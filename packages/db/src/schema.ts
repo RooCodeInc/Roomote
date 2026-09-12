@@ -3478,6 +3478,11 @@ export const fastAgentConversations = pgTable(
       .default(sql`'[]'::jsonb`)
       .$type<Record<string, unknown>[]>(),
     openCodeSessionId: text('opencode_session_id'),
+    /** Projection represented by the persisted native OpenCode session. */
+    openCodeProjectionHash: text('open_code_projection_hash'),
+    openCodeProjectedThroughSeq: bigint('open_code_projected_through_seq', {
+      mode: 'number',
+    }),
     model: text('model'),
     reasoningEffort: text('reasoning_effort').$type<ReasoningEffort>(),
     title: text('title'),
@@ -3619,9 +3624,16 @@ export const fastAgentMessages = pgTable(
       .notNull()
       .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
     eventId: text('event_id').notNull(),
+    /**
+     * Canonical per-conversation admission order. Nullable for N-1 binaries,
+     * which may continue inserting rows without this field during rollback.
+     */
+    conversationSeq: bigint('conversation_seq', { mode: 'number' }),
     turnId: text('turn_id').notNull(),
     turnSeq: integer('turn_seq').notNull(),
     ts: bigint('ts', { mode: 'number' }).notNull(),
+    /** Source observation time; created_at remains durable admission time. */
+    observedAt: timestamp('observed_at'),
     eventType: text('event_type').notNull().$type<TaskMessageEventType>(),
     role: text('role').$type<TaskMessageRole>(),
     contentBlocks: jsonb('content_blocks')
@@ -3642,6 +3654,13 @@ export const fastAgentMessages = pgTable(
       table.eventId,
     ),
     index('fast_agent_messages_conversation_order_idx').on(
+      table.conversationId,
+      table.conversationSeq,
+    ),
+    uniqueIndex('fast_agent_messages_conversation_seq_unique')
+      .on(table.conversationId, table.conversationSeq)
+      .where(sql`${table.conversationSeq} is not null`),
+    index('fast_agent_messages_legacy_order_idx').on(
       table.conversationId,
       table.ts,
       table.turnSeq,

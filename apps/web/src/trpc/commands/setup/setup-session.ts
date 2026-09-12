@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import { buildFastAgentArtifactCreator } from '@roomote/sdk/server';
+import {
+  buildFastAgentArtifactCreator,
+  enqueueFastAgentParentEvent,
+} from '@roomote/sdk/server';
 import { buildFastAgentSetupAdapter } from '@roomote/cloud-agents/server';
 import {
   and,
@@ -465,8 +468,36 @@ export async function scheduleSetupPlatformEvent(
 ): Promise<{ scheduled: boolean }> {
   const turn = await buildSetupPlatformEventTurn(auth, input);
   if (!turn) return { scheduled: false };
-  scheduleWebFastAgentTurn(turn);
+  await enqueueDurableWebPlatformEventTurn(turn);
   return { scheduled: true };
+}
+
+async function enqueueDurableWebPlatformEventTurn(
+  turn: Parameters<typeof scheduleWebFastAgentTurn>[0],
+): Promise<void> {
+  if (!turn.durableSessionId || !turn.setupContext || !turn.currentMessageId) {
+    throw new Error('A setup platform event requires durable turn context.');
+  }
+  await enqueueFastAgentParentEvent({
+    parent: {
+      sessionId: turn.durableSessionId,
+      conversation: turn.delivery.conversation,
+    },
+    event: {
+      type: 'human_follow_up',
+      eventId: turn.currentMessageId,
+      currentMessageId: turn.currentMessageId,
+      userId: turn.userId,
+      question: turn.question,
+      turnSource: 'platform_event',
+      platformEventKind: turn.platformEventKind ?? 'setup',
+      ...(turn.platformEventVisibility
+        ? { platformEventVisibility: turn.platformEventVisibility }
+        : {}),
+      setupSession: true,
+      setupContext: turn.setupContext,
+    },
+  });
 }
 
 async function buildSetupPlatformEventTurn(
@@ -784,7 +815,7 @@ export async function reconcileSetupPlatformEvents(
     },
     { conversation, setupSnapshot },
   );
-  if (turn) scheduleWebFastAgentTurn(turn);
+  if (turn) await enqueueDurableWebPlatformEventTurn(turn);
   return setupCompleted;
 }
 

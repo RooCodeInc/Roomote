@@ -49,6 +49,8 @@ const mocks = vi.hoisted(() => ({
   scheduleDurableRetry: vi.fn(),
   findActiveRetryNotice: vi.fn(),
   loadTurnAttempt: vi.fn(),
+  loadCanonicalMessages: vi.fn(),
+  loadAdmittedSemantics: vi.fn(),
   getUnifiedSession: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
@@ -130,6 +132,8 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   scheduleFastAgentDurableTurnRetry: mocks.scheduleDurableRetry,
   findFastAgentActiveInferenceRetryNotice: mocks.findActiveRetryNotice,
   loadFastAgentTurnAttemptSummary: mocks.loadTurnAttempt,
+  loadFastAgentCanonicalMessages: mocks.loadCanonicalMessages,
+  loadFastAgentAdmittedEventSemantics: mocks.loadAdmittedSemantics,
 }));
 
 vi.mock('../../available-environments', () => ({
@@ -321,10 +325,12 @@ vi.mock('../fast-agent-turn-lock', () => ({
 }));
 
 import { buildFastSessionUrl } from '@roomote/communication';
+import type { FastAgentMessage } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
+  FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY,
   NO_REPOSITORIES,
 } from '@roomote/types';
 import { McpToolCallError } from '../../mcp-tool-client';
@@ -348,6 +354,7 @@ import {
   registerFastAgentTurnActivity,
 } from '../fast-agent-turn-lock';
 import { FAST_RESPONDING_LEASE_RENEW_MS } from '../fast-agent-constants';
+import { projectFastAgentCanonicalEvents } from '../fast-agent-canonical-projection';
 
 const baseParams = {
   question: 'What does this service do?',
@@ -513,6 +520,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
       prompt: null,
     });
+    mocks.loadCanonicalMessages.mockResolvedValue([]);
+    mocks.loadAdmittedSemantics.mockResolvedValue(null);
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.listCustomSkills.mockResolvedValue([]);
     mocks.getCustomSkill.mockResolvedValue(null);
@@ -1138,6 +1147,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
       sessionId: 'conversation-1',
       openCodeSessionId: 'opencode-session-1',
+      projectionHash: expect.any(String),
+      projectedThroughSequence: null,
     });
   });
 
@@ -1663,6 +1674,975 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }),
       }),
     );
+  });
+
+  it('does not infer for a queued state assertion superseded before consumption', async () => {
+    const canonicalState = (
+      id: string,
+      sequence: number,
+      state: string,
+      version: number,
+    ): FastAgentMessage => ({
+      id,
+      conversationId: 'conversation-1',
+      eventId: `${id}:user`,
+      conversationSeq: sequence,
+      turnId: id,
+      turnSeq: 0,
+      ts: version,
+      observedAt: new Date(version),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      contentBlocks: [{ type: 'text', text: state }],
+      metadata: {
+        visibleInTranscript: false,
+        turnSource: 'platform_event',
+        platformEventKind: 'setup',
+        [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: {
+          schemaVersion: 1,
+          kind: 'current_state_assertion',
+          authority: 'roomote_runtime',
+          observedAt: new Date(version).toISOString(),
+          sourceEventId: id,
+          subject: { type: 'setup_session', id: 'conversation-1' },
+          version: { scheme: 'monotonic_number', value: version },
+          state,
+        },
+      },
+      payload: {},
+      source: 'web',
+      nativeSessionId: null,
+      nativeMessageId: null,
+      createdAt: new Date(sequence),
+      updatedAt: new Date(sequence),
+    });
+    mocks.loadCanonicalMessages.mockResolvedValue([
+      canonicalState('green-v11', 1, 'green', 11),
+      canonicalState('yellow-v12', 2, 'yellow', 12),
+    ]);
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        currentMessageId: 'green-v11',
+        turnSource: 'platform_event',
+        platformEventKind: 'setup',
+        platformEventVisibility: 'required',
+        setupSnapshot: '{"source":"green"}',
+        durableAdmission: { eventId: 'durable-green-v11' },
+        adapter: callbacks(),
+      }),
+    ).resolves.toBe('');
+
+    expect(mocks.runSession).not.toHaveBeenCalled();
+    expect(mocks.markDurableDelivered).toHaveBeenCalledWith(
+      'durable-green-v11',
+    );
+  });
+
+  it.each([
+    [
+      'an image-only turn',
+      [{ type: 'image', mimeType: 'image/png', data: 'aW1hZ2Utb25sea==' }],
+      ['data:image/png;base64,aW1hZ2Utb25sea=='],
+    ],
+    [
+      'a mixed text and image turn',
+      [
+        { type: 'text', text: 'Why does this screen look wrong?' },
+        { type: 'image', mimeType: 'image/jpeg', data: 'bWl4ZWQtaW1hZ2U=' },
+      ],
+      ['data:image/jpeg;base64,bWl4ZWQtaW1hZ2U='],
+    ],
+  ])(
+    'restores attachments from %s into a rebuilt prompt',
+    async (_case, contentBlocks, expectedUrls) => {
+      const priorPrompt: FastAgentMessage = {
+        id: 'turn-one',
+        conversationId: 'conversation-1',
+        eventId: 'turn-one:user',
+        conversationSeq: 1,
+        turnId: 'turn-one',
+        turnSeq: 0,
+        ts: 1,
+        observedAt: new Date(1),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: contentBlocks as FastAgentMessage['contentBlocks'],
+        metadata: {
+          visibleInTranscript: true,
+          turnSource: 'human',
+          [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: {
+            schemaVersion: 1,
+            kind: 'historical_observation',
+            authority: 'human',
+            observedAt: new Date(1).toISOString(),
+            sourceEventId: 'turn-one',
+          },
+        },
+        payload: {},
+        source: 'slack',
+        nativeSessionId: null,
+        nativeMessageId: null,
+        createdAt: new Date(1),
+        updatedAt: new Date(1),
+      };
+      mocks.loadCanonicalMessages.mockResolvedValue([priorPrompt]);
+      // A rebuild is the path that has to carry earlier attachments; a warm
+      // session still holds them natively.
+      mocks.runSession.mockImplementation(
+        ({
+          bootstrapPrompt,
+          execute,
+        }: {
+          bootstrapPrompt: () => string;
+          execute: (
+            session: { id?: string },
+            selectedPrompt: string,
+            context: { path: string; validateSession: boolean },
+          ) => Promise<unknown>;
+        }) =>
+          execute({}, bootstrapPrompt(), {
+            path: 'cold_rebuild',
+            validateSession: false,
+          }),
+      );
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      const [promptParams] = mocks.generateText.mock.calls[0]!;
+      expect(
+        promptParams.files?.map(({ url }: { url: string }) => url),
+      ).toEqual(expectedUrls);
+      // The turn itself is still represented in the rebuilt history.
+      expect(promptParams.prompt).toContain('canonical_event_attachments');
+    },
+  );
+
+  describe('restored attachment delivery on a rebuild', () => {
+    function historicalImagePrompt(): FastAgentMessage {
+      return {
+        id: 'turn-one',
+        conversationId: 'conversation-1',
+        eventId: 'turn-one:user',
+        conversationSeq: 1,
+        turnId: 'turn-one',
+        turnSeq: 0,
+        ts: 1,
+        observedAt: new Date(1),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: [
+          { type: 'image', mimeType: 'image/png', data: 'aGlzdG9yaWNhbA==' },
+        ],
+        metadata: {
+          visibleInTranscript: true,
+          turnSource: 'human',
+          [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: {
+            schemaVersion: 1,
+            kind: 'historical_observation',
+            authority: 'human',
+            observedAt: new Date(1).toISOString(),
+            sourceEventId: 'turn-one',
+          },
+        },
+        payload: {},
+        source: 'slack',
+        nativeSessionId: null,
+        nativeMessageId: null,
+        createdAt: new Date(1),
+        updatedAt: new Date(1),
+      };
+    }
+
+    beforeEach(() => {
+      mocks.loadCanonicalMessages.mockResolvedValue([historicalImagePrompt()]);
+      mocks.runSession.mockImplementation(
+        ({
+          bootstrapPrompt,
+          execute,
+        }: {
+          bootstrapPrompt: () => string;
+          execute: (
+            session: { id?: string },
+            selectedPrompt: string,
+            context: { path: string; validateSession: boolean },
+          ) => Promise<unknown>;
+        }) =>
+          execute({}, bootstrapPrompt(), {
+            path: 'cold_rebuild',
+            validateSession: false,
+          }),
+      );
+    });
+
+    it('holds restored images for a session model that cannot view them', async () => {
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'helper',
+        model: 'openrouter/openai/gpt-5.4',
+        helperModel: 'openrouter/google/gemini-3.8-flash',
+      });
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      const [promptParams] = mocks.generateText.mock.calls[0]!;
+      // Held rather than attached, and announced with an inspectable ID.
+      expect(promptParams.files).toBeUndefined();
+      expect(promptParams.prompt).toContain('Image attachments: image-1');
+      expect(promptParams.prompt).toContain('inspect_images');
+    });
+
+    it('holds restored images once when a clean retry rebuilds the prompt', async () => {
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'helper',
+        model: 'openrouter/openai/gpt-5.4',
+        helperModel: 'openrouter/google/gemini-3.8-flash',
+      });
+      let attempts = 0;
+      mocks.generateText.mockImplementation(async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('TypeError: fetch failed');
+        return 'Recovered.';
+      });
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(attempts).toBe(2);
+      const retryPrompt = mocks.generateText.mock.calls.at(-1)![0];
+      // The retry restates the notice for the same held image rather than
+      // dropping it, and holding stays idempotent, so no second ID is
+      // reserved for the same bytes.
+      expect(retryPrompt.files).toBeUndefined();
+      expect(retryPrompt.prompt).toContain('Image attachments: image-1');
+      expect(retryPrompt.prompt).not.toContain('image-2');
+    });
+
+    it('restores historical images when a text-only warm turn falls back to a clean retry', async () => {
+      // The reviewed gap: a text-only turn never resolves a delivery mode,
+      // so the retry used to rebuild the bootstrap with no restored images
+      // at all even though it replays the conversation that carried them.
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'direct',
+        model: 'openrouter/openai/gpt-5.6-terra',
+      });
+      mocks.runSession.mockImplementation(
+        ({
+          prompt,
+          execute,
+        }: {
+          prompt: string;
+          execute: (
+            session: { id?: string },
+            selectedPrompt: string,
+            context: { path: string; validateSession: boolean },
+          ) => Promise<unknown>;
+        }) =>
+          execute({ id: 'opencode-session-1' }, prompt, {
+            path: 'warm',
+            validateSession: false,
+          }),
+      );
+      let attempts = 0;
+      mocks.generateText.mockImplementation(async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('TypeError: fetch failed');
+        return 'Recovered.';
+      });
+
+      // No `images`: the turn itself carries nothing to deliver.
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(attempts).toBe(2);
+      const warmPrompt = mocks.generateText.mock.calls[0]![0];
+      const retryPrompt = mocks.generateText.mock.calls.at(-1)![0];
+      // The warm attempt neither resolved delivery nor carried any file.
+      expect(warmPrompt.files).toBeUndefined();
+      // The rebuilt retry replays the historical image as a real file.
+      expect(retryPrompt.files).toHaveLength(1);
+      expect(mocks.captureInferenceContext).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          sessionPath: 'cold_rebuild',
+          promptKind: 'clean_retry_bootstrap',
+          attachedImageCount: 1,
+        }),
+      );
+    });
+
+    it('announces restored images to a helper model when a text-only warm turn retries', async () => {
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'helper',
+        model: 'openrouter/openai/gpt-5.6-terra',
+        helperModel: 'openrouter/google/gemini-3.8-flash',
+      });
+      mocks.runSession.mockImplementation(
+        ({
+          prompt,
+          execute,
+        }: {
+          prompt: string;
+          execute: (
+            session: { id?: string },
+            selectedPrompt: string,
+            context: { path: string; validateSession: boolean },
+          ) => Promise<unknown>;
+        }) =>
+          execute({ id: 'opencode-session-1' }, prompt, {
+            path: 'warm',
+            validateSession: false,
+          }),
+      );
+      let attempts = 0;
+      mocks.generateText.mockImplementation(async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('TypeError: fetch failed');
+        return 'Recovered.';
+      });
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(attempts).toBe(2);
+      const retryPrompt = mocks.generateText.mock.calls.at(-1)![0];
+      // Held for a model that cannot view them, and announced for
+      // `inspect_images` rather than pushed at it as raw files.
+      expect(retryPrompt.files).toBeUndefined();
+      expect(retryPrompt.prompt).toContain('Image attachments: image-1');
+      expect(retryPrompt.prompt).toContain('inspect_images');
+    });
+
+    it('holds restored images a warm attempt never held when a retry rebuilds', async () => {
+      // The divergence that matters: delivery is already resolved for the
+      // turn's own image, but no rebuild has held the restored one yet. The
+      // retry must prepare it rather than leave the historical image out.
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'helper',
+        model: 'openrouter/openai/gpt-5.4',
+        helperModel: 'openrouter/google/gemini-3.8-flash',
+      });
+      mocks.runSession.mockImplementation(
+        ({
+          prompt,
+          execute,
+        }: {
+          prompt: string;
+          execute: (
+            session: { id?: string },
+            selectedPrompt: string,
+            context: { path: string; validateSession: boolean },
+          ) => Promise<unknown>;
+        }) =>
+          execute({ id: 'opencode-session-1' }, prompt, {
+            path: 'warm',
+            validateSession: false,
+          }),
+      );
+      let attempts = 0;
+      mocks.generateText.mockImplementation(async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('TypeError: fetch failed');
+        return 'Recovered.';
+      });
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        images: ['data:image/png;base64,b3duLWltYWdl'],
+        adapter: callbacks(),
+      });
+
+      expect(attempts).toBe(2);
+      const warmPrompt = mocks.generateText.mock.calls[0]![0];
+      const retryPrompt = mocks.generateText.mock.calls.at(-1)![0];
+      // The warm attempt held only the turn's own image.
+      expect(warmPrompt.prompt).toContain('Image attachments: image-1');
+      expect(warmPrompt.prompt).not.toContain('image-2');
+      // The rebuilt retry announces the restored one too.
+      expect(retryPrompt.files).toBeUndefined();
+      expect(retryPrompt.prompt).toContain('image-2');
+    });
+
+    it('attaches restored images to a clean retry that takes them directly', async () => {
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'direct',
+        model: 'openrouter/openai/gpt-5.4',
+      });
+      let attempts = 0;
+      mocks.generateText.mockImplementation(async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('TypeError: fetch failed');
+        return 'Recovered.';
+      });
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(attempts).toBe(2);
+      const retryPrompt = mocks.generateText.mock.calls.at(-1)![0];
+      expect(retryPrompt.files).toHaveLength(1);
+      expect(retryPrompt.prompt).not.toContain('Image attachments:');
+    });
+
+    it('drops restored images when no configured model accepts image input', async () => {
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'unsupported',
+      });
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      const [promptParams] = mocks.generateText.mock.calls[0]!;
+      expect(promptParams.files).toBeUndefined();
+      // Nothing is announced as inspectable, because nothing could read it,
+      // but the rebuilt history still records that the turn had attachments.
+      expect(promptParams.prompt).not.toContain('Image attachments:');
+      expect(promptParams.prompt).toContain('canonical_event_attachments');
+    });
+  });
+
+  describe('canonical history eligibility', () => {
+    function coldRebuild() {
+      mocks.runSession.mockImplementation(
+        ({
+          bootstrapPrompt,
+          execute,
+        }: {
+          bootstrapPrompt: () => string;
+          execute: (
+            session: { id?: string },
+            selectedPrompt: string,
+            context: { path: string; validateSession: boolean },
+          ) => Promise<unknown>;
+        }) =>
+          execute({}, bootstrapPrompt(), {
+            path: 'cold_rebuild',
+            validateSession: false,
+          }),
+      );
+    }
+
+    it('does not fall back to the legacy transcript when canonical history is legitimately empty', async () => {
+      coldRebuild();
+      mocks.getSession.mockResolvedValue({
+        id: 'conversation-1',
+        compatibilityMessages: [
+          { role: 'user', content: 'Legacy question' },
+          { role: 'assistant', content: 'Legacy answer' },
+        ],
+        openCodeSessionId: null,
+      });
+      // A canonical event exists, so canonical history is authoritative; it
+      // renders to nothing only because a tool row is not presentable.
+      mocks.loadCanonicalMessages.mockResolvedValue([
+        {
+          id: 'turn-one-tool',
+          conversationId: 'conversation-1',
+          eventId: 'turn-one:tool:0',
+          conversationSeq: 1,
+          turnId: 'turn-one',
+          turnSeq: 1,
+          ts: 1,
+          observedAt: new Date(1),
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+          role: 'tool',
+          contentBlocks: [{ type: 'text', text: 'tool output' }],
+          metadata: { visibleInTranscript: true },
+          payload: {},
+          source: 'slack',
+          nativeSessionId: null,
+          nativeMessageId: null,
+          createdAt: new Date(1),
+          updatedAt: new Date(1),
+        } as FastAgentMessage,
+      ]);
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      const prompt = mocks.generateText.mock.calls[0]![0].prompt;
+      expect(prompt).not.toContain('Legacy answer');
+      expect(prompt).not.toContain('Legacy question');
+    });
+
+    it('rebuilds a pre-canonical session from its legacy transcript', async () => {
+      coldRebuild();
+      mocks.getSession.mockResolvedValue({
+        id: 'conversation-1',
+        compatibilityMessages: [
+          { role: 'user', content: 'Legacy question' },
+          { role: 'assistant', content: 'Legacy answer' },
+        ],
+        openCodeSessionId: null,
+      });
+      // No canonical event other than this turn's own input, which is what a
+      // session recorded before the canonical log looks like.
+      mocks.loadCanonicalMessages.mockResolvedValue([]);
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      const prompt = mocks.generateText.mock.calls[0]![0].prompt;
+      expect(prompt).toContain('Legacy answer');
+    });
+  });
+
+  it('reuses admitted semantics instead of restating the input as observed now', async () => {
+    const admitted = {
+      schemaVersion: 1 as const,
+      kind: 'historical_observation' as const,
+      authority: 'delegated_task' as const,
+      observedAt: '2026-01-01T00:00:00.000Z',
+      sourceEventId: 'fast-parent-child-message:child-1',
+      subject: { type: 'task_run', id: '42' },
+    };
+    mocks.loadAdmittedSemantics.mockResolvedValue(admitted);
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: '<platform_event>{"type":"child_message"}</platform_event>',
+      turnSource: 'platform_event',
+      adapter: callbacks(),
+    });
+
+    expect(mocks.loadAdmittedSemantics).toHaveBeenCalledWith(
+      'conversation-1',
+      '100.2:user',
+    );
+    const prompt = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find((message) => message.eventId === '100.2:user');
+    // The admitted record travels through unchanged, including the instant
+    // the event was actually observed.
+    expect(prompt?.metadata?.[FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]).toEqual(
+      admitted,
+    );
+    expect(prompt?.observedAt).toEqual(new Date(admitted.observedAt));
+  });
+
+  it('writes no semantics of its own when the admitted record cannot be read', async () => {
+    mocks.loadAdmittedSemantics.mockRejectedValue(new Error('database down'));
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: '<platform_event>{"type":"task_settled"}</platform_event>',
+      turnSource: 'platform_event',
+      adapter: callbacks(),
+    });
+
+    const prompt = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find((message) => message.eventId === '100.2:user');
+    // A failed read cannot tell an admitted record from an absent one, so
+    // the turn leaves the key alone rather than replacing a queued event's
+    // current-state assertion with a human input's weaker shape.
+    expect(prompt?.metadata).not.toHaveProperty(
+      FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY,
+    );
+    expect(prompt?.metadata?.turnSource).toBe('platform_event');
+  });
+
+  it('describes an input that no admission recorded', async () => {
+    mocks.loadAdmittedSemantics.mockResolvedValue(null);
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const prompt = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find((message) => message.eventId === '100.2:user');
+    expect(
+      prompt?.metadata?.[FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY],
+    ).toMatchObject({
+      kind: 'historical_observation',
+      authority: 'human',
+      sourceEventId: '100.2',
+    });
+  });
+
+  it('does not restore historical attachments into a warm delta', async () => {
+    const priorPrompt: FastAgentMessage = {
+      id: 'turn-one',
+      conversationId: 'conversation-1',
+      eventId: 'turn-one:user',
+      conversationSeq: 1,
+      turnId: 'turn-one',
+      turnSeq: 0,
+      ts: 1,
+      observedAt: new Date(1),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      contentBlocks: [
+        { type: 'image', mimeType: 'image/png', data: 'd2FybS1pbWFnZQ==' },
+      ],
+      metadata: {
+        visibleInTranscript: true,
+        turnSource: 'human',
+        [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: {
+          schemaVersion: 1,
+          kind: 'historical_observation',
+          authority: 'human',
+          observedAt: new Date(1).toISOString(),
+          sourceEventId: 'turn-one',
+        },
+      },
+      payload: {},
+      source: 'slack',
+      nativeSessionId: 'opencode-session-1',
+      nativeMessageId: null,
+      createdAt: new Date(1),
+      updatedAt: new Date(1),
+    };
+    mocks.loadCanonicalMessages.mockResolvedValue([priorPrompt]);
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const [promptParams] = mocks.generateText.mock.calls[0]!;
+    expect(promptParams.files).toBeUndefined();
+  });
+
+  it('reuses the native session for an ordinary follow-up turn already represented by its watermark', async () => {
+    // Turn one's prompt is canonical history with semantics, and the stored
+    // watermark covers it, so the follow-up must continue warm.
+    const priorPrompt: FastAgentMessage = {
+      id: 'turn-one',
+      conversationId: 'conversation-1',
+      eventId: 'turn-one:user',
+      conversationSeq: 1,
+      turnId: 'turn-one',
+      turnSeq: 0,
+      ts: 1,
+      observedAt: new Date(1),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      contentBlocks: [{ type: 'text', text: 'What does this service do?' }],
+      metadata: {
+        visibleInTranscript: true,
+        turnSource: 'human',
+        [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: {
+          schemaVersion: 1,
+          kind: 'historical_observation',
+          authority: 'human',
+          observedAt: new Date(1).toISOString(),
+          sourceEventId: 'turn-one',
+        },
+      },
+      payload: {},
+      source: 'slack',
+      nativeSessionId: 'opencode-session-1',
+      nativeMessageId: null,
+      createdAt: new Date(1),
+      updatedAt: new Date(1),
+    };
+    const priorReply: FastAgentMessage = {
+      ...priorPrompt,
+      id: 'turn-one-reply',
+      eventId: 'turn-one:assistant:0',
+      conversationSeq: 2,
+      role: 'assistant',
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      contentBlocks: [{ type: 'text', text: 'It coordinates requests.' }],
+      metadata: { visibleInTranscript: true },
+    };
+    mocks.loadCanonicalMessages.mockResolvedValue([priorPrompt, priorReply]);
+    mocks.getSession.mockResolvedValue({
+      id: 'conversation-1',
+      compatibilityMessages: [],
+      openCodeSessionId: 'opencode-session-1',
+      openCodeProjectionHash: projectFastAgentCanonicalEvents([
+        priorPrompt,
+        priorReply,
+      ]).stateHash,
+      openCodeProjectedThroughSeq: 1,
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.invalidateSession).not.toHaveBeenCalled();
+    expect(mocks.runSession).toHaveBeenCalledWith(
+      expect.objectContaining({ persistedSessionId: 'opencode-session-1' }),
+    );
+  });
+
+  describe('delayed child report continuity', () => {
+    // The reported symptom: a delegated task report is queued while the
+    // parent is busy, a human turn corrects the picture in the meantime, and
+    // the report is only consumed afterwards. The report keeps the lower
+    // conversation sequence it was admitted with, so the newer turns are
+    // genuinely later canonical history than the event being executed.
+    const REPORT_EVENT_ID = 'fast-parent-child-message:child-message-1';
+
+    function canonicalRow(input: {
+      id: string;
+      eventId: string;
+      sequence: number;
+      role: 'user' | 'assistant';
+      text: string;
+      observedAtMs: number;
+      semantics?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+    }): FastAgentMessage {
+      return {
+        id: input.id,
+        conversationId: 'conversation-1',
+        eventId: input.eventId,
+        conversationSeq: input.sequence,
+        turnId: input.eventId.replace(/:(user|assistant:0)$/u, ''),
+        turnSeq: 0,
+        ts: input.observedAtMs,
+        observedAt: new Date(input.observedAtMs),
+        eventType:
+          input.role === 'user'
+            ? ACP_ENVELOPE_EVENT_TYPES.UserPrompt
+            : ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: input.role,
+        contentBlocks: [{ type: 'text', text: input.text }],
+        metadata: {
+          visibleInTranscript: true,
+          ...(input.metadata ?? {}),
+          ...(input.semantics
+            ? {
+                [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: input.semantics,
+              }
+            : {}),
+        },
+        payload: {},
+        source: 'slack',
+        nativeSessionId: null,
+        nativeMessageId: null,
+        createdAt: new Date(input.observedAtMs),
+        updatedAt: new Date(input.observedAtMs),
+      };
+    }
+
+    // Admitted first, while the parent was busy: the stale report. This is
+    // the exact question text the durable queue builds for a child report.
+    const STALE_REPORT_QUESTION = `<platform_event>${JSON.stringify({
+      type: 'child_message',
+      taskId: 'task-1',
+      runId: 42,
+      messageId: 'child-message-1',
+      purpose: 'progress',
+      message: 'The rollout is still blocked on the failing migration.',
+    })}</platform_event>`;
+    const staleReportRow = canonicalRow({
+      id: 'report-row',
+      eventId: `${REPORT_EVENT_ID}:user`,
+      sequence: 10,
+      role: 'user',
+      text: STALE_REPORT_QUESTION,
+      observedAtMs: 1_000,
+      metadata: {
+        visibleInTranscript: false,
+        turnSource: 'platform_event',
+        platformEventKind: 'delegated_task',
+      },
+      semantics: {
+        schemaVersion: 1,
+        kind: 'historical_observation',
+        authority: 'delegated_task',
+        observedAt: new Date(1_000).toISOString(),
+        sourceEventId: REPORT_EVENT_ID,
+        subject: { type: 'task_run', id: '42' },
+      },
+    });
+    // Newer completed turns that corrected the picture in the meantime.
+    const newerHumanRow = canonicalRow({
+      id: 'human-row',
+      eventId: 'human-correction:user',
+      sequence: 11,
+      role: 'user',
+      text: 'Correction: the migration was renumbered and the rollout is unblocked.',
+      observedAtMs: 2_000,
+      metadata: { turnSource: 'human' },
+      semantics: {
+        schemaVersion: 1,
+        kind: 'historical_observation',
+        authority: 'human',
+        observedAt: new Date(2_000).toISOString(),
+        sourceEventId: 'human-correction',
+      },
+    });
+    const newerAssistantRow = canonicalRow({
+      id: 'assistant-row',
+      eventId: 'human-correction:assistant:0',
+      sequence: 12,
+      role: 'assistant',
+      text: 'Understood, the rollout is unblocked and the migration is renumbered.',
+      observedAtMs: 2_500,
+    });
+
+    const reportTurnParams = {
+      ...baseParams,
+      question: STALE_REPORT_QUESTION,
+      currentMessageId: REPORT_EVENT_ID,
+      turnSource: 'platform_event' as const,
+      platformEventKind: 'delegated_task' as const,
+    };
+
+    beforeEach(() => {
+      mocks.loadCanonicalMessages.mockResolvedValue([
+        staleReportRow,
+        newerHumanRow,
+        newerAssistantRow,
+      ]);
+    });
+
+    it('keeps the newer completed turns in the rebuilt context and preserves report provenance', async () => {
+      // Forced cold recovery: the native session is gone, so everything the
+      // model can see has to come from canonical history.
+      mocks.getSession.mockResolvedValue({
+        id: 'conversation-1',
+        compatibilityMessages: [],
+        openCodeSessionId: null,
+      });
+      mocks.runSession.mockImplementation(
+        ({
+          bootstrapPrompt,
+          execute,
+        }: {
+          bootstrapPrompt: () => string;
+          execute: (
+            session: { id?: string },
+            selectedPrompt: string,
+            context: { path: string; validateSession: boolean },
+          ) => Promise<unknown>;
+        }) =>
+          execute({}, bootstrapPrompt(), {
+            path: 'cold_rebuild',
+            validateSession: false,
+          }),
+      );
+
+      await answerFastAgentQuestion({
+        ...reportTurnParams,
+        adapter: callbacks(),
+      });
+
+      const prompt = mocks.generateText.mock.calls[0]![0].prompt as string;
+
+      // 1. Not missing context: both newer completed turns survive.
+      expect(prompt).toContain(
+        'Correction: the migration was renumbered and the rollout is unblocked.',
+      );
+      expect(prompt).toContain(
+        'Understood, the rollout is unblocked and the migration is renumbered.',
+      );
+
+      // 2. Not an ordering error: the newer turns precede the report being
+      //    executed, which is the last thing in the prompt.
+      const correctionAt = prompt.indexOf('Correction: the migration');
+      const assistantAt = prompt.indexOf(
+        'Understood, the rollout is unblocked',
+      );
+      const reportAt = prompt.lastIndexOf(
+        'still blocked on the failing migration',
+      );
+      expect(correctionAt).toBeGreaterThan(-1);
+      expect(assistantAt).toBeGreaterThan(correctionAt);
+      expect(reportAt).toBeGreaterThan(assistantAt);
+
+      // 3. Provenance is preserved, and it is what distinguishes the report
+      //    from the newer turns: the report was observed earlier even though
+      //    it is executed last.
+      expect(prompt).toContain('"authority":"delegated_task"');
+      expect(prompt).toContain('"subject":{"type":"task_run","id":"42"}');
+      expect(prompt).toContain(
+        `"observedAt":"${new Date(1_000).toISOString()}"`,
+      );
+      expect(prompt).toContain(
+        `"observedAt":"${new Date(2_000).toISOString()}"`,
+      );
+    });
+
+    it('continues warm without discarding the native transcript that holds the newer turns', async () => {
+      // Warm continuation sends only the delta, so the newer turns must stay
+      // in the native session rather than being rebuilt away.
+      mocks.getSession.mockResolvedValue({
+        id: 'conversation-1',
+        compatibilityMessages: [],
+        openCodeSessionId: 'opencode-session-1',
+        openCodeProjectionHash: projectFastAgentCanonicalEvents([
+          staleReportRow,
+          newerHumanRow,
+          newerAssistantRow,
+        ]).stateHash,
+        openCodeProjectedThroughSeq: 12,
+      });
+
+      await answerFastAgentQuestion({
+        ...reportTurnParams,
+        adapter: callbacks(),
+      });
+
+      // The native session that already contains the newer turns is reused.
+      expect(mocks.invalidateSession).not.toHaveBeenCalled();
+      expect(mocks.runSession).toHaveBeenCalledWith(
+        expect.objectContaining({ persistedSessionId: 'opencode-session-1' }),
+      );
+      expect(mocks.captureInferenceContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionPath: 'warm',
+          promptKind: 'turn_delta',
+        }),
+      );
+      // The delta still carries the report's provenance so its age is
+      // visible against the transcript it is appended to.
+      const delta = mocks.generateText.mock.calls[0]![0].prompt as string;
+      expect(delta).toContain('"authority":"delegated_task"');
+      expect(delta).toContain(
+        `"observedAt":"${new Date(1_000).toISOString()}"`,
+      );
+    });
+
+    it('gives the human turn after the report equivalent knowledge', async () => {
+      const reportReplyRow = canonicalRow({
+        id: 'report-reply-row',
+        eventId: `${REPORT_EVENT_ID}:assistant:0`,
+        sequence: 13,
+        role: 'assistant',
+        text: 'Noted the task report.',
+        observedAtMs: 3_000,
+      });
+      mocks.loadCanonicalMessages.mockResolvedValue([
+        staleReportRow,
+        newerHumanRow,
+        newerAssistantRow,
+        reportReplyRow,
+      ]);
+      mocks.getSession.mockResolvedValue({
+        id: 'conversation-1',
+        compatibilityMessages: [],
+        openCodeSessionId: null,
+      });
+      mocks.runSession.mockImplementation(
+        ({
+          bootstrapPrompt,
+          execute,
+        }: {
+          bootstrapPrompt: () => string;
+          execute: (
+            session: { id?: string },
+            selectedPrompt: string,
+            context: { path: string; validateSession: boolean },
+          ) => Promise<unknown>;
+        }) =>
+          execute({}, bootstrapPrompt(), {
+            path: 'cold_rebuild',
+            validateSession: false,
+          }),
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        question: 'Where does the rollout actually stand?',
+        currentMessageId: 'human-after-report',
+        adapter: callbacks(),
+      });
+
+      const prompt = mocks.generateText.mock.calls[0]![0].prompt as string;
+      // The correction, its reply, and the report all remain available, so a
+      // later human turn is not reasoning from a narrower context.
+      expect(prompt).toContain(
+        'Correction: the migration was renumbered and the rollout is unblocked.',
+      );
+      expect(prompt).toContain(
+        'Understood, the rollout is unblocked and the migration is renumbered.',
+      );
+      expect(prompt).toContain('still blocked on the failing migration');
+      expect(prompt).toContain('"authority":"delegated_task"');
+    });
   });
 
   it('leaves pending human rows for whole-turn delivery without a native-ready capability', async () => {
@@ -4481,7 +5461,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       { id: 'persisted-session' },
       expect.objectContaining({ validateSession: true }),
     );
-    expect(mocks.setOpenCodeSession).not.toHaveBeenCalled();
+    // The session id is unchanged, but its projection watermark is recorded
+    // so the next ordinary turn can continue warm.
+    expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      openCodeSessionId: 'persisted-session',
+      projectionHash: expect.any(String),
+      projectedThroughSequence: null,
+    });
   });
 
   it('rebuilds missing durable sessions and stores the replacement id', async () => {
@@ -4523,6 +5510,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
       sessionId: 'conversation-1',
       openCodeSessionId: 'replacement-session',
+      projectionHash: expect.any(String),
+      projectedThroughSequence: null,
     });
     expect(mocks.getNativeRuntime).toHaveBeenCalledTimes(2);
   });
@@ -9895,6 +10884,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
         sessionId: 'conversation-1',
         openCodeSessionId: 'opencode-session-1',
+        projectionHash: expect.any(String),
+        projectedThroughSequence: null,
       });
       expect(mocks.invalidateSession).not.toHaveBeenCalled();
     } finally {

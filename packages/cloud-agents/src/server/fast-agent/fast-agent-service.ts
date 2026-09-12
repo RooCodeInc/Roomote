@@ -11,6 +11,8 @@ import {
   CHAT_MESSAGE_CONTEXT_TOOL,
   CHAT_REACTION_EMOJI_TOOL_NAME,
   FAST_EXECUTION,
+  FAST_AGENT_ASSISTANT_CLAIM_PROVENANCE_METADATA_KEY,
+  FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY,
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
@@ -36,6 +38,8 @@ import {
   matchIntegrationTools,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
+  type FastAgentAssistantClaimProvenance,
+  buildFastAgentInputSemantics,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
 } from '@roomote/types';
@@ -87,6 +91,14 @@ import {
   FAST_RESPONDING_LEASE_RENEW_MS,
 } from './fast-agent-constants';
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
+import {
+  FAST_AGENT_CANONICAL_REDUCER_VERSION,
+  collectFastAgentCanonicalAttachments,
+  isFastAgentCanonicalEventSuperseded,
+  projectFastAgentCanonicalEvents,
+  renderFastAgentCanonicalEventContext,
+  renderFastAgentCanonicalHistory,
+} from './fast-agent-canonical-projection';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import { getTherapistModeEnabledForUser } from '../therapist-mode';
 import {
@@ -149,6 +161,8 @@ import {
   type FastAgentTurnAttemptReply,
   type FastAgentTurnAttemptSummary,
   type FastAgentUnresolvedRequest,
+  loadFastAgentAdmittedEventSemantics,
+  loadFastAgentCanonicalMessages,
   loadFastAgentTurnAttemptSummary,
 } from './fast-agent-conversation-repository';
 import {
@@ -1766,6 +1780,7 @@ export async function answerFastAgentQuestion({
     ? { externalInput: humanInput.externalInput }
     : platformEventTranscriptPayload;
   const turnVisibleMessages: ModelMessage[] = [];
+  let claimProvenance: FastAgentAssistantClaimProvenance | null = null;
   let mirroredMessageCount = 0;
   let canonicalConversationId: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
@@ -2016,6 +2031,10 @@ export async function answerFastAgentQuestion({
   const turnImages = new Map<string, NonTaskPromptFile>();
   let imageDeliveryPromise: Promise<FastAgentImageDelivery> | undefined;
   let resolvedImageDelivery: FastAgentImageDelivery | undefined;
+  // Restored history attachments are held at most once per turn, not per
+  // prompt attempt, so a rebuild followed by a retry cannot reserve two sets
+  // of attachment IDs for the same bytes.
+  let restoredAttachmentsHeld = false;
   const resolveImageDelivery = (): Promise<FastAgentImageDelivery> => {
     imageDeliveryPromise ??= resolveNonTaskInputModalityDelivery({
       modality: 'image',
@@ -2591,6 +2610,12 @@ export async function answerFastAgentQuestion({
             : {}),
           ...(interruptionReason ? { interruptionReason } : {}),
           ...(platformMessageId ? { platformMessageId } : {}),
+          ...(claimProvenance
+            ? {
+                [FAST_AGENT_ASSISTANT_CLAIM_PROVENANCE_METADATA_KEY]:
+                  claimProvenance,
+              }
+            : {}),
         },
         payload: {
           purpose: reply.purpose,
@@ -3169,6 +3194,38 @@ export async function answerFastAgentQuestion({
     const userEvent = previousAttempt?.prompt
       ? { eventId: `${turnId}:user`, turnSeq: previousAttempt.prompt.turnSeq }
       : allocateCanonicalEvent('user');
+    const inputObservedAt = new Date();
+    // A durable admission already recorded what this input claims, including
+    // the instant it was observed. Reuse that record rather than deriving a
+    // second one at execution time, which would restate the observation as
+    // now. Only an input with no admitted record — an inline turn, or a row
+    // admitted by an N-1 binary — is described here.
+    const admittedInputSemantics = await loadFastAgentAdmittedEventSemantics(
+      session.id,
+      userEvent.eventId,
+    )
+      .then((semantics) => ({ read: true as const, semantics }))
+      .catch((error: unknown) => {
+        console.warn(
+          `[Fast Agent] Failed to read admitted event semantics: ${formatErrorForLog(error)}`,
+        );
+        return { read: false as const, semantics: null };
+      });
+    // Without a successful read an admitted record is indistinguishable from
+    // an absent one, so this turn writes nothing for the key: the metadata
+    // merge then leaves whatever admission recorded intact. Describing the
+    // input here instead could replace a queued event's current-state
+    // assertion with the weaker shape a human input has.
+    const inputSemantics = admittedInputSemantics.read
+      ? (admittedInputSemantics.semantics ??
+        buildFastAgentInputSemantics({
+          sessionId: session.id,
+          observedAt: inputObservedAt,
+          sourceEventId: currentMessageId ?? turnId,
+          platformEvent,
+          ...(setupSnapshot ? { setupSnapshot } : {}),
+        }))
+      : null;
     const userMessageResult = await persistCanonicalMessage(
       {
         ...userEvent,
@@ -3190,6 +3247,9 @@ export async function answerFastAgentQuestion({
             ? { inputKind: FAST_AGENT_REACTION_INPUT_TYPE }
             : {}),
           ...(platformEvent ? { platformEventKind } : {}),
+          ...(inputSemantics
+            ? { [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: inputSemantics }
+            : {}),
           // Lineage back to the interrupted request this turn is resuming,
           // so the original still surfaces if this turn is interrupted too.
           ...(unresolvedRequest
@@ -3202,6 +3262,11 @@ export async function answerFastAgentQuestion({
         },
         payload: {},
         source: conversation.surface,
+        // Kept coherent with the semantics above: a reused admitted record
+        // keeps its own observation instant rather than this turn's.
+        observedAt: inputSemantics
+          ? new Date(inputSemantics.observedAt)
+          : inputObservedAt,
       },
       true,
     );
@@ -3243,16 +3308,104 @@ export async function answerFastAgentQuestion({
             senderDisplayName?.trim() || currentUser.displayName || undefined,
           githubLogin: currentUser.githubLogin || undefined,
         };
+    const canonicalProjection = projectFastAgentCanonicalEvents(
+      await loadFastAgentCanonicalMessages(session.id),
+    );
+    const currentCanonicalEventId = `${turnId}:user`;
+    const currentProjection = canonicalProjection.events.find(
+      ({ event }) => event.eventId === currentCanonicalEventId,
+    );
+    if (
+      isFastAgentCanonicalEventSuperseded(
+        canonicalProjection,
+        currentCanonicalEventId,
+      )
+    ) {
+      console.info(
+        `[Fast Agent] Suppressed superseded canonical event ${currentCanonicalEventId}.`,
+      );
+      await settleDurableTurn();
+      return '';
+    }
+    claimProvenance = {
+      reducerVersion: FAST_AGENT_CANONICAL_REDUCER_VERSION,
+      projectedThroughSequence: canonicalProjection.projectedThroughSequence,
+      projectionHash: canonicalProjection.stateHash,
+      eventIds: [
+        ...new Set([
+          currentCanonicalEventId,
+          ...canonicalProjection.currentStateEventIds,
+        ]),
+      ],
+    };
+    const projectedHistory = renderFastAgentCanonicalHistory(
+      canonicalProjection,
+      { excludeEventId: currentCanonicalEventId },
+    );
+    // A rebuild restates the whole conversation, so attachments an earlier
+    // turn provided have to travel with it; a warm session still holds them
+    // natively and needs nothing restored.
+    const restoredAttachmentFiles = getFastAgentImageFiles(
+      collectFastAgentCanonicalAttachments(canonicalProjection, {
+        excludeEventId: currentCanonicalEventId,
+      }).map(({ url }) => url),
+    );
+    const projectedBeforeCurrentSequence = canonicalProjection.events.reduce<
+      number | null
+    >(
+      (highest, projected) =>
+        projected.event.eventId === currentCanonicalEventId ||
+        projected.event.conversationSeq === null
+          ? highest
+          : Math.max(highest ?? 0, projected.event.conversationSeq),
+      null,
+    );
+    const canonicalHistoryAheadOfNative =
+      projectedBeforeCurrentSequence !== null &&
+      (session.openCodeProjectedThroughSeq === undefined ||
+        session.openCodeProjectedThroughSeq === null ||
+        session.openCodeProjectedThroughSeq < projectedBeforeCurrentSequence) &&
+      canonicalProjection.events.some(
+        ({ event, semantics }) =>
+          event.eventId !== currentCanonicalEventId &&
+          Boolean(semantics) &&
+          event.conversationSeq !== null &&
+          (session.openCodeProjectedThroughSeq === undefined ||
+            session.openCodeProjectedThroughSeq === null ||
+            event.conversationSeq > session.openCodeProjectedThroughSeq),
+      );
+    const currentProjectionContext = currentProjection?.semantics
+      ? renderFastAgentCanonicalEventContext({
+          eventId: currentCanonicalEventId,
+          classification: currentProjection.classification,
+          admittedAt: currentProjection.event.createdAt,
+          semantics: currentProjection.semantics,
+        })
+      : undefined;
+    const projectedQuestion = currentProjectionContext
+      ? `${currentProjectionContext}\n${question}`
+      : question;
+    // Canonical history is authoritative as soon as this conversation has any
+    // canonical event other than the input being executed, even when
+    // rendering it yields nothing: an empty projection means the prior events
+    // are genuinely not presentable, not that history is missing. The legacy
+    // transcript is only eligible for a session that never recorded a
+    // canonical event, which is what a pre-canonical session looks like.
+    const canonicalHistoryEligible = canonicalProjection.events.some(
+      ({ event }) => event.eventId !== currentCanonicalEventId,
+    );
     const {
       bootstrapMessages,
       turnMessages,
       bootstrapThreadContextPresent,
       turnThreadContextPresent,
     } = buildFastAgentMessages({
-      question,
+      question: projectedQuestion,
       currentMessageAgentContext,
       threadContext,
-      compatibilityMessages: session.compatibilityMessages,
+      compatibilityMessages: canonicalHistoryEligible
+        ? projectedHistory
+        : session.compatibilityMessages,
       currentMessageTs: currentMessageId,
       currentMessageSender,
       surface: conversation.surface,
@@ -4760,13 +4913,29 @@ export async function answerFastAgentQuestion({
     const serializedTurnPrompt = turnPromptInput.text;
     let inferenceAttemptNumber = 0;
     const persistOpenCodeSession = async (openCodeSessionId: string) => {
-      if (durableOpenCodeSessionId === openCodeSessionId) return;
+      // The watermark travels with every native session, not only with
+      // state-bearing turns: an ordinary prompt is canonical history too, so
+      // leaving it unrecorded would make the next turn look ahead of the
+      // session and rebuild it from scratch.
+      if (
+        durableOpenCodeSessionId === openCodeSessionId &&
+        session.openCodeProjectionHash === canonicalProjection.stateHash &&
+        session.openCodeProjectedThroughSeq ===
+          canonicalProjection.projectedThroughSequence
+      ) {
+        return;
+      }
       await setFastAgentOpenCodeSession({
         sessionId: session.id,
         openCodeSessionId,
+        projectionHash: canonicalProjection.stateHash,
+        projectedThroughSequence: canonicalProjection.projectedThroughSequence,
       });
       durableOpenCodeSessionId = openCodeSessionId;
       session.openCodeSessionId = openCodeSessionId;
+      session.openCodeProjectionHash = canonicalProjection.stateHash;
+      session.openCodeProjectedThroughSeq =
+        canonicalProjection.projectedThroughSequence;
     };
     // A resumed run whose earlier attempt reached its closeout has nothing
     // left to ask the model. Finish the turn from the record instead. A
@@ -4800,6 +4969,22 @@ export async function answerFastAgentQuestion({
       return lastVisibleMessage;
     }
     diagnostics.markInferenceQueued();
+    // A native session cannot receive a delta safely once canonical history
+    // moved past what it represents, or once the state it was built on
+    // changed. A session carried over from before this release has no
+    // recorded projection: that is unknown rather than stale, so it keeps
+    // its transcript unless newer semantic events are actually ahead of it.
+    if (
+      session.openCodeSessionId &&
+      (canonicalHistoryAheadOfNative ||
+        (session.openCodeProjectionHash != null &&
+          session.openCodeProjectionHash !== canonicalProjection.stateHash))
+    ) {
+      fastAgentOpenCodeSessionManager.invalidate(session.id);
+      session.openCodeSessionId = null;
+      activeOpenCodeSessionId = null;
+      durableOpenCodeSessionId = null;
+    }
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
       persistedSessionId: session.openCodeSessionId,
@@ -4853,6 +5038,50 @@ export async function answerFastAgentQuestion({
           sessionPath === 'fallback_rebuild'
             ? [...imageFiles, ...injectedHumanFollowUpFiles]
             : imageFiles;
+        // Restored history attachments follow the same delivery rules as the
+        // turn's own images: sent as files only when the model takes them
+        // directly, and otherwise held and announced with attachment IDs so
+        // `inspect_images` can read them. Where no configured model accepts
+        // image input at all, they are dropped rather than announced as
+        // inspectable, because nothing could ever read them; rebuilt history
+        // still records that the turn carried attachments.
+        //
+        // Single owner for both the rebuild below and the clean retry, which
+        // resolves the delivery mode itself when the failed attempt never
+        // needed one. Holding happens once: a retry re-renders the notice for
+        // every held image through `withTurnImageNotice`, so reserving a
+        // second set of IDs for the same bytes would announce them twice.
+        const prepareRestoredAttachments = (
+          delivery: FastAgentImageDelivery,
+          text: string,
+        ): { text: string; files: NonTaskPromptFile[] } => {
+          if (
+            restoredAttachmentFiles.length === 0 ||
+            delivery.delivery === 'unsupported'
+          ) {
+            return { text, files: [] };
+          }
+          if (restoredAttachmentsHeld) return { text, files: [] };
+          const prepared = holdImagesForPrompt(
+            restoredAttachmentFiles,
+            text,
+            delivery,
+          );
+          commitTurnImages(prepared.held);
+          restoredAttachmentsHeld = prepared.held.length > 0;
+          return { text: prepared.text, files: prepared.files };
+        };
+        if (
+          sessionPath === 'fallback_rebuild' ||
+          sessionPath === 'cold_rebuild'
+        ) {
+          const restored = prepareRestoredAttachments(
+            await resolveImageDelivery(),
+            promptForAttempt,
+          );
+          promptForAttempt = restored.text;
+          imageFilesForAttempt = [...imageFilesForAttempt, ...restored.files];
+        }
         let promptKind: FastAgentPromptKind =
           sessionPath === 'warm' || sessionPath === 'cold_resume'
             ? 'turn_delta'
@@ -4907,6 +5136,17 @@ export async function answerFastAgentQuestion({
             agentContextPresent: Boolean(currentMessageAgentContext),
             inputImageCount: imageFiles.length,
             attachedImageCount: imageFilesForAttempt.length,
+            canonicalEventCount: canonicalProjection.events.length,
+            canonicalCurrentStateCount:
+              canonicalProjection.currentStateEventIds.length,
+            canonicalProjectedThroughSequence:
+              canonicalProjection.projectedThroughSequence,
+            canonicalAdmissionDelayMs: currentProjection
+              ? Math.max(
+                  0,
+                  Date.now() - currentProjection.event.createdAt.getTime(),
+                )
+              : null,
             degradedComponents: [...degradedContextComponents],
           });
         };
@@ -5251,7 +5491,7 @@ export async function answerFastAgentQuestion({
                 noteInferenceRecoveryProgress();
                 return true;
               },
-              prepareRetry: () => {
+              prepareRetry: async () => {
                 if (nativeToolInvoked && openCodeSession.id) {
                   promptForAttempt = FAST_AGENT_PROVIDER_RECOVERY_PROMPT;
                   imageFilesForAttempt = [];
@@ -5261,6 +5501,22 @@ export async function answerFastAgentQuestion({
                   // Before tools run, rebuild from visible history rather than
                   // append the original turn to the failed session again.
                   openCodeSession.id = undefined;
+                  // This rebuild replays the whole conversation, so history's
+                  // attachments have to travel with it. A text-only turn never
+                  // resolved a delivery mode, so resolve one here rather than
+                  // leave the images out; the lookup stays off turns that
+                  // never retry. Awaiting before the prompt is built is safe:
+                  // holding and building still run without interruption.
+                  const restored =
+                    restoredAttachmentFiles.length > 0
+                      ? prepareRestoredAttachments(
+                          await resolveImageDelivery(),
+                          '',
+                        )
+                      : { files: [] };
+                  // The returned text is discarded because on a rebuilt prompt
+                  // `withTurnImageNotice` owns the notice, and it restates
+                  // every held image including anything just held above.
                   promptForAttempt = withTurnImageNotice(
                     serializeFastAgentMessages([
                       ...bootstrapMessages,
@@ -5270,6 +5526,7 @@ export async function answerFastAgentQuestion({
                   imageFilesForAttempt = [
                     ...imageFiles,
                     ...injectedHumanFollowUpFiles,
+                    ...restored.files,
                   ];
                   promptKind = 'clean_retry_bootstrap';
                   attemptSessionPath = 'cold_rebuild';

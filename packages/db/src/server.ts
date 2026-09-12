@@ -70,6 +70,7 @@ export * from './lib/declarative-environments';
 export * from './lib/environment-config-versions';
 export * from './lib/environment-definitions';
 export * from './lib/environment-snapshots';
+export * from './lib/fast-agent-message-order';
 export * from './lib/github-branch-activity';
 export * from './lib/compute-runtime-config';
 export * from './lib/model-runtime-config';

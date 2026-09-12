@@ -1,6 +1,7 @@
 const mocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
   schedule: vi.fn(),
+  enqueue: vi.fn(),
   submit: vi.fn(),
   complete: vi.fn(),
 }));
@@ -17,6 +18,7 @@ vi.mock('@/lib/server/setup-funnel-telemetry', () => ({
 }));
 vi.mock('@roomote/sdk/server', () => ({
   buildFastAgentArtifactCreator: vi.fn(),
+  enqueueFastAgentParentEvent: mocks.enqueue,
   LINEAR_ORG_CONNECTION_ROLE: 'organization',
 }));
 vi.mock('@roomote/cloud-agents/server', async (importOriginal) => ({
@@ -200,6 +202,10 @@ describe('optional setup integration discovery', () => {
       },
     }));
     mocks.complete.mockResolvedValue(true);
+    mocks.enqueue.mockImplementation(async ({ event }) => {
+      mocks.schedule(event);
+      return { queued: true };
+    });
   });
   afterEach(async () => {
     await db

@@ -625,6 +625,102 @@ describe('Fast conversation repository', () => {
     ).resolves.toMatchObject({ compatibilityMessages: visibleHistory });
   });
 
+  it('allocates deterministic canonical sequence under concurrent admission and preserves it on replay', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const observedAt = new Date('2026-01-01T00:00:00.000Z');
+    const writes = Array.from({ length: 12 }, (_, index) => ({
+      eventId: `concurrent-${index}`,
+      turnId: `turn-${index}`,
+      turnSeq: 0,
+      ts: observedAt.getTime() + index,
+      observedAt,
+      eventType: 'roomote_runtime.user_prompt' as const,
+      role: 'user' as const,
+      contentBlocks: [{ type: 'text' as const, text: `message-${index}` }],
+      metadata: { visibleInTranscript: true, turnSource: 'human' },
+      payload: {},
+      source: 'slack',
+    }));
+
+    const admitted = await Promise.all(
+      writes.map((message) =>
+        fastAgentConversationRepository.upsertMessage({
+          conversationId: session.id,
+          message,
+          insertOnly: true,
+        }),
+      ),
+    );
+    expect(
+      admitted
+        .map(({ conversationSeq }) => conversationSeq)
+        .sort((left, right) => Number(left) - Number(right)),
+    ).toEqual(Array.from({ length: 12 }, (_, index) => index + 1));
+
+    const replay = await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: writes[4]!,
+      insertOnly: true,
+    });
+    expect(replay).toMatchObject({
+      inserted: false,
+      conversationSeq: admitted[4]!.conversationSeq,
+    });
+    const rows = await db.query.fastAgentMessages.findMany({
+      where: eq(fastAgentMessages.conversationId, session.id),
+    });
+    expect(rows).toHaveLength(12);
+    expect(
+      rows.every((row) => row.observedAt?.getTime() === observedAt.getTime()),
+    ).toBe(true);
+  });
+
+  it('orders N-1 null-sequence rows before the next canonical admission', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    await db.insert(fastAgentMessages).values({
+      conversationId: session.id,
+      eventId: 'legacy-event',
+      turnId: 'legacy-turn',
+      turnSeq: 0,
+      ts: 1,
+      eventType: 'roomote_runtime.user_prompt',
+      role: 'user',
+      contentBlocks: [{ type: 'text', text: 'Legacy input' }],
+      payload: {},
+    });
+
+    const admitted = await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'new-event',
+        turnId: 'new-turn',
+        turnSeq: 0,
+        ts: 2,
+        eventType: 'roomote_runtime.user_prompt',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'New input' }],
+        payload: {},
+      },
+    });
+    const rows = await db.query.fastAgentMessages.findMany({
+      where: eq(fastAgentMessages.conversationId, session.id),
+    });
+    expect(
+      Object.fromEntries(
+        rows.map(({ eventId, conversationSeq }) => [eventId, conversationSeq]),
+      ),
+    ).toEqual({ 'legacy-event': 1, 'new-event': 2 });
+    expect(admitted.conversationSeq).toBe(2);
+  });
+
   it('persists the canonical OpenCode session identity', async () => {
     const user = await createUser();
     const session = await fastAgentConversationRepository.getOrCreate({
