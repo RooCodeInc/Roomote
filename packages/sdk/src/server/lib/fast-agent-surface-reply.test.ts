@@ -936,6 +936,53 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       }),
     );
   });
+
+  it('binds every chunk of a split Telegram reply to its exact text', async () => {
+    mocks.telegramPostMessage.mockResolvedValueOnce({
+      provider: 'telegram',
+      channelId: 'telegram-chat-1',
+      messageId: 'telegram-message-1',
+      lastTextMessageId: 'telegram-message-2',
+      textMessages: [
+        { messageId: 'telegram-message-1', text: 'First chunk' },
+        {
+          messageId: 'telegram-message-2',
+          text: 'Final chunk\n\nReply anytime',
+        },
+      ],
+    });
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      replyTarget: { channelId: 'telegram-chat-1' },
+    });
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Matt',
+      question: 'Follow up',
+    });
+
+    await delivery!.adapter.postReply({
+      purpose: 'closeout',
+      message: 'First chunk\nFinal chunk',
+    });
+
+    await expect(
+      db.query.fastAgentProviderMessages.findMany({
+        where: eq(fastAgentProviderMessages.conversationId, conversation.id),
+        orderBy: fastAgentProviderMessages.messageId,
+        columns: { messageId: true, messageText: true },
+      }),
+    ).resolves.toEqual([
+      { messageId: 'telegram-message-1', messageText: 'First chunk' },
+      {
+        messageId: 'telegram-message-2',
+        messageText: 'First chunk\nFinal chunk',
+      },
+    ]);
+  });
 });
 
 describe('continueFastAgentSurfaceReply admission hooks', () => {

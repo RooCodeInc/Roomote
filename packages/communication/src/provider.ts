@@ -61,6 +61,8 @@ export type CommunicationPostMessageResult = {
   messageId: string;
   /** The final text-bearing message when a provider splits one post. */
   lastTextMessageId?: string;
+  /** Every text-bearing provider message emitted for one logical post. */
+  textMessages?: Array<{ messageId: string; text: string }>;
   threadId?: string;
 };
 

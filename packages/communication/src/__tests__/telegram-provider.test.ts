@@ -351,6 +351,7 @@ describe('TelegramCommunicationProvider', () => {
       channelId: '-100456',
       messageId: '99',
       lastTextMessageId: '99',
+      textMessages: [{ messageId: '99', text: 'hello from Roomote' }],
       threadId: '7',
     });
 
@@ -546,6 +547,13 @@ describe('TelegramCommunicationProvider', () => {
     expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
     expect(result.messageId).toBe('200');
     expect(result.lastTextMessageId).toBe('201');
+    expect(result.textMessages?.map(({ messageId }) => messageId)).toEqual([
+      '200',
+      '201',
+    ]);
+    expect(result.textMessages?.map(({ text }) => text).join('')).toBe(
+      longText,
+    );
 
     const firstBody = JSON.parse(
       (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,

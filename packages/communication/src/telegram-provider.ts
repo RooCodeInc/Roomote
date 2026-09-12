@@ -154,6 +154,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       message_id: number;
       message_thread_id?: number;
     } | null = null;
+    const textMessages: Array<{ messageId: string; text: string }> = [];
 
     const replyMarkup = buildTelegramReplyMarkup(input.buttons);
     const lastSendIndex = chunks.length + images.length - 1;
@@ -173,6 +174,10 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
 
       firstResult ??= result;
       lastTextResult = result;
+      textMessages.push({
+        messageId: String(result.message_id),
+        text: chunk.markdown,
+      });
     }
 
     for (const [index, image] of images.entries()) {
@@ -201,6 +206,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       ...(lastTextResult
         ? { lastTextMessageId: String(lastTextResult.message_id) }
         : {}),
+      ...(textMessages.length ? { textMessages } : {}),
       ...(firstResult.message_thread_id !== undefined
         ? { threadId: String(firstResult.message_thread_id) }
         : input.threadId

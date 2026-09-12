@@ -121,6 +121,23 @@ export async function recordFastAgentConversationMessageBestEffort(
   }
 }
 
+export async function recordFastAgentConversationMessagesBestEffort(input: {
+  sessionId: string;
+  conversation: FastAgentConversation;
+  messages: Array<{ messageId: string; text: string }>;
+}): Promise<void> {
+  await Promise.all(
+    input.messages.map(({ messageId, text }) =>
+      recordFastAgentConversationMessageBestEffort({
+        sessionId: input.sessionId,
+        conversation: input.conversation,
+        messageId,
+        messageText: text,
+      }),
+    ),
+  );
+}
+
 export async function findFastAgentSessionForProviderReply(
   input: ProviderRoute & { replyToMessageId?: string; userId?: string },
 ): Promise<FastAgentConversationRecord | null> {

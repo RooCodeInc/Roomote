@@ -105,9 +105,21 @@ export async function postTextThreadReplyWithFooter(params: {
           : finalChunk.endsWith(`\n\n${footerText}`)
             ? finalChunk.slice(0, -footerText.length - 2)
             : finalChunk;
+      const textMessages = posted.textMessages;
       return {
         ...posted,
         messageId: posted.lastTextMessageId ?? posted.messageId,
+        ...(textMessages
+          ? {
+              textMessages: textMessages.map((message, index) => ({
+                ...message,
+                text:
+                  index === textMessages.length - 1
+                    ? textWithoutFooter
+                    : message.text,
+              })),
+            }
+          : {}),
         textWithoutFooter,
         ...(provider.provider === 'telegram' &&
         !input.images?.length &&

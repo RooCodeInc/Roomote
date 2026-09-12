@@ -49,6 +49,7 @@ import { findTeamsConversationRoute } from '../automations/destination';
 import {
   isFastAgentManagedTelegramTopic,
   recordFastAgentConversationMessageBestEffort,
+  recordFastAgentConversationMessagesBestEffort,
 } from './fast-agent-provider-message';
 import { buildFastAgentSlackReplyBodyBlocks } from './fast-agent-slack-reply-blocks';
 import {
@@ -670,11 +671,15 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         }),
       });
       activity.reassert();
-      await recordFastAgentConversationMessageBestEffort({
+      await recordFastAgentConversationMessagesBestEffort({
         sessionId: session.id,
         conversation,
-        messageId: posted.lastTextMessageId ?? posted.messageId,
-        messageText: message,
+        messages: posted.textMessages ?? [
+          {
+            messageId: posted.lastTextMessageId ?? posted.messageId,
+            text: message,
+          },
+        ],
       });
       return { messageId: posted.messageId };
     };

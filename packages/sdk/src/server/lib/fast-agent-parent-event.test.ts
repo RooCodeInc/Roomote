@@ -48,6 +48,7 @@ const mocks = vi.hoisted(() => ({
   agentMailPostMessage: vi.fn(),
   findTeamsConversationRoute: vi.fn(),
   recordProviderMessage: vi.fn(),
+  recordProviderMessages: vi.fn(),
   isManagedTelegramTopic: vi.fn(),
   enqueueTask: vi.fn(),
   getTaskUrl: vi.fn(),
@@ -277,6 +278,7 @@ vi.mock('../automations/destination', () => ({
 
 vi.mock('./fast-agent-provider-message', () => ({
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
+  recordFastAgentConversationMessagesBestEffort: mocks.recordProviderMessages,
   isFastAgentManagedTelegramTopic: mocks.isManagedTelegramTopic,
 }));
 
@@ -477,6 +479,7 @@ describe('deliverFastAgentParentEvent', () => {
       workspaceId: 'tenant-1',
     });
     mocks.recordProviderMessage.mockResolvedValue(true);
+    mocks.recordProviderMessages.mockResolvedValue(undefined);
     mocks.getTaskUrl.mockReturnValue(
       'https://roomote.example/task/child-task-1',
     );
@@ -1105,7 +1108,6 @@ describe('deliverFastAgentParentEvent', () => {
             postKickoff: vi.fn().mockResolvedValue(undefined),
           }),
       );
-
       await deliverFastAgentParentEvent({
         parent: automationParent,
         event: {
@@ -2647,6 +2649,21 @@ describe('deliverFastAgentParentEvent', () => {
             suggestions,
           }),
       );
+      if (surface === 'telegram') {
+        mocks.telegramPostMessage.mockResolvedValueOnce({
+          provider: 'telegram',
+          channelId: 'telegram-chat-1',
+          messageId: 'telegram-message-1',
+          lastTextMessageId: 'telegram-message-2',
+          textMessages: [
+            { messageId: 'telegram-message-1', text: 'Automation first chunk' },
+            {
+              messageId: 'telegram-message-2',
+              text: 'Automation final chunk\n\nReply anytime',
+            },
+          ],
+        });
+      }
 
       await deliverFastAgentParentEvent({
         parent: {
@@ -2685,21 +2702,30 @@ describe('deliverFastAgentParentEvent', () => {
         expect.any(Object),
         parent.sessionId,
       );
-      expect(mocks.recordProviderMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
+      if (surface === 'telegram') {
+        expect(mocks.recordProviderMessages).toHaveBeenCalledWith({
           sessionId: parent.sessionId,
           conversation: expect.objectContaining({ surface }),
-          messageId:
-            rootMessageId ??
-            (surface === 'teams' ? 'teams-message-1' : 'telegram-message-2'),
-          ...(surface === 'telegram'
-            ? {
-                messageText:
-                  'Automation: Retry scan\n\nRetry failures increased.',
-              }
-            : {}),
-        }),
-      );
+          messages: [
+            {
+              messageId: 'telegram-message-1',
+              text: 'Automation first chunk',
+            },
+            {
+              messageId: 'telegram-message-2',
+              text: 'Automation: Retry scan\n\nRetry failures increased.',
+            },
+          ],
+        });
+      } else {
+        expect(mocks.recordProviderMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sessionId: parent.sessionId,
+            conversation: expect.objectContaining({ surface }),
+            messageId: rootMessageId ?? 'teams-message-1',
+          }),
+        );
+      }
     },
   );
 

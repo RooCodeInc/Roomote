@@ -151,6 +151,10 @@ describe('text provider current carriers', () => {
       channelId: 'C',
       messageId: 'first',
       lastTextMessageId: 'last',
+      textMessages: [
+        { messageId: 'first', text: 'Long narrative.' },
+        { messageId: 'last', text: 'Final paragraph\n\nold footer' },
+      ],
     });
     const editMessageText = vi.fn().mockResolvedValue(undefined);
     const provider = {
@@ -170,6 +174,10 @@ describe('text provider current carriers', () => {
     expect(record?.textWithoutFooter.endsWith('Final paragraph')).toBe(true);
     expect(record?.textWithoutFooter.length).toBeLessThan(body.length);
     expect(record?.buttons).toEqual(buttons);
+    expect(posted.textMessages).toEqual([
+      { messageId: 'first', text: 'Long narrative.' },
+      { messageId: 'last', text: record?.textWithoutFooter },
+    ]);
     mocks.resolve.mockResolvedValue('No running tasks');
     await refreshManagedThreadReplyFooter({
       provider: 'telegram',
