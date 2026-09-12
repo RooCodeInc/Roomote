@@ -404,11 +404,11 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
         'Telegram sendRichMessageDraft requires a private-chat id.',
       );
     }
-    const [chunk] = planTelegramRichMessages({
+    const chunk = planTelegramRichMessages({
       text: input.text,
       htmlText: input.htmlText,
       textFormat: input.textFormat === 'markdown' ? 'markdown' : 'plain',
-    });
+    }).at(-1);
     const threadId = parsePositiveInteger(input.threadId);
     await this.callBotApi('sendRichMessageDraft', {
       chat_id: chatId,

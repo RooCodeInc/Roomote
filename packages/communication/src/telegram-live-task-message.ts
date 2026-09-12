@@ -98,7 +98,9 @@ export function buildTelegramLiveTaskMessage(
   const footerHtmlText = content.taskUrl
     ? `<a href="${escapeHtmlAttribute(content.taskUrl)}">Open in Roomote</a>`
     : undefined;
-  const footerHtmlBudget = footerHtmlText ? footerHtmlText.length + 2 : 0;
+  const footerHtmlBudget = footerHtmlText
+    ? footerHtmlText.length + '\n\n<footer></footer>'.length
+    : 0;
   const htmlBody = running
     ? `${htmlPrefix}${escapeHtmlWithinBudget(
         running.details

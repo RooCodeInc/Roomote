@@ -140,6 +140,31 @@ describe('TelegramCommunicationProvider', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it('keeps the latest chunk visible in an oversized rich draft', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+    const text = `early ${'a'.repeat(40_000)} latest`;
+
+    await provider.sendRichMessageDraft({
+      channelId: '123',
+      draftId: 42,
+      text,
+    });
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
+    ) as { rich_message: { html: string } };
+    expect(body.rich_message.html).toContain('latest');
+    expect(body.rich_message.html).not.toContain('early');
+    expect(body.rich_message.html.length).toBeLessThanOrEqual(32_768);
+  });
+
   it('rejects live drafts outside a numeric private chat', async () => {
     const fetchMock = vi.fn();
     const provider = new TelegramCommunicationProvider({

@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { TELEGRAM_MAX_RICH_MESSAGE_LENGTH } from '../telegram-format';
+import {
+  TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+  planTelegramRichMessages,
+} from '../telegram-format';
 import { buildTelegramLiveTaskMessage } from '../telegram-live-task-message';
 
 describe('buildTelegramLiveTaskMessage', () => {
@@ -57,6 +60,24 @@ describe('buildTelegramLiveTaskMessage', () => {
     expect(message.htmlText.length).toBeLessThanOrEqual(
       TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
     );
+  });
+
+  it('reserves the native footer envelope in near-limit editable HTML', () => {
+    const message = buildTelegramLiveTaskMessage({
+      status: 'running',
+      progress: `Working\n${'x'.repeat(TELEGRAM_MAX_RICH_MESSAGE_LENGTH)}`,
+      taskUrl: 'https://roomote.test/sessions/1?task=2',
+    });
+    const chunks = planTelegramRichMessages({
+      ...message,
+      textFormat: 'plain',
+    });
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]!.html.length).toBeLessThanOrEqual(
+      TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+    );
+    expect(chunks[0]!.html).toContain('<footer>');
   });
 
   it('matches the checked-in compact text demo fixture', () => {
