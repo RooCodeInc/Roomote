@@ -929,6 +929,24 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('keeps the system prompt stable when voice mode changes', async () => {
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'How is the task going?',
+      currentMessageId: '100.3',
+      voiceMode: true,
+      adapter: callbacks(),
+    });
+
+    const textTurn = mocks.generateText.mock.calls[0]?.[0];
+    const voiceTurn = mocks.generateText.mock.calls[1]?.[0];
+    expect(voiceTurn?.system).toBe(textTurn?.system);
+    expect(textTurn?.system).toContain('## Voice Calls');
+    expect(textTurn?.prompt).not.toContain('<voice_mode active="true" />');
+    expect(voiceTurn?.prompt).toContain('<voice_mode active="true" />');
+  });
+
   it('cuts the trailing model request once the closeout is delivered', async () => {
     const adapter = callbacks();
     const abortedAtSecondRequest = vi.fn();

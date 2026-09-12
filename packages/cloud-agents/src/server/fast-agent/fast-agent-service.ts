@@ -1442,6 +1442,7 @@ function buildFastAgentMessages({
   resumedAfterInterruption = false,
   resumedAfterInferenceRetry = false,
   previousAttempt,
+  voiceMode = false,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -1462,6 +1463,7 @@ function buildFastAgentMessages({
   resumedAfterInferenceRetry?: boolean;
   /** What an earlier attempt at this same turn already did, when resuming. */
   previousAttempt?: FastAgentTurnAttemptSummary | null;
+  voiceMode?: boolean;
 }): {
   bootstrapMessages: ModelMessage[];
   turnMessages: ModelMessage[];
@@ -1498,6 +1500,7 @@ function buildFastAgentMessages({
           )
         : normalizedQuestion;
   const currentUserMessageText = [
+    voiceMode ? '<voice_mode active="true" />' : undefined,
     explicitSkillInvocationContext,
     wrappedCurrentUserMessageText,
   ]
@@ -3259,6 +3262,7 @@ export async function answerFastAgentQuestion({
       resumedAfterInterruption,
       resumedAfterInferenceRetry,
       previousAttempt,
+      voiceMode,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
       Env.RELEASE_PRODUCT_VERSION,
@@ -3286,7 +3290,6 @@ export async function answerFastAgentQuestion({
       appEnv: Env.R_APP_ENV,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
-      voiceMode,
       therapistModeEnabled,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,

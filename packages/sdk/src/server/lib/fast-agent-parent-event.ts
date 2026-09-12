@@ -8,6 +8,7 @@ import {
   createFastAgentTaskLauncher,
   createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
+  isFastAgentVoiceCallActive,
   resolveApiBaseUrl,
   type FastAgentConversationRecord,
   type FastAgentTurnLockHandle,
@@ -2596,6 +2597,10 @@ export async function deliverFastAgentParentEventWithLock(
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
     // every deployment MCP server from parent-event turns.
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
+    const voiceMode =
+      params.event.type === 'scheduled_wakeup'
+        ? await isFastAgentVoiceCallActive(params.parent.sessionId)
+        : humanFollowUp?.voiceMode;
     await answerFastAgentQuestion({
       question:
         humanFollowUp?.question ??
@@ -2635,7 +2640,7 @@ export async function deliverFastAgentParentEventWithLock(
         (humanFollowUp ? 'human' : 'platform_event'),
       ...(humanFollowUp?.input ? { input: humanFollowUp.input } : {}),
       ...(humanFollowUp?.setupSession ? { setupSession: true } : {}),
-      ...(humanFollowUp?.voiceMode ? { voiceMode: true } : {}),
+      ...(voiceMode ? { voiceMode: true } : {}),
       ...(humanFollowUp?.setupContext
         ? { setupSnapshot: humanFollowUp.setupContext.setupSnapshot }
         : {}),

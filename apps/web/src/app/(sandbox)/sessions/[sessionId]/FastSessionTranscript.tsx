@@ -1309,27 +1309,31 @@ export function FastSessionTranscript({
     for (const text of held) recordVoiceTurn('assistant', text);
   }, [liveVoiceActive, requestInFlight, recordVoiceTurn]);
   const callStartedAtRef = useRef<number | null>(null);
+  const callEventWriteRef = useRef<Promise<void>>(Promise.resolve());
+  const recordVoiceCallEvent = useCallback(
+    (event: { phase: 'started' | 'ended'; durationMs?: number }) => {
+      const write = callEventWriteRef.current.then(async () => {
+        await trpcClient.voice.recordCallEvent.mutate({ sessionId, ...event });
+      });
+      callEventWriteRef.current = write.catch((error: unknown) => {
+        console.error(`[voice] Failed to record call ${event.phase}`, error);
+      });
+    },
+    [sessionId, trpcClient],
+  );
   useEffect(() => {
     if (liveVoice.active && liveVoice.startedAt !== null) {
       if (callStartedAtRef.current === liveVoice.startedAt) return;
       callStartedAtRef.current = liveVoice.startedAt;
-      void trpcClient.voice.recordCallEvent
-        .mutate({ sessionId, phase: 'started' })
-        .catch((error: unknown) => {
-          console.error('[voice] Failed to record call start', error);
-        });
+      recordVoiceCallEvent({ phase: 'started' });
       return;
     }
     if (!liveVoice.active && callStartedAtRef.current !== null) {
       const durationMs = Date.now() - callStartedAtRef.current;
       callStartedAtRef.current = null;
-      void trpcClient.voice.recordCallEvent
-        .mutate({ sessionId, phase: 'ended', durationMs })
-        .catch((error: unknown) => {
-          console.error('[voice] Failed to record call end', error);
-        });
+      recordVoiceCallEvent({ phase: 'ended', durationMs });
     }
-  }, [liveVoice.active, liveVoice.startedAt, sessionId, trpcClient]);
+  }, [liveVoice.active, liveVoice.startedAt, recordVoiceCallEvent]);
 
   const handleVoiceToggle = useCallback(() => {
     // Toggling while the handshake is still connecting cancels it.
