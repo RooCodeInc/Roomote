@@ -338,6 +338,51 @@ describe('Fast canonical event projection', () => {
     ]);
   });
 
+  it('keeps a terminal status current when a later task re-emits an opening event for the same pull request', () => {
+    // `pull_request_opened` is keyed per task but the subject is the PR, so a
+    // second task updating an already-merged PR admits an unversioned `open`
+    // state afterwards. It records a transition, not current state, so it
+    // must not overwrite the merged assertion.
+    const pullRequest = { type: 'pull_request', id: 'https://example/pull/5' };
+    const merged = event({
+      id: 'task-a-merged',
+      sequence: 1,
+      state: 'merged',
+      semantics: {
+        kind: 'current_state_assertion',
+        authority: 'source_control',
+        observedAt: '2026-01-01T00:00:10.000Z',
+        subject: pullRequest,
+      },
+    });
+    const laterOpenFromSecondTask = event({
+      id: 'task-b-opened',
+      sequence: 2,
+      state: 'open',
+      semantics: {
+        kind: 'state_change',
+        authority: 'source_control',
+        observedAt: '2026-01-01T00:05:00.000Z',
+        subject: pullRequest,
+      },
+    });
+
+    const projection = projectFastAgentCanonicalEvents([
+      merged,
+      laterOpenFromSecondTask,
+    ]);
+    expect(projection.currentStateEventIds).toEqual(['task-a-merged']);
+    expect(
+      projection.events.map(({ event, classification }) => [
+        event.eventId,
+        classification,
+      ]),
+    ).toEqual([
+      ['task-a-merged', 'current'],
+      ['task-b-opened', 'historical_relevant'],
+    ]);
+  });
+
   it('keeps a stale lower-authority claim from overriding a provider status it arrives after', () => {
     const pullRequest = { type: 'pull_request', id: 'https://example/pull/2' };
     const merged = event({

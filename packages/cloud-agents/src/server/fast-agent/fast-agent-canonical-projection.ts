@@ -7,6 +7,7 @@ import {
   FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY,
   type FastAgentEventAuthority,
   type FastAgentEventProjectionClassification,
+  type FastAgentEventSemanticKind,
   type FastAgentEventSemantics,
 } from '@roomote/types';
 
@@ -31,6 +32,20 @@ const AUTHORITY_RANK: Record<FastAgentEventAuthority, number> = {
   automation: 3,
   roomote_runtime: 4,
   source_control: 5,
+};
+
+/**
+ * How strongly an event speaks about the present. A current-state assertion
+ * reports what the subject is now, while a state change only records that a
+ * transition happened; the latter can be re-emitted long after the fact (a
+ * later task updating an already-merged pull request), so it must never
+ * overwrite an assertion about current state. A legitimate reverse
+ * transition still wins once its producer asserts it as current state.
+ */
+const STATE_EVIDENCE_RANK: Record<FastAgentEventSemanticKind, number> = {
+  historical_observation: 0,
+  state_change: 1,
+  current_state_assertion: 2,
 };
 
 function readSemantics(
@@ -78,6 +93,14 @@ function compareCandidate(
     AUTHORITY_RANK[rightSemantics.authority];
   if (authority !== 0) return authority;
 
+  // What the event claims about the present outranks when it arrived. This is
+  // what keeps a terminal status authoritative over an opening event that a
+  // later task re-emits for the same pull request.
+  const evidence =
+    STATE_EVIDENCE_RANK[leftSemantics.kind] -
+    STATE_EVIDENCE_RANK[rightSemantics.kind];
+  if (evidence !== 0) return evidence;
+
   // A comparable monotonic version is the only signal allowed to outrank a
   // later observation. Without one, the freshest thing the source actually
   // told us wins, so a legitimate later transition is never pinned by an
@@ -100,6 +123,9 @@ function isAmbiguousConflict(
   const leftSemantics = left.semantics!;
   const rightSemantics = right.semantics!;
   if (leftSemantics.authority !== rightSemantics.authority) return false;
+  // A transition record disagreeing with an assertion about current state is
+  // resolved by evidence strength, not surfaced as an unresolvable conflict.
+  if (leftSemantics.kind !== rightSemantics.kind) return false;
   if (leftSemantics.state === rightSemantics.state) return false;
   const version = compareVersion(leftSemantics, rightSemantics);
   if (version !== null) return version === 0;

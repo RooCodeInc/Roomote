@@ -264,13 +264,14 @@ function buildCanonicalEventSemantics(params: {
     case 'pull_request_opened':
       return {
         ...base,
+        // This records that a task opened or updated the pull request; it is
+        // not a claim about the PR's current status. That distinction is what
+        // keeps a merged or closed assertion authoritative even when a later
+        // task re-emits this event for the same PR, so no invented lifecycle
+        // version is needed here.
         kind: 'state_change',
         authority: 'source_control',
         subject: { type: 'pull_request', id: event.pullRequest.url },
-        // Providers expose no monotonic pull-request lifecycle version, and a
-        // pull request can legitimately move backward (reopened, returned to
-        // draft). Leave this unversioned so observation order decides and a
-        // later transition is never suppressed by an earlier state.
         state: event.pullRequest.status ?? 'open',
       };
     case 'pull_request_feedback':
