@@ -5046,11 +5046,11 @@ export async function answerFastAgentQuestion({
         // inspectable, because nothing could ever read them; rebuilt history
         // still records that the turn carried attachments.
         //
-        // Single owner for both the rebuild below and the synchronous retry,
-        // which reuses the mode this turn already resolved. Holding happens
-        // once: a retry re-renders the notice for every held image through
-        // `withTurnImageNotice`, so reserving a second set of IDs for the
-        // same bytes would announce them twice.
+        // Single owner for both the rebuild below and the clean retry, which
+        // resolves the delivery mode itself when the failed attempt never
+        // needed one. Holding happens once: a retry re-renders the notice for
+        // every held image through `withTurnImageNotice`, so reserving a
+        // second set of IDs for the same bytes would announce them twice.
         const prepareRestoredAttachments = (
           delivery: FastAgentImageDelivery,
           text: string,
@@ -5491,7 +5491,7 @@ export async function answerFastAgentQuestion({
                 noteInferenceRecoveryProgress();
                 return true;
               },
-              prepareRetry: () => {
+              prepareRetry: async () => {
                 if (nativeToolInvoked && openCodeSession.id) {
                   promptForAttempt = FAST_AGENT_PROVIDER_RECOVERY_PROMPT;
                   imageFilesForAttempt = [];
@@ -5501,13 +5501,22 @@ export async function answerFastAgentQuestion({
                   // Before tools run, rebuild from visible history rather than
                   // append the original turn to the failed session again.
                   openCodeSession.id = undefined;
-                  // Prepared before the notice is re-rendered so anything
-                  // newly held is announced by it. The returned text is
-                  // discarded for the same reason: on a rebuilt prompt
-                  // `withTurnImageNotice` is the notice owner.
-                  const restored = resolvedImageDelivery
-                    ? prepareRestoredAttachments(resolvedImageDelivery, '')
-                    : { files: [] };
+                  // This rebuild replays the whole conversation, so history's
+                  // attachments have to travel with it. A text-only turn never
+                  // resolved a delivery mode, so resolve one here rather than
+                  // leave the images out; the lookup stays off turns that
+                  // never retry. Awaiting before the prompt is built is safe:
+                  // holding and building still run without interruption.
+                  const restored =
+                    restoredAttachmentFiles.length > 0
+                      ? prepareRestoredAttachments(
+                          await resolveImageDelivery(),
+                          '',
+                        )
+                      : { files: [] };
+                  // The returned text is discarded because on a rebuilt prompt
+                  // `withTurnImageNotice` owns the notice, and it restates
+                  // every held image including anything just held above.
                   promptForAttempt = withTurnImageNotice(
                     serializeFastAgentMessages([
                       ...bootstrapMessages,

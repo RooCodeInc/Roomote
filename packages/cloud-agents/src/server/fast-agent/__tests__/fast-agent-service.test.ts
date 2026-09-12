@@ -1917,6 +1917,98 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(retryPrompt.prompt).not.toContain('image-2');
     });
 
+    it('restores historical images when a text-only warm turn falls back to a clean retry', async () => {
+      // The reviewed gap: a text-only turn never resolves a delivery mode,
+      // so the retry used to rebuild the bootstrap with no restored images
+      // at all even though it replays the conversation that carried them.
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'direct',
+        model: 'openrouter/openai/gpt-5.6-terra',
+      });
+      mocks.runSession.mockImplementation(
+        ({
+          prompt,
+          execute,
+        }: {
+          prompt: string;
+          execute: (
+            session: { id?: string },
+            selectedPrompt: string,
+            context: { path: string; validateSession: boolean },
+          ) => Promise<unknown>;
+        }) =>
+          execute({ id: 'opencode-session-1' }, prompt, {
+            path: 'warm',
+            validateSession: false,
+          }),
+      );
+      let attempts = 0;
+      mocks.generateText.mockImplementation(async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('TypeError: fetch failed');
+        return 'Recovered.';
+      });
+
+      // No `images`: the turn itself carries nothing to deliver.
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(attempts).toBe(2);
+      const warmPrompt = mocks.generateText.mock.calls[0]![0];
+      const retryPrompt = mocks.generateText.mock.calls.at(-1)![0];
+      // The warm attempt neither resolved delivery nor carried any file.
+      expect(warmPrompt.files).toBeUndefined();
+      // The rebuilt retry replays the historical image as a real file.
+      expect(retryPrompt.files).toHaveLength(1);
+      expect(mocks.captureInferenceContext).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          sessionPath: 'cold_rebuild',
+          promptKind: 'clean_retry_bootstrap',
+          attachedImageCount: 1,
+        }),
+      );
+    });
+
+    it('announces restored images to a helper model when a text-only warm turn retries', async () => {
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'helper',
+        model: 'openrouter/openai/gpt-5.6-terra',
+        helperModel: 'openrouter/google/gemini-3.8-flash',
+      });
+      mocks.runSession.mockImplementation(
+        ({
+          prompt,
+          execute,
+        }: {
+          prompt: string;
+          execute: (
+            session: { id?: string },
+            selectedPrompt: string,
+            context: { path: string; validateSession: boolean },
+          ) => Promise<unknown>;
+        }) =>
+          execute({ id: 'opencode-session-1' }, prompt, {
+            path: 'warm',
+            validateSession: false,
+          }),
+      );
+      let attempts = 0;
+      mocks.generateText.mockImplementation(async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('TypeError: fetch failed');
+        return 'Recovered.';
+      });
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(attempts).toBe(2);
+      const retryPrompt = mocks.generateText.mock.calls.at(-1)![0];
+      // Held for a model that cannot view them, and announced for
+      // `inspect_images` rather than pushed at it as raw files.
+      expect(retryPrompt.files).toBeUndefined();
+      expect(retryPrompt.prompt).toContain('Image attachments: image-1');
+      expect(retryPrompt.prompt).toContain('inspect_images');
+    });
+
     it('holds restored images a warm attempt never held when a retry rebuilds', async () => {
       // The divergence that matters: delivery is already resolved for the
       // turn's own image, but no rebuild has held the restored one yet. The
