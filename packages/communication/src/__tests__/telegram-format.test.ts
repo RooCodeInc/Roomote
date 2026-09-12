@@ -128,7 +128,7 @@ describe('chunkTelegramMarkdown', () => {
     const chunks = chunkTelegramMarkdown(lines.join('\n'), 100);
 
     expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.join('\n')).toBe(lines.join('\n'));
+    expect(chunks.join('')).toBe(lines.join('\n'));
     for (const chunk of chunks) {
       expect(chunk.length).toBeLessThanOrEqual(100);
     }
@@ -165,9 +165,9 @@ describe('chunkTelegramMarkdown', () => {
     const markdown = `${line}\n${line}\n`;
     const chunks = chunkTelegramMarkdown(markdown, 3_500);
 
-    expect(chunks).toEqual([line, `${line}\n`]);
-    expect(chunks.join('\n')).toBe(markdown);
+    expect(chunks.join('')).toBe(markdown);
     expect(chunks.every((chunk) => chunk.length > 0)).toBe(true);
+    expect(chunks.every((chunk) => chunk.length <= 3_500)).toBe(true);
   });
 });
 
@@ -216,6 +216,15 @@ describe('chunkTelegramMarkdownAsHtml', () => {
     const markdown = Array.from({ length: 200 }, () => line).join('\n');
     const chunks = chunkTelegramMarkdownAsHtml(markdown);
 
-    expect(chunks.map((chunk) => chunk.markdown).join('\n')).toBe(markdown);
+    expect(chunks.map((chunk) => chunk.markdown).join('')).toBe(markdown);
+  });
+
+  it('preserves exact newlines during recursive HTML expansion', () => {
+    const markdown = `${'&'.repeat(409)}\n${'&'.repeat(1_000)}`;
+    const chunks = chunkTelegramMarkdownAsHtml(markdown);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.map((chunk) => chunk.markdown).join('')).toBe(markdown);
+    expect(chunks.every((chunk) => chunk.markdown.length > 0)).toBe(true);
   });
 });

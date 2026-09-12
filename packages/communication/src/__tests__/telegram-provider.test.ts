@@ -728,7 +728,7 @@ describe('TelegramCommunicationProvider', () => {
       )
       .filter((body) => !body.parse_mode);
     expect(plainBodies.length).toBeGreaterThan(1);
-    expect(plainBodies.map((body) => body.text).join('\n')).toBe(text);
+    expect(plainBodies.map((body) => body.text).join('')).toBe(text);
   });
 
   it('requires text or images for outbound Telegram messages', async () => {

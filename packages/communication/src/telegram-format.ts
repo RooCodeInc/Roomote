@@ -195,65 +195,26 @@ export function chunkTelegramMarkdown(
     return [markdown];
   }
 
-  const chunks: string[] = [];
-  let current: string[] = [];
-  let currentLength = 0;
+  const rawChunks = chunkTelegramText(markdown, maxLength - 16);
   let openFence: string | null = null;
 
-  const flush = (reopenFence: boolean) => {
-    if (currentLength === 0) {
-      return;
-    }
+  return rawChunks.map((rawChunk) => {
+    const reopenFence = openFence;
 
-    if (openFence && reopenFence) {
-      current.push('```');
-    }
-
-    chunks.push(current.join('\n'));
-    current = openFence && reopenFence ? [openFence] : [];
-    currentLength = current.join('\n').length;
-  };
-
-  const rawLines = markdown.split('\n');
-
-  for (const rawLine of rawLines) {
-    const lines =
-      rawLine.length > maxLength
-        ? chunkTelegramText(rawLine, maxLength - 8)
-        : [rawLine];
-
-    for (const [lineIndex, line] of lines.entries()) {
-      const fenceMatch = /^```/.test(line);
-      // Reserve room for the closing fence a flush would append.
-      const closingFenceReserve = openFence ? 4 : 0;
-      let separatorLength = current.length > 0 ? 1 : 0;
-
-      if (
-        currentLength + separatorLength + line.length + closingFenceReserve >
-        maxLength
-      ) {
-        flush(true);
-        separatorLength = current.length > 0 ? 1 : 0;
-      }
-
-      current.push(line);
-      currentLength += separatorLength + line.length;
-
-      if (fenceMatch) {
+    for (const line of rawChunk.split('\n')) {
+      if (/^```/.test(line)) {
         openFence = openFence ? null : line;
       }
-
-      // A hard-split line has no newline between its pieces. Flush each piece
-      // separately so joining the line array below cannot invent one.
-      if (lineIndex < lines.length - 1) {
-        flush(true);
-      }
     }
-  }
 
-  flush(false);
+    const renderedChunk = reopenFence
+      ? `${reopenFence}\n${rawChunk}`
+      : rawChunk;
 
-  return chunks.filter((chunk) => chunk.length > 0);
+    return openFence
+      ? `${renderedChunk}${renderedChunk.endsWith('\n') ? '' : '\n'}\`\`\``
+      : renderedChunk;
+  });
 }
 
 /**
