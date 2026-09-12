@@ -175,7 +175,7 @@ describe('text provider current carriers', () => {
     expect(posted.messageId).toBe('last');
     const record = await getThreadReplyFooterRecord('telegram', 'C', 'root');
     expect(record?.textWithoutFooter.endsWith('Final paragraph')).toBe(true);
-    expect(record?.textWithoutFooter.length).toBeLessThan(body.length);
+    expect(record?.textWithoutFooter).toBe(body);
     expect(record?.buttons).toEqual(buttons);
     mocks.resolve.mockResolvedValue('No running tasks');
     await refreshManagedThreadReplyFooter({

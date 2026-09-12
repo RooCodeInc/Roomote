@@ -1,4 +1,4 @@
-import { TELEGRAM_MAX_MESSAGE_LENGTH } from './telegram-format';
+import { TELEGRAM_MAX_RICH_MESSAGE_LENGTH } from './telegram-format';
 
 export type TelegramLiveTaskStatus =
   | 'running'
@@ -91,7 +91,7 @@ export function buildTelegramLiveTaskMessage(
     running?.details
       ? `${running.summary}\n\n${running.details}`
       : (running?.summary ?? progress),
-    TELEGRAM_MAX_MESSAGE_LENGTH - (footerText ? footerText.length + 2 : 0),
+    TELEGRAM_MAX_RICH_MESSAGE_LENGTH - (footerText ? footerText.length + 2 : 0),
   );
   const htmlPrefix = '<blockquote expandable>';
   const htmlSuffix = '</blockquote>';
@@ -104,14 +104,14 @@ export function buildTelegramLiveTaskMessage(
         running.details
           ? `${running.summary}\n\n${running.details}`
           : running.summary,
-        TELEGRAM_MAX_MESSAGE_LENGTH -
+        TELEGRAM_MAX_RICH_MESSAGE_LENGTH -
           htmlPrefix.length -
           htmlSuffix.length -
           footerHtmlBudget,
       )}${htmlSuffix}`
     : escapeHtmlWithinBudget(
         progress,
-        TELEGRAM_MAX_MESSAGE_LENGTH - footerHtmlBudget,
+        TELEGRAM_MAX_RICH_MESSAGE_LENGTH - footerHtmlBudget,
       );
 
   return {

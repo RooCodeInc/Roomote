@@ -3,4 +3,4 @@
 '@roomote/sdk': patch
 ---
 
-Render Telegram reply and live-task links with native rich-message footers while preserving ordinary-message fallback behavior.
+Send all Telegram text replies, edits, and private-chat drafts as rich messages with native footers and rich-message-sized splitting.

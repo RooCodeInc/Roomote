@@ -182,7 +182,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       editForumTopic: mocks.telegramEditForumTopic,
       resolveForumTopicIconCustomEmojiId: mocks.telegramResolveForumTopicIcon,
       sendChatAction: mocks.telegramTyping,
-      sendMessageDraft: mocks.telegramTyping,
+      sendRichMessageDraft: mocks.telegramTyping,
     });
     mocks.createDiscordProvider.mockResolvedValue({
       triggerTyping: mocks.discordTyping,

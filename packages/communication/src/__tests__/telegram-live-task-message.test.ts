@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { TELEGRAM_MAX_MESSAGE_LENGTH } from '../telegram-format';
+import { TELEGRAM_MAX_RICH_MESSAGE_LENGTH } from '../telegram-format';
 import { buildTelegramLiveTaskMessage } from '../telegram-live-task-message';
 
 describe('buildTelegramLiveTaskMessage', () => {
@@ -45,17 +45,17 @@ describe('buildTelegramLiveTaskMessage', () => {
   it('escapes expandable HTML without splitting entities or exceeding one message', () => {
     const message = buildTelegramLiveTaskMessage({
       status: 'running',
-      progress: `Fixing <Telegram>...\n${'<>&'.repeat(TELEGRAM_MAX_MESSAGE_LENGTH)}`,
+      progress: `Fixing <Telegram>...\n${'<>&'.repeat(TELEGRAM_MAX_RICH_MESSAGE_LENGTH)}`,
     });
 
     expect(message.htmlText).toContain('Fixing &lt;Telegram&gt;...');
     expect(message.htmlText).not.toMatch(/&(?!amp;|lt;|gt;)/);
     expect(message.htmlText.endsWith('</blockquote>')).toBe(true);
     expect(message.text.length).toBeLessThanOrEqual(
-      TELEGRAM_MAX_MESSAGE_LENGTH,
+      TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
     );
     expect(message.htmlText.length).toBeLessThanOrEqual(
-      TELEGRAM_MAX_MESSAGE_LENGTH,
+      TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
     );
   });
 

@@ -4,7 +4,7 @@ import type {
 } from './provider';
 import type { TeamsCommunicationProvider } from './teams-provider';
 import type { TelegramCommunicationProvider } from './telegram-provider';
-import { chunkTelegramMarkdownAsHtml } from './telegram-format';
+import { planTelegramRichMessages } from './telegram-format';
 import {
   deliverManagedThreadReplyFooter,
   withThreadReplyFooterLock,
@@ -112,7 +112,11 @@ export async function postTextThreadReplyWithFooter(params: {
       }
       const finalChunk =
         provider.provider === 'telegram'
-          ? (chunkTelegramMarkdownAsHtml(text).at(-1)?.markdown ?? '')
+          ? (planTelegramRichMessages({
+              text: input.text ?? '',
+              footerText,
+              textFormat: 'markdown',
+            }).at(-1)?.text ?? '')
           : text;
       const textWithoutFooter =
         finalChunk === footerText
@@ -132,7 +136,9 @@ export async function postTextThreadReplyWithFooter(params: {
         ...(provider.provider === 'teams' && input.images?.length
           ? { images: input.images }
           : {}),
-        ...(finalChunk.endsWith(footerText) ? { refresh } : {}),
+        ...(provider.provider === 'telegram' || finalChunk.endsWith(footerText)
+          ? { refresh }
+          : {}),
       };
     },
     clearPreviousFooter: (record) =>

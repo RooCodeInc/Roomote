@@ -120,9 +120,9 @@ current one, opening a new topic when Telegram supports it; in a plain private
 chat the request joins that chat's conversation.
 
 While a private-chat Fast turn is running, Telegram shows a non-empty
-**Roomote is working...** native draft, then replaces it with response text as
-generation continues. The completed response is always sent as a normal message
-so it remains in the conversation. Roomote keeps activity active across
+**Roomote is working...** rich-message draft, then replaces it with rich response
+text as generation continues. The completed response is always finalized as a
+durable rich message so it remains in the conversation. Roomote keeps activity active across
 intermediate replies while more work remains, and a final reply clears it
 naturally.
 Telegram does not support native drafts in group chats, so groups use
@@ -134,11 +134,15 @@ says so in the chat instead of starting a task another way. Fast automation
 reports can target a Telegram chat, topic, or owner direct message; replies
 continue the report's Fast session.
 
-Every Fast reply ends with a compact footer: **Reply anytime**, a plain
+Roomote sends all Telegram text replies as rich messages, including
+acknowledgements, progress, final replies, and editable live-task status. Every
+Fast reply ends with a compact footer: **Reply anytime**, a plain
 running-task count when at least one task is running, links to pull requests the
 Session is working on, and **Open in Roomote**, which opens the Session transcript.
-Current Telegram clients render this through Telegram's native rich-message
-footer presentation; Telegram controls its exact appearance.
+Telegram renders this through its native rich-message footer presentation and
+controls its exact appearance. Rich text replies can remain in one message up to
+Telegram's 32,768-character rich-message limit; longer replies are split while
+keeping the footer on the final text message.
 Roomote keeps the footer on the latest reply current as delegated tasks start
 and finish (checking about every 30 seconds while work is running), and
 earlier replies drop their footer when a new reply posts.

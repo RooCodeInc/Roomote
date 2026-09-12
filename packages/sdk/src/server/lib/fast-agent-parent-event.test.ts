@@ -457,7 +457,7 @@ describe('deliverFastAgentParentEvent', () => {
       provider: 'telegram',
       postMessage: mocks.telegramPostMessage,
       sendChatAction: mocks.telegramTyping,
-      sendMessageDraft: mocks.telegramTyping,
+      sendRichMessageDraft: mocks.telegramTyping,
       editMessageText: mocks.telegramEditMessage,
       editForumTopic: mocks.telegramEditForumTopic,
       resolveForumTopicIconCustomEmojiId: mocks.telegramResolveForumTopicIcon,
