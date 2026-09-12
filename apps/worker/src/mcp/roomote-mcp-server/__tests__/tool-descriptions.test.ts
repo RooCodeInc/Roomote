@@ -470,7 +470,7 @@ describe('roomote MCP tool descriptions', () => {
     const tool = getRegisteredTool(registeredTools, 'show_widget');
 
     expect(tool.config.description).toContain(
-      'Create a rendered visual in the current task transcript.',
+      'Create and share a rendered visual in the current task transcript.',
     );
     expect(tool.config.description).not.toContain('Roomote');
     expect(tool.config.description).toContain(
@@ -493,12 +493,9 @@ describe('roomote MCP tool descriptions', () => {
       'HTML, CSS, and inline SVG are displayed in a sandboxed iframe',
     );
     expect(tool.config.description).toContain('request_user_input');
-    expect(tool.config.description).toContain(
-      'a link to open the visual is shared automatically',
-    );
-    expect(tool.config.description).toContain(
-      'Communication providers do not need to render the HTML inline, and that is not a reason to avoid this tool',
-    );
+    expect(tool.config.description).not.toContain('communication provider');
+    expect(tool.config.description).not.toContain('link to open');
+    expect(tool.config.description).not.toContain('HTML inline');
     expect(getInputSchemaField(tool, 'html').description).toContain('HTML');
     expect(getInputSchemaField(tool, 'html').description).toContain(
       'Avoid long prose',
@@ -513,7 +510,7 @@ describe('roomote MCP tool descriptions', () => {
       SHOW_WIDGET_HEIGHT_DESCRIPTION,
     );
     expect(getInputSchemaField(tool, 'textFallback').description).toContain(
-      'Optional chat preview',
+      'Optional short plain-text preview of the rendered visual',
     );
     for (const field of ['html', 'title', 'css', 'height', 'textFallback']) {
       expect(getInputSchemaField(tool, field).description).not.toContain(

@@ -418,14 +418,14 @@ import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
   description: ${JSON.stringify(
-    `Create a rendered visual in the Session transcript. ${SHOW_WIDGET_THEME_GUIDANCE} ${SHOW_WIDGET_FIXED_CANVAS_GUIDANCE} On supported communication providers, a link to open the visual is shared automatically; add textFallback only when a short chat preview adds useful context. Communication providers do not need to render the HTML inline, and that is not a reason to avoid this tool. Use request_user_input for questions.`,
+    `Create and share a rendered visual in the Session transcript when a structured or visual presentation communicates better than prose. Use it proactively to show, mock up, preview, or visualize an interface or interaction. ${SHOW_WIDGET_THEME_GUIDANCE} ${SHOW_WIDGET_FIXED_CANVAS_GUIDANCE} Use request_user_input for questions.`,
   )},
   args: {
     html: z.string().min(1).max(${SHOW_WIDGET_MAX_HTML_CHARS}).describe("Compact semantic HTML that fully fits the fixed canvas; avoid long prose, large lists, and dense data"),
     title: z.string().max(${SHOW_WIDGET_MAX_TITLE_CHARS}).optional(),
     css: z.string().max(${SHOW_WIDGET_MAX_CSS_CHARS}).optional().describe("Optional CSS using --rw-* theme variables; do not mask overflow with clipping or scroll containers"),
     height: z.number().finite().optional().describe(${JSON.stringify(SHOW_WIDGET_HEIGHT_DESCRIPTION)}),
-    textFallback: z.string().max(${SHOW_WIDGET_MAX_TEXT_FALLBACK_CHARS}).optional().describe("Optional chat preview shown with the automatically shared link to the rendered visual"),
+    textFallback: z.string().max(${SHOW_WIDGET_MAX_TEXT_FALLBACK_CHARS}).optional().describe("Optional short plain-text preview of the rendered visual"),
   },
   execute: (args, context) => invoke("show_widget", args, context),
 }

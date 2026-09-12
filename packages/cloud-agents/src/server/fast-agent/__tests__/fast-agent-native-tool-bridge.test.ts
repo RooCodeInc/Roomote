@@ -196,15 +196,18 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(showWidgetSource).toContain('invoke("show_widget"');
     expect(showWidgetSource).toContain('textFallback: z.string().max(4000)');
     expect(showWidgetSource).toContain(
-      'On supported communication providers, a link to open the visual is shared automatically',
+      'Create and share a rendered visual in the Session transcript',
     );
     expect(showWidgetSource).toContain(
-      'Optional chat preview shown with the automatically shared link to the rendered visual',
+      'Use it proactively to show, mock up, preview, or visualize an interface or interaction',
     );
     expect(showWidgetSource).toContain(
-      'Communication providers do not need to render the HTML inline, and that is not a reason to avoid this tool',
+      'Optional short plain-text preview of the rendered visual',
     );
     expect(showWidgetSource).not.toContain('On Slack');
+    expect(showWidgetSource).not.toContain('communication provider');
+    expect(showWidgetSource).not.toContain('link to open');
+    expect(showWidgetSource).not.toContain('HTML inline');
     expect(showWidgetSource).not.toContain('textFallback is posted instead');
     expect(showWidgetSource).toContain(SHOW_WIDGET_THEME_GUIDANCE);
     expect(showWidgetSource).toContain(SHOW_WIDGET_FIXED_CANVAS_GUIDANCE);
