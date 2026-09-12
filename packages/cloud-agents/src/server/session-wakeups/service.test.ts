@@ -241,7 +241,7 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
     );
   });
 
-  it('schedules and deduplicates voice follow-through at one minute', async () => {
+  it('schedules and deduplicates voice follow-through at thirty seconds', async () => {
     await db.insert(fastAgentMessages).values({
       conversationId: actor.conversationId,
       eventId: 'voice-call:started',
@@ -259,8 +259,8 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
     expect(created).toMatchObject({
       duplicate: false,
       wakeup: {
-        schedule: { mode: 'once', inMinutes: 1 },
-        nextRunAt: new Date(now.getTime() + 60_000).toISOString(),
+        schedule: { mode: 'once', inMinutes: 0.5 },
+        nextRunAt: new Date(now.getTime() + 30_000).toISOString(),
         internal: true,
       },
     });
@@ -272,7 +272,7 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
     expect(enqueueSessionWakeupFireBestEffort).toHaveBeenCalledOnce();
   });
 
-  it('rearms at one minute in voice mode, then returns to ten minutes when the call ends', async () => {
+  it('rearms at thirty seconds in voice mode, then returns to ten minutes when the call ends', async () => {
     await db.insert(fastAgentMessages).values({
       conversationId: actor.conversationId,
       eventId: 'voice-call:started',
@@ -289,7 +289,7 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
       .set({ status: 'completed', nextRunAt: null })
       .where(eq(sessionWakeups.id, initial.wakeup.id));
 
-    vi.setSystemTime(new Date(now.getTime() + 60_000));
+    vi.setSystemTime(new Date(now.getTime() + 30_000));
     const rearmed = await handleManageWakeupsToolCall(actor, {
       ...ownTaskFollowThroughInput,
       internal: true,
@@ -298,8 +298,8 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
       success: true,
       duplicate: false,
       wakeup: {
-        schedule: { mode: 'once', inMinutes: 1 },
-        nextRunAt: new Date(now.getTime() + 2 * 60_000).toISOString(),
+        schedule: { mode: 'once', inMinutes: 0.5 },
+        nextRunAt: new Date(now.getTime() + 60_000).toISOString(),
       },
     });
 
@@ -308,10 +308,10 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
       eventId: 'voice-call:ended',
       turnId: 'voice-call:ended',
       turnSeq: 0,
-      ts: now.getTime() + 60_000,
+      ts: now.getTime() + 30_000,
       eventType: ACP_ENVELOPE_EVENT_TYPES.VoiceCall,
       role: 'system',
-      payload: { phase: 'ended', durationMs: 60_000 },
+      payload: { phase: 'ended', durationMs: 30_000 },
     });
     const transitioned = await refreshOwnTaskFollowThroughWakeupCadence(actor);
 
@@ -319,7 +319,7 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
       duplicate: false,
       wakeup: {
         schedule: { mode: 'once', inMinutes: 10 },
-        nextRunAt: new Date(now.getTime() + 11 * 60_000).toISOString(),
+        nextRunAt: new Date(now.getTime() + 10.5 * 60_000).toISOString(),
       },
     });
     const active = await listSessionWakeups(actor.conversationId);

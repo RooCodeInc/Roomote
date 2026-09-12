@@ -7278,15 +7278,26 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       tools: [{ name: 'search_code', inputSchema: { type: 'object' } }],
     };
 
-    it('counts the voice bridge as startup communication without posting a duplicate acknowledgement', async () => {
+    it('keeps voice work gated until Fast posts the activity bridge', async () => {
       mocks.listIntegrations.mockResolvedValue([githubIntegration]);
-      let result: unknown;
+      const results: unknown[] = [];
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
-          result = await invokeMcpTool('github', 'search_code', {
-            query: 'voice progress',
+          results.push(
+            await invokeMcpTool('github', 'search_code', {
+              query: 'before bridge',
+            }),
+          );
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Just a second while I inspect the relevant files.',
           });
+          results.push(
+            await invokeMcpTool('github', 'search_code', {
+              query: 'after bridge',
+            }),
+          );
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
             message: 'I found it.',
@@ -7302,12 +7313,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         adapter,
       });
 
-      expect(result).toEqual({
-        success: true,
-        result: { matches: ['fast-agent.ts'] },
+      expect(results).toEqual([
+        acknowledgementRequired,
+        { success: true, result: { matches: ['fast-agent.ts'] } },
+      ]);
+      expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
+        purpose: 'ack',
+        message: 'Just a second while I inspect the relevant files.',
       });
-      expect(adapter.postReply).toHaveBeenCalledOnce();
-      expect(adapter.postReply).toHaveBeenCalledWith({
+      expect(adapter.postReply).toHaveBeenNthCalledWith(2, {
         purpose: 'closeout',
         message: 'I found it.',
       });

@@ -37,7 +37,7 @@ const OWN_TASK_FOLLOW_THROUGH_WAKEUP = {
   reportPolicy: 'only_when_notable' as const,
 };
 const OWN_TASK_FOLLOW_THROUGH_SCHEDULE = {
-  voice: 'in 1m',
+  voice: 'in 30s',
   text: 'in 10m',
 } as const;
 
@@ -103,7 +103,7 @@ async function ensureOwnTaskFollowThroughWakeupForMode(
   const schedule = voiceMode
     ? OWN_TASK_FOLLOW_THROUGH_SCHEDULE.voice
     : OWN_TASK_FOLLOW_THROUGH_SCHEDULE.text;
-  const inMinutes = voiceMode ? 1 : 10;
+  const inMinutes = voiceMode ? 0.5 : 10;
   await Promise.all(
     ownTaskWakeups
       .filter(

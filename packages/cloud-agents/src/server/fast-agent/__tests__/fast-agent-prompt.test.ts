@@ -478,7 +478,7 @@ describe('buildFastAgentSystemPrompt', () => {
       expect(turnStartupIndex).toBeLessThan(prompt.indexOf(laterSection));
     }
     expect(prompt).toContain(
-      "the first model-selected action must communicate with the user before substantive model-invoked work, except that a marked voice turn's activity-specific spoken bridge already satisfies this requirement",
+      'the first model-selected action must communicate with the user before substantive model-invoked work',
     );
     expect(prompt).toContain(
       'use `send_chat_reply` with purpose `ack` before calling `launch_task`',
@@ -497,7 +497,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'If launch fails, explain the failure through the normal closeout or clarification path',
     );
     expect(prompt).toContain(
-      "Before Brain recall, integrations, subagents, task steering, skills, result recovery, widgets, memory, custom automation management, or any other model-invoked work, communicate first unless the marked voice turn's spoken bridge already did so",
+      'Before Brain recall, integrations, subagents, task steering, skills, result recovery, widgets, memory, custom automation management, or any other model-invoked work, communicate first',
     );
     expect(prompt).toContain(
       'Trusted platform events follow their dedicated rules instead of this startup contract',
@@ -776,7 +776,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'the runtime silently ensures this conversation has exactly one internal session-wide one-shot check',
     );
     expect(prompt).toContain(
-      '"in 1m" while a voice call is active, otherwise "in 10m"',
+      '"in 30s" while a voice call is active, otherwise "in 10m"',
     );
     expect(prompt).toContain('Do not create another wakeup for this purpose');
     expect(prompt).toContain('passing "internal": true');
@@ -842,9 +842,6 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       'or the user has received no useful work update for roughly 30 seconds on a voice-marked check or roughly 10 minutes otherwise',
-    );
-    expect(prompt).toContain(
-      'These reporting windows are separate from the automatic check cadence',
     );
     expect(prompt).toContain(
       'Important news is immediate and has no minimum wait',
@@ -914,7 +911,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('stable nominal schedule "in 10m"');
     expect(prompt).toContain(
-      'the server replaces that nominal delay with "in 1m" while voice is currently active and otherwise keeps "in 10m"',
+      'the server replaces that nominal delay with "in 30s" while voice is currently active and otherwise keeps "in 10m"',
     );
     expect(prompt).toContain(
       "Check the conversation's actual visible updates: a recent useful update suppresses only a routine cadence status",
@@ -1093,14 +1090,17 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('bridges likely voice silence without narrating tools or duplicating acknowledgements', () => {
+  it('requires Fast to bridge likely voice silence before opening the work gate', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
     expect(prompt).toContain(
-      'The voice already gave one activity-specific spoken bridge before handing you the request',
+      'Before the first integration, task, or other substantive operation likely to create noticeable silence',
     );
     expect(prompt).toContain(
-      'the runtime counts it as startup communication. Do not send another opening acknowledgement',
+      'send one short activity-specific bridge with purpose "ack"',
+    );
+    expect(prompt).toContain(
+      'This delivered Fast reply opens the runtime work-start gate; do not rely on the voice client having spoken first',
     );
     expect(prompt).toContain(
       'Before a later operation likely to create another noticeable silence',

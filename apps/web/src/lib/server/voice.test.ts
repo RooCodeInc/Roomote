@@ -113,10 +113,10 @@ describe('createVoiceLiveSession', () => {
     // results faithfully in its own words.
     expect(body.session.instructions).toContain('Bridge policy');
     expect(body.session.instructions).toContain(
-      'Before delegating a request whose backend work is likely to create noticeable silence',
+      'Delegate substantive work immediately without acknowledging it yourself',
     );
     expect(body.session.instructions).toContain(
-      'Just a second while I read this Notion document',
+      'The backend will return one short activity-specific bridge before it starts work likely to create noticeable silence',
     );
     expect(body.session.instructions).toContain(
       'Thirty seconds or more without useful speech is generally too long',
