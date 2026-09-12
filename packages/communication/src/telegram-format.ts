@@ -408,6 +408,31 @@ type TelegramRichMessageChunk = {
   richMessage: TelegramInputRichMessage;
 };
 
+function closeOpenMarkdownCodeFence(markdown: string): string {
+  let openFence: { marker: string; length: number } | null = null;
+  for (const line of markdown.split('\n')) {
+    if (openFence) {
+      const closingFence = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(line)?.[1];
+      if (
+        closingFence?.[0] === openFence.marker &&
+        closingFence.length >= openFence.length
+      ) {
+        openFence = null;
+      }
+      continue;
+    }
+
+    const openingFence = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
+    const marker = openingFence?.[1];
+    if (!marker || (marker[0] === '`' && openingFence[2]?.includes('`')))
+      continue;
+    openFence = { marker: marker[0]!, length: marker.length };
+  }
+  return openFence
+    ? `${markdown}${markdown.endsWith('\n') ? '' : '\n'}${openFence.marker.repeat(openFence.length)}`
+    : markdown;
+}
+
 export function planTelegramRichMessages(input: {
   text: string;
   htmlText?: string;
@@ -438,22 +463,34 @@ export function planTelegramRichMessages(input: {
   }
 
   if (input.textFormat === 'markdown') {
+    const markdownBody = footerSuffix
+      ? closeOpenMarkdownCodeFence(input.text)
+      : input.text;
     const chunks =
-      input.text.length <= bodyLimit
-        ? [input.text]
+      markdownBody.length <= bodyLimit
+        ? [{ text: input.text, markdown: markdownBody }]
         : bodyLimit >= 18
           ? chunkTelegramMarkdown(
               input.text,
               Math.max(18, Math.floor(bodyLimit * 0.85)),
-            )
-          : chunkTelegramText(input.text, bodyLimit);
+            ).map((text) => ({ text, markdown: text }))
+          : chunkTelegramText(input.text, bodyLimit).map((text) => ({
+              text,
+              markdown: text,
+            }));
     const lastIndex = chunks.length - 1;
-    return chunks.map((text, index) => ({
-      text,
-      richMessage: {
-        markdown: `${text}${index === lastIndex ? footerSuffix : ''}`,
-      },
-    }));
+    return chunks.map((chunk, index) => {
+      const markdown =
+        index === lastIndex && footerSuffix
+          ? closeOpenMarkdownCodeFence(chunk.markdown)
+          : chunk.markdown;
+      return {
+        text: chunk.text,
+        richMessage: {
+          markdown: `${markdown}${index === lastIndex ? footerSuffix : ''}`,
+        },
+      };
+    });
   }
 
   const chunks = chunkTelegramPlainTextAsHtml(input.text, bodyLimit);

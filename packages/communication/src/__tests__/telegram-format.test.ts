@@ -376,6 +376,69 @@ describe('planTelegramRichMessages', () => {
     expect(chunks[1]!.richMessage.markdown).toContain('<footer>');
   });
 
+  it('closes an unterminated code fence before the native footer', () => {
+    const text = '```ts\n```not a closing fence\nconst complete = true;';
+
+    expect(
+      planTelegramRichMessages({
+        text,
+        footerText: '[Open](https://roomote.test)',
+        textFormat: 'markdown',
+      }),
+    ).toEqual([
+      {
+        text,
+        richMessage: {
+          markdown: [
+            text,
+            '```',
+            '',
+            '<footer><a href="https://roomote.test">Open</a></footer>',
+          ].join('\n'),
+        },
+      },
+    ]);
+  });
+
+  it('closes an unterminated tilde fence with the matching marker', () => {
+    const text = '~~~~md\n# still code';
+    const [chunk] = planTelegramRichMessages({
+      text,
+      footerText: 'Open',
+      textFormat: 'markdown',
+    });
+
+    expect(chunk!.text).toBe(text);
+    expect(chunk!.richMessage.markdown).toBe(
+      `${text}\n~~~~\n\n<footer>Open</footer>`,
+    );
+  });
+
+  it('includes a synthetic fence closure in the footer length budget', () => {
+    const footerSuffix =
+      '\n\n<footer><a href="https://roomote.test">Open</a></footer>';
+    const text = `\`\`\`\n${'x'.repeat(
+      TELEGRAM_MAX_RICH_MESSAGE_LENGTH - footerSuffix.length - 4,
+    )}`;
+    const chunks = planTelegramRichMessages({
+      text,
+      footerText: '[Open](https://roomote.test)',
+      textFormat: 'markdown',
+    });
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(
+      chunks.every(
+        (chunk) =>
+          chunk.richMessage.markdown!.length <=
+          TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+      ),
+    ).toBe(true);
+    expect(chunks.at(-1)!.richMessage.markdown).toMatch(
+      /```\n\n<footer>.*<\/footer>$/,
+    );
+  });
+
   it('accounts for escaping expansion when splitting plain text', () => {
     const text = '&<>'.repeat(20_000);
     const chunks = planTelegramRichMessages({ text });
