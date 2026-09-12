@@ -1,4 +1,5 @@
 import { isNonTranscriptAcpEvent } from './acp-non-transcript';
+import { readToolArguments } from './messages/acp/tool-presentation';
 import type { AcpUiMessage } from './types';
 
 const TOOL_CALLS_DENY_LIST_BY_SOURCE = new Map([
@@ -15,13 +16,17 @@ const TOOL_CALLS_DENY_LIST_BY_SOURCE = new Map([
   ],
 ]);
 
-// Only tools whose call carries no user-visible effect belong here. Outbound
-// communication (`send_chat_reply`, `post_to_channel`,
+// Only tools whose effect is either internal or represented by dedicated UI
+// belong here. Outbound communication (`send_chat_reply`, `post_to_channel`,
 // `send_chat_reaction_emoji`) is a consequential receipt like
 // `send_task_message`: for a delegated task reporting to its orchestrator it
 // is the entire result, so hiding it left the task transcript blank.
 const INTERNAL_DEBUG_TOOL_CALLS_BY_SOURCE = new Map([
   ['roomote', new Set(['find_integration_tools', 'ignore_event'])],
+]);
+
+const INTERNAL_DEBUG_TOOL_ACTIONS_BY_SOURCE = new Map([
+  ['roomote', new Map([['manage_wakeups', new Set(['create', 'list'])]])],
 ]);
 
 function normalizeIdentifier(value: string | null | undefined): string | null {
@@ -52,16 +57,34 @@ function getToolSourceAndName(
 }
 
 export function isInternalDebugToolCallMessage(msg: AcpUiMessage): boolean {
+  if (msg.kind !== 'tool_call' && msg.kind !== 'tool_result') {
+    return false;
+  }
+
   const toolIdentity = getToolSourceAndName(msg);
 
   if (!toolIdentity) {
     return false;
   }
 
-  return (
+  if (
     INTERNAL_DEBUG_TOOL_CALLS_BY_SOURCE.get(toolIdentity.source)?.has(
       toolIdentity.toolName,
-    ) ?? false
+    ) ??
+    false
+  ) {
+    return true;
+  }
+
+  const actionValue = readToolArguments(msg.data)?.action;
+  const action =
+    typeof actionValue === 'string' ? normalizeIdentifier(actionValue) : null;
+
+  return Boolean(
+    action &&
+    INTERNAL_DEBUG_TOOL_ACTIONS_BY_SOURCE.get(toolIdentity.source)
+      ?.get(toolIdentity.toolName)
+      ?.has(action),
   );
 }
 
