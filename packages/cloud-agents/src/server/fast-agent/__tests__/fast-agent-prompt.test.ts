@@ -1348,11 +1348,17 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(configuredPrompt).toContain(
       'Handle work directly in Fast when it does not require sandbox execution',
     );
+    expect(configuredPrompt).toContain(
+      'A Blank slate request never overrides a required repository or environment',
+    );
     expect(configuredPrompt).not.toContain(
       'Otherwise use null to use the deployment default',
     );
+    expect(configuredPrompt).not.toContain(
+      'Use Blank slate when the user explicitly requests it, or when the work can be completed',
+    );
     expect(environmentlessPrompt).toContain(
-      'Use Blank slate when the user explicitly requests it, or when the work can be completed in a standalone sandbox without a configured environment',
+      'Use Blank slate only when the work can be completed in a standalone sandbox without a configured environment, including when the user explicitly requests it',
     );
     expect(environmentlessPrompt).toContain(
       'Instances without connected source control or configured environments can still use Blank slate for suitable work',
