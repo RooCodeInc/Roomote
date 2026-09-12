@@ -561,10 +561,25 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
   async registerCommands(): Promise<void> {
     await this.callBotApi('setMyCommands', {
       commands: [
+        { command: 'new', description: 'Start a fresh task' },
+        {
+          command: 'goal',
+          description: 'Keep working toward an objective',
+        },
+      ],
+      scope: { type: 'all_group_chats' },
+    });
+    await this.callBotApi('setMyCommands', {
+      commands: [
         { command: 'start', description: 'Show welcome and command help' },
         { command: 'help', description: 'Show command help' },
         { command: 'new', description: 'Start a fresh task' },
+        {
+          command: 'goal',
+          description: 'Keep working toward an objective',
+        },
       ],
+      scope: { type: 'all_private_chats' },
     });
   }
 

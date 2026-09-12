@@ -31,6 +31,7 @@ const {
   redisGetdelMock,
   redisSetMock,
   setLatestInboundMessageIdMock,
+  startTaskGoalMock,
   setTrustedRunActingUserMock,
   stopTaskRunMock,
   updateMock,
@@ -86,6 +87,7 @@ const {
   redisGetdelMock: vi.fn(),
   redisSetMock: vi.fn(),
   setLatestInboundMessageIdMock: vi.fn(),
+  startTaskGoalMock: vi.fn(),
   setTrustedRunActingUserMock: vi.fn(),
   stopTaskRunMock: vi.fn(),
   updateMock: vi.fn(),
@@ -114,6 +116,10 @@ vi.mock('@roomote/env', () => ({
 
 vi.mock('../../account-link-help.js', () => ({
   appendAccountLinkHelpText: appendAccountLinkHelpTextMock,
+}));
+
+vi.mock('../../tasks/start-task-goal.js', () => ({
+  startTaskGoal: startTaskGoalMock,
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -460,6 +466,7 @@ describe('Telegram webhook handler', () => {
     getAvailableEnvironmentsMock.mockResolvedValue([]);
     editMessageTextMock.mockResolvedValue(undefined);
     setLatestInboundMessageIdMock.mockResolvedValue(undefined);
+    startTaskGoalMock.mockResolvedValue({ success: true });
     authUsersFindFirstMock.mockResolvedValue(null);
     usersFindFirstMock.mockResolvedValue(null);
     taskRunsFindFirstMock.mockResolvedValue(null);
@@ -1486,6 +1493,87 @@ describe('Telegram webhook handler', () => {
     expect(getFastSessionMock).not.toHaveBeenCalled();
   });
 
+  it('enables Goal Mode for an active task', async () => {
+    mockTelegramLinkedSender();
+    taskRunsFindFirstMock.mockResolvedValueOnce({
+      id: 77,
+      status: 'running',
+      taskId: 'task-1',
+      payload: {},
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/goal ship the release',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      goalStarted: true,
+      runId: 77,
+    });
+    expect(startTaskGoalMock).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      userId: 'launch-owner-1',
+      objective: 'ship the release',
+      source: 'telegram',
+      clientMessageId: '456',
+    });
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Goal Mode enabled.' }),
+    );
+    expect(queueCommunicationMessageOnceMock).not.toHaveBeenCalled();
+    expect(continueFastReplyMock).not.toHaveBeenCalled();
+  });
+
+  it('shows /goal usage when the objective is missing', async () => {
+    mockTelegramLinkedSender();
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/goal',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      goalStarted: false,
+      reason: 'missing_objective',
+    });
+    expect(startTaskGoalMock).not.toHaveBeenCalled();
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining('/goal ship') }),
+    );
+  });
+
+  it('requires /goal to target an active task', async () => {
+    mockTelegramLinkedSender();
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/goal ship the release',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      goalStarted: false,
+      reason: 'no_active_task',
+    });
+    expect(startTaskGoalMock).not.toHaveBeenCalled();
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining('active') }),
+    );
+  });
+
   it('releases the update claim when active-run queueing fails', async () => {
     mockTelegramLinkedSender();
     taskRunsFindFirstMock.mockResolvedValueOnce({
@@ -2172,6 +2260,7 @@ describe('Telegram webhook handler', () => {
     expect(welcomeText).toContain('`/start`');
     expect(welcomeText).toContain('`/help`');
     expect(welcomeText).toContain('`/new <request>`');
+    expect(welcomeText).toContain('`/goal <objective>`');
     expect(welcomeText).not.toContain('`/start <request>`');
   });
 

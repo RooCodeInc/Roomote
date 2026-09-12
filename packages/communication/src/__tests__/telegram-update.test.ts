@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getNewTelegramMessageReactions,
+  getTelegramGoalCommand,
   getTelegramNewTaskCommand,
   getTelegramUpdateCallbackQuery,
   getTelegramUpdateCommunicationMetadata,
@@ -816,6 +817,71 @@ describe('Telegram update helpers', () => {
       expect(
         getTelegramNewTaskCommand(
           parse(buildUpdate('just a regular message', 'private')),
+        ),
+      ).toBeNull();
+    });
+  });
+
+  describe('getTelegramGoalCommand', () => {
+    const parse = (
+      text: string,
+      chatType: 'private' | 'group' = 'private',
+      entities: Array<{ type: string; offset: number; length: number }> = [],
+    ) =>
+      parseTelegramUpdate({
+        update_id: 2002,
+        message: {
+          message_id: 43,
+          chat: { id: chatType === 'private' ? 5 : -1007, type: chatType },
+          text,
+          entities,
+        },
+      }).data!;
+
+    it('extracts a private-chat objective', () => {
+      expect(
+        getTelegramGoalCommand(
+          parse('/goal ship the release', 'private', [
+            { type: 'bot_command', offset: 0, length: 5 },
+          ]),
+        ),
+      ).toEqual({ command: 'goal', objective: 'ship the release' });
+    });
+
+    it('requires group commands to target this bot', () => {
+      expect(
+        getTelegramGoalCommand(
+          parse('/goal@roomote_bot ship it', 'group', [
+            { type: 'bot_command', offset: 0, length: 17 },
+          ]),
+          { botUsername: 'roomote_bot' },
+        ),
+      ).toEqual({ command: 'goal', objective: 'ship it' });
+      expect(
+        getTelegramGoalCommand(
+          parse('/goal ship it', 'group', [
+            { type: 'bot_command', offset: 0, length: 5 },
+          ]),
+          { botUsername: 'roomote_bot' },
+        ),
+      ).toBeNull();
+    });
+
+    it('accepts a leading bot mention and rejects mid-sentence commands', () => {
+      expect(
+        getTelegramGoalCommand(
+          parse('@roomote_bot /goal ship it', 'group', [
+            { type: 'mention', offset: 0, length: 12 },
+            { type: 'bot_command', offset: 13, length: 5 },
+          ]),
+          { botUsername: 'roomote_bot' },
+        ),
+      ).toEqual({ command: 'goal', objective: 'ship it' });
+      expect(
+        getTelegramGoalCommand(
+          parse('please /goal ship it', 'private', [
+            { type: 'bot_command', offset: 7, length: 5 },
+          ]),
         ),
       ).toBeNull();
     });

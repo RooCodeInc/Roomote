@@ -16,7 +16,7 @@ describe('TelegramCommunicationProvider', () => {
   it('registers the supported slash commands', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+      .mockImplementation(async () => jsonResponse({ ok: true, result: true }));
     const provider = new TelegramCommunicationProvider({
       botToken: 'bot-token',
       apiBaseUrl: 'https://telegram.example.test',
@@ -25,13 +25,32 @@ describe('TelegramCommunicationProvider', () => {
 
     await provider.registerCommands();
 
-    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
-      commands: [
-        { command: 'start', description: 'Show welcome and command help' },
-        { command: 'help', description: 'Show command help' },
-        { command: 'new', description: 'Start a fresh task' },
-      ],
-    });
+    expect(
+      fetchMock.mock.calls.map(([, init]) => JSON.parse(init!.body as string)),
+    ).toEqual([
+      {
+        commands: [
+          { command: 'new', description: 'Start a fresh task' },
+          {
+            command: 'goal',
+            description: 'Keep working toward an objective',
+          },
+        ],
+        scope: { type: 'all_group_chats' },
+      },
+      {
+        commands: [
+          { command: 'start', description: 'Show welcome and command help' },
+          { command: 'help', description: 'Show command help' },
+          { command: 'new', description: 'Start a fresh task' },
+          {
+            command: 'goal',
+            description: 'Keep working toward an objective',
+          },
+        ],
+        scope: { type: 'all_private_chats' },
+      },
+    ]);
   });
 
   it('retries transient idempotent Bot API failures', async () => {
