@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => ({
   scheduleDurableRetry: vi.fn(),
   findActiveRetryNotice: vi.fn(),
   loadTurnAttempt: vi.fn(),
+  loadCanonicalMessages: vi.fn(),
   getUnifiedSession: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
@@ -130,6 +131,7 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   scheduleFastAgentDurableTurnRetry: mocks.scheduleDurableRetry,
   findFastAgentActiveInferenceRetryNotice: mocks.findActiveRetryNotice,
   loadFastAgentTurnAttemptSummary: mocks.loadTurnAttempt,
+  loadFastAgentCanonicalMessages: mocks.loadCanonicalMessages,
 }));
 
 vi.mock('../../available-environments', () => ({
@@ -321,10 +323,12 @@ vi.mock('../fast-agent-turn-lock', () => ({
 }));
 
 import { buildFastSessionUrl } from '@roomote/communication';
+import type { FastAgentMessage } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
+  FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY,
   NO_REPOSITORIES,
 } from '@roomote/types';
 import { McpToolCallError } from '../../mcp-tool-client';
@@ -513,6 +517,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
       prompt: null,
     });
+    mocks.loadCanonicalMessages.mockResolvedValue([]);
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.listCustomSkills.mockResolvedValue([]);
     mocks.getCustomSkill.mockResolvedValue(null);
@@ -1662,6 +1667,70 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           }),
         }),
       }),
+    );
+  });
+
+  it('does not infer for a queued state assertion superseded before consumption', async () => {
+    const canonicalState = (
+      id: string,
+      sequence: number,
+      state: string,
+      version: number,
+    ): FastAgentMessage => ({
+      id,
+      conversationId: 'conversation-1',
+      eventId: `${id}:user`,
+      conversationSeq: sequence,
+      turnId: id,
+      turnSeq: 0,
+      ts: version,
+      observedAt: new Date(version),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      contentBlocks: [{ type: 'text', text: state }],
+      metadata: {
+        visibleInTranscript: false,
+        turnSource: 'platform_event',
+        platformEventKind: 'setup',
+        [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: {
+          schemaVersion: 1,
+          kind: 'current_state_assertion',
+          authority: 'roomote_runtime',
+          observedAt: new Date(version).toISOString(),
+          sourceEventId: id,
+          subject: { type: 'setup_session', id: 'conversation-1' },
+          version: { scheme: 'monotonic_number', value: version },
+          state,
+        },
+      },
+      payload: {},
+      source: 'web',
+      nativeSessionId: null,
+      nativeMessageId: null,
+      createdAt: new Date(sequence),
+      updatedAt: new Date(sequence),
+    });
+    mocks.loadCanonicalMessages.mockResolvedValue([
+      canonicalState('green-v11', 1, 'green', 11),
+      canonicalState('yellow-v12', 2, 'yellow', 12),
+    ]);
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        currentMessageId: 'green-v11',
+        turnSource: 'platform_event',
+        platformEventKind: 'setup',
+        platformEventVisibility: 'required',
+        setupSnapshot: '{"source":"green"}',
+        durableAdmission: { eventId: 'durable-green-v11' },
+        adapter: callbacks(),
+      }),
+    ).resolves.toBe('');
+
+    expect(mocks.runSession).not.toHaveBeenCalled();
+    expect(mocks.markDurableDelivered).toHaveBeenCalledWith(
+      'durable-green-v11',
     );
   });
 

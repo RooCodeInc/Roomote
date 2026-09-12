@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => {
     updateWhere: vi.fn(),
     findPending: vi.fn(),
     findRun: vi.fn(),
+    findCanonical: vi.fn(),
+    allocateSequence: vi.fn(),
     selectRows: vi.fn(),
     acquireLock: vi.fn(),
     releaseLock: Object.assign(vi.fn(), {
@@ -48,6 +50,7 @@ vi.mock('@roomote/redis', () => ({ getRedis: vi.fn(() => ({})) }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
+  buildFastAgentUserContentBlocks: (text: string) => [{ type: 'text', text }],
   findFastAgentDurableRetryScheduledError: (error: unknown) =>
     error instanceof Error &&
     error.name === 'FastAgentDurableRetryScheduledError'
@@ -60,6 +63,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  allocateFastAgentConversationSequence: mocks.allocateSequence,
   db: {
     insert: vi.fn(() => ({ values: mocks.insertValues })),
     transaction: mocks.transaction,
@@ -76,6 +80,7 @@ vi.mock('@roomote/db/server', () => ({
     })),
     query: {
       fastAgentParentEvents: { findFirst: mocks.findPending },
+      fastAgentMessages: { findFirst: mocks.findCanonical },
       taskRuns: { findFirst: mocks.findRun },
     },
   },
@@ -105,6 +110,10 @@ vi.mock('@roomote/db/server', () => ({
     createdAt: 'created_at',
     deliveredAt: 'delivered_at',
     discardedAt: 'discarded_at',
+  },
+  fastAgentMessages: {
+    conversationId: 'fast_agent_messages.conversation_id',
+    eventId: 'fast_agent_messages.event_id',
   },
   taskRuns: { id: 'task_runs.id', status: 'task_runs.status' },
 }));
@@ -186,10 +195,15 @@ describe('Fast parent event durable queue', () => {
     });
     mocks.insertOnConflict.mockResolvedValue(undefined);
     mocks.selectForUpdate.mockResolvedValue([{ status: RunStatus.Running }]);
+    mocks.findCanonical.mockResolvedValue(undefined);
+    mocks.allocateSequence.mockResolvedValue(1);
     mocks.transaction.mockImplementation(
       async (callback: (tx: unknown) => unknown) =>
         callback({
           insert: vi.fn(() => ({ values: mocks.insertValues })),
+          query: {
+            fastAgentMessages: { findFirst: mocks.findCanonical },
+          },
           select: vi.fn(() => ({
             from: vi.fn(() => ({
               where: vi.fn(() => ({

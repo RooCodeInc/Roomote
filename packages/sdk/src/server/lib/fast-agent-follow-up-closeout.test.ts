@@ -22,6 +22,7 @@ vi.mock('bullmq', () => ({
 vi.mock('@roomote/redis', () => ({ getRedis: vi.fn(() => ({})) }));
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
+  buildFastAgentUserContentBlocks: (text: string) => [{ type: 'text', text }],
   FAST_AGENT_DURABLE_TURN_CLAIM_MS: 15 * 60 * 1000,
   findFastAgentDurableRetryScheduledError: () => null,
 }));

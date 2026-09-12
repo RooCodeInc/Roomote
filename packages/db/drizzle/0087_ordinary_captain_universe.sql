@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "fast_agent_messages_conversation_seq_unique" ON "fast_agent_messages" USING btree ("conversation_id","conversation_seq") WHERE "fast_agent_messages"."conversation_seq" is not null;

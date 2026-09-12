@@ -11,6 +11,9 @@ import {
   CHAT_MESSAGE_CONTEXT_TOOL,
   CHAT_REACTION_EMOJI_TOOL_NAME,
   FAST_EXECUTION,
+  FAST_AGENT_ASSISTANT_CLAIM_PROVENANCE_METADATA_KEY,
+  FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY,
+  FAST_AGENT_EVENT_SEMANTICS_VERSION,
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
@@ -36,6 +39,7 @@ import {
   matchIntegrationTools,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
+  type FastAgentAssistantClaimProvenance,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
 } from '@roomote/types';
@@ -87,6 +91,11 @@ import {
   FAST_RESPONDING_LEASE_RENEW_MS,
 } from './fast-agent-constants';
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
+import {
+  FAST_AGENT_CANONICAL_REDUCER_VERSION,
+  projectFastAgentCanonicalEvents,
+  renderFastAgentCanonicalHistory,
+} from './fast-agent-canonical-projection';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import { getTherapistModeEnabledForUser } from '../therapist-mode';
 import {
@@ -149,6 +158,7 @@ import {
   type FastAgentTurnAttemptReply,
   type FastAgentTurnAttemptSummary,
   type FastAgentUnresolvedRequest,
+  loadFastAgentCanonicalMessages,
   loadFastAgentTurnAttemptSummary,
 } from './fast-agent-conversation-repository';
 import {
@@ -1766,6 +1776,7 @@ export async function answerFastAgentQuestion({
     ? { externalInput: humanInput.externalInput }
     : platformEventTranscriptPayload;
   const turnVisibleMessages: ModelMessage[] = [];
+  let claimProvenance: FastAgentAssistantClaimProvenance | null = null;
   let mirroredMessageCount = 0;
   let canonicalConversationId: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
@@ -2591,6 +2602,12 @@ export async function answerFastAgentQuestion({
             : {}),
           ...(interruptionReason ? { interruptionReason } : {}),
           ...(platformMessageId ? { platformMessageId } : {}),
+          ...(claimProvenance
+            ? {
+                [FAST_AGENT_ASSISTANT_CLAIM_PROVENANCE_METADATA_KEY]:
+                  claimProvenance,
+              }
+            : {}),
         },
         payload: {
           purpose: reply.purpose,
@@ -3169,6 +3186,7 @@ export async function answerFastAgentQuestion({
     const userEvent = previousAttempt?.prompt
       ? { eventId: `${turnId}:user`, turnSeq: previousAttempt.prompt.turnSeq }
       : allocateCanonicalEvent('user');
+    const inputObservedAt = new Date();
     const userMessageResult = await persistCanonicalMessage(
       {
         ...userEvent,
@@ -3190,6 +3208,22 @@ export async function answerFastAgentQuestion({
             ? { inputKind: FAST_AGENT_REACTION_INPUT_TYPE }
             : {}),
           ...(platformEvent ? { platformEventKind } : {}),
+          [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: {
+            schemaVersion: FAST_AGENT_EVENT_SEMANTICS_VERSION,
+            kind:
+              platformEvent && setupSnapshot
+                ? 'current_state_assertion'
+                : 'historical_observation',
+            authority: platformEvent ? 'roomote_runtime' : 'human',
+            observedAt: inputObservedAt.toISOString(),
+            sourceEventId: currentMessageId ?? turnId,
+            ...(platformEvent && setupSnapshot
+              ? {
+                  subject: { type: 'setup_session', id: session.id },
+                  state: setupSnapshot,
+                }
+              : {}),
+          },
           // Lineage back to the interrupted request this turn is resuming,
           // so the original still surfaces if this turn is interrupted too.
           ...(unresolvedRequest
@@ -3202,6 +3236,7 @@ export async function answerFastAgentQuestion({
         },
         payload: {},
         source: conversation.surface,
+        observedAt: inputObservedAt,
       },
       true,
     );
@@ -3243,16 +3278,87 @@ export async function answerFastAgentQuestion({
             senderDisplayName?.trim() || currentUser.displayName || undefined,
           githubLogin: currentUser.githubLogin || undefined,
         };
+    const canonicalProjection = projectFastAgentCanonicalEvents(
+      await loadFastAgentCanonicalMessages(session.id),
+    );
+    const currentCanonicalEventId = `${turnId}:user`;
+    const currentProjection = canonicalProjection.events.find(
+      ({ event }) => event.eventId === currentCanonicalEventId,
+    );
+    if (currentProjection?.classification === 'superseded_irrelevant') {
+      console.info(
+        `[Fast Agent] Suppressed superseded canonical event ${currentCanonicalEventId}.`,
+      );
+      await settleDurableTurn();
+      return '';
+    }
+    claimProvenance = {
+      reducerVersion: FAST_AGENT_CANONICAL_REDUCER_VERSION,
+      projectedThroughSequence: canonicalProjection.projectedThroughSequence,
+      projectionHash: canonicalProjection.stateHash,
+      eventIds: [
+        ...new Set([
+          currentCanonicalEventId,
+          ...canonicalProjection.currentStateEventIds,
+        ]),
+      ],
+    };
+    const projectedHistory = renderFastAgentCanonicalHistory(
+      canonicalProjection,
+      { excludeEventId: currentCanonicalEventId },
+    );
+    const projectedBeforeCurrentSequence = canonicalProjection.events.reduce<
+      number | null
+    >(
+      (highest, projected) =>
+        projected.event.eventId === currentCanonicalEventId ||
+        projected.event.conversationSeq === null
+          ? highest
+          : Math.max(highest ?? 0, projected.event.conversationSeq),
+      null,
+    );
+    const canonicalHistoryAheadOfNative =
+      projectedBeforeCurrentSequence !== null &&
+      (session.openCodeProjectedThroughSeq === undefined ||
+        session.openCodeProjectedThroughSeq === null ||
+        session.openCodeProjectedThroughSeq < projectedBeforeCurrentSequence) &&
+      canonicalProjection.events.some(
+        ({ event, semantics }) =>
+          event.eventId !== currentCanonicalEventId &&
+          Boolean(semantics) &&
+          event.conversationSeq !== null &&
+          (session.openCodeProjectedThroughSeq === undefined ||
+            session.openCodeProjectedThroughSeq === null ||
+            event.conversationSeq > session.openCodeProjectedThroughSeq),
+      );
+    const currentProjectionContext = currentProjection?.semantics
+      ? `<canonical_event_context>${JSON.stringify({
+          eventId: currentCanonicalEventId,
+          classification: currentProjection.classification,
+          observedAt: currentProjection.semantics.observedAt,
+          admittedAt: currentProjection.event.createdAt.toISOString(),
+          occurredAt: currentProjection.semantics.occurredAt,
+          authority: currentProjection.semantics.authority,
+          subject: currentProjection.semantics.subject,
+          version: currentProjection.semantics.version,
+        })}</canonical_event_context>`
+      : undefined;
+    const projectedQuestion = currentProjectionContext
+      ? `${currentProjectionContext}\n${question}`
+      : question;
     const {
       bootstrapMessages,
       turnMessages,
       bootstrapThreadContextPresent,
       turnThreadContextPresent,
     } = buildFastAgentMessages({
-      question,
+      question: projectedQuestion,
       currentMessageAgentContext,
       threadContext,
-      compatibilityMessages: session.compatibilityMessages,
+      compatibilityMessages:
+        projectedHistory.length > 0
+          ? projectedHistory
+          : session.compatibilityMessages,
       currentMessageTs: currentMessageId,
       currentMessageSender,
       surface: conversation.surface,
@@ -4764,13 +4870,31 @@ export async function answerFastAgentQuestion({
     const serializedTurnPrompt = turnPromptInput.text;
     let inferenceAttemptNumber = 0;
     const persistOpenCodeSession = async (openCodeSessionId: string) => {
-      if (durableOpenCodeSessionId === openCodeSessionId) return;
+      if (
+        durableOpenCodeSessionId === openCodeSessionId &&
+        (canonicalProjection.currentStateEventIds.length === 0 ||
+          (session.openCodeProjectionHash === canonicalProjection.stateHash &&
+            session.openCodeProjectedThroughSeq ===
+              canonicalProjection.projectedThroughSequence))
+      ) {
+        return;
+      }
       await setFastAgentOpenCodeSession({
         sessionId: session.id,
         openCodeSessionId,
+        ...(canonicalProjection.currentStateEventIds.length > 0
+          ? {
+              projectionHash: canonicalProjection.stateHash,
+              projectedThroughSequence:
+                canonicalProjection.projectedThroughSequence,
+            }
+          : {}),
       });
       durableOpenCodeSessionId = openCodeSessionId;
       session.openCodeSessionId = openCodeSessionId;
+      session.openCodeProjectionHash = canonicalProjection.stateHash;
+      session.openCodeProjectedThroughSeq =
+        canonicalProjection.projectedThroughSequence;
     };
     // A resumed run whose earlier attempt reached its closeout has nothing
     // left to ask the model. Finish the turn from the record instead. A
@@ -4804,6 +4928,17 @@ export async function answerFastAgentQuestion({
       return lastVisibleMessage;
     }
     diagnostics.markInferenceQueued();
+    if (
+      session.openCodeSessionId &&
+      (canonicalHistoryAheadOfNative ||
+        (canonicalProjection.currentStateEventIds.length > 0 &&
+          session.openCodeProjectionHash !== canonicalProjection.stateHash))
+    ) {
+      fastAgentOpenCodeSessionManager.invalidate(session.id);
+      session.openCodeSessionId = null;
+      activeOpenCodeSessionId = null;
+      durableOpenCodeSessionId = null;
+    }
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
       persistedSessionId: session.openCodeSessionId,
@@ -4911,6 +5046,17 @@ export async function answerFastAgentQuestion({
             agentContextPresent: Boolean(currentMessageAgentContext),
             inputImageCount: imageFiles.length,
             attachedImageCount: imageFilesForAttempt.length,
+            canonicalEventCount: canonicalProjection.events.length,
+            canonicalCurrentStateCount:
+              canonicalProjection.currentStateEventIds.length,
+            canonicalProjectedThroughSequence:
+              canonicalProjection.projectedThroughSequence,
+            canonicalAdmissionDelayMs: currentProjection
+              ? Math.max(
+                  0,
+                  Date.now() - currentProjection.event.createdAt.getTime(),
+                )
+              : null,
             degradedComponents: [...degradedContextComponents],
           });
         };

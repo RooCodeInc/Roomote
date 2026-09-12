@@ -32,6 +32,8 @@ type FastAgentSessionRecord = {
   conversation: FastAgentConversation;
   compatibilityMessages: ModelMessage[];
   openCodeSessionId: string | null;
+  openCodeProjectionHash?: string | null;
+  openCodeProjectedThroughSeq?: number | null;
   created: boolean;
 };
 
@@ -174,12 +176,20 @@ export async function upsertFastAgentMessage({
 export async function setFastAgentOpenCodeSession({
   sessionId,
   openCodeSessionId,
+  projectionHash,
+  projectedThroughSequence,
 }: {
   sessionId: string;
   openCodeSessionId: string | null;
+  projectionHash?: string | null;
+  projectedThroughSequence?: number | null;
 }): Promise<void> {
   await fastAgentConversationRepository.setOpenCodeSession({
     conversationId: sessionId,
     openCodeSessionId,
+    ...(projectionHash !== undefined ? { projectionHash } : {}),
+    ...(projectedThroughSequence !== undefined
+      ? { projectedThroughSequence }
+      : {}),
   });
 }

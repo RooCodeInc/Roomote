@@ -63,6 +63,10 @@ type CaptureFastAgentInferenceContextInput = {
   agentContextPresent: boolean;
   inputImageCount: number;
   attachedImageCount: number;
+  canonicalEventCount?: number;
+  canonicalCurrentStateCount?: number;
+  canonicalProjectedThroughSequence?: number | null;
+  canonicalAdmissionDelayMs?: number | null;
   degradedComponents: string[];
 };
 
@@ -147,6 +151,11 @@ export function captureFastAgentInferenceContext(
       agent_context_present: input.agentContextPresent,
       input_image_count: input.inputImageCount,
       attached_image_count: input.attachedImageCount,
+      canonical_event_count: input.canonicalEventCount ?? null,
+      canonical_current_state_count: input.canonicalCurrentStateCount ?? null,
+      canonical_projected_through_sequence:
+        input.canonicalProjectedThroughSequence ?? null,
+      canonical_admission_delay_ms: input.canonicalAdmissionDelayMs ?? null,
     },
   });
 }

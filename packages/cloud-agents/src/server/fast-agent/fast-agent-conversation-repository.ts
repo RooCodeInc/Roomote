@@ -1,6 +1,8 @@
 import type { ModelMessage } from 'ai';
 import {
   and,
+  allocateFastAgentConversationSequence,
+  asc,
   type CreateFastAgentMessage,
   db,
   desc,
@@ -24,9 +26,11 @@ import {
   sql,
   touchSessionActivity,
   type DatabaseOrTransaction,
+  type FastAgentMessage,
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY,
   fastAgentConversationSchema,
   type FastAgentConversationOwner,
   type ReasoningEffort,
@@ -53,6 +57,8 @@ export type FastAgentConversationRecord = {
   compatibilityMessages: ModelMessage[];
   /** Last successfully completed native session; validated before cold resume. */
   openCodeSessionId: string | null;
+  openCodeProjectionHash?: string | null;
+  openCodeProjectedThroughSeq?: number | null;
 };
 
 export type FastAgentConversationGetOrCreateResult =
@@ -62,13 +68,14 @@ export type FastAgentConversationGetOrCreateResult =
 
 export type FastAgentMessageWrite = Omit<
   CreateFastAgentMessage,
-  'conversationId'
+  'conversationId' | 'conversationSeq'
 >;
 
 export type FastAgentMessageUpsertResult = {
   initialHumanTurn: boolean;
   /** True only for the transaction that created this canonical event row. */
   inserted?: boolean;
+  conversationSeq: number | null;
 };
 
 export const INTERRUPTED_INFERENCE_RETRY_MESSAGE =
@@ -848,7 +855,23 @@ export interface FastAgentConversationRepository {
   setOpenCodeSession(input: {
     conversationId: string;
     openCodeSessionId: string | null;
+    projectionHash?: string | null;
+    projectedThroughSequence?: number | null;
   }): Promise<void>;
+}
+
+export async function loadFastAgentCanonicalMessages(
+  conversationId: string,
+): Promise<FastAgentMessage[]> {
+  return db.query.fastAgentMessages.findMany({
+    where: eq(fastAgentMessages.conversationId, conversationId),
+    orderBy: [
+      asc(fastAgentMessages.conversationSeq),
+      asc(fastAgentMessages.createdAt),
+      asc(fastAgentMessages.turnSeq),
+      asc(fastAgentMessages.id),
+    ],
+  });
 }
 
 function buildIdentityKey(conversation: FastAgentConversation): string {
@@ -974,6 +997,8 @@ async function loadConversationRecord(
     conversation,
     compatibilityMessages: record.compatibilityMessages as ModelMessage[],
     openCodeSessionId: record.openCodeSessionId,
+    openCodeProjectionHash: record.openCodeProjectionHash,
+    openCodeProjectedThroughSeq: record.openCodeProjectedThroughSeq,
   };
 }
 
@@ -1258,7 +1283,10 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         }
 
         const [existingEvent] = await tx
-          .select({ id: fastAgentMessages.id })
+          .select({
+            id: fastAgentMessages.id,
+            conversationSeq: fastAgentMessages.conversationSeq,
+          })
           .from(fastAgentMessages)
           .where(
             and(
@@ -1321,9 +1349,27 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             (Boolean(currentHumanPrompt) || !hasCompatibilityHumanPrompt);
         }
 
-        const insert = tx
-          .insert(fastAgentMessages)
-          .values({ conversationId, ...message });
+        const allocatedSequence =
+          existingEvent?.conversationSeq ??
+          (await allocateFastAgentConversationSequence(tx, conversationId));
+        // An existing row with no sequence was written by an N-1 binary. The
+        // allocation above repairs every such row under the conversation
+        // lock, so re-read this one rather than giving it a second number.
+        const conversationSeq =
+          existingEvent?.conversationSeq === null
+            ? ((
+                await tx.query.fastAgentMessages.findFirst({
+                  where: eq(fastAgentMessages.id, existingEvent.id),
+                  columns: { conversationSeq: true },
+                })
+              )?.conversationSeq ?? allocatedSequence)
+            : allocatedSequence;
+        const insert = tx.insert(fastAgentMessages).values({
+          conversationId,
+          ...message,
+          conversationSeq,
+          observedAt: message.observedAt ?? new Date(message.ts),
+        });
         if (insertOnly) {
           await insert.onConflictDoNothing({
             target: [
@@ -1344,7 +1390,16 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               eventType: message.eventType,
               role: message.role ?? null,
               contentBlocks: message.contentBlocks ?? [],
-              metadata: message.metadata ?? null,
+              metadata: sql`coalesce(${fastAgentMessages.metadata}, '{}'::jsonb)
+                || ${JSON.stringify(message.metadata ?? {})}::jsonb
+                || case
+                  when ${fastAgentMessages.metadata} ? ${FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY}
+                  then jsonb_build_object(
+                    ${FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY}::text,
+                    ${fastAgentMessages.metadata}->${FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY}
+                  )
+                  else '{}'::jsonb
+                end`,
               payload: message.payload ?? {},
               source: message.source ?? null,
               nativeSessionId: message.nativeSessionId ?? null,
@@ -1394,13 +1449,19 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           }
         }
 
-        return { initialHumanTurn, inserted: !existingEvent };
+        return {
+          initialHumanTurn,
+          inserted: !existingEvent,
+          conversationSeq,
+        };
       });
     },
 
     async setOpenCodeSession({
       conversationId: requestedId,
       openCodeSessionId,
+      projectionHash,
+      projectedThroughSequence,
     }) {
       await db.transaction(async (tx) => {
         const conversationId = await resolveCanonicalId(tx, requestedId);
@@ -1411,6 +1472,12 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           .update(fastAgentConversations)
           .set({
             openCodeSessionId,
+            ...(projectionHash !== undefined
+              ? { openCodeProjectionHash: projectionHash }
+              : {}),
+            ...(projectedThroughSequence !== undefined
+              ? { openCodeProjectedThroughSeq: projectedThroughSequence }
+              : {}),
             updatedAt: sql`now()`,
           })
           .where(eq(fastAgentConversations.id, conversationId))

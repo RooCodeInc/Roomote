@@ -1,4 +1,6 @@
 export * from './fast-agent-constants';
+export * from './fast-agent-canonical-projection';
+export * from './fast-agent-content-blocks';
 export * from './fast-agent-conversation';
 export * from './fast-agent-conversation-repository';
 export * from './fast-agent-prompt';
