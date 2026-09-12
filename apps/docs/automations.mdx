@@ -169,9 +169,9 @@ Create arbitrary scheduled agent runs with:
   has an explicitly verified account email
 
 Each custom automation row summarizes its cadence, workspace target, report
-destination, creator, and most recent run. Its runs also appear as Sessions in
-the normal Session history. Blank slate runs do not clone repositories or
-require source-control credentials.
+destination, creator, next scheduled run, and most recent run. Its runs also
+appear as Sessions in the normal Session history. Blank slate runs do not clone
+repositories or require source-control credentials.
 
 When creating an automation through Roomote chat, ask for **suggested tasks** or
 **launchable follow-ups** if qualifying findings should become tasks that
@@ -209,8 +209,8 @@ the Session is what talks to the report destination.
 Runs deliver to every custom-automation report destination: Slack, Discord,
 Microsoft Teams, Telegram, or Email. Chat providers support a channel/chat or
 a direct message to the automation owner; Email is private only. Each run keeps
-a distinct Session, and the report links
-back to that Session in the web app. The Session transcript shows the
+a distinct Session, and each Email run starts a separate mail thread. The report
+links back to that Session in the web app. The Session transcript shows the
 automation's configured prompt and any delegated task cards, and its normal
 composer lets a signed-in teammate continue the run from the dashboard. Replies
 on chat providers continue the Session directly there, and replies to an Email

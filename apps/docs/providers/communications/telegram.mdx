@@ -128,6 +128,13 @@ naturally.
 Telegram does not support native drafts in group chats, so groups use
 Telegram's standard typing status and receive completed replies instead.
 
+When Fast delegates coding work, Roomote posts one separate live task message
+in the same chat or topic. It edits that message with compact, expandable
+progress and settles it as completed, failed, stopped, or waiting for input
+instead of posting a stream of status messages. **Open in Roomote** opens the
+selected task inside its Session; the Session still sends the final result as a
+normal reply.
+
 Existing task chats and topics keep their active-task, `request_user_input`,
 and resumable-snapshot behavior. If Fast cannot start a conversation, Roomote
 says so in the chat instead of starting a task another way. Fast automation
