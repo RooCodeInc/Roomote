@@ -41,7 +41,8 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
   category?: TaskTitleCategory | null;
   titleChanged?: boolean;
   resolveSession: () => Promise<FastAgentConversationRecord | null>;
-}): Promise<void> {
+}): Promise<boolean> {
+  let updated = false;
   try {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const session = await input.resolveSession();
@@ -51,7 +52,7 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
         session.conversation.replyTarget.channelId !== input.channelId ||
         session.conversation.replyTarget.threadId !== input.threadId
       ) {
-        return;
+        return updated;
       }
 
       const title = buildCommunicationTaskThreadName(session.title);
@@ -63,7 +64,7 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
             .catch(() => undefined)
         : undefined;
       if (input.titleChanged === false && !iconCustomEmojiId) {
-        return;
+        return updated;
       }
       await input.provider.editForumTopic({
         channelId: input.channelId,
@@ -71,9 +72,10 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
         ...(input.titleChanged === false ? {} : { name: title }),
         ...(iconCustomEmojiId ? { iconCustomEmojiId } : {}),
       });
+      updated = true;
 
       if (input.titleChanged === false) {
-        return;
+        return updated;
       }
 
       const latest = await input.resolveSession();
@@ -81,7 +83,7 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
         !latest?.title ||
         buildCommunicationTaskThreadName(latest.title) === title
       ) {
-        return;
+        return updated;
       }
     }
   } catch (error) {
@@ -89,6 +91,7 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
       `[Fast Agent] Failed to sync Telegram topic title for session ${input.sessionId}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+  return updated;
 }
 
 export function addFastAgentTelegramTopicTitleSync<
@@ -126,13 +129,14 @@ export function addFastAgentTelegramTopicTitleSync<
       lastRequestedTitle = title;
       lastRequestedCategory = category;
       lastRequestedTitleChanged = titleChanged;
-      titleUpdate = titleUpdate.then(() =>
-        syncFastAgentTelegramTopicTitleBestEffort({
+      titleUpdate = titleUpdate.then(async () => {
+        const updated = await syncFastAgentTelegramTopicTitleBestEffort({
           ...input,
           category,
           titleChanged,
-        }),
-      );
+        });
+        if (updated) input.activity.reassert();
+      });
     },
     async dispose() {
       await Promise.all([input.activity.dispose(), titleUpdate]);

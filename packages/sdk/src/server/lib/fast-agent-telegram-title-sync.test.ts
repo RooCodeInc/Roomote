@@ -11,6 +11,10 @@ import {
   getTelegramTopicIconEmojiPreferences,
   syncFastAgentTelegramTopicTitleBestEffort,
 } from './fast-agent-telegram-title-sync';
+import {
+  FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS,
+  createFastAgentTelegramActivity,
+} from './fast-agent-telegram-activity';
 
 const CONFIRMED_TELEGRAM_TOPIC_ICON_EMOJIS = new Set([
   '💡',
@@ -184,6 +188,57 @@ describe('Telegram Fast topic title sync', () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
+  it('restores working activity after a topic update clears the draft', async () => {
+    vi.useFakeTimers();
+    try {
+      const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
+      const currentSession = session('Generated title');
+      if (currentSession.conversation.surface !== 'telegram') {
+        throw new Error('Expected a Telegram session.');
+      }
+      currentSession.conversation.replyTarget = {
+        channelId: '123',
+        threadId: '77',
+      };
+      const baseActivity = createFastAgentTelegramActivity({
+        provider: { sendMessageDraft, sendChatAction: vi.fn() },
+        replyTarget: { channelId: '123', threadId: '77' },
+      });
+      const activity = addFastAgentTelegramTopicTitleSync({
+        activity: baseActivity,
+        provider: {
+          editForumTopic: vi.fn().mockResolvedValue(undefined),
+          resolveForumTopicIconCustomEmojiId: vi
+            .fn()
+            .mockResolvedValue(undefined),
+        } as never,
+        sessionId: 'session-1',
+        channelId: '123',
+        threadId: '77',
+        resolveSession: vi.fn().mockResolvedValue(currentSession),
+      });
+
+      activity.start();
+      await vi.advanceTimersByTimeAsync(
+        FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS,
+      );
+      expect(sendMessageDraft).toHaveBeenCalledOnce();
+
+      activity.updateTitle?.('Generated title', { titleChanged: true });
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(
+        FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS,
+      );
+      expect(sendMessageDraft).toHaveBeenCalledTimes(2);
+      expect(sendMessageDraft).toHaveBeenLastCalledWith(
+        expect.objectContaining({ text: 'Roomote is working...' }),
+      );
+      await activity.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('updates only the icon when a generated canonical title is unchanged', async () => {
     const editForumTopic = vi.fn().mockResolvedValue(undefined);
 
@@ -246,7 +301,7 @@ describe('Telegram Fast topic title sync', () => {
         threadId: '77',
         resolveSession: vi.fn().mockResolvedValue(session('Generated title')),
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('Failed to sync Telegram topic title'),
     );
