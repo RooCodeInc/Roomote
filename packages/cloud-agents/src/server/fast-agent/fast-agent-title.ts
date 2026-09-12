@@ -28,7 +28,7 @@ import {
 
 import {
   generateLlmTaskTitle,
-  generateLlmTaskTitleWithEmoji,
+  generateLlmTaskTitleWithCategory,
   isFallbackTaskTitle,
   LLM_TITLE_LOCKED_CHECKPOINT,
   type GeneratedTaskTitle,
@@ -250,7 +250,7 @@ export async function refreshFastAgentSessionTitle({
       return null;
     }
 
-    const generated = await generateLlmTaskTitleWithEmoji({
+    const generated = await generateLlmTaskTitleWithCategory({
       userId,
       taskId: null,
       messages,
@@ -316,7 +316,7 @@ export async function refreshFastAgentSessionTitle({
     return persistedTitle
       ? {
           ...persistedTitle,
-          emoji: generated.emoji,
+          category: generated.category,
         }
       : null;
   } catch (error) {

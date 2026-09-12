@@ -1,6 +1,7 @@
 import type {
   FastAgentConversationRecord,
   FastAgentTurnActivity,
+  TaskTitleCategory,
 } from '@roomote/cloud-agents/server';
 import { buildCommunicationTaskThreadName } from '@roomote/communication/task-thread-title';
 import type { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
@@ -10,12 +11,34 @@ type TelegramTopicTitleProvider = Pick<
   'editForumTopic' | 'resolveForumTopicIconCustomEmojiId'
 >;
 
+const DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES = ['💡', '💬', '📝'] as const;
+const TELEGRAM_TOPIC_ICON_CANDIDATES_BY_CATEGORY: Record<
+  TaskTitleCategory,
+  readonly string[]
+> = {
+  general: DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES,
+  security: ['🛃', '🪪', '👮‍♂️', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  fix: ['🦠', '🔎', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  test: ['✅', '🧪', '🔬', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  release: ['🎉', '🏁', '🏆', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  docs: ['📚', '📝', '💡', '💬'],
+  ui: ['🎨', '💻', '📱', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  data: ['📈', '📉', '🧮', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  communication: ['💬', '🗣', '📣', '💡', '📝'],
+};
+
+export function getTelegramTopicIconEmojiPreferences(
+  category: TaskTitleCategory,
+): readonly string[] {
+  return TELEGRAM_TOPIC_ICON_CANDIDATES_BY_CATEGORY[category];
+}
+
 export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
   provider: TelegramTopicTitleProvider;
   sessionId: string;
   channelId: string;
   threadId: string;
-  emoji?: string | null;
+  category?: TaskTitleCategory | null;
   titleChanged?: boolean;
   resolveSession: () => Promise<FastAgentConversationRecord | null>;
 }): Promise<void> {
@@ -32,9 +55,11 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
       }
 
       const title = buildCommunicationTaskThreadName(session.title);
-      const iconCustomEmojiId = input.emoji
+      const iconCustomEmojiId = input.category
         ? await input.provider
-            .resolveForumTopicIconCustomEmojiId([input.emoji])
+            .resolveForumTopicIconCustomEmojiId(
+              getTelegramTopicIconEmojiPreferences(input.category),
+            )
             .catch(() => undefined)
         : undefined;
       if (input.titleChanged === false && !iconCustomEmojiId) {
@@ -78,33 +103,33 @@ export function addFastAgentTelegramTopicTitleSync<
 }): T & {
   updateTitle: (
     title: string | null,
-    metadata?: { emoji?: string | null; titleChanged?: boolean },
+    metadata?: { category?: TaskTitleCategory | null; titleChanged?: boolean },
   ) => void;
 } {
   let lastRequestedTitle: string | null | undefined;
-  let lastRequestedEmoji: string | null | undefined;
+  let lastRequestedCategory: TaskTitleCategory | null | undefined;
   let lastRequestedTitleChanged: boolean | undefined;
   let titleUpdate = Promise.resolve();
 
   return {
     ...input.activity,
     updateTitle(title, metadata) {
-      const emoji = metadata?.emoji;
+      const category = metadata?.category;
       const titleChanged = metadata?.titleChanged;
       if (
         !title ||
         (title === lastRequestedTitle &&
-          emoji === lastRequestedEmoji &&
+          category === lastRequestedCategory &&
           titleChanged === lastRequestedTitleChanged)
       )
         return;
       lastRequestedTitle = title;
-      lastRequestedEmoji = emoji;
+      lastRequestedCategory = category;
       lastRequestedTitleChanged = titleChanged;
       titleUpdate = titleUpdate.then(() =>
         syncFastAgentTelegramTopicTitleBestEffort({
           ...input,
-          emoji,
+          category,
           titleChanged,
         }),
       );
@@ -115,7 +140,10 @@ export function addFastAgentTelegramTopicTitleSync<
   } as T & {
     updateTitle: (
       title: string | null,
-      metadata?: { emoji?: string | null; titleChanged?: boolean },
+      metadata?: {
+        category?: TaskTitleCategory | null;
+        titleChanged?: boolean;
+      },
     ) => void;
   };
 }

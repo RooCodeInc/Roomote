@@ -25,12 +25,12 @@ import {
 import { LLM_TITLE_LOCKED_CHECKPOINT } from '../../llm-task-title';
 
 const generateLlmTaskTitle = vi.hoisted(() => vi.fn());
-const generateLlmTaskTitleWithEmoji = vi.hoisted(() => vi.fn());
+const generateLlmTaskTitleWithCategory = vi.hoisted(() => vi.fn());
 
 vi.mock('../../llm-task-title', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../llm-task-title')>()),
   generateLlmTaskTitle,
-  generateLlmTaskTitleWithEmoji,
+  generateLlmTaskTitleWithCategory,
 }));
 
 async function createConversation(
@@ -116,7 +116,7 @@ async function insertMessage({
 describe('refreshFastAgentSessionTitle', () => {
   beforeEach(() => {
     generateLlmTaskTitle.mockReset();
-    generateLlmTaskTitleWithEmoji.mockReset();
+    generateLlmTaskTitleWithCategory.mockReset();
   });
 
   it('titles a session at the first user-message checkpoint', async () => {
@@ -130,9 +130,9 @@ describe('refreshFastAgentSessionTitle', () => {
       ts: 1,
       eventType: 'roomote_runtime.user_prompt',
     });
-    generateLlmTaskTitleWithEmoji.mockResolvedValue({
+    generateLlmTaskTitleWithCategory.mockResolvedValue({
       title: 'Rotate the API keys',
-      emoji: '🔑',
+      category: 'security',
     });
 
     const refreshedTitle = await refreshFastAgentSessionTitle({
@@ -151,11 +151,11 @@ describe('refreshFastAgentSessionTitle', () => {
     expect(session?.title).toBe('Rotate the API keys');
     expect(refreshedTitle).toEqual({
       title: 'Rotate the API keys',
-      emoji: '🔑',
+      category: 'security',
       titleChanged: true,
     });
     expect(session?.llmTitleCheckpoint).toBe(1);
-    expect(generateLlmTaskTitleWithEmoji).toHaveBeenCalledWith({
+    expect(generateLlmTaskTitleWithCategory).toHaveBeenCalledWith({
       userId: user.id,
       taskId: null,
       messages: [{ role: 'user', text: 'How do I rotate the API keys?' }],
@@ -183,9 +183,9 @@ describe('refreshFastAgentSessionTitle', () => {
       },
       source: 'automation',
     });
-    generateLlmTaskTitleWithEmoji.mockResolvedValue({
+    generateLlmTaskTitleWithCategory.mockResolvedValue({
       title: 'Find actionable regressions',
-      emoji: '🔎',
+      category: 'fix',
     });
 
     await refreshFastAgentSessionTitle({
@@ -197,7 +197,7 @@ describe('refreshFastAgentSessionTitle', () => {
       where: eq(sessions.fastConversationId, conversation.id),
     });
     expect(session?.title).toBe('Find actionable regressions');
-    expect(generateLlmTaskTitleWithEmoji).toHaveBeenCalledWith({
+    expect(generateLlmTaskTitleWithCategory).toHaveBeenCalledWith({
       userId: user.id,
       taskId: null,
       messages: [{ role: 'user', text: 'Find actionable regressions.' }],
@@ -227,7 +227,7 @@ describe('refreshFastAgentSessionTitle', () => {
     });
 
     expect(refreshedTitle).toBeNull();
-    expect(generateLlmTaskTitleWithEmoji).not.toHaveBeenCalled();
+    expect(generateLlmTaskTitleWithCategory).not.toHaveBeenCalled();
   });
 
   it('does not regenerate before the next checkpoint and skips hidden prompts', async () => {
@@ -267,7 +267,7 @@ describe('refreshFastAgentSessionTitle', () => {
     });
 
     expect(refreshedTitle).toBeNull();
-    expect(generateLlmTaskTitleWithEmoji).not.toHaveBeenCalled();
+    expect(generateLlmTaskTitleWithCategory).not.toHaveBeenCalled();
   });
 
   it('reports an unchanged title without requesting another provider rename', async () => {
@@ -287,9 +287,9 @@ describe('refreshFastAgentSessionTitle', () => {
       .update(fastAgentConversations)
       .set({ title: 'Existing title', llmTitleCheckpoint: 1 })
       .where(eq(fastAgentConversations.id, conversation.id));
-    generateLlmTaskTitleWithEmoji.mockResolvedValue({
+    generateLlmTaskTitleWithCategory.mockResolvedValue({
       title: 'Existing title',
-      emoji: '💡',
+      category: 'general',
     });
 
     const refreshedTitle = await refreshFastAgentSessionTitle({
@@ -299,7 +299,7 @@ describe('refreshFastAgentSessionTitle', () => {
 
     expect(refreshedTitle).toEqual({
       title: 'Existing title',
-      emoji: '💡',
+      category: 'general',
       titleChanged: false,
     });
     const updated = await db.query.fastAgentConversations.findFirst({
@@ -329,7 +329,7 @@ describe('refreshFastAgentSessionTitle', () => {
       userId: user.id,
     });
 
-    expect(generateLlmTaskTitleWithEmoji).not.toHaveBeenCalled();
+    expect(generateLlmTaskTitleWithCategory).not.toHaveBeenCalled();
     const updated = await db.query.fastAgentConversations.findFirst({
       where: eq(fastAgentConversations.id, conversation.id),
     });
@@ -357,9 +357,9 @@ describe('refreshFastAgentSessionTitle', () => {
         titleEditedByUserAt: new Date(),
       })
       .where(eq(sessions.fastConversationId, conversation.id));
-    generateLlmTaskTitleWithEmoji.mockResolvedValue({
+    generateLlmTaskTitleWithCategory.mockResolvedValue({
       title: 'Generated Fast title',
-      emoji: '✨',
+      category: 'general',
     });
 
     await refreshFastAgentSessionTitle({

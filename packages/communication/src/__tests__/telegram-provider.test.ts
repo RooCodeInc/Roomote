@@ -266,7 +266,7 @@ describe('TelegramCommunicationProvider', () => {
           ok: true,
           result: [
             { emoji: '💡', custom_emoji_id: 'idea-icon' },
-            { emoji: '🐞', custom_emoji_id: 'bug-icon' },
+            { emoji: '🦠', custom_emoji_id: 'bug-icon' },
           ],
         }),
       )
@@ -278,7 +278,7 @@ describe('TelegramCommunicationProvider', () => {
     });
 
     const iconCustomEmojiId = await provider.resolveForumTopicIconCustomEmojiId(
-      ['🐞', '💡'],
+      ['🦠', '💡'],
     );
     await provider.editForumTopic({
       channelId: '123',

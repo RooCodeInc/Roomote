@@ -20,13 +20,31 @@ export const LLM_TITLE_LOCKED_CHECKPOINT = 1000;
 const MAX_TRANSCRIPT_CHARS = 12_000;
 const MAX_MESSAGE_CHARS = 800;
 
+export const TASK_TITLE_CATEGORIES = [
+  'general',
+  'security',
+  'fix',
+  'test',
+  'release',
+  'docs',
+  'ui',
+  'data',
+  'communication',
+] as const;
+export type TaskTitleCategory = (typeof TASK_TITLE_CATEGORIES)[number];
+export const taskTitleCategorySchema = z
+  .enum(TASK_TITLE_CATEGORIES)
+  .catch('general')
+  .optional()
+  .default('general');
+
 const generatedTaskTitleSchema = z.object({
   title: z.string(),
-  emoji: z.string().nullable(),
+  category: taskTitleCategorySchema,
 });
 
 const TITLE_SYSTEM_PROMPT = `You write concise task titles for coding conversations.
-Return a title and one emoji that semantically represents the requested work.
+Return a title and classify it as exactly one of: general, security, fix, test, release, docs, ui, data, communication.
 Rules:
 - maximum 12 words
 - name the requested work; never assert an outcome or failure state such as failed, blocked, stuck, or missing unless the final message explicitly states that outcome
@@ -38,12 +56,11 @@ Rules:
 - descriptive and specific to the user's request
 - use sentence case, not title case; preserve proper nouns, acronyms, and file names, capitalize the first word
 - avoid filler words
-- choose exactly one relevant emoji; do not include it in the title
 - no markdown`;
 
 export type GeneratedTaskTitle = {
   title: string;
-  emoji: string | null;
+  category: TaskTitleCategory;
 };
 
 export type TaskTitleMessage = {
@@ -88,19 +105,12 @@ export function finalizeGeneratedTaskTitle(rawTitle: unknown): string {
   return enforceWordCap(sanitized, MAX_LLM_TASK_TITLE_WORDS);
 }
 
-export function sanitizeGeneratedTaskEmoji(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const emoji = value.trim();
-  return emoji &&
-    /^\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?)*$/u.test(
-      emoji,
-    )
-    ? emoji
-    : null;
-}
-
 export function isFallbackTaskTitle(value: unknown): boolean {
   return sanitizeGeneratedTaskTitle(value) === FALLBACK_TASK_TITLE;
+}
+
+export function normalizeTaskTitleCategory(value: unknown): TaskTitleCategory {
+  return taskTitleCategorySchema.parse(value);
 }
 
 function normalizeMessageText(value: string): string {
@@ -145,7 +155,7 @@ async function generateLlmTaskTitleResult(input: {
   if (!prompt) {
     return {
       title: finalizeGeneratedTaskTitle(FALLBACK_TASK_TITLE),
-      emoji: null,
+      category: 'general',
     };
   }
 
@@ -161,7 +171,7 @@ async function generateLlmTaskTitleResult(input: {
 
   return {
     title: finalizeGeneratedTaskTitle(object?.title),
-    emoji: sanitizeGeneratedTaskEmoji(object?.emoji),
+    category: normalizeTaskTitleCategory(object?.category),
   };
 }
 
@@ -173,7 +183,7 @@ export async function generateLlmTaskTitle(input: {
   return (await generateLlmTaskTitleResult(input)).title;
 }
 
-export async function generateLlmTaskTitleWithEmoji(input: {
+export async function generateLlmTaskTitleWithCategory(input: {
   userId?: string | null;
   taskId?: string | null;
   messages: TaskTitleMessage[];

@@ -15,9 +15,10 @@ vi.mock('../non-task-provider-usage', async (importOriginal) => {
 import {
   finalizeGeneratedTaskTitle,
   generateLlmTaskTitle,
-  generateLlmTaskTitleWithEmoji,
+  generateLlmTaskTitleWithCategory,
   isFallbackTaskTitle,
-  sanitizeGeneratedTaskEmoji,
+  TASK_TITLE_CATEGORIES,
+  taskTitleCategorySchema,
 } from '../llm-task-title';
 
 describe('llm-task-title', () => {
@@ -51,30 +52,52 @@ describe('llm-task-title', () => {
     expect(isFallbackTaskTitle('Investigate worker boot loops')).toBe(false);
   });
 
-  it('accepts one generated emoji and rejects non-emoji metadata', () => {
-    expect(sanitizeGeneratedTaskEmoji(' 🐞 ')).toBe('🐞');
-    expect(sanitizeGeneratedTaskEmoji('bug')).toBeNull();
-    expect(sanitizeGeneratedTaskEmoji('🐞 bug')).toBeNull();
-    expect(sanitizeGeneratedTaskEmoji('🐞🚀')).toBeNull();
+  it.each(TASK_TITLE_CATEGORIES)(
+    'accepts the %s title category',
+    (category) => {
+      expect(taskTitleCategorySchema.parse(category)).toBe(category);
+    },
+  );
+
+  it('normalizes invalid and missing categories to general', () => {
+    expect(taskTitleCategorySchema.parse('unexpected')).toBe('general');
+    expect(taskTitleCategorySchema.parse(undefined)).toBe('general');
   });
 
-  it('returns the model-selected emoji with the generated title', async () => {
+  it('returns a validated category with the generated title', async () => {
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: { title: 'Fix deploy failures', emoji: '🛠️' },
+      object: { title: 'Fix deploy failures', category: 'fix' },
     });
 
     await expect(
-      generateLlmTaskTitleWithEmoji({
+      generateLlmTaskTitleWithCategory({
         messages: [{ role: 'user', text: 'Fix the failing deployment.' }],
       }),
-    ).resolves.toEqual({ title: 'Fix deploy failures', emoji: '🛠️' });
+    ).resolves.toEqual({ title: 'Fix deploy failures', category: 'fix' });
   });
+
+  it.each([undefined, 'unexpected'])(
+    'falls back to general for model category %s',
+    async (category) => {
+      mockGenerateTrackedNonTaskObject.mockResolvedValue({
+        object: { title: 'Plan quarterly priorities', category },
+      });
+
+      await expect(
+        generateLlmTaskTitleWithCategory({
+          messages: [{ role: 'user', text: 'Plan quarterly priorities.' }],
+        }),
+      ).resolves.toEqual({
+        title: 'Plan quarterly priorities',
+        category: 'general',
+      });
+    },
+  );
 
   it('falls back to a sanitized default title on malformed model output', async () => {
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
       object: {
         title: '   ""   ',
-        emoji: '📝',
       },
     });
 
@@ -92,7 +115,6 @@ describe('llm-task-title', () => {
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
       object: {
         title: 'Fix deploy title casing',
-        emoji: '✏️',
       },
     });
 
@@ -113,13 +135,15 @@ describe('llm-task-title', () => {
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
       expect.objectContaining({
         system: expect.stringContaining(
-          'base the title on the full conversation as it evolves',
+          'general, security, fix, test, release, docs, ui, data, communication',
         ),
       }),
     );
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
       expect.objectContaining({
-        system: expect.stringContaining('choose exactly one relevant emoji'),
+        system: expect.stringContaining(
+          'base the title on the full conversation as it evolves',
+        ),
       }),
     );
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(

@@ -5,6 +5,8 @@ import type {
   ReasoningEffort,
 } from '@roomote/types';
 
+import type { TaskTitleCategory } from '../llm-task-title';
+
 export {
   isFastAgentCommunicationConversation,
   type FastAgentConversation,
@@ -157,7 +159,7 @@ export type FastAgentTurnActivity = {
   dispose: () => Promise<void>;
   updateTitle?: (
     title: string | null,
-    metadata?: { emoji?: string | null; titleChanged?: boolean },
+    metadata?: { category?: TaskTitleCategory | null; titleChanged?: boolean },
   ) => void;
 };
 
