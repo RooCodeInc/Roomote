@@ -195,6 +195,9 @@ function normalizeOpenCodeMcpServers(
       type: 'remote',
       name,
       url: redactReservedOpenCodeEnvReferences(config.url),
+      ...(config.roomoteManaged
+        ? { roomoteManaged: config.roomoteManaged }
+        : {}),
       ...(Object.keys(headers).length > 0 ? { headers } : {}),
     };
   });

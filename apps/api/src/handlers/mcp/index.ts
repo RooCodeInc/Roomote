@@ -33,8 +33,12 @@ import { notionMcp } from './notion';
 import { slackMcp } from './slack';
 import { snowflakeMcp } from './snowflake';
 import { vercelMcp } from './vercel';
+import { createHttpIntegrationsMcp } from './http-integrations';
 
 export const mcp = new Hono<{ Variables: Variables }>();
+
+// Session grants are live; the operator flag controls only manifest integrations.
+mcp.route('/http-integrations', createHttpIntegrationsMcp());
 
 const requireCuratedIntegrations: MiddlewareHandler<{
   Variables: Variables;

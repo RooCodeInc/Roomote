@@ -18,6 +18,7 @@ import * as instanceSkills from '../instance-skills';
 import type { AppRouter, AppRouterInput, AppRouterOutput } from '../types';
 
 export type { AppRouter, AppRouterInput, AppRouterOutput };
+export * from '../http-integrations';
 export type { GithubInstallation } from '../github-installations';
 export type { SlackInstallation } from '../slack-installations';
 export type { LinearSessionConnection } from '../linear-sessions';

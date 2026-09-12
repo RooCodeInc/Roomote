@@ -5,6 +5,7 @@ import { DOCKER_CAPABILITIES as DOCKER_CAPABILITIES_VALUE } from '@roomote/types
 import type { ComputeProvider } from '@roomote/types';
 
 import { unsupported } from '../errors';
+import { removeDockerSessionEgressBoundary } from '../session-egress-docker-boundary';
 import type {
   CommandOutputEvent,
   ComputeProviderClient,
@@ -42,6 +43,11 @@ function getTaskWorkspaceVolumeName(instanceId: string): string {
   return `${instanceId}-workspace`;
 }
 
+/** Session-egress connector sidecar (controller-provisioned, keys never in the worker). */
+function getSessionEgressConnectorContainerName(instanceId: string): string {
+  return `${instanceId}-connector`;
+}
+
 async function docker(
   args: string[],
   options: { signal?: AbortSignal; allowFailure?: boolean } = {},
@@ -74,11 +80,22 @@ async function removeTaskNetwork(
     allowFailure: true,
   });
   let containerIds: string[] = [];
+  let network:
+    | {
+        Id?: string;
+        Labels?: Record<string, string>;
+        Options?: Record<string, string>;
+      }
+    | undefined;
 
   try {
     const networks = JSON.parse(output) as Array<{
       Containers?: Record<string, unknown> | null;
+      Id?: string;
+      Labels?: Record<string, string>;
+      Options?: Record<string, string>;
     }>;
+    network = networks[0];
     containerIds = Object.keys(networks[0]?.Containers ?? {});
   } catch {
     // Missing networks and transient inspect failures are handled by the
@@ -91,6 +108,8 @@ async function removeTaskNetwork(
       allowFailure: true,
     });
   }
+
+  if (network) await removeDockerSessionEgressBoundary(network, runDocker);
 
   await runDocker(['network', 'rm', taskNetwork], {
     signal,
@@ -111,6 +130,10 @@ export async function destroyDockerInstance(
     signal: input.signal,
     allowFailure: true,
   });
+  await runDocker(
+    ['rm', '-f', getSessionEgressConnectorContainerName(input.instanceId)],
+    { signal: input.signal, allowFailure: true },
+  );
   await runDocker(['rm', '-f', input.instanceId], {
     signal: input.signal,
     allowFailure: true,
@@ -181,6 +204,12 @@ export class DockerClient implements ComputeProviderClient {
     await docker(['stop', '--time', '10', input.instanceId], {
       signal: input.signal,
     });
+    // The connector holds this generation's client certificate; the resume
+    // path registers a new generation and provisions a fresh connector.
+    await docker(
+      ['rm', '-f', getSessionEgressConnectorContainerName(input.instanceId)],
+      { signal: input.signal, allowFailure: true },
+    );
     return { resumeHandle: input.instanceId };
   }
 

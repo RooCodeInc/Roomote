@@ -603,6 +603,27 @@
       "when": 1789149625129,
       "tag": "0085_chubby_shinko_yamashiro",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1789158001521,
+      "tag": "0086_workable_forgotten_one",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1789158001553,
+      "tag": "0087_familiar_steel_serpent",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1789158001585,
+      "tag": "0088_wooden_cardiac",
+      "breakpoints": true
     }
   ]
 }

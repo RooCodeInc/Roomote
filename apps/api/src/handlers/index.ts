@@ -32,6 +32,9 @@ export { inference } from './inference';
 // the deployment Brain's own inference, keyless on the Brain's side
 export { brainInference } from './brain-inference';
 
+// session egress control plane: controller/gateway service principals only
+export { sessionEgress } from './session-egress';
+
 // narration tts
 export { tts } from './tts';
 

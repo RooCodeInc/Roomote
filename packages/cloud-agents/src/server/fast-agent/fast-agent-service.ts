@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
+  listSessionSecretApprovals,
+  prepareSessionSecret,
+} from '@roomote/sdk/server/session-secrets';
+import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
@@ -16,6 +20,7 @@ import {
   INFERENCE_PROVIDER_MAX_RETRIES,
   NO_REPOSITORIES,
   ROOMOTE_MCP_ID,
+  HTTP_INTEGRATIONS_MCP_ID,
   REASONING_EFFORT_VALUES,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
@@ -25,6 +30,8 @@ import {
   formatErrorForLog,
   formatSingleLineLog,
   manageWakeupsInputSchema,
+  sessionSecretRequestSchema,
+  sessionSecretPrepareSchema,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
   truncateAcpOutputText,
@@ -3599,6 +3606,15 @@ export async function answerFastAgentQuestion({
       // Reading an attachment the user just sent is part of understanding
       // the request, not an action taken on their behalf.
       FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages,
+      // Web already shows tool activity; an approved bounded secret read needs
+      // no extra reply. This does not bypass the live actor/grant checks.
+      ...(conversation.surface === 'web'
+        ? [
+            FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+            FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret,
+            FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets,
+          ]
+        : []),
       `${ROOMOTE_MCP_ID}_${CHAT_REACTION_EMOJI_TOOL_NAME}`,
     ]);
     const authorizeToolStart = (toolId: string) =>
@@ -3736,6 +3752,7 @@ export async function answerFastAgentQuestion({
             userId,
             apiBaseUrl,
             sessionId: session.id,
+            humanTurn: !platformEvent,
             conversation,
             messageId: currentMessageId ?? conversation.conversationId,
           },
@@ -4458,6 +4475,78 @@ export async function answerFastAgentQuestion({
               currentTasks.delete(target.taskId);
             }
             return result;
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret:
+          case FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets:
+          case FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret: {
+            try {
+              const schema =
+                call.name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret
+                  ? sessionSecretPrepareSchema
+                  : call.name ===
+                      FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets
+                    ? z.object({}).strict()
+                    : sessionSecretRequestSchema;
+              const args = schema.safeParse(call.args);
+              // Platform events carry an owner for routing, not a human actor.
+              if (!args.success || platformEvent || !userId) {
+                return { success: false, error: 'Secret request unavailable' };
+              }
+              const canonicalSession = await getSessionForFastConversation(
+                db,
+                session.id,
+              );
+              if (!canonicalSession) {
+                return { success: false, error: 'Secret request unavailable' };
+              }
+              throwIfTurnCancelled();
+              const context = { sessionId: canonicalSession.id, userId };
+              if (
+                call.name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret
+              ) {
+                const pending = await prepareSessionSecret(
+                  context,
+                  sessionSecretPrepareSchema.parse(args.data),
+                );
+                const url = new URL(
+                  `${Env.R_APP_URL}/sessions/${encodeURIComponent(canonicalSession.id)}`,
+                );
+                url.hash = 'session-secrets';
+                return { pending, sessionUrl: url.toString() };
+              }
+              if (
+                call.name === FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets
+              ) {
+                return await listSessionSecretApprovals(context);
+              }
+              const request = sessionSecretRequestSchema.parse(args.data);
+              const result = await callFastAgentIntegration(
+                {
+                  userId,
+                  apiBaseUrl,
+                  sessionId: session.id,
+                  humanTurn: true,
+                  conversation,
+                  messageId: currentMessageId ?? conversation.conversationId,
+                },
+                availableIntegrations,
+                {
+                  integrationId: HTTP_INTEGRATIONS_MCP_ID,
+                  toolName: 'integration_request',
+                  args: {
+                    integrationId: `session:${request.secretRef}`,
+                    method: request.method,
+                    path: request.path,
+                    body: request.body,
+                    accept: request.accept,
+                  },
+                },
+              );
+              return { success: true, ...(result as Record<string, unknown>) };
+            } catch {
+              return { success: false, error: 'Secret request unavailable' };
+            }
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.stopTask: {

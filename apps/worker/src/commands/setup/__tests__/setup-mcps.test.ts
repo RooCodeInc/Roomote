@@ -1,4 +1,5 @@
-vi.mock('@roomote/sdk/client', () => ({
+vi.mock('@roomote/sdk/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/sdk/client')>()),
   __esModule: true,
   sdk: {
     mcpConnections: {
@@ -13,6 +14,34 @@ const { BUILT_IN_MCPS, resolveBuiltInMcpServers } =
   await import('../setup-mcps');
 
 describe('resolveBuiltInMcpServers', () => {
+  it('strips raw operator provenance from the public schema', async () => {
+    const { environmentMcpServerConfigSchema } = await import('@roomote/types');
+    for (const config of [
+      { url: 'https://operator.test/mcp' },
+      { command: 'operator-mcp' },
+    ]) {
+      expect(
+        environmentMcpServerConfigSchema.parse({
+          ...config,
+          roomoteManaged: 'http-integrations-broker',
+        }),
+      ).not.toHaveProperty('roomoteManaged');
+    }
+  });
+
+  it.each(['/api/mcp/custom/server-1', 'https://operator.test/mcp'])(
+    'does not let a custom user MCP self-mark: %s',
+    (url) => {
+      process.env.TRPC_URL = 'https://api.test';
+      const custom = { url, roomoteManaged: 'http-integrations-broker' };
+      const servers = resolveBuiltInMcpServers(
+        { ROOMOTE_CLOUD_TOKEN: 'run-token' },
+        { userMcpServers: { custom } },
+      );
+      expect(servers.custom).toHaveProperty('type', 'streamable-http');
+      expect(servers.custom).not.toHaveProperty('roomoteManaged');
+    },
+  );
   const originalEnv = { ...process.env };
   const expectedBuiltInMcpNames = ['roomote'];
 
@@ -42,6 +71,192 @@ describe('resolveBuiltInMcpServers', () => {
 
   it('exports BUILT_IN_MCPS with the expected servers', () => {
     expect(Object.keys(BUILT_IN_MCPS).sort()).toEqual(expectedBuiltInMcpNames);
+  });
+
+  it.each([
+    '/api/mcp/http-integrations',
+    'https://web.test/api/mcp/http-integrations',
+  ])(
+    'authenticates HTTP integrations %s with only the normal run bearer',
+    (url) => {
+      process.env.TRPC_URL = 'https://api.test/_roomote-api';
+      const servers = resolveBuiltInMcpServers(
+        {
+          ROOMOTE_CLOUD_TOKEN: 'run-token',
+          SERVICE_API_KEY: 'upstream-secret',
+          R_HTTP_INTEGRATIONS_CONFIG: 'server-only-config',
+          HTTP_PROXY: 'http://upstream.test',
+        },
+        {
+          userMcpServers: { _roomote_http_integrations: { url, headers: {} } },
+        },
+      );
+      expect(servers._roomote_http_integrations).toEqual({
+        type: 'streamable-http',
+        url: 'https://api.test/_roomote-api/api/mcp/http-integrations',
+        roomoteManaged: 'http-integrations-broker',
+        headers: { Authorization: 'Bearer run-token' },
+      });
+      expect(JSON.stringify(servers)).not.toContain('upstream-secret');
+      expect(JSON.stringify(servers)).not.toContain('server-only-config');
+      expect(JSON.stringify(servers)).not.toContain('http://upstream.test');
+      expect(JSON.stringify(servers)).not.toContain('HTTP_PROXY');
+    },
+  );
+
+  it('omits HTTP integrations without server presence even with a launcher flag', () => {
+    process.env.R_HTTP_INTEGRATIONS_ENABLED = 'true';
+    expect(resolveBuiltInMcpServers()).not.toHaveProperty(
+      '_roomote_http_integrations',
+    );
+  });
+
+  it.each(['environment', 'deployment', 'both'] as const)(
+    'preserves %s operator HTTP integrations configuration without broker credentials',
+    (source) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      process.env.TRPC_URL = 'https://api.test/_roomote-api';
+      const operator = {
+        _roomote_http_integrations: {
+          url: 'https://operator.test/mcp',
+          roomoteManaged: 'http-integrations-broker',
+          headers: { Authorization: 'Bearer ${OPERATOR_KEY}' },
+        },
+      };
+      const servers = resolveBuiltInMcpServers(
+        {
+          ROOMOTE_CLOUD_TOKEN: 'run-token',
+          ROOMOTE_AUTH_BYPASS_HEADER_NAME: 'X-Preview-Bypass',
+          ROOMOTE_AUTH_BYPASS_VALUE: 'bypass-secret',
+        },
+        {
+          userMcpServers: {
+            _roomote_http_integrations: { url: '/api/mcp/http-integrations' },
+            notion: { url: '/api/mcp/notion' },
+          },
+        },
+        source === 'deployment' ? undefined : operator,
+        { OPERATOR_KEY: 'operator-secret' },
+        source === 'environment'
+          ? undefined
+          : source === 'both'
+            ? { _roomote_http_integrations: { command: 'deployment-mcp' } }
+            : operator,
+      );
+      expect(servers._roomote_http_integrations).toEqual({
+        type: 'streamable-http',
+        url: 'https://operator.test/mcp',
+        headers: { Authorization: 'Bearer operator-secret' },
+      });
+      expect(servers.roomote).toMatchObject({ type: 'stdio' });
+      expect(servers.notion).toEqual({
+        type: 'streamable-http',
+        url: 'https://api.test/_roomote-api/api/mcp/notion',
+        headers: {
+          Authorization: 'Bearer run-token',
+          'X-Preview-Bypass': 'bypass-secret',
+        },
+      });
+      expect(warn).toHaveBeenCalledWith(
+        "[resolveBuiltInMcpServers] Skipping HTTP integrations broker: preserving operator MCP '_roomote_http_integrations'. Rename the operator server to receive both.",
+      );
+      expect(warn).toHaveBeenCalledTimes(source === 'both' ? 2 : 1);
+      expect(JSON.stringify(warn.mock.calls)).not.toMatch(
+        /https?:|secret|run-token/,
+      );
+      warn.mockRestore();
+    },
+  );
+
+  it.each(['environment', 'deployment'] as const)(
+    'preserves %s operator stdio server at the broker name',
+    (source) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const operator = {
+        _roomote_http_integrations: {
+          command: 'operator-mcp',
+          roomoteManaged: 'http-integrations-broker',
+          args: ['--stdio'],
+          env: { API_KEY: '${OPERATOR_KEY}' },
+        },
+      };
+      const servers = resolveBuiltInMcpServers(
+        { ROOMOTE_CLOUD_TOKEN: 'run-token' },
+        {
+          userMcpServers: {
+            _roomote_http_integrations: { url: '/api/mcp/http-integrations' },
+          },
+        },
+        source === 'environment' ? operator : undefined,
+        { OPERATOR_KEY: 'operator-secret' },
+        source === 'deployment' ? operator : undefined,
+      );
+      expect(servers._roomote_http_integrations).toEqual({
+        type: 'stdio',
+        command: 'operator-mcp',
+        args: ['--stdio'],
+        env: {
+          MISE_DATA_DIR: '/opt/mise',
+          MISE_CACHE_DIR: '/opt/mise/cache',
+          API_KEY: 'operator-secret',
+        },
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      warn.mockRestore();
+    },
+  );
+
+  it.each<{ taskEnv: Record<string, string>; url: string }>([
+    {
+      taskEnv: { R_APP_URL: 'https://api.test' },
+      url: '/api/mcp/http-integrations',
+    },
+    {
+      taskEnv: { ROOMOTE_CLOUD_TOKEN: 'run-token' },
+      url: '/api/mcp/http-integrations',
+    },
+    {
+      taskEnv: {
+        R_APP_URL: 'https://api.test',
+        ROOMOTE_CLOUD_TOKEN: 'run-token',
+      },
+      url: 'https://upstream.test/mcp',
+    },
+  ])(
+    'omits HTTP integrations without valid API routing and auth: %j',
+    ({ taskEnv, url }) => {
+      delete process.env.TRPC_URL;
+      expect(
+        resolveBuiltInMcpServers(taskEnv, {
+          userMcpServers: { _roomote_http_integrations: { url, headers: {} } },
+        }),
+      ).not.toHaveProperty('_roomote_http_integrations');
+    },
+  );
+
+  it('routes a persisted http-integrations custom server through its custom proxy', () => {
+    process.env.TRPC_URL = 'https://api.test/_roomote-api';
+    const servers = resolveBuiltInMcpServers(
+      { ROOMOTE_CLOUD_TOKEN: 'run-token' },
+      {
+        userMcpServers: {
+          'http-integrations': {
+            url: '/api/mcp/custom/server-1',
+            headers: { 'X-MCP-Client': 'Roomote' },
+          },
+        },
+      },
+    );
+
+    expect(servers['http-integrations']).toEqual({
+      type: 'streamable-http',
+      url: 'https://api.test/_roomote-api/api/mcp/custom/server-1',
+      headers: {
+        'X-MCP-Client': 'Roomote',
+        Authorization: 'Bearer run-token',
+      },
+    });
+    expect(servers).not.toHaveProperty('_roomote_http_integrations');
   });
 
   it('provides the GitHub proxy with run-token auth, leaving installation eligibility to the API', () => {

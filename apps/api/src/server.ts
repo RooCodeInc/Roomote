@@ -49,6 +49,7 @@ import {
   discord,
   cloudDeploymentAccess,
   brainInference,
+  sessionEgress,
   inference,
   tts,
   mcp,
@@ -223,6 +224,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/internal/cloud', cloudDeploymentAccess);
   app.route('/api/inference', inference);
   app.route('/api/brain/inference', brainInference);
+  app.route('/api/internal/session-egress', sessionEgress);
   app.route('/api/tts', tts);
   app.route('/api/mcp', mcp);
   app.route('/api/mcp-routing', mcpRouting);

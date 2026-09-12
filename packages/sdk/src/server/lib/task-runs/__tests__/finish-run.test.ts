@@ -22,6 +22,7 @@ const mockReleaseRedisLock = Object.assign(
   { renewDetailed: mockRenewRedisLock },
 );
 const mockDbExecute = vi.fn().mockResolvedValue([]);
+const mockTerminateSessionEgress = vi.fn().mockResolvedValue([]);
 const mockRecordTaskRunLifecycleEvent = vi.fn().mockResolvedValue(undefined);
 const mockCleanupSandboxOidcTargetsForTaskRun = vi
   .fn()
@@ -126,6 +127,8 @@ vi.mock('@roomote/db/server', async () => {
     );
   return {
     ...actual,
+    terminateSessionEgressWorkloadsForRun: (...args: unknown[]) =>
+      mockTerminateSessionEgress(...args),
     db: {
       query: {
         taskRuns: {
@@ -570,6 +573,7 @@ describe('finishRun', () => {
     await finishRun({ id: 1, status: RunStatus.Idle });
 
     expect(mockCaptureTaskSettled).not.toHaveBeenCalled();
+    expect(mockTerminateSessionEgress).not.toHaveBeenCalled();
   });
 
   it('derives tasks.state completed via the shared sync when the job completes', async () => {
@@ -589,6 +593,11 @@ describe('finishRun', () => {
       state: 'completed',
       updatedAt: expect.any(Date),
     });
+    expect(mockTerminateSessionEgress).toHaveBeenCalledWith(
+      1,
+      'completed',
+      expect.anything(),
+    );
   });
 
   it('derives tasks.state canceled via the shared sync when the job is canceled', async () => {
@@ -605,6 +614,11 @@ describe('finishRun', () => {
       state: 'canceled',
       updatedAt: expect.any(Date),
     });
+    expect(mockTerminateSessionEgress).toHaveBeenCalledWith(
+      1,
+      'stopped',
+      expect.anything(),
+    );
   });
 
   it('derives tasks.state failed via the shared sync when the job fails', async () => {
@@ -622,6 +636,11 @@ describe('finishRun', () => {
       state: 'failed',
       updatedAt: expect.any(Date),
     });
+    expect(mockTerminateSessionEgress).toHaveBeenCalledWith(
+      1,
+      'failed',
+      expect.anything(),
+    );
   });
 
   it('keeps the task active (not terminal) when the finishing run goes idle', async () => {

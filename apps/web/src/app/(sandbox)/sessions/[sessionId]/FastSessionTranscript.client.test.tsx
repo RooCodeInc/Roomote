@@ -319,6 +319,105 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
+  it('reports server-owned secure-save continuation without submitting or replacing the browser composer draft', async () => {
+    const secretRef = '6a1f8f1e-0000-4000-8000-000000000007';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          secrets: [],
+          pending: [
+            {
+              pendingRef: secretRef,
+              label: 'Demo',
+              origin: 'https://api.example.com',
+              headerName: 'authorization',
+              headerPrefix: 'Bearer ',
+              allowedMethods: ['GET', 'HEAD'],
+              expiresAt: new Date(Date.now() + 3600000).toISOString(),
+              revokedAt: null,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    const composer = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(composer, { target: { value: 'Keep this unsent draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Session secrets' }));
+    await screen.findByLabelText('API key');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/canonical-session/secrets',
+      expect.objectContaining({
+        cache: 'no-store',
+        credentials: 'same-origin',
+      }),
+    );
+    expect(replyMutate).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('API key'), {
+      target: { value: 'disposable-test-credential' },
+    });
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /info|How it is used|Review/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Review access details|GET and HEAD/),
+    ).not.toBeInTheDocument();
+    expect(replyMutate).not.toHaveBeenCalled();
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          secret: {
+            secretRef,
+            label: 'Demo',
+            origin: 'https://api.example.com',
+            headerName: 'authorization',
+            headerPrefix: 'Bearer ',
+            allowedMethods: ['GET', 'HEAD'],
+            expiresAt: new Date(Date.now() + 3600000).toISOString(),
+            createdAt: new Date().toISOString(),
+            revokedAt: null,
+          },
+          resumed: true,
+        }),
+        { status: 201 },
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Allow for this Session' }),
+    );
+    await screen.findByText(
+      'API key saved. The Session has been notified without sharing your key.',
+    );
+    expect(replyMutate).not.toHaveBeenCalled();
+    expect(preparePromptAttachments).not.toHaveBeenCalled();
+    expect(composer).toHaveValue('Keep this unsent draft');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/sessions/canonical-session/secrets',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          pendingRef: secretRef,
+          secret: 'disposable-test-credential',
+          allowedMethods: ['GET', 'HEAD'],
+        }),
+      }),
+    );
+    expect(document.body.textContent).not.toContain(
+      'disposable-test-credential',
+    );
+  });
+
   const textMessage = ({
     id,
     role,

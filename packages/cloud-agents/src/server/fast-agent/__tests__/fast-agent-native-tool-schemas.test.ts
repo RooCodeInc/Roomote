@@ -3,16 +3,22 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 
 import {
   CALL_INTEGRATION_TOOL_TOOL,
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  sessionSecretRequestSchema,
+  sessionSecretPrepareSchema,
   MANAGE_WAKEUPS_TOOL,
 } from '@roomote/types';
 import { z } from 'zod';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 
 import { getFastAgentNativeToolRuntime } from '../fast-agent-native-tool-bridge';
+import { writeOpenCodePluginSeedFixture } from '../../__tests__/helpers/opencode-plugin-seed-fixture';
 
 /**
  * Guards the JSON schema OpenAI receives for every Fast native tool.
@@ -214,7 +220,10 @@ function toOpenCodeJsonSchema(zod: ZodV4, args: unknown) {
 }
 
 describe('Fast native tool schemas as OpenAI receives them', () => {
-  const validator = new Ajv2020({ strict: false });
+  const validator = new Ajv2020({ strict: false }).addFormat(
+    'uuid',
+    (value: string) => z.string().uuid().safeParse(value).success,
+  );
   let workDir: string;
   let zod: ZodV4;
   let tools: LoadedTool[];
@@ -266,6 +275,155 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       await rm(dirname(join(workDir, 'x')), { recursive: true, force: true });
   });
 
+  it('generates a concrete bounded Session-secret request shape without caller identity', async () => {
+    const tool = tools.find(
+      ({ name }) =>
+        name === FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+    )!;
+    expect(Object.keys(tool.args!).sort()).toEqual([
+      'accept',
+      'body',
+      'method',
+      'path',
+      'secretRef',
+    ]);
+    const schema = toOpenCodeJsonSchema(zod, tool.args!);
+    expect(JSON.stringify(schema)).not.toContain('\\p{');
+    expect(schema).toMatchObject({
+      type: 'object',
+      properties: {
+        secretRef: { type: 'string', format: 'uuid' },
+        method: { enum: ['GET', 'HEAD'] },
+        path: { type: 'string', minLength: 1, maxLength: 2048 },
+        accept: { enum: ['application/json', 'text/plain'] },
+        body: expect.any(Object),
+      },
+      required: ['secretRef', 'method', 'path'],
+    });
+    const args = {
+      secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+      method: 'GET',
+      path: '/status',
+    };
+    expect(sessionSecretRequestSchema.safeParse(args).success).toBe(true);
+    for (const body of [undefined, null, '']) {
+      expect(
+        sessionSecretRequestSchema.safeParse({ ...args, body }).success,
+      ).toBe(true);
+      expect(validator.compile(schema)({ ...args, body })).toBe(true);
+    }
+    for (const body of ['nonempty', ' ', {}]) {
+      expect(validator.compile(schema)({ ...args, body })).toBe(false);
+    }
+    for (const invalid of [
+      { ...args, userId: 'caller' },
+      { ...args, sessionId: 'caller' },
+      { ...args, method: 'POST' },
+      { ...args, path: 'x'.repeat(2049) },
+      { ...args, accept: 'text/html' },
+      { ...args, body: 'nonempty' },
+      { ...args, body: ' ' },
+      { ...args, body: {} },
+    ]) {
+      expect(sessionSecretRequestSchema.safeParse(invalid).success).toBe(false);
+    }
+    const execute = tool.execute as (
+      args: unknown,
+      context: unknown,
+    ) => Promise<unknown>;
+    expect(await execute(args, {})).toEqual({
+      name: 'request_with_session_secret',
+      args,
+    });
+  });
+
+  it('generates concrete nonsecret preparation and empty status schemas', async () => {
+    const prepare = tools.find(
+      ({ name }) => name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret,
+    )!;
+    const status = tools.find(
+      ({ name }) => name === FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets,
+    )!;
+    const schema = toOpenCodeJsonSchema(zod, prepare.args!);
+    expect(Object.keys(prepare.args!).sort()).toEqual([
+      'allowedMethods',
+      'headerName',
+      'headerPrefix',
+      'label',
+      'origin',
+      'ttlHours',
+    ]);
+    expect(schema).toMatchObject({
+      type: 'object',
+      properties: {
+        label: { type: 'string', minLength: 1, maxLength: 80 },
+        origin: { type: 'string', minLength: 1, maxLength: 2048 },
+        headerName: { enum: ['authorization', 'x-api-key', 'api-key'] },
+        headerPrefix: { enum: ['', 'Bearer ', 'Basic ', 'Token '] },
+        ttlHours: { type: 'integer', minimum: 1, maximum: 720, default: 24 },
+        allowedMethods: {
+          type: 'array',
+          items: { enum: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] },
+          minItems: 1,
+          maxItems: 6,
+        },
+      },
+    });
+    expect(schema.required).not.toContain('allowedMethods');
+    expect(status.args).toEqual({});
+    expect(toOpenCodeJsonSchema(zod, status.args!)).toMatchObject({
+      type: 'object',
+      properties: {},
+    });
+    const args = {
+      label: 'API',
+      origin: 'https://api.example.com',
+      headerName: 'authorization',
+      headerPrefix: 'Bearer ',
+    };
+    expect(sessionSecretPrepareSchema.parse(args)).toEqual({
+      ...args,
+      ttlHours: 24,
+      allowedMethods: ['GET', 'HEAD'],
+    });
+    expect(
+      sessionSecretPrepareSchema.parse({
+        ...args,
+        allowedMethods: ['POST', 'GET'],
+      }).allowedMethods,
+    ).toEqual(['GET', 'POST']);
+    for (const extra of [
+      { secret: 'never-a-key' },
+      { userId: 'caller' },
+      { sessionId: 'caller' },
+      { ttlHours: 0 },
+      { ttlHours: 721 },
+      { ttlHours: 1.5 },
+      { headerName: 'cookie' },
+      { headerPrefix: 'Custom ' },
+      { allowedMethods: [] },
+      { allowedMethods: ['GET', 'GET'] },
+      { allowedMethods: ['OPTIONS'] },
+    ]) {
+      expect(
+        sessionSecretPrepareSchema.safeParse({ ...args, ...extra }).success,
+      ).toBe(false);
+    }
+    for (const [tool, input] of [
+      [prepare, args],
+      [status, {}],
+    ] as const) {
+      const execute = tool.execute as (
+        args: unknown,
+        context: unknown,
+      ) => Promise<unknown>;
+      expect(await execute(input, {})).toEqual({
+        name: tool.name,
+        args: input,
+      });
+    }
+  });
+
   it('covers every native tool', () => {
     const generated = tools.map((tool) => tool.name).sort();
     for (const name of Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)) {
@@ -276,6 +434,239 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       expect(typeof tool.execute, tool.name).toBe('function');
     }
   });
+
+  // Opt in where the pinned OpenCode binary is installed. No real provider
+  // credentials/config are inherited; both providers terminate at this mock.
+  it.skipIf(process.env.ROOMOTE_TEST_OPENCODE_SCHEMAS !== '1')(
+    'captures the Session-secret schema emitted to OpenAI and Anthropic HTTP endpoints',
+    async () => {
+      const requests: Record<string, unknown>[] = [];
+      const provider = createServer(async (request, response) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        requests.push(JSON.parse(Buffer.concat(chunks).toString()));
+        // A non-retryable response stops the turn after capturing serialization.
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            error: {
+              type: 'invalid_request_error',
+              message: 'Controlled schema capture',
+            },
+          }),
+        );
+      });
+      provider.listen(0, '127.0.0.1');
+      await once(provider, 'listening');
+      const address = provider.address();
+      if (!address || typeof address === 'string')
+        throw new Error('Missing mock address');
+      const baseURL = `http://127.0.0.1:${address.port}/v1`;
+      const home = join(workDir, 'isolated-home');
+      await mkdir(home, { recursive: true });
+      // Tools import the real Zod installed above, not the plugin. Satisfy
+      // OpenCode's install check without contacting the package registry.
+      writeOpenCodePluginSeedFixture(workDir, '1.18.10');
+      writeOpenCodePluginSeedFixture(
+        join(home, 'config', 'opencode'),
+        '1.18.10',
+      );
+      const server = spawn(
+        'opencode',
+        ['serve', '--print-logs', '--hostname', '127.0.0.1', '--port', '0'],
+        {
+          cwd: home,
+          detached: true,
+          env: {
+            PATH: process.env.PATH,
+            HOME: home,
+            XDG_CONFIG_HOME: join(home, 'config'),
+            XDG_DATA_HOME: join(home, 'data'),
+            XDG_CACHE_HOME: join(home, 'cache'),
+            XDG_STATE_HOME: join(home, 'state'),
+            OPENCODE_CONFIG_DIR: workDir,
+            OPENCODE_DISABLE_PROJECT_CONFIG: '1',
+            OPENCODE_DISABLE_AUTOUPDATE: '1',
+            OPENCODE_DISABLE_MODELS_FETCH: '1',
+            OPENCODE_DISABLE_DEFAULT_PLUGINS: '1',
+            OPENCODE_CONFIG_CONTENT: JSON.stringify({
+              enabled_providers: ['openai', 'anthropic'],
+              share: 'disabled',
+              provider: {
+                openai: { options: { baseURL, apiKey: 'mock-provider-key' } },
+                anthropic: {
+                  options: { baseURL, apiKey: 'mock-provider-key' },
+                },
+              },
+              agent: {
+                build: {
+                  tools: {
+                    '*': false,
+                    request_with_session_secret: true,
+                    prepare_session_secret: true,
+                    list_session_secrets: true,
+                  },
+                },
+              },
+            }),
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      let output = '';
+      let spawnError: Error | undefined;
+      server.on('error', (error) => {
+        spawnError = error;
+      });
+      server.stdout.on('data', (chunk) => {
+        output += String(chunk);
+      });
+      server.stderr.on('data', (chunk) => {
+        output += String(chunk);
+      });
+      try {
+        await vi.waitFor(
+          () => {
+            if (spawnError) throw spawnError;
+            expect(server.exitCode, output).toBeNull();
+            expect(output).toMatch(/http:\/\/127\.0\.0\.1:\d+/);
+          },
+          { timeout: 20_000 },
+        );
+        const url = output.match(/http:\/\/127\.0\.0\.1:\d+/)![0];
+        for (const [providerID, modelID] of [
+          ['openai', 'gpt-4.1'],
+          ['anthropic', 'claude-sonnet-4-5'],
+        ]) {
+          requests.length = 0;
+          const sessionResponse = await fetch(`${url}/session`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ title: 'Controlled schema capture' }),
+            signal: AbortSignal.timeout(20_000),
+          });
+          expect(sessionResponse.ok, output).toBe(true);
+          const session = (await sessionResponse.json()) as { id: string };
+          await fetch(`${url}/session/${session.id}/message`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              model: { providerID, modelID },
+              parts: [
+                {
+                  type: 'text',
+                  text: 'Read /status using secret reference e9d35700-56b8-4bf0-b088-c1cb498905d9.',
+                },
+              ],
+            }),
+            signal: AbortSignal.timeout(20_000),
+          });
+          for (const [name, properties] of [
+            [
+              FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret,
+              {
+                label: { type: 'string' },
+                origin: { type: 'string' },
+                headerName: { enum: ['authorization', 'x-api-key', 'api-key'] },
+                headerPrefix: { enum: ['', 'Bearer ', 'Basic ', 'Token '] },
+                ttlHours: { type: 'integer' },
+              },
+            ],
+            [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets, {}],
+          ] as const) {
+            const tool = requests
+              .flatMap(
+                (request) =>
+                  (request.tools ?? []) as Array<{
+                    name?: string;
+                    parameters?: object;
+                    input_schema?: object;
+                  }>,
+              )
+              .find((tool) => tool.name === name);
+            expect(tool, `${providerID}: ${name}: ${output}`).toBeDefined();
+            const schema =
+              providerID === 'anthropic'
+                ? tool!.input_schema
+                : tool!.parameters;
+            expect(schema).toMatchObject({ type: 'object', properties });
+            expect(
+              Object.keys((schema as { properties: object }).properties).sort(),
+            ).toEqual(Object.keys(properties).sort());
+            expect(validateJsonSchema(schema, providerID!)).toEqual([]);
+          }
+          const emitted = requests
+            .flatMap(
+              (request) =>
+                (request.tools ?? []) as Array<{
+                  name?: string;
+                  parameters?: object;
+                  input_schema?: object;
+                }>,
+            )
+            .find(
+              (tool) =>
+                tool.name ===
+                FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+            );
+          expect(emitted, `${providerID}: ${output}`).toBeDefined();
+          const schema =
+            providerID === 'anthropic'
+              ? emitted!.input_schema
+              : emitted!.parameters;
+          expect(schema).toMatchObject({
+            type: 'object',
+            properties: {
+              secretRef: { type: 'string' },
+              method: { enum: ['GET', 'HEAD'] },
+              path: { type: 'string' },
+              accept: { enum: ['application/json', 'text/plain'] },
+              body: expect.any(Object),
+            },
+            required: expect.arrayContaining(['secretRef', 'method', 'path']),
+          });
+          expect(
+            Object.keys((schema as { properties: object }).properties).sort(),
+          ).toEqual(['accept', 'body', 'method', 'path', 'secretRef']);
+          // OpenCode strips string constraints for OpenAI; the server-side
+          // schema above remains responsible for enforcing these bounds.
+          if (providerID === 'anthropic') {
+            expect(schema).toMatchObject({
+              properties: {
+                secretRef: { format: 'uuid' },
+                path: { minLength: 1, maxLength: 2048 },
+              },
+            });
+          }
+          expect(validateJsonSchema(schema, providerID!)).toEqual([]);
+          expect(
+            validator.compile(schema!)({
+              secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+              method: 'GET',
+              path: '/status',
+            }),
+          ).toBe(true);
+          expect(JSON.stringify(requests)).not.toContain('mock-provider-key');
+        }
+      } catch (error) {
+        throw new Error(`OpenCode schema capture failed: ${output}`, {
+          cause: error,
+        });
+      } finally {
+        if (
+          server.pid &&
+          server.exitCode === null &&
+          server.signalCode === null
+        ) {
+          process.kill(-server.pid, 'SIGKILL');
+          await once(server, 'exit');
+        }
+        provider.closeAllConnections();
+        await new Promise<void>((resolve) => provider.close(() => resolve()));
+      }
+    },
+    90_000,
+  );
 
   it('produces a JSON schema OpenAI accepts for every tool', () => {
     const failures: string[] = [];

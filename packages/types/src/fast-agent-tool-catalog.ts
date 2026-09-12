@@ -26,6 +26,9 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   spillRead: 'spill_read',
   stopTask: 'stop_task',
   requestUserInput: 'request_user_input',
+  requestWithSessionSecret: 'request_with_session_secret',
+  prepareSessionSecret: 'prepare_session_secret',
+  listSessionSecrets: 'list_session_secrets',
   reviewPullRequest: 'review_pull_request',
 } as const;
 
@@ -96,6 +99,18 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep, kind: ACP_TOOL_KINDS.search },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead, kind: ACP_TOOL_KINDS.read },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.stopTask, kind: ACP_TOOL_KINDS.task },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+    kind: ACP_TOOL_KINDS.read,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret,
+    kind: ACP_TOOL_KINDS.tool,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets,
+    kind: ACP_TOOL_KINDS.list,
+  },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
     kind: ACP_TOOL_KINDS.communication,

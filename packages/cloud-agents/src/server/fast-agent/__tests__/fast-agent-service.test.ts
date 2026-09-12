@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   captureInferenceContext: vi.fn(),
   captureInferenceAttemptOutcome: vi.fn(),
   captureTurnSettled: vi.fn(),
+  captureEvent: vi.fn(),
   markShutdownCloseoutPending: vi.fn(),
   markShutdownCloseoutSettled: vi.fn(),
   revokeMcpCapabilities: vi.fn(),
@@ -50,6 +51,8 @@ const mocks = vi.hoisted(() => ({
   findActiveRetryNotice: vi.fn(),
   loadTurnAttempt: vi.fn(),
   getUnifiedSession: vi.fn(),
+  prepareSessionSecret: vi.fn(),
+  listSessionSecretApprovals: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
   getPendingHumanFollowUp: vi.fn(),
@@ -61,6 +64,7 @@ const mocks = vi.hoisted(() => ({
     | ((call: {
         agent?: string;
         messageId?: string;
+        sessionId?: string;
         name: string;
         args: Record<string, unknown>;
       }) => Promise<unknown>)
@@ -93,6 +97,9 @@ const nativeToolNames = vi.hoisted(
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
       requestUserInput: 'request_user_input',
+      requestWithSessionSecret: 'request_with_session_secret',
+      prepareSessionSecret: 'prepare_session_secret',
+      listSessionSecrets: 'list_session_secrets',
       listSkills: 'list_skills',
       loadSkill: 'load_skill',
       showWidget: 'show_widget',
@@ -106,6 +113,15 @@ const fastAgentSessionPermissions = vi.hoisted(() => [
   { permission: 'task', pattern: '*', action: 'allow' },
 ]);
 const fastAgentSessionToolFilter = vi.hoisted(() => ({ task: true }));
+
+vi.mock('@roomote/sdk/server/session-secrets', () => ({
+  prepareSessionSecret: mocks.prepareSessionSecret,
+  listSessionSecretApprovals: mocks.listSessionSecretApprovals,
+}));
+
+vi.mock('@roomote/telemetry/server', () => ({
+  captureEvent: mocks.captureEvent,
+}));
 
 vi.mock('../fast-agent-session', () => ({
   appendFastAgentVisibleMessages: mocks.appendVisibleMessages,
@@ -321,6 +337,7 @@ vi.mock('../fast-agent-turn-lock', () => ({
 }));
 
 import { buildFastSessionUrl } from '@roomote/communication';
+import { Env } from '@roomote/env';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
@@ -1412,6 +1429,540 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       questions: presetQuestions,
     });
   });
+
+  it.each(['web', 'slack'] as const)(
+    'prepares and discovers %s Session secrets without human reference copying',
+    async (surface) => {
+      const args = {
+        label: 'Example API',
+        origin: 'https://api.example.com',
+        headerName: 'authorization',
+        headerPrefix: 'Bearer ',
+      };
+      const pending = {
+        pendingRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+        ...args,
+        expiresAt: '2026-09-10T00:00:00.000Z',
+        createdAt: '2026-09-09T00:00:00.000Z',
+      };
+      const metadata = {
+        pending: [pending],
+        secrets: [
+          {
+            ...args,
+            secretRef: '0d8672fb-c73c-4f3d-8b65-e30b44868138',
+            expiresAt: pending.expiresAt,
+            createdAt: pending.createdAt,
+            revokedAt: null,
+          },
+        ],
+      };
+      mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
+      mocks.prepareSessionSecret.mockResolvedValue(pending);
+      mocks.listSessionSecretApprovals.mockResolvedValue(metadata);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          if (surface !== 'web') {
+            await invokeTool(nativeToolNames.sendChatReply, {
+              purpose: 'ack',
+              message: 'Preparing secure access.',
+            });
+          }
+          for (const extra of [
+            { secret: 'never-accept-a-key' },
+            { userId: 'injected-user' },
+            { sessionId: 'injected-session' },
+            { headerName: 'cookie' },
+            { ttlHours: 721 },
+          ]) {
+            expect(
+              await invokeTool(nativeToolNames.prepareSessionSecret, {
+                ...args,
+                ...extra,
+              }),
+            ).toEqual({ success: false, error: 'Secret request unavailable' });
+          }
+          expect(mocks.prepareSessionSecret).not.toHaveBeenCalled();
+          expect(
+            await invokeTool(nativeToolNames.listSessionSecrets, {
+              userId: 'injected-user',
+            }),
+          ).toEqual({ success: false, error: 'Secret request unavailable' });
+          expect(mocks.listSessionSecretApprovals).not.toHaveBeenCalled();
+          const url = new URL(`${Env.R_APP_URL}/sessions/canonical-session-1`);
+          url.hash = 'session-secrets';
+          expect(
+            await invokeTool(nativeToolNames.prepareSessionSecret, args),
+          ).toEqual({
+            pending,
+            sessionUrl: url.toString(),
+          });
+          expect(
+            await invokeTool(nativeToolNames.listSessionSecrets, {}),
+          ).toEqual(metadata);
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Enter the key securely.',
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: { ...baseParams.conversation, surface },
+        adapter: callbacks(),
+      });
+      expect(mocks.prepareSessionSecret).toHaveBeenCalledExactlyOnceWith(
+        { sessionId: 'canonical-session-1', userId: 'user-1' },
+        { ...args, ttlHours: 24, allowedMethods: ['GET', 'HEAD'] },
+      );
+      expect(mocks.listSessionSecretApprovals).toHaveBeenCalledExactlyOnceWith({
+        sessionId: 'canonical-session-1',
+        userId: 'user-1',
+      });
+    },
+  );
+
+  it.each(['web', 'slack'] as const)(
+    'dispatches %s Session-secret requests with the persisted Session and trusted turn actor only',
+    async (surface) => {
+      const args = {
+        secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+        method: 'GET',
+        path: '/repos/octocat/Hello-World',
+        accept: 'application/json',
+      };
+      mocks.getUnifiedSession.mockResolvedValue({
+        id: 'canonical-session-1',
+        createdBy: 'different-owner',
+      });
+      mocks.callIntegration.mockResolvedValue({
+        success: true,
+        status: 200,
+        body: 'healthy',
+      });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          if (surface !== 'web') {
+            expect(
+              await invokeTool(nativeToolNames.requestWithSessionSecret, args),
+            ).toEqual({
+              success: false,
+              error:
+                'Post an acknowledgement with send_chat_reply before this action.',
+            });
+            expect(mocks.callIntegration).not.toHaveBeenCalled();
+            await invokeTool(nativeToolNames.sendChatReply, {
+              purpose: 'ack',
+              message: 'Checking the approved endpoint.',
+            });
+          }
+          expect(
+            await invokeTool(nativeToolNames.requestWithSessionSecret, {
+              ...args,
+              sessionId: 'injected-session',
+              userId: 'injected-user',
+            }),
+          ).toEqual({ success: false, error: 'Secret request unavailable' });
+          expect(mocks.callIntegration).not.toHaveBeenCalled();
+          expect(
+            await mocks.nativeExecutor!({
+              name: nativeToolNames.requestWithSessionSecret,
+              sessionId: 'injected-opencode-session',
+              args,
+            }),
+          ).toEqual({ success: true, status: 200, body: 'healthy' });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Checked.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: { ...baseParams.conversation, surface },
+        adapter: callbacks(),
+      });
+
+      expect(mocks.getUnifiedSession).toHaveBeenCalledWith(
+        expect.anything(),
+        'conversation-1',
+      );
+      expect(mocks.callIntegration).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          sessionId: 'conversation-1',
+          userId: 'user-1',
+          humanTurn: true,
+        }),
+        expect.any(Array),
+        {
+          integrationId: '_roomote_http_integrations',
+          toolName: 'integration_request',
+          args: {
+            integrationId: `session:${args.secretRef}`,
+            method: args.method,
+            path: args.path,
+            body: undefined,
+            accept: 'application/json',
+          },
+        },
+      );
+    },
+  );
+
+  it.each([undefined, null, '', 'nonempty', ' '] as const)(
+    'accepts only empty Session request bodies: %j',
+    async (body) => {
+      mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
+      mocks.callIntegration.mockResolvedValue({ status: 200, body: 'healthy' });
+      const allowed = body === undefined || body === null || body === '';
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          expect(
+            await invokeTool(nativeToolNames.requestWithSessionSecret, {
+              secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+              method: 'GET',
+              path: '/status',
+              ...(body === undefined ? {} : { body }),
+            }),
+          ).toEqual(
+            allowed
+              ? { success: true, status: 200, body: 'healthy' }
+              : {
+                  success: false,
+                  error: 'Secret request unavailable',
+                },
+          );
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Checked.',
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: { ...baseParams.conversation, surface: 'web' },
+        adapter: callbacks(),
+      });
+      if (allowed) {
+        expect(mocks.callIntegration).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            sessionId: 'conversation-1',
+            userId: 'user-1',
+            humanTurn: true,
+          }),
+          expect.any(Array),
+          {
+            integrationId: '_roomote_http_integrations',
+            toolName: 'integration_request',
+            args: {
+              integrationId: 'session:e9d35700-56b8-4bf0-b088-c1cb498905d9',
+              method: 'GET',
+              path: '/status',
+              body,
+              accept: undefined,
+            },
+          },
+        );
+      } else expect(mocks.callIntegration).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['human', 'platform_event'] as const)(
+    'passes trusted %s context to operator HTTP requests without argument authority',
+    async (turnSource) => {
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: '_roomote_http_integrations',
+          name: 'HTTP integrations',
+          description: 'Broker',
+          tools: [{ name: 'integration_request' }],
+        },
+      ]);
+      const args = {
+        integrationId: 'operator-service',
+        method: 'GET',
+        path: '/status',
+        userId: 'forged-user',
+        sessionId: 'forged-session',
+        humanTurn: true,
+      };
+      mocks.callIntegration.mockResolvedValue({ status: 200 });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Checking the service.',
+          });
+          await invokeTool(nativeToolNames.callIntegrationTool, {
+            integrationId: '_roomote_http_integrations',
+            toolName: 'integration_request',
+            args,
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Checked.',
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        turnSource,
+        adapter: callbacks(),
+      });
+      expect(mocks.callIntegration).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          sessionId: 'conversation-1',
+          userId: 'user-1',
+          humanTurn: turnSource === 'human',
+        }),
+        expect.any(Array),
+        {
+          integrationId: '_roomote_http_integrations',
+          toolName: 'integration_request',
+          args,
+        },
+      );
+    },
+  );
+
+  it.each([
+    [
+      nativeToolNames.prepareSessionSecret,
+      'prepareSessionSecret',
+      {
+        label: 'API',
+        origin: 'https://api.example.com',
+        headerName: 'authorization',
+        headerPrefix: 'Bearer ',
+      },
+    ],
+    [nativeToolNames.listSessionSecrets, 'listSessionSecretApprovals', {}],
+  ] as const)('sanitizes %s SDK failures', async (name, method, args) => {
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
+    mocks[method].mockRejectedValueOnce(
+      new Error('sensitive SDK failure canary'),
+    );
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        expect(await invokeTool(name, args)).toEqual({
+          success: false,
+          error: 'Secret request unavailable',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Secure access is unavailable.',
+        });
+        return '';
+      },
+    );
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: { ...baseParams.conversation, surface: 'web' },
+      adapter: callbacks(),
+    });
+    expect(mocks[method]).toHaveBeenCalledOnce();
+    expect(JSON.stringify(mocks.upsertMessage.mock.calls)).not.toContain(
+      'sensitive SDK failure canary',
+    );
+  });
+
+  it.each(['openai/gpt-5.6', 'anthropic/claude-sonnet-5'])(
+    'keeps Session-secret broker errors out of %s model input, tool results, and emitted telemetry',
+    async (model) => {
+      const secret = 'session-secret-error-canary-7e2b9c';
+      const secretRef = 'e9d35700-56b8-4bf0-b088-c1cb498905d9';
+      const telemetry = await vi.importActual<
+        typeof import('../fast-agent-context-telemetry')
+      >('../fast-agent-context-telemetry');
+      mocks.captureInferenceContext.mockImplementationOnce(
+        telemetry.captureFastAgentInferenceContext,
+      );
+      mocks.captureInferenceAttemptOutcome.mockImplementationOnce(
+        telemetry.captureFastAgentInferenceAttemptOutcome,
+      );
+      mocks.captureTurnSettled.mockImplementationOnce(
+        telemetry.captureFastAgentTurnSettled,
+      );
+      mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
+      mocks.callIntegration.mockRejectedValueOnce(
+        new Error(`Upstream echoed Authorization: Bearer ${secret}`, {
+          cause: { headers: { Authorization: `Bearer ${secret}` } },
+        }),
+      );
+      const modelPayloads: unknown[] = [];
+      mocks.generateText.mockImplementation(
+        async (params, _session, options) => {
+          modelPayloads.push(params);
+          options.onModelResolved?.(model);
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          const result = await invokeTool(
+            nativeToolNames.requestWithSessionSecret,
+            {
+              secretRef,
+              method: 'GET',
+              path: '/status',
+            },
+          );
+          modelPayloads.push(result);
+          expect(result).toEqual({
+            success: false,
+            error: 'Secret request unavailable',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'The approved request was unavailable.',
+          });
+          return '';
+        },
+      );
+      const adapter = callbacks();
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        question: `Read /status with Session secret reference ${secretRef}.`,
+        conversation: { ...baseParams.conversation, surface: 'web' },
+        adapter,
+      });
+
+      expect(mocks.callIntegration).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          sessionId: 'conversation-1',
+          userId: 'user-1',
+          humanTurn: true,
+        }),
+        expect.any(Array),
+        {
+          integrationId: '_roomote_http_integrations',
+          toolName: 'integration_request',
+          args: {
+            integrationId: `session:${secretRef}`,
+            method: 'GET',
+            path: '/status',
+            body: undefined,
+            accept: undefined,
+          },
+        },
+      );
+      expect(modelPayloads).toHaveLength(2);
+      expect(JSON.stringify(modelPayloads)).toContain(secretRef);
+      expect(mocks.captureEvent.mock.calls.map(([name]) => name)).toEqual([
+        'fast_agent_inference_context',
+        'fast_agent_inference_attempt_outcome',
+        'fast_turn_settled',
+      ]);
+      expect(mocks.captureEvent).toHaveBeenCalledWith(
+        'fast_agent_inference_attempt_outcome',
+        expect.objectContaining({
+          properties: expect.objectContaining({
+            resolved_model: model,
+            outcome: 'success',
+          }),
+        }),
+      );
+      for (const captured of [
+        modelPayloads,
+        mocks.captureEvent.mock.calls,
+        mocks.upsertMessage.mock.calls,
+        mocks.appendVisibleMessages.mock.calls,
+        vi.mocked(adapter.postReply).mock.calls,
+      ]) {
+        expect(JSON.stringify(captured)).not.toContain(secret);
+        expect(JSON.stringify(captured)).not.toContain('Upstream echoed');
+      }
+      expect(JSON.stringify(mocks.captureEvent.mock.calls)).not.toContain(
+        secretRef,
+      );
+    },
+  );
+
+  it.each([
+    'platform-event',
+    'missing-actor',
+    'missing-session',
+    'subagent',
+  ] as const)(
+    'fails closed for Session-secret requests from %s',
+    async (scenario) => {
+      let toolResult: unknown;
+      if (scenario !== 'missing-session') {
+        mocks.getUnifiedSession.mockResolvedValue({
+          id: 'canonical-session-1',
+        });
+      }
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          if (scenario === 'subagent') {
+            options.onSubagentSessionReady('opencode-subagent-session-1');
+          }
+          toolResult = await invokeTool(
+            nativeToolNames.requestWithSessionSecret,
+            {
+              secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+              method: 'HEAD',
+              path: '/status',
+            },
+          );
+          for (const [name, args] of [
+            [
+              nativeToolNames.prepareSessionSecret,
+              {
+                label: 'API',
+                origin: 'https://api.example.com',
+                headerName: 'authorization',
+                headerPrefix: 'Bearer ',
+              },
+            ],
+            [nativeToolNames.listSessionSecrets, {}],
+          ] as const) {
+            expect(await invokeTool(name, args)).toMatchObject({
+              success: false,
+            });
+          }
+          if (scenario === 'subagent') {
+            await options.onSessionReady('opencode-session-1');
+          }
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Unavailable.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: { ...baseParams.conversation, surface: 'web' },
+        userId: scenario === 'missing-actor' ? '' : baseParams.userId,
+        ...(scenario === 'platform-event'
+          ? { turnSource: 'platform_event' as const }
+          : {}),
+        adapter: callbacks(),
+      });
+
+      expect(toolResult).toMatchObject({ success: false });
+      expect(mocks.callIntegration).not.toHaveBeenCalled();
+      expect(mocks.prepareSessionSecret).not.toHaveBeenCalled();
+      expect(mocks.listSessionSecretApprovals).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([undefined, { documents: { answers: ['Notion'] } }])(
     'resolves integration discovery with optional prose preferences: %j',

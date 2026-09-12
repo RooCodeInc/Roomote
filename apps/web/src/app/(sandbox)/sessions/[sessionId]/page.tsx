@@ -20,6 +20,7 @@ import {
 import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
 import { SessionViewers } from '@/components/sessions/SessionViewers';
+import { SessionSecrets } from '@/components/sessions/SessionSecrets';
 
 import { findDeploymentSetupSessionId } from '@/trpc/commands/setup/setup-session';
 import { hasVoiceAutostartFlag } from '@/lib/voice-autostart';
@@ -167,6 +168,11 @@ export default async function SessionDetailPage({
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <FastSessionTranscript
                   sessionId={session.id}
+                  secretSessionId={
+                    unifiedSession.ownerUserId === authorizedUser.userId
+                      ? unifiedSession.id
+                      : undefined
+                  }
                   initialMessages={session.messages}
                   hasOlderMessages={session.hasOlderMessages}
                   canReply
@@ -204,7 +210,14 @@ export default async function SessionDetailPage({
               <WorkspaceHeader
                 className="py-4"
                 contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-nowrap`}
-                actions={<SessionViewers sessionId={unifiedSession.id} />}
+                actions={
+                  <>
+                    {unifiedSession.ownerUserId === authorizedUser.userId ? (
+                      <SessionSecrets sessionId={unifiedSession.id} />
+                    ) : null}
+                    <SessionViewers sessionId={unifiedSession.id} />
+                  </>
+                }
               >
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                   <h1 className={SESSION_HEADER_TITLE_CLASS_NAME}>

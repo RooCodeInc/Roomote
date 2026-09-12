@@ -1161,6 +1161,9 @@ importers:
       '@roomote/redis':
         specifier: workspace:^
         version: link:../redis
+      '@roomote/sdk':
+        specifier: workspace:^
+        version: link:../sdk
       '@roomote/telemetry':
         specifier: workspace:^
         version: link:../telemetry

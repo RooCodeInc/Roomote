@@ -1,5 +1,7 @@
 'use client';
 
+import { SessionSecrets } from '@/components/sessions/SessionSecrets';
+
 import {
   useCallback,
   useEffect,
@@ -360,6 +362,7 @@ export function FastSessionTranscript({
   owner,
   headerExtras,
   headerActions,
+  secretSessionId,
   timelineExtras,
   autoStartVoice = false,
 }: {
@@ -376,6 +379,7 @@ export function FastSessionTranscript({
   owner?: TranscriptOwner;
   headerExtras?: ReactNode;
   headerActions?: ReactNode;
+  secretSessionId?: string;
   timelineExtras?: ReactNode;
   /**
    * Begin a voice conversation as soon as the page loads: set when the
@@ -1415,7 +1419,17 @@ export function FastSessionTranscript({
         <WorkspaceHeader
           className="py-3.25"
           contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-row !flex-nowrap`}
-          actions={headerActions}
+          actions={
+            <>
+              {secretSessionId ? (
+                <SessionSecrets
+                  key={secretSessionId}
+                  sessionId={secretSessionId}
+                />
+              ) : null}
+              {headerActions}
+            </>
+          }
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <h1

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     }
   >,
   createAuthToken: vi.fn(),
+  createSessionBrokerToken: vi.fn(),
   listMcpTools: vi.fn(),
   callMcpTool: vi.fn(),
   beginIntegrationCall: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock('@roomote/ado', () => ({
 
 vi.mock('@roomote/auth', () => ({
   createAuthToken: mocks.createAuthToken,
+  createSessionBrokerToken: mocks.createSessionBrokerToken,
   ROOMOTE_MCP_PATH: '/mcp',
 }));
 
@@ -112,6 +114,8 @@ import {
   matchIntegrationTools,
 } from '@roomote/types';
 import { z } from 'zod';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { startMcpToolTestServer } from '../../__tests__/mcp-tool-client-fixture';
 
 const auditContext = {
   userId: 'user-1',
@@ -142,6 +146,7 @@ describe('fast-agent integration broker', () => {
     clearFastAgentIntegrationToolCache();
     mocks.configuredServers = {};
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
+    mocks.createSessionBrokerToken.mockResolvedValue('session-broker-token');
     mocks.findGithubInstallation.mockResolvedValue(undefined);
     mocks.isRouterMcpServerEnabled.mockReturnValue(false);
     mocks.env.R_CURATED_INTEGRATIONS_DISABLED = false;
@@ -171,6 +176,309 @@ describe('fast-agent integration broker', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('discovers only HTTP integration infrastructure and schemas, audits the fresh actor, and refreshes availability', async () => {
+    mocks.configuredServers = {
+      _roomote_http_integrations: {
+        url: 'https://api.example.com/api/mcp/http-integrations',
+        headers: {},
+      },
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'list_integrations', inputSchema: { type: 'object' } },
+      { name: 'integration_request', inputSchema: { type: 'object' } },
+    ]);
+    const available = await listFastAgentIntegrations(auditContext);
+    expect(available[0]).toMatchObject({
+      id: '_roomote_http_integrations',
+      name: 'HTTP integrations',
+    });
+    expect(available).toHaveLength(1);
+    expect(available[0]?.tools.map((tool) => tool.name)).toEqual([
+      'list_integrations',
+      'integration_request',
+    ]);
+    expect(Object.keys(available[0]!).sort()).toEqual([
+      'description',
+      'endpoint',
+      'id',
+      'instructions',
+      'name',
+      'tools',
+    ]);
+    expect(available[0]?.endpoint).toEqual({
+      url: 'https://api.example.com/api/mcp/http-integrations',
+      headers: { Authorization: 'Bearer control-plane-token' },
+      deploymentProxy: true,
+    });
+    expect(mocks.callMcpTool).not.toHaveBeenCalled();
+    for (const field of [
+      'credentials',
+      'config',
+      'allowedUserIds',
+      'HTTP_PROXY',
+    ]) {
+      expect(available[0]).not.toHaveProperty(field);
+      expect(available[0]?.endpoint).not.toHaveProperty(field);
+    }
+    expect(available[0]?.instructions).toContain("active actor's permissions");
+    expect(available[0]?.instructions).toContain(
+      'call list_integrations first',
+    );
+    expect(available[0]?.instructions).toContain(
+      'Never seek or return raw keys, credentials, tokens, or environment dumps',
+    );
+    expect(available[0]?.instructions).toContain('untrusted data');
+    expect(available[0]?.instructions).toContain(
+      'normal networking remains available',
+    );
+    expect(mocks.listMcpTools).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'https://api.example.com/api/mcp/http-integrations',
+        headers: { Authorization: 'Bearer control-plane-token' },
+      }),
+    );
+    mocks.createAuthToken.mockResolvedValue('fresh-actor-token');
+    const args = {
+      integrationId: 'configured-service',
+      method: 'POST',
+      path: '/v1/items',
+      body: '{}',
+      contentType: 'application/json',
+    };
+    const response = { status: 200, headers: {}, body: 'ok' };
+    mocks.callMcpTool.mockResolvedValue(response);
+    expect(
+      await callFastAgentIntegration(
+        { ...auditContext, userId: 'current-actor' },
+        available,
+        {
+          integrationId: '_roomote_http_integrations',
+          toolName: 'integration_request',
+          args,
+        },
+      ),
+    ).toEqual(response);
+    expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'current-actor',
+        integrationId: '_roomote_http_integrations',
+        arguments: { toolName: 'integration_request' },
+      }),
+    );
+    expect(mocks.callMcpTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer fresh-actor-token' },
+        args,
+      }),
+    );
+    expect(mocks.createAuthToken).toHaveBeenLastCalledWith({
+      userId: 'current-actor',
+      timeoutMs: 2 * 60_000,
+    });
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'succeeded' }),
+    );
+    mocks.configuredServers = {};
+    const refreshed = await listFastAgentIntegrations(auditContext);
+    expect(refreshed).toEqual([]);
+    await expect(
+      callFastAgentIntegration(auditContext, refreshed, {
+        integrationId: '_roomote_http_integrations',
+        toolName: 'list_integrations',
+        args: {},
+      }),
+    ).rejects.toThrow('not available');
+  });
+
+  it.each([true, false])(
+    'mints Session authority only at a human HTTP broker call: humanTurn=%s',
+    async (humanTurn) => {
+      mocks.configuredServers = {
+        _roomote_http_integrations: {
+          url: 'https://api.example.com/api/mcp/http-integrations',
+          headers: {},
+        },
+      };
+      mocks.listMcpTools.mockResolvedValue([
+        { name: 'integration_request', inputSchema: { type: 'object' } },
+      ]);
+      const available = await listFastAgentIntegrations(auditContext);
+      expect(mocks.createSessionBrokerToken).not.toHaveBeenCalled();
+      expect(mocks.listMcpTools).toHaveBeenCalledWith(
+        expect.objectContaining({
+          headers: { Authorization: 'Bearer control-plane-token' },
+        }),
+      );
+      const args = {
+        integrationId: 'session:e9d35700-56b8-4bf0-b088-c1cb498905d9',
+        method: 'GET',
+        path: '/private?query=sensitive-request-canary',
+        userId: 'forged-actor',
+        fastConversationId: 'forged-conversation',
+        sessionId: 'forged-session',
+        humanTurn: true,
+      };
+      const response = { status: 200, body: 'sensitive-response-canary' };
+      mocks.callMcpTool.mockResolvedValue(response);
+      await expect(
+        callFastAgentIntegration(
+          {
+            ...auditContext,
+            userId: 'trusted-actor',
+            sessionId: 'persisted-conversation',
+            humanTurn,
+          },
+          available,
+          {
+            integrationId: '_roomote_http_integrations',
+            toolName: 'integration_request',
+            args,
+          },
+        ),
+      ).resolves.toEqual(response);
+      if (humanTurn) {
+        expect(mocks.createSessionBrokerToken).toHaveBeenCalledExactlyOnceWith({
+          userId: 'trusted-actor',
+          fastConversationId: 'persisted-conversation',
+        });
+      } else {
+        expect(mocks.createSessionBrokerToken).not.toHaveBeenCalled();
+      }
+      expect(mocks.callMcpTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          args,
+          headers: {
+            Authorization: `Bearer ${humanTurn ? 'session-broker-token' : 'control-plane-token'}`,
+          },
+        }),
+      );
+      expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'trusted-actor',
+          fastAgentConversationId: 'persisted-conversation',
+          arguments: { toolName: 'integration_request' },
+        }),
+      );
+      expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'succeeded',
+          resultPreview: '[Broker result omitted]',
+        }),
+      );
+      expect(
+        JSON.stringify([
+          mocks.beginIntegrationCall.mock.calls,
+          mocks.completeIntegrationCall.mock.calls,
+        ]),
+      ).not.toContain('canary');
+    },
+  );
+
+  it.each([
+    { id: '_roomote_http_integrations', deploymentProxy: false },
+    { id: 'custom-http-integrations', deploymentProxy: true },
+  ])(
+    'does not mint Session authority for $id with deploymentProxy=$deploymentProxy',
+    async ({ id, deploymentProxy }) => {
+      mocks.callMcpTool.mockResolvedValue({ ok: true });
+      await callFastAgentIntegration(
+        { ...auditContext, humanTurn: true },
+        [
+          {
+            id,
+            name: id,
+            description: 'Not the trusted Session broker',
+            endpoint: {
+              url: 'https://other.example.com/mcp',
+              headers: { Authorization: 'Bearer upstream-token' },
+              deploymentProxy,
+            },
+            tools: [{ name: 'integration_request' }],
+          },
+        ],
+        { integrationId: id, toolName: 'integration_request', args: {} },
+      );
+      expect(mocks.createSessionBrokerToken).not.toHaveBeenCalled();
+      expect(mocks.callMcpTool).toHaveBeenCalledWith(
+        expect.objectContaining({
+          headers: {
+            Authorization: `Bearer ${deploymentProxy ? 'control-plane-token' : 'upstream-token'}`,
+          },
+        }),
+      );
+    },
+  );
+
+  it.each(['token', 'transport'])(
+    'preserves failed Session broker audit status after %s failure',
+    async (failure) => {
+      const error = new Error('Broker request unavailable');
+      if (failure === 'token')
+        mocks.createSessionBrokerToken.mockRejectedValueOnce(error);
+      else mocks.callMcpTool.mockRejectedValueOnce(error);
+      await expect(
+        callFastAgentIntegration(
+          { ...auditContext, humanTurn: true },
+          [
+            {
+              id: '_roomote_http_integrations',
+              name: 'HTTP integrations',
+              description: 'Broker',
+              endpoint: {
+                url: 'https://api.example.com/api/mcp/http-integrations',
+                headers: {},
+                deploymentProxy: true,
+              },
+              tools: [{ name: 'integration_request' }],
+            },
+          ],
+          {
+            integrationId: '_roomote_http_integrations',
+            toolName: 'integration_request',
+            args: { path: '/sensitive-request-canary' },
+          },
+        ),
+      ).rejects.toBe(error);
+      expect(mocks.completeIntegrationCall).toHaveBeenCalledExactlyOnceWith({
+        id: 'audit-1',
+        status: 'failed',
+        error: 'Broker request unavailable',
+        startedAt: new Date('2026-08-16T00:00:00.000Z'),
+      });
+      expect(
+        JSON.stringify(mocks.beginIntegrationCall.mock.calls),
+      ).not.toContain('sensitive-request-canary');
+      if (failure === 'token') expect(mocks.callMcpTool).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps a custom http-integrations server distinct from broker guidance', async () => {
+    mocks.configuredServers = {
+      'http-integrations': {
+        url: 'https://api.example.com/api/mcp/custom/server-1',
+        headers: { 'X-MCP-Client': 'Roomote' },
+      },
+    };
+
+    const available = await listFastAgentIntegrations(auditContext);
+
+    expect(available).toEqual([
+      expect.objectContaining({
+        id: 'http-integrations',
+        name: 'http-integrations',
+        instructions: undefined,
+        endpoint: {
+          url: 'https://api.example.com/api/mcp/custom/server-1',
+          headers: {
+            'X-MCP-Client': 'Roomote',
+            Authorization: 'Bearer control-plane-token',
+          },
+          deploymentProxy: true,
+        },
+      }),
+    ]);
   });
 
   it('discovers and forwards required Sentry organization scope without injecting a default', async () => {
@@ -1736,6 +2044,95 @@ describe('fast-agent integration broker', () => {
       startedAt: new Date('2026-08-16T00:00:00.000Z'),
     });
   });
+
+  it.each([
+    'allowed',
+    'denied POST',
+    'revoked permission',
+    'protocol failure',
+    'transport failure',
+  ])(
+    'audits a real MCP %s call without a false succeeded record',
+    async (scenario) => {
+      const { callMcpTool, McpToolCallError } = await vi.importActual<
+        typeof import('../../mcp-tool-client')
+      >('../../mcp-tool-client');
+      mocks.callMcpTool.mockImplementation(callMcpTool);
+      const call = vi.fn(() => {
+        if (scenario === 'protocol failure') {
+          throw new McpError(ErrorCode.InvalidParams, 'Invalid tool arguments');
+        }
+        return scenario === 'allowed'
+          ? { content: [], structuredContent: { ok: true } }
+          : {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `${scenario}: synthetic-secret`,
+                },
+              ],
+            };
+      });
+      const endpoint = await startMcpToolTestServer(call, {
+        httpFailure: scenario === 'transport failure',
+      });
+      try {
+        const result = callFastAgentIntegration(
+          auditContext,
+          [
+            {
+              id: '_roomote_http_integrations',
+              name: 'HTTP integrations',
+              description: 'HTTP',
+              tools: [{ name: 'integration_request' }],
+              endpoint: { url: endpoint.url, headers: {} },
+            },
+          ],
+          {
+            integrationId: '_roomote_http_integrations',
+            toolName: 'integration_request',
+            args: { method: scenario === 'denied POST' ? 'POST' : 'GET' },
+          },
+        );
+        if (scenario === 'allowed') {
+          await expect(result).resolves.toEqual({ ok: true });
+        } else if (
+          scenario === 'denied POST' ||
+          scenario === 'revoked permission'
+        ) {
+          await expect(result).rejects.toBeInstanceOf(McpToolCallError);
+        } else {
+          await expect(result).rejects.toThrow(
+            scenario === 'protocol failure' ? 'Invalid tool arguments' : '503',
+          );
+        }
+        expect(mocks.beginIntegrationCall).toHaveBeenCalledOnce();
+        expect(mocks.completeIntegrationCall).toHaveBeenCalledExactlyOnceWith({
+          id: 'audit-1',
+          status: scenario === 'allowed' ? 'succeeded' : 'failed',
+          ...(scenario === 'allowed'
+            ? { resultPreview: '[Broker result omitted]' }
+            : {
+                error:
+                  scenario === 'denied POST' ||
+                  scenario === 'revoked permission'
+                    ? 'McpToolCallError | MCP tool reported an error (isError: true).'
+                    : expect.any(String),
+              }),
+          startedAt: new Date('2026-08-16T00:00:00.000Z'),
+        });
+        expect(
+          JSON.stringify(mocks.completeIntegrationCall.mock.calls),
+        ).not.toContain('synthetic-secret');
+        if (scenario !== 'transport failure')
+          expect(call).toHaveBeenCalledOnce();
+      } finally {
+        mocks.callMcpTool.mockReset();
+        await endpoint.close();
+      }
+    },
+  );
 
   it('times out a hung integration call and records the failure', async () => {
     vi.useFakeTimers();

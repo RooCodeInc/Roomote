@@ -17,6 +17,7 @@ export type CiE2eAuthContext = {
 };
 
 export type Variables = {
+  sessionBrokerAuth: import('@roomote/auth').SessionBrokerContext | undefined;
   authContext:
     | AuthTokenContext
     | McpAccessTokenContext

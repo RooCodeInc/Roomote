@@ -860,6 +860,16 @@ export const runTask = async ({
       delete runtimeEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME];
     }
 
+    if (workerEnv.sessionEgressBootstrapRequired) {
+      Object.assign(runtimeEnv, workerEnv.buildSessionEgressClientEnv());
+      if (!runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME]) {
+        throw new Error(
+          'Protected execution requires a configured Roomote inference gateway; direct-provider inference is unavailable',
+        );
+      }
+      runtimeEnv.ROOMOTE_SESSION_EGRESS_ENFORCED = '1';
+    }
+
     const workerHomeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
 
     if (workerHomeDir) {
