@@ -224,13 +224,18 @@ export function chunkTelegramMarkdown(
       const fenceMatch = /^```/.test(line);
       // Reserve room for the closing fence a flush would append.
       const closingFenceReserve = openFence ? 4 : 0;
+      let separatorLength = current.length > 0 ? 1 : 0;
 
-      if (currentLength + line.length + 1 + closingFenceReserve > maxLength) {
+      if (
+        currentLength + separatorLength + line.length + closingFenceReserve >
+        maxLength
+      ) {
         flush(true);
+        separatorLength = current.length > 0 ? 1 : 0;
       }
 
       current.push(line);
-      currentLength += line.length + 1;
+      currentLength += separatorLength + line.length;
 
       if (fenceMatch) {
         openFence = openFence ? null : line;
@@ -246,7 +251,7 @@ export function chunkTelegramMarkdown(
 
   flush(false);
 
-  return chunks;
+  return chunks.filter((chunk) => chunk.length > 0);
 }
 
 /**

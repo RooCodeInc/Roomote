@@ -159,6 +159,16 @@ describe('chunkTelegramMarkdown', () => {
       expect(chunk.length).toBeLessThanOrEqual(100);
     }
   });
+
+  it('preserves a trailing newline without emitting an empty chunk', () => {
+    const line = 'x'.repeat(3_499);
+    const markdown = `${line}\n${line}\n`;
+    const chunks = chunkTelegramMarkdown(markdown, 3_500);
+
+    expect(chunks).toEqual([line, `${line}\n`]);
+    expect(chunks.join('\n')).toBe(markdown);
+    expect(chunks.every((chunk) => chunk.length > 0)).toBe(true);
+  });
 });
 
 describe('chunkTelegramMarkdownAsHtml', () => {
