@@ -629,6 +629,60 @@ describe('prReviewNotificationJob', () => {
     expect(mockStickyFooterPost).not.toHaveBeenCalled();
   });
 
+  it('auto-dispatches opted-in feedback through a Telegram Fast parent', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      taskId: 'task-1',
+      payload: {
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'telegram',
+            workspaceId: '12345',
+            conversationId: '12345:77',
+            replyTarget: { channelId: '12345', threadId: '77' },
+          },
+        },
+      },
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
+    });
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      sourceControlProvider: 'github',
+      host: 'github.com',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prTitle: 'PR title',
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      status: 'open',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: null,
+      text: 'Alice requested changes on owner/repo#42.',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+    mockNotifyFastAgentParent.mockResolvedValue(true);
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockNotifyFastAgentParent.mock.calls[0]?.[0]).not.toHaveProperty(
+      'suggestedActionPrompt',
+    );
+    expect(mockDispatchFollowUp).toHaveBeenCalledWith({
+      provider: 'telegram',
+      taskId: 'task-1',
+      channelId: '12345',
+      threadId: '77',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+      actingUserId: 'user-9',
+    });
+  });
+
   it('does not auto-dispatch when Fast-parent delivery fails', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,

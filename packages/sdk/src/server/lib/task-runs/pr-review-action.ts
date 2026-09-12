@@ -16,6 +16,11 @@ import {
   buildResolvedSlackPrReviewMessageBlocks,
   SlackNotifier,
 } from '@roomote/slack';
+import {
+  getThreadReplyFooterRecord,
+  setThreadReplyFooterRecord,
+  withThreadReplyFooterLock,
+} from '@roomote/communication';
 import type { SourceControlProvider } from '@roomote/types';
 
 import { getCommunicationProviderAdapter } from '../communication-providers';
@@ -429,9 +434,32 @@ export async function retirePrReviewActionMessagesBestEffort(
         pending.provider === 'telegram' &&
         adapter.provider === 'telegram'
       ) {
-        await adapter.editMessageReplyMarkup({
-          channelId: pending.channelId,
-          messageId: pending.messageId,
+        const footerThreadId = pending.threadId ?? 'root';
+        const messageId = pending.messageId;
+        await withThreadReplyFooterLock({
+          lockKey: `telegram:thread_reply_footer_lock:${pending.channelId}:${footerThreadId}`,
+          fn: async (assertLock, lock) => {
+            const footer = await getThreadReplyFooterRecord(
+              'telegram',
+              pending.channelId,
+              footerThreadId,
+            );
+            await assertLock();
+            if (footer && footer.messageId === messageId && footer.buttons) {
+              const { buttons: _buttons, ...withoutButtons } = footer;
+              await setThreadReplyFooterRecord(
+                'telegram',
+                pending.channelId,
+                footerThreadId,
+                withoutButtons,
+                { keepTtl: true, lock },
+              );
+            }
+            await adapter.editMessageReplyMarkup({
+              channelId: pending.channelId,
+              messageId,
+            });
+          },
         });
       }
     } catch (error) {
