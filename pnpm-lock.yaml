@@ -323,6 +323,9 @@ importers:
       ioredis:
         specifier: 5.10.1
         version: 5.10.1
+      jsdom:
+        specifier: 26.1.0
+        version: 26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       zod:
         specifier: ^3.25.76
         version: 3.25.76
