@@ -49,6 +49,42 @@ export type FastAgentEventSemantics = {
 export const FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY =
   'fastAgentEventSemantics' as const;
 
+/**
+ * Semantics for a human or platform-event Session input.
+ *
+ * Durable queue admission and a turn that persists its own input both write
+ * the same canonical row, so the rule for what such an input claims lives
+ * here once rather than being restated by each writer.
+ */
+export function buildFastAgentInputSemantics(params: {
+  sessionId: string;
+  observedAt: Date;
+  sourceEventId: string;
+  platformEvent: boolean;
+  /** Present only for a setup platform event, which asserts current state. */
+  setupSnapshot?: string | undefined;
+}): FastAgentEventSemantics {
+  const base = {
+    schemaVersion: FAST_AGENT_EVENT_SEMANTICS_VERSION,
+    observedAt: params.observedAt.toISOString(),
+    sourceEventId: params.sourceEventId,
+  } as const;
+  if (params.platformEvent && params.setupSnapshot) {
+    return {
+      ...base,
+      kind: 'current_state_assertion',
+      authority: 'roomote_runtime',
+      subject: { type: 'setup_session', id: params.sessionId },
+      state: params.setupSnapshot,
+    };
+  }
+  return {
+    ...base,
+    kind: 'historical_observation',
+    authority: params.platformEvent ? 'roomote_runtime' : 'human',
+  };
+}
+
 export type FastAgentEventProjectionClassification =
   | 'current'
   | 'historical_relevant'

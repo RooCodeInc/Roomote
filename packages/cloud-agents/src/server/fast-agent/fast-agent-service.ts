@@ -13,7 +13,6 @@ import {
   FAST_EXECUTION,
   FAST_AGENT_ASSISTANT_CLAIM_PROVENANCE_METADATA_KEY,
   FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY,
-  FAST_AGENT_EVENT_SEMANTICS_VERSION,
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
@@ -40,6 +39,7 @@ import {
   type IntegrationToolCandidate,
   type DataVisualizationInput,
   type FastAgentAssistantClaimProvenance,
+  buildFastAgentInputSemantics,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
 } from '@roomote/types';
@@ -96,6 +96,7 @@ import {
   collectFastAgentCanonicalAttachments,
   isFastAgentCanonicalEventSuperseded,
   projectFastAgentCanonicalEvents,
+  renderFastAgentCanonicalEventContext,
   renderFastAgentCanonicalHistory,
 } from './fast-agent-canonical-projection';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
@@ -160,6 +161,7 @@ import {
   type FastAgentTurnAttemptReply,
   type FastAgentTurnAttemptSummary,
   type FastAgentUnresolvedRequest,
+  loadFastAgentAdmittedEventSemantics,
   loadFastAgentCanonicalMessages,
   loadFastAgentTurnAttemptSummary,
 } from './fast-agent-conversation-repository';
@@ -2029,6 +2031,10 @@ export async function answerFastAgentQuestion({
   const turnImages = new Map<string, NonTaskPromptFile>();
   let imageDeliveryPromise: Promise<FastAgentImageDelivery> | undefined;
   let resolvedImageDelivery: FastAgentImageDelivery | undefined;
+  // Restored history attachments are held at most once per turn, not per
+  // prompt attempt, so a rebuild followed by a retry cannot reserve two sets
+  // of attachment IDs for the same bytes.
+  let restoredAttachmentsHeld = false;
   const resolveImageDelivery = (): Promise<FastAgentImageDelivery> => {
     imageDeliveryPromise ??= resolveNonTaskInputModalityDelivery({
       modality: 'image',
@@ -3189,6 +3195,37 @@ export async function answerFastAgentQuestion({
       ? { eventId: `${turnId}:user`, turnSeq: previousAttempt.prompt.turnSeq }
       : allocateCanonicalEvent('user');
     const inputObservedAt = new Date();
+    // A durable admission already recorded what this input claims, including
+    // the instant it was observed. Reuse that record rather than deriving a
+    // second one at execution time, which would restate the observation as
+    // now. Only an input with no admitted record — an inline turn, or a row
+    // admitted by an N-1 binary — is described here.
+    const admittedInputSemantics = await loadFastAgentAdmittedEventSemantics(
+      session.id,
+      userEvent.eventId,
+    )
+      .then((semantics) => ({ read: true as const, semantics }))
+      .catch((error: unknown) => {
+        console.warn(
+          `[Fast Agent] Failed to read admitted event semantics: ${formatErrorForLog(error)}`,
+        );
+        return { read: false as const, semantics: null };
+      });
+    // Without a successful read an admitted record is indistinguishable from
+    // an absent one, so this turn writes nothing for the key: the metadata
+    // merge then leaves whatever admission recorded intact. Describing the
+    // input here instead could replace a queued event's current-state
+    // assertion with the weaker shape a human input has.
+    const inputSemantics = admittedInputSemantics.read
+      ? (admittedInputSemantics.semantics ??
+        buildFastAgentInputSemantics({
+          sessionId: session.id,
+          observedAt: inputObservedAt,
+          sourceEventId: currentMessageId ?? turnId,
+          platformEvent,
+          ...(setupSnapshot ? { setupSnapshot } : {}),
+        }))
+      : null;
     const userMessageResult = await persistCanonicalMessage(
       {
         ...userEvent,
@@ -3210,22 +3247,9 @@ export async function answerFastAgentQuestion({
             ? { inputKind: FAST_AGENT_REACTION_INPUT_TYPE }
             : {}),
           ...(platformEvent ? { platformEventKind } : {}),
-          [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: {
-            schemaVersion: FAST_AGENT_EVENT_SEMANTICS_VERSION,
-            kind:
-              platformEvent && setupSnapshot
-                ? 'current_state_assertion'
-                : 'historical_observation',
-            authority: platformEvent ? 'roomote_runtime' : 'human',
-            observedAt: inputObservedAt.toISOString(),
-            sourceEventId: currentMessageId ?? turnId,
-            ...(platformEvent && setupSnapshot
-              ? {
-                  subject: { type: 'setup_session', id: session.id },
-                  state: setupSnapshot,
-                }
-              : {}),
-          },
+          ...(inputSemantics
+            ? { [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: inputSemantics }
+            : {}),
           // Lineage back to the interrupted request this turn is resuming,
           // so the original still surfaces if this turn is interrupted too.
           ...(unresolvedRequest
@@ -3238,7 +3262,11 @@ export async function answerFastAgentQuestion({
         },
         payload: {},
         source: conversation.surface,
-        observedAt: inputObservedAt,
+        // Kept coherent with the semantics above: a reused admitted record
+        // keeps its own observation instant rather than this turn's.
+        observedAt: inputSemantics
+          ? new Date(inputSemantics.observedAt)
+          : inputObservedAt,
       },
       true,
     );
@@ -3347,20 +3375,25 @@ export async function answerFastAgentQuestion({
             event.conversationSeq > session.openCodeProjectedThroughSeq),
       );
     const currentProjectionContext = currentProjection?.semantics
-      ? `<canonical_event_context>${JSON.stringify({
+      ? renderFastAgentCanonicalEventContext({
           eventId: currentCanonicalEventId,
           classification: currentProjection.classification,
-          observedAt: currentProjection.semantics.observedAt,
-          admittedAt: currentProjection.event.createdAt.toISOString(),
-          occurredAt: currentProjection.semantics.occurredAt,
-          authority: currentProjection.semantics.authority,
-          subject: currentProjection.semantics.subject,
-          version: currentProjection.semantics.version,
-        })}</canonical_event_context>`
+          admittedAt: currentProjection.event.createdAt,
+          semantics: currentProjection.semantics,
+        })
       : undefined;
     const projectedQuestion = currentProjectionContext
       ? `${currentProjectionContext}\n${question}`
       : question;
+    // Canonical history is authoritative as soon as this conversation has any
+    // canonical event other than the input being executed, even when
+    // rendering it yields nothing: an empty projection means the prior events
+    // are genuinely not presentable, not that history is missing. The legacy
+    // transcript is only eligible for a session that never recorded a
+    // canonical event, which is what a pre-canonical session looks like.
+    const canonicalHistoryEligible = canonicalProjection.events.some(
+      ({ event }) => event.eventId !== currentCanonicalEventId,
+    );
     const {
       bootstrapMessages,
       turnMessages,
@@ -3370,10 +3403,9 @@ export async function answerFastAgentQuestion({
       question: projectedQuestion,
       currentMessageAgentContext,
       threadContext,
-      compatibilityMessages:
-        projectedHistory.length > 0
-          ? projectedHistory
-          : session.compatibilityMessages,
+      compatibilityMessages: canonicalHistoryEligible
+        ? projectedHistory
+        : session.compatibilityMessages,
       currentMessageTs: currentMessageId,
       currentMessageSender,
       surface: conversation.surface,
@@ -5017,24 +5049,42 @@ export async function answerFastAgentQuestion({
         // image input at all, they are dropped rather than announced as
         // inspectable, because nothing could ever read them; rebuilt history
         // still records that the turn carried attachments.
-        const prepareRestoredAttachments = async () => {
-          if (restoredAttachmentFiles.length === 0) return;
-          const delivery = await resolveImageDelivery();
-          if (delivery.delivery === 'unsupported') return;
+        //
+        // Single owner for both the rebuild below and the synchronous retry,
+        // which reuses the mode this turn already resolved. Holding happens
+        // once: a retry re-renders the notice for every held image through
+        // `withTurnImageNotice`, so reserving a second set of IDs for the
+        // same bytes would announce them twice.
+        const prepareRestoredAttachments = (
+          delivery: FastAgentImageDelivery,
+          text: string,
+        ): { text: string; files: NonTaskPromptFile[] } => {
+          if (
+            restoredAttachmentFiles.length === 0 ||
+            delivery.delivery === 'unsupported'
+          ) {
+            return { text, files: [] };
+          }
+          if (restoredAttachmentsHeld) return { text, files: [] };
           const prepared = holdImagesForPrompt(
             restoredAttachmentFiles,
-            promptForAttempt,
+            text,
             delivery,
           );
           commitTurnImages(prepared.held);
-          promptForAttempt = prepared.text;
-          imageFilesForAttempt = [...imageFilesForAttempt, ...prepared.files];
+          restoredAttachmentsHeld = prepared.held.length > 0;
+          return { text: prepared.text, files: prepared.files };
         };
         if (
           sessionPath === 'fallback_rebuild' ||
           sessionPath === 'cold_rebuild'
         ) {
-          await prepareRestoredAttachments();
+          const restored = prepareRestoredAttachments(
+            await resolveImageDelivery(),
+            promptForAttempt,
+          );
+          promptForAttempt = restored.text;
+          imageFilesForAttempt = [...imageFilesForAttempt, ...restored.files];
         }
         let promptKind: FastAgentPromptKind =
           sessionPath === 'warm' || sessionPath === 'cold_resume'
@@ -5455,6 +5505,13 @@ export async function answerFastAgentQuestion({
                   // Before tools run, rebuild from visible history rather than
                   // append the original turn to the failed session again.
                   openCodeSession.id = undefined;
+                  // Prepared before the notice is re-rendered so anything
+                  // newly held is announced by it. The returned text is
+                  // discarded for the same reason: on a rebuilt prompt
+                  // `withTurnImageNotice` is the notice owner.
+                  const restored = resolvedImageDelivery
+                    ? prepareRestoredAttachments(resolvedImageDelivery, '')
+                    : { files: [] };
                   promptForAttempt = withTurnImageNotice(
                     serializeFastAgentMessages([
                       ...bootstrapMessages,
@@ -5464,13 +5521,7 @@ export async function answerFastAgentQuestion({
                   imageFilesForAttempt = [
                     ...imageFiles,
                     ...injectedHumanFollowUpFiles,
-                    // The retry path is synchronous, so restored attachments
-                    // ride along only under a delivery mode already resolved
-                    // for this turn; otherwise they are left out rather than
-                    // sent to a model that may not accept them directly.
-                    ...(resolvedImageDelivery?.delivery === 'direct'
-                      ? restoredAttachmentFiles
-                      : []),
+                    ...restored.files,
                   ];
                   promptKind = 'clean_retry_bootstrap';
                   attemptSessionPath = 'cold_rebuild';

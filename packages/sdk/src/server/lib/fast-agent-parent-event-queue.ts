@@ -32,6 +32,7 @@ import {
   FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY,
   FAST_AGENT_EVENT_SEMANTICS_VERSION,
   RunStatus,
+  buildFastAgentInputSemantics,
   exitedRunStatuses,
   type FastAgentParent,
   type FastAgentHumanFollowUpEvent,
@@ -206,19 +207,22 @@ function buildCanonicalEventSemantics(params: {
   } as const;
   switch (event.type) {
     case 'human_follow_up': {
-      if (
-        event.turnSource === 'platform_event' &&
+      // One rule decides what a Session input claims, shared with the turn
+      // that persists its own input, so admission and execution cannot
+      // disagree about the same row.
+      return buildFastAgentInputSemantics({
+        sessionId: parent.sessionId,
+        observedAt,
+        sourceEventId: base.sourceEventId,
+        platformEvent: event.turnSource === 'platform_event',
+        ...(event.turnSource === 'platform_event' &&
         event.platformEventKind === 'setup'
-      ) {
-        return {
-          ...base,
-          kind: 'current_state_assertion',
-          authority: 'roomote_runtime',
-          subject: { type: 'setup_session', id: parent.sessionId },
-          state: event.setupContext?.setupSnapshot ?? event.question,
-        };
-      }
-      return { ...base, kind: 'historical_observation', authority: 'human' };
+          ? {
+              setupSnapshot:
+                event.setupContext?.setupSnapshot ?? event.question,
+            }
+          : {}),
+      });
     }
     case 'scheduled_wakeup':
       return {

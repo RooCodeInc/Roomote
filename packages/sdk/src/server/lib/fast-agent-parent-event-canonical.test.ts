@@ -22,6 +22,7 @@ import {
 } from '@roomote/types';
 import {
   getOrCreateFastAgentSession,
+  loadFastAgentAdmittedEventSemantics,
   projectFastAgentCanonicalEvents,
   upsertFastAgentMessage,
 } from '@roomote/cloud-agents/server';
@@ -118,7 +119,7 @@ describe('Fast parent event canonical admission', () => {
     ).toHaveLength(1);
   });
 
-  it('preserves admission provenance when consumption idempotently upserts the prompt', async () => {
+  it('keeps admitted semantics when a later writer carries none', async () => {
     const parent = { sessionId, conversation };
     await enqueueFastAgentParentEvent({
       parent,
@@ -134,6 +135,8 @@ describe('Fast parent event canonical admission', () => {
     const [admitted] = await db.query.fastAgentMessages.findMany({
       where: eq(fastAgentMessages.conversationId, sessionId),
     });
+    // A writer touching this row for another reason must not erase the
+    // admission record just because it has nothing to say about semantics.
     await upsertFastAgentMessage({
       sessionId,
       message: {
@@ -144,17 +147,7 @@ describe('Fast parent event canonical admission', () => {
         eventType: admitted!.eventType,
         role: 'user',
         contentBlocks: admitted!.contentBlocks,
-        metadata: {
-          visibleInTranscript: false,
-          turnSource: 'platform_event',
-          [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: {
-            schemaVersion: 1,
-            kind: 'historical_observation',
-            authority: 'roomote_runtime',
-            observedAt: new Date().toISOString(),
-            sourceEventId: 'replacement',
-          },
-        },
+        metadata: { visibleInTranscript: false, turnSource: 'platform_event' },
         payload: {},
         source: 'web',
       },
@@ -168,7 +161,51 @@ describe('Fast parent event canonical admission', () => {
       authority: 'delegated_task',
       sourceEventId: 'fast-parent-child-message:child-message-1',
     });
+    expect(updated?.metadata?.turnSource).toBe('platform_event');
     expect(updated?.conversationSeq).toBe(admitted?.conversationSeq);
     expect(updated?.observedAt).toEqual(admitted?.observedAt);
+  });
+
+  it('offers the admitted semantics for consumption to reuse', async () => {
+    const parent = { sessionId, conversation };
+    await enqueueFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'child_message',
+        taskId: 'task-1',
+        runId: 42,
+        messageId: 'child-message-2',
+        purpose: 'progress',
+        message: 'The source is ready.',
+      },
+    });
+    const [admitted] = await db.query.fastAgentMessages.findMany({
+      where: eq(fastAgentMessages.conversationId, sessionId),
+    });
+
+    // What the executing turn reads instead of deriving its own semantics.
+    const reused = await loadFastAgentAdmittedEventSemantics(
+      sessionId,
+      admitted!.eventId,
+    );
+    expect(reused).toMatchObject({
+      authority: 'delegated_task',
+      kind: 'historical_observation',
+      sourceEventId: 'fast-parent-child-message:child-message-2',
+      observedAt: admitted!.observedAt?.toISOString(),
+    });
+
+    // An N-1 binary admitted rows without semantics; the turn describes
+    // those itself rather than reusing a record that is not there.
+    await db
+      .update(fastAgentMessages)
+      .set({ metadata: { turnSource: 'platform_event' } })
+      .where(eq(fastAgentMessages.id, admitted!.id));
+    expect(
+      await loadFastAgentAdmittedEventSemantics(sessionId, admitted!.eventId),
+    ).toBeNull();
+    expect(
+      await loadFastAgentAdmittedEventSemantics(sessionId, 'no-such-event'),
+    ).toBeNull();
   });
 });

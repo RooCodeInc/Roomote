@@ -5,6 +5,7 @@ import type { ModelMessage } from 'ai';
 import type { FastAgentMessage } from '@roomote/db/server';
 import {
   FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY,
+  FAST_AGENT_EVENT_SEMANTICS_VERSION,
   type FastAgentEventAuthority,
   type FastAgentEventProjectionClassification,
   type FastAgentEventSemanticKind,
@@ -56,21 +57,26 @@ const STATE_EVIDENCE_RANK: Record<FastAgentEventSemanticKind, number> = {
  * `undefined` and make the ordering comparison `NaN`, which would silently
  * destroy the total order. An event whose semantics cannot be ranked is
  * treated as unsemantic history instead.
+ *
+ * The check is an own-property test, not `in`: every object inherits
+ * `toString` and `constructor`, so `in` would accept those as a kind or an
+ * authority and then rank them as a function, which is exactly the `NaN` this
+ * guard exists to prevent.
  */
-function readSemantics(
-  event: FastAgentMessage,
+export function readFastAgentEventSemantics(
+  event: Pick<FastAgentMessage, 'metadata'>,
 ): FastAgentEventSemantics | null {
   const value = event.metadata?.[FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY];
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const semantics = value as Partial<FastAgentEventSemantics>;
   if (
-    semantics.schemaVersion !== 1 ||
+    semantics.schemaVersion !== FAST_AGENT_EVENT_SEMANTICS_VERSION ||
     typeof semantics.observedAt !== 'string' ||
     typeof semantics.sourceEventId !== 'string' ||
     typeof semantics.kind !== 'string' ||
     typeof semantics.authority !== 'string' ||
-    !(semantics.kind in STATE_EVIDENCE_RANK) ||
-    !(semantics.authority in AUTHORITY_RANK)
+    !Object.hasOwn(STATE_EVIDENCE_RANK, semantics.kind) ||
+    !Object.hasOwn(AUTHORITY_RANK, semantics.authority)
   ) {
     return null;
   }
@@ -195,7 +201,7 @@ export function projectFastAgentCanonicalEvents(
   });
   const events: FastAgentProjectedEvent[] = ordered.map((event) => ({
     event,
-    semantics: readSemantics(event),
+    semantics: readFastAgentEventSemantics(event),
     classification: 'historical_relevant',
   }));
   const bySubject = new Map<string, FastAgentProjectedEvent[]>();
@@ -329,6 +335,29 @@ function eventText(event: FastAgentMessage): string {
     .join('\n');
 }
 
+/**
+ * The provenance header a canonical event carries into a prompt. Rebuilt
+ * history and the current turn's own input both announce an event the same
+ * way, so the shape lives here rather than being restated per call site.
+ */
+export function renderFastAgentCanonicalEventContext(params: {
+  eventId: string;
+  classification: FastAgentEventProjectionClassification;
+  admittedAt: Date;
+  semantics: FastAgentEventSemantics;
+}): string {
+  return `<canonical_event_context>${JSON.stringify({
+    eventId: params.eventId,
+    classification: params.classification,
+    observedAt: params.semantics.observedAt,
+    admittedAt: params.admittedAt.toISOString(),
+    occurredAt: params.semantics.occurredAt,
+    authority: params.semantics.authority,
+    subject: params.semantics.subject,
+    version: params.semantics.version,
+  })}</canonical_event_context>`;
+}
+
 export function renderFastAgentCanonicalHistory(
   projection: FastAgentCanonicalProjection,
   options: { excludeEventId?: string } = {},
@@ -352,16 +381,12 @@ export function renderFastAgentCanonicalHistory(
         : '';
     const body = [attachmentNote, text].filter(Boolean).join('\n');
     const context = semantics
-      ? `<canonical_event_context>${JSON.stringify({
+      ? `${renderFastAgentCanonicalEventContext({
           eventId: event.eventId,
           classification,
-          observedAt: semantics.observedAt,
-          admittedAt: event.createdAt.toISOString(),
-          occurredAt: semantics.occurredAt,
-          authority: semantics.authority,
-          subject: semantics.subject,
-          version: semantics.version,
-        })}</canonical_event_context>\n`
+          admittedAt: event.createdAt,
+          semantics,
+        })}\n`
       : '';
     return [{ role: event.role, content: `${context}${body}` } as ModelMessage];
   });

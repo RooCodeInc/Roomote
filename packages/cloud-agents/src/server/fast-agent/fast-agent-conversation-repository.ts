@@ -30,12 +30,13 @@ import {
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
-  FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY,
   fastAgentConversationSchema,
   type FastAgentConversationOwner,
+  type FastAgentEventSemantics,
   type ReasoningEffort,
 } from '@roomote/types';
 
+import { readFastAgentEventSemantics } from './fast-agent-canonical-projection';
 import { FAST_RESPONDING_LEASE_MS } from './fast-agent-constants';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
@@ -874,6 +875,26 @@ export async function loadFastAgentCanonicalMessages(
   });
 }
 
+/**
+ * The semantics a durable admission already recorded for this input, so a
+ * turn executing a queued event reuses that record instead of deriving its
+ * own. Returns null when no row exists yet, or when the row was admitted by
+ * an N-1 binary that did not record semantics; the caller supplies them then.
+ */
+export async function loadFastAgentAdmittedEventSemantics(
+  conversationId: string,
+  eventId: string,
+): Promise<FastAgentEventSemantics | null> {
+  const row = await db.query.fastAgentMessages.findFirst({
+    where: and(
+      eq(fastAgentMessages.conversationId, conversationId),
+      eq(fastAgentMessages.eventId, eventId),
+    ),
+    columns: { metadata: true },
+  });
+  return row ? readFastAgentEventSemantics(row) : null;
+}
+
 function buildIdentityKey(conversation: FastAgentConversation): string {
   return `${conversation.surface}:${conversation.workspaceId}:${conversation.conversationId}`;
 }
@@ -1390,16 +1411,12 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               eventType: message.eventType,
               role: message.role ?? null,
               contentBlocks: message.contentBlocks ?? [],
+              // Merge rather than replace so metadata a durable admission
+              // wrote for this row survives the executing turn's write. The
+              // turn reuses the admitted semantics instead of rebuilding
+              // them, so no key needs protecting from its own writer.
               metadata: sql`coalesce(${fastAgentMessages.metadata}, '{}'::jsonb)
-                || ${JSON.stringify(message.metadata ?? {})}::jsonb
-                || case
-                  when ${fastAgentMessages.metadata} ? ${FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY}
-                  then jsonb_build_object(
-                    ${FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY}::text,
-                    ${fastAgentMessages.metadata}->${FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY}
-                  )
-                  else '{}'::jsonb
-                end`,
+                || ${JSON.stringify(message.metadata ?? {})}::jsonb`,
               payload: message.payload ?? {},
               source: message.source ?? null,
               nativeSessionId: message.nativeSessionId ?? null,

@@ -8,6 +8,8 @@ import {
   collectFastAgentCanonicalAttachments,
   FAST_AGENT_CANONICAL_ATTACHMENT_LIMIT,
   projectFastAgentCanonicalEvents,
+  readFastAgentEventSemantics,
+  renderFastAgentCanonicalEventContext,
   renderFastAgentCanonicalHistory,
 } from '../fast-agent-canonical-projection';
 
@@ -815,6 +817,125 @@ describe('Fast canonical event projection', () => {
           excludeEventId: 'current',
         }).map(({ eventId }) => eventId),
       ).toEqual(['history']);
+    });
+  });
+  describe('semantics validation', () => {
+    function withSemantics(
+      semantics: Record<string, unknown>,
+    ): FastAgentMessage {
+      const row = event({
+        id: 'candidate',
+        sequence: 1,
+        state: 'yellow',
+        semantics: {
+          kind: 'current_state_assertion',
+          authority: 'roomote_runtime',
+          observedAt: '2026-01-01T00:00:00.000Z',
+          subject: setupSubject,
+        },
+      });
+      return {
+        ...row,
+        metadata: {
+          ...row.metadata,
+          [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: semantics,
+        },
+      };
+    }
+
+    // `in` would accept these: every object inherits them from its prototype,
+    // and ranking a function makes the ordering comparison NaN, which would
+    // silently destroy the total order the reducer depends on.
+    it.each(['toString', 'constructor', 'valueOf', 'hasOwnProperty'])(
+      'rejects inherited object member %s as a kind or an authority',
+      (inherited) => {
+        expect(
+          readFastAgentEventSemantics(
+            withSemantics({
+              schemaVersion: 1,
+              kind: inherited,
+              authority: 'roomote_runtime',
+              observedAt: '2026-01-01T00:00:00.000Z',
+              sourceEventId: 'candidate',
+            }),
+          ),
+        ).toBeNull();
+        expect(
+          readFastAgentEventSemantics(
+            withSemantics({
+              schemaVersion: 1,
+              kind: 'current_state_assertion',
+              authority: inherited,
+              observedAt: '2026-01-01T00:00:00.000Z',
+              sourceEventId: 'candidate',
+            }),
+          ),
+        ).toBeNull();
+      },
+    );
+
+    it('keeps one unrankable claim from reordering the claims around it', () => {
+      const rankable = event({
+        id: 'green-v11',
+        sequence: 2,
+        state: 'green',
+        semantics: {
+          kind: 'current_state_assertion',
+          authority: 'roomote_runtime',
+          observedAt: '2026-01-01T00:00:11.000Z',
+          subject: setupSubject,
+          version: { scheme: 'monotonic_number', value: 11 },
+        },
+      });
+      const unrankable = withSemantics({
+        schemaVersion: 1,
+        kind: 'constructor',
+        authority: 'constructor',
+        observedAt: '2026-01-01T00:00:99.000Z',
+        sourceEventId: 'candidate',
+        subject: setupSubject,
+        state: 'bogus',
+      });
+
+      const projection = projectFastAgentCanonicalEvents([
+        unrankable,
+        rankable,
+      ]);
+
+      expect(projection.currentStateEventIds).toEqual(['green-v11']);
+      // Unsemantic history, not a state claim that could win the subject.
+      expect(
+        projection.events.find(({ event: row }) => row.eventId === 'candidate')
+          ?.classification,
+      ).toBe('historical_relevant');
+    });
+
+    it('announces the current input exactly as rebuilt history does', () => {
+      const row = event({
+        id: 'shared-shape',
+        sequence: 1,
+        state: 'yellow',
+        semantics: {
+          kind: 'current_state_assertion',
+          authority: 'roomote_runtime',
+          observedAt: '2026-01-01T00:00:10.000Z',
+          subject: setupSubject,
+        },
+      });
+      const projection = projectFastAgentCanonicalEvents([row]);
+      const projected = projection.events[0]!;
+
+      const rendered = renderFastAgentCanonicalHistory(projection)[0];
+      const context = renderFastAgentCanonicalEventContext({
+        eventId: row.eventId,
+        classification: projected.classification,
+        admittedAt: row.createdAt,
+        semantics: projected.semantics!,
+      });
+
+      expect(String(rendered?.content)).toContain(context);
+      expect(context).toContain('"classification":"current"');
+      expect(context).toContain('"admittedAt":');
     });
   });
 });
