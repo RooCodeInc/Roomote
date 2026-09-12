@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   TELEGRAM_MAX_MESSAGE_LENGTH,
+  TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
   chunkTelegramMarkdown,
   chunkTelegramMarkdownAsHtml,
   chunkTelegramText,
   markdownToTelegramHtml,
+  planTelegramRichMessages,
 } from '../telegram-format';
 
 describe('markdownToTelegramHtml', () => {
@@ -191,7 +193,7 @@ describe('chunkTelegramMarkdownAsHtml', () => {
 
   it('keeps every HTML chunk under the Telegram limit despite escape expansion', () => {
     // Angle-bracket-heavy content expands ~4x under HTML escaping, so raw
-    // chunks that fit the markdown target can overflow 4096 once converted.
+    // chunks that fit the source target can overflow once converted.
     const line = '<div><span attr="&&&">' + '&<>'.repeat(20) + '</span></div>';
     const markdown = [
       '```html',
@@ -203,10 +205,7 @@ describe('chunkTelegramMarkdownAsHtml', () => {
     expect(chunks.length).toBeGreaterThan(1);
     for (const chunk of chunks) {
       expect(chunk.html.length).toBeLessThanOrEqual(
-        TELEGRAM_MAX_MESSAGE_LENGTH,
-      );
-      expect(chunk.markdown.length).toBeLessThanOrEqual(
-        TELEGRAM_MAX_MESSAGE_LENGTH,
+        TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
       );
     }
   });
@@ -220,11 +219,54 @@ describe('chunkTelegramMarkdownAsHtml', () => {
   });
 
   it('preserves exact newlines during recursive HTML expansion', () => {
-    const markdown = `${'&'.repeat(409)}\n${'&'.repeat(1_000)}`;
+    const markdown = `${'&'.repeat(5_000)}\n${'&'.repeat(10_000)}`;
     const chunks = chunkTelegramMarkdownAsHtml(markdown);
 
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.map((chunk) => chunk.markdown).join('')).toBe(markdown);
     expect(chunks.every((chunk) => chunk.markdown.length > 0)).toBe(true);
+  });
+});
+
+describe('planTelegramRichMessages', () => {
+  it('keeps rendered messages above 4096 together below the rich limit', () => {
+    const text = 'x'.repeat(10_000);
+    expect(planTelegramRichMessages({ text })).toEqual([{ text, html: text }]);
+  });
+
+  it('splits above the rich limit and reserves footer overhead', () => {
+    const text = 'paragraph '.repeat(8_000);
+    const chunks = planTelegramRichMessages({
+      text,
+      footerText: '[Open](https://roomote.test)',
+      textFormat: 'markdown',
+    });
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(text);
+    expect(
+      chunks.every(
+        (chunk) => chunk.html.length <= TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+      ),
+    ).toBe(true);
+    expect(
+      chunks.slice(0, -1).every((chunk) => !chunk.html.includes('<footer>')),
+    ).toBe(true);
+    expect(chunks.at(-1)?.html).toContain(
+      '<footer><a href="https://roomote.test">Open</a></footer>',
+    );
+  });
+
+  it('accounts for escaping expansion when splitting plain text', () => {
+    const text = '&<>'.repeat(20_000);
+    const chunks = planTelegramRichMessages({ text });
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(text);
+    expect(
+      chunks.every(
+        (chunk) => chunk.html.length <= TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+      ),
+    ).toBe(true);
   });
 });

@@ -457,7 +457,7 @@ describe('deliverFastAgentParentEvent', () => {
       provider: 'telegram',
       postMessage: mocks.telegramPostMessage,
       sendChatAction: mocks.telegramTyping,
-      sendMessageDraft: mocks.telegramTyping,
+      sendRichMessageDraft: mocks.telegramTyping,
       editMessageText: mocks.telegramEditMessage,
       editForumTopic: mocks.telegramEditForumTopic,
       resolveForumTopicIconCustomEmojiId: mocks.telegramResolveForumTopicIcon,
@@ -2302,7 +2302,8 @@ describe('deliverFastAgentParentEvent', () => {
       expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           channelId: 'telegram-chat-1',
-          text: `${expectedPrefix}\n\n${message}\n\nReply anytime · [Open in Roomote](https://api.roomote.example/sessions/${parent.sessionId}?utm_source=telegram&utm_medium=link&utm_campaign=telegram.fast_reply)`,
+          text: `${expectedPrefix}\n\n${message}`,
+          footerText: `Reply anytime · [Open in Roomote](https://api.roomote.example/sessions/${parent.sessionId}?utm_source=telegram&utm_medium=link&utm_campaign=telegram.fast_reply)`,
           textFormat: 'markdown',
         }),
       );
@@ -2484,11 +2485,21 @@ describe('deliverFastAgentParentEvent', () => {
         expect.objectContaining({
           channelId,
           ...(threadId ? { threadId } : {}),
-          text: expect.stringMatching(
-            new RegExp(
-              `^The proof is ready\\.\\n\\nReply anytime · \\[Open in Roomote\\]\\(.*utm_source=${surface}.*\\)$`,
-            ),
-          ),
+          text:
+            surface === 'telegram'
+              ? 'The proof is ready.'
+              : expect.stringMatching(
+                  new RegExp(
+                    `^The proof is ready\\.\\n\\nReply anytime · \\[Open in Roomote\\]\\(.*utm_source=${surface}.*\\)$`,
+                  ),
+                ),
+          ...(surface === 'telegram'
+            ? {
+                footerText: expect.stringMatching(
+                  /Reply anytime · \[Open in Roomote\]\(.*utm_source=telegram.*\)/,
+                ),
+              }
+            : {}),
           textFormat: 'markdown',
           images: [
             {
@@ -2499,7 +2510,9 @@ describe('deliverFastAgentParentEvent', () => {
           ],
         }),
       );
-      const footerText = post.mock.calls[0]![0].text.split('\n\n').at(-1);
+      const footerText =
+        post.mock.calls[0]![0].footerText ??
+        post.mock.calls[0]![0].text.split('\n\n').at(-1);
       expect(
         JSON.parse(
           mocks.redisStore.get(
@@ -3561,8 +3574,9 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.telegramPostMessage).toHaveBeenCalledWith({
       channelId: 'telegram-chat-1',
       threadId: 'topic-7',
-      text: expect.stringMatching(
-        /^There is new PR feedback\.\n\nReply anytime · \[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\) · \[Open in Roomote\]\(.*\/sessions\/.*\)$/,
+      text: 'There is new PR feedback.',
+      footerText: expect.stringMatching(
+        /^Reply anytime · \[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\) · \[Open in Roomote\]\(.*\/sessions\/.*\)$/,
       ),
       textFormat: 'markdown',
       images: [],
