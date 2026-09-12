@@ -26,7 +26,7 @@ describe('Fast Telegram activity', () => {
       channelId: '123',
       threadId: '77',
       draftId: thinkingDraftId,
-      text: 'Thinking...',
+      text: 'Roomote is working...',
     });
     expect(sendChatAction).not.toHaveBeenCalled();
 
@@ -63,7 +63,7 @@ describe('Fast Telegram activity', () => {
       channelId: '123',
       threadId: '77',
       draftId: firstDraftId,
-      text: 'Thinking...',
+      text: 'Roomote is working...',
     });
 
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_DRAFT_REFRESH_MS);
@@ -93,7 +93,7 @@ describe('Fast Telegram activity', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(sendMessageDraft).toHaveBeenCalledTimes(2);
     expect(sendMessageDraft).toHaveBeenLastCalledWith(
-      expect.objectContaining({ text: 'Thinking...' }),
+      expect.objectContaining({ text: 'Roomote is working...' }),
     );
 
     activity.reassert();
@@ -128,7 +128,7 @@ describe('Fast Telegram activity', () => {
       sendMessageDraft.mock.calls
         .filter(([input]) => input.text)
         .map(([input]) => input.text),
-    ).toEqual(['Thinking...', 'Partial ']);
+    ).toEqual(['Roomote is working...', 'Partial ']);
     await vi.advanceTimersByTimeAsync(
       FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS / 2,
     );
@@ -139,7 +139,11 @@ describe('Fast Telegram activity', () => {
       sendMessageDraft.mock.calls
         .filter(([input]) => input.text)
         .map(([input]) => input.text),
-    ).toEqual(['Thinking...', 'Partial ', 'Partial answer in progress']);
+    ).toEqual([
+      'Roomote is working...',
+      'Partial ',
+      'Partial answer in progress',
+    ]);
 
     await expect(
       stream.finish({ purpose: 'closeout', message: 'Final answer' }),

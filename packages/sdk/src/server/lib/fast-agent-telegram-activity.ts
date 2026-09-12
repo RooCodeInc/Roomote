@@ -18,7 +18,7 @@ export const FAST_AGENT_TELEGRAM_TYPING_REFRESH_MS = 4_000;
 export const FAST_AGENT_TELEGRAM_REASSERT_DELAY_MS = 500;
 // Pace draft updates independently of model token cadence.
 export const FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS = 800;
-const FAST_AGENT_TELEGRAM_THINKING_TEXT = 'Thinking...';
+const FAST_AGENT_TELEGRAM_THINKING_TEXT = 'Roomote is working...';
 
 function isTelegramPrivateChatId(channelId: string): boolean {
   const parsed = Number(channelId);
