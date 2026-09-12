@@ -1,9 +1,24 @@
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+
+import {
+  DEFAULT_MODEL_PROVIDER_ENV_KEYS,
+  isSettingsOnlyProviderEnvVar,
+} from '@roomote/types';
 
 const require = createRequire(import.meta.url);
 const ecosystemConfigPath = fileURLToPath(
   new URL('../../../../../ecosystem.config.js', import.meta.url),
+);
+const productionComposePath = fileURLToPath(
+  new URL(
+    '../../../../../deploy/compose/docker-compose.prod.yml',
+    import.meta.url,
+  ),
+);
+const runtimeProviderEnvKeys = DEFAULT_MODEL_PROVIDER_ENV_KEYS.filter(
+  (key) => !isSettingsOnlyProviderEnvVar(key),
 );
 
 interface EcosystemApp {
@@ -120,6 +135,36 @@ describe('ecosystem.config.js', () => {
       OPENROUTER_API_KEY: 'test-openrouter-key',
       CUSTOM_PROVIDER_API_KEY: 'custom-provider-key',
     });
+  });
+
+  it('forwards every canonical runtime provider variable in deployment templates', () => {
+    process.env = {
+      ...originalEnv,
+      ...Object.fromEntries(runtimeProviderEnvKeys.map((key) => [key, key])),
+    };
+
+    const apps = loadEcosystemApps();
+    for (const serviceName of ['api', 'web', 'bullmq', 'controller']) {
+      const app = apps.find((entry) => entry.name === `roomote-${serviceName}`);
+
+      for (const key of runtimeProviderEnvKeys) {
+        expect(app?.env?.[key], `${serviceName} is missing ${key}`).toBe(key);
+      }
+    }
+
+    const compose = readFileSync(productionComposePath, 'utf8');
+    const inferenceEnv = compose.slice(
+      compose.indexOf('x-roomote-inference-env:'),
+      compose.indexOf('x-roomote-web-env:'),
+    );
+    for (const key of runtimeProviderEnvKeys) {
+      expect(inferenceEnv, `production Compose is missing ${key}`).toContain(
+        `  ${key}: \${${key}:-}`,
+      );
+    }
+    expect(compose).toContain(
+      'x-roomote-controller-env: &roomote-controller-env\n  <<: *roomote-inference-env',
+    );
   });
 
   it('passes the preview inference launcher key only to the controller', () => {
