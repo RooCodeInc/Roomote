@@ -16,6 +16,7 @@ import {
   taskFactory,
   syncTaskStateFromRuns,
   deriveTaskStateFromRuns,
+  selectTaskStateRun,
 } from '../../server';
 import type { CreateTaskRun } from '../../types';
 
@@ -135,12 +136,12 @@ describe('deriveTaskStateFromRuns', () => {
   });
 
   it('prefers the latest progressed terminal run among siblings', () => {
-    expect(
-      deriveTaskStateFromRuns([
-        { id: 1, status: RunStatus.Completed, startedAt: new Date() },
-        { id: 2, status: RunStatus.Failed, startedAt: new Date() },
-      ]),
-    ).toBe('failed');
+    const runs = [
+      { id: 1, status: RunStatus.Completed, startedAt: new Date() },
+      { id: 2, status: RunStatus.Failed, startedAt: new Date() },
+    ];
+    expect(deriveTaskStateFromRuns(runs)).toBe('failed');
+    expect(selectTaskStateRun(runs)?.id).toBe(2);
   });
 });
 

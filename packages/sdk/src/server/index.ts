@@ -21,6 +21,15 @@ export {
   maybeEnqueueBrainMemoryForCompletedRun,
 } from './lib/task-runs/finish-run';
 export {
+  WEB_TASK_INITIATOR_SETTLE_NOTIFICATION_JOB,
+  enqueueWebTaskInitiatorSettleNotification,
+  type WebTaskInitiatorSettleNotificationJob,
+} from './lib/task-runs/enqueue-web-task-initiator-settle-notification';
+export {
+  notifyWebTaskInitiatorOnSettle,
+  type WebTaskInitiatorSettleNotificationResult,
+} from './lib/task-runs/notify-web-task-initiator-on-settle';
+export {
   AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
   AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
   AUTOMATION_RECOMMENDATION_REPOSITORY_CAP,

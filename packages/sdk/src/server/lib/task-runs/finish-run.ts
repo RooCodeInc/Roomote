@@ -75,6 +75,8 @@ import {
 import { cleanupSandboxOidcTargetsForTaskRun } from '../sandbox-oidc';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
 import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
+import { notifyWebTaskInitiatorOnSettle } from './notify-web-task-initiator-on-settle';
+import { enqueueWebTaskInitiatorSettleNotification } from './enqueue-web-task-initiator-settle-notification';
 import { settleLiveTaskMessageOnExit } from './settle-live-task-message-on-exit';
 import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
@@ -409,6 +411,16 @@ export const finishRun = async ({
     status,
     run.task.title,
   );
+  if (status !== RunStatus.Idle) {
+    const notification = await notifyWebTaskInitiatorOnSettle(run, status);
+    if (notification === 'failed') {
+      await enqueueWebTaskInitiatorSettleNotification({
+        runId: run.id,
+        taskId: run.taskId,
+        status,
+      });
+    }
+  }
   const fastAgentParent = getFastAgentParentFromPayload(run.payload);
   const parentSettleNotification = notifyFastAgentParentOnSettle(
     {

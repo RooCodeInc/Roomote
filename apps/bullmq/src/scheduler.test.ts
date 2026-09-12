@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   workerConstructor: vi.fn(),
   queueEventsConstructor: vi.fn(),
   threadFooterRefreshJob: vi.fn(),
+  notifyWebTaskInitiatorOnSettle: vi.fn(),
 }));
 
 vi.mock('bullmq', () => ({
@@ -48,6 +49,7 @@ vi.mock('@roomote/sdk/server', () => ({
   securityAuditorJob: vi.fn(),
   sentryTriageJob: vi.fn(),
   suggesterJob: vi.fn(),
+  notifyWebTaskInitiatorOnSettle: mocks.notifyWebTaskInitiatorOnSettle,
 }));
 
 vi.mock('./redis', () => ({ getRedis: () => ({}) }));
@@ -84,6 +86,30 @@ describe('startScheduler', () => {
     }) => Promise<void>;
     await handler({ name: ScheduledJobName.ThreadFooterRefresh });
     expect(mocks.threadFooterRefreshJob).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries failed personal settlement notifications through BullMQ', async () => {
+    mocks.notifyWebTaskInitiatorOnSettle.mockResolvedValue('failed');
+    await startScheduler();
+    const handler = mocks.workerConstructor.mock.calls[0]![1] as (job: {
+      name: string;
+      data: unknown;
+    }) => Promise<void>;
+
+    await expect(
+      handler({
+        name: ScheduledJobName.WebTaskInitiatorSettleNotification,
+        data: {
+          runId: 42,
+          taskId: 'task-1',
+          status: 'completed',
+        },
+      }),
+    ).rejects.toThrow('Personal settlement notification failed for run 42');
+    expect(mocks.notifyWebTaskInitiatorOnSettle).toHaveBeenCalledWith(
+      { id: 42, taskId: 'task-1' },
+      'completed',
+    );
   });
   beforeEach(() => {
     vi.clearAllMocks();
