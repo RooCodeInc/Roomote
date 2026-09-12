@@ -19,6 +19,7 @@ import {
   getTelegramUpdateMessage,
   getTelegramUpdateMessageReaction,
   getNewTelegramMessageReactions,
+  getTelegramGoalCommand,
   getTelegramNewTaskCommand,
   isTelegramImplicitTopicCreatedMessage,
   isTelegramPrivateChat,
@@ -32,6 +33,7 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
+import { startTaskGoal } from '../tasks/start-task-goal.js';
 import {
   findActiveTelegramTaskRun,
   findCompletedTelegramTaskRunWithSnapshot,
@@ -76,6 +78,7 @@ const TELEGRAM_COMMAND_HELP = [
   '`/start` — show this welcome message.',
   '`/help` — show command help.',
   '`/new <request>` — start a fresh conversation instead of continuing the current one; when topics are available, it opens a new topic.',
+  '`/goal <objective>` — keep an active task working toward an objective.',
 ].join('\n');
 
 const TELEGRAM_WELCOME_MESSAGE = [
@@ -535,8 +538,11 @@ telegram.post('/', async (c) => {
   const newTaskCommand = getTelegramNewTaskCommand(update, {
     botUsername: botUsername ?? undefined,
   });
+  const goalCommand = getTelegramGoalCommand(update, {
+    botUsername: botUsername ?? undefined,
+  });
 
-  if (!queuedMessage && !newTaskCommand) {
+  if (!queuedMessage && !newTaskCommand && !goalCommand) {
     return c.json({ ok: true, ignored: 'unsupported_update' });
   }
 
@@ -558,18 +564,19 @@ telegram.post('/', async (c) => {
   const hasMedia = Boolean(
     message.photo?.length || message.document || message.audio || message.voice,
   );
-  const fastSession = !newTaskCommand
-    ? await findFastAgentSessionForProviderReply({
-        provider: 'telegram',
-        workspaceId: metadata.communicationChannelId,
-        channelId: metadata.communicationChannelId,
-        ...(metadata.communicationThreadId
-          ? { threadId: metadata.communicationThreadId }
-          : {}),
-        ...(replyToMessageId ? { replyToMessageId } : {}),
-        userId: senderUserId,
-      })
-    : null;
+  const fastSession =
+    !newTaskCommand && !goalCommand
+      ? await findFastAgentSessionForProviderReply({
+          provider: 'telegram',
+          workspaceId: metadata.communicationChannelId,
+          channelId: metadata.communicationChannelId,
+          ...(metadata.communicationThreadId
+            ? { threadId: metadata.communicationThreadId }
+            : {}),
+          ...(replyToMessageId ? { replyToMessageId } : {}),
+          userId: senderUserId,
+        })
+      : null;
   if (!fastSession && replyToMessageId) {
     const isKnownFastMessage = await isFastAgentProviderMessage({
       provider: 'telegram',
@@ -652,6 +659,53 @@ telegram.post('/', async (c) => {
       ? repliedToAutomationReport
       : undefined
     : await findActiveTelegramTaskRun(conversation);
+
+  if (goalCommand) {
+    const reply = async (text: string) =>
+      postTelegramMessageBestEffort({
+        chatId: metadata.communicationChannelId,
+        threadId: metadata.communicationThreadId,
+        replyToMessageId: metadata.communicationMessageId,
+        text,
+        textFormat: 'markdown',
+      });
+
+    if (!goalCommand.objective) {
+      await reply(
+        'Add what you want Roomote to keep working toward after the command. For example: `/goal ship the release`.',
+      );
+      return c.json({
+        ok: true,
+        goalStarted: false,
+        reason: 'missing_objective',
+      });
+    }
+    if (!activeRun) {
+      await reply(
+        'Use `/goal` in an active Roomote task chat or topic. Start a task with `/new` or message me first.',
+      );
+      return c.json({
+        ok: true,
+        goalStarted: false,
+        reason: 'no_active_task',
+      });
+    }
+
+    const result = await startTaskGoal({
+      taskId: activeRun.taskId,
+      userId: senderUserId,
+      objective: goalCommand.objective,
+      source: 'telegram',
+      clientMessageId:
+        metadata.communicationMessageId ?? `telegram:${update.update_id}`,
+    });
+    await reply(result.success ? 'Goal Mode enabled.' : result.error);
+    return c.json({
+      ok: true,
+      goalStarted: result.success,
+      runId: activeRun.id,
+    });
+  }
 
   const shouldProcessMedia = Boolean(
     activeRun ||
