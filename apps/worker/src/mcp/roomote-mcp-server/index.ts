@@ -204,7 +204,7 @@ roomoteMcpServer.registerTool(
   {
     title: 'Show Widget',
     description:
-      'Render a presentational HTML widget in the current task transcript. ' +
+      'Create a rendered visual in the current task transcript. ' +
       'Use it proactively when the user asks to show, mock up, preview, or visualize an interface or interaction; prefer it over an ASCII or text-only example when a compact visual would answer the request better. ' +
       'Use it when a structured or visual presentation is clearer than plain text, or to demonstrate how something would look. ' +
       'Examples include mock UI, status cards, tables, annotated plans, and other visual examples. ' +
@@ -214,7 +214,7 @@ roomoteMcpServer.registerTool(
       SHOW_WIDGET_FIXED_CANVAS_GUIDANCE +
       ' ' +
       'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers. ' +
-      'Optional textFallback is delivered to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
+      'When the task starts from a supported communication provider, a link to open the visual is shared automatically; add textFallback only when a short chat preview adds useful context. Communication providers do not need to render the HTML inline, and that is not a reason to avoid this tool.',
     inputSchema: {
       html: nonEmptyStringSchema.describe(
         'Non-empty compact HTML fragment or full document to display, including inline SVG. Avoid long prose, large lists, and dense data likely to require scrolling. Scripts and nested browsing contexts are stripped. Built-in widget classes include rw-card, rw-stack, rw-row, rw-grid, rw-stat, rw-badge, rw-callout, and rw-muted.',
@@ -234,7 +234,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'Optional plain-text fallback posted to the originating chat surface when this task was started from chat',
+          'Optional chat preview shown with the automatically shared link to the rendered visual',
         ),
     },
     annotations: {

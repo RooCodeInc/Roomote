@@ -80,7 +80,6 @@ describe('extractShowWidgetFallbackDelivery', () => {
     { mcpToolName: 'other_tool' },
     { status: 'failed' },
     { output: JSON.stringify({ success: false, textFallback: 'Nope' }) },
-    { output: JSON.stringify({ success: true, shown: true }) },
   ])('rejects non-deliverable widget payloads: %o', (payloadOverrides) => {
     expect(
       extractShowWidgetFallbackDelivery(
@@ -88,6 +87,22 @@ describe('extractShowWidgetFallbackDelivery', () => {
         'task-1',
       ),
     ).toBeNull();
+  });
+
+  it('extracts a completed widget without optional preview text', () => {
+    expect(
+      extractShowWidgetFallbackDelivery(
+        buildEnvelope({
+          output: JSON.stringify({ success: true, shown: true }),
+        }),
+        'task-1',
+      ),
+    ).toEqual({
+      toolCallId: 'call-1',
+      title: null,
+      textFallback: null,
+      widgetUrl: expect.stringContaining('/task/task-1#msg-1'),
+    });
   });
 });
 
