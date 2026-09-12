@@ -752,6 +752,15 @@ export function CommsProviderSection({
               {provider.id === 'agentmail' && provider.agentmail && (
                 <AgentMailSetupStatus status={provider.agentmail} />
               )}
+              {agentMailStatusOnly && !provider.agentmail ? (
+                <div className="flex items-start gap-2 mt-4">
+                  <Info className="size-4 mt-0.5 shrink-0 text-amber-600" />
+                  <p className="text-sm">
+                    Managed Email is unavailable. Roomote Cloud has not
+                    provisioned an inbox for this deployment.
+                  </p>
+                </div>
+              ) : null}
               {provider.id === 'microsoft' &&
                 (hasConfiguredValues || teamsBotConfigured) && (
                   <TeamsBotStatus />

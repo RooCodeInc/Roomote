@@ -1449,5 +1449,29 @@ describe('CommsProviderSection', () => {
         screen.queryByText('Email is managed by Roomote Cloud.'),
       ).not.toBeInTheDocument();
     });
+
+    it('shows when Cloud-managed Email has not been provisioned', () => {
+      state.cloudEnabled = true;
+      render(
+        <CommsProviderSection
+          provider={buildAgentMailProvider({
+            runtimeSatisfied: false,
+            setupSatisfied: false,
+            agentmail: null,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.getByText(
+          'Managed Email is unavailable. Roomote Cloud has not provisioned an inbox for this deployment.',
+        ),
+      ).toBeVisible();
+      expect(screen.queryByText('AgentMail API Key')).not.toBeInTheDocument();
+    });
   });
 });
