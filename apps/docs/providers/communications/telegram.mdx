@@ -119,12 +119,12 @@ Roomote user. `/new` starts a fresh conversation instead of continuing the
 current one, opening a new topic when Telegram supports it; in a plain private
 chat the request joins that chat's conversation.
 
-While a private-chat Fast turn is running, Telegram shows its native
-**Thinking** status. Roomote refreshes the temporary draft for long turns and
-starts filling that draft with the response when generation takes long enough
-to stream. The completed response is always sent as a normal message so it
-remains in the conversation. Roomote keeps activity active across intermediate
-replies while more work remains, and a final reply clears it naturally.
+While a private-chat Fast turn is running, Telegram shows a non-empty
+**Roomote is working...** native draft, then replaces it with response text as
+generation continues. The completed response is always sent as a normal message
+so it remains in the conversation. Roomote keeps activity active across
+intermediate replies while more work remains, and a final reply clears it
+naturally.
 Telegram does not support native drafts in group chats, so groups use
 Telegram's standard typing status and receive completed replies instead.
 
