@@ -64,58 +64,64 @@ function readSemantics(
 }
 
 /**
- * Compares two source-provided versions for the same subject. Only versions
- * that share a scheme are comparable, and only a genuinely monotonic scheme
- * establishes order; an opaque version can establish identity but never
- * precedence. Anything else is reported as incomparable so the caller falls
- * back to real observation order instead of an invented lifecycle.
+ * Whether the version can order a subject at all. Only a genuinely monotonic
+ * scheme establishes precedence; an opaque version identifies a revision
+ * without implying order.
  */
-function compareVersion(
-  left: FastAgentEventSemantics,
-  right: FastAgentEventSemantics,
-): number | null {
-  if (!left.version || !right.version) return null;
-  if (left.version.scheme !== right.version.scheme) return null;
-  if (left.version.scheme === 'monotonic_number') {
-    return left.version.value - (right.version as typeof left.version).value;
-  }
-  return left.version.value === right.version.value ? 0 : null;
+function monotonicVersion(semantics: FastAgentEventSemantics): number | null {
+  return semantics.version?.scheme === 'monotonic_number'
+    ? semantics.version.value
+    : null;
 }
 
-function compareCandidate(
+/**
+ * The single ordering key every state claim about one subject is compared by.
+ *
+ * Using one lexicographic key, rather than pairwise rules that differ by
+ * which side happens to carry a version, is what makes the order total: the
+ * winner cannot depend on admission order, and adding an unversioned claim
+ * cannot reorder the versioned claims around it.
+ *
+ * Mixed-version policy: when a source numbers a subject's states, that
+ * number is the most trustworthy ordering signal available, so a numbered
+ * claim outranks an unnumbered one from the same authority and a higher
+ * number always outranks a lower one. An unnumbered claim therefore cannot
+ * regress a numbered state, and among unnumbered claims the stronger
+ * statement about the present wins, then the later observation. A producer
+ * that emits both numbered and unnumbered claims for one subject is
+ * modelling that subject inconsistently; the numbered claims win there.
+ */
+function buildSubjectOrderingKey(candidate: FastAgentProjectedEvent): number[] {
+  const semantics = candidate.semantics!;
+  const version = monotonicVersion(semantics);
+  const observedAt = Date.parse(semantics.observedAt);
+  return [
+    AUTHORITY_RANK[semantics.authority],
+    version === null ? 0 : 1,
+    version ?? 0,
+    STATE_EVIDENCE_RANK[semantics.kind],
+    Number.isFinite(observedAt) ? observedAt : 0,
+    candidate.event.conversationSeq ?? 0,
+  ];
+}
+
+function compareSubjectCandidates(
   left: FastAgentProjectedEvent,
   right: FastAgentProjectedEvent,
-) {
-  const leftSemantics = left.semantics!;
-  const rightSemantics = right.semantics!;
-  const authority =
-    AUTHORITY_RANK[leftSemantics.authority] -
-    AUTHORITY_RANK[rightSemantics.authority];
-  if (authority !== 0) return authority;
-
-  // What the event claims about the present outranks when it arrived. This is
-  // what keeps a terminal status authoritative over an opening event that a
-  // later task re-emits for the same pull request.
-  const evidence =
-    STATE_EVIDENCE_RANK[leftSemantics.kind] -
-    STATE_EVIDENCE_RANK[rightSemantics.kind];
-  if (evidence !== 0) return evidence;
-
-  // A comparable monotonic version is the only signal allowed to outrank a
-  // later observation. Without one, the freshest thing the source actually
-  // told us wins, so a legitimate later transition is never pinned by an
-  // earlier state.
-  const version = compareVersion(leftSemantics, rightSemantics);
-  if (version !== null && version !== 0) return version;
-
-  const observed =
-    Date.parse(leftSemantics.observedAt) -
-    Date.parse(rightSemantics.observedAt);
-  if (Number.isFinite(observed) && observed !== 0) return observed;
-
-  return (left.event.conversationSeq ?? 0) - (right.event.conversationSeq ?? 0);
+): number {
+  const leftKey = buildSubjectOrderingKey(left);
+  const rightKey = buildSubjectOrderingKey(right);
+  for (let index = 0; index < leftKey.length; index += 1) {
+    const difference = leftKey[index]! - rightKey[index]!;
+    if (difference !== 0) return difference;
+  }
+  return 0;
 }
 
+/**
+ * Whether two claims about one subject disagree with no signal able to
+ * separate them, which is reported rather than silently resolved.
+ */
 function isAmbiguousConflict(
   left: FastAgentProjectedEvent,
   right: FastAgentProjectedEvent,
@@ -127,8 +133,18 @@ function isAmbiguousConflict(
   // resolved by evidence strength, not surfaced as an unresolvable conflict.
   if (leftSemantics.kind !== rightSemantics.kind) return false;
   if (leftSemantics.state === rightSemantics.state) return false;
-  const version = compareVersion(leftSemantics, rightSemantics);
-  if (version !== null) return version === 0;
+  const leftVersion = monotonicVersion(leftSemantics);
+  const rightVersion = monotonicVersion(rightSemantics);
+  if (leftVersion !== null && rightVersion !== null) {
+    return leftVersion === rightVersion;
+  }
+  if (leftVersion !== null || rightVersion !== null) return false;
+  if (
+    leftSemantics.version?.scheme === 'opaque' &&
+    rightSemantics.version?.scheme === 'opaque'
+  ) {
+    return leftSemantics.version.value === rightSemantics.version.value;
+  }
   return leftSemantics.observedAt === rightSemantics.observedAt;
 }
 
@@ -168,7 +184,7 @@ export function projectFastAgentCanonicalEvents(
   for (const candidates of bySubject.values()) {
     let winner = candidates[0]!;
     for (const candidate of candidates.slice(1)) {
-      if (compareCandidate(candidate, winner) > 0) winner = candidate;
+      if (compareSubjectCandidates(candidate, winner) > 0) winner = candidate;
     }
     const conflicts = candidates.filter(
       (candidate) =>
@@ -231,6 +247,53 @@ export function isFastAgentCanonicalEventSuperseded(
   );
 }
 
+/**
+ * Historical attachments a rebuilt prompt must carry so a cold conversation
+ * can still see images an earlier turn provided. Canonical rows keep the
+ * image bytes, so a rebuild can restore real attachments rather than only
+ * noting that one existed.
+ */
+export type FastAgentCanonicalAttachment = {
+  eventId: string;
+  mime: string;
+  /** Data URL in the same shape the live turn's image path consumes. */
+  url: string;
+};
+
+/** Most recent attachments to restore, newest first, bounded per rebuild. */
+export const FAST_AGENT_CANONICAL_ATTACHMENT_LIMIT = 4;
+
+export function collectFastAgentCanonicalAttachments(
+  projection: FastAgentCanonicalProjection,
+  options: { excludeEventId?: string; limit?: number } = {},
+): FastAgentCanonicalAttachment[] {
+  const limit = options.limit ?? FAST_AGENT_CANONICAL_ATTACHMENT_LIMIT;
+  const restored: FastAgentCanonicalAttachment[] = [];
+  // Walk newest first so the bound keeps the most recent attachments, which
+  // are the ones a continuing conversation is most likely to still mean.
+  for (const { event, classification } of [...projection.events].reverse()) {
+    if (restored.length >= limit) break;
+    if (event.eventId === options.excludeEventId) continue;
+    if (classification === 'superseded_irrelevant') continue;
+    if (event.role !== 'user') continue;
+    for (const block of event.contentBlocks) {
+      if (restored.length >= limit) break;
+      if (block.type !== 'image') continue;
+      const mime = String(
+        (block as { mimeType?: unknown }).mimeType ?? '',
+      ).trim();
+      const data = String((block as { data?: unknown }).data ?? '').trim();
+      if (!mime.startsWith('image/') || !data) continue;
+      restored.push({
+        eventId: event.eventId,
+        mime,
+        url: `data:${mime};base64,${data}`,
+      });
+    }
+  }
+  return restored;
+}
+
 function eventText(event: FastAgentMessage): string {
   return event.contentBlocks
     .flatMap((block) => (block.type === 'text' ? [String(block.text)] : []))
@@ -246,8 +309,19 @@ export function renderFastAgentCanonicalHistory(
     if (event.eventId === options.excludeEventId) return [];
     if (classification === 'superseded_irrelevant') return [];
     if (event.role !== 'user' && event.role !== 'assistant') return [];
+    const attachmentCount = event.contentBlocks.filter(
+      (block) => block.type === 'image',
+    ).length;
     const text = eventText(event).trim();
-    if (!text) return [];
+    // An image-only turn still happened. Dropping it would erase the turn
+    // from rebuilt history entirely, so it is rendered with its attachment
+    // count; the bytes themselves are restored separately as real files.
+    if (!text && attachmentCount === 0) return [];
+    const attachmentNote =
+      attachmentCount > 0
+        ? `<canonical_event_attachments count="${attachmentCount}" />`
+        : '';
+    const body = [attachmentNote, text].filter(Boolean).join('\n');
     const context = semantics
       ? `<canonical_event_context>${JSON.stringify({
           eventId: event.eventId,
@@ -260,6 +334,6 @@ export function renderFastAgentCanonicalHistory(
           version: semantics.version,
         })}</canonical_event_context>\n`
       : '';
-    return [{ role: event.role, content: `${context}${text}` } as ModelMessage];
+    return [{ role: event.role, content: `${context}${body}` } as ModelMessage];
   });
 }

@@ -93,6 +93,7 @@ import {
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import {
   FAST_AGENT_CANONICAL_REDUCER_VERSION,
+  collectFastAgentCanonicalAttachments,
   isFastAgentCanonicalEventSuperseded,
   projectFastAgentCanonicalEvents,
   renderFastAgentCanonicalHistory,
@@ -3313,6 +3314,14 @@ export async function answerFastAgentQuestion({
       canonicalProjection,
       { excludeEventId: currentCanonicalEventId },
     );
+    // A rebuild restates the whole conversation, so attachments an earlier
+    // turn provided have to travel with it; a warm session still holds them
+    // natively and needs nothing restored.
+    const restoredAttachmentFiles = getFastAgentImageFiles(
+      collectFastAgentCanonicalAttachments(canonicalProjection, {
+        excludeEventId: currentCanonicalEventId,
+      }).map(({ url }) => url),
+    );
     const projectedBeforeCurrentSequence = canonicalProjection.events.reduce<
       number | null
     >(
@@ -4999,8 +5008,14 @@ export async function answerFastAgentQuestion({
         let promptForAttempt = selectedPrompt;
         let imageFilesForAttempt =
           sessionPath === 'fallback_rebuild'
-            ? [...imageFiles, ...injectedHumanFollowUpFiles]
-            : imageFiles;
+            ? [
+                ...imageFiles,
+                ...injectedHumanFollowUpFiles,
+                ...restoredAttachmentFiles,
+              ]
+            : sessionPath === 'cold_rebuild'
+              ? [...imageFiles, ...restoredAttachmentFiles]
+              : imageFiles;
         let promptKind: FastAgentPromptKind =
           sessionPath === 'warm' || sessionPath === 'cold_resume'
             ? 'turn_delta'
@@ -5429,6 +5444,7 @@ export async function answerFastAgentQuestion({
                   imageFilesForAttempt = [
                     ...imageFiles,
                     ...injectedHumanFollowUpFiles,
+                    ...restoredAttachmentFiles,
                   ];
                   promptKind = 'clean_retry_bootstrap';
                   attemptSessionPath = 'cold_rebuild';

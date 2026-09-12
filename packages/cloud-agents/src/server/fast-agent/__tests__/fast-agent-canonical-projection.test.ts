@@ -338,6 +338,125 @@ describe('Fast canonical event projection', () => {
     ]);
   });
 
+  describe('mixed-version ordering', () => {
+    const subject = { type: 'setup_source', id: 'deployment-mixed' };
+    // The intransitive triple: by timestamp B beats A and C beats B, while by
+    // version A beats C. A pairwise rule would pick a winner by iteration
+    // order; one ordering key must not.
+    const versionedOlderObservation = event({
+      id: 'a-v2-observed-first',
+      sequence: 1,
+      state: 'a',
+      semantics: {
+        kind: 'current_state_assertion',
+        authority: 'roomote_runtime',
+        observedAt: '2026-01-01T00:00:01.000Z',
+        subject,
+        version: { scheme: 'monotonic_number', value: 2 },
+      },
+    });
+    const unversionedMiddleObservation = event({
+      id: 'b-unversioned',
+      sequence: 2,
+      state: 'b',
+      semantics: {
+        kind: 'current_state_assertion',
+        authority: 'roomote_runtime',
+        observedAt: '2026-01-01T00:00:02.000Z',
+        subject,
+      },
+    });
+    const versionedNewestObservation = event({
+      id: 'c-v1-observed-last',
+      sequence: 3,
+      state: 'c',
+      semantics: {
+        kind: 'current_state_assertion',
+        authority: 'roomote_runtime',
+        observedAt: '2026-01-01T00:00:03.000Z',
+        subject,
+        version: { scheme: 'monotonic_number', value: 1 },
+      },
+    });
+
+    function permutations<T>(items: T[]): T[][] {
+      if (items.length <= 1) return [items];
+      return items.flatMap((item, index) =>
+        permutations([...items.slice(0, index), ...items.slice(index + 1)]).map(
+          (rest) => [item, ...rest],
+        ),
+      );
+    }
+
+    it('selects the same winner for every admission order of a mixed-version subject', () => {
+      const winners = new Set(
+        permutations([
+          versionedOlderObservation,
+          unversionedMiddleObservation,
+          versionedNewestObservation,
+        ]).map((ordering) =>
+          projectFastAgentCanonicalEvents(ordering).currentStateEventIds.join(
+            ',',
+          ),
+        ),
+      );
+
+      expect([...winners]).toEqual(['a-v2-observed-first']);
+    });
+
+    it('keeps the highest monotonic version current when an unversioned claim is added later', () => {
+      const versionedOnly = projectFastAgentCanonicalEvents([
+        versionedOlderObservation,
+        versionedNewestObservation,
+      ]);
+      const withUnversioned = projectFastAgentCanonicalEvents([
+        versionedOlderObservation,
+        versionedNewestObservation,
+        unversionedMiddleObservation,
+      ]);
+
+      // Adding an unnumbered claim must not silently regress a numbered state.
+      expect(versionedOnly.currentStateEventIds).toEqual([
+        'a-v2-observed-first',
+      ]);
+      expect(withUnversioned.currentStateEventIds).toEqual([
+        'a-v2-observed-first',
+      ]);
+    });
+
+    it('lets a higher monotonic transition outrank an unversioned assertion', () => {
+      const artifact = { type: 'artifact', id: 'artifact-1' };
+      const publishedV5 = event({
+        id: 'artifact-v5',
+        sequence: 1,
+        state: 'published:5',
+        semantics: {
+          kind: 'state_change',
+          authority: 'roomote_runtime',
+          observedAt: '2026-01-01T00:00:10.000Z',
+          subject: artifact,
+          version: { scheme: 'monotonic_number', value: 5 },
+        },
+      });
+      const unversionedAssertion = event({
+        id: 'artifact-assertion',
+        sequence: 2,
+        state: 'stale',
+        semantics: {
+          kind: 'current_state_assertion',
+          authority: 'roomote_runtime',
+          observedAt: '2026-01-01T00:00:20.000Z',
+          subject: artifact,
+        },
+      });
+
+      expect(
+        projectFastAgentCanonicalEvents([publishedV5, unversionedAssertion])
+          .currentStateEventIds,
+      ).toEqual(['artifact-v5']);
+    });
+  });
+
   it('keeps a terminal status current when a later task re-emits an opening event for the same pull request', () => {
     // `pull_request_opened` is keyed per task but the subject is the PR, so a
     // second task updating an already-merged PR admits an unversioned `open`

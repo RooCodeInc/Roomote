@@ -1737,6 +1737,126 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it.each([
+    [
+      'an image-only turn',
+      [{ type: 'image', mimeType: 'image/png', data: 'aW1hZ2Utb25sea==' }],
+      ['data:image/png;base64,aW1hZ2Utb25sea=='],
+    ],
+    [
+      'a mixed text and image turn',
+      [
+        { type: 'text', text: 'Why does this screen look wrong?' },
+        { type: 'image', mimeType: 'image/jpeg', data: 'bWl4ZWQtaW1hZ2U=' },
+      ],
+      ['data:image/jpeg;base64,bWl4ZWQtaW1hZ2U='],
+    ],
+  ])(
+    'restores attachments from %s into a rebuilt prompt',
+    async (_case, contentBlocks, expectedUrls) => {
+      const priorPrompt: FastAgentMessage = {
+        id: 'turn-one',
+        conversationId: 'conversation-1',
+        eventId: 'turn-one:user',
+        conversationSeq: 1,
+        turnId: 'turn-one',
+        turnSeq: 0,
+        ts: 1,
+        observedAt: new Date(1),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: contentBlocks as FastAgentMessage['contentBlocks'],
+        metadata: {
+          visibleInTranscript: true,
+          turnSource: 'human',
+          [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: {
+            schemaVersion: 1,
+            kind: 'historical_observation',
+            authority: 'human',
+            observedAt: new Date(1).toISOString(),
+            sourceEventId: 'turn-one',
+          },
+        },
+        payload: {},
+        source: 'slack',
+        nativeSessionId: null,
+        nativeMessageId: null,
+        createdAt: new Date(1),
+        updatedAt: new Date(1),
+      };
+      mocks.loadCanonicalMessages.mockResolvedValue([priorPrompt]);
+      // A rebuild is the path that has to carry earlier attachments; a warm
+      // session still holds them natively.
+      mocks.runSession.mockImplementation(
+        ({
+          bootstrapPrompt,
+          execute,
+        }: {
+          bootstrapPrompt: () => string;
+          execute: (
+            session: { id?: string },
+            selectedPrompt: string,
+            context: { path: string; validateSession: boolean },
+          ) => Promise<unknown>;
+        }) =>
+          execute({}, bootstrapPrompt(), {
+            path: 'cold_rebuild',
+            validateSession: false,
+          }),
+      );
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      const [promptParams] = mocks.generateText.mock.calls[0]!;
+      expect(
+        promptParams.files?.map(({ url }: { url: string }) => url),
+      ).toEqual(expectedUrls);
+      // The turn itself is still represented in the rebuilt history.
+      expect(promptParams.prompt).toContain('canonical_event_attachments');
+    },
+  );
+
+  it('does not restore historical attachments into a warm delta', async () => {
+    const priorPrompt: FastAgentMessage = {
+      id: 'turn-one',
+      conversationId: 'conversation-1',
+      eventId: 'turn-one:user',
+      conversationSeq: 1,
+      turnId: 'turn-one',
+      turnSeq: 0,
+      ts: 1,
+      observedAt: new Date(1),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      contentBlocks: [
+        { type: 'image', mimeType: 'image/png', data: 'd2FybS1pbWFnZQ==' },
+      ],
+      metadata: {
+        visibleInTranscript: true,
+        turnSource: 'human',
+        [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: {
+          schemaVersion: 1,
+          kind: 'historical_observation',
+          authority: 'human',
+          observedAt: new Date(1).toISOString(),
+          sourceEventId: 'turn-one',
+        },
+      },
+      payload: {},
+      source: 'slack',
+      nativeSessionId: 'opencode-session-1',
+      nativeMessageId: null,
+      createdAt: new Date(1),
+      updatedAt: new Date(1),
+    };
+    mocks.loadCanonicalMessages.mockResolvedValue([priorPrompt]);
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const [promptParams] = mocks.generateText.mock.calls[0]!;
+    expect(promptParams.files).toBeUndefined();
+  });
+
   it('reuses the native session for an ordinary follow-up turn already represented by its watermark', async () => {
     // Turn one's prompt is canonical history with semantics, and the stored
     // watermark covers it, so the follow-up must continue warm.
