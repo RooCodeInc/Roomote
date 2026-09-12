@@ -71,7 +71,7 @@ describe('Telegram live task stream', () => {
       channelId: '-1001',
       threadId: '77',
       text: 'Starting task…',
-      htmlText: '<blockquote expandable>Starting task…</blockquote>',
+      htmlText: 'Starting task…',
       footerText: expect.stringMatching(/^Open in Roomote: .*task=task-1/),
       footerHtmlText: expect.stringMatching(
         /^<a href=".*task=task-1.*">Open in Roomote<\/a>/,
@@ -82,7 +82,7 @@ describe('Telegram live task stream', () => {
     expect(mocks.postMessage).toHaveBeenCalledOnce();
   });
 
-  it('edits running progress with expandable HTML and a plain fallback', async () => {
+  it('edits running progress with details HTML and a plain fallback', async () => {
     await start();
 
     await renderTelegramLiveTaskStream({
@@ -97,7 +97,7 @@ describe('Telegram live task stream', () => {
         messageId: '88',
         text: 'Running tests.\n\nChecking Telegram fallback behavior.',
         htmlText:
-          '<blockquote expandable>Running tests.\n\nChecking Telegram fallback behavior.</blockquote>',
+          '<details><summary>Running tests.</summary>Checking Telegram fallback behavior.</details>',
         footerText: expect.stringMatching(/^Open in Roomote:/),
         footerHtmlText: expect.stringMatching(/^<a href=/),
       }),

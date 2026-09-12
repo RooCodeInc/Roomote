@@ -9,7 +9,7 @@ import {
 import { buildTelegramLiveTaskMessage } from '../telegram-live-task-message';
 
 describe('buildTelegramLiveTaskMessage', () => {
-  it('uses the current activity as the collapsed expandable quote line', () => {
+  it('uses the current activity as the collapsed details summary', () => {
     expect(
       buildTelegramLiveTaskMessage({
         status: 'running',
@@ -25,11 +25,23 @@ describe('buildTelegramLiveTaskMessage', () => {
         'Updating the task lifecycle and rerunning focused tests.',
       ].join('\n'),
       htmlText:
-        '<blockquote expandable>Fixing bug…\n\nUpdating the task lifecycle and rerunning focused tests.</blockquote>',
+        '<details><summary>Fixing bug…</summary>Updating the task lifecycle and rerunning focused tests.</details>',
       footerText:
         'Open in Roomote: https://roomote.example/sessions/session-1?task=task-1&utm_source=telegram',
       footerHtmlText:
         '<a href="https://roomote.example/sessions/session-1?task=task-1&amp;utm_source=telegram">Open in Roomote</a>',
+    });
+  });
+
+  it('keeps single-line running progress visibly plain', () => {
+    expect(
+      buildTelegramLiveTaskMessage({
+        status: 'running',
+        progress: 'Running focused tests.',
+      }),
+    ).toMatchObject({
+      text: 'Running focused tests.',
+      htmlText: 'Running focused tests.',
     });
   });
 
@@ -45,15 +57,16 @@ describe('buildTelegramLiveTaskMessage', () => {
     });
   });
 
-  it('escapes expandable HTML without splitting entities or exceeding one message', () => {
+  it('escapes details HTML without splitting entities or exceeding one message', () => {
     const message = buildTelegramLiveTaskMessage({
       status: 'running',
       progress: `Fixing <Telegram>...\n${'<>&'.repeat(TELEGRAM_MAX_RICH_MESSAGE_LENGTH)}`,
     });
 
     expect(message.htmlText).toContain('Fixing &lt;Telegram&gt;...');
+    expect(message.htmlText).toContain('</summary>&lt;&gt;&amp;&lt;&gt;&amp;');
     expect(message.htmlText).not.toMatch(/&(?!amp;|lt;|gt;)/);
-    expect(message.htmlText.endsWith('</blockquote>')).toBe(true);
+    expect(message.htmlText.endsWith('</details>')).toBe(true);
     expect(message.text.length).toBeLessThanOrEqual(
       TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
     );
