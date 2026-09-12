@@ -15,7 +15,7 @@ export const TELEGRAM_MAX_RICH_MESSAGE_LENGTH = 32768;
  */
 const MARKDOWN_CHUNK_TARGET_LENGTH = 3500;
 
-export function escapeTelegramHtml(text: string): string {
+function escapeTelegramHtml(text: string): string {
   return text
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
@@ -309,7 +309,7 @@ function chunkTelegramPlainTextAsHtml(
   );
 }
 
-export type TelegramRichMessageChunk = {
+type TelegramRichMessageChunk = {
   text: string;
   html: string;
 };
