@@ -190,8 +190,9 @@ if [ "$database_mode" = "external" ] && ! env_has_key "$env_file" DATABASE_URL; 
   die "--database external requires DATABASE_URL in $env_file"
 fi
 
-if [ "$manage_dns" = "true" ] && [ -z "$dns_zone" ]; then
-  die "--dns-zone is required with --manage-dns"
+if [ "$manage_dns" = "true" ]; then
+  [ -n "$dns_zone" ] || die "--dns-zone is required with --manage-dns"
+  validate_domain "$dns_zone"
 fi
 
 if [ "${#ssh_allowed_cidrs[@]}" -eq 0 ]; then
