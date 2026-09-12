@@ -169,10 +169,17 @@ describe('text provider current carriers', () => {
       input: { channelId: 'C', text: body, buttons },
       footerText: 'old footer',
     });
+    expect(postMessage).toHaveBeenCalledWith({
+      channelId: 'C',
+      text: body,
+      footerText: 'old footer',
+      buttons,
+      textFormat: 'markdown',
+    });
     expect(posted.messageId).toBe('last');
     const record = await getThreadReplyFooterRecord('telegram', 'C', 'root');
     expect(record?.textWithoutFooter.endsWith('Final paragraph')).toBe(true);
-    expect(record?.textWithoutFooter.length).toBeLessThan(body.length);
+    expect(record?.textWithoutFooter).toBe(body);
     expect(record?.buttons).toEqual(buttons);
     expect(posted.textMessages).toEqual([
       { messageId: 'first', text: 'Long narrative.' },
@@ -189,7 +196,8 @@ describe('text provider current carriers', () => {
     expect(editMessageText).toHaveBeenCalledWith({
       channelId: 'C',
       messageId: 'last',
-      text: `${record?.textWithoutFooter}\n\nNo running tasks`,
+      text: record?.textWithoutFooter,
+      footerText: 'No running tasks',
       textFormat: 'markdown',
       buttons,
     });

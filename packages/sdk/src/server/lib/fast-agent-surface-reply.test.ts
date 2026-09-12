@@ -182,7 +182,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       editForumTopic: mocks.telegramEditForumTopic,
       resolveForumTopicIconCustomEmojiId: mocks.telegramResolveForumTopicIcon,
       sendChatAction: mocks.telegramTyping,
-      sendMessageDraft: mocks.telegramTyping,
+      sendRichMessageDraft: mocks.telegramTyping,
     });
     mocks.createDiscordProvider.mockResolvedValue({
       triggerTyping: mocks.discordTyping,
@@ -864,7 +864,13 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
           channelId,
           ...(threadId ? { threadId } : {}),
           ...(currentMessageId ? { replyToMessageId: currentMessageId } : {}),
-          text: expect.stringContaining('[Open in Roomote]'),
+          text:
+            surface === 'telegram'
+              ? 'Done'
+              : expect.stringContaining('[Open in Roomote]'),
+          ...(surface === 'telegram'
+            ? { footerText: expect.stringContaining('[Open in Roomote]') }
+            : {}),
         }),
       );
       expect(binding?.messageId).toBe(

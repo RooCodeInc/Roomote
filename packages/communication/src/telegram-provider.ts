@@ -10,11 +10,7 @@ import type {
 import { UnsupportedCommunicationOperationError } from './provider';
 import { readBoundedResponseBody } from './bounded-response-body';
 import { getTelegramApiBaseUrl } from './telegram-api-base-url';
-import {
-  TELEGRAM_MAX_MESSAGE_LENGTH,
-  chunkTelegramMarkdownAsHtml,
-  chunkTelegramText,
-} from './telegram-format';
+import { planTelegramRichMessages } from './telegram-format';
 
 export type TelegramCommunicationProviderOptions = {
   botToken: string;
@@ -68,6 +64,8 @@ type TelegramInlineKeyboardMarkup = {
   >;
 };
 
+type TelegramRichMessage = { html: string };
+
 function buildTelegramReplyMarkup(
   buttons: CommunicationMessageButton[][] | undefined,
 ): TelegramInlineKeyboardMarkup | undefined {
@@ -110,41 +108,26 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
   ): Promise<CommunicationPostMessageResult> {
     const text = input.text;
     const images = input.images ?? [];
-    const hasText = Boolean(text?.trim());
-
-    if (!hasText && images.length === 0) {
-      throw new Error('Telegram postMessage requires text or images.');
-    }
-
     const threadId = parsePositiveInteger(input.threadId);
     // Honor an explicit reply target when callers supply one (task closeouts,
     // launch-failure recovery, onboarding threads). Callers that prefer a
     // free-floating chronological send simply omit replyToMessageId.
     const replyToMessageId = parsePositiveInteger(input.replyToMessageId);
-    const useMarkdown = input.textFormat === 'markdown';
-    const chunks: Array<{
-      markdown: string;
-      html: string | null;
-      fallbackOnHtmlError?: boolean;
-    }> =
-      hasText && text
-        ? input.htmlText &&
-          input.htmlText.length <= TELEGRAM_MAX_MESSAGE_LENGTH &&
-          text.length <= TELEGRAM_MAX_MESSAGE_LENGTH
-          ? [
-              {
-                markdown: text,
-                html: input.htmlText,
-                fallbackOnHtmlError: true,
-              },
-            ]
-          : useMarkdown
-            ? chunkTelegramMarkdownAsHtml(text)
-            : chunkTelegramText(text).map((chunk) => ({
-                markdown: chunk,
-                html: null,
-              }))
-        : [];
+    const footerText = input.footerText;
+    const hasText = Boolean(text?.trim() || footerText?.trim());
+
+    if (!hasText && images.length === 0) {
+      throw new Error('Telegram postMessage requires text or images.');
+    }
+    const chunks = hasText
+      ? planTelegramRichMessages({
+          text: text ?? '',
+          htmlText: input.htmlText,
+          footerText,
+          footerHtmlText: input.footerHtmlText,
+          textFormat: input.textFormat === 'markdown' ? 'markdown' : 'plain',
+        })
+      : [];
 
     let firstResult: {
       message_id: number;
@@ -160,11 +143,9 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     const lastSendIndex = chunks.length + images.length - 1;
 
     for (const [index, chunk] of chunks.entries()) {
-      const result = await this.sendMessageChunk({
+      const result = await this.sendRichMessageChunk({
         chatId: input.channelId,
-        markdown: chunk.markdown,
-        html: chunk.html,
-        fallbackOnHtmlError: chunk.fallbackOnHtmlError,
+        richMessage: { html: chunk.html },
         threadId,
         // Reply threading only anchors the first message of a long reply;
         // buttons attach to the last message so they sit under the content.
@@ -176,7 +157,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       lastTextResult = result;
       textMessages.push({
         messageId: String(result.message_id),
-        text: chunk.markdown,
+        text: chunk.text,
       });
     }
 
@@ -256,96 +237,56 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
 
     // Telegram fetches the photo URL itself and can reject it (size limits,
     // unreachable host, unsupported type) — fall back to sending the link.
-    return this.sendMessageChunk({
+    const [chunk] = planTelegramRichMessages({
+      text: params.caption ? `${params.caption}: ${params.url}` : params.url,
+      textFormat: 'plain',
+    });
+    return this.sendRichMessageChunk({
       chatId: params.chatId,
-      markdown: params.caption
-        ? `${params.caption}: ${params.url}`
-        : params.url,
-      html: null,
+      richMessage: { html: chunk!.html },
       threadId: params.threadId,
       replyToMessageId: params.replyToMessageId,
       replyMarkup: params.replyMarkup,
     });
   }
 
-  private async sendMessageChunk(params: {
+  private async sendRichMessageChunk(params: {
     chatId: string;
-    markdown: string;
-    html: string | null;
-    fallbackOnHtmlError?: boolean;
+    richMessage: TelegramRichMessage;
     threadId?: number;
     replyToMessageId?: number;
     replyMarkup?: TelegramInlineKeyboardMarkup;
   }): Promise<{ message_id: number; message_thread_id?: number }> {
-    const attempts: Array<{ text: string; parseMode?: 'HTML' }> = params.html
-      ? [
-          { text: params.html, parseMode: 'HTML' },
-          // Telegram rejects the whole message when entity parsing fails,
-          // so fall back to the raw markdown as plain text.
-          { text: params.markdown },
-        ]
-      : [{ text: params.markdown }];
-
-    let lastError: Error | null = null;
-
-    for (const attempt of attempts) {
-      const body = {
-        chat_id: params.chatId,
-        text: attempt.text,
-        ...(attempt.parseMode ? { parse_mode: attempt.parseMode } : {}),
-        link_preview_options: {
-          is_disabled: true,
-        },
-        ...(params.threadId ? { message_thread_id: params.threadId } : {}),
-        ...(params.replyMarkup ? { reply_markup: params.replyMarkup } : {}),
-        ...(params.replyToMessageId
-          ? {
-              reply_parameters: {
-                message_id: params.replyToMessageId,
-                allow_sending_without_reply: true,
-              },
-            }
-          : {}),
-      };
-      const response = await this.fetchWithRetry(
-        `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/sendMessage`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-        },
-        { method: 'sendMessage', retryNetworkErrors: false },
-      );
-      const parsed = (await response
-        .json()
-        .catch(() => null)) as TelegramApiResponse | null;
-
-      if (response.ok && parsed?.ok) {
-        return parsed.result;
-      }
-
-      const description =
-        parsed && !parsed.ok && 'description' in parsed
-          ? parsed.description
-          : undefined;
-      lastError = new Error(
-        `Telegram sendMessage failed${
-          response.status ? ` (${response.status})` : ''
-        }: ${description ?? response.statusText}`,
-      );
-
-      const isEntityParseError =
-        attempt.parseMode === 'HTML' &&
-        response.status === 400 &&
-        (params.fallbackOnHtmlError === true ||
-          Boolean(description?.toLowerCase().includes("can't parse entities")));
-
-      if (!isEntityParseError) {
-        throw lastError;
-      }
-    }
-
-    throw lastError ?? new Error('Telegram sendMessage failed.');
+    const response = await this.fetchWithRetry(
+      `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/sendRichMessage`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: params.chatId,
+          rich_message: params.richMessage,
+          ...(params.threadId ? { message_thread_id: params.threadId } : {}),
+          ...(params.replyMarkup ? { reply_markup: params.replyMarkup } : {}),
+          ...(params.replyToMessageId
+            ? {
+                reply_parameters: {
+                  message_id: params.replyToMessageId,
+                  allow_sending_without_reply: true,
+                },
+              }
+            : {}),
+        }),
+      },
+      { method: 'sendRichMessage', retryNetworkErrors: false },
+    );
+    const parsed = (await response
+      .json()
+      .catch(() => null)) as TelegramApiResponse | null;
+    if (response.ok && parsed?.ok) return parsed.result;
+    const description = parsed && !parsed.ok ? parsed.description : undefined;
+    throw new Error(
+      `Telegram sendRichMessage failed (${response.status}): ${description ?? response.statusText}`,
+    );
   }
 
   /** Acknowledge a callback query so the button stops showing a spinner. */
@@ -359,89 +300,59 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     });
   }
 
-  /**
-   * Replace the text (and keyboard) of an existing bot message. Mirrors the
-   * postMessage markdown handling: try Telegram HTML, fall back to the raw
-   * markdown as plain text when entity parsing fails. The edited text must
-   * fit in one message — this is for cards and status lines, not replies.
-   */
+  /** Replace one rich text message and its keyboard in place. */
   async editMessageText(input: {
     channelId: string;
     messageId: string;
     text: string;
-    /** Provider-native HTML with `text` retained as the plain-text fallback. */
+    /** Provider-native HTML with `text` retained for size planning. */
     htmlText?: string;
+    footerText?: string;
+    footerHtmlText?: string;
     textFormat?: 'plain' | 'markdown';
     buttons?: CommunicationMessageButton[][];
   }): Promise<void> {
-    const useMarkdown = input.textFormat === 'markdown';
-    const firstChunk = useMarkdown
-      ? chunkTelegramMarkdownAsHtml(input.text)[0]
-      : null;
-    const attempts: Array<{ text: string; parseMode?: 'HTML' }> = input.htmlText
-      ? [{ text: input.htmlText, parseMode: 'HTML' }, { text: input.text }]
-      : firstChunk?.html
-        ? [
-            { text: firstChunk.html, parseMode: 'HTML' },
-            { text: firstChunk.markdown },
-          ]
-        : [{ text: firstChunk?.markdown ?? input.text }];
-
-    let lastError: Error | null = null;
-
-    for (const attempt of attempts) {
-      const response = await this.fetchWithRetry(
-        `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/editMessageText`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: input.channelId,
-            message_id: Number.parseInt(input.messageId, 10),
-            text: attempt.text,
-            ...(attempt.parseMode ? { parse_mode: attempt.parseMode } : {}),
-            link_preview_options: { is_disabled: true },
-            reply_markup: buildTelegramReplyMarkup(input.buttons) ?? {
-              inline_keyboard: [],
-            },
-          }),
-        },
-        { method: 'editMessageText', retryNetworkErrors: true },
-      );
-      const parsed = (await response.json().catch(() => null)) as {
-        ok?: boolean;
-        description?: string;
-      } | null;
-
-      if (response.ok && parsed?.ok) {
-        return;
-      }
-
-      const description = parsed?.description;
-      if (
-        response.status === 400 &&
-        description?.toLowerCase().includes('message is not modified')
-      ) {
-        return;
-      }
-      lastError = new Error(
-        `Telegram editMessageText failed${
-          response.status ? ` (${response.status})` : ''
-        }: ${description ?? response.statusText}`,
-      );
-
-      const isEntityParseError =
-        attempt.parseMode === 'HTML' &&
-        response.status === 400 &&
-        (Boolean(input.htmlText) ||
-          Boolean(description?.toLowerCase().includes("can't parse entities")));
-
-      if (!isEntityParseError) {
-        throw lastError;
-      }
+    const chunks = planTelegramRichMessages({
+      text: input.text,
+      htmlText: input.htmlText,
+      footerText: input.footerText,
+      footerHtmlText: input.footerHtmlText,
+      textFormat: input.textFormat === 'markdown' ? 'markdown' : 'plain',
+    });
+    if (chunks.length !== 1) {
+      throw new Error('Telegram editMessageText requires one rich message.');
     }
-
-    throw lastError ?? new Error('Telegram editMessageText failed.');
+    const response = await this.fetchWithRetry(
+      `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/editMessageText`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: input.channelId,
+          message_id: Number.parseInt(input.messageId, 10),
+          rich_message: { html: chunks[0]!.html },
+          link_preview_options: { is_disabled: true },
+          reply_markup: buildTelegramReplyMarkup(input.buttons) ?? {
+            inline_keyboard: [],
+          },
+        }),
+      },
+      { method: 'editMessageText', retryNetworkErrors: true },
+    );
+    const parsed = (await response.json().catch(() => null)) as {
+      ok?: boolean;
+      description?: string;
+    } | null;
+    if (response.ok && parsed?.ok) return;
+    if (
+      response.status === 400 &&
+      parsed?.description?.toLowerCase().includes('message is not modified')
+    ) {
+      return;
+    }
+    throw new Error(
+      `Telegram editMessageText failed (${response.status}): ${parsed?.description ?? response.statusText}`,
+    );
   }
 
   /** Replace or remove the inline keyboard on an existing message. */
@@ -478,33 +389,37 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     });
   }
 
-  /** Update a private-chat live draft. Empty text shows native Thinking. */
-  async sendMessageDraft(input: {
+  /** Update a private-chat rich draft. The durable reply uses sendRichMessage. */
+  async sendRichMessageDraft(input: {
     channelId: string;
     draftId: number;
     threadId?: string;
-    text?: string;
+    text: string;
+    htmlText?: string;
+    textFormat?: 'plain' | 'markdown';
   }): Promise<void> {
     if (!Number.isSafeInteger(input.draftId) || input.draftId === 0) {
       throw new Error(
-        'Telegram sendMessageDraft requires a non-zero draft id.',
-      );
-    }
-    if ((input.text?.length ?? 0) > TELEGRAM_MAX_MESSAGE_LENGTH) {
-      throw new Error(
-        `Telegram sendMessageDraft text exceeds ${TELEGRAM_MAX_MESSAGE_LENGTH} characters.`,
+        'Telegram sendRichMessageDraft requires a non-zero draft id.',
       );
     }
 
     const chatId = Number(input.channelId);
     if (!Number.isSafeInteger(chatId) || chatId <= 0) {
-      throw new Error('Telegram sendMessageDraft requires a private-chat id.');
+      throw new Error(
+        'Telegram sendRichMessageDraft requires a private-chat id.',
+      );
     }
+    const chunk = planTelegramRichMessages({
+      text: input.text,
+      htmlText: input.htmlText,
+      textFormat: input.textFormat === 'markdown' ? 'markdown' : 'plain',
+    }).at(-1);
     const threadId = parsePositiveInteger(input.threadId);
-    await this.callBotApi('sendMessageDraft', {
+    await this.callBotApi('sendRichMessageDraft', {
       chat_id: chatId,
       draft_id: input.draftId,
-      text: input.text ?? '',
+      rich_message: { html: chunk!.html },
       ...(threadId ? { message_thread_id: threadId } : {}),
     });
   }
@@ -514,7 +429,11 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     draftId: number;
     threadId?: string;
   }): Promise<void> {
-    await this.sendMessageDraft(input);
+    await this.sendRichMessageDraft({
+      ...input,
+      text: 'Roomote is working...',
+      htmlText: '<tg-thinking>Roomote is working...</tg-thinking>',
+    });
   }
 
   /**
@@ -756,7 +675,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       'setWebhook',
       'setMyCommands',
       'sendChatAction',
-      'sendMessageDraft',
+      'sendRichMessageDraft',
       'editMessageText',
       'editMessageReplyMarkup',
       'editForumTopic',

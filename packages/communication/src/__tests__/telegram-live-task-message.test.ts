@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { TELEGRAM_MAX_MESSAGE_LENGTH } from '../telegram-format';
+import {
+  TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+  planTelegramRichMessages,
+} from '../telegram-format';
 import { buildTelegramLiveTaskMessage } from '../telegram-live-task-message';
 
 describe('buildTelegramLiveTaskMessage', () => {
@@ -20,11 +23,13 @@ describe('buildTelegramLiveTaskMessage', () => {
         'Fixing bug…',
         '',
         'Updating the task lifecycle and rerunning focused tests.',
-        '',
-        'Open in Roomote: https://roomote.example/sessions/session-1?task=task-1&utm_source=telegram',
       ].join('\n'),
       htmlText:
-        '<blockquote expandable>Fixing bug…\n\nUpdating the task lifecycle and rerunning focused tests.</blockquote>\n\n<a href="https://roomote.example/sessions/session-1?task=task-1&amp;utm_source=telegram">Open in Roomote</a>',
+        '<blockquote expandable>Fixing bug…\n\nUpdating the task lifecycle and rerunning focused tests.</blockquote>',
+      footerText:
+        'Open in Roomote: https://roomote.example/sessions/session-1?task=task-1&utm_source=telegram',
+      footerHtmlText:
+        '<a href="https://roomote.example/sessions/session-1?task=task-1&amp;utm_source=telegram">Open in Roomote</a>',
     });
   });
 
@@ -43,18 +48,36 @@ describe('buildTelegramLiveTaskMessage', () => {
   it('escapes expandable HTML without splitting entities or exceeding one message', () => {
     const message = buildTelegramLiveTaskMessage({
       status: 'running',
-      progress: `Fixing <Telegram>...\n${'<>&'.repeat(TELEGRAM_MAX_MESSAGE_LENGTH)}`,
+      progress: `Fixing <Telegram>...\n${'<>&'.repeat(TELEGRAM_MAX_RICH_MESSAGE_LENGTH)}`,
     });
 
     expect(message.htmlText).toContain('Fixing &lt;Telegram&gt;...');
     expect(message.htmlText).not.toMatch(/&(?!amp;|lt;|gt;)/);
     expect(message.htmlText.endsWith('</blockquote>')).toBe(true);
     expect(message.text.length).toBeLessThanOrEqual(
-      TELEGRAM_MAX_MESSAGE_LENGTH,
+      TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
     );
     expect(message.htmlText.length).toBeLessThanOrEqual(
-      TELEGRAM_MAX_MESSAGE_LENGTH,
+      TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
     );
+  });
+
+  it('reserves the native footer envelope in near-limit editable HTML', () => {
+    const message = buildTelegramLiveTaskMessage({
+      status: 'running',
+      progress: `Working\n${'x'.repeat(TELEGRAM_MAX_RICH_MESSAGE_LENGTH)}`,
+      taskUrl: 'https://roomote.test/sessions/1?task=2',
+    });
+    const chunks = planTelegramRichMessages({
+      ...message,
+      textFormat: 'plain',
+    });
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]!.html.length).toBeLessThanOrEqual(
+      TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+    );
+    expect(chunks[0]!.html).toContain('<footer>');
   });
 
   it('matches the checked-in compact text demo fixture', () => {
@@ -68,19 +91,21 @@ describe('buildTelegramLiveTaskMessage', () => {
     });
     const fixture = [
       'RUNNING',
-      running.text,
+      [running.text, running.footerText].filter(Boolean).join('\n\n'),
       '',
       'WAITING',
-      buildTelegramLiveTaskMessage({ status: 'waiting', taskUrl }).text,
+      joinMessage(buildTelegramLiveTaskMessage({ status: 'waiting', taskUrl })),
       '',
       'COMPLETED',
-      buildTelegramLiveTaskMessage({ status: 'completed', taskUrl }).text,
+      joinMessage(
+        buildTelegramLiveTaskMessage({ status: 'completed', taskUrl }),
+      ),
       '',
       'FAILED',
-      buildTelegramLiveTaskMessage({ status: 'failed', taskUrl }).text,
+      joinMessage(buildTelegramLiveTaskMessage({ status: 'failed', taskUrl })),
       '',
       'STOPPED',
-      buildTelegramLiveTaskMessage({ status: 'stopped', taskUrl }).text,
+      joinMessage(buildTelegramLiveTaskMessage({ status: 'stopped', taskUrl })),
       '',
     ].join('\n');
 
@@ -92,3 +117,7 @@ describe('buildTelegramLiveTaskMessage', () => {
     );
   });
 });
+
+function joinMessage(message: { text: string; footerText?: string }): string {
+  return [message.text, message.footerText].filter(Boolean).join('\n\n');
+}

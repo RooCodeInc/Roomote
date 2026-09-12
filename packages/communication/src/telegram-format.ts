@@ -2,12 +2,12 @@
  * Telegram Bot API text formatting helpers.
  *
  * Converts the agent-authored markdown used across Roomote chat surfaces into
- * the HTML subset supported by Telegram's `parse_mode: 'HTML'`
- * (https://core.telegram.org/bots/api#html-style) and splits long messages so
- * each `sendMessage` call stays under Telegram's 4096-character limit.
+ * Telegram rich-message HTML and splits rendered payloads at Telegram's rich
+ * message limit.
  */
 
 export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
+export const TELEGRAM_MAX_RICH_MESSAGE_LENGTH = 32768;
 
 /**
  * Chunk raw markdown before HTML conversion so tag pairs never straddle a
@@ -223,7 +223,7 @@ export function chunkTelegramMarkdown(
  * alone can still produce messages Telegram rejects as too long. Re-chunk
  * any oversized piece with a target scaled down by its observed expansion
  * ratio. The floor guarantees termination: at 256 raw characters even
- * worst-case escaping plus tag overhead stays far below the 4096 limit.
+ * worst-case escaping plus tag overhead stays below the configured limit.
  */
 const HTML_CHUNK_MIN_TARGET_LENGTH = 256;
 
@@ -235,44 +235,121 @@ type TelegramHtmlChunk = {
 function convertChunkWithinLimit(
   chunk: string,
   targetLength: number,
+  maxHtmlLength: number,
 ): TelegramHtmlChunk[] {
   const html = markdownToTelegramHtml(chunk);
 
-  if (html.length <= TELEGRAM_MAX_MESSAGE_LENGTH) {
+  if (html.length <= maxHtmlLength) {
     return [{ markdown: chunk, html }];
   }
 
   const scaledTarget = Math.floor(
-    (chunk.length * TELEGRAM_MAX_MESSAGE_LENGTH) / html.length / 2,
+    (chunk.length * maxHtmlLength) / html.length / 2,
   );
   const nextTarget = Math.max(
     HTML_CHUNK_MIN_TARGET_LENGTH,
     Math.min(Math.floor(targetLength / 2), scaledTarget),
   );
+  if (nextTarget >= chunk.length) {
+    throw new Error('Telegram rich-message content cannot fit in one chunk.');
+  }
 
   return chunkTelegramMarkdown(chunk, nextTarget).flatMap((piece) =>
-    convertChunkWithinLimit(piece, nextTarget),
+    convertChunkWithinLimit(piece, nextTarget, maxHtmlLength),
   );
 }
 
 /**
- * Split markdown into send-ready pieces whose *converted HTML* fits within
- * Telegram's message limit. Each piece carries its raw markdown alongside so
- * callers can fall back to plain text when Telegram rejects entity parsing.
+ * Split markdown into send-ready pieces whose converted HTML fits within the
+ * requested Telegram rich-message budget.
  */
 export function chunkTelegramMarkdownAsHtml(
   markdown: string,
+  maxHtmlLength: number = TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
 ): TelegramHtmlChunk[] {
+  if (!Number.isSafeInteger(maxHtmlLength) || maxHtmlLength < 2) {
+    throw new Error(
+      'Telegram HTML chunk length must be an integer of at least 2.',
+    );
+  }
   const html = markdownToTelegramHtml(markdown);
 
-  if (
-    markdown.length <= TELEGRAM_MAX_MESSAGE_LENGTH &&
-    html.length <= TELEGRAM_MAX_MESSAGE_LENGTH
-  ) {
+  if (html.length <= maxHtmlLength) {
     return [{ markdown, html }];
   }
 
-  return chunkTelegramMarkdown(markdown).flatMap((chunk) =>
-    convertChunkWithinLimit(chunk, MARKDOWN_CHUNK_TARGET_LENGTH),
+  const targetLength = Math.max(
+    HTML_CHUNK_MIN_TARGET_LENGTH,
+    Math.floor(maxHtmlLength * 0.85),
   );
+  return chunkTelegramMarkdown(markdown, targetLength).flatMap((chunk) =>
+    convertChunkWithinLimit(chunk, targetLength, maxHtmlLength),
+  );
+}
+
+function chunkTelegramPlainTextAsHtml(
+  text: string,
+  maxHtmlLength: number,
+): TelegramHtmlChunk[] {
+  const html = escapeTelegramHtml(text);
+  if (html.length <= maxHtmlLength) return [{ markdown: text, html }];
+
+  const targetLength = Math.max(
+    2,
+    Math.min(
+      text.length - 1,
+      Math.floor((text.length * maxHtmlLength) / html.length / 2),
+    ),
+  );
+  if (targetLength >= text.length) {
+    throw new Error('Telegram rich-message content cannot fit in one chunk.');
+  }
+  return chunkTelegramText(text, targetLength).flatMap((chunk) =>
+    chunkTelegramPlainTextAsHtml(chunk, maxHtmlLength),
+  );
+}
+
+type TelegramRichMessageChunk = {
+  text: string;
+  html: string;
+};
+
+export function planTelegramRichMessages(input: {
+  text: string;
+  htmlText?: string;
+  footerText?: string;
+  footerHtmlText?: string;
+  textFormat?: 'plain' | 'markdown';
+}): TelegramRichMessageChunk[] {
+  const footerHtml = input.footerText
+    ? `<footer>${
+        input.footerHtmlText ?? markdownToTelegramHtml(input.footerText)
+      }</footer>`
+    : '';
+  const footerSuffix = footerHtml ? `\n\n${footerHtml}` : '';
+  const bodyLimit = TELEGRAM_MAX_RICH_MESSAGE_LENGTH - footerSuffix.length;
+  if (bodyLimit < 2) {
+    throw new Error(
+      `Telegram rich-message footer exceeds ${TELEGRAM_MAX_RICH_MESSAGE_LENGTH} characters.`,
+    );
+  }
+
+  if (input.htmlText !== undefined && input.htmlText.length <= bodyLimit) {
+    return [
+      {
+        text: input.text,
+        html: `${input.htmlText}${footerSuffix}`,
+      },
+    ];
+  }
+
+  const chunks =
+    input.textFormat === 'markdown'
+      ? chunkTelegramMarkdownAsHtml(input.text, bodyLimit)
+      : chunkTelegramPlainTextAsHtml(input.text, bodyLimit);
+  const lastIndex = chunks.length - 1;
+  return chunks.map((chunk, index) => ({
+    text: chunk.markdown,
+    html: `${chunk.html}${index === lastIndex ? footerSuffix : ''}`,
+  }));
 }

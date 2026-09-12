@@ -12,10 +12,10 @@ describe('Fast Telegram activity', () => {
   afterEach(() => vi.useRealTimers());
 
   it('shows non-empty Thinking before replacing it with the first partial', async () => {
-    const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
+    const sendRichMessageDraft = vi.fn().mockResolvedValue(undefined);
     const sendChatAction = vi.fn().mockResolvedValue(undefined);
     const activity = createFastAgentTelegramActivity({
-      provider: { sendMessageDraft, sendChatAction },
+      provider: { sendRichMessageDraft, sendChatAction },
       replyTarget: { channelId: '123', threadId: '77' },
     });
 
@@ -23,38 +23,39 @@ describe('Fast Telegram activity', () => {
     await vi.advanceTimersByTimeAsync(
       FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS - 1,
     );
-    expect(sendMessageDraft).not.toHaveBeenCalled();
+    expect(sendRichMessageDraft).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
-    const thinkingDraftId = sendMessageDraft.mock.calls[0]![0].draftId;
+    const thinkingDraftId = sendRichMessageDraft.mock.calls[0]![0].draftId;
     expect(thinkingDraftId).not.toBe(0);
-    expect(sendMessageDraft).toHaveBeenCalledWith({
+    expect(sendRichMessageDraft).toHaveBeenCalledWith({
       channelId: '123',
       threadId: '77',
       draftId: thinkingDraftId,
       text: 'Roomote is working...',
+      htmlText: '<tg-thinking>Roomote is working...</tg-thinking>',
     });
     expect(sendChatAction).not.toHaveBeenCalled();
 
     const stream = activity.createReplyStream(vi.fn());
     await stream.append('Partial answer');
-    expect(sendMessageDraft).toHaveBeenCalledWith(
+    expect(sendRichMessageDraft).toHaveBeenCalledWith(
       expect.objectContaining({
         draftId: thinkingDraftId,
         text: 'Partial answer',
       }),
     );
     expect(
-      sendMessageDraft.mock.calls.some(([input]) => input.text === ''),
+      sendRichMessageDraft.mock.calls.some(([input]) => input.text === ''),
     ).toBe(false);
     await activity.dispose();
   });
 
   it('refreshes one non-empty Thinking draft below its TTL in private chats', async () => {
-    const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
+    const sendRichMessageDraft = vi.fn().mockResolvedValue(undefined);
     const sendChatAction = vi.fn().mockResolvedValue(undefined);
     const activity = createFastAgentTelegramActivity({
       provider: {
-        sendMessageDraft,
+        sendRichMessageDraft,
         sendChatAction,
       },
       replyTarget: { channelId: '123', threadId: '77' },
@@ -62,25 +63,26 @@ describe('Fast Telegram activity', () => {
 
     activity.start();
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS);
-    expect(sendMessageDraft).toHaveBeenCalledTimes(1);
-    const firstDraftId = sendMessageDraft.mock.calls[0]![0].draftId;
-    expect(sendMessageDraft).toHaveBeenCalledWith({
+    expect(sendRichMessageDraft).toHaveBeenCalledTimes(1);
+    const firstDraftId = sendRichMessageDraft.mock.calls[0]![0].draftId;
+    expect(sendRichMessageDraft).toHaveBeenCalledWith({
       channelId: '123',
       threadId: '77',
       draftId: firstDraftId,
       text: 'Roomote is working...',
+      htmlText: '<tg-thinking>Roomote is working...</tg-thinking>',
     });
 
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_DRAFT_REFRESH_MS);
-    expect(sendMessageDraft).toHaveBeenCalledTimes(2);
-    expect(sendMessageDraft.mock.calls[1]![0].draftId).toBe(firstDraftId);
+    expect(sendRichMessageDraft).toHaveBeenCalledTimes(2);
+    expect(sendRichMessageDraft.mock.calls[1]![0].draftId).toBe(firstDraftId);
     await activity.settle();
   });
 
   it('does not show a working draft for a turn that settles within the delay', async () => {
-    const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
+    const sendRichMessageDraft = vi.fn().mockResolvedValue(undefined);
     const activity = createFastAgentTelegramActivity({
-      provider: { sendMessageDraft, sendChatAction: vi.fn() },
+      provider: { sendRichMessageDraft, sendChatAction: vi.fn() },
       replyTarget: { channelId: '123' },
     });
 
@@ -90,31 +92,31 @@ describe('Fast Telegram activity', () => {
     );
     await activity.settle();
     await vi.advanceTimersByTimeAsync(1);
-    expect(sendMessageDraft).not.toHaveBeenCalled();
+    expect(sendRichMessageDraft).not.toHaveBeenCalled();
   });
 
   it('streams the first partial immediately instead of waiting for the status delay', async () => {
-    const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
+    const sendRichMessageDraft = vi.fn().mockResolvedValue(undefined);
     const activity = createFastAgentTelegramActivity({
-      provider: { sendMessageDraft, sendChatAction: vi.fn() },
+      provider: { sendRichMessageDraft, sendChatAction: vi.fn() },
       replyTarget: { channelId: '123' },
     });
 
     activity.start();
     const stream = activity.createReplyStream(vi.fn());
     await stream.append('Partial answer');
-    expect(sendMessageDraft).toHaveBeenCalledExactlyOnceWith(
+    expect(sendRichMessageDraft).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ text: 'Partial answer' }),
     );
     await activity.settle();
   });
 
   it('restores Thinking after an intermediate post but cancels it on true completion', async () => {
-    const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
+    const sendRichMessageDraft = vi.fn().mockResolvedValue(undefined);
     const sendChatAction = vi.fn().mockResolvedValue(undefined);
     const activity = createFastAgentTelegramActivity({
       provider: {
-        sendMessageDraft,
+        sendRichMessageDraft,
         sendChatAction,
       },
       replyTarget: { channelId: '123' },
@@ -126,17 +128,17 @@ describe('Fast Telegram activity', () => {
     await vi.advanceTimersByTimeAsync(
       FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS - 1,
     );
-    expect(sendMessageDraft).toHaveBeenCalledTimes(1);
+    expect(sendRichMessageDraft).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
-    expect(sendMessageDraft).toHaveBeenCalledTimes(2);
-    expect(sendMessageDraft).toHaveBeenLastCalledWith(
+    expect(sendRichMessageDraft).toHaveBeenCalledTimes(2);
+    expect(sendRichMessageDraft).toHaveBeenLastCalledWith(
       expect.objectContaining({ text: 'Roomote is working...' }),
     );
 
     activity.reassert();
     await activity.settle();
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS);
-    expect(sendMessageDraft).toHaveBeenCalledTimes(2);
+    expect(sendRichMessageDraft).toHaveBeenCalledTimes(2);
     expect(sendChatAction).not.toHaveBeenCalled();
   });
 
@@ -145,15 +147,15 @@ describe('Fast Telegram activity', () => {
     const draft = new Promise<void>((resolve) => {
       resolveDraft = resolve;
     });
-    const sendMessageDraft = vi.fn(() => draft);
+    const sendRichMessageDraft = vi.fn(() => draft);
     const activity = createFastAgentTelegramActivity({
-      provider: { sendMessageDraft, sendChatAction: vi.fn() },
+      provider: { sendRichMessageDraft, sendChatAction: vi.fn() },
       replyTarget: { channelId: '123' },
     });
 
     activity.start();
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS);
-    expect(sendMessageDraft).toHaveBeenCalledOnce();
+    expect(sendRichMessageDraft).toHaveBeenCalledOnce();
     const settlement = activity.settle();
     let settled = false;
     void settlement.then(() => {
@@ -161,20 +163,20 @@ describe('Fast Telegram activity', () => {
     });
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_DRAFT_REFRESH_MS);
     expect(settled).toBe(false);
-    expect(sendMessageDraft).toHaveBeenCalledOnce();
+    expect(sendRichMessageDraft).toHaveBeenCalledOnce();
 
     resolveDraft();
     await settlement;
     expect(settled).toBe(true);
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_DRAFT_REFRESH_MS);
-    expect(sendMessageDraft).toHaveBeenCalledOnce();
+    expect(sendRichMessageDraft).toHaveBeenCalledOnce();
   });
 
   it('writes the first partial immediately, then paces later coalesced drafts before final delivery', async () => {
-    const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
+    const sendRichMessageDraft = vi.fn().mockResolvedValue(undefined);
     const deliver = vi.fn().mockResolvedValue({ messageId: 'final-1' });
     const activity = createFastAgentTelegramActivity({
-      provider: { sendMessageDraft, sendChatAction: vi.fn() },
+      provider: { sendRichMessageDraft, sendChatAction: vi.fn() },
       replyTarget: { channelId: '123' },
     });
 
@@ -182,7 +184,7 @@ describe('Fast Telegram activity', () => {
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS);
     const stream = activity.createReplyStream(deliver);
     await stream.append('Partial ');
-    expect(sendMessageDraft).toHaveBeenLastCalledWith(
+    expect(sendRichMessageDraft).toHaveBeenLastCalledWith(
       expect.objectContaining({ text: 'Partial ' }),
     );
 
@@ -192,18 +194,18 @@ describe('Fast Telegram activity', () => {
     await stream.append('answer');
     await stream.append(' in progress');
     expect(
-      sendMessageDraft.mock.calls
+      sendRichMessageDraft.mock.calls
         .filter(([input]) => input.text)
         .map(([input]) => input.text),
     ).toEqual(['Roomote is working...', 'Partial ']);
     await vi.advanceTimersByTimeAsync(
       FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS / 2,
     );
-    expect(sendMessageDraft).toHaveBeenLastCalledWith(
+    expect(sendRichMessageDraft).toHaveBeenLastCalledWith(
       expect.objectContaining({ text: 'Partial answer in progress' }),
     );
     expect(
-      sendMessageDraft.mock.calls
+      sendRichMessageDraft.mock.calls
         .filter(([input]) => input.text)
         .map(([input]) => input.text),
     ).toEqual([
@@ -227,13 +229,13 @@ describe('Fast Telegram activity', () => {
     const draft = new Promise<void>((resolve) => {
       resolveDraft = resolve;
     });
-    const sendMessageDraft = vi
+    const sendRichMessageDraft = vi
       .fn()
       .mockResolvedValueOnce(undefined)
       .mockReturnValueOnce(draft);
     const deliver = vi.fn().mockResolvedValue({ messageId: 'final-1' });
     const activity = createFastAgentTelegramActivity({
-      provider: { sendMessageDraft, sendChatAction: vi.fn() },
+      provider: { sendRichMessageDraft, sendChatAction: vi.fn() },
       replyTarget: { channelId: '123' },
     });
 
@@ -252,15 +254,15 @@ describe('Fast Telegram activity', () => {
     expect(deliver).toHaveBeenCalledOnce();
     await activity.settle();
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_DRAFT_REFRESH_MS);
-    expect(sendMessageDraft).toHaveBeenCalledTimes(2);
+    expect(sendRichMessageDraft).toHaveBeenCalledTimes(2);
     await activity.dispose();
   });
 
   it('retains ordinary typing in group chats where drafts are unsupported', async () => {
     const sendChatAction = vi.fn().mockResolvedValue(undefined);
-    const sendMessageDraft = vi.fn();
+    const sendRichMessageDraft = vi.fn();
     const activity = createFastAgentTelegramActivity({
-      provider: { sendMessageDraft, sendChatAction },
+      provider: { sendRichMessageDraft, sendChatAction },
       replyTarget: { channelId: '-100123', threadId: '77' },
     });
 
@@ -270,7 +272,7 @@ describe('Fast Telegram activity', () => {
       channelId: '-100123',
       threadId: '77',
     });
-    expect(sendMessageDraft).not.toHaveBeenCalled();
+    expect(sendRichMessageDraft).not.toHaveBeenCalled();
     expect(activity.supportsReplyStream).toBe(false);
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_TYPING_REFRESH_MS);
     expect(sendChatAction).toHaveBeenCalledTimes(2);
@@ -278,19 +280,19 @@ describe('Fast Telegram activity', () => {
   });
 
   it('falls back to a typing heartbeat when Telegram rejects live drafts', async () => {
-    const sendMessageDraft = vi
+    const sendRichMessageDraft = vi
       .fn()
       .mockRejectedValue(new Error('method unavailable'));
     const sendChatAction = vi.fn().mockResolvedValue(undefined);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const activity = createFastAgentTelegramActivity({
-      provider: { sendMessageDraft, sendChatAction },
+      provider: { sendRichMessageDraft, sendChatAction },
       replyTarget: { channelId: '123', threadId: '77' },
     });
 
     activity.start();
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS);
-    expect(sendMessageDraft).toHaveBeenCalledOnce();
+    expect(sendRichMessageDraft).toHaveBeenCalledOnce();
     expect(sendChatAction).toHaveBeenCalledWith({
       channelId: '123',
       threadId: '77',
@@ -298,7 +300,7 @@ describe('Fast Telegram activity', () => {
     expect(warn).toHaveBeenCalledOnce();
 
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_TYPING_REFRESH_MS);
-    expect(sendMessageDraft).toHaveBeenCalledOnce();
+    expect(sendRichMessageDraft).toHaveBeenCalledOnce();
     expect(sendChatAction).toHaveBeenCalledTimes(2);
     await activity.dispose();
     warn.mockRestore();
