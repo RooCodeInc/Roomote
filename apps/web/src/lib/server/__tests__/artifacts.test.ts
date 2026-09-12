@@ -9,6 +9,7 @@ import {
 import {
   getArtifactByPath,
   getArtifactBySessionPath,
+  getArtifactVersionsBySessionPath,
   validateArtifactPath,
   validateArtifactSize,
 } from '../artifacts';
@@ -94,6 +95,47 @@ describe.each(['task', 'session'] as const)(
     });
   },
 );
+
+describe('Session artifact helper authorization', () => {
+  const path = 'reports/private.pdf';
+  let sessionId: string;
+
+  beforeEach(async () => {
+    sessionId = (await sessionFactory.create()).id;
+    await db.insert(taskArtifacts).values(
+      [1, 2, 3].map((version) => ({
+        sessionId,
+        path,
+        version,
+        uploaded: version < 3,
+        contentType: 'application/pdf',
+        size: 100,
+      })),
+    );
+  });
+
+  it('rejects path and version reads without a human user', async () => {
+    const auth = { userId: null, isAdmin: false };
+
+    await expect(
+      getArtifactBySessionPath({ sessionId, path, auth }),
+    ).resolves.toBeNull();
+    await expect(
+      getArtifactVersionsBySessionPath({ sessionId, path, auth }),
+    ).resolves.toEqual([]);
+  });
+
+  it('returns uploaded versions, latest first, for an authorized member', async () => {
+    const auth = { userId: (await userFactory.create()).id, isAdmin: false };
+
+    await expect(
+      getArtifactVersionsBySessionPath({ sessionId, path, auth }),
+    ).resolves.toMatchObject([{ version: 2 }, { version: 1 }]);
+    await expect(
+      getArtifactBySessionPath({ sessionId, path, auth }),
+    ).resolves.toMatchObject({ path, version: 2, uploaded: true });
+  });
+});
 
 describe('validateArtifactPath', () => {
   it('should accept valid paths', () => {
