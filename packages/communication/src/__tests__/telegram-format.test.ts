@@ -59,6 +59,22 @@ describe('markdownToTelegramHtml', () => {
     );
   });
 
+  it('keeps indented list items nested under their parent item', () => {
+    expect(
+      markdownToTelegramHtml(
+        '- Parent\n  - **Child one**\n  - Child two with `code`\n- Sibling',
+      ),
+    ).toBe(
+      '<ul><li>Parent<ul><li><b>Child one</b></li><li>Child two with <code>code</code></li></ul></li><li>Sibling</li></ul>',
+    );
+  });
+
+  it('supports a nested ordered list inside an unordered item', () => {
+    expect(markdownToTelegramHtml('- Parent\n  1. First\n  2. Second')).toBe(
+      '<ul><li>Parent<ol><li>First</li><li>Second</li></ol></li></ul>',
+    );
+  });
+
   it('converts fenced code blocks with language hints', () => {
     expect(markdownToTelegramHtml('```ts\nconst a = 1;\n```')).toBe(
       '<pre><code class="language-ts">const a = 1;</code></pre>',

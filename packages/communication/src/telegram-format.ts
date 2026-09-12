@@ -86,44 +86,87 @@ function convertInlineText(escaped: string): string {
     .join('');
 }
 
+type MarkdownListLine = {
+  indent: number;
+  type: 'ol' | 'ul';
+  content: string;
+};
+
+function parseMarkdownListLine(line: string): MarkdownListLine | null {
+  const match = /^([ \t]*)(?:[-+*]|(\d+)[.)])\s+(.*)$/u.exec(line);
+  if (!match) return null;
+
+  return {
+    indent: match[1]!.replaceAll('\t', '    ').length,
+    type: match[2] ? 'ol' : 'ul',
+    content: match[3]!,
+  };
+}
+
+function renderMarkdownList(
+  lines: string[],
+  startIndex: number,
+): { html: string; nextIndex: number } {
+  const firstLine = parseMarkdownListLine(lines[startIndex]!)!;
+  const items: Array<{ content: string; nestedHtml: string }> = [];
+  let nextIndex = startIndex;
+
+  while (nextIndex < lines.length) {
+    const line = parseMarkdownListLine(lines[nextIndex]!);
+    if (!line || line.indent < firstLine.indent) break;
+
+    if (line.indent > firstLine.indent) {
+      const parent = items.at(-1);
+      if (!parent) break;
+      const nested = renderMarkdownList(lines, nextIndex);
+      parent.nestedHtml += nested.html;
+      nextIndex = nested.nextIndex;
+      continue;
+    }
+
+    if (line.type !== firstLine.type) break;
+    items.push({ content: line.content, nestedHtml: '' });
+    nextIndex += 1;
+  }
+
+  return {
+    html: `<${firstLine.type}>${items
+      .map(
+        (item) =>
+          `<li>${convertInlineText(item.content)}${item.nestedHtml}</li>`,
+      )
+      .join('')}</${firstLine.type}>`,
+    nextIndex,
+  };
+}
+
 function convertTextSegment(segment: string): string {
   const escaped = escapeTelegramHtml(segment);
   const hasBlockMarkdown =
-    segment.includes('\n') || /^(?:#{1,6}|[-+*]|\d+[.)])\s+/u.test(segment);
+    segment.includes('\n') ||
+    /^[ \t]*(?:#{1,6}|[-+*]|\d+[.)])\s+/u.test(segment);
   if (!hasBlockMarkdown) return convertInlineText(escaped);
 
   const blocks: string[] = [];
   let paragraphLines: string[] = [];
-  let listType: 'ol' | 'ul' | null = null;
-  let listItems: string[] = [];
 
   const flushParagraph = () => {
     if (paragraphLines.length === 0) return;
     blocks.push(`<p>${paragraphLines.map(convertInlineText).join('<br>')}</p>`);
     paragraphLines = [];
   };
-  const flushList = () => {
-    if (!listType) return;
-    blocks.push(
-      `<${listType}>${listItems
-        .map((item) => `<li>${convertInlineText(item)}</li>`)
-        .join('')}</${listType}>`,
-    );
-    listType = null;
-    listItems = [];
-  };
 
-  for (const line of escaped.split('\n')) {
+  const lines = escaped.split('\n');
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
     if (line.trim() === '') {
       flushParagraph();
-      flushList();
       continue;
     }
 
     const headingMatch = /^(#{1,6})\s+(.*)$/u.exec(line);
     if (headingMatch) {
       flushParagraph();
-      flushList();
       const level = headingMatch[1]!.length;
       blocks.push(
         `<h${level}>${convertInlineText(headingMatch[2]!)}</h${level}>`,
@@ -131,22 +174,18 @@ function convertTextSegment(segment: string): string {
       continue;
     }
 
-    const listMatch = /^(?:[-+*]|(\d+)[.)])\s+(.*)$/u.exec(line);
-    if (listMatch) {
+    if (parseMarkdownListLine(line)) {
       flushParagraph();
-      const nextListType = listMatch[1] ? 'ol' : 'ul';
-      if (listType && listType !== nextListType) flushList();
-      listType = nextListType;
-      listItems.push(listMatch[2]!);
+      const list = renderMarkdownList(lines, index);
+      blocks.push(list.html);
+      index = list.nextIndex - 1;
       continue;
     }
 
-    flushList();
     paragraphLines.push(line);
   }
 
   flushParagraph();
-  flushList();
   return blocks.join('');
 }
 
