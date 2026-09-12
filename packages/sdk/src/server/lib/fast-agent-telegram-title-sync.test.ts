@@ -191,7 +191,7 @@ describe('Telegram Fast topic title sync', () => {
   it('restores working activity after a topic update clears the draft', async () => {
     vi.useFakeTimers();
     try {
-      const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
+      const sendRichMessageDraft = vi.fn().mockResolvedValue(undefined);
       const currentSession = session('Generated title');
       if (currentSession.conversation.surface !== 'telegram') {
         throw new Error('Expected a Telegram session.');
@@ -201,7 +201,7 @@ describe('Telegram Fast topic title sync', () => {
         threadId: '77',
       };
       const baseActivity = createFastAgentTelegramActivity({
-        provider: { sendMessageDraft, sendChatAction: vi.fn() },
+        provider: { sendRichMessageDraft, sendChatAction: vi.fn() },
         replyTarget: { channelId: '123', threadId: '77' },
       });
       const activity = addFastAgentTelegramTopicTitleSync({
@@ -222,15 +222,15 @@ describe('Telegram Fast topic title sync', () => {
       await vi.advanceTimersByTimeAsync(
         FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS,
       );
-      expect(sendMessageDraft).toHaveBeenCalledOnce();
+      expect(sendRichMessageDraft).toHaveBeenCalledOnce();
 
       activity.updateTitle?.('Generated title', { titleChanged: true });
       await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(
         FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS,
       );
-      expect(sendMessageDraft).toHaveBeenCalledTimes(2);
-      expect(sendMessageDraft).toHaveBeenLastCalledWith(
+      expect(sendRichMessageDraft).toHaveBeenCalledTimes(2);
+      expect(sendRichMessageDraft).toHaveBeenLastCalledWith(
         expect.objectContaining({ text: 'Roomote is working...' }),
       );
       await activity.dispose();

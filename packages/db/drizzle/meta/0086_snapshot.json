@@ -1,5 +1,5 @@
 {
-  "id": "8483ebd2-231f-4513-82a8-b4739b3d84f4",
+  "id": "78faf767-b110-4ac3-966e-07f3ced5db5f",
   "prevId": "34ef594d-bdb7-43df-a351-bf2550b16bcf",
   "version": "7",
   "dialect": "postgresql",
@@ -4086,18 +4086,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "open_code_projection_hash": {
-          "name": "open_code_projection_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "open_code_projected_through_seq": {
-          "name": "open_code_projected_through_seq",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
         "model": {
           "name": "model",
           "type": "text",
@@ -4387,12 +4375,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "conversation_seq": {
-          "name": "conversation_seq",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
         "turn_id": {
           "name": "turn_id",
           "type": "text",
@@ -4410,12 +4392,6 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true
-        },
-        "observed_at": {
-          "name": "observed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
         },
         "event_type": {
           "name": "event_type",
@@ -4506,27 +4482,6 @@
         },
         "fast_agent_messages_conversation_order_idx": {
           "name": "fast_agent_messages_conversation_order_idx",
-          "columns": [
-            {
-              "expression": "conversation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "conversation_seq",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "fast_agent_messages_legacy_order_idx": {
-          "name": "fast_agent_messages_legacy_order_idx",
           "columns": [
             {
               "expression": "conversation_id",
@@ -5507,6 +5462,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
         },
         "created_at": {
           "name": "created_at",

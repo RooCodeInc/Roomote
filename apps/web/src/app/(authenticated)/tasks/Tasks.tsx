@@ -650,7 +650,7 @@ export const Tasks = () => {
         </div>
       ) : isError ? (
         <div className="flex min-h-0 flex-1 bg-background">
-          <TaskCardError />
+          <TaskCardError onRetry={() => void infiniteTasks.refetch()} />
         </div>
       ) : tasks.length === 0 ? (
         <div className="flex min-h-0 flex-1 bg-background">

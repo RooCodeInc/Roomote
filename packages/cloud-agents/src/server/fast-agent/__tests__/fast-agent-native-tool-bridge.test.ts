@@ -196,11 +196,18 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(showWidgetSource).toContain('invoke("show_widget"');
     expect(showWidgetSource).toContain('textFallback: z.string().max(4000)');
     expect(showWidgetSource).toContain(
-      'On Slack or Discord, textFallback is posted as a chat preview with a link to open the rendered widget',
+      'Create and share a rendered visual in the Session transcript',
     );
     expect(showWidgetSource).toContain(
-      'Optional chat preview shown on Slack or Discord with a link to open the rendered widget',
+      'Use it proactively to show, mock up, preview, or visualize an interface or interaction',
     );
+    expect(showWidgetSource).toContain(
+      'Optional short plain-text preview of the rendered visual',
+    );
+    expect(showWidgetSource).not.toContain('On Slack');
+    expect(showWidgetSource).not.toContain('communication provider');
+    expect(showWidgetSource).not.toContain('link to open');
+    expect(showWidgetSource).not.toContain('HTML inline');
     expect(showWidgetSource).not.toContain('textFallback is posted instead');
     expect(showWidgetSource).toContain(SHOW_WIDGET_THEME_GUIDANCE);
     expect(showWidgetSource).toContain(SHOW_WIDGET_FIXED_CANVAS_GUIDANCE);
@@ -286,6 +293,7 @@ describe('Fast native OpenCode tool bridge', () => {
       task: false,
       roomote_manage_custom_automations: false,
       roomote_create_custom_skill: false,
+      roomote_update_custom_skill: false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: false,
     });
     for (const rawFilesystemTool of [
@@ -862,6 +870,7 @@ describe('Fast native OpenCode tool bridge', () => {
       task: false,
       roomote_manage_custom_automations: false,
       roomote_create_custom_skill: false,
+      roomote_update_custom_skill: false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: false,
     });
     const unbind = bindFastAgentMcpToolExecutor(

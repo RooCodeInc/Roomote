@@ -401,9 +401,11 @@ function isMatchingBotCommand(
 
   const botUsername = normalizeTelegramBotUsername(options.botUsername);
 
-  if (!botUsername || isTelegramPrivateChat(message)) {
+  if (isTelegramPrivateChat(message)) {
     return true;
   }
+
+  if (!botUsername) return false;
 
   return parseTelegramBotCommand(entityText)?.botSuffix === botUsername;
 }
@@ -418,9 +420,7 @@ function isMatchingBotMention(
     return false;
   }
 
-  if (!botUsername) {
-    return true;
-  }
+  if (!botUsername) return false;
 
   return entityText.slice(1).toLowerCase() === botUsername;
 }
@@ -650,6 +650,9 @@ export function getTelegramNewTaskCommand(
   }
 
   const botUsername = normalizeTelegramBotUsername(options.botUsername);
+  if (!botUsername && !isTelegramPrivateChat(message)) {
+    return null;
+  }
   const entities = message.entities ?? [];
 
   for (const entity of entities) {

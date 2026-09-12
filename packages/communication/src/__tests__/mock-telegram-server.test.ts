@@ -14,6 +14,7 @@ import {
   computeTelegramEntities,
   type MockTelegramState,
 } from '../mock-telegram-server';
+import { TELEGRAM_MAX_RICH_MESSAGE_LENGTH } from '../telegram-format';
 import { TelegramCommunicationProvider } from '../telegram-provider';
 
 const BOT_TOKEN = '7000000001:mock-telegram-token';
@@ -122,7 +123,7 @@ describe('MockTelegramServer', () => {
       expect.objectContaining({
         chat_id: '111000111',
         message_thread_id: Number(topic.messageThreadId),
-        text: 'Task started.',
+        rich_message: { html: 'Task started.' },
       }),
     );
   });
@@ -155,7 +156,9 @@ describe('MockTelegramServer', () => {
     const messages = server.getState().messages ?? [];
     const botMessage = messages.find((m) => m.from.is_bot);
     expect(botMessage).toBeDefined();
-    expect(botMessage?.text).toBe('On it — taking a look now.');
+    expect(botMessage?.rich_message).toEqual({
+      html: 'On it — taking a look now.',
+    });
     expect(botMessage?.reply_to_message_id).toBe(1000);
     expect(result.messageId).toBe(String(botMessage?.message_id));
   });
@@ -166,7 +169,7 @@ describe('MockTelegramServer', () => {
 
     const provider = providerFor(baseUrl);
     const line = 'x'.repeat(100);
-    const longText = Array.from({ length: 120 }, () => line).join('\n');
+    const longText = Array.from({ length: 500 }, () => line).join('\n');
 
     await provider.postMessage({
       channelId: '111000111',
@@ -182,9 +185,9 @@ describe('MockTelegramServer', () => {
     expect(botMessages.length).toBeGreaterThan(1);
 
     for (const message of botMessages) {
-      expect((message.text ?? '').length).toBeLessThanOrEqual(
-        TELEGRAM_MESSAGE_TEXT_LIMIT,
-      );
+      expect(
+        String(message.rich_message?.html ?? '').length,
+      ).toBeLessThanOrEqual(TELEGRAM_MAX_RICH_MESSAGE_LENGTH);
     }
 
     expect(botMessages[0]?.reply_to_message_id).toBe(1000);
@@ -223,10 +226,8 @@ describe('MockTelegramServer', () => {
     expect(parsed.description).toContain('message is too long');
   });
 
-  it('falls back to plain text when HTML parse mode is rejected', async () => {
-    const state = baseState();
-    state.behavior = { rejectHtmlParseMode: true };
-    const { server, baseUrl } = await startServer(state);
+  it('stores markdown formatting as rich HTML', async () => {
+    const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());
 
     const provider = providerFor(baseUrl);
@@ -239,8 +240,9 @@ describe('MockTelegramServer', () => {
     const botMessage = (server.getState().messages ?? []).find(
       (m) => m.from.is_bot,
     );
-    expect(botMessage?.text).toBe('Some **bold** update');
-    expect(botMessage?.parse_mode).toBeUndefined();
+    expect(botMessage?.rich_message).toEqual({
+      html: 'Some <b>bold</b> update',
+    });
   });
 
   it('falls back to a caption + link text message when the photo is rejected', async () => {
@@ -264,9 +266,9 @@ describe('MockTelegramServer', () => {
       (m) => m.from.is_bot,
     );
     expect(botMessage?.photo_url).toBeUndefined();
-    expect(botMessage?.text).toBe(
-      'Screenshot: https://artifacts.example.test/shot.png',
-    );
+    expect(botMessage?.rich_message).toEqual({
+      html: 'Screenshot: https://artifacts.example.test/shot.png',
+    });
   });
 
   it('maps reaction names onto the Telegram emoji set via setMessageReaction', async () => {
@@ -339,7 +341,9 @@ describe('MockTelegramServer', () => {
     const message = (server.getState().messages ?? []).find(
       (m) => String(m.message_id) === posted.messageId,
     );
-    expect(message?.text).toBe('Okay — where should I run this?');
+    expect(message?.rich_message).toEqual({
+      html: 'Okay — where should I run this?',
+    });
     expect(message?.reply_markup).toEqual({
       inline_keyboard: [
         [{ text: 'web-app', callback_data: 'route_pick:def456UVW012:0' }],
@@ -354,6 +358,136 @@ describe('MockTelegramServer', () => {
         text: 'nothing here',
       }),
     ).rejects.toThrow('message to edit not found');
+  });
+
+  it('stores native rich footers on send and edit', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    const provider = providerFor(baseUrl);
+    const posted = await provider.postMessage({
+      channelId: '111000111',
+      text: 'Initial reply',
+      footerText: 'Reply anytime · [Open in Roomote](https://roomote.test/s/1)',
+    });
+    await provider.editMessageText({
+      channelId: '111000111',
+      messageId: posted.messageId,
+      text: 'Updated reply',
+      footerText: 'Reply anytime · [Open in Roomote](https://roomote.test/s/1)',
+    });
+
+    const message = (server.getState().messages ?? []).find(
+      (entry) => String(entry.message_id) === posted.messageId,
+    );
+    expect(message?.text).toBeUndefined();
+    expect(message?.rich_message).toEqual({
+      html: [
+        'Updated reply',
+        '',
+        '<footer>Reply anytime · <a href="https://roomote.test/s/1">Open in Roomote</a></footer>',
+      ].join('\n'),
+    });
+  });
+
+  it('accepts rich footer HTML above the ordinary message limit', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    const provider = providerFor(baseUrl);
+    const posted = await provider.postMessage({
+      channelId: '111000111',
+      text: 'Near-limit live update',
+      htmlText: `<blockquote>${'x'.repeat(4_050)}</blockquote>`,
+      footerText: 'Open in Roomote',
+    });
+
+    const message = (server.getState().messages ?? []).find(
+      (entry) => String(entry.message_id) === posted.messageId,
+    );
+    const richHtml = String(message?.rich_message?.html ?? '');
+    expect(richHtml.length).toBeGreaterThan(4_096);
+    expect(richHtml.length).toBeLessThanOrEqual(32_768);
+    expect(richHtml).toContain('<footer>Open in Roomote</footer>');
+  });
+
+  it('rejects rich messages above the documented rich-message limit', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    const response = await fetch(`${baseUrl}/bot${BOT_TOKEN}/sendRichMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: '111000111',
+        rich_message: {
+          html: 'x'.repeat(TELEGRAM_MAX_RICH_MESSAGE_LENGTH + 1),
+        },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      description: 'Bad Request: rich message is too long',
+    });
+  });
+
+  it('stores and replaces one private rich draft by draft id', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+    const provider = providerFor(baseUrl);
+
+    await provider.sendRichMessageDraft({
+      channelId: '111000111',
+      threadId: '77',
+      draftId: 42,
+      text: 'Partial **reply**',
+      textFormat: 'markdown',
+    });
+    await provider.sendRichMessageDraft({
+      channelId: '111000111',
+      threadId: '77',
+      draftId: 42,
+      text: 'Complete **preview**',
+      textFormat: 'markdown',
+    });
+
+    expect(server.getState().richDrafts).toEqual([
+      {
+        chat_id: '111000111',
+        message_thread_id: 77,
+        draft_id: 42,
+        rich_message: { html: 'Complete <b>preview</b>' },
+      },
+    ]);
+    expect(
+      server.getState().messages?.filter((message) => message.from.is_bot),
+    ).toHaveLength(0);
+  });
+
+  it('finalizes a private rich draft with a durable rich message', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+    const provider = providerFor(baseUrl);
+
+    await provider.sendRichMessageDraft({
+      channelId: '111000111',
+      draftId: 42,
+      text: 'Partial reply',
+    });
+    const posted = await provider.postMessage({
+      channelId: '111000111',
+      text: 'Final reply',
+    });
+
+    expect(server.getState().richDrafts).toEqual([]);
+    expect(server.getState().messages).toContainEqual(
+      expect.objectContaining({
+        message_id: Number(posted.messageId),
+        rich_message: { html: 'Final reply' },
+      }),
+    );
   });
 
   it('records typing chat actions through sendChatAction', async () => {

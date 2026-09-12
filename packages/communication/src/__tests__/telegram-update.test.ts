@@ -422,6 +422,52 @@ describe('Telegram update helpers', () => {
     ).toBe(false);
   });
 
+  it('does not trust Telegram mentions when the bot username is unavailable', () => {
+    const buildUpdate = (chatType: 'private' | 'group') =>
+      parseTelegramUpdate({
+        update_id: 1008,
+        message: {
+          message_id: 49,
+          text: '@someone $daily-brief summarize this',
+          chat: {
+            id: chatType === 'private' ? 5 : -100456,
+            type: chatType,
+            title: chatType === 'private' ? undefined : 'Engineering',
+          },
+          entities: [{ type: 'mention', offset: 0, length: 8 }],
+        },
+      }).data!;
+
+    const groupUpdate = buildUpdate('group');
+    expect(isTelegramTaskEntryUpdate(groupUpdate)).toBe(false);
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(groupUpdate),
+    ).toMatchObject({ text: '@someone $daily-brief summarize this' });
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(buildUpdate('private')),
+    ).toMatchObject({ text: '@someone $daily-brief summarize this' });
+  });
+
+  it('does not trust group bot commands when the bot username is unavailable', () => {
+    const parsed = parseTelegramUpdate({
+      update_id: 1009,
+      message: {
+        message_id: 50,
+        text: '/run@someone_else $daily-brief summarize this',
+        chat: { id: -100456, type: 'group', title: 'Engineering' },
+        entities: [{ type: 'bot_command', offset: 0, length: 17 }],
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(isTelegramTaskEntryUpdate(parsed.data!)).toBe(false);
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(parsed.data!),
+    ).toMatchObject({
+      text: '/run@someone_else $daily-brief summarize this',
+    });
+  });
+
   it('treats a bot command as an invocation only when it leads the message', () => {
     const buildUpdate = (
       text: string,
@@ -683,6 +729,20 @@ describe('Telegram update helpers', () => {
           { botUsername: 'roomote_bot' },
         ),
       ).toEqual({ command: 'new', text: 'fix the tests' });
+    });
+
+    it('rejects group /new commands when the bot username is unavailable', () => {
+      expect(
+        getTelegramNewTaskCommand(
+          parse(
+            buildUpdate(
+              '/new@someone_else $daily-brief summarize this',
+              'group',
+              [{ type: 'bot_command', offset: 0, length: 17 }],
+            ),
+          ),
+        ),
+      ).toBeNull();
     });
 
     it('accepts a leading bot mention as group targeting', () => {

@@ -4270,21 +4270,17 @@ export async function answerFastAgentQuestion({
               };
             }
 
-            if (
-              result.textFallback &&
-              (conversation.surface === 'slack' ||
-                conversation.surface === 'discord')
-            ) {
-              const signature = JSON.stringify([
-                'progress',
-                result.textFallback,
-                [],
-              ]);
+            if (isFastAgentCommunicationConversation(conversation)) {
+              const widgetLink = `[View widget](${buildFastSessionUrl(conversation.surface, session.id)})`;
+              const message = result.textFallback
+                ? `${result.textFallback}\n\n${widgetLink}`
+                : widgetLink;
+              const signature = JSON.stringify(['progress', message, []]);
               if (!completedChatReplySignatures.has(signature)) {
                 throwIfTurnCancelled();
                 await postReply({
                   purpose: 'progress',
-                  message: `${result.textFallback}\n\n[View widget](${buildFastSessionUrl(conversation.surface, session.id)})`,
+                  message,
                 });
                 completedChatReplySignatures.add(signature);
               }

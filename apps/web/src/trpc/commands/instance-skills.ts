@@ -63,7 +63,7 @@ export function createInstanceSkillCommand(
 
 export function updateInstanceSkillCommand(
   auth: UserAuthSuccess,
-  input: SkillDefinition & { skillId: string },
+  input: SkillDefinition & { expectedVersion: number; skillId: string },
 ) {
   return withSkillErrors(
     updateCustomSkill({ ...input, actorUserId: auth.userId }),

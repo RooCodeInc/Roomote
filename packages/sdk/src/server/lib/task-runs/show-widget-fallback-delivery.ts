@@ -62,8 +62,7 @@ export function extractShowWidgetFallbackDelivery(
   if (
     !result ||
     asBoolean(result.success) !== true ||
-    asBoolean(result.shown) !== true ||
-    !textFallback
+    asBoolean(result.shown) !== true
   ) {
     return null;
   }

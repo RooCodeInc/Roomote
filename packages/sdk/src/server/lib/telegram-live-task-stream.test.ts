@@ -70,11 +70,11 @@ describe('Telegram live task stream', () => {
     expect(mocks.postMessage).toHaveBeenCalledWith({
       channelId: '-1001',
       threadId: '77',
-      text: expect.stringMatching(
-        /^Starting task…\n\nOpen in Roomote: .*task=task-1/,
-      ),
-      htmlText: expect.stringMatching(
-        /^<blockquote expandable>Starting task…<\/blockquote>\n\n<a href=".*task=task-1.*">Open in Roomote<\/a>/,
+      text: 'Starting task…',
+      htmlText: 'Starting task…',
+      footerText: expect.stringMatching(/^Open in Roomote: .*task=task-1/),
+      footerHtmlText: expect.stringMatching(
+        /^<a href=".*task=task-1.*">Open in Roomote<\/a>/,
       ),
     });
 
@@ -82,7 +82,7 @@ describe('Telegram live task stream', () => {
     expect(mocks.postMessage).toHaveBeenCalledOnce();
   });
 
-  it('edits running progress with expandable HTML and a plain fallback', async () => {
+  it('edits running progress with details HTML and a plain fallback', async () => {
     await start();
 
     await renderTelegramLiveTaskStream({
@@ -95,12 +95,11 @@ describe('Telegram live task stream', () => {
       expect.objectContaining({
         channelId: '-1001',
         messageId: '88',
-        text: expect.stringMatching(
-          /^Running tests\.\n\nChecking Telegram fallback behavior\.\n\nOpen in Roomote:/,
-        ),
-        htmlText: expect.stringMatching(
-          /^<blockquote expandable>Running tests\.\n\nChecking Telegram fallback behavior\.<\/blockquote>\n\n<a href=/,
-        ),
+        text: 'Running tests.\n\nChecking Telegram fallback behavior.',
+        htmlText:
+          '<details><summary>Running tests.</summary>Checking Telegram fallback behavior.</details>',
+        footerText: expect.stringMatching(/^Open in Roomote:/),
+        footerHtmlText: expect.stringMatching(/^<a href=/),
       }),
     );
   });
@@ -117,9 +116,8 @@ describe('Telegram live task stream', () => {
 
     expect(mocks.editMessageText).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: expect.stringMatching(
-          /^Waiting for your input…\n\nOpen in Roomote:/,
-        ),
+        text: 'Waiting for your input…',
+        footerText: expect.stringMatching(/^Open in Roomote:/),
       }),
     );
   });
@@ -143,8 +141,9 @@ describe('Telegram live task stream', () => {
       const edit = mocks.editMessageText.mock.calls[0]?.[0] as {
         text: string;
         htmlText: string;
+        footerText: string;
       };
-      expect(edit.text).toMatch(
+      expect(`${edit.text}\n\n${edit.footerText}`).toMatch(
         new RegExp(
           `^${label === 'Completed' ? 'Completed\\.' : label === 'Failed' ? 'Task failed\\.' : 'Stopped\\.'}\\n\\nOpen in Roomote:`,
         ),

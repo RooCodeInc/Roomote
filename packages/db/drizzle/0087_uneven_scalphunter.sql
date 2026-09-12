@@ -17,4 +17,5 @@ SET
 FROM ranked
 WHERE messages."id" = ranked."id";--> statement-breakpoint
 CREATE INDEX "fast_agent_messages_legacy_order_idx" ON "fast_agent_messages" USING btree ("conversation_id","ts","turn_seq");--> statement-breakpoint
-CREATE INDEX "fast_agent_messages_conversation_order_idx" ON "fast_agent_messages" USING btree ("conversation_id","conversation_seq");
+CREATE INDEX "fast_agent_messages_conversation_order_idx" ON "fast_agent_messages" USING btree ("conversation_id","conversation_seq");--> statement-breakpoint
+CREATE UNIQUE INDEX "fast_agent_messages_conversation_seq_unique" ON "fast_agent_messages" USING btree ("conversation_id","conversation_seq") WHERE "fast_agent_messages"."conversation_seq" is not null;

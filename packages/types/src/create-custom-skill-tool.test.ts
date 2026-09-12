@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import {
   CREATE_CUSTOM_SKILL_TOOL,
+  UPDATE_CUSTOM_SKILL_TOOL,
   customSkillDefinitionSchema,
   createCustomSkillInputSchema,
   isSafeSkillName,
+  updateCustomSkillInputSchema,
 } from './create-custom-skill-tool';
 
 const skill = {
@@ -30,6 +32,77 @@ it('exposes a raw Zod shape for the MCP input schema with only instance definiti
       content: ' Read and review.\r\n ',
     }),
   ).toEqual(skill);
+});
+
+it('defines exact-ID content update and replacement modes', () => {
+  const skillId = 'instance:00000000-0000-4000-8000-000000000001';
+  expect(Object.keys(UPDATE_CUSTOM_SKILL_TOOL.inputSchema).sort()).toEqual([
+    'content',
+    'description',
+    'expectedVersion',
+    'name',
+    'skillId',
+  ]);
+  expect(
+    updateCustomSkillInputSchema.parse({
+      skillId,
+      expectedVersion: 2,
+      content: {
+        type: 'update_content',
+        update_content: {
+          content_updates: [{ old_str: 'old', new_str: 'new' }],
+        },
+      },
+    }),
+  ).toMatchObject({ skillId, expectedVersion: 2 });
+  expect(
+    updateCustomSkillInputSchema.parse({
+      skillId,
+      expectedVersion: 2,
+      description: 'Updated use case',
+      content: {
+        type: 'replace_content',
+        replace_content: { new_str: '# Complete instructions' },
+      },
+    }),
+  ).toMatchObject({ content: { type: 'replace_content' } });
+});
+
+it.each([
+  { skillId: '00000000-0000-4000-8000-000000000001' },
+  { skillId: 'settings:00000000-0000-4000-8000-000000000001' },
+  { skillId: 'packaged:review-example' },
+  { expectedVersion: 0 },
+  {
+    content: {
+      type: 'update_content',
+      update_content: { content_updates: [] },
+    },
+  },
+  {
+    content: {
+      type: 'update_content',
+      update_content: {
+        content_updates: [{ old_str: '', new_str: 'new' }],
+      },
+    },
+  },
+  { content: { type: 'replace_content', replace_content: {} } },
+  { content: 'not an operation' },
+])('rejects invalid update contract input (case %#)', (override) => {
+  expect(
+    updateCustomSkillInputSchema.safeParse({
+      skillId: 'instance:00000000-0000-4000-8000-000000000001',
+      expectedVersion: 1,
+      content: {
+        type: 'update_content',
+        update_content: {
+          content_updates: [{ old_str: 'old', new_str: 'new' }],
+        },
+      },
+      ...override,
+    }).success,
+  ).toBe(false);
 });
 
 it('bounds names and descriptions and requires every definition field', () => {

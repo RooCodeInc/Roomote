@@ -127,6 +127,23 @@ it.each(['auth', 'run', 'deployment-run'] as const)(
         where: eq(instanceSkills.name, name),
       }),
     ).toMatchObject({ ...skill, name, createdByUserId: member.id });
+    const stored = await db.query.instanceSkills.findFirst({
+      where: eq(instanceSkills.name, name),
+    });
+    const updated = await app(authContext).request('/api/mcp/custom-skills', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        skillId: `instance:${stored!.id}`,
+        expectedVersion: 1,
+        content: {
+          type: 'replace_content',
+          replace_content: { new_str: 'Updated instructions.\n' },
+        },
+      }),
+    });
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({ version: 2 });
 
     // The same token must observe the current actor state, never its durable owner.
     if (authContext.tokenType === 'run') {

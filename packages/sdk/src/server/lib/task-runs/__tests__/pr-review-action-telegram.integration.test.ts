@@ -146,7 +146,7 @@ describe('Telegram PR review action carrier lifecycle', () => {
       },
     }));
     expect(requests[0]).toMatchObject({
-      method: 'sendMessage',
+      method: 'sendRichMessage',
       body: {
         reply_markup: {
           inline_keyboard: [
