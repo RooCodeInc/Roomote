@@ -134,7 +134,12 @@ it.each(['creator', 'admin'] as const)(
       content: 'Updated instructions.\n',
     };
     expect(
-      await updateCustomSkill({ ...edited, actorUserId, skillId }),
+      await updateCustomSkill({
+        ...edited,
+        actorUserId,
+        expectedVersion: 1,
+        skillId,
+      }),
     ).toEqual({
       success: true,
       persisted: true,
@@ -164,7 +169,12 @@ it('denies noncreator mutations without changing the skill', async () => {
   const actorUserId = await user();
   const before = await read(skillId);
   await expect(
-    updateCustomSkill({ ...definition(), actorUserId, skillId }),
+    updateCustomSkill({
+      ...definition(),
+      actorUserId,
+      expectedVersion: 1,
+      skillId,
+    }),
   ).rejects.toMatchObject({ status: 403 });
   await expect(
     updateCustomSkillFromAgent({
@@ -197,7 +207,13 @@ it('denies missing, deleted, and unknown actors at every public helper', async (
       () => createCustomSkill({ ...skill, actorUserId }),
       () => listCustomSkills(actorUserId),
       () => getCustomSkill(actorUserId, skillId),
-      () => updateCustomSkill({ ...skill, actorUserId, skillId }),
+      () =>
+        updateCustomSkill({
+          ...skill,
+          actorUserId,
+          expectedVersion: 1,
+          skillId,
+        }),
       () =>
         updateCustomSkillFromAgent({
           actorUserId,
@@ -433,7 +449,13 @@ it('returns safe 404s for unknown or foreign identifiers without exposing databa
   ]) {
     for (const request of [
       () => getCustomSkill(actorUserId, skillId),
-      () => updateCustomSkill({ ...definition(), actorUserId, skillId }),
+      () =>
+        updateCustomSkill({
+          ...definition(),
+          actorUserId,
+          expectedVersion: 1,
+          skillId,
+        }),
       () => deleteCustomSkill({ actorUserId, skillId }),
     ])
       await expect(request()).rejects.toMatchObject({
@@ -474,7 +496,12 @@ it('maps concurrent renames onto the same unique name to one success and one 409
   const edited = definition();
   const results = await Promise.allSettled(
     [first, second].map(({ skillId }) =>
-      updateCustomSkill({ ...edited, actorUserId, skillId }),
+      updateCustomSkill({
+        ...edited,
+        actorUserId,
+        expectedVersion: 1,
+        skillId,
+      }),
     ),
   );
   expect(
@@ -510,7 +537,13 @@ it('accepts exactly 64 KiB of rendered UTF-8 and rejects one byte more on create
   const { skillId } = await create(actorUserId, { ...skill, content });
   expect((await read(skillId))!.content).toBe(`${content}\n`);
   await expect(
-    updateCustomSkill({ ...skill, content, actorUserId, skillId }),
+    updateCustomSkill({
+      ...skill,
+      content,
+      actorUserId,
+      expectedVersion: 1,
+      skillId,
+    }),
   ).resolves.toMatchObject({ success: true });
   const before = await read(skillId);
   await expect(
@@ -518,6 +551,7 @@ it('accepts exactly 64 KiB of rendered UTF-8 and rejects one byte more on create
       ...skill,
       content: `${content}x`,
       actorUserId,
+      expectedVersion: 2,
       skillId,
     }),
   ).rejects.toThrow('64 KiB');
@@ -542,7 +576,13 @@ it('strictly rejects scope and creator injection on create, update, and delete',
       createCustomSkill({ ...definition(), actorUserId, ...extra }),
     ).rejects.toThrow();
     await expect(
-      updateCustomSkill({ ...definition(), actorUserId, skillId, ...extra }),
+      updateCustomSkill({
+        ...definition(),
+        actorUserId,
+        expectedVersion: 1,
+        skillId,
+        ...extra,
+      }),
     ).rejects.toThrow();
     await expect(
       deleteCustomSkill({ actorUserId, skillId, ...extra }),
@@ -629,7 +669,12 @@ it('leaves legacy environment configurations and verification untouched through 
       .where(eq(environments.id, environment.id))
   )[0];
   const { skillId } = await create(actorUserId, skill);
-  await updateCustomSkill({ ...definition(), actorUserId, skillId });
+  await updateCustomSkill({
+    ...definition(),
+    actorUserId,
+    expectedVersion: 1,
+    skillId,
+  });
   await deleteCustomSkill({ actorUserId, skillId });
   expect(
     (
@@ -657,12 +702,22 @@ it('sets creator attribution to null on hard deletion and retains admin manageme
     canManage: true,
   });
   await expect(
-    updateCustomSkill({ ...definition(), actorUserId: member, skillId }),
+    updateCustomSkill({
+      ...definition(),
+      actorUserId: member,
+      expectedVersion: 1,
+      skillId,
+    }),
   ).rejects.toMatchObject({ status: 403 });
   await expect(
     deleteCustomSkill({ actorUserId: member, skillId }),
   ).rejects.toMatchObject({ status: 403 });
-  await updateCustomSkill({ ...definition(), actorUserId: admin, skillId });
+  await updateCustomSkill({
+    ...definition(),
+    actorUserId: admin,
+    expectedVersion: 1,
+    skillId,
+  });
   expect(await read(skillId)).toMatchObject({ createdByUserId: null });
   await deleteCustomSkill({ actorUserId: admin, skillId });
   expect(await read(skillId)).toBeUndefined();

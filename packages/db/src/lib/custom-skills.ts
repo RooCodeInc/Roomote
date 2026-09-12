@@ -127,17 +127,31 @@ export async function createCustomSkill(
 }
 
 export async function updateCustomSkill(
-  input: CreateCustomSkillInput & { actorUserId: string; skillId: string },
+  input: CreateCustomSkillInput & {
+    actorUserId: string;
+    expectedVersion: number;
+    skillId: string;
+  },
 ) {
   return db
     .transaction(async (tx) => {
-      const { actorUserId, skillId, ...definition } = input;
+      const { actorUserId, expectedVersion, skillId, ...definition } = input;
+      const parsedExpectedVersion = z
+        .number()
+        .int()
+        .positive()
+        .parse(expectedVersion);
       const actor = await requireMember(tx, actorUserId);
       const skill = await readSkill(tx, skillId);
       if (actor.role !== 'admin' && skill.createdByUserId !== actor.id)
         throw new CreateCustomSkillError(
           'Only the creator or an admin can manage this skill',
           403,
+        );
+      if (skill.version !== parsedExpectedVersion)
+        throw new CreateCustomSkillError(
+          `Skill version conflict. Current version is ${skill.version}. Reload the skill and retry.`,
+          409,
         );
       const parsed = createCustomSkillInputSchema.parse(definition);
       await tx
