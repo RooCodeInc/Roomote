@@ -309,6 +309,13 @@ telegram.post('/', async (c) => {
     return c.json({ ok: true, implicitTopicRemembered: true });
   }
 
+  if (
+    isTelegramPrivateChat(message) &&
+    (!message.from || message.from.is_bot)
+  ) {
+    return c.json({ ok: true, ignored: 'unsupported_update' });
+  }
+
   // Account linking: a bare link code (or /start <code> from the deep link)
   // binds the sender's Telegram identity to their Roomote user.
   const messageText = message.text?.trim() ?? '';
@@ -378,6 +385,10 @@ telegram.post('/', async (c) => {
 
       return c.json({ ok: true, linked: true });
     }
+  }
+
+  if (isTelegramPrivateChat(message) && !isTelegramTaskEntryUpdate(update)) {
+    return c.json({ ok: true, ignored: 'unsupported_update' });
   }
 
   // Attribution requires a linked sender: an unlinked Telegram user is never
