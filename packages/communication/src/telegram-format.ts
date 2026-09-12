@@ -121,16 +121,19 @@ export function markdownToTelegramHtml(markdown: string): string {
 }
 
 function safeCodePointBoundary(text: string, boundary: number): number {
-  if (
+  const adjustedBoundary =
     boundary > 0 &&
     boundary < text.length &&
     /[\uD800-\uDBFF]/.test(text[boundary - 1] ?? '') &&
     /[\uDC00-\uDFFF]/.test(text[boundary] ?? '')
-  ) {
-    return boundary - 1;
+      ? boundary - 1
+      : boundary;
+
+  if (adjustedBoundary > 0) {
+    return adjustedBoundary;
   }
 
-  return boundary;
+  return (text.codePointAt(0) ?? 0) > 0xffff ? 2 : 1;
 }
 
 /**

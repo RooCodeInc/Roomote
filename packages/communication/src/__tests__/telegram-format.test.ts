@@ -108,6 +108,10 @@ describe('chunkTelegramText', () => {
 
   it('always advances at the minimum length around a surrogate pair', () => {
     expect(chunkTelegramText('a🙂', 2)).toEqual(['a', '🙂']);
+    expect(chunkTelegramText('🙂a', 2)).toEqual(['🙂', 'a']);
+    expect(() => chunkTelegramText('🙂', 1)).toThrow(
+      'Telegram chunk length must be an integer of at least 2.',
+    );
   });
 });
 
