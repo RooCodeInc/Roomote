@@ -77,7 +77,7 @@ describe('TelegramCommunicationProvider', () => {
           chat_id: 123,
           draft_id: 42,
           rich_message: {
-            html: '<tg-thinking>Roomote is working...</tg-thinking>',
+            markdown: '<tg-thinking>Roomote is working...</tg-thinking>',
           },
           message_thread_id: 77,
         }),
@@ -107,6 +107,31 @@ describe('TelegramCommunicationProvider', () => {
       draft_id: 42,
       rich_message: {
         markdown: '**Highlights**\n\n- First\n- Second',
+      },
+    });
+  });
+
+  it('streams literal plain text through escaped Rich Markdown', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.sendRichMessageDraft({
+      channelId: '123',
+      draftId: 42,
+      text: '**literal** <b>not bold</b>',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
+      chat_id: 123,
+      draft_id: 42,
+      rich_message: {
+        markdown: '<p>**literal** &lt;b&gt;not bold&lt;/b&gt;</p>',
       },
     });
   });
@@ -394,7 +419,7 @@ describe('TelegramCommunicationProvider', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           chat_id: '-100456',
-          rich_message: { html: 'hello from Roomote' },
+          rich_message: { markdown: '<p>hello from Roomote</p>' },
           message_thread_id: 7,
           reply_parameters: {
             message_id: 42,
@@ -714,7 +739,7 @@ describe('TelegramCommunicationProvider', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(
       JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
-    ).toMatchObject({ rich_message: { html: text } });
+    ).toMatchObject({ rich_message: { markdown: `<p>${text}</p>` } });
   });
 
   it('preserves leading and trailing whitespace in delivered text', async () => {
@@ -735,7 +760,9 @@ describe('TelegramCommunicationProvider', () => {
     expect(
       JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
     ).toMatchObject({
-      rich_message: { html: '<br>  complete response  <br>' },
+      rich_message: {
+        markdown: '<p><br>  complete response  <br></p>',
+      },
     });
   });
 
@@ -761,12 +788,12 @@ describe('TelegramCommunicationProvider', () => {
       JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
     ).toMatchObject({
       rich_message: {
-        html: `${'first '.repeat(800)}<br><br>${'safe '.repeat(1_000)}`,
+        markdown: `<p>${'first '.repeat(800)}<br><br>${'safe '.repeat(1_000)}</p>`,
       },
     });
   });
 
-  it('keeps native HTML above 4096 together with topic and reply semantics', async () => {
+  it('keeps embedded native HTML above 4096 with topic and reply semantics', async () => {
     const fetchMock = vi.fn().mockImplementation(async () =>
       jsonResponse({
         ok: true,
@@ -798,13 +825,13 @@ describe('TelegramCommunicationProvider', () => {
     const bodies = fetchMock.mock.calls.map(
       (call) =>
         JSON.parse((call[1] as RequestInit).body as string) as {
-          rich_message: { html: string };
+          rich_message: { markdown: string };
           message_thread_id?: number;
           reply_parameters?: { message_id: number };
         },
     );
     expect(bodies).toHaveLength(1);
-    expect(bodies[0]?.rich_message.html.length).toBeGreaterThan(4_096);
+    expect(bodies[0]?.rich_message.markdown.length).toBeGreaterThan(4_096);
     expect(bodies.every((body) => body.message_thread_id === 7)).toBe(true);
     expect(bodies[0]?.reply_parameters?.message_id).toBe(42);
     expect(result.lastTextMessageId).toBe('211');
@@ -928,8 +955,8 @@ describe('TelegramCommunicationProvider', () => {
       chat_id: '123',
       message_id: 42,
       rich_message: {
-        html: [
-          'Completed.',
+        markdown: [
+          '<p>Completed.</p>',
           '',
           '<footer>Reply anytime · <a href="https://roomote.test/s/1">Open in Roomote</a></footer>',
         ].join('\n'),
@@ -1064,10 +1091,10 @@ describe('TelegramCommunicationProvider', () => {
 
     const fallbackBody = JSON.parse(
       (fetchMock.mock.calls[1]?.[1] as RequestInit).body as string,
-    ) as { rich_message: { html: string } };
+    ) as { rich_message: { markdown: string } };
 
-    expect(fallbackBody.rich_message.html).toBe(
-      'the shot: https://example.test/shot.png',
+    expect(fallbackBody.rich_message.markdown).toBe(
+      '<p>the shot: https://example.test/shot.png</p>',
     );
   });
 

@@ -1,8 +1,7 @@
 /**
  * Telegram Bot API text formatting helpers.
  *
- * Converts the agent-authored markdown used across Roomote chat surfaces into
- * Telegram rich-message HTML and splits rendered payloads at Telegram's rich
+ * Plans Telegram Rich Markdown payloads and splits them at Telegram's rich
  * message limit.
  */
 
@@ -15,10 +14,6 @@ type MarkdownCodeFence = {
   openingLine: string;
 };
 
-/**
- * Chunk raw markdown before HTML conversion so tag pairs never straddle a
- * message boundary. Keep enough headroom for the HTML tags added later.
- */
 const MARKDOWN_CHUNK_TARGET_LENGTH = 3500;
 
 function escapeTelegramHtml(text: string): string {
@@ -26,194 +21,6 @@ function escapeTelegramHtml(text: string): string {
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;');
-}
-
-function convertInlineMarkdown(escaped: string): string {
-  return (
-    escaped
-      // Links first so their URLs are not touched by emphasis rules.
-      .replace(
-        /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
-        (_match, label: string, url: string) => `<a href="${url}">${label}</a>`,
-      )
-      .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
-      .replace(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/g, '<i>$1</i>')
-      // Underscore italics only when they wrap a whole line, so snake_case
-      // identifiers inside prose are never touched.
-      .replace(/^_([^_\n](?:[^\n]*[^_\n])?)_$/gm, '<i>$1</i>')
-      .replace(/~~([^~\n]+)~~/g, '<s>$1</s>')
-  );
-}
-
-type MarkdownSegment =
-  | { kind: 'text'; content: string }
-  | { kind: 'code'; content: string; language?: string };
-
-function splitCodeFences(markdown: string): MarkdownSegment[] {
-  const segments: MarkdownSegment[] = [];
-  const fencePattern = /^```([^\n`]*)\n([\s\S]*?)^```[ \t]*$/gm;
-  let lastIndex = 0;
-
-  for (const match of markdown.matchAll(fencePattern)) {
-    const index = match.index ?? 0;
-
-    if (index > lastIndex) {
-      segments.push({
-        kind: 'text',
-        content: markdown.slice(lastIndex, index),
-      });
-    }
-
-    segments.push({
-      kind: 'code',
-      content: match[2] ?? '',
-      ...(match[1]?.trim() ? { language: match[1].trim() } : {}),
-    });
-    lastIndex = index + match[0].length;
-  }
-
-  if (lastIndex < markdown.length) {
-    segments.push({ kind: 'text', content: markdown.slice(lastIndex) });
-  }
-
-  return segments;
-}
-
-function convertInlineText(escaped: string): string {
-  // Convert inline code spans before emphasis so their contents stay verbatim.
-  const withInlineCode = escaped.replace(/`([^`\n]+)`/g, '<code>$1</code>');
-
-  // Apply emphasis/link conversion outside <code> spans only.
-  return withInlineCode
-    .split(/(<code>[^<]*<\/code>)/g)
-    .map((part) =>
-      part.startsWith('<code>') ? part : convertInlineMarkdown(part),
-    )
-    .join('');
-}
-
-type MarkdownListLine = {
-  indent: number;
-  type: 'ol' | 'ul';
-  content: string;
-};
-
-function parseMarkdownListLine(line: string): MarkdownListLine | null {
-  const match = /^([ \t]*)(?:[-+*]|(\d+)[.)])\s+(.*)$/u.exec(line);
-  if (!match) return null;
-
-  return {
-    indent: match[1]!.replaceAll('\t', '    ').length,
-    type: match[2] ? 'ol' : 'ul',
-    content: match[3]!,
-  };
-}
-
-function renderMarkdownList(
-  lines: string[],
-  startIndex: number,
-): { html: string; nextIndex: number } {
-  const firstLine = parseMarkdownListLine(lines[startIndex]!)!;
-  const items: Array<{ content: string; nestedHtml: string }> = [];
-  let nextIndex = startIndex;
-
-  while (nextIndex < lines.length) {
-    const line = parseMarkdownListLine(lines[nextIndex]!);
-    if (!line || line.indent < firstLine.indent) break;
-
-    if (line.indent > firstLine.indent) {
-      const parent = items.at(-1);
-      if (!parent) break;
-      const nested = renderMarkdownList(lines, nextIndex);
-      parent.nestedHtml += nested.html;
-      nextIndex = nested.nextIndex;
-      continue;
-    }
-
-    if (line.type !== firstLine.type) break;
-    items.push({ content: line.content, nestedHtml: '' });
-    nextIndex += 1;
-  }
-
-  return {
-    html: `<${firstLine.type}>${items
-      .map(
-        (item) =>
-          `<li>${convertInlineText(item.content)}${item.nestedHtml}</li>`,
-      )
-      .join('')}</${firstLine.type}>`,
-    nextIndex,
-  };
-}
-
-function convertTextSegment(segment: string): string {
-  const escaped = escapeTelegramHtml(segment);
-  const hasBlockMarkdown =
-    segment.includes('\n') ||
-    /^[ \t]*(?:#{1,6}|[-+*]|\d+[.)])\s+/u.test(segment);
-  if (!hasBlockMarkdown) return convertInlineText(escaped);
-
-  const blocks: string[] = [];
-  let paragraphLines: string[] = [];
-
-  const flushParagraph = () => {
-    if (paragraphLines.length === 0) return;
-    blocks.push(`<p>${paragraphLines.map(convertInlineText).join('<br>')}</p>`);
-    paragraphLines = [];
-  };
-
-  const lines = escaped.split('\n');
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index]!;
-    if (line.trim() === '') {
-      flushParagraph();
-      continue;
-    }
-
-    const headingMatch = /^(#{1,6})\s+(.*)$/u.exec(line);
-    if (headingMatch) {
-      flushParagraph();
-      const level = headingMatch[1]!.length;
-      blocks.push(
-        `<h${level}>${convertInlineText(headingMatch[2]!)}</h${level}>`,
-      );
-      continue;
-    }
-
-    if (parseMarkdownListLine(line)) {
-      flushParagraph();
-      const list = renderMarkdownList(lines, index);
-      blocks.push(list.html);
-      index = list.nextIndex - 1;
-      continue;
-    }
-
-    paragraphLines.push(line);
-  }
-
-  flushParagraph();
-  return blocks.join('');
-}
-
-/**
- * Convert Roomote markdown to Telegram rich-message HTML. Supports paragraphs,
- * lists, headings, bold, italic, strikethrough, inline code, fenced code blocks,
- * and links. Everything else passes through as escaped text.
- */
-export function markdownToTelegramHtml(markdown: string): string {
-  return splitCodeFences(markdown)
-    .map((segment) => {
-      if (segment.kind === 'code') {
-        const escaped = escapeTelegramHtml(segment.content.replace(/\n$/, ''));
-
-        return segment.language
-          ? `<pre><code class="language-${segment.language}">${escaped}</code></pre>`
-          : `<pre>${escaped}</pre>`;
-      }
-
-      return convertTextSegment(segment.content);
-    })
-    .join('');
 }
 
 function safeCodePointBoundary(text: string, boundary: number): number {
@@ -340,101 +147,40 @@ function advanceMarkdownCodeFence(
   return openFence;
 }
 
-/**
- * HTML escaping and tags can expand a chunk well past its raw markdown
- * length (worst case ~5x for `&`-heavy text), so chunking on raw length
- * alone can still produce messages Telegram rejects as too long. Re-chunk
- * any oversized piece with a target scaled down by its observed expansion
- * ratio. The floor guarantees termination: at 256 raw characters even
- * worst-case escaping plus tag overhead stays below the configured limit.
- */
-const HTML_CHUNK_MIN_TARGET_LENGTH = 256;
-
-type TelegramHtmlChunk = {
+type TelegramRichMarkdownChunk = {
+  text: string;
   markdown: string;
-  html: string;
 };
 
-function convertChunkWithinLimit(
-  chunk: string,
-  targetLength: number,
-  maxHtmlLength: number,
-): TelegramHtmlChunk[] {
-  const html = markdownToTelegramHtml(chunk);
-
-  if (html.length <= maxHtmlLength) {
-    return [{ markdown: chunk, html }];
-  }
-
-  const scaledTarget = Math.floor(
-    (chunk.length * maxHtmlLength) / html.length / 2,
-  );
-  const nextTarget = Math.max(
-    HTML_CHUNK_MIN_TARGET_LENGTH,
-    Math.min(Math.floor(targetLength / 2), scaledTarget),
-  );
-  if (nextTarget >= chunk.length) {
-    throw new Error('Telegram rich-message content cannot fit in one chunk.');
-  }
-
-  return chunkTelegramMarkdown(chunk, nextTarget).flatMap((piece) =>
-    convertChunkWithinLimit(piece, nextTarget, maxHtmlLength),
-  );
+function renderTelegramPlainText(text: string): string {
+  return text
+    ? `<p>${escapeTelegramHtml(text).replaceAll('\n', '<br>')}</p>`
+    : '';
 }
 
-/**
- * Split markdown into send-ready pieces whose converted HTML fits within the
- * requested Telegram rich-message budget.
- */
-export function chunkTelegramMarkdownAsHtml(
-  markdown: string,
-  maxHtmlLength: number = TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
-): TelegramHtmlChunk[] {
-  if (!Number.isSafeInteger(maxHtmlLength) || maxHtmlLength < 2) {
-    throw new Error(
-      'Telegram HTML chunk length must be an integer of at least 2.',
-    );
-  }
-  const html = markdownToTelegramHtml(markdown);
-
-  if (html.length <= maxHtmlLength) {
-    return [{ markdown, html }];
-  }
-
-  const targetLength = Math.max(
-    HTML_CHUNK_MIN_TARGET_LENGTH,
-    Math.floor(maxHtmlLength * 0.85),
-  );
-  return chunkTelegramMarkdown(markdown, targetLength).flatMap((chunk) =>
-    convertChunkWithinLimit(chunk, targetLength, maxHtmlLength),
-  );
-}
-
-function chunkTelegramPlainTextAsHtml(
+function chunkTelegramPlainTextAsMarkdown(
   text: string,
-  maxHtmlLength: number,
-): TelegramHtmlChunk[] {
-  const html = escapeTelegramHtml(text).replaceAll('\n', '<br>');
-  if (html.length <= maxHtmlLength) return [{ markdown: text, html }];
+  maxLength: number,
+): TelegramRichMarkdownChunk[] {
+  const markdown = renderTelegramPlainText(text);
+  if (markdown.length <= maxLength) return [{ text, markdown }];
 
   const targetLength = Math.max(
     2,
     Math.min(
       text.length - 1,
-      Math.floor((text.length * maxHtmlLength) / html.length / 2),
+      Math.floor((text.length * maxLength) / markdown.length / 2),
     ),
   );
   if (targetLength >= text.length) {
     throw new Error('Telegram rich-message content cannot fit in one chunk.');
   }
   return chunkTelegramText(text, targetLength).flatMap((chunk) =>
-    chunkTelegramPlainTextAsHtml(chunk, maxHtmlLength),
+    chunkTelegramPlainTextAsMarkdown(chunk, maxLength),
   );
 }
 
-export type TelegramInputRichMessage =
-  | { markdown: string; html?: never }
-  | { html: string; markdown?: never };
+export type TelegramInputRichMessage = { markdown: string };
 
 type TelegramRichMessageChunk = {
   text: string;
@@ -467,6 +213,13 @@ function closeOpenMarkdownCodeFence(markdown: string): string {
     : markdown;
 }
 
+function telegramFooterMarkdownToHtml(markdown: string): string {
+  return escapeTelegramHtml(markdown).replace(
+    /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    (_match, label: string, url: string) => `<a href="${url}">${label}</a>`,
+  );
+}
+
 export function planTelegramRichMessages(input: {
   text: string;
   htmlText?: string;
@@ -476,7 +229,7 @@ export function planTelegramRichMessages(input: {
 }): TelegramRichMessageChunk[] {
   const footerHtml = input.footerText
     ? `<footer>${
-        input.footerHtmlText ?? markdownToTelegramHtml(input.footerText)
+        input.footerHtmlText ?? telegramFooterMarkdownToHtml(input.footerText)
       }</footer>`
     : '';
   const footerSuffix = footerHtml ? `\n\n${footerHtml}` : '';
@@ -491,7 +244,7 @@ export function planTelegramRichMessages(input: {
     return [
       {
         text: input.text,
-        richMessage: { html: `${input.htmlText}${footerSuffix}` },
+        richMessage: { markdown: `${input.htmlText}${footerSuffix}` },
       },
     ];
   }
@@ -522,12 +275,12 @@ export function planTelegramRichMessages(input: {
     });
   }
 
-  const chunks = chunkTelegramPlainTextAsHtml(input.text, bodyLimit);
+  const chunks = chunkTelegramPlainTextAsMarkdown(input.text, bodyLimit);
   const lastIndex = chunks.length - 1;
   return chunks.map((chunk, index) => ({
-    text: chunk.markdown,
+    text: chunk.text,
     richMessage: {
-      html: `${chunk.html}${index === lastIndex ? footerSuffix : ''}`,
+      markdown: `${chunk.markdown}${index === lastIndex ? footerSuffix : ''}`,
     },
   }));
 }

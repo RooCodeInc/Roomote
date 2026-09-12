@@ -14,10 +14,11 @@ function getRichMessageText(
   richMessage: JsonRecord | undefined,
 ): string | null {
   if (!richMessage) return null;
-  const values = [richMessage.markdown, richMessage.html].filter(
-    (value): value is string => typeof value === 'string',
-  );
-  return values.length === 1 ? values[0]! : null;
+  return typeof richMessage.markdown === 'string' &&
+    richMessage.html === undefined &&
+    richMessage.blocks === undefined
+    ? richMessage.markdown
+    : null;
 }
 
 export type MockTelegramUser = {
@@ -729,7 +730,7 @@ export class MockTelegramServer {
           apiError(
             response,
             400,
-            'Bad Request: rich message must use exactly one formatting field',
+            'Bad Request: rich message must use Markdown formatting',
           );
           return;
         }
@@ -770,7 +771,7 @@ export class MockTelegramServer {
           apiError(
             response,
             400,
-            'Bad Request: rich message must use exactly one formatting field',
+            'Bad Request: rich message must use Markdown formatting',
           );
           return;
         }

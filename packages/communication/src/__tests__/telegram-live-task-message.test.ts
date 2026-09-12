@@ -75,7 +75,7 @@ describe('buildTelegramLiveTaskMessage', () => {
     );
   });
 
-  it('reserves the native footer envelope in near-limit editable HTML', () => {
+  it('reserves the native footer envelope in near-limit embedded HTML', () => {
     const message = buildTelegramLiveTaskMessage({
       status: 'running',
       progress: `Working\n${'x'.repeat(TELEGRAM_MAX_RICH_MESSAGE_LENGTH)}`,
@@ -87,10 +87,11 @@ describe('buildTelegramLiveTaskMessage', () => {
     });
 
     expect(chunks).toHaveLength(1);
-    expect(chunks[0]!.richMessage.html?.length).toBeLessThanOrEqual(
+    expect(chunks[0]!.richMessage.markdown.length).toBeLessThanOrEqual(
       TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
     );
-    expect(chunks[0]!.richMessage.html).toContain('<footer>');
+    expect(chunks[0]!.richMessage.markdown.startsWith('<details>')).toBe(true);
+    expect(chunks[0]!.richMessage.markdown).toContain('<footer>');
   });
 
   it('matches the checked-in compact text demo fixture', () => {

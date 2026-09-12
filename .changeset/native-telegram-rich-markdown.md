@@ -2,4 +2,4 @@
 '@roomote/communication': patch
 ---
 
-Send Markdown-authored Telegram replies, edits, and private drafts through native Rich Markdown.
+Send all Telegram rich replies, edits, and private drafts through one native Rich Markdown payload.

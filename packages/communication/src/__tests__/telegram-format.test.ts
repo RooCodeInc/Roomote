@@ -4,107 +4,9 @@ import {
   TELEGRAM_MAX_MESSAGE_LENGTH,
   TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
   chunkTelegramMarkdown,
-  chunkTelegramMarkdownAsHtml,
   chunkTelegramText,
-  markdownToTelegramHtml,
   planTelegramRichMessages,
 } from '../telegram-format';
-
-describe('markdownToTelegramHtml', () => {
-  it('converts bold, italic, strikethrough, and inline code', () => {
-    expect(
-      markdownToTelegramHtml('**bold** and *italic* and ~~gone~~ and `code`'),
-    ).toBe(
-      '<b>bold</b> and <i>italic</i> and <s>gone</s> and <code>code</code>',
-    );
-  });
-
-  it('converts markdown links to anchors', () => {
-    expect(
-      markdownToTelegramHtml('see [the task](https://example.test/t/1)'),
-    ).toBe('see <a href="https://example.test/t/1">the task</a>');
-  });
-
-  it('escapes HTML special characters', () => {
-    expect(markdownToTelegramHtml('a < b && c > d')).toBe(
-      'a &lt; b &amp;&amp; c &gt; d',
-    );
-  });
-
-  it('renders headings as bold lines', () => {
-    expect(markdownToTelegramHtml('## Summary\ndone')).toBe(
-      '<h2>Summary</h2><p>done</p>',
-    );
-  });
-
-  it('renders paragraphs and lists as rich-message blocks', () => {
-    expect(
-      markdownToTelegramHtml(
-        '**Highlights**\n\n- **Voice.** Talk to Roomote.\n- **Skills.** Reuse [team skills](https://example.test/skills).\n\nNext `step`.',
-      ),
-    ).toBe(
-      '<p><b>Highlights</b></p><ul><li><b>Voice.</b> Talk to Roomote.</li><li><b>Skills.</b> Reuse <a href="https://example.test/skills">team skills</a>.</li></ul><p>Next <code>step</code>.</p>',
-    );
-  });
-
-  it('preserves soft line breaks within a paragraph', () => {
-    expect(markdownToTelegramHtml('first line\nsecond line')).toBe(
-      '<p>first line<br>second line</p>',
-    );
-  });
-
-  it('renders ordered markdown lists', () => {
-    expect(markdownToTelegramHtml('1. First\n2. Second')).toBe(
-      '<ol><li>First</li><li>Second</li></ol>',
-    );
-  });
-
-  it('keeps indented list items nested under their parent item', () => {
-    expect(
-      markdownToTelegramHtml(
-        '- Parent\n  - **Child one**\n  - Child two with `code`\n- Sibling',
-      ),
-    ).toBe(
-      '<ul><li>Parent<ul><li><b>Child one</b></li><li>Child two with <code>code</code></li></ul></li><li>Sibling</li></ul>',
-    );
-  });
-
-  it('supports a nested ordered list inside an unordered item', () => {
-    expect(markdownToTelegramHtml('- Parent\n  1. First\n  2. Second')).toBe(
-      '<ul><li>Parent<ol><li>First</li><li>Second</li></ol></li></ul>',
-    );
-  });
-
-  it('converts fenced code blocks with language hints', () => {
-    expect(markdownToTelegramHtml('```ts\nconst a = 1;\n```')).toBe(
-      '<pre><code class="language-ts">const a = 1;</code></pre>',
-    );
-  });
-
-  it('converts fenced code blocks without language hints', () => {
-    expect(markdownToTelegramHtml('```\nplain <text>\n```')).toBe(
-      '<pre>plain &lt;text&gt;</pre>',
-    );
-  });
-
-  it('leaves emphasis markers inside code spans untouched', () => {
-    expect(markdownToTelegramHtml('`**not bold**` but **bold**')).toBe(
-      '<code>**not bold**</code> but <b>bold</b>',
-    );
-  });
-
-  it('does not italicize snake_case identifiers', () => {
-    expect(
-      markdownToTelegramHtml('set R_TELEGRAM_BOT_TOKEN and my_var_name'),
-    ).toBe('set R_TELEGRAM_BOT_TOKEN and my_var_name');
-  });
-
-  it('italicizes whole lines wrapped in underscores (footer style)', () => {
-    expect(
-      markdownToTelegramHtml('_Reply or use the [web app](https://a.test)._'),
-    ).toBe('<i>Reply or use the <a href="https://a.test">web app</a>.</i>');
-  });
-});
 
 describe('chunkTelegramText', () => {
   it('keeps text at the exact limit in one chunk', () => {
@@ -252,66 +154,11 @@ describe('chunkTelegramMarkdown', () => {
   });
 });
 
-describe('chunkTelegramMarkdownAsHtml', () => {
-  it('returns a single converted chunk for short markdown', () => {
-    expect(chunkTelegramMarkdownAsHtml('**hi**')).toEqual([
-      { markdown: '**hi**', html: '<b>hi</b>' },
-    ]);
-  });
-
-  it('preserves exact-target markdown while rendering a paragraph block', () => {
-    const markdown = `**${'x'.repeat(3_496)}**\n`;
-
-    expect(chunkTelegramMarkdownAsHtml(markdown)).toEqual([
-      {
-        markdown,
-        html: `<p><b>${'x'.repeat(3_496)}</b></p>`,
-      },
-    ]);
-  });
-
-  it('keeps every HTML chunk under the Telegram limit despite escape expansion', () => {
-    // Angle-bracket-heavy content expands ~4x under HTML escaping, so raw
-    // chunks that fit the source target can overflow once converted.
-    const line = '<div><span attr="&&&">' + '&<>'.repeat(20) + '</span></div>';
-    const markdown = [
-      '```html',
-      ...Array.from({ length: 120 }, () => line),
-      '```',
-    ].join('\n');
-    const chunks = chunkTelegramMarkdownAsHtml(markdown);
-
-    expect(chunks.length).toBeGreaterThan(1);
-    for (const chunk of chunks) {
-      expect(chunk.html.length).toBeLessThanOrEqual(
-        TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
-      );
-    }
-  });
-
-  it('preserves all content across re-chunked pieces', () => {
-    const line = `payload & <tag> ${'&'.repeat(40)}`;
-    const markdown = Array.from({ length: 200 }, () => line).join('\n');
-    const chunks = chunkTelegramMarkdownAsHtml(markdown);
-
-    expect(chunks.map((chunk) => chunk.markdown).join('')).toBe(markdown);
-  });
-
-  it('preserves exact newlines during recursive HTML expansion', () => {
-    const markdown = `${'&'.repeat(5_000)}\n${'&'.repeat(10_000)}`;
-    const chunks = chunkTelegramMarkdownAsHtml(markdown);
-
-    expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.map((chunk) => chunk.markdown).join('')).toBe(markdown);
-    expect(chunks.every((chunk) => chunk.markdown.length > 0)).toBe(true);
-  });
-});
-
 describe('planTelegramRichMessages', () => {
   it('keeps rendered messages above 4096 together below the rich limit', () => {
     const text = 'x'.repeat(10_000);
     expect(planTelegramRichMessages({ text })).toEqual([
-      { text, richMessage: { html: text } },
+      { text, richMessage: { markdown: `<p>${text}</p>` } },
     ]);
   });
 
@@ -509,16 +356,37 @@ describe('planTelegramRichMessages', () => {
     expect(
       chunks.every(
         (chunk) =>
-          chunk.richMessage.html!.length <= TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+          chunk.richMessage.markdown.length <= TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+      ),
+    ).toBe(true);
+    expect(
+      chunks.every(
+        (chunk) =>
+          chunk.richMessage.markdown.startsWith('<p>') &&
+          chunk.richMessage.markdown.endsWith('</p>'),
       ),
     ).toBe(true);
   });
 
-  it('preserves plain-text newlines with explicit rich HTML breaks', () => {
+  it('preserves literal plain text inside embedded Rich HTML', () => {
+    const text = '**literal** <b>not bold</b>\n\n- not a list';
+
+    expect(planTelegramRichMessages({ text })).toEqual([
+      {
+        text,
+        richMessage: {
+          markdown:
+            '<p>**literal** &lt;b&gt;not bold&lt;/b&gt;<br><br>- not a list</p>',
+        },
+      },
+    ]);
+  });
+
+  it('preserves plain-text newlines with embedded Rich HTML breaks', () => {
     expect(planTelegramRichMessages({ text: 'first\n\n- second' })).toEqual([
       {
         text: 'first\n\n- second',
-        richMessage: { html: 'first<br><br>- second' },
+        richMessage: { markdown: '<p>first<br><br>- second</p>' },
       },
     ]);
   });
@@ -533,7 +401,7 @@ describe('planTelegramRichMessages', () => {
     ).toEqual([
       {
         text: '**Working**',
-        richMessage: { html: '<tg-thinking>Working</tg-thinking>' },
+        richMessage: { markdown: '<tg-thinking>Working</tg-thinking>' },
       },
     ]);
   });
