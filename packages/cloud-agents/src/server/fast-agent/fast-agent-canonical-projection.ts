@@ -48,19 +48,40 @@ const STATE_EVIDENCE_RANK: Record<FastAgentEventSemanticKind, number> = {
   current_state_assertion: 2,
 };
 
+/**
+ * Reads the immutable semantics an admission recorded on an event.
+ *
+ * Authority and kind are checked against the ranks that order them, not
+ * merely for being strings: an unrecognized value would index those ranks as
+ * `undefined` and make the ordering comparison `NaN`, which would silently
+ * destroy the total order. An event whose semantics cannot be ranked is
+ * treated as unsemantic history instead.
+ */
 function readSemantics(
   event: FastAgentMessage,
 ): FastAgentEventSemantics | null {
   const value = event.metadata?.[FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY];
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const semantics = value as Partial<FastAgentEventSemantics>;
-  return semantics.schemaVersion === 1 &&
-    typeof semantics.kind === 'string' &&
-    typeof semantics.authority === 'string' &&
-    typeof semantics.observedAt === 'string' &&
-    typeof semantics.sourceEventId === 'string'
-    ? (semantics as FastAgentEventSemantics)
-    : null;
+  if (
+    semantics.schemaVersion !== 1 ||
+    typeof semantics.observedAt !== 'string' ||
+    typeof semantics.sourceEventId !== 'string' ||
+    typeof semantics.kind !== 'string' ||
+    typeof semantics.authority !== 'string' ||
+    !(semantics.kind in STATE_EVIDENCE_RANK) ||
+    !(semantics.authority in AUTHORITY_RANK)
+  ) {
+    return null;
+  }
+  // A version that cannot be ordered numerically must not reach the key.
+  if (
+    semantics.version?.scheme === 'monotonic_number' &&
+    !Number.isFinite(semantics.version.value)
+  ) {
+    return null;
+  }
+  return semantics as FastAgentEventSemantics;
 }
 
 /**
@@ -145,7 +166,15 @@ function isAmbiguousConflict(
   ) {
     return leftSemantics.version.value === rightSemantics.version.value;
   }
-  return leftSemantics.observedAt === rightSemantics.observedAt;
+  // Compare the instant, not its formatting, so the same observation time
+  // written two ways is still recognized as inseparable.
+  const leftObserved = Date.parse(leftSemantics.observedAt);
+  const rightObserved = Date.parse(rightSemantics.observedAt);
+  return (
+    Number.isFinite(leftObserved) &&
+    Number.isFinite(rightObserved) &&
+    leftObserved === rightObserved
+  );
 }
 
 /** Pure projection of immutable canonical facts into current conversational state. */

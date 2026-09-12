@@ -5,6 +5,8 @@ import {
 } from '@roomote/types';
 
 import {
+  collectFastAgentCanonicalAttachments,
+  FAST_AGENT_CANONICAL_ATTACHMENT_LIMIT,
   projectFastAgentCanonicalEvents,
   renderFastAgentCanonicalHistory,
 } from '../fast-agent-canonical-projection';
@@ -664,5 +666,155 @@ describe('Fast canonical event projection', () => {
     );
 
     expect([...warmPrefix, ...warmSuffix]).toEqual(cold);
+  });
+
+  describe('unrecognized semantics', () => {
+    function withRawSemantics(
+      id: string,
+      sequence: number,
+      raw: Record<string, unknown>,
+    ): FastAgentMessage {
+      const base = event({
+        id,
+        sequence,
+        state: 'x',
+        semantics: {
+          kind: 'current_state_assertion',
+          authority: 'roomote_runtime',
+          observedAt: '2026-01-01T00:00:10.000Z',
+          subject: setupSubject,
+        },
+      });
+      return {
+        ...base,
+        metadata: {
+          ...base.metadata,
+          [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: raw,
+        },
+      };
+    }
+
+    it.each([
+      ['an unknown authority', { authority: 'from_the_future' }],
+      ['an unknown kind', { kind: 'speculation' }],
+      [
+        'a non-finite monotonic version',
+        {
+          version: { scheme: 'monotonic_number', value: Number.NaN },
+        },
+      ],
+    ])('rejects %s instead of ranking it', (_case, override) => {
+      const valid = event({
+        id: 'valid-claim',
+        sequence: 1,
+        state: 'valid',
+        semantics: {
+          kind: 'current_state_assertion',
+          authority: 'roomote_runtime',
+          observedAt: '2026-01-01T00:00:10.000Z',
+          subject: setupSubject,
+        },
+      });
+      const unrankable = withRawSemantics('unrankable-claim', 2, {
+        schemaVersion: 1,
+        kind: 'current_state_assertion',
+        authority: 'roomote_runtime',
+        observedAt: '2026-01-01T00:00:20.000Z',
+        sourceEventId: 'unrankable-claim',
+        subject: setupSubject,
+        state: 'x',
+        ...override,
+      });
+
+      const projection = projectFastAgentCanonicalEvents([valid, unrankable]);
+      // The unrankable claim cannot compete for current state, and the valid
+      // claim is still selected rather than compared against NaN.
+      expect(projection.currentStateEventIds).toEqual(['valid-claim']);
+      expect(
+        projection.events.find(
+          ({ event }) => event.eventId === 'unrankable-claim',
+        ),
+      ).toMatchObject({
+        semantics: null,
+        classification: 'historical_relevant',
+      });
+    });
+  });
+
+  describe('attachment collection', () => {
+    function imagePrompt(
+      id: string,
+      sequence: number,
+      blocks: FastAgentMessage['contentBlocks'],
+    ): FastAgentMessage {
+      const base = event({
+        id,
+        sequence,
+        state: 'prompt',
+        semantics: {
+          kind: 'historical_observation',
+          authority: 'human',
+          observedAt: new Date(sequence).toISOString(),
+        },
+      });
+      return { ...base, role: 'user', contentBlocks: blocks };
+    }
+
+    it('rebuilds data URLs newest first and ignores unusable blocks', () => {
+      const projection = projectFastAgentCanonicalEvents([
+        imagePrompt('older', 1, [{ type: 'text', text: 'no attachment here' }]),
+        imagePrompt('malformed', 2, [
+          { type: 'image', mimeType: 'text/plain', data: 'bm90LWFuLWltYWdl' },
+          { type: 'image', mimeType: 'image/png', data: '' },
+        ]),
+        imagePrompt('newest', 3, [
+          { type: 'image', mimeType: 'image/png', data: 'dXNhYmxl' },
+        ]),
+      ]);
+
+      expect(collectFastAgentCanonicalAttachments(projection)).toEqual([
+        {
+          eventId: 'newest',
+          mime: 'image/png',
+          url: 'data:image/png;base64,dXNhYmxl',
+        },
+      ]);
+    });
+
+    it('bounds how many attachments one rebuild restores', () => {
+      const projection = projectFastAgentCanonicalEvents(
+        Array.from(
+          { length: FAST_AGENT_CANONICAL_ATTACHMENT_LIMIT + 3 },
+          (_, index) =>
+            imagePrompt(`prompt-${index}`, index + 1, [
+              { type: 'image', mimeType: 'image/png', data: `aW1hZ2U${index}` },
+            ]),
+        ),
+      );
+
+      const restored = collectFastAgentCanonicalAttachments(projection);
+      expect(restored).toHaveLength(FAST_AGENT_CANONICAL_ATTACHMENT_LIMIT);
+      // Newest first, so the oldest prompts fall outside the bound.
+      expect(restored[0]?.eventId).toBe(
+        `prompt-${FAST_AGENT_CANONICAL_ATTACHMENT_LIMIT + 2}`,
+      );
+    });
+
+    it('skips the excluded current event', () => {
+      const projection = projectFastAgentCanonicalEvents([
+        imagePrompt('history', 1, [
+          { type: 'image', mimeType: 'image/png', data: 'aGlzdG9yeQ==' },
+        ]),
+        imagePrompt('current', 2, [
+          { type: 'image', mimeType: 'image/png', data: 'Y3VycmVudA==' },
+        ]),
+      ]);
+
+      expect(
+        collectFastAgentCanonicalAttachments(projection, {
+          excludeEventId: 'current',
+        }).map(({ eventId }) => eventId),
+      ).toEqual(['history']);
+    });
   });
 });

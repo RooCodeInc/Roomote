@@ -1816,6 +1816,95 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
+  describe('restored attachment delivery on a rebuild', () => {
+    function historicalImagePrompt(): FastAgentMessage {
+      return {
+        id: 'turn-one',
+        conversationId: 'conversation-1',
+        eventId: 'turn-one:user',
+        conversationSeq: 1,
+        turnId: 'turn-one',
+        turnSeq: 0,
+        ts: 1,
+        observedAt: new Date(1),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: [
+          { type: 'image', mimeType: 'image/png', data: 'aGlzdG9yaWNhbA==' },
+        ],
+        metadata: {
+          visibleInTranscript: true,
+          turnSource: 'human',
+          [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: {
+            schemaVersion: 1,
+            kind: 'historical_observation',
+            authority: 'human',
+            observedAt: new Date(1).toISOString(),
+            sourceEventId: 'turn-one',
+          },
+        },
+        payload: {},
+        source: 'slack',
+        nativeSessionId: null,
+        nativeMessageId: null,
+        createdAt: new Date(1),
+        updatedAt: new Date(1),
+      };
+    }
+
+    beforeEach(() => {
+      mocks.loadCanonicalMessages.mockResolvedValue([historicalImagePrompt()]);
+      mocks.runSession.mockImplementation(
+        ({
+          bootstrapPrompt,
+          execute,
+        }: {
+          bootstrapPrompt: () => string;
+          execute: (
+            session: { id?: string },
+            selectedPrompt: string,
+            context: { path: string; validateSession: boolean },
+          ) => Promise<unknown>;
+        }) =>
+          execute({}, bootstrapPrompt(), {
+            path: 'cold_rebuild',
+            validateSession: false,
+          }),
+      );
+    });
+
+    it('holds restored images for a session model that cannot view them', async () => {
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'helper',
+        model: 'openrouter/openai/gpt-5.4',
+        helperModel: 'openrouter/google/gemini-3.8-flash',
+      });
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      const [promptParams] = mocks.generateText.mock.calls[0]!;
+      // Held rather than attached, and announced with an inspectable ID.
+      expect(promptParams.files).toBeUndefined();
+      expect(promptParams.prompt).toContain('Image attachments: image-1');
+      expect(promptParams.prompt).toContain('inspect_images');
+    });
+
+    it('drops restored images when no configured model accepts image input', async () => {
+      mocks.resolveImageDelivery.mockResolvedValue({
+        delivery: 'unsupported',
+      });
+
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      const [promptParams] = mocks.generateText.mock.calls[0]!;
+      expect(promptParams.files).toBeUndefined();
+      // Nothing is announced as inspectable, because nothing could read it,
+      // but the rebuilt history still records that the turn had attachments.
+      expect(promptParams.prompt).not.toContain('Image attachments:');
+      expect(promptParams.prompt).toContain('canonical_event_attachments');
+    });
+  });
+
   it('does not restore historical attachments into a warm delta', async () => {
     const priorPrompt: FastAgentMessage = {
       id: 'turn-one',

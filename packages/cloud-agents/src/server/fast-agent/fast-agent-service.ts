@@ -5008,14 +5008,34 @@ export async function answerFastAgentQuestion({
         let promptForAttempt = selectedPrompt;
         let imageFilesForAttempt =
           sessionPath === 'fallback_rebuild'
-            ? [
-                ...imageFiles,
-                ...injectedHumanFollowUpFiles,
-                ...restoredAttachmentFiles,
-              ]
-            : sessionPath === 'cold_rebuild'
-              ? [...imageFiles, ...restoredAttachmentFiles]
-              : imageFiles;
+            ? [...imageFiles, ...injectedHumanFollowUpFiles]
+            : imageFiles;
+        // Restored history attachments follow the same delivery rules as the
+        // turn's own images: sent as files only when the model takes them
+        // directly, and otherwise held and announced with attachment IDs so
+        // `inspect_images` can read them. Where no configured model accepts
+        // image input at all, they are dropped rather than announced as
+        // inspectable, because nothing could ever read them; rebuilt history
+        // still records that the turn carried attachments.
+        const prepareRestoredAttachments = async () => {
+          if (restoredAttachmentFiles.length === 0) return;
+          const delivery = await resolveImageDelivery();
+          if (delivery.delivery === 'unsupported') return;
+          const prepared = holdImagesForPrompt(
+            restoredAttachmentFiles,
+            promptForAttempt,
+            delivery,
+          );
+          commitTurnImages(prepared.held);
+          promptForAttempt = prepared.text;
+          imageFilesForAttempt = [...imageFilesForAttempt, ...prepared.files];
+        };
+        if (
+          sessionPath === 'fallback_rebuild' ||
+          sessionPath === 'cold_rebuild'
+        ) {
+          await prepareRestoredAttachments();
+        }
         let promptKind: FastAgentPromptKind =
           sessionPath === 'warm' || sessionPath === 'cold_resume'
             ? 'turn_delta'
@@ -5444,7 +5464,13 @@ export async function answerFastAgentQuestion({
                   imageFilesForAttempt = [
                     ...imageFiles,
                     ...injectedHumanFollowUpFiles,
-                    ...restoredAttachmentFiles,
+                    // The retry path is synchronous, so restored attachments
+                    // ride along only under a delivery mode already resolved
+                    // for this turn; otherwise they are left out rather than
+                    // sent to a model that may not accept them directly.
+                    ...(resolvedImageDelivery?.delivery === 'direct'
+                      ? restoredAttachmentFiles
+                      : []),
                   ];
                   promptKind = 'clean_retry_bootstrap';
                   attemptSessionPath = 'cold_rebuild';
