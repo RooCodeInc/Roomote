@@ -152,6 +152,7 @@ describe('refreshFastAgentSessionTitle', () => {
     expect(refreshedTitle).toEqual({
       title: 'Rotate the API keys',
       emoji: '🔑',
+      titleChanged: true,
     });
     expect(session?.llmTitleCheckpoint).toBe(1);
     expect(generateLlmTaskTitleWithEmoji).toHaveBeenCalledWith({
@@ -260,12 +261,51 @@ describe('refreshFastAgentSessionTitle', () => {
       .set({ title: 'Existing title', llmTitleCheckpoint: 1 })
       .where(eq(fastAgentConversations.id, conversation.id));
 
-    await refreshFastAgentSessionTitle({
+    const refreshedTitle = await refreshFastAgentSessionTitle({
       sessionId: conversation.id,
       userId: user.id,
     });
 
+    expect(refreshedTitle).toBeNull();
     expect(generateLlmTaskTitleWithEmoji).not.toHaveBeenCalled();
+  });
+
+  it('reports an unchanged title without requesting another provider rename', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation(user.id, 'title-unchanged');
+    for (const ts of [1, 2, 3, 4]) {
+      await insertMessage({
+        conversationId: conversation.id,
+        eventId: `turn-${ts}:user`,
+        role: 'user',
+        text: `Question ${ts}`,
+        ts,
+        eventType: 'roomote_runtime.user_prompt',
+      });
+    }
+    await db
+      .update(fastAgentConversations)
+      .set({ title: 'Existing title', llmTitleCheckpoint: 1 })
+      .where(eq(fastAgentConversations.id, conversation.id));
+    generateLlmTaskTitleWithEmoji.mockResolvedValue({
+      title: 'Existing title',
+      emoji: '💡',
+    });
+
+    const refreshedTitle = await refreshFastAgentSessionTitle({
+      sessionId: conversation.id,
+      userId: user.id,
+    });
+
+    expect(refreshedTitle).toEqual({
+      title: 'Existing title',
+      emoji: '💡',
+      titleChanged: false,
+    });
+    const updated = await db.query.fastAgentConversations.findFirst({
+      where: eq(fastAgentConversations.id, conversation.id),
+    });
+    expect(updated?.llmTitleCheckpoint).toBe(4);
   });
 
   it('never overwrites a user-edited title', async () => {

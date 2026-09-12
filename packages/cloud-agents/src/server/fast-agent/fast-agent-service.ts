@@ -3216,6 +3216,7 @@ export async function answerFastAgentQuestion({
         (generated) =>
           adapter.activity?.updateTitle?.(generated?.title ?? null, {
             emoji: generated?.emoji ?? null,
+            titleChanged: generated?.titleChanged,
           }),
       );
     }

@@ -587,7 +587,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
   async editForumTopic(input: {
     channelId: string;
     threadId: string;
-    name: string;
+    name?: string;
     iconCustomEmojiId?: string;
   }): Promise<void> {
     const threadId = parsePositiveInteger(input.threadId);
@@ -599,7 +599,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     await this.callBotApi('editForumTopic', {
       chat_id: input.channelId,
       message_thread_id: threadId,
-      name: input.name,
+      ...(input.name ? { name: input.name } : {}),
       ...(input.iconCustomEmojiId
         ? { icon_custom_emoji_id: input.iconCustomEmojiId }
         : {}),

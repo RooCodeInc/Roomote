@@ -118,6 +118,52 @@ describe('Telegram Fast topic title sync', () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
+  it('updates only the icon when a generated canonical title is unchanged', async () => {
+    const editForumTopic = vi.fn().mockResolvedValue(undefined);
+
+    await syncFastAgentTelegramTopicTitleBestEffort({
+      provider: {
+        editForumTopic,
+        resolveForumTopicIconCustomEmojiId: vi
+          .fn()
+          .mockResolvedValue('idea-icon'),
+      } as never,
+      sessionId: 'session-1',
+      channelId: 'chat-1',
+      threadId: '77',
+      emoji: '💡',
+      titleChanged: false,
+      resolveSession: vi.fn().mockResolvedValue(session('Generated title')),
+    });
+
+    expect(editForumTopic).toHaveBeenCalledWith({
+      channelId: 'chat-1',
+      threadId: '77',
+      iconCustomEmojiId: 'idea-icon',
+    });
+  });
+
+  it('skips Telegram when neither the canonical title nor icon changed', async () => {
+    const editForumTopic = vi.fn().mockResolvedValue(undefined);
+
+    await syncFastAgentTelegramTopicTitleBestEffort({
+      provider: {
+        editForumTopic,
+        resolveForumTopicIconCustomEmojiId: vi
+          .fn()
+          .mockResolvedValue(undefined),
+      } as never,
+      sessionId: 'session-1',
+      channelId: 'chat-1',
+      threadId: '77',
+      emoji: null,
+      titleChanged: false,
+      resolveSession: vi.fn().mockResolvedValue(session('Generated title')),
+    });
+
+    expect(editForumTopic).not.toHaveBeenCalled();
+  });
+
   it('keeps Telegram failures non-fatal', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
