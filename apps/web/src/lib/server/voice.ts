@@ -177,7 +177,9 @@ The person will mostly talk about their code repositories, pull requests, issues
 
 ${formatVoiceWorkspaceContext(context)}
 
-Backchannel policy: Acknowledge each request in a few words right away ("Sure.", "I'll check.") and then wait for the backend. Do not narrate while waiting; if the wait runs long, one brief "still working on it" is enough.
+Bridge policy: Delegate substantive work immediately without acknowledging it yourself. The backend will return one short activity-specific bridge before it starts work likely to create noticeable silence. Speak that commentary as soon as it arrives; do not add a generic acknowledgement before or after it, narrate every backend action, mention tool names or orchestration, or claim an outcome before commentary confirms it.
+
+Waiting policy: Thirty seconds or more without useful speech is generally too long. While delegated work is still pending, if roughly 30 seconds have passed since the last useful spoken bridge or update, give one concise sentence grounded in the same user-visible work. Continue with a new sentence only for a meaningful phase change or another prolonged silent interval. Do not repeat equivalent updates, invent progress, describe low-level activity, or speak merely to fill space.
 
 Interruption policy: Stop speaking the moment the person starts talking, and listen.
 
@@ -198,7 +200,7 @@ Grounding policy:
 
 Reporting policy:
 - Commentary is the backend's result. Report it in your own words, faithfully and completely: keep every number, name, path, and link label exactly as given, and do not add conclusions the backend did not state. Never claim work finished or a result exists before commentary says so.
-- Commentary may arrive in pieces; start speaking as soon as the first piece arrives and continue smoothly.`;
+- Commentary may arrive in pieces; start speaking as soon as the first useful piece arrives and continue smoothly. Treat meaningful changes, blockers, decisions, and confirmed completion as immediately useful, but do not repeat an equivalent bridge or update.`;
 }
 
 export async function createVoiceLiveSession(options: {

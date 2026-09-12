@@ -776,7 +776,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'the runtime silently ensures this conversation has exactly one internal session-wide one-shot check',
     );
     expect(prompt).toContain(
-      '"in 1m" while a voice call is active, otherwise "in 10m"',
+      '"in 30s" while a voice call is active, otherwise "in 10m"',
     );
     expect(prompt).toContain('Do not create another wakeup for this purpose');
     expect(prompt).toContain('passing "internal": true');
@@ -841,7 +841,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'post one brief consolidated factual status for the Session when either inspection finds a genuinely notable new development',
     );
     expect(prompt).toContain(
-      'or the user has received no useful user-visible work update during the current automatic-check interval',
+      'or the user has received no useful work update for roughly 30 seconds on a voice-marked check or roughly 10 minutes otherwise',
     );
     expect(prompt).toContain(
       'Important news is immediate and has no minimum wait',
@@ -881,7 +881,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('automatic monitoring must never reactivate it');
     expect(prompt).toContain(
-      'report notable new developments immediately or one factual consolidated status when there has been no useful visible work update during the current automatic-check interval',
+      'report notable new developments immediately or one factual consolidated status when there has been no useful work update for roughly 30 seconds on a voice-marked check or roughly 10 minutes otherwise',
     );
     expect(prompt).toContain(
       'otherwise stay silent while still rearming if work runs',
@@ -899,7 +899,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('keeps one cache-stable follow-through contract for voice and text cadence', () => {
+  it('separates voice check cadence from deduplicated spoken reporting', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       turnSource: 'platform_event',
@@ -907,14 +907,20 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).toContain(
-      'user-visible work update during the current automatic-check interval',
+      'no useful work update for roughly 30 seconds on a voice-marked check or roughly 10 minutes otherwise',
     );
     expect(prompt).toContain('stable nominal schedule "in 10m"');
     expect(prompt).toContain(
-      'the server replaces that nominal delay with "in 1m" while voice is currently active and otherwise keeps "in 10m"',
+      'the server replaces that nominal delay with "in 30s" while voice is currently active and otherwise keeps "in 10m"',
     );
     expect(prompt).toContain(
-      'Keep routine spoken updates especially concise, applying these same reporting and repetition rules rather than inventing another suppression policy',
+      "Check the conversation's actual visible updates: a recent useful update suppresses only a routine cadence status",
+    );
+    expect(prompt).toContain(
+      'When neither reporting condition is met, call "ignore_event" after ensuring the next check',
+    );
+    expect(prompt).toContain(
+      "Keep every spoken update to one concise sentence about the user's work",
     );
     expect(prompt).toContain(
       'do not narrate routine logs, invent progress, repeat an already reported development',
@@ -1081,6 +1087,35 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       'The opening acknowledgement is already visible and needs no duplicate launch reply, but it does not suppress later useful updates while work continues',
+    );
+  });
+
+  it('requires Fast to bridge likely voice silence before opening the work gate', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'Before the first integration, task, or other substantive operation likely to create noticeable silence',
+    );
+    expect(prompt).toContain(
+      'send one short activity-specific bridge with purpose "ack"',
+    );
+    expect(prompt).toContain(
+      'This delivered Fast reply opens the runtime work-start gate; do not rely on the voice client having spoken first',
+    );
+    expect(prompt).toContain(
+      'Before a later operation likely to create another noticeable silence',
+    );
+    expect(prompt).toContain(
+      'reading a Notion document, inspecting relevant files, starting coding work, validating a fix, or waiting on tests',
+    );
+    expect(prompt).toContain(
+      'Treat roughly 30 seconds without useful speech during active work as a prolonged silent interval',
+    );
+    expect(prompt).toContain(
+      'Deduplicate equivalent updates and otherwise stay silent',
+    );
+    expect(prompt).toContain(
+      'Do not name tools, integrations as machinery, orchestration, wakeups, or routine logs',
     );
   });
 

@@ -7278,6 +7278,55 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       tools: [{ name: 'search_code', inputSchema: { type: 'object' } }],
     };
 
+    it('keeps voice work gated until Fast posts the activity bridge', async () => {
+      mocks.listIntegrations.mockResolvedValue([githubIntegration]);
+      const results: unknown[] = [];
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          results.push(
+            await invokeMcpTool('github', 'search_code', {
+              query: 'before bridge',
+            }),
+          );
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Just a second while I inspect the relevant files.',
+          });
+          results.push(
+            await invokeMcpTool('github', 'search_code', {
+              query: 'after bridge',
+            }),
+          );
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'I found it.',
+          });
+          return '';
+        },
+      );
+      const adapter = callbacks();
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        voiceMode: true,
+        adapter,
+      });
+
+      expect(results).toEqual([
+        acknowledgementRequired,
+        { success: true, result: { matches: ['fast-agent.ts'] } },
+      ]);
+      expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
+        purpose: 'ack',
+        message: 'Just a second while I inspect the relevant files.',
+      });
+      expect(adapter.postReply).toHaveBeenNthCalledWith(2, {
+        purpose: 'closeout',
+        message: 'I found it.',
+      });
+    });
+
     it('does not let a reaction unlock work, but a text acknowledgement does', async () => {
       mocks.listIntegrations.mockResolvedValue([githubIntegration]);
       const results: unknown[] = [];
