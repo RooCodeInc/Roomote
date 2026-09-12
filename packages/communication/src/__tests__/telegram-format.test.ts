@@ -4,6 +4,7 @@ import {
   TELEGRAM_MAX_MESSAGE_LENGTH,
   chunkTelegramMarkdown,
   chunkTelegramMarkdownAsHtml,
+  chunkTelegramText,
   markdownToTelegramHtml,
 } from '../telegram-format';
 
@@ -62,6 +63,47 @@ describe('markdownToTelegramHtml', () => {
     expect(
       markdownToTelegramHtml('_Reply or use the [web app](https://a.test)._'),
     ).toBe('<i>Reply or use the <a href="https://a.test">web app</a>.</i>');
+  });
+});
+
+describe('chunkTelegramText', () => {
+  it('keeps text at the exact limit in one chunk', () => {
+    const text = 'x'.repeat(TELEGRAM_MAX_MESSAGE_LENGTH);
+
+    expect(chunkTelegramText(text)).toEqual([text]);
+  });
+
+  it('splits text one character over the limit without losing content', () => {
+    const text = 'x'.repeat(TELEGRAM_MAX_MESSAGE_LENGTH + 1);
+    const chunks = chunkTelegramText(text);
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks.join('')).toBe(text);
+  });
+
+  it('preserves every character while preferring paragraph boundaries', () => {
+    const text = `${'a'.repeat(3_000)}\n\n${'b'.repeat(3_000)}`;
+    const chunks = chunkTelegramText(text);
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]).toBe(`${'a'.repeat(3_000)}\n\n`);
+    expect(chunks.join('')).toBe(text);
+  });
+
+  it('hard-splits long unbroken text without breaking Unicode', () => {
+    const text = '🙂'.repeat(5_000);
+    const chunks = chunkTelegramText(text);
+
+    expect(chunks.length).toBeGreaterThan(2);
+    expect(chunks.join('')).toBe(text);
+    expect(chunks.every((chunk) => chunk.length <= 4_096)).toBe(true);
+    expect(chunks.every((chunk) => !chunk.includes('\uFFFD'))).toBe(true);
+    expect(
+      chunks.every(
+        (chunk) =>
+          !/^[\uDC00-\uDFFF]/.test(chunk) && !/[\uD800-\uDBFF]$/.test(chunk),
+      ),
+    ).toBe(true);
   });
 });
 

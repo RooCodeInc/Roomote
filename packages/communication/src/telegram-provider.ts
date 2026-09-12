@@ -12,8 +12,8 @@ import { readBoundedResponseBody } from './bounded-response-body';
 import { getTelegramApiBaseUrl } from './telegram-api-base-url';
 import {
   TELEGRAM_MAX_MESSAGE_LENGTH,
-  chunkTelegramMarkdown,
   chunkTelegramMarkdownAsHtml,
+  chunkTelegramText,
 } from './telegram-format';
 
 export type TelegramCommunicationProviderOptions = {
@@ -108,10 +108,10 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
   async postMessage(
     input: CommunicationPostMessageInput,
   ): Promise<CommunicationPostMessageResult> {
-    const text = input.text?.trim();
+    const text = input.text;
     const images = input.images ?? [];
 
-    if (!text && images.length === 0) {
+    if (!text?.trim() && images.length === 0) {
       throw new Error('Telegram postMessage requires text or images.');
     }
 
@@ -126,7 +126,9 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       html: string | null;
       fallbackOnHtmlError?: boolean;
     }> = text
-      ? input.htmlText
+      ? input.htmlText &&
+        input.htmlText.length <= TELEGRAM_MAX_MESSAGE_LENGTH &&
+        text.length <= TELEGRAM_MAX_MESSAGE_LENGTH
         ? [
             {
               markdown: text,
@@ -136,9 +138,10 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
           ]
         : useMarkdown
           ? chunkTelegramMarkdownAsHtml(text)
-          : chunkTelegramMarkdown(text, TELEGRAM_MAX_MESSAGE_LENGTH).map(
-              (chunk) => ({ markdown: chunk, html: null }),
-            )
+          : chunkTelegramText(text).map((chunk) => ({
+              markdown: chunk,
+              html: null,
+            }))
       : [];
 
     let firstResult: {

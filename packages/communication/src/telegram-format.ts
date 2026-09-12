@@ -120,14 +120,63 @@ export function markdownToTelegramHtml(markdown: string): string {
     .join('');
 }
 
-function splitLongLine(line: string, maxLength: number): string[] {
-  const pieces: string[] = [];
-
-  for (let index = 0; index < line.length; index += maxLength) {
-    pieces.push(line.slice(index, index + maxLength));
+function safeCodePointBoundary(text: string, boundary: number): number {
+  if (
+    boundary > 0 &&
+    boundary < text.length &&
+    /[\uD800-\uDBFF]/.test(text[boundary - 1] ?? '') &&
+    /[\uDC00-\uDFFF]/.test(text[boundary] ?? '')
+  ) {
+    return boundary - 1;
   }
 
-  return pieces;
+  return boundary;
+}
+
+/**
+ * Split plain Telegram text without dropping separators or cutting a Unicode
+ * code point. Prefer paragraph, line, then word boundaries before hard splits.
+ */
+export function chunkTelegramText(
+  text: string,
+  maxLength: number = TELEGRAM_MAX_MESSAGE_LENGTH,
+): string[] {
+  if (!Number.isSafeInteger(maxLength) || maxLength < 2) {
+    throw new Error('Telegram chunk length must be an integer of at least 2.');
+  }
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > maxLength) {
+    const hardBoundary = safeCodePointBoundary(remaining, maxLength);
+    const candidate = remaining.slice(0, hardBoundary);
+    const paragraphIndex = candidate.lastIndexOf('\n\n');
+    const paragraphBoundary = paragraphIndex < 0 ? 0 : paragraphIndex + 2;
+    const newlineBoundary = candidate.lastIndexOf('\n') + 1;
+    let whitespaceBoundary = 0;
+
+    for (let index = candidate.length - 1; index >= 0; index -= 1) {
+      if (/\s/u.test(candidate[index] ?? '')) {
+        whitespaceBoundary = index + 1;
+        break;
+      }
+    }
+
+    const minimumPreferredBoundary = Math.floor(hardBoundary / 2);
+    const boundary =
+      [paragraphBoundary, newlineBoundary, whitespaceBoundary].find(
+        (value) => value >= minimumPreferredBoundary,
+      ) ?? hardBoundary;
+    chunks.push(remaining.slice(0, boundary));
+    remaining = remaining.slice(boundary);
+  }
+
+  if (remaining.length > 0 || chunks.length === 0) {
+    chunks.push(remaining);
+  }
+
+  return chunks;
 }
 
 /**
@@ -165,10 +214,10 @@ export function chunkTelegramMarkdown(
   for (const rawLine of markdown.split('\n')) {
     const lines =
       rawLine.length > maxLength
-        ? splitLongLine(rawLine, maxLength - 8)
+        ? chunkTelegramText(rawLine, maxLength - 8)
         : [rawLine];
 
-    for (const line of lines) {
+    for (const [lineIndex, line] of lines.entries()) {
       const fenceMatch = /^```/.test(line);
       // Reserve room for the closing fence a flush would append.
       const closingFenceReserve = openFence ? 4 : 0;
@@ -183,12 +232,18 @@ export function chunkTelegramMarkdown(
       if (fenceMatch) {
         openFence = openFence ? null : line;
       }
+
+      // A hard-split line has no newline between its pieces. Flush each piece
+      // separately so joining the line array below cannot invent one.
+      if (lineIndex < lines.length - 1) {
+        flush(true);
+      }
     }
   }
 
   flush(false);
 
-  return chunks.filter((chunk) => chunk.trim().length > 0);
+  return chunks;
 }
 
 /**
