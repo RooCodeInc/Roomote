@@ -114,7 +114,7 @@ export function brainNamespaceLabel(id: BrainNamespaceBucketId): string {
  * superseded version's rows.
  */
 export const BRAIN_COLLECTOR_IDS = {
-  taskMemories: 'task-memory:effective-date-v2',
+  taskMemories: 'task-memory:initiator-v3',
   pullRequestFacts: 'pull-request-facts:occurrence-date-v3',
   personIdentities: 'person-identities:members:occurrence-date-v2',
   ripplingWorkers: 'rippling-workers',

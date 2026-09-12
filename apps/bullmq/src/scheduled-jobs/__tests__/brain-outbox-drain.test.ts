@@ -61,6 +61,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     releaseFastAgentMemoryEvents: mockReleaseFastEvents,
     getBrainSyncState: mockGetSyncState,
     upsertBrainSyncState: vi.fn(),
+    deleteBrainSyncStateFamily: vi.fn(),
   };
 });
 
@@ -82,6 +83,7 @@ beforeEach(() => {
   });
 });
 
+import { personIdentitySlug } from '../brain-collectors/identity';
 import {
   brainCollectorsJob,
   brainOutboxDrainJob,
@@ -443,8 +445,73 @@ describe('task memory page identity', () => {
     completedAt: new Date('2026-08-13T10:00:00Z'),
     environmentName: null,
     agentSummary: 'Used the durable approach.',
+    initiator: { kind: 'user' as const, userId: 'user-1', name: 'Sam Lee' },
+    workflow: 'standard' as const,
     pullRequests: [],
   };
+
+  it('links a linked member to their person page', () => {
+    const page = buildMemoryPage({ ...base, runId: 101 });
+    const slug = personIdentitySlug('user-1');
+
+    expect(slug).toMatch(/^people\/roomote-member-[0-9a-f]{16}$/);
+    expect(page.content).toContain('\ninitiated_by: "Sam Lee"\n');
+    expect(page.content).toContain('\nroomote_user_id: user-1\n');
+    expect(page.content).toContain(
+      `\ninitiated_by_person: ${JSON.stringify(slug)}\n`,
+    );
+    expect(page.content).toContain(`\nInitiated by [Sam Lee](${slug}).\n`);
+  });
+
+  it('names an unlinked human without inventing a person page', () => {
+    const page = buildMemoryPage({
+      ...base,
+      runId: 101,
+      initiator: { kind: 'user', userId: null, name: 'octocat' },
+    });
+
+    expect(page.content).toContain('\ninitiated_by: "octocat"\n');
+    expect(page.content).not.toContain('roomote_user_id');
+    expect(page.content).not.toContain('initiated_by_person');
+    expect(page.content).toContain('\nInitiated by octocat.\n');
+  });
+
+  it('names the automation that started a task', () => {
+    const page = buildMemoryPage({
+      ...base,
+      runId: 101,
+      initiator: { kind: 'automation', automation: 'issue_fixer' },
+    });
+
+    expect(page.content).toContain('\ninitiated_by_automation: issue_fixer\n');
+    expect(page.content).not.toContain('initiated_by:');
+    expect(page.content).toContain(
+      '\nInitiated by the issue_fixer automation.\n',
+    );
+  });
+
+  it('never links a person to a review the member merely triggered', () => {
+    const page = buildMemoryPage({
+      ...base,
+      runId: 101,
+      workflow: 'pr_review',
+    });
+
+    expect(page.content).not.toContain('Initiated by');
+    expect(page.content).not.toContain('initiated_by');
+    expect(page.content).not.toContain('roomote_user_id');
+  });
+
+  it('omits the initiator line when nothing is known about them', () => {
+    const page = buildMemoryPage({
+      ...base,
+      runId: 101,
+      initiator: { kind: 'user', userId: null, name: null },
+    });
+
+    expect(page.content).not.toContain('Initiated by');
+    expect(page.content).not.toContain('initiated_by');
+  });
 
   it('keeps separate runs of the same task distinct', () => {
     const first = buildMemoryPage({ ...base, runId: 101 });
@@ -492,6 +559,8 @@ describe('task memory pull request outcomes', () => {
     completedAt: new Date('2026-08-13T10:00:00Z'),
     environmentName: null,
     agentSummary: 'Opened a PR with the durable approach.',
+    initiator: { kind: 'automation' as const, automation: 'issue_fixer' },
+    workflow: 'standard' as const,
   };
   const pr = {
     repository: 'owner/repo',

@@ -13,6 +13,7 @@ import {
   settleBrainMemoryEvent,
   releaseBrainMemoryEvents,
   releaseFastAgentMemoryEvents,
+  deleteBrainSyncStateFamily,
   settleFastAgentMemoryEvent,
   pullRequestFacts,
   taskPullRequests,
@@ -38,12 +39,17 @@ import {
   BRAIN_PAGE_TYPES,
   type PullRequestStatus,
   RunStatus,
+  type TaskWorkflow,
   brainNamespacePrefix,
   getLinkedEnvironmentIdFromPayload,
   renderBrainFrontmatter,
 } from '@roomote/types';
 
 import { runBrainCollectors } from './brain-collectors';
+import {
+  brainSafeIdentityValue,
+  personIdentitySlug,
+} from './brain-collectors/identity';
 import { drainMemoryOutboxBatch } from './memory-outbox-drain';
 import {
   runSlackDayPageCensus,
@@ -54,6 +60,19 @@ import { slackPublicChannelsCollector } from './brain-collectors/slack-public-ch
 const LOG_PREFIX = '[brainOutboxDrain]';
 /** Sync-state key for the one-time task-history backfill. */
 const TASK_MEMORY_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.taskMemories;
+/**
+ * Task-memory sync-state rows left behind by version bumps. A bump replays
+ * history under the new id (the backfill checkpoint lives on the row), and
+ * the old row would otherwise linger and count as the source's history
+ * cutoff forever. Extend when bumping again.
+ */
+const SUPERSEDED_TASK_MEMORY_COLLECTOR_IDS = ['task-memory:effective-date-v2'];
+/**
+ * How far back a version bump re-puts memories that already reached the
+ * Brain. Older pages keep correct content and pick the new shape up if a
+ * linked pull request later changes state.
+ */
+const LINKABLE_REPLAY_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 const CLAIM_BATCH_SIZE = 10;
 // Backfill can enqueue a deployment's whole task history at once; drain up
 // to this many batches per tick so the backlog clears in minutes, not hours.
@@ -308,6 +327,71 @@ function describePullRequestOutcome(
  * timestamps, provenance). LLM distillation of decisions/rationale layers on
  * top of this later; it must never widen what raw data can reach the brain.
  */
+/**
+ * Who started the task. On a standard-workflow task, a linked Roomote member
+ * gets a link to their person page so recall can answer "what has X been
+ * working on"; an unlinked human from an integration surface (a Slack or
+ * GitHub user with no Roomote account) keeps only the display name the
+ * surface reported; an automation names its key. Other workflows (PR
+ * reviews, conflict resolution, scans, snapshots) never link a person: the
+ * human who happened to trigger a review is not its author, and a person
+ * page full of reviews says nothing about what they worked on.
+ */
+type TaskMemoryInitiator =
+  | {
+      kind: 'user';
+      userId: string | null;
+      /** The Roomote member's name, or the surface-reported display name. */
+      name: string | null;
+    }
+  | { kind: 'automation'; automation: string };
+
+function describeInitiator(
+  initiator: TaskMemoryInitiator,
+  workflow: TaskWorkflow,
+): {
+  fields: string[];
+  line: string | null;
+} {
+  if (initiator.kind === 'automation') {
+    return {
+      fields: [`initiated_by_automation: ${initiator.automation}`],
+      line: `Initiated by the ${initiator.automation} automation.`,
+    };
+  }
+
+  if (workflow !== 'standard') {
+    return { fields: [], line: null };
+  }
+
+  const name = initiator.name ? brainSafeIdentityValue(initiator.name) : '';
+
+  if (initiator.userId) {
+    const slug = personIdentitySlug(initiator.userId);
+    const title = name || 'Roomote member';
+
+    return {
+      fields: [
+        `initiated_by: ${JSON.stringify(title)}`,
+        `roomote_user_id: ${initiator.userId}`,
+        // Same convention as person aliases: the person page's slug, so the
+        // Brain can walk from the task to the member and back.
+        `initiated_by_person: ${JSON.stringify(slug)}`,
+      ],
+      line: `Initiated by [${title}](${slug}).`,
+    };
+  }
+
+  if (name) {
+    return {
+      fields: [`initiated_by: ${JSON.stringify(name)}`],
+      line: `Initiated by ${name}.`,
+    };
+  }
+
+  return { fields: [], line: null };
+}
+
 export function buildMemoryPage(input: {
   runId: number;
   taskId: string;
@@ -315,6 +399,8 @@ export function buildMemoryPage(input: {
   completedAt: Date | null;
   environmentName: string | null;
   agentSummary: string | null;
+  initiator: TaskMemoryInitiator;
+  workflow: TaskWorkflow;
   pullRequests: Array<{
     repository: string | null;
     prNumber: number | null;
@@ -327,6 +413,7 @@ export function buildMemoryPage(input: {
   const completed = completedAtIso ?? 'unknown';
   const completedDate = completedAtIso?.slice(0, 10);
   const outcome = summarizePullRequestOutcome(input.pullRequests);
+  const initiator = describeInitiator(input.initiator, input.workflow);
   const prLines = input.pullRequests.map((pr) => {
     const label =
       pr.repository && pr.prNumber
@@ -346,6 +433,7 @@ export function buildMemoryPage(input: {
       fields: [
         `roomote_task_id: ${input.taskId}`,
         `roomote_run_id: ${input.runId}`,
+        ...initiator.fields,
         // GBrain derives effective_date from this conventional field. Keep
         // the full timestamp below as provenance, but make backfilled pages
         // sort and filter by when the task completed rather than when it
@@ -367,6 +455,7 @@ export function buildMemoryPage(input: {
     '',
     `# ${input.taskTitle}`,
     '',
+    ...(initiator.line ? [initiator.line, ''] : []),
     // The agent that did the work writes the substance when it can; the
     // deterministic completion line is the floor, not the ceiling.
     ...(input.agentSummary
@@ -470,6 +559,10 @@ async function resolveReadyBrain(): Promise<{
  * restarts (there is no connect action to hang this off anymore).
  */
 async function backfillTaskHistoryOnce(): Promise<void> {
+  for (const collectorId of SUPERSEDED_TASK_MEMORY_COLLECTOR_IDS) {
+    await deleteBrainSyncStateFamily(db, collectorId);
+  }
+
   const state = await getBrainSyncState(db, TASK_MEMORY_COLLECTOR_ID);
 
   if (state?.backfillCompletedAt) {
@@ -477,7 +570,9 @@ async function backfillTaskHistoryOnce(): Promise<void> {
   }
 
   const enqueued = await backfillBrainMemoryEvents(db, {
-    requeueCompleted: true,
+    requeueLinkable: {
+      completedAfter: new Date(Date.now() - LINKABLE_REPLAY_WINDOW_MS),
+    },
   });
 
   await upsertBrainSyncState(db, TASK_MEMORY_COLLECTOR_ID, {
@@ -613,7 +708,7 @@ async function drainOneBatch(connection: {
       async prepare(event) {
         const run = await db.query.taskRuns.findFirst({
           where: eq(taskRuns.id, event.runId),
-          with: { task: true },
+          with: { task: { with: { initiatorUser: true } } },
         });
 
         if (!run) {
@@ -671,13 +766,25 @@ async function drainOneBatch(connection: {
           environmentName = environment?.name ?? null;
         }
 
+        const task = run.task;
+        const initiator: TaskMemoryInitiator =
+          task.initiatorKind === 'automation' && task.initiatorAutomation
+            ? { kind: 'automation', automation: task.initiatorAutomation }
+            : {
+                kind: 'user',
+                userId: task.initiatorUser?.id ?? null,
+                name: task.initiatorUser?.name ?? task.actorDisplayName,
+              };
+
         const page = buildMemoryPage({
           environmentName,
           agentSummary: event.agentSummary,
           runId: run.id,
           taskId: run.taskId,
-          taskTitle: run.task.title,
+          taskTitle: task.title,
           completedAt: run.completedAt,
+          initiator,
+          workflow: task.workflow,
           pullRequests: prRows.map((pr) => ({
             repository: pr.repository,
             prNumber: pr.prNumber,
