@@ -25,6 +25,25 @@ interface SessionEgressEndpoint {
   port: number;
 }
 
+/** Use Docker's active backend, which may differ from the helper image default. */
+function selectDockerFirewallBackend(): string[] {
+  return [
+    'rse_iptables=',
+    'rse_ip6tables=',
+    'for rse_suffix in -nft -legacy ""; do',
+    '  rse_v4="iptables${rse_suffix}"; rse_v6="ip6tables${rse_suffix}"',
+    '  command -v "$rse_v4" >/dev/null 2>&1 || continue',
+    '  command -v "$rse_v6" >/dev/null 2>&1 || continue',
+    '  "$rse_v4" -S DOCKER-USER >/dev/null 2>&1 || continue',
+    '  "$rse_v4" -C FORWARD -j DOCKER-USER >/dev/null 2>&1 || continue',
+    '  rse_iptables="$rse_v4"; rse_ip6tables="$rse_v6"; break',
+    'done',
+    'test -n "$rse_iptables" || { echo "Docker firewall backend unavailable" >&2; exit 1; }',
+    'iptables() { command "$rse_iptables" "$@"; }',
+    'ip6tables() { command "$rse_ip6tables" "$@"; }',
+  ];
+}
+
 /** Host policy, outside the worker and its privileged nested Docker namespace. */
 export function buildSessionEgressHostPolicy(
   networkId: string,
@@ -56,6 +75,7 @@ export function buildSessionEgressHostPolicy(
   const guard = `${chain}_G`;
   return [
     'set -eu',
+    ...selectDockerFirewallBackend(),
     // Bridge traffic must traverse the host filter, including same-bridge peers.
     'test "$(cat /proc/sys/net/bridge/bridge-nf-call-iptables)" = 1',
     'test "$(cat /proc/sys/net/bridge/bridge-nf-call-ip6tables)" = 1',
@@ -329,6 +349,7 @@ export async function removeDockerSessionEgressBoundary(
   const guard = `${chain}_G`;
   const script = [
     'set -eu',
+    ...selectDockerFirewallBackend(),
     'iptables -S DOCKER-USER >/dev/null',
     `while iptables -C DOCKER-USER -i ${bridge} -j ${chain} 2>/dev/null; do iptables -D DOCKER-USER -i ${bridge} -j ${chain}; done`,
     `while iptables -C DOCKER-USER -i ${bridge} -j DROP 2>/dev/null; do iptables -D DOCKER-USER -i ${bridge} -j DROP; done`,
