@@ -21,6 +21,17 @@ export const FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS = 300;
 export const FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS = 800;
 const FAST_AGENT_TELEGRAM_THINKING_TEXT = 'Roomote is working...';
 
+export async function runWithFastAgentTelegramActivityReassertion<T>(
+  activity: { reassert: () => void },
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } finally {
+    activity.reassert();
+  }
+}
+
 function isTelegramPrivateChatId(channelId: string): boolean {
   const parsed = Number(channelId);
   return Number.isSafeInteger(parsed) && parsed > 0;

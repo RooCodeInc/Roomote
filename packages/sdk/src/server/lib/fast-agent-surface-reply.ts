@@ -78,7 +78,10 @@ import {
 } from './source-control-fast-delivery';
 import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
 import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
-import { createFastAgentTelegramActivity } from './fast-agent-telegram-activity';
+import {
+  createFastAgentTelegramActivity,
+  runWithFastAgentTelegramActivityReassertion,
+} from './fast-agent-telegram-activity';
 import { addFastAgentTelegramTopicTitleSync } from './fast-agent-telegram-title-sync';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
@@ -641,6 +644,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       sessionId: session.id,
       footerContext,
     });
+    const launchTask = createFastAgentCommunicationTaskLauncher({
+      userId: params.userId,
+      conversation,
+      telegramLiveTaskProvider: provider,
+    });
     const postReply: FastAgentTurnAdapter['postReply'] = async ({
       message,
     }) => {
@@ -680,11 +688,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             }
           : {}),
         createArtifact,
-        launchTask: createFastAgentCommunicationTaskLauncher({
-          userId: params.userId,
-          conversation,
-          telegramLiveTaskProvider: provider,
-        }),
+        launchTask: async (input) => {
+          return runWithFastAgentTelegramActivityReassertion(activity, () =>
+            launchTask(input),
+          );
+        },
         postReply,
         replaceReply: async (handle, reply) => {
           const result = await replaceReply(handle, reply);

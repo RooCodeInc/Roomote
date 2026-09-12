@@ -4,6 +4,7 @@ import {
   FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS,
   FAST_AGENT_TELEGRAM_TYPING_REFRESH_MS,
   createFastAgentTelegramActivity,
+  runWithFastAgentTelegramActivityReassertion,
 } from './fast-agent-telegram-activity';
 
 describe('Fast Telegram activity', () => {
@@ -302,4 +303,26 @@ describe('Fast Telegram activity', () => {
     await activity.dispose();
     warn.mockRestore();
   });
+
+  it.each(['success', 'failure'] as const)(
+    'reasserts after a draft-clearing operation %s',
+    async (outcome) => {
+      const activity = { reassert: vi.fn() };
+      const operation =
+        outcome === 'success'
+          ? vi.fn().mockResolvedValue('result')
+          : vi.fn().mockRejectedValue(new Error('failed'));
+
+      if (outcome === 'success') {
+        await expect(
+          runWithFastAgentTelegramActivityReassertion(activity, operation),
+        ).resolves.toBe('result');
+      } else {
+        await expect(
+          runWithFastAgentTelegramActivityReassertion(activity, operation),
+        ).rejects.toThrow('failed');
+      }
+      expect(activity.reassert).toHaveBeenCalledOnce();
+    },
+  );
 });

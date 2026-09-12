@@ -3505,6 +3505,8 @@ describe('deliverFastAgentParentEvent', () => {
             text: 'Resolve these issues',
             callbackData: `prr:y:${nonce}`,
           },
+        ],
+        [
           {
             text: 'Auto-resolve on this PR',
             callbackData: `prr:a:${nonce}`,

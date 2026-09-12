@@ -118,7 +118,10 @@ import {
   type TelegramLiveTaskStreamProvider,
 } from './telegram-live-task-stream';
 import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
-import { createFastAgentTelegramActivity } from './fast-agent-telegram-activity';
+import {
+  createFastAgentTelegramActivity,
+  runWithFastAgentTelegramActivityReassertion,
+} from './fast-agent-telegram-activity';
 import { findTeamsConversationRoute } from '../automations/destination';
 import {
   isFastAgentManagedTelegramTopic,
@@ -1903,20 +1906,25 @@ async function createTelegramFastAgentParentTurn(
     sessionId: session.id,
     footerContext: params.footerContext,
   });
+  const launchTask = createFastAgentCommunicationTaskLauncher({
+    userId: actorUserId,
+    conversation,
+    telegramLiveTaskProvider: provider,
+    automation: await resolveFastAutomationLaunchContext({
+      event: params.event,
+      conversation,
+    }),
+  });
   return {
     userId: actorUserId,
     conversation,
     adapter: {
       activity,
-      launchTask: createFastAgentCommunicationTaskLauncher({
-        userId: actorUserId,
-        conversation,
-        telegramLiveTaskProvider: provider,
-        automation: await resolveFastAutomationLaunchContext({
-          event: params.event,
-          conversation,
-        }),
-      }),
+      launchTask: async (input) => {
+        return runWithFastAgentTelegramActivityReassertion(activity, () =>
+          launchTask(input),
+        );
+      },
       replaceReply: async (handle, reply) => {
         const result = await replaceReply(handle, reply);
         activity.reassert();
@@ -1991,6 +1999,8 @@ async function createTelegramFastAgentParentTurn(
                           action.nonce,
                         ),
                       },
+                    ],
+                    [
                       {
                         text: PR_REVIEW_ACTION_LABELS.auto,
                         callbackData: buildPrReviewActionCallbackData(
