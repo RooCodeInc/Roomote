@@ -593,6 +593,8 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('get_chat_channel_messages');
     expect(prompt).toContain('manage_custom_automations');
     expect(prompt).toContain('roomote_create_custom_skill');
+    expect(prompt).toContain('roomote_update_custom_skill');
+    expect(prompt).toContain('exact `instance:<uuid>` ID and current version');
     expect(prompt).toContain('user explicitly asks to save');
     expect(prompt).toContain(
       'do not supply environmentIds or ask for environment selection',

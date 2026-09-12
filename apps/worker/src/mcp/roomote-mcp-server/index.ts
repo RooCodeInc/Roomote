@@ -13,6 +13,7 @@ import {
   CHAT_MESSAGE_CONTEXT_TOOL,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   CREATE_CUSTOM_SKILL_TOOL,
+  UPDATE_CUSTOM_SKILL_TOOL,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   dataVisualizationInputsSchema,
@@ -91,7 +92,10 @@ import { errorResult } from './tool-result.js';
 import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-summary-state.js';
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
-import { handleCreateCustomSkill } from './custom-skills.js';
+import {
+  handleCreateCustomSkill,
+  handleUpdateCustomSkill,
+} from './custom-skills.js';
 import { handleManageGoal } from './goal.js';
 import {
   handleGetSessionMessages,
@@ -143,6 +147,23 @@ roomoteMcpServer.registerTool(
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
     }
     return handleManageCustomAutomations(params, config);
+  },
+);
+
+roomoteMcpServer.registerTool(
+  UPDATE_CUSTOM_SKILL_TOOL.name,
+  {
+    title: UPDATE_CUSTOM_SKILL_TOOL.title,
+    description: UPDATE_CUSTOM_SKILL_TOOL.description,
+    inputSchema: z.object(UPDATE_CUSTOM_SKILL_TOOL.inputSchema).strict(),
+    annotations: UPDATE_CUSTOM_SKILL_TOOL.annotations,
+  },
+  async (params): Promise<ToolResult> => {
+    const config = getRoomoteConfig();
+    if (!config) {
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+    return handleUpdateCustomSkill(params, config);
   },
 );
 

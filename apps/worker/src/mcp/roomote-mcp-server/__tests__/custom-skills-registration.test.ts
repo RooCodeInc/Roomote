@@ -34,6 +34,24 @@ describe('roomote MCP custom skill registration', () => {
     await client.connect(clientTransport);
   });
 
+  it('advertises exact-ID atomic update fields', async () => {
+    const { tools } = await client.listTools();
+    const tool = tools.find(({ name }) => name === 'update_custom_skill');
+    expect(tool).toBeDefined();
+    expect(Object.keys(tool!.inputSchema.properties!).sort()).toEqual([
+      'content',
+      'description',
+      'expectedVersion',
+      'name',
+      'skillId',
+    ]);
+    expect(tool!.inputSchema.required?.slice().sort()).toEqual([
+      'expectedVersion',
+      'skillId',
+    ]);
+    expect(tool!.inputSchema.additionalProperties).toBe(false);
+  });
+
   afterEach(async () => {
     await client.close();
     await server.close();

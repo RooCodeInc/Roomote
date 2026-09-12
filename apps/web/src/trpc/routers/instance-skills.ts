@@ -29,7 +29,10 @@ export const instanceSkillsRouter = createRouter({
   update: protectedProcedure
     .input(
       customSkillDefinitionSchema
-        .extend({ skillId: z.string().uuid() })
+        .extend({
+          expectedVersion: z.number().int().positive(),
+          skillId: z.string().uuid(),
+        })
         .strict(),
     )
     .mutation(({ ctx: { auth }, input }) =>
