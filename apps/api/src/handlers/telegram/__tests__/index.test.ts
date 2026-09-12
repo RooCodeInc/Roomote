@@ -579,6 +579,60 @@ describe('Telegram webhook handler', () => {
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
+  it('ignores private Telegram service messages without nudging the sender', async () => {
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: undefined,
+          forum_topic_closed: {},
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'unsupported_update',
+    });
+    expect(telegramMappingsFindFirstMock).not.toHaveBeenCalled();
+    expect(postMessageMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['bot-authored', { id: 999, is_bot: true, first_name: 'Roomote' }],
+    ['senderless', undefined],
+  ])('ignores %s private task-entry messages', async (_label, from) => {
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({ message: { from } }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'unsupported_update',
+    });
+    expect(telegramMappingsFindFirstMock).not.toHaveBeenCalled();
+    expect(postMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('applies the private task-entry guard to edited messages', async () => {
+    const response = await postTelegramUpdate({
+      update_id: 127,
+      edited_message: {
+        message_id: 456,
+        date: 1,
+        from: { id: 111, first_name: 'Ada' },
+        chat: { id: 222, type: 'private', first_name: 'Ada' },
+        forum_topic_closed: {},
+      },
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'unsupported_update',
+    });
+    expect(telegramMappingsFindFirstMock).not.toHaveBeenCalled();
+    expect(postMessageMock).not.toHaveBeenCalled();
+  });
+
   it('durably marks the first Fast session in an implicit New Chat topic', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     redisGetdelMock.mockResolvedValueOnce('1');
