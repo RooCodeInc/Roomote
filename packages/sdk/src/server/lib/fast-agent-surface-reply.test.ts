@@ -341,8 +341,8 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       iconCustomEmojiId: 'bug-icon',
     });
     expect(mocks.telegramResolveForumTopicIcon).toHaveBeenCalledWith([
-      '🐞',
-      '🛠',
+      '🦠',
+      '🔎',
       '💡',
       '💬',
       '📝',

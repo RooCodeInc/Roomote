@@ -12,6 +12,32 @@ import {
   syncFastAgentTelegramTopicTitleBestEffort,
 } from './fast-agent-telegram-title-sync';
 
+const CONFIRMED_TELEGRAM_TOPIC_ICON_EMOJIS = new Set([
+  '💡',
+  '💬',
+  '📝',
+  '🛃',
+  '🪪',
+  '👮‍♂️',
+  '🦠',
+  '🔎',
+  '✅',
+  '🧪',
+  '🔬',
+  '🎉',
+  '🏁',
+  '🏆',
+  '📚',
+  '🎨',
+  '💻',
+  '📱',
+  '📈',
+  '📉',
+  '🧮',
+  '🗣',
+  '📣',
+]);
+
 function session(title: string): FastAgentConversationRecord {
   return {
     id: 'session-1',
@@ -60,8 +86,8 @@ describe('Telegram Fast topic title sync', () => {
       iconCustomEmojiId: 'idea-icon',
     });
     expect(resolveForumTopicIconCustomEmojiId).toHaveBeenCalledWith([
-      '🐞',
-      '🛠',
+      '🦠',
+      '🔎',
       '💡',
       '💬',
       '📝',
@@ -71,14 +97,14 @@ describe('Telegram Fast topic title sync', () => {
   it('defines ordered emoji preferences for every title category', () => {
     const expected: Record<TaskTitleCategory, readonly string[]> = {
       general: ['💡', '💬', '📝'],
-      security: ['🔒', '💡', '💬', '📝'],
-      fix: ['🐞', '🛠', '💡', '💬', '📝'],
-      test: ['✅', '🧪', '💡', '💬', '📝'],
-      release: ['🚀', '💡', '💬', '📝'],
-      docs: ['📚', '💡', '💬', '📝'],
-      ui: ['🎨', '💡', '💬', '📝'],
-      data: ['📊', '💡', '💬', '📝'],
-      communication: ['💬', '💡', '📝'],
+      security: ['🛃', '🪪', '👮‍♂️', '💡', '💬', '📝'],
+      fix: ['🦠', '🔎', '💡', '💬', '📝'],
+      test: ['✅', '🧪', '🔬', '💡', '💬', '📝'],
+      release: ['🎉', '🏁', '🏆', '💡', '💬', '📝'],
+      docs: ['📚', '📝', '💡', '💬'],
+      ui: ['🎨', '💻', '📱', '💡', '💬', '📝'],
+      data: ['📈', '📉', '🧮', '💡', '💬', '📝'],
+      communication: ['💬', '🗣', '📣', '💡', '📝'],
     };
 
     expect(Object.keys(expected)).toEqual(TASK_TITLE_CATEGORIES);
@@ -86,6 +112,14 @@ describe('Telegram Fast topic title sync', () => {
       expect(getTelegramTopicIconEmojiPreferences(category)).toEqual(
         expected[category],
       );
+    }
+  });
+
+  it('uses only emoji confirmed by the live Telegram topic-icon inventory', () => {
+    for (const category of TASK_TITLE_CATEGORIES) {
+      for (const emoji of getTelegramTopicIconEmojiPreferences(category)) {
+        expect(CONFIRMED_TELEGRAM_TOPIC_ICON_EMOJIS).toContain(emoji);
+      }
     }
   });
 
@@ -148,6 +182,52 @@ describe('Telegram Fast topic title sync', () => {
 
     expect(editForumTopic).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('updates only the icon when a generated canonical title is unchanged', async () => {
+    const editForumTopic = vi.fn().mockResolvedValue(undefined);
+
+    await syncFastAgentTelegramTopicTitleBestEffort({
+      provider: {
+        editForumTopic,
+        resolveForumTopicIconCustomEmojiId: vi
+          .fn()
+          .mockResolvedValue('idea-icon'),
+      } as never,
+      sessionId: 'session-1',
+      channelId: 'chat-1',
+      threadId: '77',
+      category: 'general',
+      titleChanged: false,
+      resolveSession: vi.fn().mockResolvedValue(session('Generated title')),
+    });
+
+    expect(editForumTopic).toHaveBeenCalledWith({
+      channelId: 'chat-1',
+      threadId: '77',
+      iconCustomEmojiId: 'idea-icon',
+    });
+  });
+
+  it('skips Telegram when neither the canonical title nor icon changed', async () => {
+    const editForumTopic = vi.fn().mockResolvedValue(undefined);
+
+    await syncFastAgentTelegramTopicTitleBestEffort({
+      provider: {
+        editForumTopic,
+        resolveForumTopicIconCustomEmojiId: vi
+          .fn()
+          .mockResolvedValue(undefined),
+      } as never,
+      sessionId: 'session-1',
+      channelId: 'chat-1',
+      threadId: '77',
+      category: null,
+      titleChanged: false,
+      resolveSession: vi.fn().mockResolvedValue(session('Generated title')),
+    });
+
+    expect(editForumTopic).not.toHaveBeenCalled();
   });
 
   it('keeps Telegram failures non-fatal', async () => {

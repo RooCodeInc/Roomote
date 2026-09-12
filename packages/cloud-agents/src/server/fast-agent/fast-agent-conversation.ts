@@ -159,7 +159,7 @@ export type FastAgentTurnActivity = {
   dispose: () => Promise<void>;
   updateTitle?: (
     title: string | null,
-    metadata?: { category?: TaskTitleCategory | null },
+    metadata?: { category?: TaskTitleCategory | null; titleChanged?: boolean },
   ) => void;
 };
 

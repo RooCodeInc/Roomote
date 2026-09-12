@@ -17,14 +17,14 @@ const TELEGRAM_TOPIC_ICON_CANDIDATES_BY_CATEGORY: Record<
   readonly string[]
 > = {
   general: DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES,
-  security: ['🔒', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
-  fix: ['🐞', '🛠', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
-  test: ['✅', '🧪', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
-  release: ['🚀', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
-  docs: ['📚', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
-  ui: ['🎨', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
-  data: ['📊', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
-  communication: ['💬', '💡', '📝'],
+  security: ['🛃', '🪪', '👮‍♂️', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  fix: ['🦠', '🔎', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  test: ['✅', '🧪', '🔬', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  release: ['🎉', '🏁', '🏆', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  docs: ['📚', '📝', '💡', '💬'],
+  ui: ['🎨', '💻', '📱', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  data: ['📈', '📉', '🧮', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  communication: ['💬', '🗣', '📣', '💡', '📝'],
 };
 
 export function getTelegramTopicIconEmojiPreferences(
@@ -39,6 +39,7 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
   channelId: string;
   threadId: string;
   category?: TaskTitleCategory | null;
+  titleChanged?: boolean;
   resolveSession: () => Promise<FastAgentConversationRecord | null>;
 }): Promise<void> {
   try {
@@ -61,12 +62,19 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
             )
             .catch(() => undefined)
         : undefined;
+      if (input.titleChanged === false && !iconCustomEmojiId) {
+        return;
+      }
       await input.provider.editForumTopic({
         channelId: input.channelId,
         threadId: input.threadId,
-        name: title,
+        ...(input.titleChanged === false ? {} : { name: title }),
         ...(iconCustomEmojiId ? { iconCustomEmojiId } : {}),
       });
+
+      if (input.titleChanged === false) {
+        return;
+      }
 
       const latest = await input.resolveSession();
       if (
@@ -95,26 +103,35 @@ export function addFastAgentTelegramTopicTitleSync<
 }): T & {
   updateTitle: (
     title: string | null,
-    metadata?: { category?: TaskTitleCategory | null },
+    metadata?: { category?: TaskTitleCategory | null; titleChanged?: boolean },
   ) => void;
 } {
   let lastRequestedTitle: string | null | undefined;
   let lastRequestedCategory: TaskTitleCategory | null | undefined;
+  let lastRequestedTitleChanged: boolean | undefined;
   let titleUpdate = Promise.resolve();
 
   return {
     ...input.activity,
     updateTitle(title, metadata) {
       const category = metadata?.category;
+      const titleChanged = metadata?.titleChanged;
       if (
         !title ||
-        (title === lastRequestedTitle && category === lastRequestedCategory)
+        (title === lastRequestedTitle &&
+          category === lastRequestedCategory &&
+          titleChanged === lastRequestedTitleChanged)
       )
         return;
       lastRequestedTitle = title;
       lastRequestedCategory = category;
+      lastRequestedTitleChanged = titleChanged;
       titleUpdate = titleUpdate.then(() =>
-        syncFastAgentTelegramTopicTitleBestEffort({ ...input, category }),
+        syncFastAgentTelegramTopicTitleBestEffort({
+          ...input,
+          category,
+          titleChanged,
+        }),
       );
     },
     async dispose() {
@@ -123,7 +140,10 @@ export function addFastAgentTelegramTopicTitleSync<
   } as T & {
     updateTitle: (
       title: string | null,
-      metadata?: { category?: TaskTitleCategory | null },
+      metadata?: {
+        category?: TaskTitleCategory | null;
+        titleChanged?: boolean;
+      },
     ) => void;
   };
 }

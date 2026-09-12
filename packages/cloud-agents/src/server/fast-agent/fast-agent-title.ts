@@ -31,7 +31,7 @@ import {
   generateLlmTaskTitleWithCategory,
   isFallbackTaskTitle,
   LLM_TITLE_LOCKED_CHECKPOINT,
-  type TaskTitleCategory,
+  type GeneratedTaskTitle,
   type TaskTitleMessage,
 } from '../llm-task-title';
 
@@ -179,10 +179,7 @@ export async function refreshFastAgentSessionTitle({
 }: {
   sessionId: string;
   userId: string;
-}): Promise<{
-  title: string;
-  category: TaskTitleCategory | null;
-} | null> {
+}): Promise<(GeneratedTaskTitle & { titleChanged: boolean }) | null> {
   try {
     const conversation = await db.query.fastAgentConversations.findFirst({
       where: eq(fastAgentConversations.id, sessionId),
@@ -197,9 +194,7 @@ export async function refreshFastAgentSessionTitle({
       return null;
     }
     if (conversation.titleEditedByUserAt) {
-      return conversation.title
-        ? { title: conversation.title, category: null }
-        : null;
+      return null;
     }
 
     const rows = await db
@@ -252,9 +247,7 @@ export async function refreshFastAgentSessionTitle({
       checkpoint <= conversation.llmTitleCheckpoint ||
       messages.length === 0
     ) {
-      return conversation.title
-        ? { title: conversation.title, category: null }
-        : null;
+      return null;
     }
 
     const generated = await generateLlmTaskTitleWithCategory({
@@ -264,9 +257,7 @@ export async function refreshFastAgentSessionTitle({
     });
     const { title } = generated;
     if (isFallbackTaskTitle(title)) {
-      return conversation.title
-        ? { title: conversation.title, category: null }
-        : null;
+      return null;
     }
 
     const persistedTitle = await db.transaction(async (tx) => {
@@ -278,7 +269,7 @@ export async function refreshFastAgentSessionTitle({
         .from(fastAgentConversations)
         .where(eq(fastAgentConversations.id, sessionId))
         .for('update');
-      if (!current) return conversation.title;
+      if (!current) return null;
 
       const [updatedConversation] = await tx
         .update(fastAgentConversations)
@@ -291,7 +282,7 @@ export async function refreshFastAgentSessionTitle({
           ),
         )
         .returning({ id: fastAgentConversations.id });
-      if (!updatedConversation) return current.title;
+      if (!updatedConversation) return null;
 
       // Keep the unified Session's title in step with the generated
       // conversation title, but never clobber a manual Session rename: only
@@ -320,12 +311,12 @@ export async function refreshFastAgentSessionTitle({
             inArray(sessions.title, [...previousTitleCandidates]),
           ),
         );
-      return title;
+      return { title, titleChanged: current.title !== title };
     });
     return persistedTitle
       ? {
-          title: persistedTitle,
-          category: persistedTitle === title ? generated.category : null,
+          ...persistedTitle,
+          category: generated.category,
         }
       : null;
   } catch (error) {

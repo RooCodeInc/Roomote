@@ -266,7 +266,7 @@ describe('TelegramCommunicationProvider', () => {
           ok: true,
           result: [
             { emoji: '💡', custom_emoji_id: 'idea-icon' },
-            { emoji: '🐞', custom_emoji_id: 'bug-icon' },
+            { emoji: '🦠', custom_emoji_id: 'bug-icon' },
           ],
         }),
       )
@@ -278,7 +278,7 @@ describe('TelegramCommunicationProvider', () => {
     });
 
     const iconCustomEmojiId = await provider.resolveForumTopicIconCustomEmojiId(
-      ['🐞', '💡'],
+      ['🦠', '💡'],
     );
     await provider.editForumTopic({
       channelId: '123',
@@ -297,6 +297,29 @@ describe('TelegramCommunicationProvider', () => {
       message_thread_id: 77,
       name: 'Fix flaky login tests',
       icon_custom_emoji_id: 'bug-icon',
+    });
+  });
+
+  it('updates a forum topic icon without resending an unchanged name', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock,
+    });
+
+    await provider.editForumTopic({
+      channelId: '123',
+      threadId: '77',
+      iconCustomEmojiId: 'idea-icon',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
+      chat_id: '123',
+      message_thread_id: 77,
+      icon_custom_emoji_id: 'idea-icon',
     });
   });
 

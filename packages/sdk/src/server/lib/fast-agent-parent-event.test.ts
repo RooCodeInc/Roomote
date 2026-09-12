@@ -36,6 +36,8 @@ const mocks = vi.hoisted(() => ({
   discordTyping: vi.fn(),
   telegramTyping: vi.fn(),
   telegramEditMessage: vi.fn(),
+  telegramEditForumTopic: vi.fn(),
+  telegramResolveForumTopicIcon: vi.fn(),
   createDiscordThread: vi.fn(),
   createTeamsProvider: vi.fn(),
   teamsPostMessage: vi.fn(),
@@ -46,6 +48,7 @@ const mocks = vi.hoisted(() => ({
   agentMailPostMessage: vi.fn(),
   findTeamsConversationRoute: vi.fn(),
   recordProviderMessage: vi.fn(),
+  isManagedTelegramTopic: vi.fn(),
   enqueueTask: vi.fn(),
   getTaskUrl: vi.fn(),
   setPendingPrReviewAction: vi.fn(),
@@ -274,6 +277,7 @@ vi.mock('../automations/destination', () => ({
 
 vi.mock('./fast-agent-provider-message', () => ({
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
+  isFastAgentManagedTelegramTopic: mocks.isManagedTelegramTopic,
 }));
 
 vi.mock('../routers/mcp-connections', () => ({
@@ -454,7 +458,10 @@ describe('deliverFastAgentParentEvent', () => {
       sendChatAction: mocks.telegramTyping,
       sendMessageDraft: mocks.telegramTyping,
       editMessageText: mocks.telegramEditMessage,
+      editForumTopic: mocks.telegramEditForumTopic,
+      resolveForumTopicIconCustomEmojiId: mocks.telegramResolveForumTopicIcon,
     });
+    mocks.isManagedTelegramTopic.mockResolvedValue(false);
     mocks.agentMailPostMessage.mockResolvedValue({
       provider: 'agentmail',
       channelId: 'roomote@agentmail.test',
@@ -2169,6 +2176,57 @@ describe('deliverFastAgentParentEvent', () => {
     },
   );
 
+  it('syncs a generated automation title to its managed Telegram DM topic', async () => {
+    const telegramParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-dm-1',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: {
+          channelId: 'telegram-dm-1',
+          threadId: 'telegram-topic-1',
+        },
+      },
+    };
+    mocks.isManagedTelegramTopic.mockResolvedValueOnce(true);
+    mocks.findSession.mockResolvedValue({
+      id: telegramParent.sessionId,
+      userId: 'u1',
+      title: 'Generated automation title',
+      conversation: telegramParent.conversation,
+      messages: [],
+    });
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+      adapter.activity.updateTitle('Generated automation title');
+      await adapter.activity.dispose();
+    });
+
+    await deliverFastAgentParentEvent({
+      parent: telegramParent,
+      event: {
+        type: 'automation_triggered',
+        eventId: 'automation-1:occurrence-1',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find actionable regressions.',
+        trigger: 'schedule',
+      },
+    });
+
+    expect(mocks.isManagedTelegramTopic).toHaveBeenCalledWith({
+      sessionId: telegramParent.sessionId,
+      workspaceId: 'telegram-dm-1',
+      channelId: 'telegram-dm-1',
+      threadId: 'telegram-topic-1',
+    });
+    expect(mocks.telegramEditForumTopic).toHaveBeenCalledWith({
+      channelId: 'telegram-dm-1',
+      threadId: 'telegram-topic-1',
+      name: 'Generated automation title',
+    });
+  });
+
   it.each(['new report', 'existing report', 'task settled'] as const)(
     'reasserts Discord typing after %s and its suggestion messages',
     async (scenario) => {
@@ -3356,6 +3414,186 @@ describe('deliverFastAgentParentEvent', () => {
       nonce,
       'message-with-actions',
     );
+  });
+
+  it('delivers Telegram pull request feedback with persisted inline actions', async () => {
+    const feedbackEvent = {
+      type: 'pull_request_feedback' as const,
+      feedbackId: 'feedback-telegram',
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: 'Fix review feedback',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'open' as const,
+      },
+      summary: 'Alice requested changes.',
+      suggestedActionQuestion: 'Want me to resolve these issues?',
+      suggestedActionPrompt: 'Address the requested changes.',
+    };
+    const telegramParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-chat-1',
+        conversationId: 'telegram-chat-1:topic-7',
+        replyTarget: { channelId: 'telegram-chat-1', threadId: 'topic-7' },
+      },
+    };
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'There is new PR feedback.',
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: telegramParent,
+      event: feedbackEvent,
+    });
+
+    expect(mocks.setPendingPrReviewAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'telegram',
+        taskId: 'task-1',
+        repository: 'acme/web',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/web/pull/42',
+        channelId: 'telegram-chat-1',
+        threadId: 'topic-7',
+        followUpPrompt: 'Address the requested changes.',
+        nonce: expect.any(String),
+      }),
+    );
+    const nonce = mocks.setPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    expect(mocks.telegramPostMessage).toHaveBeenCalledWith({
+      channelId: 'telegram-chat-1',
+      threadId: 'topic-7',
+      text: expect.stringMatching(
+        /^There is new PR feedback\.\n\nReply anytime · \[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\) · \[Open in Roomote\]\(.*\/sessions\/.*\)$/,
+      ),
+      textFormat: 'markdown',
+      images: [],
+      buttons: [
+        [
+          {
+            text: 'Resolve these issues',
+            callbackData: `prr:y:${nonce}`,
+          },
+          {
+            text: 'Auto-resolve on this PR',
+            callbackData: `prr:a:${nonce}`,
+          },
+          { text: 'Dismiss', callbackData: `prr:d:${nonce}` },
+        ],
+      ],
+    });
+    expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenCalledWith(
+      nonce,
+      'telegram-message-2',
+    );
+  });
+
+  it('retires a Telegram action message when attachment failure retries the post', async () => {
+    const feedbackEvent = {
+      type: 'pull_request_feedback' as const,
+      feedbackId: 'feedback-telegram-retry',
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: 'Fix review feedback',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'open' as const,
+      },
+      summary: 'Alice requested changes.',
+      suggestedActionQuestion: 'Want me to resolve these issues?',
+      suggestedActionPrompt: 'Address the requested changes.',
+    };
+    const telegramParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-chat-1',
+        conversationId: 'telegram-chat-1:topic-7',
+        replyTarget: { channelId: 'telegram-chat-1', threadId: 'topic-7' },
+      },
+    };
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'There is new PR feedback.',
+        }),
+    );
+    mocks.telegramPostMessage
+      .mockResolvedValueOnce({
+        provider: 'telegram',
+        channelId: 'telegram-chat-1',
+        messageId: 'telegram-first',
+        lastTextMessageId: 'telegram-first-actions',
+      })
+      .mockResolvedValueOnce({
+        provider: 'telegram',
+        channelId: 'telegram-chat-1',
+        messageId: 'telegram-second',
+        lastTextMessageId: 'telegram-second-actions',
+      });
+    mocks.attachPendingPrReviewActionMessage
+      .mockRejectedValueOnce(new Error('attachment failed'))
+      .mockResolvedValueOnce({ attached: true, superseded: [] });
+
+    await expect(
+      deliverFastAgentParentEvent({
+        parent: telegramParent,
+        event: feedbackEvent,
+      }),
+    ).rejects.toThrow('attachment failed');
+    await expect(
+      deliverFastAgentParentEvent({
+        parent: telegramParent,
+        event: feedbackEvent,
+      }),
+    ).resolves.toBe('delivered');
+
+    const nonce = mocks.setPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    expect(mocks.setPendingPrReviewAction).toHaveBeenCalledTimes(2);
+    expect(mocks.setPendingPrReviewAction).toHaveBeenLastCalledWith(
+      expect.objectContaining({ nonce }),
+    );
+    expect(mocks.retirePrReviewActionMessagesBestEffort).toHaveBeenCalledWith([
+      {
+        provider: 'telegram',
+        channelId: 'telegram-chat-1',
+        threadId: 'topic-7',
+        messageId: 'telegram-first-actions',
+      },
+    ]);
+    expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenLastCalledWith(
+      nonce,
+      'telegram-second-actions',
+    );
+    expect(
+      mocks.retirePrReviewActionMessagesBestEffort.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.telegramPostMessage.mock.invocationCallOrder[1]!);
   });
 
   it('preserves Discord action callbacks when attachment failure retries the post', async () => {
