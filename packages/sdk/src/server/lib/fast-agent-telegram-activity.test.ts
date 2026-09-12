@@ -10,12 +10,47 @@ describe('Fast Telegram activity', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it('refreshes one native Thinking draft below its TTL in private chats', async () => {
+  it('shows non-empty Thinking before replacing it with the first partial', async () => {
     const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
+    const sendChatAction = vi.fn().mockResolvedValue(undefined);
+    const activity = createFastAgentTelegramActivity({
+      provider: { sendMessageDraft, sendChatAction },
+      replyTarget: { channelId: '123', threadId: '77' },
+    });
+
+    activity.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const thinkingDraftId = sendMessageDraft.mock.calls[0]![0].draftId;
+    expect(thinkingDraftId).not.toBe(0);
+    expect(sendMessageDraft).toHaveBeenCalledWith({
+      channelId: '123',
+      threadId: '77',
+      draftId: thinkingDraftId,
+      text: 'Thinking...',
+    });
+    expect(sendChatAction).not.toHaveBeenCalled();
+
+    const stream = activity.createReplyStream(vi.fn());
+    await stream.append('Partial answer');
+    expect(sendMessageDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        draftId: thinkingDraftId,
+        text: 'Partial answer',
+      }),
+    );
+    expect(
+      sendMessageDraft.mock.calls.some(([input]) => input.text === ''),
+    ).toBe(false);
+    await activity.dispose();
+  });
+
+  it('refreshes one non-empty Thinking draft below its TTL in private chats', async () => {
+    const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
+    const sendChatAction = vi.fn().mockResolvedValue(undefined);
     const activity = createFastAgentTelegramActivity({
       provider: {
         sendMessageDraft,
-        sendChatAction: vi.fn(),
+        sendChatAction,
       },
       replyTarget: { channelId: '123', threadId: '77' },
     });
@@ -28,7 +63,7 @@ describe('Fast Telegram activity', () => {
       channelId: '123',
       threadId: '77',
       draftId: firstDraftId,
-      text: '',
+      text: 'Thinking...',
     });
 
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_DRAFT_REFRESH_MS);
@@ -39,10 +74,11 @@ describe('Fast Telegram activity', () => {
 
   it('restores Thinking after an intermediate post but cancels it on true completion', async () => {
     const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
+    const sendChatAction = vi.fn().mockResolvedValue(undefined);
     const activity = createFastAgentTelegramActivity({
       provider: {
         sendMessageDraft,
-        sendChatAction: vi.fn(),
+        sendChatAction,
       },
       replyTarget: { channelId: '123' },
     });
@@ -56,11 +92,15 @@ describe('Fast Telegram activity', () => {
     expect(sendMessageDraft).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(sendMessageDraft).toHaveBeenCalledTimes(2);
+    expect(sendMessageDraft).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: 'Thinking...' }),
+    );
 
     activity.reassert();
     await activity.settle();
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_REASSERT_DELAY_MS);
     expect(sendMessageDraft).toHaveBeenCalledTimes(2);
+    expect(sendChatAction).not.toHaveBeenCalled();
   });
 
   it('writes the first partial immediately, then paces later coalesced drafts before final delivery', async () => {
@@ -88,7 +128,7 @@ describe('Fast Telegram activity', () => {
       sendMessageDraft.mock.calls
         .filter(([input]) => input.text)
         .map(([input]) => input.text),
-    ).toEqual(['Partial ']);
+    ).toEqual(['Thinking...', 'Partial ']);
     await vi.advanceTimersByTimeAsync(
       FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS / 2,
     );
@@ -99,7 +139,7 @@ describe('Fast Telegram activity', () => {
       sendMessageDraft.mock.calls
         .filter(([input]) => input.text)
         .map(([input]) => input.text),
-    ).toEqual(['Partial ', 'Partial answer in progress']);
+    ).toEqual(['Thinking...', 'Partial ', 'Partial answer in progress']);
 
     await expect(
       stream.finish({ purpose: 'closeout', message: 'Final answer' }),

@@ -16,8 +16,9 @@ import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 export const FAST_AGENT_TELEGRAM_DRAFT_REFRESH_MS = 25_000;
 export const FAST_AGENT_TELEGRAM_TYPING_REFRESH_MS = 4_000;
 export const FAST_AGENT_TELEGRAM_REASSERT_DELAY_MS = 500;
-// Telegram allows 40 draft updates per 30 seconds; stay just above its 750ms floor.
+// Pace draft updates independently of model token cadence.
 export const FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS = 800;
+const FAST_AGENT_TELEGRAM_THINKING_TEXT = 'Thinking...';
 
 function isTelegramPrivateChatId(channelId: string): boolean {
   const parsed = Number(channelId);
@@ -25,8 +26,8 @@ function isTelegramPrivateChatId(channelId: string): boolean {
 }
 
 /**
- * Uses Telegram's native Thinking draft in private chats. Groups do not
- * support drafts, so they retain Telegram's ordinary typing action.
+ * Uses a non-empty Thinking draft in private chats, then replaces it with
+ * streamed response text. Groups retain Telegram's ordinary typing action.
  */
 export function createFastAgentTelegramActivity({
   provider,
@@ -56,7 +57,10 @@ export function createFastAgentTelegramActivity({
           await provider.sendMessageDraft({
             ...replyTarget,
             draftId: draftId!,
-            text: draftText.slice(0, TELEGRAM_MAX_MESSAGE_LENGTH),
+            text: (draftText || FAST_AGENT_TELEGRAM_THINKING_TEXT).slice(
+              0,
+              TELEGRAM_MAX_MESSAGE_LENGTH,
+            ),
           });
           lastDraftWriteAtMs = Date.now();
           return;
