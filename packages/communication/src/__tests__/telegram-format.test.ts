@@ -169,21 +169,23 @@ describe('chunkTelegramMarkdown', () => {
     expect(chunks.join('\n')).toBe(markdown);
     expect(chunks.every((chunk) => chunk.length > 0)).toBe(true);
   });
-
-  it('preserves a trailing newline after an exactly full line', () => {
-    const line = 'x'.repeat(3_500);
-    const chunks = chunkTelegramMarkdown(`${line}\n`, 3_500);
-
-    expect(chunks.join('')).toBe(`${line}\n`);
-    expect(chunks.every((chunk) => chunk.length > 0)).toBe(true);
-    expect(chunks.every((chunk) => chunk.length <= 3_500)).toBe(true);
-  });
 });
 
 describe('chunkTelegramMarkdownAsHtml', () => {
   it('returns a single converted chunk for short markdown', () => {
     expect(chunkTelegramMarkdownAsHtml('**hi**')).toEqual([
       { markdown: '**hi**', html: '<b>hi</b>' },
+    ]);
+  });
+
+  it('preserves exact-target inline formatting and its trailing newline', () => {
+    const markdown = `**${'x'.repeat(3_496)}**\n`;
+
+    expect(chunkTelegramMarkdownAsHtml(markdown)).toEqual([
+      {
+        markdown,
+        html: `<b>${'x'.repeat(3_496)}</b>\n`,
+      },
     ]);
   });
 

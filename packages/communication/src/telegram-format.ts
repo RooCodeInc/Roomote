@@ -216,11 +216,9 @@ export function chunkTelegramMarkdown(
 
   const rawLines = markdown.split('\n');
 
-  for (const [rawLineIndex, rawLine] of rawLines.entries()) {
-    const needsLineBreakHeadroom =
-      rawLine.length === maxLength && rawLineIndex < rawLines.length - 1;
+  for (const rawLine of rawLines) {
     const lines =
-      rawLine.length > maxLength || needsLineBreakHeadroom
+      rawLine.length > maxLength
         ? chunkTelegramText(rawLine, maxLength - 8)
         : [rawLine];
 
@@ -304,6 +302,15 @@ function convertChunkWithinLimit(
 export function chunkTelegramMarkdownAsHtml(
   markdown: string,
 ): TelegramHtmlChunk[] {
+  const html = markdownToTelegramHtml(markdown);
+
+  if (
+    markdown.length <= TELEGRAM_MAX_MESSAGE_LENGTH &&
+    html.length <= TELEGRAM_MAX_MESSAGE_LENGTH
+  ) {
+    return [{ markdown, html }];
+  }
+
   return chunkTelegramMarkdown(markdown).flatMap((chunk) =>
     convertChunkWithinLimit(chunk, MARKDOWN_CHUNK_TARGET_LENGTH),
   );
