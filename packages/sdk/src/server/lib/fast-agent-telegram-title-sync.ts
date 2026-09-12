@@ -1,6 +1,7 @@
 import type {
   FastAgentConversationRecord,
   FastAgentTurnActivity,
+  TaskTitleCategory,
 } from '@roomote/cloud-agents/server';
 import { buildCommunicationTaskThreadName } from '@roomote/communication/task-thread-title';
 import type { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
@@ -11,32 +12,23 @@ type TelegramTopicTitleProvider = Pick<
 >;
 
 const DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS = ['💡', '💬', '📝'] as const;
-const TELEGRAM_TOPIC_ICON_RULES: ReadonlyArray<{
-  pattern: RegExp;
-  emojis: readonly string[];
-}> = [
-  { pattern: /\b(security|auth|permission|vulnerab)/iu, emojis: ['🔒'] },
-  { pattern: /\b(bug|fix|error|fail|regression|crash)/iu, emojis: ['🐞', '🛠'] },
-  { pattern: /\b(test|spec|validation|verify|ci)\b/iu, emojis: ['✅', '🧪'] },
-  { pattern: /\b(deploy|release|ship|launch)\b/iu, emojis: ['🚀'] },
-  { pattern: /\b(doc|docs|documentation|guide|readme)\b/iu, emojis: ['📚'] },
-  { pattern: /\b(ui|ux|design|frontend|interface)\b/iu, emojis: ['🎨'] },
-  { pattern: /\b(data|database|analytics|metric|report)\b/iu, emojis: ['📊'] },
+const TELEGRAM_TOPIC_ICON_EMOJIS: Record<TaskTitleCategory, readonly string[]> =
   {
-    pattern: /\b(telegram|slack|discord|teams|email|integration)\b/iu,
-    emojis: ['💬'],
-  },
-];
+    general: DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS,
+    security: ['🔒', ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS],
+    fix: ['🐞', '🛠', ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS],
+    test: ['✅', '🧪', ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS],
+    release: ['🚀', ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS],
+    docs: ['📚', ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS],
+    ui: ['🎨', ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS],
+    data: ['📊', ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS],
+    communication: ['💬', '💡', '📝'],
+  };
 
 export function getTelegramTopicIconEmojiPreferences(
-  title: string,
+  category: TaskTitleCategory,
 ): readonly string[] {
-  const match = TELEGRAM_TOPIC_ICON_RULES.find(({ pattern }) =>
-    pattern.test(title),
-  );
-  return match
-    ? [...match.emojis, ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS]
-    : DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS;
+  return TELEGRAM_TOPIC_ICON_EMOJIS[category];
 }
 
 export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
@@ -44,6 +36,7 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
   sessionId: string;
   channelId: string;
   threadId: string;
+  category?: TaskTitleCategory | null;
   resolveSession: () => Promise<FastAgentConversationRecord | null>;
 }): Promise<void> {
   try {
@@ -59,11 +52,13 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
       }
 
       const title = buildCommunicationTaskThreadName(session.title);
-      const iconCustomEmojiId = await input.provider
-        .resolveForumTopicIconCustomEmojiId(
-          getTelegramTopicIconEmojiPreferences(title),
-        )
-        .catch(() => undefined);
+      const iconCustomEmojiId = input.category
+        ? await input.provider
+            .resolveForumTopicIconCustomEmojiId(
+              getTelegramTopicIconEmojiPreferences(input.category),
+            )
+            .catch(() => undefined)
+        : undefined;
       await input.provider.editForumTopic({
         channelId: input.channelId,
         threadId: input.threadId,
@@ -95,21 +90,38 @@ export function addFastAgentTelegramTopicTitleSync<
   channelId: string;
   threadId: string;
   resolveSession: () => Promise<FastAgentConversationRecord | null>;
-}): T & { updateTitle: (title: string | null) => void } {
+}): T & {
+  updateTitle: (
+    title: string | null,
+    metadata?: { category?: TaskTitleCategory | null },
+  ) => void;
+} {
   let lastRequestedTitle: string | null | undefined;
+  let lastRequestedCategory: TaskTitleCategory | null | undefined;
   let titleUpdate = Promise.resolve();
 
   return {
     ...input.activity,
-    updateTitle(title) {
-      if (!title || title === lastRequestedTitle) return;
+    updateTitle(title, metadata) {
+      const category = metadata?.category;
+      if (
+        !title ||
+        (title === lastRequestedTitle && category === lastRequestedCategory)
+      )
+        return;
       lastRequestedTitle = title;
+      lastRequestedCategory = category;
       titleUpdate = titleUpdate.then(() =>
-        syncFastAgentTelegramTopicTitleBestEffort(input),
+        syncFastAgentTelegramTopicTitleBestEffort({ ...input, category }),
       );
     },
     async dispose() {
       await Promise.all([input.activity.dispose(), titleUpdate]);
     },
-  } as T & { updateTitle: (title: string | null) => void };
+  } as T & {
+    updateTitle: (
+      title: string | null,
+      metadata?: { category?: TaskTitleCategory | null },
+    ) => void;
+  };
 }

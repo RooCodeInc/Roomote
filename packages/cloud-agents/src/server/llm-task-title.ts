@@ -20,12 +20,31 @@ export const LLM_TITLE_LOCKED_CHECKPOINT = 1000;
 const MAX_TRANSCRIPT_CHARS = 12_000;
 const MAX_MESSAGE_CHARS = 800;
 
+export const TASK_TITLE_CATEGORIES = [
+  'general',
+  'security',
+  'fix',
+  'test',
+  'release',
+  'docs',
+  'ui',
+  'data',
+  'communication',
+] as const;
+export type TaskTitleCategory = (typeof TASK_TITLE_CATEGORIES)[number];
+export const taskTitleCategorySchema = z
+  .enum(TASK_TITLE_CATEGORIES)
+  .catch('general')
+  .optional()
+  .default('general');
+
 const generatedTaskTitleSchema = z.object({
   title: z.string(),
+  category: taskTitleCategorySchema,
 });
 
 const TITLE_SYSTEM_PROMPT = `You write concise task titles for coding conversations.
-Return a title only, without punctuation wrappers or commentary.
+Return a title and classify it as exactly one of: general, security, fix, test, release, docs, ui, data, communication.
 Rules:
 - maximum 12 words
 - name the requested work; never assert an outcome or failure state such as failed, blocked, stuck, or missing unless the final message explicitly states that outcome
@@ -38,6 +57,11 @@ Rules:
 - use sentence case, not title case; preserve proper nouns, acronyms, and file names, capitalize the first word
 - avoid filler words
 - no markdown`;
+
+export type GeneratedTaskTitle = {
+  title: string;
+  category: TaskTitleCategory;
+};
 
 export type TaskTitleMessage = {
   role: 'user' | 'assistant';
@@ -85,6 +109,10 @@ export function isFallbackTaskTitle(value: unknown): boolean {
   return sanitizeGeneratedTaskTitle(value) === FALLBACK_TASK_TITLE;
 }
 
+export function normalizeTaskTitleCategory(value: unknown): TaskTitleCategory {
+  return taskTitleCategorySchema.parse(value);
+}
+
 function normalizeMessageText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
@@ -117,15 +145,18 @@ function buildTaskTitlePrompt(messages: TaskTitleMessage[]): string {
   return hasMessages ? transcript : '';
 }
 
-export async function generateLlmTaskTitle(input: {
+async function generateLlmTaskTitleResult(input: {
   userId?: string | null;
   taskId?: string | null;
   messages: TaskTitleMessage[];
-}): Promise<string> {
+}): Promise<GeneratedTaskTitle> {
   const prompt = buildTaskTitlePrompt(input.messages);
 
   if (!prompt) {
-    return finalizeGeneratedTaskTitle(FALLBACK_TASK_TITLE);
+    return {
+      title: finalizeGeneratedTaskTitle(FALLBACK_TASK_TITLE),
+      category: 'general',
+    };
   }
 
   const { object } = await generateTrackedNonTaskObject({
@@ -138,5 +169,24 @@ export async function generateLlmTaskTitle(input: {
     prompt,
   });
 
-  return finalizeGeneratedTaskTitle(object?.title);
+  return {
+    title: finalizeGeneratedTaskTitle(object?.title),
+    category: normalizeTaskTitleCategory(object?.category),
+  };
+}
+
+export async function generateLlmTaskTitle(input: {
+  userId?: string | null;
+  taskId?: string | null;
+  messages: TaskTitleMessage[];
+}): Promise<string> {
+  return (await generateLlmTaskTitleResult(input)).title;
+}
+
+export async function generateLlmTaskTitleWithCategory(input: {
+  userId?: string | null;
+  taskId?: string | null;
+  messages: TaskTitleMessage[];
+}): Promise<GeneratedTaskTitle> {
+  return generateLlmTaskTitleResult(input);
 }

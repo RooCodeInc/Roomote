@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { FastAgentConversationRecord } from '@roomote/cloud-agents/server';
+import {
+  TASK_TITLE_CATEGORIES,
+  type FastAgentConversationRecord,
+  type TaskTitleCategory,
+} from '@roomote/cloud-agents/server';
 
 import {
   addFastAgentTelegramTopicTitleSync,
@@ -45,6 +49,7 @@ describe('Telegram Fast topic title sync', () => {
       sessionId: 'session-1',
       channelId: 'chat-1',
       threadId: '77',
+      category: 'fix',
       resolveSession,
     });
 
@@ -63,23 +68,25 @@ describe('Telegram Fast topic title sync', () => {
     ]);
   });
 
-  it.each([
-    ['Investigate auth permissions', '🔒'],
-    ['Fix login regression', '🐞'],
-    ['Verify CI test coverage', '✅'],
-    ['Prepare release deployment', '🚀'],
-    ['Update documentation guide', '📚'],
-    ['Polish frontend design', '🎨'],
-    ['Review database metrics', '📊'],
-    ['Improve Telegram integration', '💬'],
-  ])('classifies %s with %s as its first icon preference', (title, emoji) => {
-    expect(getTelegramTopicIconEmojiPreferences(title)[0]).toBe(emoji);
-  });
+  it('defines ordered emoji preferences for every title category', () => {
+    const expected: Record<TaskTitleCategory, readonly string[]> = {
+      general: ['💡', '💬', '📝'],
+      security: ['🔒', '💡', '💬', '📝'],
+      fix: ['🐞', '🛠', '💡', '💬', '📝'],
+      test: ['✅', '🧪', '💡', '💬', '📝'],
+      release: ['🚀', '💡', '💬', '📝'],
+      docs: ['📚', '💡', '💬', '📝'],
+      ui: ['🎨', '💡', '💬', '📝'],
+      data: ['📊', '💡', '💬', '📝'],
+      communication: ['💬', '💡', '📝'],
+    };
 
-  it('uses deterministic general-purpose preferences when no pattern matches', () => {
-    expect(
-      getTelegramTopicIconEmojiPreferences('Plan quarterly priorities'),
-    ).toEqual(['💡', '💬', '📝']);
+    expect(Object.keys(expected)).toEqual(TASK_TITLE_CATEGORIES);
+    for (const category of TASK_TITLE_CATEGORIES) {
+      expect(getTelegramTopicIconEmojiPreferences(category)).toEqual(
+        expected[category],
+      );
+    }
   });
 
   it('retries with the latest canonical title when generation races a rename', async () => {
@@ -135,8 +142,8 @@ describe('Telegram Fast topic title sync', () => {
       resolveSession: vi.fn().mockResolvedValue(session('Generated title')),
     });
 
-    activity.updateTitle?.('Generated title');
-    activity.updateTitle?.('Generated title');
+    activity.updateTitle?.('Generated title', { category: 'general' });
+    activity.updateTitle?.('Generated title', { category: 'general' });
     await activity.dispose();
 
     expect(editForumTopic).toHaveBeenCalledTimes(1);
@@ -179,6 +186,7 @@ describe('Telegram Fast topic title sync', () => {
       sessionId: 'session-1',
       channelId: 'chat-1',
       threadId: '77',
+      category: 'general',
       resolveSession: vi.fn().mockResolvedValue(session('Generated title')),
     });
 
@@ -202,6 +210,7 @@ describe('Telegram Fast topic title sync', () => {
       sessionId: 'session-1',
       channelId: 'chat-1',
       threadId: '77',
+      category: 'fix',
       resolveSession: vi.fn().mockResolvedValue(session('Fix generated title')),
     });
 
@@ -209,6 +218,30 @@ describe('Telegram Fast topic title sync', () => {
       channelId: 'chat-1',
       threadId: '77',
       name: 'Fix generated title',
+    });
+  });
+
+  it('preserves the existing icon when no new title category is supplied', async () => {
+    const editForumTopic = vi.fn().mockResolvedValue(undefined);
+    const resolveForumTopicIconCustomEmojiId = vi.fn();
+
+    await syncFastAgentTelegramTopicTitleBestEffort({
+      provider: {
+        editForumTopic,
+        resolveForumTopicIconCustomEmojiId,
+      } as never,
+      sessionId: 'session-1',
+      channelId: 'chat-1',
+      threadId: '77',
+      category: null,
+      resolveSession: vi.fn().mockResolvedValue(session('Existing title')),
+    });
+
+    expect(resolveForumTopicIconCustomEmojiId).not.toHaveBeenCalled();
+    expect(editForumTopic).toHaveBeenCalledWith({
+      channelId: 'chat-1',
+      threadId: '77',
+      name: 'Existing title',
     });
   });
 });

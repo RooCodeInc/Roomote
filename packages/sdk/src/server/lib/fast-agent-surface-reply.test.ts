@@ -329,7 +329,9 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       question: 'Start here',
       currentMessageId: '78',
     });
-    delivery!.adapter.activity?.updateTitle?.('Fix generated Fast title');
+    delivery!.adapter.activity?.updateTitle?.('Fix generated Fast title', {
+      category: 'fix',
+    });
     await delivery!.adapter.activity?.dispose();
 
     expect(mocks.telegramEditForumTopic).toHaveBeenCalledWith({

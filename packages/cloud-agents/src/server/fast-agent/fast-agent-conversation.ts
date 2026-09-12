@@ -5,6 +5,8 @@ import type {
   ReasoningEffort,
 } from '@roomote/types';
 
+import type { TaskTitleCategory } from '../llm-task-title';
+
 export {
   isFastAgentCommunicationConversation,
   type FastAgentConversation,
@@ -155,7 +157,10 @@ export type FastAgentTurnActivity = {
   settle: (options?: { keepProcessing?: boolean }) => Promise<void>;
   /** Synchronously cancel delayed starts and fence new status writes, then drain issued writes. */
   dispose: () => Promise<void>;
-  updateTitle?: (title: string | null) => void;
+  updateTitle?: (
+    title: string | null,
+    metadata?: { category?: TaskTitleCategory | null },
+  ) => void;
 };
 
 export type FastAgentMcpServerConfig = {

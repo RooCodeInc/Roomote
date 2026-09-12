@@ -3213,7 +3213,10 @@ export async function answerFastAgentQuestion({
       (platformEvent && platformEventKind === 'automation')
     ) {
       void refreshFastAgentSessionTitle({ sessionId: session.id, userId }).then(
-        (title) => adapter.activity?.updateTitle?.(title),
+        (generated) =>
+          adapter.activity?.updateTitle?.(generated?.title ?? null, {
+            category: generated?.category ?? null,
+          }),
       );
     }
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
