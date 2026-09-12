@@ -3,20 +3,16 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { resolve } from 'node:path';
 
-const validationScript = resolve(import.meta.dirname, '../scripts/lib.sh');
+const validationRunner = resolve(
+  import.meta.dirname,
+  'validate-domain-subprocess.sh',
+);
 
 function validateDomain(domain) {
-  return spawnSync(
-    'bash',
-    [
-      '-c',
-      'source "$1"; validate_domain "$2"',
-      'validate-domain',
-      validationScript,
-      domain,
-    ],
-    { encoding: 'utf8' },
-  );
+  // Pass the runner script and the candidate domain as explicit positional
+  // arguments to `bash` rather than interpolating either into a `-c` shell
+  // string, so no value here is parsed as shell command text.
+  return spawnSync('bash', [validationRunner, domain], { encoding: 'utf8' });
 }
 
 test('deployment domains use valid DNS labels', () => {
@@ -42,6 +38,7 @@ test('deployment domains use valid DNS labels', () => {
     'foo-.example.com',
     `${'a'.repeat(64)}.example`,
     `${maximumLengthDomain}e`,
+    'roomote.example.com\nnot-a-domain',
   ]) {
     const result = validateDomain(domain);
     assert.equal(result.status, 1, `${domain} was accepted`);
