@@ -1312,8 +1312,8 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('requires repository work to use a matching configured environment', () => {
-    const prompt = buildFastAgentSystemPrompt({
+  it('selects task environments from work requirements without unsafe fallbacks', () => {
+    const configuredPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [
         {
           id: 'env-roomote',
@@ -1322,27 +1322,43 @@ describe('buildFastAgentSystemPrompt', () => {
         },
       ],
     });
+    const environmentlessPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      availableIntegrations: [],
+    });
 
-    expect(prompt).toContain(
-      'For repository work, select the matching configured environment from All Environments and pass its exact ID to "launch_task"',
+    expect(configuredPrompt).toContain(
+      "Choose the task environment from the work's requirements and the instance's available environments",
     );
-    expect(prompt).toContain(
-      'Never use Blank slate as a default or recovery path',
+    expect(configuredPrompt).toContain(
+      'When a configured environment clearly matches the required project, repository, or tools, pass its exact ID to `launch_task`',
     );
-    expect(prompt).toContain(
-      'If no configured environment matches the required repository, or the match is ambiguous, ask the user before launching instead of silently using Blank slate',
+    expect(configuredPrompt).toContain(
+      'If the work depends on a specific repository or environment and no suitable target is available, explain what is missing and ask how to proceed',
     );
-    expect(prompt).toContain(
-      'Use Blank slate only when the user explicitly requests it, the work clearly requires no repository',
+    expect(configuredPrompt).toContain(
+      'If multiple targets are plausible, ask which to use',
     );
-    expect(prompt).toContain(
-      'no suitable configured environment exists for work that can legitimately proceed without a repository',
+    expect(configuredPrompt).toContain(
+      'Never silently substitute Blank slate or All repositories for a required or ambiguous target',
     );
-    expect(prompt).toContain(
-      'Preserve normal Fast-only handling for work that needs neither a repository nor sandbox execution',
+    expect(configuredPrompt).toContain(
+      'Do not use Blank slate to work around missing access or an environment failure',
     );
-    expect(prompt).not.toContain(
+    expect(configuredPrompt).toContain(
+      'Handle work directly in Fast when it does not require sandbox execution',
+    );
+    expect(configuredPrompt).not.toContain(
       'Otherwise use null to use the deployment default',
+    );
+    expect(environmentlessPrompt).toContain(
+      'Use Blank slate when the user explicitly requests it, or when the work can be completed in a standalone sandbox without a configured environment',
+    );
+    expect(environmentlessPrompt).toContain(
+      'Instances without connected source control or configured environments can still use Blank slate for suitable work',
+    );
+    expect(environmentlessPrompt).toContain(
+      'No configured environments were found for this deployment',
     );
   });
 
