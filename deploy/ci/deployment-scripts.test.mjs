@@ -39,6 +39,9 @@ test('deployment domains use valid DNS labels', () => {
     `${'a'.repeat(64)}.example`,
     `${maximumLengthDomain}e`,
     'roomote.example.com\nnot-a-domain',
+    'roomote.example.com\rnot-a-domain',
+    'roomote.example.com\r',
+    'roomote.example.com\r\nnot-a-domain',
   ]) {
     const result = validateDomain(domain);
     assert.equal(result.status, 1, `${domain} was accepted`);
