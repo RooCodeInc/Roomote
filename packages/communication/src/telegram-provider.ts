@@ -12,8 +12,8 @@ import { readBoundedResponseBody } from './bounded-response-body';
 import { getTelegramApiBaseUrl } from './telegram-api-base-url';
 import {
   TELEGRAM_MAX_MESSAGE_LENGTH,
-  chunkTelegramMarkdown,
   chunkTelegramMarkdownAsHtml,
+  chunkTelegramText,
 } from './telegram-format';
 
 export type TelegramCommunicationProviderOptions = {
@@ -108,10 +108,11 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
   async postMessage(
     input: CommunicationPostMessageInput,
   ): Promise<CommunicationPostMessageResult> {
-    const text = input.text?.trim();
+    const text = input.text;
     const images = input.images ?? [];
+    const hasText = Boolean(text?.trim());
 
-    if (!text && images.length === 0) {
+    if (!hasText && images.length === 0) {
       throw new Error('Telegram postMessage requires text or images.');
     }
 
@@ -125,21 +126,25 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       markdown: string;
       html: string | null;
       fallbackOnHtmlError?: boolean;
-    }> = text
-      ? input.htmlText
-        ? [
-            {
-              markdown: text,
-              html: input.htmlText,
-              fallbackOnHtmlError: true,
-            },
-          ]
-        : useMarkdown
-          ? chunkTelegramMarkdownAsHtml(text)
-          : chunkTelegramMarkdown(text, TELEGRAM_MAX_MESSAGE_LENGTH).map(
-              (chunk) => ({ markdown: chunk, html: null }),
-            )
-      : [];
+    }> =
+      hasText && text
+        ? input.htmlText &&
+          input.htmlText.length <= TELEGRAM_MAX_MESSAGE_LENGTH &&
+          text.length <= TELEGRAM_MAX_MESSAGE_LENGTH
+          ? [
+              {
+                markdown: text,
+                html: input.htmlText,
+                fallbackOnHtmlError: true,
+              },
+            ]
+          : useMarkdown
+            ? chunkTelegramMarkdownAsHtml(text)
+            : chunkTelegramText(text).map((chunk) => ({
+                markdown: chunk,
+                html: null,
+              }))
+        : [];
 
     let firstResult: {
       message_id: number;

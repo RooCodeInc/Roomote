@@ -120,14 +120,66 @@ export function markdownToTelegramHtml(markdown: string): string {
     .join('');
 }
 
-function splitLongLine(line: string, maxLength: number): string[] {
-  const pieces: string[] = [];
+function safeCodePointBoundary(text: string, boundary: number): number {
+  const adjustedBoundary =
+    boundary > 0 &&
+    boundary < text.length &&
+    /[\uD800-\uDBFF]/.test(text[boundary - 1] ?? '') &&
+    /[\uDC00-\uDFFF]/.test(text[boundary] ?? '')
+      ? boundary - 1
+      : boundary;
 
-  for (let index = 0; index < line.length; index += maxLength) {
-    pieces.push(line.slice(index, index + maxLength));
+  if (adjustedBoundary > 0) {
+    return adjustedBoundary;
   }
 
-  return pieces;
+  return (text.codePointAt(0) ?? 0) > 0xffff ? 2 : 1;
+}
+
+/**
+ * Split plain Telegram text without dropping separators or cutting a Unicode
+ * code point. Prefer paragraph, line, then word boundaries before hard splits.
+ */
+export function chunkTelegramText(
+  text: string,
+  maxLength: number = TELEGRAM_MAX_MESSAGE_LENGTH,
+): string[] {
+  if (!Number.isSafeInteger(maxLength) || maxLength < 2) {
+    throw new Error('Telegram chunk length must be an integer of at least 2.');
+  }
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > maxLength) {
+    const hardBoundary = safeCodePointBoundary(remaining, maxLength);
+    const candidate = remaining.slice(0, hardBoundary);
+    const paragraphIndex = candidate.lastIndexOf('\n\n');
+    const paragraphBoundary = paragraphIndex < 0 ? 0 : paragraphIndex + 2;
+    const newlineBoundary = candidate.lastIndexOf('\n') + 1;
+    let whitespaceBoundary = 0;
+
+    for (let index = candidate.length - 1; index >= 0; index -= 1) {
+      if (/\s/u.test(candidate[index] ?? '')) {
+        whitespaceBoundary = index + 1;
+        break;
+      }
+    }
+
+    const minimumPreferredBoundary = Math.floor(hardBoundary / 2);
+    const boundary =
+      [paragraphBoundary, newlineBoundary, whitespaceBoundary].find(
+        (value) => value > 0 && value >= minimumPreferredBoundary,
+      ) ?? hardBoundary;
+    chunks.push(remaining.slice(0, boundary));
+    remaining = remaining.slice(boundary);
+  }
+
+  if (remaining.length > 0 || chunks.length === 0) {
+    chunks.push(remaining);
+  }
+
+  return chunks;
 }
 
 /**
@@ -143,52 +195,26 @@ export function chunkTelegramMarkdown(
     return [markdown];
   }
 
-  const chunks: string[] = [];
-  let current: string[] = [];
-  let currentLength = 0;
+  const rawChunks = chunkTelegramText(markdown, maxLength - 16);
   let openFence: string | null = null;
 
-  const flush = (reopenFence: boolean) => {
-    if (currentLength === 0) {
-      return;
-    }
+  return rawChunks.map((rawChunk) => {
+    const reopenFence = openFence;
 
-    if (openFence && reopenFence) {
-      current.push('```');
-    }
-
-    chunks.push(current.join('\n'));
-    current = openFence && reopenFence ? [openFence] : [];
-    currentLength = current.join('\n').length;
-  };
-
-  for (const rawLine of markdown.split('\n')) {
-    const lines =
-      rawLine.length > maxLength
-        ? splitLongLine(rawLine, maxLength - 8)
-        : [rawLine];
-
-    for (const line of lines) {
-      const fenceMatch = /^```/.test(line);
-      // Reserve room for the closing fence a flush would append.
-      const closingFenceReserve = openFence ? 4 : 0;
-
-      if (currentLength + line.length + 1 + closingFenceReserve > maxLength) {
-        flush(true);
-      }
-
-      current.push(line);
-      currentLength += line.length + 1;
-
-      if (fenceMatch) {
+    for (const line of rawChunk.split('\n')) {
+      if (/^```/.test(line)) {
         openFence = openFence ? null : line;
       }
     }
-  }
 
-  flush(false);
+    const renderedChunk = reopenFence
+      ? `${reopenFence}\n${rawChunk}`
+      : rawChunk;
 
-  return chunks.filter((chunk) => chunk.trim().length > 0);
+    return openFence
+      ? `${renderedChunk}${renderedChunk.endsWith('\n') ? '' : '\n'}\`\`\``
+      : renderedChunk;
+  });
 }
 
 /**
@@ -237,6 +263,15 @@ function convertChunkWithinLimit(
 export function chunkTelegramMarkdownAsHtml(
   markdown: string,
 ): TelegramHtmlChunk[] {
+  const html = markdownToTelegramHtml(markdown);
+
+  if (
+    markdown.length <= TELEGRAM_MAX_MESSAGE_LENGTH &&
+    html.length <= TELEGRAM_MAX_MESSAGE_LENGTH
+  ) {
+    return [{ markdown, html }];
+  }
+
   return chunkTelegramMarkdown(markdown).flatMap((chunk) =>
     convertChunkWithinLimit(chunk, MARKDOWN_CHUNK_TARGET_LENGTH),
   );

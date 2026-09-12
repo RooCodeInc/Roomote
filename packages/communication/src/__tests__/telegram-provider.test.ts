@@ -561,6 +561,176 @@ describe('TelegramCommunicationProvider', () => {
     expect(secondBody.reply_parameters).toBeUndefined();
   });
 
+  it('delivers exact-limit text unchanged in one message', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 202 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+    const text = 'x'.repeat(4_096);
+
+    await provider.postMessage({ channelId: '123', text });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(
+      JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
+    ).toMatchObject({ text });
+  });
+
+  it('preserves leading and trailing whitespace in delivered text', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 203 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+    const text = '\n  complete response  \n';
+
+    await provider.postMessage({ channelId: '123', text });
+
+    expect(
+      JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
+    ).toMatchObject({ text });
+  });
+
+  it('preserves all text across paragraph, word, and Unicode boundaries', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      jsonResponse({
+        ok: true,
+        result: { message_id: fetchMock.mock.calls.length + 202 },
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+    const text = `${'first '.repeat(800)}\n\n${'🙂'.repeat(4_500)}`;
+
+    await provider.postMessage({ channelId: '123', text });
+
+    const bodies = fetchMock.mock.calls.map(
+      (call) =>
+        JSON.parse((call[1] as RequestInit).body as string) as { text: string },
+    );
+    expect(bodies.length).toBeGreaterThan(2);
+    expect(bodies.map((body) => body.text).join('')).toBe(text);
+    expect(bodies.every((body) => body.text.length <= 4_096)).toBe(true);
+    expect(
+      bodies.every(
+        (body) =>
+          !/^[\uDC00-\uDFFF]/.test(body.text) &&
+          !/[\uD800-\uDBFF]$/.test(body.text),
+      ),
+    ).toBe(true);
+  });
+
+  it('chunks oversized native HTML through markdown with topic and reply semantics', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      jsonResponse({
+        ok: true,
+        result: {
+          message_id: fetchMock.mock.calls.length + 210,
+          message_thread_id: 7,
+        },
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+    const text = Array.from(
+      { length: 180 },
+      (_, index) => `**section ${index}** ${'body '.repeat(8)}`,
+    ).join('\n');
+
+    const result = await provider.postMessage({
+      channelId: '-100456',
+      threadId: '7',
+      replyToMessageId: '42',
+      text,
+      htmlText: `<b>${'oversized'.repeat(600)}</b>`,
+      textFormat: 'markdown',
+    });
+
+    const bodies = fetchMock.mock.calls.map(
+      (call) =>
+        JSON.parse((call[1] as RequestInit).body as string) as {
+          text: string;
+          parse_mode?: string;
+          message_thread_id?: number;
+          reply_parameters?: { message_id: number };
+        },
+    );
+    expect(bodies.length).toBeGreaterThan(1);
+    expect(bodies.every((body) => body.parse_mode === 'HTML')).toBe(true);
+    expect(bodies.every((body) => body.message_thread_id === 7)).toBe(true);
+    expect(bodies[0]?.reply_parameters?.message_id).toBe(42);
+    expect(
+      bodies.slice(1).every((body) => body.reply_parameters === undefined),
+    ).toBe(true);
+    expect(result.lastTextMessageId).toBe(
+      String(fetchMock.mock.calls.length + 210),
+    );
+  });
+
+  it('falls back per chunk without dropping markdown content', async () => {
+    const text = Array.from(
+      { length: 160 },
+      (_, index) => `**section ${index}** ${'body '.repeat(8)}`,
+    ).join('\n');
+    const fetchMock = vi.fn().mockImplementation(async (_url, init) => {
+      const body = JSON.parse(init?.body as string) as { parse_mode?: string };
+
+      return body.parse_mode
+        ? jsonResponse(
+            {
+              ok: false,
+              error_code: 400,
+              description: "Bad Request: can't parse entities",
+            },
+            400,
+          )
+        : jsonResponse({
+            ok: true,
+            result: { message_id: fetchMock.mock.calls.length + 220 },
+          });
+    });
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '123',
+      text,
+      textFormat: 'markdown',
+    });
+
+    const plainBodies = fetchMock.mock.calls
+      .map(
+        (call) =>
+          JSON.parse((call[1] as RequestInit).body as string) as {
+            text: string;
+            parse_mode?: string;
+          },
+      )
+      .filter((body) => !body.parse_mode);
+    expect(plainBodies.length).toBeGreaterThan(1);
+    expect(plainBodies.map((body) => body.text).join('')).toBe(text);
+  });
+
   it('requires text or images for outbound Telegram messages', async () => {
     const provider = new TelegramCommunicationProvider({
       botToken: 'bot-token',
@@ -708,6 +878,30 @@ describe('TelegramCommunicationProvider', () => {
       message_id: 42,
       allow_sending_without_reply: true,
     });
+  });
+
+  it('treats whitespace-only text with an image as image-only', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 311 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '123',
+      text: '\n',
+      images: [{ url: 'https://example.test/shot.png', altText: 'the shot' }],
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://telegram.example.test/botbot-token/sendPhoto',
+    );
   });
 
   it('falls back to a link message when sendPhoto fails', async () => {

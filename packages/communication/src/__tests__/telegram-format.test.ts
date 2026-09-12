@@ -4,6 +4,7 @@ import {
   TELEGRAM_MAX_MESSAGE_LENGTH,
   chunkTelegramMarkdown,
   chunkTelegramMarkdownAsHtml,
+  chunkTelegramText,
   markdownToTelegramHtml,
 } from '../telegram-format';
 
@@ -65,6 +66,55 @@ describe('markdownToTelegramHtml', () => {
   });
 });
 
+describe('chunkTelegramText', () => {
+  it('keeps text at the exact limit in one chunk', () => {
+    const text = 'x'.repeat(TELEGRAM_MAX_MESSAGE_LENGTH);
+
+    expect(chunkTelegramText(text)).toEqual([text]);
+  });
+
+  it('splits text one character over the limit without losing content', () => {
+    const text = 'x'.repeat(TELEGRAM_MAX_MESSAGE_LENGTH + 1);
+    const chunks = chunkTelegramText(text);
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks.join('')).toBe(text);
+  });
+
+  it('preserves every character while preferring paragraph boundaries', () => {
+    const text = `${'a'.repeat(3_000)}\n\n${'b'.repeat(3_000)}`;
+    const chunks = chunkTelegramText(text);
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]).toBe(`${'a'.repeat(3_000)}\n\n`);
+    expect(chunks.join('')).toBe(text);
+  });
+
+  it('hard-splits long unbroken text without breaking Unicode', () => {
+    const text = '🙂'.repeat(5_000);
+    const chunks = chunkTelegramText(text);
+
+    expect(chunks.length).toBeGreaterThan(2);
+    expect(chunks.join('')).toBe(text);
+    expect(chunks.every((chunk) => chunk.length <= 4_096)).toBe(true);
+    expect(chunks.every((chunk) => !chunk.includes('\uFFFD'))).toBe(true);
+    expect(
+      chunks.every(
+        (chunk) =>
+          !/^[\uDC00-\uDFFF]/.test(chunk) && !/[\uD800-\uDBFF]$/.test(chunk),
+      ),
+    ).toBe(true);
+  });
+
+  it('always advances at the minimum length around a surrogate pair', () => {
+    expect(chunkTelegramText('a🙂', 2)).toEqual(['a', '🙂']);
+    expect(chunkTelegramText('🙂a', 2)).toEqual(['🙂', 'a']);
+    expect(() => chunkTelegramText('🙂', 1)).toThrow(
+      'Telegram chunk length must be an integer of at least 2.',
+    );
+  });
+});
+
 describe('chunkTelegramMarkdown', () => {
   it('returns short text as a single chunk', () => {
     expect(chunkTelegramMarkdown('hello', 100)).toEqual(['hello']);
@@ -78,7 +128,7 @@ describe('chunkTelegramMarkdown', () => {
     const chunks = chunkTelegramMarkdown(lines.join('\n'), 100);
 
     expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.join('\n')).toBe(lines.join('\n'));
+    expect(chunks.join('')).toBe(lines.join('\n'));
     for (const chunk of chunks) {
       expect(chunk.length).toBeLessThanOrEqual(100);
     }
@@ -109,12 +159,33 @@ describe('chunkTelegramMarkdown', () => {
       expect(chunk.length).toBeLessThanOrEqual(100);
     }
   });
+
+  it('preserves a trailing newline without emitting an empty chunk', () => {
+    const line = 'x'.repeat(3_499);
+    const markdown = `${line}\n${line}\n`;
+    const chunks = chunkTelegramMarkdown(markdown, 3_500);
+
+    expect(chunks.join('')).toBe(markdown);
+    expect(chunks.every((chunk) => chunk.length > 0)).toBe(true);
+    expect(chunks.every((chunk) => chunk.length <= 3_500)).toBe(true);
+  });
 });
 
 describe('chunkTelegramMarkdownAsHtml', () => {
   it('returns a single converted chunk for short markdown', () => {
     expect(chunkTelegramMarkdownAsHtml('**hi**')).toEqual([
       { markdown: '**hi**', html: '<b>hi</b>' },
+    ]);
+  });
+
+  it('preserves exact-target inline formatting and its trailing newline', () => {
+    const markdown = `**${'x'.repeat(3_496)}**\n`;
+
+    expect(chunkTelegramMarkdownAsHtml(markdown)).toEqual([
+      {
+        markdown,
+        html: `<b>${'x'.repeat(3_496)}</b>\n`,
+      },
     ]);
   });
 
@@ -145,6 +216,15 @@ describe('chunkTelegramMarkdownAsHtml', () => {
     const markdown = Array.from({ length: 200 }, () => line).join('\n');
     const chunks = chunkTelegramMarkdownAsHtml(markdown);
 
-    expect(chunks.map((chunk) => chunk.markdown).join('\n')).toBe(markdown);
+    expect(chunks.map((chunk) => chunk.markdown).join('')).toBe(markdown);
+  });
+
+  it('preserves exact newlines during recursive HTML expansion', () => {
+    const markdown = `${'&'.repeat(409)}\n${'&'.repeat(1_000)}`;
+    const chunks = chunkTelegramMarkdownAsHtml(markdown);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.map((chunk) => chunk.markdown).join('')).toBe(markdown);
+    expect(chunks.every((chunk) => chunk.markdown.length > 0)).toBe(true);
   });
 });
