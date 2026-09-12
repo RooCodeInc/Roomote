@@ -98,13 +98,16 @@ describe('TelegramCommunicationProvider', () => {
     await provider.sendRichMessageDraft({
       channelId: '123',
       draftId: 42,
-      text: 'A partial response',
+      text: '**Highlights**\n\n- First\n- Second',
+      textFormat: 'markdown',
     });
 
     expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
       chat_id: 123,
       draft_id: 42,
-      rich_message: { html: 'A partial response' },
+      rich_message: {
+        html: '<p><b>Highlights</b></p><ul><li>First</li><li>Second</li></ul>',
+      },
     });
   });
 
@@ -458,6 +461,33 @@ describe('TelegramCommunicationProvider', () => {
     );
   });
 
+  it('sends paragraph and list blocks in rich-message HTML', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        result: { message_id: 101 },
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '123',
+      text: '**Highlights**\n\n- **First.** Details\n- **Second.** More',
+      textFormat: 'markdown',
+    });
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
+    ) as { rich_message: { html: string } };
+    expect(body.rich_message.html).toBe(
+      '<p><b>Highlights</b></p><ul><li><b>First.</b> Details</li><li><b>Second.</b> More</li></ul>',
+    );
+  });
+
   it('does not fall back when Telegram rejects a rich message', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(
@@ -703,7 +733,9 @@ describe('TelegramCommunicationProvider', () => {
 
     expect(
       JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
-    ).toMatchObject({ rich_message: { html: text } });
+    ).toMatchObject({
+      rich_message: { html: '<br>  complete response  <br>' },
+    });
   });
 
   it('keeps payloads above 4096 together below the rich-message limit', async () => {
@@ -726,7 +758,11 @@ describe('TelegramCommunicationProvider', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(
       JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
-    ).toMatchObject({ rich_message: { html: text } });
+    ).toMatchObject({
+      rich_message: {
+        html: `${'first '.repeat(800)}<br><br>${'safe '.repeat(1_000)}`,
+      },
+    });
   });
 
   it('keeps native HTML above 4096 together with topic and reply semantics', async () => {
