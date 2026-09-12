@@ -57,6 +57,7 @@ export type FastAgentSkillSummary = {
   repository?: string;
   settingsSource?: string;
   source: 'packaged' | 'instance' | 'repository' | 'settings';
+  version?: number;
 };
 
 export type FastAgentSkillDocument = FastAgentSkillSummary & {

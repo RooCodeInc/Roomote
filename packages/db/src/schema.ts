@@ -184,6 +184,7 @@ export const instanceSkills = pgTable(
     createdByUserId: text('created_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
+    version: integer('version').notNull().default(1),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },

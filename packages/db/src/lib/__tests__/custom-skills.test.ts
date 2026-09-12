@@ -22,6 +22,7 @@ import {
   listCustomSkills,
   listInstanceSkillDefinitions,
   updateCustomSkill,
+  updateCustomSkillFromAgent,
 } from '../custom-skills';
 
 const userIds: string[] = [];
@@ -97,6 +98,7 @@ it('lets members create instance skills and exposes full records with actor-spec
     ...skill,
     id: result.skillId,
     createdByUserId: creator,
+    version: 1,
     createdAt: expect.any(Date),
     updatedAt: expect.any(Date),
   });
@@ -139,6 +141,7 @@ it.each(['creator', 'admin'] as const)(
       skillId,
       name: edited.name,
       scope: 'instance',
+      version: 2,
     });
     const after = (await read(skillId))!;
     expect(after).toMatchObject({
@@ -164,6 +167,17 @@ it('denies noncreator mutations without changing the skill', async () => {
     updateCustomSkill({ ...definition(), actorUserId, skillId }),
   ).rejects.toMatchObject({ status: 403 });
   await expect(
+    updateCustomSkillFromAgent({
+      actorUserId,
+      skillId: `instance:${skillId}`,
+      expectedVersion: 1,
+      content: {
+        type: 'replace_content',
+        replace_content: { new_str: 'Denied.\n' },
+      },
+    }),
+  ).rejects.toMatchObject({ status: 403 });
+  await expect(
     deleteCustomSkill({ actorUserId, skillId }),
   ).rejects.toMatchObject({ status: 403 });
   expect(await read(skillId)).toEqual(before);
@@ -184,6 +198,16 @@ it('denies missing, deleted, and unknown actors at every public helper', async (
       () => listCustomSkills(actorUserId),
       () => getCustomSkill(actorUserId, skillId),
       () => updateCustomSkill({ ...skill, actorUserId, skillId }),
+      () =>
+        updateCustomSkillFromAgent({
+          actorUserId,
+          skillId: `instance:${skillId}`,
+          expectedVersion: 1,
+          content: {
+            type: 'replace_content',
+            replace_content: { new_str: 'Denied.\n' },
+          },
+        }),
       () => deleteCustomSkill({ actorUserId, skillId }),
     ])
       await expect(request()).rejects.toMatchObject({ status: 403 });
@@ -195,6 +219,203 @@ it('denies missing, deleted, and unknown actors at every public helper', async (
     ).toEqual([]);
   }
   expect(await read(skillId)).toEqual(before);
+});
+
+it('atomically applies ordered exact replacements and omitted metadata', async () => {
+  const actorUserId = await user();
+  const skill = definition();
+  const { skillId } = await create(actorUserId, {
+    ...skill,
+    content: 'alpha beta gamma\n',
+  });
+  await expect(
+    updateCustomSkillFromAgent({
+      actorUserId,
+      skillId: `instance:${skillId}`,
+      expectedVersion: 1,
+      content: {
+        type: 'update_content',
+        update_content: {
+          content_updates: [
+            { old_str: 'alpha', new_str: 'first' },
+            { old_str: 'first beta', new_str: 'second' },
+          ],
+        },
+      },
+    }),
+  ).resolves.toEqual({
+    success: true,
+    persisted: true,
+    skillId: `instance:${skillId}`,
+    name: skill.name,
+    scope: 'instance',
+    version: 2,
+  });
+  expect(await read(skillId)).toMatchObject({
+    name: skill.name,
+    description: skill.description,
+    content: 'second gamma\n',
+    version: 2,
+  });
+});
+
+it('rejects missing and ambiguous replacements without partial metadata writes', async () => {
+  const actorUserId = await user();
+  const skill = definition();
+  const { skillId } = await create(actorUserId, {
+    ...skill,
+    content: 'repeat repeat\n',
+  });
+  const before = await read(skillId);
+  for (const contentUpdates of [
+    [{ old_str: 'missing', new_str: 'new' }],
+    [{ old_str: 'repeat', new_str: 'new' }],
+    [
+      { old_str: 'repeat repeat', new_str: 'changed' },
+      { old_str: 'missing', new_str: 'new' },
+    ],
+  ]) {
+    await expect(
+      updateCustomSkillFromAgent({
+        actorUserId,
+        skillId: `instance:${skillId}`,
+        expectedVersion: 1,
+        name: definition().name,
+        content: {
+          type: 'update_content',
+          update_content: { content_updates: contentUpdates },
+        },
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(await read(skillId)).toEqual(before);
+  }
+});
+
+it('replaces all exact matches only when explicitly enabled', async () => {
+  const actorUserId = await user();
+  const skill = definition();
+  const { skillId } = await create(actorUserId, {
+    ...skill,
+    content: 'repeat repeat\n',
+  });
+  await updateCustomSkillFromAgent({
+    actorUserId,
+    skillId: `instance:${skillId}`,
+    expectedVersion: 1,
+    content: {
+      type: 'update_content',
+      update_content: {
+        content_updates: [
+          {
+            old_str: 'repeat',
+            new_str: 'done',
+            replace_all_matches: true,
+          },
+        ],
+      },
+    },
+  });
+  expect(await read(skillId)).toMatchObject({
+    content: 'done done\n',
+    version: 2,
+  });
+});
+
+it('supports full content replacement with metadata in one write', async () => {
+  const actorUserId = await user();
+  const skill = definition();
+  const { skillId } = await create(actorUserId, skill);
+  await updateCustomSkillFromAgent({
+    actorUserId,
+    skillId: `instance:${skillId}`,
+    expectedVersion: 1,
+    description: 'New description',
+    content: {
+      type: 'replace_content',
+      replace_content: { new_str: '# Replacement\r\n' },
+    },
+  });
+  expect(await read(skillId)).toMatchObject({
+    name: skill.name,
+    description: 'New description',
+    content: '# Replacement\n',
+    version: 2,
+  });
+  skillNames.push(`${skill.name}-renamed`);
+  await updateCustomSkillFromAgent({
+    actorUserId,
+    skillId: `instance:${skillId}`,
+    expectedVersion: 2,
+    name: `${skill.name}-renamed`,
+  });
+  expect(await read(skillId)).toMatchObject({
+    name: `${skill.name}-renamed`,
+    description: 'New description',
+    content: '# Replacement\n',
+    version: 3,
+  });
+});
+
+it('rejects duplicate names and stale versions without partial writes', async () => {
+  const actorUserId = await user();
+  const first = await create(actorUserId);
+  const second = await create(actorUserId);
+  const before = await read(second.skillId);
+  await expect(
+    updateCustomSkillFromAgent({
+      actorUserId,
+      skillId: `instance:${second.skillId}`,
+      expectedVersion: 1,
+      name: first.name,
+      content: {
+        type: 'replace_content',
+        replace_content: { new_str: 'Replacement.\n' },
+      },
+    }),
+  ).rejects.toMatchObject({ status: 409 });
+  expect(await read(second.skillId)).toEqual(before);
+
+  await updateCustomSkillFromAgent({
+    actorUserId,
+    skillId: `instance:${second.skillId}`,
+    expectedVersion: 1,
+    content: {
+      type: 'replace_content',
+      replace_content: { new_str: 'Current.\n' },
+    },
+  });
+  const current = await read(second.skillId);
+  await expect(
+    updateCustomSkillFromAgent({
+      actorUserId,
+      skillId: `instance:${second.skillId}`,
+      expectedVersion: 1,
+      description: 'Must not persist',
+      content: {
+        type: 'replace_content',
+        replace_content: { new_str: 'Stale.\n' },
+      },
+    }),
+  ).rejects.toMatchObject({ status: 409 });
+  expect(await read(second.skillId)).toEqual(current);
+});
+
+it.each([
+  '00000000-0000-4000-8000-000000000001',
+  'settings:00000000-0000-4000-8000-000000000001',
+  'packaged:example',
+])('rejects non-instance lookup ID %s', async (skillId) => {
+  await expect(
+    updateCustomSkillFromAgent({
+      actorUserId: await user(),
+      skillId,
+      expectedVersion: 1,
+      content: {
+        type: 'replace_content',
+        replace_content: { new_str: 'Replacement.\n' },
+      },
+    }),
+  ).rejects.toThrow();
 });
 
 it('returns safe 404s for unknown or foreign identifiers without exposing database errors', async () => {

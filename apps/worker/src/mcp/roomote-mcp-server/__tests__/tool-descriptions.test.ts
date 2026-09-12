@@ -11,6 +11,7 @@ import {
 import {
   CREATE_CUSTOM_SKILL_TOOL,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  UPDATE_CUSTOM_SKILL_TOOL,
 } from '@roomote/types';
 
 const thisFilePath = fileURLToPath(import.meta.url);
@@ -233,6 +234,24 @@ describe('roomote MCP tool descriptions', () => {
         environmentIds: [],
       }).success,
     ).toBe(false);
+  });
+
+  it('registers the shared custom skill update descriptor', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(
+      registeredTools,
+      UPDATE_CUSTOM_SKILL_TOOL.name,
+    );
+    expect(tool.config.title).toBe(UPDATE_CUSTOM_SKILL_TOOL.title);
+    expect(tool.config.description).toBe(UPDATE_CUSTOM_SKILL_TOOL.description);
+    expect(tool.config.annotations).toEqual(
+      UPDATE_CUSTOM_SKILL_TOOL.annotations,
+    );
+    const schema = tool.config
+      .inputSchema as unknown as z.ZodObject<z.ZodRawShape>;
+    expect(Object.keys(schema.shape)).toEqual(
+      Object.keys(UPDATE_CUSTOM_SKILL_TOOL.inputSchema),
+    );
   });
 
   it('requires a token before creating a custom skill', async () => {

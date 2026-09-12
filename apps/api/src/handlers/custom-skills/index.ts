@@ -1,27 +1,47 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { ZodError } from 'zod';
-import { createCustomSkill, CreateCustomSkillError } from '@roomote/db/server';
-import { createCustomSkillInputSchema } from '@roomote/types';
+import {
+  createCustomSkill,
+  CreateCustomSkillError,
+  updateCustomSkillFromAgent,
+} from '@roomote/db/server';
+import {
+  createCustomSkillInputSchema,
+  updateCustomSkillInputSchema,
+} from '@roomote/types';
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
 import { resolveActingUserIdOrNull } from '../mcp/proxy-utils';
 
-export const customSkillsRouter = new Hono<{
+type CustomSkillsEnv = {
   Variables: Variables & { mcpAuth: McpAuth };
-}>();
+};
 
-customSkillsRouter.post('/', async (c) => {
+export const customSkillsRouter = new Hono<CustomSkillsEnv>();
+
+async function actingUserId(c: Context<CustomSkillsEnv>) {
   const auth = c.get('mcpAuth');
-  let actorUserId: string | null = null;
   try {
-    actorUserId = await resolveActingUserIdOrNull({
+    return await resolveActingUserIdOrNull({
       userId: auth.userId ?? null,
       tokenType: auth.authContext.tokenType,
       ...('runId' in auth.authContext ? { runId: auth.authContext.runId } : {}),
     });
   } catch {
-    return c.json({ error: 'Active member access required' }, 403);
+    return null;
   }
+}
+
+function skillError(c: Context<CustomSkillsEnv>, error: unknown) {
+  if (error instanceof CreateCustomSkillError)
+    return c.json({ error: error.message }, error.status);
+  if (error instanceof ZodError)
+    return c.json({ error: 'Invalid skill.' }, 400);
+  throw error;
+}
+
+customSkillsRouter.post('/', async (c) => {
+  const actorUserId = await actingUserId(c);
   if (!actorUserId)
     return c.json({ error: 'Active member access required' }, 403);
   const body = await c.req.json().catch(() => null);
@@ -33,10 +53,22 @@ customSkillsRouter.post('/', async (c) => {
       201,
     );
   } catch (error) {
-    if (error instanceof CreateCustomSkillError)
-      return c.json({ error: error.message }, error.status);
-    if (error instanceof ZodError)
-      return c.json({ error: 'Invalid skill.' }, 400);
-    throw error;
+    return skillError(c, error);
+  }
+});
+
+customSkillsRouter.patch('/', async (c) => {
+  const actorUserId = await actingUserId(c);
+  if (!actorUserId)
+    return c.json({ error: 'Active member access required' }, 403);
+  const body = await c.req.json().catch(() => null);
+  const parsed = updateCustomSkillInputSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  try {
+    return c.json(
+      await updateCustomSkillFromAgent({ ...parsed.data, actorUserId }),
+    );
+  } catch (error) {
+    return skillError(c, error);
   }
 });
