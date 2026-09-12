@@ -214,9 +214,13 @@ export function chunkTelegramMarkdown(
     currentLength = current.join('\n').length;
   };
 
-  for (const rawLine of markdown.split('\n')) {
+  const rawLines = markdown.split('\n');
+
+  for (const [rawLineIndex, rawLine] of rawLines.entries()) {
+    const needsLineBreakHeadroom =
+      rawLine.length === maxLength && rawLineIndex < rawLines.length - 1;
     const lines =
-      rawLine.length > maxLength
+      rawLine.length > maxLength || needsLineBreakHeadroom
         ? chunkTelegramText(rawLine, maxLength - 8)
         : [rawLine];
 
