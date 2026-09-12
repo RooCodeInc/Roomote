@@ -109,9 +109,24 @@ describe('createVoiceLiveSession', () => {
     expect(body.session.instructions).toContain(
       'Integrations the backend can use: GitHub.',
     );
-    // The voice acknowledges, delegates real work, and reports results
-    // faithfully in its own words.
-    expect(body.session.instructions).toContain('Backchannel policy');
+    // The voice bridges likely silence, delegates real work, and reports
+    // results faithfully in its own words.
+    expect(body.session.instructions).toContain('Bridge policy');
+    expect(body.session.instructions).toContain(
+      'Before delegating a request whose backend work is likely to create noticeable silence',
+    );
+    expect(body.session.instructions).toContain(
+      'Just a second while I read this Notion document',
+    );
+    expect(body.session.instructions).toContain(
+      'Thirty seconds or more without useful speech is generally too long',
+    );
+    expect(body.session.instructions).toContain(
+      'Do not repeat equivalent updates',
+    );
+    expect(body.session.instructions).toContain(
+      'Stop speaking the moment the person starts talking',
+    );
     expect(body.session.instructions).toContain('Delegate to the backend when');
     expect(body.session.instructions).toContain(
       'Do not delegate to the backend when',
@@ -119,6 +134,9 @@ describe('createVoiceLiveSession', () => {
     expect(body.session.instructions).toContain('Grounding policy');
     expect(body.session.instructions).toContain(
       'keep every number, name, path, and link label exactly as given',
+    );
+    expect(body.session.instructions).toContain(
+      'Never claim work finished or a result exists before commentary says so',
     );
   });
 

@@ -3315,7 +3315,10 @@ export async function answerFastAgentQuestion({
       ),
     );
     let visibleUpdatePosted = resumedWithDeliveredAcknowledgement;
-    let substantiveWorkAcknowledged = resumedWithDeliveredAcknowledgement;
+    // GPT-Live speaks an activity-specific bridge before delegating a voice
+    // request, so requiring another Fast acknowledgement would repeat it.
+    let substantiveWorkAcknowledged =
+      voiceMode || resumedWithDeliveredAcknowledgement;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
 
