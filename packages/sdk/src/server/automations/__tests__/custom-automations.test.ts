@@ -13,6 +13,7 @@ const fastMocks = vi.hoisted(() => ({
   teamsUpdateMessage: vi.fn(),
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
+  telegramCreateForumTopic: vi.fn(),
   canStartAgentMailConversation: vi.fn(),
   prepareAgentMailConversation: vi.fn(),
   createAgentMailProvider: vi.fn(),
@@ -248,6 +249,11 @@ describe('customAutomationsJob', () => {
     });
     fastMocks.createTelegramProvider.mockResolvedValue({
       postMessage: fastMocks.telegramPostMessage,
+      createForumTopic: fastMocks.telegramCreateForumTopic,
+    });
+    fastMocks.telegramCreateForumTopic.mockResolvedValue({
+      messageThreadId: 'telegram-topic-1',
+      name: 'Flaky tests',
     });
     fastMocks.canStartAgentMailConversation.mockResolvedValue(true);
     fastMocks.prepareAgentMailConversation.mockResolvedValue({
@@ -834,6 +840,8 @@ describe('customAutomationsJob', () => {
       channelId: 'telegram-dm-1',
       surface: 'telegram',
       workspaceId: 'telegram-dm-1',
+      threadId: 'telegram-topic-1',
+      rootMessageId: 'telegram-topic-1',
     },
   ] as const)(
     'delivers a $targetKind Fast automation through the $provider surface',
@@ -907,8 +915,47 @@ describe('customAutomationsJob', () => {
           messageId: expected.rootMessageId,
         });
       }
+      if (targetKind === 'telegram_user') {
+        expect(fastMocks.telegramCreateForumTopic).toHaveBeenCalledWith({
+          channelId,
+          name: automation.name,
+        });
+      } else if (provider === 'telegram') {
+        expect(fastMocks.telegramCreateForumTopic).not.toHaveBeenCalled();
+      }
     },
   );
+
+  it('fails a Telegram DM run instead of falling back to an unthreaded report', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        executionMode: 'fast',
+        environmentId: null,
+        target: {
+          provider: 'telegram',
+          targetKind: 'telegram_user',
+          externalRef: 'user-1',
+        },
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+    vi.mocked(findUserDirectMessageDestination).mockResolvedValue({
+      channelId: 'telegram-dm-1',
+    });
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([
+      'telegram',
+    ]);
+    fastMocks.telegramCreateForumTopic.mockRejectedValueOnce(
+      new Error('Threaded Mode is disabled'),
+    );
+
+    const result = await customAutomationsJob();
+
+    expect(result.errors).toEqual(['Flaky tests: Threaded Mode is disabled']);
+    expect(fastMocks.getSession).not.toHaveBeenCalled();
+    expect(fastMocks.telegramPostMessage).not.toHaveBeenCalled();
+  });
 
   it('fails closed for a Teams service URL without a verified installation', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
@@ -1103,6 +1150,37 @@ describe('customAutomationsJob', () => {
     expect(fastMocks.telegramPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: 'telegram-chat-1',
+        text: 'Flaky tests failed: queue down',
+      }),
+    );
+  });
+
+  it('reports a Telegram DM startup failure inside its managed topic', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        target: {
+          provider: 'telegram',
+          targetKind: 'telegram_user',
+          externalRef: 'user-1',
+        },
+      } as never,
+    ]);
+    vi.mocked(findUserDirectMessageDestination).mockResolvedValue({
+      channelId: 'telegram-dm-1',
+    });
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([
+      'telegram',
+    ]);
+    fastMocks.enqueueParentEvent.mockRejectedValueOnce(new Error('queue down'));
+
+    const result = await customAutomationsJob();
+
+    expect(result.errors).toEqual(['Flaky tests: queue down']);
+    expect(fastMocks.telegramPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'telegram-dm-1',
+        threadId: 'telegram-topic-1',
         text: 'Flaky tests failed: queue down',
       }),
     );

@@ -47,6 +47,7 @@ import {
   type AutomationRunOpts,
 } from './types';
 import { SlackNotifier } from '@roomote/slack';
+import { buildCommunicationTaskThreadName } from '@roomote/communication/task-thread-title';
 
 import { findUserDirectMessageDestination } from '../lib/user-direct-message';
 import { createAgentMailCommunicationProviderFromRuntimeCredentials } from '../lib/agentmail-communication';
@@ -363,12 +364,23 @@ async function buildFastAutomationConversation(params: {
     if (!provider) {
       throw new Error('Telegram is not connected.');
     }
+    const topic =
+      target?.targetKind === 'telegram_user'
+        ? await provider.createForumTopic({
+            channelId: destination.channelId,
+            name: buildCommunicationTaskThreadName(automation.name),
+          })
+        : null;
     return {
+      ...(topic ? { rootMessageId: topic.messageThreadId } : {}),
       conversation: {
         surface: 'telegram',
         workspaceId: destination.channelId,
         conversationId: eventId,
-        replyTarget: { channelId: destination.channelId },
+        replyTarget: {
+          channelId: destination.channelId,
+          ...(topic ? { threadId: topic.messageThreadId } : {}),
+        },
       },
     };
   }
@@ -509,6 +521,9 @@ async function reportFastAutomationStartupFailure(params: {
         await createTelegramCommunicationProviderFromRuntimeCredentials();
       await provider?.postMessage({
         channelId: conversation.replyTarget.channelId,
+        ...(conversation.replyTarget.threadId
+          ? { threadId: conversation.replyTarget.threadId }
+          : {}),
         text: message,
         textFormat: 'markdown',
       });
