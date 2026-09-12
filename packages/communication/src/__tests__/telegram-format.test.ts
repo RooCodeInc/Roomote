@@ -191,6 +191,27 @@ describe('chunkTelegramMarkdown', () => {
     }
   });
 
+  it.each([
+    ['tilde', '~~~~ts', '~~~~'],
+    ['long backtick', '````ts', '````'],
+  ])('closes and reopens oversized %s fences', (_name, opening, closing) => {
+    const codeLines = Array.from(
+      { length: 8 },
+      (_, index) => `code line ${index} ${'y'.repeat(20)}`,
+    );
+    const chunks = chunkTelegramMarkdown(
+      [opening, ...codeLines, closing].join('\n'),
+      120,
+    );
+
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.startsWith(opening)).toBe(true);
+      expect(chunk.endsWith(closing)).toBe(true);
+      expect(chunk.length).toBeLessThanOrEqual(120);
+    }
+  });
+
   it('hard-splits single lines longer than the limit', () => {
     const chunks = chunkTelegramMarkdown('z'.repeat(500), 100);
 

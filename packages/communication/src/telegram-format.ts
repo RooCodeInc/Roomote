@@ -9,6 +9,12 @@
 export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
 export const TELEGRAM_MAX_RICH_MESSAGE_LENGTH = 32768;
 
+type MarkdownCodeFence = {
+  marker: string;
+  length: number;
+  openingLine: string;
+};
+
 /**
  * Chunk raw markdown before HTML conversion so tag pairs never straddle a
  * message boundary. Keep enough headroom for the HTML tags added later.
@@ -286,14 +292,16 @@ export function chunkTelegramMarkdown(
   }
 
   const rawChunks = chunkTelegramText(markdown, maxLength - 16);
-  let openFence: string | null = null;
+  let openFence: MarkdownCodeFence | null = null;
 
   return rawChunks.map((rawChunk) => {
-    const reopenFence = openFence;
+    const reopenFence = openFence?.openingLine;
 
     for (const line of rawChunk.split('\n')) {
-      if (/^```/.test(line)) {
-        openFence = openFence ? null : line;
+      if (openFence) {
+        if (isMarkdownCodeFenceClosing(line, openFence)) openFence = null;
+      } else {
+        openFence = parseMarkdownCodeFenceOpening(line);
       }
     }
 
@@ -302,7 +310,7 @@ export function chunkTelegramMarkdown(
       : rawChunk;
 
     return openFence
-      ? `${renderedChunk}${renderedChunk.endsWith('\n') ? '' : '\n'}\`\`\``
+      ? `${renderedChunk}${renderedChunk.endsWith('\n') ? '' : '\n'}${openFence.marker.repeat(openFence.length)}`
       : renderedChunk;
   });
 }
@@ -408,25 +416,33 @@ type TelegramRichMessageChunk = {
   richMessage: TelegramInputRichMessage;
 };
 
+function parseMarkdownCodeFenceOpening(line: string): MarkdownCodeFence | null {
+  const match = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
+  const marker = match?.[1];
+  if (!marker || (marker[0] === '`' && match[2]?.includes('`'))) return null;
+  return {
+    marker: marker[0]!,
+    length: marker.length,
+    openingLine: line,
+  };
+}
+
+function isMarkdownCodeFenceClosing(
+  line: string,
+  openFence: MarkdownCodeFence,
+): boolean {
+  const marker = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(line)?.[1];
+  return marker?.[0] === openFence.marker && marker.length >= openFence.length;
+}
+
 function closeOpenMarkdownCodeFence(markdown: string): string {
-  let openFence: { marker: string; length: number } | null = null;
+  let openFence: MarkdownCodeFence | null = null;
   for (const line of markdown.split('\n')) {
     if (openFence) {
-      const closingFence = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(line)?.[1];
-      if (
-        closingFence?.[0] === openFence.marker &&
-        closingFence.length >= openFence.length
-      ) {
-        openFence = null;
-      }
+      if (isMarkdownCodeFenceClosing(line, openFence)) openFence = null;
       continue;
     }
-
-    const openingFence = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
-    const marker = openingFence?.[1];
-    if (!marker || (marker[0] === '`' && openingFence[2]?.includes('`')))
-      continue;
-    openFence = { marker: marker[0]!, length: marker.length };
+    openFence = parseMarkdownCodeFenceOpening(line);
   }
   return openFence
     ? `${markdown}${markdown.endsWith('\n') ? '' : '\n'}${openFence.marker.repeat(openFence.length)}`
