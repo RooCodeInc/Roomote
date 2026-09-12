@@ -1,14 +1,18 @@
 import {
   appendAttachmentTextsToPromptText,
+  isRoomoteImageAttachment,
   isRoomoteTextExtractableAttachment,
 } from '@roomote/cloud-agents';
 import {
   AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES,
+  describeVideoAttachment,
   extractPromptTextAttachments,
   formatAudioAttachmentWarning,
   formatAudioTranscriptionResult,
+  isVideoAgentSupportedMimeType,
   resolveAudioTranscriptionMimeType,
   transcribeAudioAttachment,
+  VIDEO_AGENT_MAX_VIDEO_SIZE_BYTES,
 } from '@roomote/cloud-agents/server';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import type { TelegramMessage } from '@roomote/communication/telegram-update';
@@ -63,27 +67,65 @@ export async function attachTelegramMediaToQueuedMessage(input: {
     }
 
     const document = input.message.document;
-    if (
+    const documentMimeType = document?.mime_type?.trim().toLowerCase();
+    const documentIsImage = Boolean(
+      document &&
+      isRoomoteImageAttachment({
+        filename: document.file_name,
+        mimeType: document.mime_type,
+      }),
+    );
+    const documentIsText = Boolean(
       document &&
       isRoomoteTextExtractableAttachment({
         filename: document.file_name,
         mimeType: document.mime_type,
-      })
-    ) {
+      }),
+    );
+    const documentIsVideo = Boolean(
+      documentMimeType && isVideoAgentSupportedMimeType(documentMimeType),
+    );
+    if (document && (documentIsImage || documentIsText || documentIsVideo)) {
       const downloaded = await provider.downloadFile(
         document.file_id,
-        MAX_DOCUMENT_BYTES,
+        documentIsImage
+          ? MAX_IMAGE_BYTES
+          : documentIsVideo
+            ? VIDEO_AGENT_MAX_VIDEO_SIZE_BYTES
+            : MAX_DOCUMENT_BYTES,
       );
-      const extracted = await extractPromptTextAttachments([
-        {
-          filename: document.file_name ?? downloaded.filePath,
-          mimeType: document.mime_type ?? downloaded.contentType ?? undefined,
-          bytes: downloaded.bytes,
-        },
-      ]);
-      attachmentTexts.push(...extracted.attachmentTexts);
-      for (const warning of extracted.warnings) {
-        console.warn(`[telegram] Attachment extraction warning: ${warning}`);
+      if (documentIsImage) {
+        const downloadedMimeType = downloaded.contentType?.split(';')[0];
+        const mimeType = downloadedMimeType?.startsWith('image/')
+          ? downloadedMimeType
+          : (documentMimeType ?? 'image/png');
+        images.push(
+          `data:${mimeType};base64,${Buffer.from(downloaded.bytes).toString('base64')}`,
+        );
+      } else if (documentIsVideo && documentMimeType) {
+        const description = await describeVideoAttachment({
+          videoBytes: Buffer.from(downloaded.bytes),
+          mimeType: documentMimeType,
+          userId: input.queuedMessage.userId,
+          userTextContext: input.queuedMessage.text,
+        });
+        if (description) {
+          attachmentTexts.push(
+            `Video attachment description${document.file_name ? `: ${document.file_name}` : ''}\n${description}`,
+          );
+        }
+      } else {
+        const extracted = await extractPromptTextAttachments([
+          {
+            filename: document.file_name ?? downloaded.filePath,
+            mimeType: document.mime_type ?? downloaded.contentType ?? undefined,
+            bytes: downloaded.bytes,
+          },
+        ]);
+        attachmentTexts.push(...extracted.attachmentTexts);
+        for (const warning of extracted.warnings) {
+          console.warn(`[telegram] Attachment extraction warning: ${warning}`);
+        }
       }
     }
   } catch (error) {
@@ -149,5 +191,6 @@ export async function attachTelegramMediaToQueuedMessage(input: {
       attachmentTexts,
     }),
     ...(images.length ? { images } : {}),
+    ...(attachmentTexts.length ? { attachmentTexts } : {}),
   };
 }

@@ -629,6 +629,9 @@ telegram.post('/', async (c) => {
         ? { agentContext: fastMessage.agentContext }
         : {}),
       ...(fastMessage.images ? { images: fastMessage.images } : {}),
+      ...(fastMessage.attachmentTexts
+        ? { attachmentTexts: fastMessage.attachmentTexts }
+        : {}),
     });
     if (!continued) {
       apiLogger.warn(
@@ -996,6 +999,9 @@ telegram.post('/', async (c) => {
       ? { agentContext: queuedMessage.agentContext }
       : {}),
     ...(queuedMessage.images ? { images: queuedMessage.images } : {}),
+    ...(queuedMessage.attachmentTexts
+      ? { attachmentTexts: queuedMessage.attachmentTexts }
+      : {}),
   })
     .then((continued) => {
       if (!continued) {
