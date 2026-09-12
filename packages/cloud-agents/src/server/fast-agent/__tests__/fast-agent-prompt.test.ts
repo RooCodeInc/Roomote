@@ -841,7 +841,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'post one brief consolidated factual status for the Session when either inspection finds a genuinely notable new development',
     );
     expect(prompt).toContain(
-      'or the user has received no useful user-visible work update in this conversation for roughly 10 minutes',
+      'or the user has received no useful user-visible work update during the current automatic-check interval',
     );
     expect(prompt).toContain(
       'Important news is immediate and has no minimum wait',
@@ -856,13 +856,13 @@ describe('buildFastAgentSystemPrompt', () => {
       'When neither reporting condition is met, call "ignore_event" after ensuring the next check',
     );
     expect(prompt).toContain(
-      'ensure exactly one equivalent next one-shot check exists for "in 10m"',
+      'ensure exactly one equivalent next one-shot check exists by creating it with the stable nominal schedule "in 10m"',
     );
     expect(prompt).toContain(
-      'latest persisted call start/end marker at wake time, not the originating turn',
+      'Never infer voice activity from the originating turn or choose the next wakeup delay yourself',
     );
     expect(prompt).toContain(
-      'cancel an otherwise equivalent own-task check with the wrong cadence',
+      'the server resolves current persisted call state when scheduling',
     );
     expect(prompt).toContain('passing "internal": true');
     expect(prompt).toContain('If no task remains running, do not rearm');
@@ -881,7 +881,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('automatic monitoring must never reactivate it');
     expect(prompt).toContain(
-      'report notable new developments immediately or one factual consolidated status after roughly 10 minutes without a useful visible work update',
+      'report notable new developments immediately or one factual consolidated status when there has been no useful visible work update during the current automatic-check interval',
     );
     expect(prompt).toContain(
       'otherwise stay silent while still rearming if work runs',
@@ -899,22 +899,22 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('uses the same concise follow-through contract at the voice cadence', () => {
+  it('keeps one cache-stable follow-through contract for voice and text cadence', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       turnSource: 'platform_event',
       platformEventKind: 'scheduled_wakeup',
-      voiceMode: true,
     });
 
     expect(prompt).toContain(
-      'user-visible work update in this conversation for roughly 1 minute',
+      'user-visible work update during the current automatic-check interval',
+    );
+    expect(prompt).toContain('stable nominal schedule "in 10m"');
+    expect(prompt).toContain(
+      'the server replaces that nominal delay with "in 1m" while voice is currently active and otherwise keeps "in 10m"',
     );
     expect(prompt).toContain(
-      'ensure exactly one equivalent next one-shot check exists for "in 1m"',
-    );
-    expect(prompt).toContain(
-      'Keep routine voice updates especially concise, applying these same reporting and repetition rules rather than inventing another suppression policy',
+      'Keep routine spoken updates especially concise, applying these same reporting and repetition rules rather than inventing another suppression policy',
     );
     expect(prompt).toContain(
       'do not narrate routine logs, invent progress, repeat an already reported development',
