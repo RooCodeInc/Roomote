@@ -120,7 +120,11 @@ import {
 import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 import { createFastAgentTelegramActivity } from './fast-agent-telegram-activity';
 import { findTeamsConversationRoute } from '../automations/destination';
-import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
+import {
+  isFastAgentManagedTelegramTopic,
+  recordFastAgentConversationMessageBestEffort,
+} from './fast-agent-provider-message';
+import { addFastAgentTelegramTopicTitleSync } from './fast-agent-telegram-title-sync';
 import {
   createDiscordFastReplyReplacer,
   createSlackFastReplyReplacer,
@@ -1868,10 +1872,30 @@ async function createTelegramFastAgentParentTurn(
   }
   const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
   const conversation = session.conversation;
-  const activity = createFastAgentTelegramActivity({
+  let activity = createFastAgentTelegramActivity({
     provider,
     replyTarget: conversation.replyTarget,
   });
+  const threadId = conversation.replyTarget.threadId;
+  if (
+    threadId &&
+    (await isFastAgentManagedTelegramTopic({
+      sessionId: session.id,
+      workspaceId: conversation.workspaceId,
+      channelId: conversation.replyTarget.channelId,
+      threadId,
+    }))
+  ) {
+    activity = addFastAgentTelegramTopicTitleSync({
+      activity,
+      provider,
+      sessionId: session.id,
+      channelId: conversation.replyTarget.channelId,
+      threadId,
+      resolveSession: () =>
+        fastAgentConversationRepository.findById({ id: session.id }),
+    });
+  }
   const replaceReply = createTelegramFastReplyReplacer({
     provider,
     conversation,

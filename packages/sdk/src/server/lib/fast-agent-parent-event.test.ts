@@ -36,6 +36,8 @@ const mocks = vi.hoisted(() => ({
   discordTyping: vi.fn(),
   telegramTyping: vi.fn(),
   telegramEditMessage: vi.fn(),
+  telegramEditForumTopic: vi.fn(),
+  telegramResolveForumTopicIcon: vi.fn(),
   createDiscordThread: vi.fn(),
   createTeamsProvider: vi.fn(),
   teamsPostMessage: vi.fn(),
@@ -46,6 +48,7 @@ const mocks = vi.hoisted(() => ({
   agentMailPostMessage: vi.fn(),
   findTeamsConversationRoute: vi.fn(),
   recordProviderMessage: vi.fn(),
+  isManagedTelegramTopic: vi.fn(),
   enqueueTask: vi.fn(),
   getTaskUrl: vi.fn(),
   setPendingPrReviewAction: vi.fn(),
@@ -274,6 +277,7 @@ vi.mock('../automations/destination', () => ({
 
 vi.mock('./fast-agent-provider-message', () => ({
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
+  isFastAgentManagedTelegramTopic: mocks.isManagedTelegramTopic,
 }));
 
 vi.mock('../routers/mcp-connections', () => ({
@@ -454,7 +458,10 @@ describe('deliverFastAgentParentEvent', () => {
       sendChatAction: mocks.telegramTyping,
       sendMessageDraft: mocks.telegramTyping,
       editMessageText: mocks.telegramEditMessage,
+      editForumTopic: mocks.telegramEditForumTopic,
+      resolveForumTopicIconCustomEmojiId: mocks.telegramResolveForumTopicIcon,
     });
+    mocks.isManagedTelegramTopic.mockResolvedValue(false);
     mocks.agentMailPostMessage.mockResolvedValue({
       provider: 'agentmail',
       channelId: 'roomote@agentmail.test',
@@ -2168,6 +2175,57 @@ describe('deliverFastAgentParentEvent', () => {
       });
     },
   );
+
+  it('syncs a generated automation title to its managed Telegram DM topic', async () => {
+    const telegramParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-dm-1',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: {
+          channelId: 'telegram-dm-1',
+          threadId: 'telegram-topic-1',
+        },
+      },
+    };
+    mocks.isManagedTelegramTopic.mockResolvedValueOnce(true);
+    mocks.findSession.mockResolvedValue({
+      id: telegramParent.sessionId,
+      userId: 'u1',
+      title: 'Generated automation title',
+      conversation: telegramParent.conversation,
+      messages: [],
+    });
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+      adapter.activity.updateTitle('Generated automation title');
+      await adapter.activity.dispose();
+    });
+
+    await deliverFastAgentParentEvent({
+      parent: telegramParent,
+      event: {
+        type: 'automation_triggered',
+        eventId: 'automation-1:occurrence-1',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find actionable regressions.',
+        trigger: 'schedule',
+      },
+    });
+
+    expect(mocks.isManagedTelegramTopic).toHaveBeenCalledWith({
+      sessionId: telegramParent.sessionId,
+      workspaceId: 'telegram-dm-1',
+      channelId: 'telegram-dm-1',
+      threadId: 'telegram-topic-1',
+    });
+    expect(mocks.telegramEditForumTopic).toHaveBeenCalledWith({
+      channelId: 'telegram-dm-1',
+      threadId: 'telegram-topic-1',
+      name: 'Generated automation title',
+    });
+  });
 
   it.each(['new report', 'existing report', 'task settled'] as const)(
     'reasserts Discord typing after %s and its suggestion messages',
