@@ -885,6 +885,11 @@ describe('Telegram webhook handler', () => {
 
   it('passes Telegram image documents to a new Fast session as images', async () => {
     mockTelegramLinkedSender('mapped-user-1');
+    downloadFileMock.mockResolvedValueOnce({
+      bytes: new Uint8Array([1, 2, 3]),
+      filePath: 'documents/failure.png',
+      contentType: 'application/octet-stream',
+    });
 
     const response = await postTelegramUpdate(
       createTelegramUpdate({
@@ -895,7 +900,7 @@ describe('Telegram webhook handler', () => {
             file_id: 'screenshot-file',
             file_unique_id: 'screenshot-1',
             file_name: 'failure.png',
-            mime_type: 'image/png',
+            mime_type: 'application/octet-stream',
           },
         },
       }),
@@ -908,7 +913,7 @@ describe('Telegram webhook handler', () => {
     expect(continueFastReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({
         question: 'Inspect the uncompressed screenshot',
-        images: ['data:image/jpeg;base64,AQID'],
+        images: ['data:image/png;base64,AQID'],
       }),
     );
   });

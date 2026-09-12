@@ -98,7 +98,9 @@ export async function attachTelegramMediaToQueuedMessage(input: {
         const downloadedMimeType = downloaded.contentType?.split(';')[0];
         const mimeType = downloadedMimeType?.startsWith('image/')
           ? downloadedMimeType
-          : (documentMimeType ?? 'image/png');
+          : documentMimeType?.startsWith('image/')
+            ? documentMimeType
+            : 'image/png';
         images.push(
           `data:${mimeType};base64,${Buffer.from(downloaded.bytes).toString('base64')}`,
         );
