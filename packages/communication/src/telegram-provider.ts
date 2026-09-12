@@ -10,7 +10,10 @@ import type {
 import { UnsupportedCommunicationOperationError } from './provider';
 import { readBoundedResponseBody } from './bounded-response-body';
 import { getTelegramApiBaseUrl } from './telegram-api-base-url';
-import { planTelegramRichMessages } from './telegram-format';
+import {
+  planTelegramRichMessages,
+  type TelegramInputRichMessage,
+} from './telegram-format';
 
 export type TelegramCommunicationProviderOptions = {
   botToken: string;
@@ -63,8 +66,6 @@ type TelegramInlineKeyboardMarkup = {
     Array<{ text: string; callback_data?: string; url?: string }>
   >;
 };
-
-type TelegramRichMessage = { html: string };
 
 function buildTelegramReplyMarkup(
   buttons: CommunicationMessageButton[][] | undefined,
@@ -144,7 +145,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     for (const [index, chunk] of chunks.entries()) {
       const result = await this.sendRichMessageChunk({
         chatId: input.channelId,
-        richMessage: { html: chunk.html },
+        richMessage: chunk.richMessage,
         threadId,
         // Reply threading only anchors the first message of a long reply;
         // buttons attach to the last message so they sit under the content.
@@ -237,7 +238,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     });
     return this.sendRichMessageChunk({
       chatId: params.chatId,
-      richMessage: { html: chunk!.html },
+      richMessage: chunk!.richMessage,
       threadId: params.threadId,
       replyToMessageId: params.replyToMessageId,
       replyMarkup: params.replyMarkup,
@@ -246,7 +247,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
 
   private async sendRichMessageChunk(params: {
     chatId: string;
-    richMessage: TelegramRichMessage;
+    richMessage: TelegramInputRichMessage;
     threadId?: number;
     replyToMessageId?: number;
     replyMarkup?: TelegramInlineKeyboardMarkup;
@@ -324,7 +325,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
         body: JSON.stringify({
           chat_id: input.channelId,
           message_id: Number.parseInt(input.messageId, 10),
-          rich_message: { html: chunks[0]!.html },
+          rich_message: chunks[0]!.richMessage,
           link_preview_options: { is_disabled: true },
           reply_markup: buildTelegramReplyMarkup(input.buttons) ?? {
             inline_keyboard: [],
@@ -413,7 +414,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     await this.callBotApi('sendRichMessageDraft', {
       chat_id: chatId,
       draft_id: input.draftId,
-      rich_message: { html: chunk!.html },
+      rich_message: chunk!.richMessage,
       ...(threadId ? { message_thread_id: threadId } : {}),
     });
   }

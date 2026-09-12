@@ -269,7 +269,33 @@ describe('chunkTelegramMarkdownAsHtml', () => {
 describe('planTelegramRichMessages', () => {
   it('keeps rendered messages above 4096 together below the rich limit', () => {
     const text = 'x'.repeat(10_000);
-    expect(planTelegramRichMessages({ text })).toEqual([{ text, html: text }]);
+    expect(planTelegramRichMessages({ text })).toEqual([
+      { text, richMessage: { html: text } },
+    ]);
+  });
+
+  it('passes broad Markdown features through to Telegram unchanged', () => {
+    const text = [
+      '# Heading',
+      '',
+      '- [x] **Nested _formatting_**',
+      '',
+      '| Feature | Status |',
+      '| --- | --- |',
+      '| Tables | Supported |',
+      '',
+      '> Quotation',
+      '',
+      'Formula: $x^2$',
+      '',
+      'Footnote[^1]',
+      '',
+      '[^1]: Native Rich Markdown',
+    ].join('\n');
+
+    expect(planTelegramRichMessages({ text, textFormat: 'markdown' })).toEqual([
+      { text, richMessage: { markdown: text } },
+    ]);
   });
 
   it('splits above the rich limit and reserves footer overhead', () => {
@@ -284,15 +310,70 @@ describe('planTelegramRichMessages', () => {
     expect(chunks.map((chunk) => chunk.text).join('')).toBe(text);
     expect(
       chunks.every(
-        (chunk) => chunk.html.length <= TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+        (chunk) =>
+          chunk.richMessage.markdown!.length <=
+          TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
       ),
     ).toBe(true);
     expect(
-      chunks.slice(0, -1).every((chunk) => !chunk.html.includes('<footer>')),
+      chunks
+        .slice(0, -1)
+        .every((chunk) => !chunk.richMessage.markdown!.includes('<footer>')),
     ).toBe(true);
-    expect(chunks.at(-1)?.html).toContain(
+    expect(chunks.at(-1)?.richMessage.markdown).toContain(
       '<footer><a href="https://roomote.test">Open</a></footer>',
     );
+  });
+
+  it('counts the complete Markdown and HTML footer source at the exact limit', () => {
+    const footerText = '[Open](https://roomote.test/?a=1&b=2)';
+    const footerSuffix =
+      '\n\n<footer><a href="https://roomote.test/?a=1&amp;b=2">Open</a></footer>';
+    const text = 'x'.repeat(
+      TELEGRAM_MAX_RICH_MESSAGE_LENGTH - footerSuffix.length,
+    );
+
+    const chunks = planTelegramRichMessages({
+      text,
+      footerText,
+      textFormat: 'markdown',
+    });
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toEqual({
+      text,
+      richMessage: { markdown: `${text}${footerSuffix}` },
+    });
+    expect(chunks[0]!.richMessage.markdown).toHaveLength(
+      TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+    );
+  });
+
+  it('splits Markdown one character over the body budget', () => {
+    const footerText = '[Open](https://roomote.test)';
+    const footerSuffix =
+      '\n\n<footer><a href="https://roomote.test">Open</a></footer>';
+    const text = 'x'.repeat(
+      TELEGRAM_MAX_RICH_MESSAGE_LENGTH - footerSuffix.length + 1,
+    );
+
+    const chunks = planTelegramRichMessages({
+      text,
+      footerText,
+      textFormat: 'markdown',
+    });
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks.map((chunk) => chunk.text).join('')).toBe(text);
+    expect(
+      chunks.every(
+        (chunk) =>
+          chunk.richMessage.markdown!.length <=
+          TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+      ),
+    ).toBe(true);
+    expect(chunks[0]!.richMessage.markdown).not.toContain('<footer>');
+    expect(chunks[1]!.richMessage.markdown).toContain('<footer>');
   });
 
   it('accounts for escaping expansion when splitting plain text', () => {
@@ -303,14 +384,33 @@ describe('planTelegramRichMessages', () => {
     expect(chunks.map((chunk) => chunk.text).join('')).toBe(text);
     expect(
       chunks.every(
-        (chunk) => chunk.html.length <= TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+        (chunk) =>
+          chunk.richMessage.html!.length <= TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
       ),
     ).toBe(true);
   });
 
   it('preserves plain-text newlines with explicit rich HTML breaks', () => {
     expect(planTelegramRichMessages({ text: 'first\n\n- second' })).toEqual([
-      { text: 'first\n\n- second', html: 'first<br><br>- second' },
+      {
+        text: 'first\n\n- second',
+        richMessage: { html: 'first<br><br>- second' },
+      },
+    ]);
+  });
+
+  it('keeps explicit provider HTML authoritative for Markdown source text', () => {
+    expect(
+      planTelegramRichMessages({
+        text: '**Working**',
+        htmlText: '<tg-thinking>Working</tg-thinking>',
+        textFormat: 'markdown',
+      }),
+    ).toEqual([
+      {
+        text: '**Working**',
+        richMessage: { html: '<tg-thinking>Working</tg-thinking>' },
+      },
     ]);
   });
 });

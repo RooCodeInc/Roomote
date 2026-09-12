@@ -186,7 +186,7 @@ describe('MockTelegramServer', () => {
 
     for (const message of botMessages) {
       expect(
-        String(message.rich_message?.html ?? '').length,
+        String(message.rich_message?.markdown ?? '').length,
       ).toBeLessThanOrEqual(TELEGRAM_MAX_RICH_MESSAGE_LENGTH);
     }
 
@@ -226,7 +226,7 @@ describe('MockTelegramServer', () => {
     expect(parsed.description).toContain('message is too long');
   });
 
-  it('stores markdown formatting as rich HTML', async () => {
+  it('stores Markdown formatting as native Rich Markdown', async () => {
     const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());
 
@@ -241,7 +241,7 @@ describe('MockTelegramServer', () => {
       (m) => m.from.is_bot,
     );
     expect(botMessage?.rich_message).toEqual({
-      html: 'Some <b>bold</b> update',
+      markdown: 'Some **bold** update',
     });
   });
 
@@ -369,12 +369,14 @@ describe('MockTelegramServer', () => {
       channelId: '111000111',
       text: 'Initial reply',
       footerText: 'Reply anytime · [Open in Roomote](https://roomote.test/s/1)',
+      textFormat: 'markdown',
     });
     await provider.editMessageText({
       channelId: '111000111',
       messageId: posted.messageId,
       text: 'Updated reply',
       footerText: 'Reply anytime · [Open in Roomote](https://roomote.test/s/1)',
+      textFormat: 'markdown',
     });
 
     const message = (server.getState().messages ?? []).find(
@@ -382,7 +384,7 @@ describe('MockTelegramServer', () => {
     );
     expect(message?.text).toBeUndefined();
     expect(message?.rich_message).toEqual({
-      html: [
+      markdown: [
         'Updated reply',
         '',
         '<footer>Reply anytime · <a href="https://roomote.test/s/1">Open in Roomote</a></footer>',
@@ -433,6 +435,27 @@ describe('MockTelegramServer', () => {
     });
   });
 
+  it('rejects rich messages with more than one formatting representation', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    const response = await fetch(`${baseUrl}/bot${BOT_TOKEN}/sendRichMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: '111000111',
+        rich_message: { markdown: '**hello**', html: '<b>hello</b>' },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      description:
+        'Bad Request: rich message must use exactly one formatting field',
+    });
+  });
+
   it('stores and replaces one private rich draft by draft id', async () => {
     const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());
@@ -458,7 +481,7 @@ describe('MockTelegramServer', () => {
         chat_id: '111000111',
         message_thread_id: 77,
         draft_id: 42,
-        rich_message: { html: 'Complete <b>preview</b>' },
+        rich_message: { markdown: 'Complete **preview**' },
       },
     ]);
     expect(

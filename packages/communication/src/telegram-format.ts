@@ -399,9 +399,13 @@ function chunkTelegramPlainTextAsHtml(
   );
 }
 
+export type TelegramInputRichMessage =
+  | { markdown: string; html?: never }
+  | { html: string; markdown?: never };
+
 type TelegramRichMessageChunk = {
   text: string;
-  html: string;
+  richMessage: TelegramInputRichMessage;
 };
 
 export function planTelegramRichMessages(input: {
@@ -428,18 +432,36 @@ export function planTelegramRichMessages(input: {
     return [
       {
         text: input.text,
-        html: `${input.htmlText}${footerSuffix}`,
+        richMessage: { html: `${input.htmlText}${footerSuffix}` },
       },
     ];
   }
 
-  const chunks =
-    input.textFormat === 'markdown'
-      ? chunkTelegramMarkdownAsHtml(input.text, bodyLimit)
-      : chunkTelegramPlainTextAsHtml(input.text, bodyLimit);
+  if (input.textFormat === 'markdown') {
+    const chunks =
+      input.text.length <= bodyLimit
+        ? [input.text]
+        : bodyLimit >= 18
+          ? chunkTelegramMarkdown(
+              input.text,
+              Math.max(18, Math.floor(bodyLimit * 0.85)),
+            )
+          : chunkTelegramText(input.text, bodyLimit);
+    const lastIndex = chunks.length - 1;
+    return chunks.map((text, index) => ({
+      text,
+      richMessage: {
+        markdown: `${text}${index === lastIndex ? footerSuffix : ''}`,
+      },
+    }));
+  }
+
+  const chunks = chunkTelegramPlainTextAsHtml(input.text, bodyLimit);
   const lastIndex = chunks.length - 1;
   return chunks.map((chunk, index) => ({
     text: chunk.markdown,
-    html: `${chunk.html}${index === lastIndex ? footerSuffix : ''}`,
+    richMessage: {
+      html: `${chunk.html}${index === lastIndex ? footerSuffix : ''}`,
+    },
   }));
 }

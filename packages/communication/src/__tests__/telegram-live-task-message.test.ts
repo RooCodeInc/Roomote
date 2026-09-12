@@ -87,10 +87,10 @@ describe('buildTelegramLiveTaskMessage', () => {
     });
 
     expect(chunks).toHaveLength(1);
-    expect(chunks[0]!.html.length).toBeLessThanOrEqual(
+    expect(chunks[0]!.richMessage.html?.length).toBeLessThanOrEqual(
       TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
     );
-    expect(chunks[0]!.html).toContain('<footer>');
+    expect(chunks[0]!.richMessage.html).toContain('<footer>');
   });
 
   it('matches the checked-in compact text demo fixture', () => {
