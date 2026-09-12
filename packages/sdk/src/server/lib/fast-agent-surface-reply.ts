@@ -172,6 +172,7 @@ type FastAgentSurfaceReplyParams = {
   currentMessageId: string;
   replyToMessageId?: string;
   images?: string[];
+  attachmentTexts?: string[];
   /**
    * Tasks the Session may steer on this turn beyond the ones it delegated,
    * for example the task that already owns the pull request a comment is on.
@@ -787,6 +788,9 @@ function buildSurfaceHumanFollowUpEvent(
     userId: params.userId,
     question: params.question,
     ...(params.images?.length ? { images: params.images } : {}),
+    ...(params.attachmentTexts?.length
+      ? { attachmentTexts: params.attachmentTexts }
+      : {}),
     ...(params.senderDisplayName
       ? { senderDisplayName: params.senderDisplayName }
       : {}),
@@ -948,6 +952,7 @@ async function runFastAgentSurfaceReplyWithLock(
     return answerFastAgentQuestion({
       question: params.question,
       images: params.images,
+      attachmentTexts: params.attachmentTexts,
       ...(params.agentContext
         ? { currentMessageAgentContext: params.agentContext }
         : {}),

@@ -951,6 +951,7 @@ describe('continueFastAgentSurfaceReply admission hooks', () => {
         userId: user.id,
         senderDisplayName: 'Matt',
         question: 'Follow up',
+        attachmentTexts: ['Attachment: notes.txt\nUse the new requirement.'],
         currentMessageId: 'message-1',
         onAccepted,
         onRejected,
@@ -959,6 +960,13 @@ describe('continueFastAgentSurfaceReply admission hooks', () => {
 
     expect(onAccepted).toHaveBeenCalledWith(abort);
     expect(onRejected).not.toHaveBeenCalled();
+    expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          attachmentTexts: ['Attachment: notes.txt\nUse the new requirement.'],
+        }),
+      }),
+    );
   });
 
   it('admits a reaction turn durably with its input and resumes a still-pending row', async () => {

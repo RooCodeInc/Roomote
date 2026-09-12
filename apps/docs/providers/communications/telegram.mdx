@@ -141,10 +141,11 @@ Roomote keeps the footer on the latest reply current as delegated tasks start
 and finish (checking about every 30 seconds while work is running), and
 earlier replies drop their footer when a new reply posts.
 
-Photos are passed to Fast or the task as image input. Supported text documents
-are downloaded server-side and their extracted content is added to the request;
-voice and audio messages are transcribed when supported. The bot token is never
-included in the prompt or attachment URL.
+Photos and supported image documents are passed as image input. Supported text
+documents are downloaded server-side and their extracted content is added to the
+request; voice and audio messages are transcribed, and supported video documents
+are described. Fast can explicitly forward those current-message attachments to
+a task. The bot token is never included in the prompt or attachment URL.
 
 ## Local URL changes
 

@@ -8,11 +8,13 @@ const {
   taskRunsFindFirstMock,
   consumeLinkCodeMock,
   createForumTopicMock,
+  describeVideoAttachmentMock,
   downloadFileMock,
   restoreLinkCodeMock,
   editMessageReplyMarkupMock,
   editMessageTextMock,
   enqueueTaskMock,
+  extractPromptTextAttachmentsMock,
   environmentsFindFirstMock,
   envMock,
   getAvailableEnvironmentsMock,
@@ -43,6 +45,7 @@ const {
   getFastSessionMock,
   isFastProviderMessageMock,
   recordFastConversationMessageMock,
+  transcribeAudioAttachmentMock,
   claimPendingPrReviewActionMock,
   completePendingPrReviewActionDispatchMock,
   dispatchPrReviewFollowUpMock,
@@ -55,11 +58,13 @@ const {
   taskRunsFindFirstMock: vi.fn(),
   consumeLinkCodeMock: vi.fn(),
   createForumTopicMock: vi.fn(),
+  describeVideoAttachmentMock: vi.fn(),
   downloadFileMock: vi.fn(),
   restoreLinkCodeMock: vi.fn(),
   editMessageReplyMarkupMock: vi.fn(),
   editMessageTextMock: vi.fn(),
   enqueueTaskMock: vi.fn(),
+  extractPromptTextAttachmentsMock: vi.fn(),
   environmentsFindFirstMock: vi.fn(),
   getAvailableEnvironmentsMock: vi.fn(),
   getBotInfoMock: vi.fn(),
@@ -95,6 +100,7 @@ const {
   getFastSessionMock: vi.fn(),
   isFastProviderMessageMock: vi.fn(),
   recordFastConversationMessageMock: vi.fn(),
+  transcribeAudioAttachmentMock: vi.fn(),
   claimPendingPrReviewActionMock: vi.fn(),
   completePendingPrReviewActionDispatchMock: vi.fn(),
   dispatchPrReviewFollowUpMock: vi.fn(),
@@ -322,14 +328,31 @@ vi.mock('../../tasks/task-stop.js', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES: 20 * 1024 * 1024,
   buildFastAgentReactionExternalInputQuestion: vi.fn(
     (input: unknown) =>
       `<external_input>${JSON.stringify(input)}</external_input>`,
   ),
+  describeVideoAttachment: describeVideoAttachmentMock,
   enqueueTask: enqueueTaskMock,
+  extractPromptTextAttachments: extractPromptTextAttachmentsMock,
+  formatAudioAttachmentWarning: (filename: string, reason: string) =>
+    `[Audio attachment ${filename} ${reason}.]`,
+  formatAudioTranscriptionResult: (
+    filename: string,
+    result: { transcript?: string },
+  ) => `Audio attachment transcript: ${filename}\n${result.transcript ?? ''}`,
   getAvailableEnvironments: getAvailableEnvironmentsMock,
   getTaskUrl: getTaskUrlMock,
   getOrCreateFastAgentSession: getFastSessionMock,
+  isVideoAgentSupportedMimeType: (mimeType: string) =>
+    ['video/mp4', 'video/quicktime', 'video/webm', 'video/mpeg'].includes(
+      mimeType,
+    ),
+  resolveAudioTranscriptionMimeType: ({ mimeType }: { mimeType?: string }) =>
+    mimeType?.startsWith('audio/') ? mimeType : null,
+  transcribeAudioAttachment: transcribeAudioAttachmentMock,
+  VIDEO_AGENT_MAX_VIDEO_SIZE_BYTES: 20 * 1024 * 1024,
 }));
 
 import { telegram } from '../index';
@@ -405,6 +428,15 @@ describe('Telegram webhook handler', () => {
       bytes: new Uint8Array([1, 2, 3]),
       filePath: 'photos/example.jpg',
       contentType: 'image/jpeg',
+    });
+    describeVideoAttachmentMock.mockResolvedValue('The video shows an error.');
+    extractPromptTextAttachmentsMock.mockResolvedValue({
+      attachmentTexts: ['Attachment: notes.txt\nDeployment failed.'],
+      warnings: [],
+    });
+    transcribeAudioAttachmentMock.mockResolvedValue({
+      status: 'transcribed',
+      transcript: 'Run the focused tests.',
     });
     taskRunsFindFirstMock.mockReset();
     telegramMappingsFindFirstMock.mockReset();
@@ -934,6 +966,195 @@ describe('Telegram webhook handler', () => {
       }),
     );
     expect(enqueueTaskMock).not.toHaveBeenCalled();
+  });
+
+  it('passes Telegram image documents to a new Fast session as images', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    downloadFileMock.mockResolvedValueOnce({
+      bytes: new Uint8Array([1, 2, 3]),
+      filePath: 'documents/failure.png',
+      contentType: 'application/octet-stream',
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: undefined,
+          caption: 'Inspect the uncompressed screenshot',
+          document: {
+            file_id: 'screenshot-file',
+            file_unique_id: 'screenshot-1',
+            file_name: 'failure.png',
+            mime_type: 'application/octet-stream',
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Inspect the uncompressed screenshot',
+        images: ['data:image/png;base64,AQID'],
+      }),
+    );
+  });
+
+  it('passes extracted Telegram documents to a new Fast session', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    downloadFileMock.mockResolvedValueOnce({
+      bytes: new TextEncoder().encode('Deployment failed.'),
+      filePath: 'documents/notes.txt',
+      contentType: 'text/plain',
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: undefined,
+          caption: 'Diagnose this log',
+          document: {
+            file_id: 'document-file',
+            file_unique_id: 'document-1',
+            file_name: 'notes.txt',
+            mime_type: 'text/plain',
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question:
+          'Diagnose this log\n\nAttachment: notes.txt\nDeployment failed.',
+        attachmentTexts: ['Attachment: notes.txt\nDeployment failed.'],
+      }),
+    );
+  });
+
+  it.each([
+    [
+      'audio',
+      {
+        audio: {
+          file_id: 'audio-file',
+          file_unique_id: 'audio-1',
+          duration: 3,
+          file_name: 'request.mp3',
+          mime_type: 'audio/mpeg',
+        },
+      },
+    ],
+    [
+      'voice note',
+      {
+        voice: {
+          file_id: 'voice-file',
+          file_unique_id: 'voice-1',
+          duration: 3,
+          mime_type: 'audio/ogg',
+        },
+      },
+    ],
+  ])(
+    'passes transcribed Telegram %s to a new Fast session',
+    async (_, message) => {
+      mockTelegramLinkedSender('mapped-user-1');
+
+      const response = await postTelegramUpdate(
+        createTelegramUpdate({ message: { text: undefined, ...message } }),
+      );
+
+      await expect(response.json()).resolves.toMatchObject({
+        fastAnswered: true,
+        fastDefaulted: true,
+      });
+      expect(continueFastReplyMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attachmentTexts: [expect.stringContaining('Run the focused tests.')],
+        }),
+      );
+    },
+  );
+
+  it('passes bounded Telegram video descriptions to a new Fast session', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    downloadFileMock.mockResolvedValueOnce({
+      bytes: new Uint8Array([1, 2, 3]),
+      filePath: 'videos/repro.mp4',
+      contentType: 'video/mp4',
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: undefined,
+          caption: 'Review this recording',
+          document: {
+            file_id: 'video-file',
+            file_unique_id: 'video-1',
+            file_name: 'repro.mp4',
+            mime_type: 'video/mp4',
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
+    expect(downloadFileMock).toHaveBeenCalledWith(
+      'video-file',
+      20 * 1024 * 1024,
+    );
+    expect(continueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining('The video shows an error.'),
+        attachmentTexts: [
+          'Video attachment description: repro.mp4\nThe video shows an error.',
+        ],
+      }),
+    );
+  });
+
+  it('keeps unsupported Telegram documents out of new Fast attachment context', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: undefined,
+          caption: 'Use this file',
+          document: {
+            file_id: 'archive-file',
+            file_unique_id: 'archive-1',
+            file_name: 'bundle.zip',
+            mime_type: 'application/zip',
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
+    expect(downloadFileMock).not.toHaveBeenCalled();
+    expect(continueFastReplyMock).toHaveBeenCalledWith({
+      sessionId: 'fast-session-default',
+      userId: 'mapped-user-1',
+      senderDisplayName: 'Ada Lovelace',
+      question: 'Use this file',
+      currentMessageId: '456',
+    });
   });
 
   it('uses a user-scoped Fast session for a Telegram group topic mention', async () => {
