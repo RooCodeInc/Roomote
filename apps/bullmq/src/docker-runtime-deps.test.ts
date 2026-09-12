@@ -30,4 +30,16 @@ describe('BullMQ image runtime dependencies', () => {
       'cd /roomote/apps/bullmq && node -e "require.resolve(\'zod/package.json\')"',
     );
   });
+
+  it('verifies the JSDOM synchronous XHR worker reaches the final image', () => {
+    const runtimeStage = dockerfile
+      .split(/^FROM /mu)
+      .find((stage) =>
+        stage.startsWith('runtime-inference-base AS runtime-app'),
+      );
+
+    expect(runtimeStage).toContain(
+      'test -f /roomote/apps/bullmq/dist/xhr-sync-worker.js',
+    );
+  });
 });

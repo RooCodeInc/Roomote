@@ -433,6 +433,7 @@ COPY --from=build-preview-proxy /runtime-deps/node_modules ./apps/preview-proxy/
 COPY --from=github-cli /usr/bin/gh /usr/local/bin/gh
 RUN command -v git >/dev/null && command -v gh >/dev/null && \
   command -v opencode >/dev/null && \
+  test -f /roomote/apps/bullmq/dist/xhr-sync-worker.js && \
   cd /roomote/apps/bullmq && node -e "require.resolve('zod/package.json')" && \
   ls -d /roomote/node_modules/.pnpm/zod@*/node_modules/zod >/dev/null
 
