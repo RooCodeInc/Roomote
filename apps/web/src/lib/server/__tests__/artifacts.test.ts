@@ -9,6 +9,7 @@ import {
 import {
   getArtifactByPath,
   getArtifactBySessionPath,
+  getArtifactVersionsBySessionPath,
   validateArtifactPath,
   validateArtifactSize,
 } from '../artifacts';
@@ -94,6 +95,28 @@ describe.each(['task', 'session'] as const)(
     });
   },
 );
+
+describe('Session artifact helper authorization', () => {
+  it('rejects path and version reads without a human user', async () => {
+    const session = await sessionFactory.create();
+    const path = 'reports/private.pdf';
+    await db.insert(taskArtifacts).values({
+      sessionId: session.id,
+      path,
+      uploaded: true,
+      contentType: 'application/pdf',
+      size: 100,
+    });
+    const auth = { userId: null, isAdmin: false };
+
+    await expect(
+      getArtifactBySessionPath({ sessionId: session.id, path, auth }),
+    ).resolves.toBeNull();
+    await expect(
+      getArtifactVersionsBySessionPath({ sessionId: session.id, path, auth }),
+    ).resolves.toEqual([]);
+  });
+});
 
 describe('validateArtifactPath', () => {
   it('should accept valid paths', () => {
