@@ -11,24 +11,26 @@ type TelegramTopicTitleProvider = Pick<
   'editForumTopic' | 'resolveForumTopicIconCustomEmojiId'
 >;
 
-const DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS = ['💡', '💬', '📝'] as const;
-const TELEGRAM_TOPIC_ICON_EMOJIS: Record<TaskTitleCategory, readonly string[]> =
-  {
-    general: DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS,
-    security: ['🔒', ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS],
-    fix: ['🐞', '🛠', ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS],
-    test: ['✅', '🧪', ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS],
-    release: ['🚀', ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS],
-    docs: ['📚', ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS],
-    ui: ['🎨', ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS],
-    data: ['📊', ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS],
-    communication: ['💬', '💡', '📝'],
-  };
+const DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES = ['💡', '💬', '📝'] as const;
+const TELEGRAM_TOPIC_ICON_CANDIDATES_BY_CATEGORY: Record<
+  TaskTitleCategory,
+  readonly string[]
+> = {
+  general: DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES,
+  security: ['🔒', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  fix: ['🐞', '🛠', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  test: ['✅', '🧪', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  release: ['🚀', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  docs: ['📚', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  ui: ['🎨', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  data: ['📊', ...DEFAULT_TELEGRAM_TOPIC_ICON_CANDIDATES],
+  communication: ['💬', '💡', '📝'],
+};
 
 export function getTelegramTopicIconEmojiPreferences(
   category: TaskTitleCategory,
 ): readonly string[] {
-  return TELEGRAM_TOPIC_ICON_EMOJIS[category];
+  return TELEGRAM_TOPIC_ICON_CANDIDATES_BY_CATEGORY[category];
 }
 
 export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
