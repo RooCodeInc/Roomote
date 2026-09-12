@@ -351,14 +351,23 @@ export function resolveTaskMemoryRequest(
     return null;
   }
 
+  // Same precedence as the prompt the agent actually received
+  // (getInitialTaskPrompt): web and chat launches carry `description` or
+  // `text`; a Linear-launched task carries the triggering comment, else the
+  // issue body, else its title.
   const raw =
-    typeof payload.description === 'string'
-      ? payload.description
-      : typeof payload.text === 'string'
-        ? payload.text
-        : null;
+    [
+      payload.description,
+      payload.text,
+      payload.commentBody,
+      payload.issueDescription,
+      payload.issueTitle,
+    ].find(
+      (value): value is string =>
+        typeof value === 'string' && value.trim() !== '',
+    ) ?? null;
 
-  if (!raw?.trim() || isSystemInjectedAcpPromptText(raw)) {
+  if (!raw || isSystemInjectedAcpPromptText(raw)) {
     return null;
   }
 

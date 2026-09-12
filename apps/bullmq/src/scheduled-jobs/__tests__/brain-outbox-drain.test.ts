@@ -583,6 +583,26 @@ describe('resolveTaskMemoryRequest', () => {
     ).toBe('Ship the banner.');
   });
 
+  it('reads a Linear-launched request the way the agent prompt did', () => {
+    const issue = {
+      issueTitle: 'Login redirect loop',
+      issueDescription: 'Users bounce between /login and /home.',
+    };
+
+    expect(
+      resolveTaskMemoryRequest(
+        { ...issue, commentBody: '@roomote please fix this' },
+        'standard',
+      ),
+    ).toBe('@roomote please fix this');
+    expect(resolveTaskMemoryRequest(issue, 'standard')).toBe(
+      'Users bounce between /login and /home.',
+    );
+    expect(
+      resolveTaskMemoryRequest({ issueTitle: issue.issueTitle }, 'standard'),
+    ).toBe('Login redirect loop');
+  });
+
   it('leaves out generated, hidden, and non-standard prompts', () => {
     expect(
       resolveTaskMemoryRequest({ description: 'Review this PR.' }, 'pr_review'),
