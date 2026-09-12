@@ -16,6 +16,7 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
   channelId: string;
   threadId: string;
   emoji?: string | null;
+  titleChanged?: boolean;
   resolveSession: () => Promise<FastAgentConversationRecord | null>;
 }): Promise<void> {
   try {
@@ -36,12 +37,19 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
             .resolveForumTopicIconCustomEmojiId([input.emoji])
             .catch(() => undefined)
         : undefined;
+      if (input.titleChanged === false && !iconCustomEmojiId) {
+        return;
+      }
       await input.provider.editForumTopic({
         channelId: input.channelId,
         threadId: input.threadId,
-        name: title,
+        ...(input.titleChanged === false ? {} : { name: title }),
         ...(iconCustomEmojiId ? { iconCustomEmojiId } : {}),
       });
+
+      if (input.titleChanged === false) {
+        return;
+      }
 
       const latest = await input.resolveSession();
       if (
@@ -70,26 +78,35 @@ export function addFastAgentTelegramTopicTitleSync<
 }): T & {
   updateTitle: (
     title: string | null,
-    metadata?: { emoji?: string | null },
+    metadata?: { emoji?: string | null; titleChanged?: boolean },
   ) => void;
 } {
   let lastRequestedTitle: string | null | undefined;
   let lastRequestedEmoji: string | null | undefined;
+  let lastRequestedTitleChanged: boolean | undefined;
   let titleUpdate = Promise.resolve();
 
   return {
     ...input.activity,
     updateTitle(title, metadata) {
       const emoji = metadata?.emoji;
+      const titleChanged = metadata?.titleChanged;
       if (
         !title ||
-        (title === lastRequestedTitle && emoji === lastRequestedEmoji)
+        (title === lastRequestedTitle &&
+          emoji === lastRequestedEmoji &&
+          titleChanged === lastRequestedTitleChanged)
       )
         return;
       lastRequestedTitle = title;
       lastRequestedEmoji = emoji;
+      lastRequestedTitleChanged = titleChanged;
       titleUpdate = titleUpdate.then(() =>
-        syncFastAgentTelegramTopicTitleBestEffort({ ...input, emoji }),
+        syncFastAgentTelegramTopicTitleBestEffort({
+          ...input,
+          emoji,
+          titleChanged,
+        }),
       );
     },
     async dispose() {
@@ -98,7 +115,7 @@ export function addFastAgentTelegramTopicTitleSync<
   } as T & {
     updateTitle: (
       title: string | null,
-      metadata?: { emoji?: string | null },
+      metadata?: { emoji?: string | null; titleChanged?: boolean },
     ) => void;
   };
 }
