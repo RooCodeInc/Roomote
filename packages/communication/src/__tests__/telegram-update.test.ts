@@ -731,6 +731,20 @@ describe('Telegram update helpers', () => {
       ).toEqual({ command: 'new', text: 'fix the tests' });
     });
 
+    it('rejects group /new commands when the bot username is unavailable', () => {
+      expect(
+        getTelegramNewTaskCommand(
+          parse(
+            buildUpdate(
+              '/new@someone_else $daily-brief summarize this',
+              'group',
+              [{ type: 'bot_command', offset: 0, length: 17 }],
+            ),
+          ),
+        ),
+      ).toBeNull();
+    });
+
     it('accepts a leading bot mention as group targeting', () => {
       expect(
         getTelegramNewTaskCommand(

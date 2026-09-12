@@ -650,6 +650,9 @@ export function getTelegramNewTaskCommand(
   }
 
   const botUsername = normalizeTelegramBotUsername(options.botUsername);
+  if (!botUsername && !isTelegramPrivateChat(message)) {
+    return null;
+  }
   const entities = message.entities ?? [];
 
   for (const entity of entities) {
