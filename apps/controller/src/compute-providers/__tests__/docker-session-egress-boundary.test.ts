@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 import {
   buildSessionEgressHostPolicy,
@@ -20,6 +24,90 @@ const networkId = 'a'.repeat(64);
 const bridge = `br-${networkId.slice(0, 12)}`;
 
 describe('host-enforced Session egress', () => {
+  it.each([
+    {
+      active: 'nft',
+      defaultKind: 'nft',
+      ipv6: true,
+      expected: 'iptables-nft:ip6tables-nft',
+    },
+    {
+      active: 'legacy',
+      defaultKind: 'legacy',
+      ipv6: true,
+      expected: 'iptables-legacy:ip6tables-legacy',
+    },
+    {
+      active: 'both',
+      defaultKind: 'nft',
+      ipv6: true,
+      error: 'Ambiguous Docker firewall backends',
+    },
+    {
+      active: 'none',
+      defaultKind: 'nft',
+      ipv6: true,
+      error: 'Docker firewall backend unavailable',
+    },
+    {
+      active: 'nft',
+      defaultKind: 'nft',
+      ipv6: false,
+      error: 'Matching IPv6 firewall backend unavailable',
+    },
+  ])(
+    'resolves one firewall ruleset or fails closed: $active/$ipv6',
+    ({ active, defaultKind, ipv6, expected, error }) => {
+      const directory = mkdtempSync(join(tmpdir(), 'firewall-selection-'));
+      try {
+        const command = [
+          '#!/bin/sh',
+          'case "${0##*/}" in *-legacy) kind=legacy;; *-nft) kind=nft;; *) kind="$DEFAULT_KIND";; esac',
+          'if [ "$1" = "--version" ]; then if [ "$kind" = nft ]; then printf "iptables v1.8.11 (nf_tables)\\n"; else printf "iptables v1.8.11 (legacy)\\n"; fi; exit 0; fi',
+          'if [ "$1" = "-S" ] && [ "$2" = "OUTPUT" ]; then exit 0; fi',
+          'if [ "$1" = "-S" ] || [ "$1" = "-C" ]; then [ "$ACTIVE" = "$kind" ] || [ "$ACTIVE" = both ]; exit $?; fi',
+          'exit 99 # No policy mutation is permitted by this selection test.',
+        ].join('\n');
+        for (const name of [
+          'iptables-nft',
+          'iptables-legacy',
+          'iptables',
+          ...(ipv6 ? ['ip6tables-nft', 'ip6tables-legacy', 'ip6tables'] : []),
+        ]) {
+          writeFileSync(join(directory, name), command, { mode: 0o700 });
+        }
+        const policy = buildSessionEgressHostPolicy(
+          networkId,
+          bridge,
+          [{ address: '172.30.0.3', port: 3128 }],
+          'veth-worker',
+        );
+        const boundary = policy.indexOf('test "$(cat /proc/sys/net/bridge/');
+        expect(boundary).toBeGreaterThan(0);
+        const result = spawnSync(
+          '/bin/sh',
+          [
+            '-c',
+            `${policy.slice(0, boundary)}\nprintf '%s:%s' "$rse_iptables" "$rse_ip6tables"`,
+          ],
+          {
+            encoding: 'utf8',
+            env: { PATH: directory, ACTIVE: active, DEFAULT_KIND: defaultKind },
+          },
+        );
+        if (expected) {
+          expect(result.status).toBe(0);
+          expect(result.stdout).toBe(expected);
+        } else {
+          expect(result.status).not.toBe(0);
+          expect(result.stderr).toContain(error);
+        }
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('permits ordinary bootstrap while recording nonsecret owned transition metadata', async () => {
     const runDocker = vi.fn<DockerCommand>().mockResolvedValue('');
     await prepareDockerTaskNetwork(

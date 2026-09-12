@@ -63,6 +63,11 @@ bridge netfilter enabled for IPv4/IPv6 and its `FORWARD -> DOCKER-USER` hook ins
 Missing capability fails admission without substitutes. Fixed Compose control ports
 are API 3001 and preview 8081. No private/issuing key is placed in workspace volumes.
 
+Firewall selection requires one unambiguous ruleset carrying Docker's forwarding
+hook. Default-command aliases of the same nft/legacy family are deduplicated, but
+simultaneous matching nft and legacy rulesets fail closed; stale chains must not
+select enforcement by command order. IPv6 must use the same selected family.
+
 ### Protected inference
 
 The worker constructs `R_INFERENCE_GATEWAY_URL` from its container-reachable

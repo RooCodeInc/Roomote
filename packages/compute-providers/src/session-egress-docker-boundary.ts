@@ -25,20 +25,34 @@ interface SessionEgressEndpoint {
   port: number;
 }
 
-/** Use Docker's active backend, which may differ from the helper image default. */
+/** Select one ruleset carrying Docker's hook; stale competing rulesets are ambiguous. */
 function selectDockerFirewallBackend(): string[] {
   return [
     'rse_iptables=',
     'rse_ip6tables=',
+    'rse_backend=',
+    'rse_kind() {',
+    '  case "$1" in *"(nf_tables)"*) printf nft;; *"(legacy)"*) printf legacy;; *) return 1;; esac',
+    '}',
     'for rse_suffix in -nft -legacy ""; do',
-    '  rse_v4="iptables${rse_suffix}"; rse_v6="ip6tables${rse_suffix}"',
+    '  rse_v4="iptables${rse_suffix}"',
     '  command -v "$rse_v4" >/dev/null 2>&1 || continue',
-    '  command -v "$rse_v6" >/dev/null 2>&1 || continue',
     '  "$rse_v4" -S DOCKER-USER >/dev/null 2>&1 || continue',
     '  "$rse_v4" -C FORWARD -j DOCKER-USER >/dev/null 2>&1 || continue',
-    '  rse_iptables="$rse_v4"; rse_ip6tables="$rse_v6"; break',
+    '  rse_current=$(rse_kind "$("$rse_v4" --version)") || { echo "Unrecognized Docker firewall backend" >&2; exit 1; }',
+    '  if [ -n "$rse_backend" ] && [ "$rse_backend" != "$rse_current" ]; then echo "Ambiguous Docker firewall backends" >&2; exit 1; fi',
+    '  if [ -z "$rse_backend" ]; then rse_backend="$rse_current"; rse_iptables="$rse_v4"; fi',
     'done',
     'test -n "$rse_iptables" || { echo "Docker firewall backend unavailable" >&2; exit 1; }',
+    'for rse_suffix in -nft -legacy ""; do',
+    '  rse_v6="ip6tables${rse_suffix}"',
+    '  command -v "$rse_v6" >/dev/null 2>&1 || continue',
+    '  rse_current=$(rse_kind "$("$rse_v6" --version)") || continue',
+    '  [ "$rse_current" = "$rse_backend" ] || continue',
+    '  "$rse_v6" -S OUTPUT >/dev/null 2>&1 || continue',
+    '  rse_ip6tables="$rse_v6"; break',
+    'done',
+    'test -n "$rse_ip6tables" || { echo "Matching IPv6 firewall backend unavailable" >&2; exit 1; }',
     'iptables() { command "$rse_iptables" "$@"; }',
     'ip6tables() { command "$rse_ip6tables" "$@"; }',
   ];
