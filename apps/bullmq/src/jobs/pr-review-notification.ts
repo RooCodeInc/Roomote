@@ -383,22 +383,24 @@ async function postPrReviewNotification({
   const postInput = buildPrReviewNotificationPostInput(route, text);
 
   if (action && nonce && isButtonRouteProvider(route.provider)) {
-    postInput.buttons = [
-      [
-        {
-          text: PR_REVIEW_ACTION_LABELS.yes,
-          callbackData: buildPrReviewActionCallbackData('yes', nonce),
-        },
-        {
-          text: PR_REVIEW_ACTION_LABELS.auto,
-          callbackData: buildPrReviewActionCallbackData('auto', nonce),
-        },
-        {
-          text: PR_REVIEW_ACTION_LABELS.dismiss,
-          callbackData: buildPrReviewActionCallbackData('dismiss', nonce),
-        },
-      ],
+    const resolveButton = {
+      text: PR_REVIEW_ACTION_LABELS.yes,
+      callbackData: buildPrReviewActionCallbackData('yes', nonce),
+    };
+    const secondaryButtons = [
+      {
+        text: PR_REVIEW_ACTION_LABELS.auto,
+        callbackData: buildPrReviewActionCallbackData('auto', nonce),
+      },
+      {
+        text: PR_REVIEW_ACTION_LABELS.dismiss,
+        callbackData: buildPrReviewActionCallbackData('dismiss', nonce),
+      },
     ];
+    postInput.buttons =
+      route.provider === 'telegram'
+        ? [[resolveButton], secondaryButtons]
+        : [[resolveButton, ...secondaryButtons]];
   }
 
   const posted = await adapter.postMessage(postInput);
