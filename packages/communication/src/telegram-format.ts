@@ -73,22 +73,9 @@ function splitCodeFences(markdown: string): MarkdownSegment[] {
   return segments;
 }
 
-function convertTextSegment(segment: string): string {
-  const escaped = escapeTelegramHtml(segment);
-  const lines = escaped.split('\n').map((line) => {
-    const headingMatch = /^(#{1,6})\s+(.*)$/.exec(line);
-
-    if (headingMatch) {
-      return `<b>${headingMatch[2]}</b>`;
-    }
-
-    return line;
-  });
-
+function convertInlineText(escaped: string): string {
   // Convert inline code spans before emphasis so their contents stay verbatim.
-  const withInlineCode = lines
-    .join('\n')
-    .replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  const withInlineCode = escaped.replace(/`([^`\n]+)`/g, '<code>$1</code>');
 
   // Apply emphasis/link conversion outside <code> spans only.
   return withInlineCode
@@ -99,10 +86,74 @@ function convertTextSegment(segment: string): string {
     .join('');
 }
 
+function convertTextSegment(segment: string): string {
+  const escaped = escapeTelegramHtml(segment);
+  const hasBlockMarkdown =
+    segment.includes('\n') || /^(?:#{1,6}|[-+*]|\d+[.)])\s+/u.test(segment);
+  if (!hasBlockMarkdown) return convertInlineText(escaped);
+
+  const blocks: string[] = [];
+  let paragraphLines: string[] = [];
+  let listType: 'ol' | 'ul' | null = null;
+  let listItems: string[] = [];
+
+  const flushParagraph = () => {
+    if (paragraphLines.length === 0) return;
+    blocks.push(`<p>${paragraphLines.map(convertInlineText).join('<br>')}</p>`);
+    paragraphLines = [];
+  };
+  const flushList = () => {
+    if (!listType) return;
+    blocks.push(
+      `<${listType}>${listItems
+        .map((item) => `<li>${convertInlineText(item)}</li>`)
+        .join('')}</${listType}>`,
+    );
+    listType = null;
+    listItems = [];
+  };
+
+  for (const line of escaped.split('\n')) {
+    if (line.trim() === '') {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    const headingMatch = /^(#{1,6})\s+(.*)$/u.exec(line);
+    if (headingMatch) {
+      flushParagraph();
+      flushList();
+      const level = headingMatch[1]!.length;
+      blocks.push(
+        `<h${level}>${convertInlineText(headingMatch[2]!)}</h${level}>`,
+      );
+      continue;
+    }
+
+    const listMatch = /^(?:[-+*]|(\d+)[.)])\s+(.*)$/u.exec(line);
+    if (listMatch) {
+      flushParagraph();
+      const nextListType = listMatch[1] ? 'ol' : 'ul';
+      if (listType && listType !== nextListType) flushList();
+      listType = nextListType;
+      listItems.push(listMatch[2]!);
+      continue;
+    }
+
+    flushList();
+    paragraphLines.push(line);
+  }
+
+  flushParagraph();
+  flushList();
+  return blocks.join('');
+}
+
 /**
- * Convert Roomote markdown to Telegram HTML. Supports bold, italic,
- * strikethrough, inline code, fenced code blocks, links, and headings
- * (rendered bold). Everything else passes through as escaped text.
+ * Convert Roomote markdown to Telegram rich-message HTML. Supports paragraphs,
+ * lists, headings, bold, italic, strikethrough, inline code, fenced code blocks,
+ * and links. Everything else passes through as escaped text.
  */
 export function markdownToTelegramHtml(markdown: string): string {
   return splitCodeFences(markdown)
@@ -291,7 +342,7 @@ function chunkTelegramPlainTextAsHtml(
   text: string,
   maxHtmlLength: number,
 ): TelegramHtmlChunk[] {
-  const html = escapeTelegramHtml(text);
+  const html = escapeTelegramHtml(text).replaceAll('\n', '<br>');
   if (html.length <= maxHtmlLength) return [{ markdown: text, html }];
 
   const targetLength = Math.max(

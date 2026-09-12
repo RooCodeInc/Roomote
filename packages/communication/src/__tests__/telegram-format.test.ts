@@ -33,7 +33,29 @@ describe('markdownToTelegramHtml', () => {
 
   it('renders headings as bold lines', () => {
     expect(markdownToTelegramHtml('## Summary\ndone')).toBe(
-      '<b>Summary</b>\ndone',
+      '<h2>Summary</h2><p>done</p>',
+    );
+  });
+
+  it('renders paragraphs and lists as rich-message blocks', () => {
+    expect(
+      markdownToTelegramHtml(
+        '**Highlights**\n\n- **Voice.** Talk to Roomote.\n- **Skills.** Reuse [team skills](https://example.test/skills).\n\nNext `step`.',
+      ),
+    ).toBe(
+      '<p><b>Highlights</b></p><ul><li><b>Voice.</b> Talk to Roomote.</li><li><b>Skills.</b> Reuse <a href="https://example.test/skills">team skills</a>.</li></ul><p>Next <code>step</code>.</p>',
+    );
+  });
+
+  it('preserves soft line breaks within a paragraph', () => {
+    expect(markdownToTelegramHtml('first line\nsecond line')).toBe(
+      '<p>first line<br>second line</p>',
+    );
+  });
+
+  it('renders ordered markdown lists', () => {
+    expect(markdownToTelegramHtml('1. First\n2. Second')).toBe(
+      '<ol><li>First</li><li>Second</li></ol>',
     );
   });
 
@@ -180,13 +202,13 @@ describe('chunkTelegramMarkdownAsHtml', () => {
     ]);
   });
 
-  it('preserves exact-target inline formatting and its trailing newline', () => {
+  it('preserves exact-target markdown while rendering a paragraph block', () => {
     const markdown = `**${'x'.repeat(3_496)}**\n`;
 
     expect(chunkTelegramMarkdownAsHtml(markdown)).toEqual([
       {
         markdown,
-        html: `<b>${'x'.repeat(3_496)}</b>\n`,
+        html: `<p><b>${'x'.repeat(3_496)}</b></p>`,
       },
     ]);
   });
@@ -268,5 +290,11 @@ describe('planTelegramRichMessages', () => {
         (chunk) => chunk.html.length <= TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
       ),
     ).toBe(true);
+  });
+
+  it('preserves plain-text newlines with explicit rich HTML breaks', () => {
+    expect(planTelegramRichMessages({ text: 'first\n\n- second' })).toEqual([
+      { text: 'first\n\n- second', html: 'first<br><br>- second' },
+    ]);
   });
 });
