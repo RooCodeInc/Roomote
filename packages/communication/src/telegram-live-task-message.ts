@@ -93,26 +93,37 @@ export function buildTelegramLiveTaskMessage(
       : (running?.summary ?? progress),
     TELEGRAM_MAX_RICH_MESSAGE_LENGTH - (footerText ? footerText.length + 2 : 0),
   );
-  const htmlPrefix = '<blockquote expandable>';
-  const htmlSuffix = '</blockquote>';
+  const detailsPrefix = '<details><summary>';
+  const detailsSummarySuffix = '</summary>';
+  const detailsSuffix = '</details>';
   const footerHtmlText = content.taskUrl
     ? `<a href="${escapeHtmlAttribute(content.taskUrl)}">Open in Roomote</a>`
     : undefined;
   const footerHtmlBudget = footerHtmlText
     ? footerHtmlText.length + '\n\n<footer></footer>'.length
     : 0;
-  const htmlBody = running
-    ? `${htmlPrefix}${escapeHtmlWithinBudget(
-        running.details
-          ? `${running.summary}\n\n${running.details}`
-          : running.summary,
+  const escapedSummary = running?.details
+    ? escapeHtmlWithinBudget(
+        running.summary,
         TELEGRAM_MAX_RICH_MESSAGE_LENGTH -
-          htmlPrefix.length -
-          htmlSuffix.length -
+          detailsPrefix.length -
+          detailsSummarySuffix.length -
+          detailsSuffix.length -
           footerHtmlBudget,
-      )}${htmlSuffix}`
+      )
+    : '';
+  const htmlBody = running?.details
+    ? `${detailsPrefix}${escapedSummary}${detailsSummarySuffix}${escapeHtmlWithinBudget(
+        running.details,
+        TELEGRAM_MAX_RICH_MESSAGE_LENGTH -
+          detailsPrefix.length -
+          escapedSummary.length -
+          detailsSummarySuffix.length -
+          detailsSuffix.length -
+          footerHtmlBudget,
+      )}${detailsSuffix}`
     : escapeHtmlWithinBudget(
-        progress,
+        running?.summary ?? progress,
         TELEGRAM_MAX_RICH_MESSAGE_LENGTH - footerHtmlBudget,
       );
 
