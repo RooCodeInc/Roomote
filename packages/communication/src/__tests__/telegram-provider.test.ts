@@ -880,6 +880,30 @@ describe('TelegramCommunicationProvider', () => {
     });
   });
 
+  it('treats whitespace-only text with an image as image-only', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 311 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '123',
+      text: '\n',
+      images: [{ url: 'https://example.test/shot.png', altText: 'the shot' }],
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://telegram.example.test/botbot-token/sendPhoto',
+    );
+  });
+
   it('falls back to a link message when sendPhoto fails', async () => {
     const fetchMock = vi
       .fn()
