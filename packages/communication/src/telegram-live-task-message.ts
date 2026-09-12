@@ -3,7 +3,6 @@ import { TELEGRAM_MAX_MESSAGE_LENGTH } from './telegram-format';
 export type TelegramLiveTaskStatus =
   | 'running'
   | 'waiting'
-  | 'completed'
   | 'failed'
   | 'stopped';
 
@@ -49,8 +48,6 @@ function getStatusText(status: TelegramLiveTaskStatus): string {
       return 'Starting task…';
     case 'waiting':
       return 'Waiting for your input…';
-    case 'completed':
-      return 'Completed.';
     case 'failed':
       return 'Task failed.';
     case 'stopped':

@@ -124,20 +124,52 @@ describe('Telegram live task stream', () => {
     );
   });
 
+  it('leaves the live message untouched on completion and resumes editing it later', async () => {
+    await start();
+    mocks.editMessageText.mockClear();
+    mocks.createProvider.mockClear();
+
+    await expect(
+      renderTelegramLiveTaskStream({
+        taskId: 'task-1',
+        status: 'complete',
+        output: 'Authoritative final response.',
+      }),
+    ).resolves.toEqual({ card: true, updated: true });
+
+    expect(mocks.createProvider).not.toHaveBeenCalled();
+    expect(mocks.editMessageText).not.toHaveBeenCalled();
+
+    await renderTelegramLiveTaskStream({
+      taskId: 'task-1',
+      status: 'in_progress',
+      details: 'A resumed run is working.',
+    });
+
+    expect(mocks.editMessageText).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        channelId: '-1001',
+        messageId: '88',
+        text: expect.stringMatching(
+          /^A resumed run is working\.\n\nOpen in Roomote:/,
+        ),
+      }),
+    );
+  });
+
   it.each([
-    ['complete', 'Authoritative final response.', 'Completed'],
-    ['error', 'Stopped because of an error.', 'Failed'],
-    ['error', 'Stopped.', 'Stopped'],
+    ['Stopped because of an error.', 'Failed'],
+    ['Stopped.', 'Stopped'],
   ] as const)(
-    'renders %s as a terminal status-only edit',
-    async (status, output, label) => {
+    'renders an error as a %s terminal status-only edit',
+    async (output, label) => {
       await start();
       mocks.editMessageText.mockClear();
 
       await renderTelegramLiveTaskStream({
         taskId: 'task-1',
-        status,
-        ...(output ? { output } : {}),
+        status: 'error',
+        output,
       });
 
       const edit = mocks.editMessageText.mock.calls[0]?.[0] as {
@@ -146,10 +178,9 @@ describe('Telegram live task stream', () => {
       };
       expect(edit.text).toMatch(
         new RegExp(
-          `^${label === 'Completed' ? 'Completed\\.' : label === 'Failed' ? 'Task failed\\.' : 'Stopped\\.'}\\n\\nOpen in Roomote:`,
+          `^${label === 'Failed' ? 'Task failed\\.' : 'Stopped\\.'}\\n\\nOpen in Roomote:`,
         ),
       );
-      expect(edit.text).not.toContain('Authoritative final response.');
       expect(edit.text).not.toContain('Stopped because of an error.');
     },
   );
