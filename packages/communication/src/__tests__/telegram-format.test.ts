@@ -105,6 +105,10 @@ describe('chunkTelegramText', () => {
       ),
     ).toBe(true);
   });
+
+  it('always advances at the minimum length around a surrogate pair', () => {
+    expect(chunkTelegramText('a🙂', 2)).toEqual(['a', '🙂']);
+  });
 });
 
 describe('chunkTelegramMarkdown', () => {

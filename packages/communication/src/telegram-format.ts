@@ -166,7 +166,7 @@ export function chunkTelegramText(
     const minimumPreferredBoundary = Math.floor(hardBoundary / 2);
     const boundary =
       [paragraphBoundary, newlineBoundary, whitespaceBoundary].find(
-        (value) => value >= minimumPreferredBoundary,
+        (value) => value > 0 && value >= minimumPreferredBoundary,
       ) ?? hardBoundary;
     chunks.push(remaining.slice(0, boundary));
     remaining = remaining.slice(boundary);
