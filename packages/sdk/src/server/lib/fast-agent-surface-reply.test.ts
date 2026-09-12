@@ -404,12 +404,18 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       try {
         adapter.activity!.start();
-        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(
+          surface === 'telegram' ? FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS : 0,
+        );
         await adapter.postReply(reply);
-        await vi.advanceTimersByTimeAsync(surface === 'telegram' ? 500 : 0);
+        await vi.advanceTimersByTimeAsync(
+          surface === 'telegram' ? FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS : 0,
+        );
         expect(typing).toHaveBeenCalledTimes(2);
         await adapter.replaceReply!({ messageId: '123' }, reply);
-        await vi.advanceTimersByTimeAsync(surface === 'telegram' ? 500 : 0);
+        await vi.advanceTimersByTimeAsync(
+          surface === 'telegram' ? FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS : 0,
+        );
         expect(typing).toHaveBeenCalledTimes(3);
         editMessage.mockRejectedValueOnce(new Error('edit failed'));
         await expect(
