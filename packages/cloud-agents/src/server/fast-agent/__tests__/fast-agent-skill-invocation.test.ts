@@ -39,6 +39,21 @@ describe('Fast explicit skill invocation parsing', () => {
     ).toBe('thermonuclear');
   });
 
+  it('builds the trusted marker from Telegram text only after provider normalization', () => {
+    expect(
+      buildFastAgentExplicitSkillInvocationContext(
+        '$daily-brief summarize this',
+        'telegram',
+      ),
+    ).toBe('<explicit_skill_invocation name="daily-brief" />');
+    expect(
+      buildFastAgentExplicitSkillInvocationContext(
+        '@someone $daily-brief summarize this',
+        'telegram',
+      ),
+    ).toBeUndefined();
+  });
+
   it.each([
     [
       'Slack dollar prose without a mention',
