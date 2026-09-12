@@ -3215,7 +3215,7 @@ export async function answerFastAgentQuestion({
       void refreshFastAgentSessionTitle({ sessionId: session.id, userId }).then(
         (generated) =>
           adapter.activity?.updateTitle?.(generated?.title ?? null, {
-            category: generated?.category ?? null,
+            iconEmoji: generated?.iconEmoji ?? null,
             titleChanged: generated?.titleChanged,
           }),
       );

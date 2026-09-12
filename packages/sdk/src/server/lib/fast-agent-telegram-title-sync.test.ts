@@ -1,46 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  TASK_TITLE_CATEGORIES,
+  TELEGRAM_TOPIC_ICON_EMOJIS,
   type FastAgentConversationRecord,
-  type TaskTitleCategory,
 } from '@roomote/cloud-agents/server';
 
 import {
   addFastAgentTelegramTopicTitleSync,
-  getTelegramTopicIconEmojiPreferences,
   syncFastAgentTelegramTopicTitleBestEffort,
 } from './fast-agent-telegram-title-sync';
 import {
   FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS,
   createFastAgentTelegramActivity,
 } from './fast-agent-telegram-activity';
-
-const CONFIRMED_TELEGRAM_TOPIC_ICON_EMOJIS = new Set([
-  '💡',
-  '💬',
-  '📝',
-  '🛃',
-  '🪪',
-  '👮‍♂️',
-  '🦠',
-  '🔎',
-  '✅',
-  '🧪',
-  '🔬',
-  '🎉',
-  '🏁',
-  '🏆',
-  '📚',
-  '🎨',
-  '💻',
-  '📱',
-  '📈',
-  '📉',
-  '🧮',
-  '🗣',
-  '📣',
-]);
 
 function session(title: string): FastAgentConversationRecord {
   return {
@@ -79,7 +51,7 @@ describe('Telegram Fast topic title sync', () => {
       sessionId: 'session-1',
       channelId: 'chat-1',
       threadId: '77',
-      category: 'fix',
+      iconEmoji: '🦠',
       resolveSession,
     });
 
@@ -89,42 +61,15 @@ describe('Telegram Fast topic title sync', () => {
       name: 'Fix generated title',
       iconCustomEmojiId: 'idea-icon',
     });
-    expect(resolveForumTopicIconCustomEmojiId).toHaveBeenCalledWith([
-      '🦠',
-      '🔎',
-      '💡',
-      '💬',
-      '📝',
-    ]);
+    expect(resolveForumTopicIconCustomEmojiId).toHaveBeenCalledWith(['🦠']);
   });
 
-  it('defines ordered emoji preferences for every title category', () => {
-    const expected: Record<TaskTitleCategory, readonly string[]> = {
-      general: ['💡', '💬', '📝'],
-      security: ['🛃', '🪪', '👮‍♂️', '💡', '💬', '📝'],
-      fix: ['🦠', '🔎', '💡', '💬', '📝'],
-      test: ['✅', '🧪', '🔬', '💡', '💬', '📝'],
-      release: ['🎉', '🏁', '🏆', '💡', '💬', '📝'],
-      docs: ['📚', '📝', '💡', '💬'],
-      ui: ['🎨', '💻', '📱', '💡', '💬', '📝'],
-      data: ['📈', '📉', '🧮', '💡', '💬', '📝'],
-      communication: ['💬', '🗣', '📣', '💡', '📝'],
-    };
-
-    expect(Object.keys(expected)).toEqual(TASK_TITLE_CATEGORIES);
-    for (const category of TASK_TITLE_CATEGORIES) {
-      expect(getTelegramTopicIconEmojiPreferences(category)).toEqual(
-        expected[category],
-      );
-    }
-  });
-
-  it('uses only emoji confirmed by the live Telegram topic-icon inventory', () => {
-    for (const category of TASK_TITLE_CATEGORIES) {
-      for (const emoji of getTelegramTopicIconEmojiPreferences(category)) {
-        expect(CONFIRMED_TELEGRAM_TOPIC_ICON_EMOJIS).toContain(emoji);
-      }
-    }
+  it('exposes the complete deduplicated Telegram topic-icon inventory', () => {
+    expect(TELEGRAM_TOPIC_ICON_EMOJIS).toHaveLength(112);
+    expect(new Set(TELEGRAM_TOPIC_ICON_EMOJIS).size).toBe(112);
+    expect(TELEGRAM_TOPIC_ICON_EMOJIS).toEqual(
+      expect.arrayContaining(['📰', '💡', '🦠', '💬', '🧠', '🐈']),
+    );
   });
 
   it('retries with the latest canonical title when generation races a rename', async () => {
@@ -180,8 +125,8 @@ describe('Telegram Fast topic title sync', () => {
       resolveSession: vi.fn().mockResolvedValue(session('Generated title')),
     });
 
-    activity.updateTitle?.('Generated title', { category: 'general' });
-    activity.updateTitle?.('Generated title', { category: 'general' });
+    activity.updateTitle?.('Generated title', { iconEmoji: '💬' });
+    activity.updateTitle?.('Generated title', { iconEmoji: '💬' });
     await activity.dispose();
 
     expect(editForumTopic).toHaveBeenCalledTimes(1);
@@ -252,7 +197,7 @@ describe('Telegram Fast topic title sync', () => {
       sessionId: 'session-1',
       channelId: 'chat-1',
       threadId: '77',
-      category: 'general',
+      iconEmoji: '💡',
       titleChanged: false,
       resolveSession: vi.fn().mockResolvedValue(session('Generated title')),
     });
@@ -277,7 +222,7 @@ describe('Telegram Fast topic title sync', () => {
       sessionId: 'session-1',
       channelId: 'chat-1',
       threadId: '77',
-      category: null,
+      iconEmoji: null,
       titleChanged: false,
       resolveSession: vi.fn().mockResolvedValue(session('Generated title')),
     });
@@ -321,7 +266,7 @@ describe('Telegram Fast topic title sync', () => {
       sessionId: 'session-1',
       channelId: 'chat-1',
       threadId: '77',
-      category: 'general',
+      iconEmoji: '💡',
       resolveSession: vi.fn().mockResolvedValue(session('Generated title')),
     });
 
@@ -332,7 +277,7 @@ describe('Telegram Fast topic title sync', () => {
     });
   });
 
-  it('keeps the title when Telegram supports none of the classified emojis', async () => {
+  it('keeps the title when Telegram does not support the selected icon', async () => {
     const editForumTopic = vi.fn().mockResolvedValue(undefined);
 
     await syncFastAgentTelegramTopicTitleBestEffort({
@@ -345,7 +290,7 @@ describe('Telegram Fast topic title sync', () => {
       sessionId: 'session-1',
       channelId: 'chat-1',
       threadId: '77',
-      category: 'fix',
+      iconEmoji: '🦠',
       resolveSession: vi.fn().mockResolvedValue(session('Fix generated title')),
     });
 
@@ -356,7 +301,7 @@ describe('Telegram Fast topic title sync', () => {
     });
   });
 
-  it('preserves the existing icon when no new title category is supplied', async () => {
+  it('preserves the existing icon when no new icon is supplied', async () => {
     const editForumTopic = vi.fn().mockResolvedValue(undefined);
     const resolveForumTopicIconCustomEmojiId = vi.fn();
 
@@ -368,7 +313,7 @@ describe('Telegram Fast topic title sync', () => {
       sessionId: 'session-1',
       channelId: 'chat-1',
       threadId: '77',
-      category: null,
+      iconEmoji: null,
       resolveSession: vi.fn().mockResolvedValue(session('Existing title')),
     });
 

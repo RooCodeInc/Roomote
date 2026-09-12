@@ -333,7 +333,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       currentMessageId: '78',
     });
     delivery!.adapter.activity?.updateTitle?.('Fix generated Fast title', {
-      category: 'fix',
+      iconEmoji: '🦠',
     });
     await delivery!.adapter.activity?.dispose();
 
@@ -343,13 +343,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       name: 'Fix generated Fast title',
       iconCustomEmojiId: 'bug-icon',
     });
-    expect(mocks.telegramResolveForumTopicIcon).toHaveBeenCalledWith([
-      '🦠',
-      '🔎',
-      '💡',
-      '💬',
-      '📝',
-    ]);
+    expect(mocks.telegramResolveForumTopicIcon).toHaveBeenCalledWith(['🦠']);
   });
 
   it('does not rename a user-owned Telegram topic', async () => {
