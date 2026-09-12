@@ -33,6 +33,7 @@ export type MockTelegramStoredMessage = {
   date: number;
   from: MockTelegramUser;
   text?: string;
+  rich_message?: JsonRecord;
   parse_mode?: string;
   caption?: string;
   photo_url?: string;
@@ -78,6 +79,8 @@ export type MockTelegramBehavior = {
   rejectHtmlParseMode?: boolean;
   /** Reject `sendPhoto` as if Telegram could not fetch the photo URL. */
   rejectPhotos?: boolean;
+  /** Reject rich-message sends and edits as an older Bot API server would. */
+  rejectRichMessages?: boolean;
 };
 
 export type MockTelegramState = {
@@ -694,6 +697,23 @@ export class MockTelegramServer {
         return;
       }
 
+      case 'sendRichMessage': {
+        if (this.state.behavior?.rejectRichMessages) {
+          apiError(response, 400, 'Bad Request: rich messages are unavailable');
+          return;
+        }
+        const richMessage = body.rich_message as JsonRecord | undefined;
+        if (!richMessage || typeof richMessage.html !== 'string') {
+          apiError(response, 400, 'Bad Request: rich message is empty');
+          return;
+        }
+        const stored = this.storeOutgoingMessage(response, body, {
+          rich_message: richMessage,
+        });
+        if (stored) apiResult(response, this.toTelegramMessage(stored));
+        return;
+      }
+
       case 'sendPhoto': {
         if (this.state.behavior?.rejectPhotos) {
           apiError(
@@ -731,9 +751,14 @@ export class MockTelegramServer {
           return;
         }
 
+        const richMessage = body.rich_message as JsonRecord | undefined;
+        if (richMessage && this.state.behavior?.rejectRichMessages) {
+          apiError(response, 400, 'Bad Request: rich messages are unavailable');
+          return;
+        }
         const messageText = String(body.text ?? '');
 
-        if (!messageText) {
+        if (!messageText && typeof richMessage?.html !== 'string') {
           apiError(response, 400, 'Bad Request: message text is empty');
           return;
         }
@@ -755,11 +780,18 @@ export class MockTelegramServer {
           return;
         }
 
-        message.text = messageText;
-        if (typeof body.parse_mode === 'string') {
-          message.parse_mode = body.parse_mode;
-        } else {
+        if (richMessage) {
+          delete message.text;
           delete message.parse_mode;
+          message.rich_message = richMessage;
+        } else {
+          message.text = messageText;
+          delete message.rich_message;
+          if (typeof body.parse_mode === 'string') {
+            message.parse_mode = body.parse_mode;
+          } else {
+            delete message.parse_mode;
+          }
         }
         message.reply_markup = body.reply_markup;
         apiResult(response, this.toTelegramMessage(message));
@@ -977,6 +1009,9 @@ export class MockTelegramServer {
       chat: chat ?? { id: Number(stored.chat_id), type: 'private' },
       from: stored.from,
       ...(stored.text !== undefined ? { text: stored.text } : {}),
+      ...(stored.rich_message !== undefined
+        ? { rich_message: stored.rich_message }
+        : {}),
       ...(stored.caption !== undefined ? { caption: stored.caption } : {}),
       ...(stored.message_thread_id !== undefined
         ? { message_thread_id: stored.message_thread_id }

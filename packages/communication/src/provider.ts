@@ -42,6 +42,10 @@ export type CommunicationPostMessageInput = {
   text?: string;
   /** Provider-native HTML with `text` retained as the plain-text fallback. */
   htmlText?: string;
+  /** Footer text kept separate for providers with native footer presentation. */
+  footerText?: string;
+  /** Provider-native footer HTML with `footerText` as the plain fallback. */
+  footerHtmlText?: string;
   blocks?: unknown[];
   images?: Array<{ url: string; altText: string; contentType?: string }>;
   serviceUrl?: string;

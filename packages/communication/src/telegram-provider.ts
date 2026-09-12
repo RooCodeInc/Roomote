@@ -14,6 +14,8 @@ import {
   TELEGRAM_MAX_MESSAGE_LENGTH,
   chunkTelegramMarkdownAsHtml,
   chunkTelegramText,
+  escapeTelegramHtml,
+  markdownToTelegramHtml,
 } from './telegram-format';
 
 export type TelegramCommunicationProviderOptions = {
@@ -68,6 +70,55 @@ type TelegramInlineKeyboardMarkup = {
   >;
 };
 
+type TelegramRichMessage = { html: string };
+
+function joinTelegramBodyAndFooter(body: string, footer?: string): string {
+  return [body, footer].filter(Boolean).join('\n\n');
+}
+
+function splitTelegramFooter(
+  text: string,
+  footer: string,
+): { body: string; footer: string } | null {
+  if (text === footer) return { body: '', footer };
+  const suffix = `\n\n${footer}`;
+  return text.endsWith(suffix)
+    ? { body: text.slice(0, -suffix.length), footer }
+    : null;
+}
+
+function buildTelegramRichMessageHtml(input: {
+  body: string;
+  footer: string;
+  bodyHtml?: string;
+  footerHtml?: string;
+  useMarkdown: boolean;
+}): string {
+  const bodyHtml =
+    input.bodyHtml ??
+    (input.useMarkdown
+      ? markdownToTelegramHtml(input.body)
+      : escapeTelegramHtml(input.body));
+  const footerHtml = input.footerHtml ?? markdownToTelegramHtml(input.footer);
+  return [bodyHtml, `<footer>${footerHtml}</footer>`]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function shouldFallbackFromRichMessage(
+  status: number,
+  description?: string,
+): boolean {
+  if (status === 404) return true;
+  if (status !== 400) return false;
+  const normalized = description?.toLowerCase() ?? '';
+  return (
+    normalized.includes('rich') ||
+    normalized.includes("can't parse") ||
+    normalized.includes('message text is empty')
+  );
+}
+
 function buildTelegramReplyMarkup(
   buttons: CommunicationMessageButton[][] | undefined,
 ): TelegramInlineKeyboardMarkup | undefined {
@@ -110,41 +161,90 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
   ): Promise<CommunicationPostMessageResult> {
     const text = input.text;
     const images = input.images ?? [];
-    const hasText = Boolean(text?.trim());
-
-    if (!hasText && images.length === 0) {
-      throw new Error('Telegram postMessage requires text or images.');
-    }
-
     const threadId = parsePositiveInteger(input.threadId);
     // Honor an explicit reply target when callers supply one (task closeouts,
     // launch-failure recovery, onboarding threads). Callers that prefer a
     // free-floating chronological send simply omit replyToMessageId.
     const replyToMessageId = parsePositiveInteger(input.replyToMessageId);
     const useMarkdown = input.textFormat === 'markdown';
+    const footerText = input.footerText;
+    const textWithFooter = text
+      ? joinTelegramBodyAndFooter(text, footerText)
+      : (footerText ?? '');
+    const hasText = Boolean(textWithFooter.trim());
+
+    if (!hasText && images.length === 0) {
+      throw new Error('Telegram postMessage requires text or images.');
+    }
     const chunks: Array<{
       markdown: string;
       html: string | null;
       fallbackOnHtmlError?: boolean;
-    }> =
-      hasText && text
-        ? input.htmlText &&
-          input.htmlText.length <= TELEGRAM_MAX_MESSAGE_LENGTH &&
-          text.length <= TELEGRAM_MAX_MESSAGE_LENGTH
-          ? [
-              {
-                markdown: text,
-                html: input.htmlText,
-                fallbackOnHtmlError: true,
-              },
-            ]
-          : useMarkdown
-            ? chunkTelegramMarkdownAsHtml(text)
-            : chunkTelegramText(text).map((chunk) => ({
-                markdown: chunk,
-                html: null,
-              }))
-        : [];
+      richMessage?: TelegramRichMessage;
+    }> = hasText
+      ? input.htmlText &&
+        input.htmlText.length <= TELEGRAM_MAX_MESSAGE_LENGTH &&
+        textWithFooter.length <= TELEGRAM_MAX_MESSAGE_LENGTH
+        ? [
+            {
+              markdown: textWithFooter,
+              html: joinTelegramBodyAndFooter(
+                input.htmlText,
+                footerText
+                  ? (input.footerHtmlText ?? markdownToTelegramHtml(footerText))
+                  : undefined,
+              ),
+              fallbackOnHtmlError: true,
+              ...(footerText
+                ? {
+                    richMessage: {
+                      html: buildTelegramRichMessageHtml({
+                        body: text ?? '',
+                        bodyHtml: input.htmlText,
+                        footer: footerText,
+                        footerHtml: input.footerHtmlText,
+                        useMarkdown,
+                      }),
+                    },
+                  }
+                : {}),
+            },
+          ]
+        : useMarkdown
+          ? chunkTelegramMarkdownAsHtml(textWithFooter).map((chunk) => {
+              const split = footerText
+                ? splitTelegramFooter(chunk.markdown, footerText)
+                : null;
+              return {
+                ...chunk,
+                ...(split
+                  ? {
+                      richMessage: {
+                        html: buildTelegramRichMessageHtml({
+                          body: split.body,
+                          footer: split.footer,
+                          useMarkdown: true,
+                        }),
+                      },
+                    }
+                  : {}),
+              };
+            })
+          : chunkTelegramText(textWithFooter).map((chunk) => ({
+              markdown: chunk,
+              html: null,
+              ...(footerText && splitTelegramFooter(chunk, footerText)
+                ? {
+                    richMessage: {
+                      html: buildTelegramRichMessageHtml({
+                        ...splitTelegramFooter(chunk, footerText)!,
+                        useMarkdown: false,
+                      }),
+                    },
+                  }
+                : {}),
+            }))
+      : [];
 
     let firstResult: {
       message_id: number;
@@ -164,6 +264,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
         markdown: chunk.markdown,
         html: chunk.html,
         fallbackOnHtmlError: chunk.fallbackOnHtmlError,
+        richMessage: chunk.richMessage,
         threadId,
         // Reply threading only anchors the first message of a long reply;
         // buttons attach to the last message so they sit under the content.
@@ -267,10 +368,47 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     markdown: string;
     html: string | null;
     fallbackOnHtmlError?: boolean;
+    richMessage?: TelegramRichMessage;
     threadId?: number;
     replyToMessageId?: number;
     replyMarkup?: TelegramInlineKeyboardMarkup;
   }): Promise<{ message_id: number; message_thread_id?: number }> {
+    if (params.richMessage) {
+      const response = await this.fetchWithRetry(
+        `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/sendRichMessage`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: params.chatId,
+            rich_message: params.richMessage,
+            ...(params.threadId ? { message_thread_id: params.threadId } : {}),
+            ...(params.replyMarkup ? { reply_markup: params.replyMarkup } : {}),
+            ...(params.replyToMessageId
+              ? {
+                  reply_parameters: {
+                    message_id: params.replyToMessageId,
+                    allow_sending_without_reply: true,
+                  },
+                }
+              : {}),
+          }),
+        },
+        { method: 'sendRichMessage', retryNetworkErrors: false },
+      );
+      const parsed = (await response
+        .json()
+        .catch(() => null)) as TelegramApiResponse | null;
+
+      if (response.ok && parsed?.ok) return parsed.result;
+      const description = parsed && !parsed.ok ? parsed.description : undefined;
+      if (!shouldFallbackFromRichMessage(response.status, description)) {
+        throw new Error(
+          `Telegram sendRichMessage failed (${response.status}): ${description ?? response.statusText}`,
+        );
+      }
+    }
+
     const attempts: Array<{ text: string; parseMode?: 'HTML' }> = params.html
       ? [
           { text: params.html, parseMode: 'HTML' },
@@ -365,21 +503,87 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     text: string;
     /** Provider-native HTML with `text` retained as the plain-text fallback. */
     htmlText?: string;
+    footerText?: string;
+    footerHtmlText?: string;
     textFormat?: 'plain' | 'markdown';
     buttons?: CommunicationMessageButton[][];
   }): Promise<void> {
     const useMarkdown = input.textFormat === 'markdown';
+    const text = joinTelegramBodyAndFooter(input.text, input.footerText);
+    if (input.footerText) {
+      const bodyHtml = input.htmlText
+        ? input.htmlText
+        : useMarkdown
+          ? markdownToTelegramHtml(input.text)
+          : escapeTelegramHtml(input.text);
+      const richResponse = await this.fetchWithRetry(
+        `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/editMessageText`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: input.channelId,
+            message_id: Number.parseInt(input.messageId, 10),
+            rich_message: {
+              html: buildTelegramRichMessageHtml({
+                body: input.text,
+                bodyHtml,
+                footer: input.footerText,
+                footerHtml: input.footerHtmlText,
+                useMarkdown,
+              }),
+            },
+            link_preview_options: { is_disabled: true },
+            reply_markup: buildTelegramReplyMarkup(input.buttons) ?? {
+              inline_keyboard: [],
+            },
+          }),
+        },
+        { method: 'editMessageText', retryNetworkErrors: true },
+      );
+      const richParsed = (await richResponse.json().catch(() => null)) as {
+        ok?: boolean;
+        description?: string;
+      } | null;
+      if (richResponse.ok && richParsed?.ok) return;
+      if (
+        richResponse.status === 400 &&
+        richParsed?.description
+          ?.toLowerCase()
+          .includes('message is not modified')
+      ) {
+        return;
+      }
+      if (
+        !shouldFallbackFromRichMessage(
+          richResponse.status,
+          richParsed?.description,
+        )
+      ) {
+        throw new Error(
+          `Telegram editMessageText failed (${richResponse.status}): ${richParsed?.description ?? richResponse.statusText}`,
+        );
+      }
+    }
     const firstChunk = useMarkdown
-      ? chunkTelegramMarkdownAsHtml(input.text)[0]
+      ? chunkTelegramMarkdownAsHtml(text)[0]
       : null;
-    const attempts: Array<{ text: string; parseMode?: 'HTML' }> = input.htmlText
-      ? [{ text: input.htmlText, parseMode: 'HTML' }, { text: input.text }]
+    const fallbackHtml = input.htmlText
+      ? joinTelegramBodyAndFooter(
+          input.htmlText,
+          input.footerText
+            ? (input.footerHtmlText ?? markdownToTelegramHtml(input.footerText))
+            : undefined,
+        )
+      : undefined;
+    const attempts: Array<{ text: string; parseMode?: 'HTML' }> = fallbackHtml
+      ? [{ text: fallbackHtml, parseMode: 'HTML' }, { text }]
       : firstChunk?.html
         ? [
             { text: firstChunk.html, parseMode: 'HTML' },
             { text: firstChunk.markdown },
           ]
-        : [{ text: firstChunk?.markdown ?? input.text }];
+        : [{ text: firstChunk?.markdown ?? text }];
 
     let lastError: Error | null = null;
 

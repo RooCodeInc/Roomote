@@ -356,6 +356,36 @@ describe('MockTelegramServer', () => {
     ).rejects.toThrow('message to edit not found');
   });
 
+  it('stores native rich footers on send and edit', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    const provider = providerFor(baseUrl);
+    const posted = await provider.postMessage({
+      channelId: '111000111',
+      text: 'Initial reply',
+      footerText: 'Reply anytime · [Open in Roomote](https://roomote.test/s/1)',
+    });
+    await provider.editMessageText({
+      channelId: '111000111',
+      messageId: posted.messageId,
+      text: 'Updated reply',
+      footerText: 'Reply anytime · [Open in Roomote](https://roomote.test/s/1)',
+    });
+
+    const message = (server.getState().messages ?? []).find(
+      (entry) => String(entry.message_id) === posted.messageId,
+    );
+    expect(message?.text).toBeUndefined();
+    expect(message?.rich_message).toEqual({
+      html: [
+        'Updated reply',
+        '',
+        '<footer>Reply anytime · <a href="https://roomote.test/s/1">Open in Roomote</a></footer>',
+      ].join('\n'),
+    });
+  });
+
   it('records typing chat actions through sendChatAction', async () => {
     const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());

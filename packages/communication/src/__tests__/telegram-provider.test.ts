@@ -518,6 +518,113 @@ describe('TelegramCommunicationProvider', () => {
     expect(secondBody.parse_mode).toBeUndefined();
   });
 
+  it('posts a native rich footer while preserving topic, reply, and keyboard fields', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        result: { message_id: 103, message_thread_id: 7 },
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '-100456',
+      threadId: '7',
+      replyToMessageId: '42',
+      text: '**Complete.**',
+      textFormat: 'markdown',
+      footerText: 'Reply anytime · [Open in Roomote](https://roomote.test/s/1)',
+      buttons: [[{ text: 'Open', url: 'https://roomote.test/s/1' }]],
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://telegram.example.test/botbot-token/sendRichMessage',
+    );
+    expect(
+      JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
+    ).toEqual({
+      chat_id: '-100456',
+      rich_message: {
+        html: [
+          '<b>Complete.</b>',
+          '',
+          '<footer>Reply anytime · <a href="https://roomote.test/s/1">Open in Roomote</a></footer>',
+        ].join('\n'),
+      },
+      message_thread_id: 7,
+      reply_markup: {
+        inline_keyboard: [[{ text: 'Open', url: 'https://roomote.test/s/1' }]],
+      },
+      reply_parameters: {
+        message_id: 42,
+        allow_sending_without_reply: true,
+      },
+    });
+  });
+
+  it('falls back to ordinary HTML after an explicit rich-message rejection', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { ok: false, description: 'Bad Request: rich messages unavailable' },
+          400,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 104 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '123',
+      text: 'Completed.',
+      htmlText: '<b>Completed.</b>',
+      footerText: 'Open in Roomote: https://roomote.test/s/1',
+      footerHtmlText: '<a href="https://roomote.test/s/1">Open in Roomote</a>',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      'https://telegram.example.test/botbot-token/sendMessage',
+    );
+    expect(
+      JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string),
+    ).toMatchObject({
+      text: '<b>Completed.</b>\n\n<a href="https://roomote.test/s/1">Open in Roomote</a>',
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+    });
+  });
+
+  it('does not fall back after an ambiguous rich-message server failure', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: false }, 500));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.postMessage({
+        channelId: '123',
+        text: 'Completed.',
+        footerText: 'Open in Roomote: https://roomote.test/s/1',
+      }),
+    ).rejects.toThrow('Telegram sendRichMessage failed (500)');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('splits long messages into multiple sends and anchors the reply on the first', async () => {
     const fetchMock = vi
       .fn()
@@ -559,6 +666,36 @@ describe('TelegramCommunicationProvider', () => {
       allow_sending_without_reply: true,
     });
     expect(secondBody.reply_parameters).toBeUndefined();
+  });
+
+  it('uses a rich footer only on the final chunk of a split reply', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      jsonResponse({
+        ok: true,
+        result: { message_id: fetchMock.mock.calls.length + 200 },
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '123',
+      text: 'Long narrative. '.repeat(400),
+      textFormat: 'markdown',
+      footerText: 'Reply anytime · [Open in Roomote](https://roomote.test/s/1)',
+    });
+
+    const methods = fetchMock.mock.calls.map((call) =>
+      String(call[0]).split('/').at(-1),
+    );
+    expect(methods.length).toBeGreaterThan(1);
+    expect(methods.at(-1)).toBe('sendRichMessage');
+    expect(
+      methods.slice(0, -1).every((method) => method === 'sendMessage'),
+    ).toBe(true);
   });
 
   it('delivers exact-limit text unchanged in one message', async () => {
@@ -814,6 +951,43 @@ describe('TelegramCommunicationProvider', () => {
       text: 'Roomote task\nRunning\n\nProgress\nWorking',
     });
     expect(secondBody.parse_mode).toBeUndefined();
+  });
+
+  it('edits native rich-message footers with the existing keyboard contract', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.editMessageText({
+      channelId: '123',
+      messageId: '42',
+      text: 'Completed.',
+      footerText: 'Reply anytime · [Open in Roomote](https://roomote.test/s/1)',
+      buttons: [[{ text: 'Open', url: 'https://roomote.test/s/1' }]],
+    });
+
+    expect(
+      JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
+    ).toEqual({
+      chat_id: '123',
+      message_id: 42,
+      rich_message: {
+        html: [
+          'Completed.',
+          '',
+          '<footer>Reply anytime · <a href="https://roomote.test/s/1">Open in Roomote</a></footer>',
+        ].join('\n'),
+      },
+      link_preview_options: { is_disabled: true },
+      reply_markup: {
+        inline_keyboard: [[{ text: 'Open', url: 'https://roomote.test/s/1' }]],
+      },
+    });
   });
 
   it('sends images as native photos with captions', async () => {

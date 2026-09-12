@@ -78,24 +78,27 @@ export function buildTelegramLiveTaskMessage(
 ): {
   text: string;
   htmlText: string;
+  footerText?: string;
+  footerHtmlText?: string;
 } {
   const progress = content.progress?.trim() || getStatusText(content.status);
   const running =
     content.status === 'running' ? buildRunningContent(progress) : null;
-  const plainFooter = content.taskUrl
-    ? `\n\nOpen in Roomote: ${content.taskUrl}`
-    : '';
-  const text = `${truncate(
+  const footerText = content.taskUrl
+    ? `Open in Roomote: ${content.taskUrl}`
+    : undefined;
+  const text = truncate(
     running?.details
       ? `${running.summary}\n\n${running.details}`
       : (running?.summary ?? progress),
-    TELEGRAM_MAX_MESSAGE_LENGTH - plainFooter.length,
-  )}${plainFooter}`;
+    TELEGRAM_MAX_MESSAGE_LENGTH - (footerText ? footerText.length + 2 : 0),
+  );
   const htmlPrefix = '<blockquote expandable>';
   const htmlSuffix = '</blockquote>';
-  const htmlFooter = content.taskUrl
-    ? `\n\n<a href="${escapeHtmlAttribute(content.taskUrl)}">Open in Roomote</a>`
-    : '';
+  const footerHtmlText = content.taskUrl
+    ? `<a href="${escapeHtmlAttribute(content.taskUrl)}">Open in Roomote</a>`
+    : undefined;
+  const footerHtmlBudget = footerHtmlText ? footerHtmlText.length + 2 : 0;
   const htmlBody = running
     ? `${htmlPrefix}${escapeHtmlWithinBudget(
         running.details
@@ -104,15 +107,17 @@ export function buildTelegramLiveTaskMessage(
         TELEGRAM_MAX_MESSAGE_LENGTH -
           htmlPrefix.length -
           htmlSuffix.length -
-          htmlFooter.length,
+          footerHtmlBudget,
       )}${htmlSuffix}`
     : escapeHtmlWithinBudget(
         progress,
-        TELEGRAM_MAX_MESSAGE_LENGTH - htmlFooter.length,
+        TELEGRAM_MAX_MESSAGE_LENGTH - footerHtmlBudget,
       );
 
   return {
     text,
-    htmlText: `${htmlBody}${htmlFooter}`,
+    htmlText: htmlBody,
+    ...(footerText ? { footerText } : {}),
+    ...(footerHtmlText ? { footerHtmlText } : {}),
   };
 }

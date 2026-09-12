@@ -20,11 +20,13 @@ describe('buildTelegramLiveTaskMessage', () => {
         'Fixing bug…',
         '',
         'Updating the task lifecycle and rerunning focused tests.',
-        '',
-        'Open in Roomote: https://roomote.example/sessions/session-1?task=task-1&utm_source=telegram',
       ].join('\n'),
       htmlText:
-        '<blockquote expandable>Fixing bug…\n\nUpdating the task lifecycle and rerunning focused tests.</blockquote>\n\n<a href="https://roomote.example/sessions/session-1?task=task-1&amp;utm_source=telegram">Open in Roomote</a>',
+        '<blockquote expandable>Fixing bug…\n\nUpdating the task lifecycle and rerunning focused tests.</blockquote>',
+      footerText:
+        'Open in Roomote: https://roomote.example/sessions/session-1?task=task-1&utm_source=telegram',
+      footerHtmlText:
+        '<a href="https://roomote.example/sessions/session-1?task=task-1&amp;utm_source=telegram">Open in Roomote</a>',
     });
   });
 
@@ -68,19 +70,21 @@ describe('buildTelegramLiveTaskMessage', () => {
     });
     const fixture = [
       'RUNNING',
-      running.text,
+      [running.text, running.footerText].filter(Boolean).join('\n\n'),
       '',
       'WAITING',
-      buildTelegramLiveTaskMessage({ status: 'waiting', taskUrl }).text,
+      joinMessage(buildTelegramLiveTaskMessage({ status: 'waiting', taskUrl })),
       '',
       'COMPLETED',
-      buildTelegramLiveTaskMessage({ status: 'completed', taskUrl }).text,
+      joinMessage(
+        buildTelegramLiveTaskMessage({ status: 'completed', taskUrl }),
+      ),
       '',
       'FAILED',
-      buildTelegramLiveTaskMessage({ status: 'failed', taskUrl }).text,
+      joinMessage(buildTelegramLiveTaskMessage({ status: 'failed', taskUrl })),
       '',
       'STOPPED',
-      buildTelegramLiveTaskMessage({ status: 'stopped', taskUrl }).text,
+      joinMessage(buildTelegramLiveTaskMessage({ status: 'stopped', taskUrl })),
       '',
     ].join('\n');
 
@@ -92,3 +96,7 @@ describe('buildTelegramLiveTaskMessage', () => {
     );
   });
 });
+
+function joinMessage(message: { text: string; footerText?: string }): string {
+  return [message.text, message.footerText].filter(Boolean).join('\n\n');
+}

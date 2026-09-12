@@ -37,8 +37,22 @@ export async function editTextThreadFooterMessage(
       images: record.images,
     });
   } else {
+    const suffix = `\n\n`;
+    const hasFooter =
+      text !== record.textWithoutFooter &&
+      (record.textWithoutFooter === '' ||
+        text.startsWith(`${record.textWithoutFooter}${suffix}`));
     await provider.editMessageText({
       ...input,
+      text: hasFooter ? record.textWithoutFooter || '\u200b' : text,
+      ...(hasFooter
+        ? {
+            footerText: text.slice(
+              record.textWithoutFooter.length +
+                (record.textWithoutFooter ? suffix.length : 0),
+            ),
+          }
+        : {}),
       ...(record.buttons ? { buttons: record.buttons } : {}),
     });
   }
@@ -91,7 +105,8 @@ export async function postTextThreadReplyWithFooter(params: {
       } else {
         posted = await provider.postMessage({
           ...input,
-          text,
+          text: provider.provider === 'telegram' ? input.text : text,
+          ...(provider.provider === 'telegram' ? { footerText } : {}),
           textFormat: 'markdown',
         });
       }

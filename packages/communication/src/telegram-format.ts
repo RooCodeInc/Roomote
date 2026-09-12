@@ -15,7 +15,7 @@ export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
  */
 const MARKDOWN_CHUNK_TARGET_LENGTH = 3500;
 
-function escapeTelegramHtml(text: string): string {
+export function escapeTelegramHtml(text: string): string {
   return text
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
