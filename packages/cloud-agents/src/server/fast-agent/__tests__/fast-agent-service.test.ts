@@ -352,6 +352,7 @@ import {
   registerFastAgentTurnActivity,
 } from '../fast-agent-turn-lock';
 import { FAST_RESPONDING_LEASE_RENEW_MS } from '../fast-agent-constants';
+import { projectFastAgentCanonicalEvents } from '../fast-agent-canonical-projection';
 
 const baseParams = {
   question: 'What does this service do?',
@@ -1143,6 +1144,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
       sessionId: 'conversation-1',
       openCodeSessionId: 'opencode-session-1',
+      projectionHash: expect.any(String),
+      projectedThroughSequence: null,
     });
   });
 
@@ -1731,6 +1734,69 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.runSession).not.toHaveBeenCalled();
     expect(mocks.markDurableDelivered).toHaveBeenCalledWith(
       'durable-green-v11',
+    );
+  });
+
+  it('reuses the native session for an ordinary follow-up turn already represented by its watermark', async () => {
+    // Turn one's prompt is canonical history with semantics, and the stored
+    // watermark covers it, so the follow-up must continue warm.
+    const priorPrompt: FastAgentMessage = {
+      id: 'turn-one',
+      conversationId: 'conversation-1',
+      eventId: 'turn-one:user',
+      conversationSeq: 1,
+      turnId: 'turn-one',
+      turnSeq: 0,
+      ts: 1,
+      observedAt: new Date(1),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      contentBlocks: [{ type: 'text', text: 'What does this service do?' }],
+      metadata: {
+        visibleInTranscript: true,
+        turnSource: 'human',
+        [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: {
+          schemaVersion: 1,
+          kind: 'historical_observation',
+          authority: 'human',
+          observedAt: new Date(1).toISOString(),
+          sourceEventId: 'turn-one',
+        },
+      },
+      payload: {},
+      source: 'slack',
+      nativeSessionId: 'opencode-session-1',
+      nativeMessageId: null,
+      createdAt: new Date(1),
+      updatedAt: new Date(1),
+    };
+    const priorReply: FastAgentMessage = {
+      ...priorPrompt,
+      id: 'turn-one-reply',
+      eventId: 'turn-one:assistant:0',
+      conversationSeq: 2,
+      role: 'assistant',
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      contentBlocks: [{ type: 'text', text: 'It coordinates requests.' }],
+      metadata: { visibleInTranscript: true },
+    };
+    mocks.loadCanonicalMessages.mockResolvedValue([priorPrompt, priorReply]);
+    mocks.getSession.mockResolvedValue({
+      id: 'conversation-1',
+      compatibilityMessages: [],
+      openCodeSessionId: 'opencode-session-1',
+      openCodeProjectionHash: projectFastAgentCanonicalEvents([
+        priorPrompt,
+        priorReply,
+      ]).stateHash,
+      openCodeProjectedThroughSeq: 1,
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.invalidateSession).not.toHaveBeenCalled();
+    expect(mocks.runSession).toHaveBeenCalledWith(
+      expect.objectContaining({ persistedSessionId: 'opencode-session-1' }),
     );
   });
 
@@ -4490,7 +4556,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       { id: 'persisted-session' },
       expect.objectContaining({ validateSession: true }),
     );
-    expect(mocks.setOpenCodeSession).not.toHaveBeenCalled();
+    // The session id is unchanged, but its projection watermark is recorded
+    // so the next ordinary turn can continue warm.
+    expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
+      sessionId: 'conversation-1',
+      openCodeSessionId: 'persisted-session',
+      projectionHash: expect.any(String),
+      projectedThroughSequence: null,
+    });
   });
 
   it('rebuilds missing durable sessions and stores the replacement id', async () => {
@@ -4532,6 +4605,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
       sessionId: 'conversation-1',
       openCodeSessionId: 'replacement-session',
+      projectionHash: expect.any(String),
+      projectedThroughSequence: null,
     });
     expect(mocks.getNativeRuntime).toHaveBeenCalledTimes(2);
   });
@@ -9883,6 +9958,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.setOpenCodeSession).toHaveBeenCalledWith({
         sessionId: 'conversation-1',
         openCodeSessionId: 'opencode-session-1',
+        projectionHash: expect.any(String),
+        projectedThroughSequence: null,
       });
       expect(mocks.invalidateSession).not.toHaveBeenCalled();
     } finally {

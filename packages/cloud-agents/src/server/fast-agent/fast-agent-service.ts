@@ -4870,25 +4870,23 @@ export async function answerFastAgentQuestion({
     const serializedTurnPrompt = turnPromptInput.text;
     let inferenceAttemptNumber = 0;
     const persistOpenCodeSession = async (openCodeSessionId: string) => {
+      // The watermark travels with every native session, not only with
+      // state-bearing turns: an ordinary prompt is canonical history too, so
+      // leaving it unrecorded would make the next turn look ahead of the
+      // session and rebuild it from scratch.
       if (
         durableOpenCodeSessionId === openCodeSessionId &&
-        (canonicalProjection.currentStateEventIds.length === 0 ||
-          (session.openCodeProjectionHash === canonicalProjection.stateHash &&
-            session.openCodeProjectedThroughSeq ===
-              canonicalProjection.projectedThroughSequence))
+        session.openCodeProjectionHash === canonicalProjection.stateHash &&
+        session.openCodeProjectedThroughSeq ===
+          canonicalProjection.projectedThroughSequence
       ) {
         return;
       }
       await setFastAgentOpenCodeSession({
         sessionId: session.id,
         openCodeSessionId,
-        ...(canonicalProjection.currentStateEventIds.length > 0
-          ? {
-              projectionHash: canonicalProjection.stateHash,
-              projectedThroughSequence:
-                canonicalProjection.projectedThroughSequence,
-            }
-          : {}),
+        projectionHash: canonicalProjection.stateHash,
+        projectedThroughSequence: canonicalProjection.projectedThroughSequence,
       });
       durableOpenCodeSessionId = openCodeSessionId;
       session.openCodeSessionId = openCodeSessionId;
@@ -4928,10 +4926,15 @@ export async function answerFastAgentQuestion({
       return lastVisibleMessage;
     }
     diagnostics.markInferenceQueued();
+    // A native session cannot receive a delta safely once canonical history
+    // moved past what it represents, or once the state it was built on
+    // changed. A session carried over from before this release has no
+    // recorded projection: that is unknown rather than stale, so it keeps
+    // its transcript unless newer semantic events are actually ahead of it.
     if (
       session.openCodeSessionId &&
       (canonicalHistoryAheadOfNative ||
-        (canonicalProjection.currentStateEventIds.length > 0 &&
+        (session.openCodeProjectionHash != null &&
           session.openCodeProjectionHash !== canonicalProjection.stateHash))
     ) {
       fastAgentOpenCodeSessionManager.invalidate(session.id);
