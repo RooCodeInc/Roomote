@@ -123,7 +123,7 @@ describe('MockTelegramServer', () => {
       expect.objectContaining({
         chat_id: '111000111',
         message_thread_id: Number(topic.messageThreadId),
-        rich_message: { html: 'Task started.' },
+        rich_message: { markdown: '<p>Task started.</p>' },
       }),
     );
   });
@@ -157,7 +157,7 @@ describe('MockTelegramServer', () => {
     const botMessage = messages.find((m) => m.from.is_bot);
     expect(botMessage).toBeDefined();
     expect(botMessage?.rich_message).toEqual({
-      html: 'On it — taking a look now.',
+      markdown: '<p>On it — taking a look now.</p>',
     });
     expect(botMessage?.reply_to_message_id).toBe(1000);
     expect(result.messageId).toBe(String(botMessage?.message_id));
@@ -186,7 +186,7 @@ describe('MockTelegramServer', () => {
 
     for (const message of botMessages) {
       expect(
-        String(message.rich_message?.html ?? '').length,
+        String(message.rich_message?.markdown ?? '').length,
       ).toBeLessThanOrEqual(TELEGRAM_MAX_RICH_MESSAGE_LENGTH);
     }
 
@@ -226,7 +226,7 @@ describe('MockTelegramServer', () => {
     expect(parsed.description).toContain('message is too long');
   });
 
-  it('stores markdown formatting as rich HTML', async () => {
+  it('stores Markdown formatting as native Rich Markdown', async () => {
     const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());
 
@@ -241,7 +241,7 @@ describe('MockTelegramServer', () => {
       (m) => m.from.is_bot,
     );
     expect(botMessage?.rich_message).toEqual({
-      html: 'Some <b>bold</b> update',
+      markdown: 'Some **bold** update',
     });
   });
 
@@ -267,7 +267,7 @@ describe('MockTelegramServer', () => {
     );
     expect(botMessage?.photo_url).toBeUndefined();
     expect(botMessage?.rich_message).toEqual({
-      html: 'Screenshot: https://artifacts.example.test/shot.png',
+      markdown: '<p>Screenshot: https://artifacts.example.test/shot.png</p>',
     });
   });
 
@@ -342,7 +342,7 @@ describe('MockTelegramServer', () => {
       (m) => String(m.message_id) === posted.messageId,
     );
     expect(message?.rich_message).toEqual({
-      html: 'Okay — where should I run this?',
+      markdown: '<p>Okay — where should I run this?</p>',
     });
     expect(message?.reply_markup).toEqual({
       inline_keyboard: [
@@ -369,12 +369,14 @@ describe('MockTelegramServer', () => {
       channelId: '111000111',
       text: 'Initial reply',
       footerText: 'Reply anytime · [Open in Roomote](https://roomote.test/s/1)',
+      textFormat: 'markdown',
     });
     await provider.editMessageText({
       channelId: '111000111',
       messageId: posted.messageId,
       text: 'Updated reply',
       footerText: 'Reply anytime · [Open in Roomote](https://roomote.test/s/1)',
+      textFormat: 'markdown',
     });
 
     const message = (server.getState().messages ?? []).find(
@@ -382,7 +384,7 @@ describe('MockTelegramServer', () => {
     );
     expect(message?.text).toBeUndefined();
     expect(message?.rich_message).toEqual({
-      html: [
+      markdown: [
         'Updated reply',
         '',
         '<footer>Reply anytime · <a href="https://roomote.test/s/1">Open in Roomote</a></footer>',
@@ -405,10 +407,10 @@ describe('MockTelegramServer', () => {
     const message = (server.getState().messages ?? []).find(
       (entry) => String(entry.message_id) === posted.messageId,
     );
-    const richHtml = String(message?.rich_message?.html ?? '');
-    expect(richHtml.length).toBeGreaterThan(4_096);
-    expect(richHtml.length).toBeLessThanOrEqual(32_768);
-    expect(richHtml).toContain('<footer>Open in Roomote</footer>');
+    const richMarkdown = String(message?.rich_message?.markdown ?? '');
+    expect(richMarkdown.length).toBeGreaterThan(4_096);
+    expect(richMarkdown.length).toBeLessThanOrEqual(32_768);
+    expect(richMarkdown).toContain('<footer>Open in Roomote</footer>');
   });
 
   it('rejects rich messages above the documented rich-message limit', async () => {
@@ -421,7 +423,7 @@ describe('MockTelegramServer', () => {
       body: JSON.stringify({
         chat_id: '111000111',
         rich_message: {
-          html: 'x'.repeat(TELEGRAM_MAX_RICH_MESSAGE_LENGTH + 1),
+          markdown: 'x'.repeat(TELEGRAM_MAX_RICH_MESSAGE_LENGTH + 1),
         },
       }),
     });
@@ -430,6 +432,46 @@ describe('MockTelegramServer', () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
       description: 'Bad Request: rich message is too long',
+    });
+  });
+
+  it('rejects rich messages with more than one formatting representation', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    const response = await fetch(`${baseUrl}/bot${BOT_TOKEN}/sendRichMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: '111000111',
+        rich_message: { markdown: '**hello**', html: '<b>hello</b>' },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      description: 'Bad Request: rich message must use Markdown formatting',
+    });
+  });
+
+  it('rejects HTML-only rich messages from Roomote callers', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    const response = await fetch(`${baseUrl}/bot${BOT_TOKEN}/sendRichMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: '111000111',
+        rich_message: { html: '<b>legacy</b>' },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      description: 'Bad Request: rich message must use Markdown formatting',
     });
   });
 
@@ -458,7 +500,7 @@ describe('MockTelegramServer', () => {
         chat_id: '111000111',
         message_thread_id: 77,
         draft_id: 42,
-        rich_message: { html: 'Complete <b>preview</b>' },
+        rich_message: { markdown: 'Complete **preview**' },
       },
     ]);
     expect(
@@ -485,7 +527,7 @@ describe('MockTelegramServer', () => {
     expect(server.getState().messages).toContainEqual(
       expect.objectContaining({
         message_id: Number(posted.messageId),
-        rich_message: { html: 'Final reply' },
+        rich_message: { markdown: '<p>Final reply</p>' },
       }),
     );
   });

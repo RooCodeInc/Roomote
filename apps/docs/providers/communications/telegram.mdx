@@ -136,6 +136,10 @@ continue the report's Fast session.
 
 Roomote sends all Telegram text replies as rich messages, including
 acknowledgements, progress, final replies, and editable live-task status. Every
+Markdown-authored reply uses Telegram's native Rich Markdown support, preserving
+GitHub Flavored Markdown features where Telegram supports them. Plain text and
+Roomote-generated controls use supported Rich HTML embedded in the same Markdown
+payload, so sends, edits, and drafts share one formatting path. Each
 Fast reply ends with a compact footer: **Reply anytime**, a plain
 running-task count when at least one task is running, links to pull requests the
 Session is working on, and **Open in Roomote**, which opens the Session transcript.
