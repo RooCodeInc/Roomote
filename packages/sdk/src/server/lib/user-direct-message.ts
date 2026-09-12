@@ -215,6 +215,7 @@ async function sendSlackUserDirectMessage(
   text: string,
   logContext: string,
   blocks?: unknown[],
+  idempotencyKey?: string,
 ): Promise<boolean> {
   try {
     const destination = await resolveSlackUserDirectMessage(userId);
@@ -223,6 +224,7 @@ async function sendSlackUserDirectMessage(
         channel: destination.channelId,
         text,
         ...(blocks ? { blocks } : {}),
+        ...(idempotencyKey ? { client_msg_id: idempotencyKey } : {}),
       });
 
       if (messageTs) {
@@ -290,6 +292,7 @@ async function sendTelegramUserDirectMessage(
   userId: string,
   text: string,
   logContext: string,
+  idempotencyKey?: string,
 ): Promise<boolean> {
   try {
     const mapping = await db.query.telegramUserMappings.findFirst({
@@ -312,6 +315,7 @@ async function sendTelegramUserDirectMessage(
       channelId: mapping.telegramChatId,
       text,
       textFormat: 'markdown',
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     });
 
     return true;
@@ -341,6 +345,7 @@ async function sendAgentMailUserDirectMessage(
   userId: string,
   text: string,
   logContext: string,
+  idempotencyKey?: string,
 ): Promise<boolean> {
   try {
     return await startAgentMailConversation({
@@ -348,6 +353,7 @@ async function sendAgentMailUserDirectMessage(
       subject: deriveEmailSubject(text),
       text,
       logContext,
+      ...(idempotencyKey ? { clientSendId: idempotencyKey } : {}),
     });
   } catch (error) {
     console.warn(
@@ -361,6 +367,7 @@ async function sendDiscordUserDirectMessage(
   userId: string,
   text: string,
   logContext: string,
+  idempotencyKey?: string,
 ): Promise<boolean> {
   try {
     const destination = await findDiscordUserDirectMessageDestination(userId);
@@ -378,6 +385,7 @@ async function sendDiscordUserDirectMessage(
       channelId: destination.channelId,
       text,
       textFormat: 'markdown',
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     });
     return true;
   } catch (error) {
@@ -394,24 +402,47 @@ export async function sendUserDirectMessage({
   text,
   slackBlocks,
   logContext,
+  idempotencyKey,
 }: {
   provider: CommunicationProvider;
   userId: string;
   text: string;
   slackBlocks?: unknown[];
   logContext: string;
+  idempotencyKey?: string;
 }): Promise<boolean> {
   switch (provider) {
     case 'slack':
-      return sendSlackUserDirectMessage(userId, text, logContext, slackBlocks);
+      return sendSlackUserDirectMessage(
+        userId,
+        text,
+        logContext,
+        slackBlocks,
+        idempotencyKey,
+      );
     case 'teams':
       return sendTeamsUserDirectMessage(userId, text, logContext);
     case 'telegram':
-      return sendTelegramUserDirectMessage(userId, text, logContext);
+      return sendTelegramUserDirectMessage(
+        userId,
+        text,
+        logContext,
+        idempotencyKey,
+      );
     case 'discord':
-      return sendDiscordUserDirectMessage(userId, text, logContext);
+      return sendDiscordUserDirectMessage(
+        userId,
+        text,
+        logContext,
+        idempotencyKey,
+      );
     case 'agentmail':
-      return sendAgentMailUserDirectMessage(userId, text, logContext);
+      return sendAgentMailUserDirectMessage(
+        userId,
+        text,
+        logContext,
+        idempotencyKey,
+      );
   }
 }
 
@@ -424,16 +455,24 @@ export async function sendUserDirectMessageBestEffort({
   userId,
   text,
   logContext,
+  idempotencyKey,
 }: {
   userId: string;
   text: string;
   logContext: string;
+  idempotencyKey?: string;
 }): Promise<UserDirectMessageProvider[]> {
   const [slack, teams, telegram, discord] = await Promise.all([
-    sendSlackUserDirectMessage(userId, text, logContext),
+    sendSlackUserDirectMessage(
+      userId,
+      text,
+      logContext,
+      undefined,
+      idempotencyKey,
+    ),
     sendTeamsUserDirectMessage(userId, text, logContext),
-    sendTelegramUserDirectMessage(userId, text, logContext),
-    sendDiscordUserDirectMessage(userId, text, logContext),
+    sendTelegramUserDirectMessage(userId, text, logContext, idempotencyKey),
+    sendDiscordUserDirectMessage(userId, text, logContext, idempotencyKey),
   ]);
 
   const chatDelivered = slack || teams || telegram || discord;
@@ -443,7 +482,12 @@ export async function sendUserDirectMessageBestEffort({
   // (email is low-frequency by design).
   const agentmail = chatDelivered
     ? false
-    : await sendAgentMailUserDirectMessage(userId, text, logContext);
+    : await sendAgentMailUserDirectMessage(
+        userId,
+        text,
+        logContext,
+        idempotencyKey,
+      );
 
   return [
     ...(slack ? (['slack'] as const) : []),

@@ -32,6 +32,26 @@ export type TaskStateRunInput = {
   startedAt: Date | null;
 };
 
+/** Returns the terminal run whose outcome defines the task state. */
+export function selectTaskStateRun(
+  runs: TaskStateRunInput[],
+): TaskStateRunInput | null {
+  if (
+    runs.length === 0 ||
+    runs.some((run) => NON_TERMINAL_RUN_STATUSES.has(run.status))
+  ) {
+    return null;
+  }
+
+  const progressRuns = runs.filter(
+    (run) => run.startedAt !== null || run.status === RunStatus.Completed,
+  );
+  const candidates = progressRuns.length > 0 ? progressRuns : runs;
+  return candidates.reduce((latest, run) =>
+    run.id > latest.id ? run : latest,
+  );
+}
+
 function terminalRunStatusToTaskState(status: RunStatus): TaskState {
   switch (status) {
     case RunStatus.Failed:
@@ -61,22 +81,10 @@ export function deriveTaskStateFromRuns(
     return null;
   }
 
-  const hasNonTerminalRun = runs.some((run) =>
-    NON_TERMINAL_RUN_STATUSES.has(run.status),
-  );
-
-  if (hasNonTerminalRun) {
+  const chosen = selectTaskStateRun(runs);
+  if (!chosen) {
     return 'active';
   }
-
-  const madeProgress = (run: TaskStateRunInput): boolean =>
-    run.startedAt !== null || run.status === RunStatus.Completed;
-
-  const progressRuns = runs.filter(madeProgress);
-  const candidates = progressRuns.length > 0 ? progressRuns : runs;
-  const chosen = candidates.reduce((latest, run) =>
-    run.id > latest.id ? run : latest,
-  );
 
   return terminalRunStatusToTaskState(chosen.status);
 }

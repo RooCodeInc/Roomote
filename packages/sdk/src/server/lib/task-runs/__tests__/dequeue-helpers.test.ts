@@ -13,6 +13,8 @@ const {
   mockResolveSandboxModelRuntimeEnv,
   mockTaskRunsFindFirst,
   mockNotifySourceRunOnSettle,
+  mockNotifyWebTaskInitiatorOnSettle,
+  mockEnqueueWebTaskInitiatorSettleNotification,
   mockCaptureTaskSettled,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
@@ -26,6 +28,8 @@ const {
   mockResolveSandboxModelRuntimeEnv: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
   mockNotifySourceRunOnSettle: vi.fn(),
+  mockNotifyWebTaskInitiatorOnSettle: vi.fn(),
+  mockEnqueueWebTaskInitiatorSettleNotification: vi.fn(),
   mockCaptureTaskSettled: vi.fn(),
 }));
 
@@ -112,6 +116,16 @@ vi.mock('../notify-source-run-on-settle', () => ({
 
 vi.mock('../notify-fast-agent-parent-on-settle', () => ({
   notifyFastAgentParentOnSettle: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../notify-web-task-initiator-on-settle', () => ({
+  notifyWebTaskInitiatorOnSettle: (...args: unknown[]) =>
+    mockNotifyWebTaskInitiatorOnSettle(...args),
+}));
+
+vi.mock('../enqueue-web-task-initiator-settle-notification', () => ({
+  enqueueWebTaskInitiatorSettleNotification: (...args: unknown[]) =>
+    mockEnqueueWebTaskInitiatorSettleNotification(...args),
 }));
 
 import { resolveWorkspaceSourceControlProvider } from '@roomote/db/server';
@@ -849,6 +863,7 @@ describe('notifyCanceledTaskRunOnSettle', () => {
     mockTaskRunsFindFirst.mockResolvedValueOnce({
       error: 'Failed to create source control token.',
     });
+    mockNotifyWebTaskInitiatorOnSettle.mockResolvedValueOnce('delivered');
 
     await notifyCanceledTaskRunOnSettle(taskRun);
 
@@ -864,6 +879,24 @@ describe('notifyCanceledTaskRunOnSettle', () => {
       taskRun.id,
       RunStatus.Canceled,
     );
+    expect(mockNotifyWebTaskInitiatorOnSettle).toHaveBeenCalledWith(
+      taskRun,
+      RunStatus.Canceled,
+    );
+  });
+
+  it('queues a durable retry when canceled-run personal delivery fails', async () => {
+    const taskRun = makeTaskRun({ repo: 'owner/repo', description: 'Task' });
+    mockTaskRunsFindFirst.mockResolvedValueOnce({ error: 'Canceled.' });
+    mockNotifyWebTaskInitiatorOnSettle.mockResolvedValueOnce('failed');
+
+    await notifyCanceledTaskRunOnSettle(taskRun);
+
+    expect(mockEnqueueWebTaskInitiatorSettleNotification).toHaveBeenCalledWith({
+      runId: taskRun.id,
+      taskId: taskRun.taskId,
+      status: RunStatus.Canceled,
+    });
   });
 });
 
