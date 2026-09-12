@@ -177,7 +177,7 @@ describe('ecosystem.config.js', () => {
     const compose = readFileSync(productionComposePath, 'utf8');
     const inferenceEnv = compose.slice(
       compose.indexOf('x-roomote-inference-env:'),
-      compose.indexOf('x-roomote-web-env:'),
+      compose.indexOf('x-roomote-worker-launcher-env:'),
     );
     for (const key of runtimeProviderEnvKeys) {
       expect(inferenceEnv, `production Compose is missing ${key}`).toContain(
