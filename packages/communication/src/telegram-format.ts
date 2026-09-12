@@ -291,7 +291,14 @@ export function chunkTelegramMarkdown(
     return [markdown];
   }
 
-  const rawChunks = chunkTelegramText(markdown, maxLength - 16);
+  const decorationOverhead = Math.max(
+    16,
+    getMarkdownCodeFenceDecorationOverhead(markdown),
+  );
+  if (decorationOverhead > maxLength - 2) {
+    throw new Error('Telegram Markdown code fence cannot fit in one chunk.');
+  }
+  const rawChunks = chunkTelegramText(markdown, maxLength - decorationOverhead);
   let openFence: MarkdownCodeFence | null = null;
 
   return rawChunks.map((rawChunk) => {
@@ -433,6 +440,25 @@ function isMarkdownCodeFenceClosing(
 ): boolean {
   const marker = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(line)?.[1];
   return marker?.[0] === openFence.marker && marker.length >= openFence.length;
+}
+
+function getMarkdownCodeFenceDecorationOverhead(markdown: string): number {
+  let openFence: MarkdownCodeFence | null = null;
+  let maxOverhead = 0;
+  for (const line of markdown.split('\n')) {
+    if (openFence) {
+      if (isMarkdownCodeFenceClosing(line, openFence)) openFence = null;
+      continue;
+    }
+    openFence = parseMarkdownCodeFenceOpening(line);
+    if (openFence) {
+      maxOverhead = Math.max(
+        maxOverhead,
+        openFence.openingLine.length + openFence.length + 2,
+      );
+    }
+  }
+  return maxOverhead;
 }
 
 function closeOpenMarkdownCodeFence(markdown: string): string {

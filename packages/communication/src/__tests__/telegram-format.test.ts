@@ -212,6 +212,26 @@ describe('chunkTelegramMarkdown', () => {
     }
   });
 
+  it('reserves the actual decoration overhead for very long fence markers', () => {
+    const marker = '`'.repeat(6_000);
+    const markdown = [
+      `${marker}ts`,
+      'x'.repeat(TELEGRAM_MAX_RICH_MESSAGE_LENGTH),
+      marker,
+    ].join('\n');
+    const chunks = chunkTelegramMarkdown(
+      markdown,
+      TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+    );
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(
+      chunks.every((chunk) => chunk.length <= TELEGRAM_MAX_RICH_MESSAGE_LENGTH),
+    ).toBe(true);
+    expect(chunks[0]!.endsWith(marker)).toBe(true);
+    expect(chunks[1]!.startsWith(`${marker}ts\n`)).toBe(true);
+  });
+
   it('hard-splits single lines longer than the limit', () => {
     const chunks = chunkTelegramMarkdown('z'.repeat(500), 100);
 
