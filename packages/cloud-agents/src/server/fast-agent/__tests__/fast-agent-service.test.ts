@@ -2355,6 +2355,296 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  describe('delayed child report continuity', () => {
+    // The reported symptom: a delegated task report is queued while the
+    // parent is busy, a human turn corrects the picture in the meantime, and
+    // the report is only consumed afterwards. The report keeps the lower
+    // conversation sequence it was admitted with, so the newer turns are
+    // genuinely later canonical history than the event being executed.
+    const REPORT_EVENT_ID = 'fast-parent-child-message:child-message-1';
+
+    function canonicalRow(input: {
+      id: string;
+      eventId: string;
+      sequence: number;
+      role: 'user' | 'assistant';
+      text: string;
+      observedAtMs: number;
+      semantics?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+    }): FastAgentMessage {
+      return {
+        id: input.id,
+        conversationId: 'conversation-1',
+        eventId: input.eventId,
+        conversationSeq: input.sequence,
+        turnId: input.eventId.replace(/:(user|assistant:0)$/u, ''),
+        turnSeq: 0,
+        ts: input.observedAtMs,
+        observedAt: new Date(input.observedAtMs),
+        eventType:
+          input.role === 'user'
+            ? ACP_ENVELOPE_EVENT_TYPES.UserPrompt
+            : ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: input.role,
+        contentBlocks: [{ type: 'text', text: input.text }],
+        metadata: {
+          visibleInTranscript: true,
+          ...(input.metadata ?? {}),
+          ...(input.semantics
+            ? {
+                [FAST_AGENT_EVENT_SEMANTICS_METADATA_KEY]: input.semantics,
+              }
+            : {}),
+        },
+        payload: {},
+        source: 'slack',
+        nativeSessionId: null,
+        nativeMessageId: null,
+        createdAt: new Date(input.observedAtMs),
+        updatedAt: new Date(input.observedAtMs),
+      };
+    }
+
+    // Admitted first, while the parent was busy: the stale report. This is
+    // the exact question text the durable queue builds for a child report.
+    const STALE_REPORT_QUESTION = `<platform_event>${JSON.stringify({
+      type: 'child_message',
+      taskId: 'task-1',
+      runId: 42,
+      messageId: 'child-message-1',
+      purpose: 'progress',
+      message: 'The rollout is still blocked on the failing migration.',
+    })}</platform_event>`;
+    const staleReportRow = canonicalRow({
+      id: 'report-row',
+      eventId: `${REPORT_EVENT_ID}:user`,
+      sequence: 10,
+      role: 'user',
+      text: STALE_REPORT_QUESTION,
+      observedAtMs: 1_000,
+      metadata: {
+        visibleInTranscript: false,
+        turnSource: 'platform_event',
+        platformEventKind: 'delegated_task',
+      },
+      semantics: {
+        schemaVersion: 1,
+        kind: 'historical_observation',
+        authority: 'delegated_task',
+        observedAt: new Date(1_000).toISOString(),
+        sourceEventId: REPORT_EVENT_ID,
+        subject: { type: 'task_run', id: '42' },
+      },
+    });
+    // Newer completed turns that corrected the picture in the meantime.
+    const newerHumanRow = canonicalRow({
+      id: 'human-row',
+      eventId: 'human-correction:user',
+      sequence: 11,
+      role: 'user',
+      text: 'Correction: the migration was renumbered and the rollout is unblocked.',
+      observedAtMs: 2_000,
+      metadata: { turnSource: 'human' },
+      semantics: {
+        schemaVersion: 1,
+        kind: 'historical_observation',
+        authority: 'human',
+        observedAt: new Date(2_000).toISOString(),
+        sourceEventId: 'human-correction',
+      },
+    });
+    const newerAssistantRow = canonicalRow({
+      id: 'assistant-row',
+      eventId: 'human-correction:assistant:0',
+      sequence: 12,
+      role: 'assistant',
+      text: 'Understood, the rollout is unblocked and the migration is renumbered.',
+      observedAtMs: 2_500,
+    });
+
+    const reportTurnParams = {
+      ...baseParams,
+      question: STALE_REPORT_QUESTION,
+      currentMessageId: REPORT_EVENT_ID,
+      turnSource: 'platform_event' as const,
+      platformEventKind: 'delegated_task' as const,
+    };
+
+    beforeEach(() => {
+      mocks.loadCanonicalMessages.mockResolvedValue([
+        staleReportRow,
+        newerHumanRow,
+        newerAssistantRow,
+      ]);
+    });
+
+    it('keeps the newer completed turns in the rebuilt context and preserves report provenance', async () => {
+      // Forced cold recovery: the native session is gone, so everything the
+      // model can see has to come from canonical history.
+      mocks.getSession.mockResolvedValue({
+        id: 'conversation-1',
+        compatibilityMessages: [],
+        openCodeSessionId: null,
+      });
+      mocks.runSession.mockImplementation(
+        ({
+          bootstrapPrompt,
+          execute,
+        }: {
+          bootstrapPrompt: () => string;
+          execute: (
+            session: { id?: string },
+            selectedPrompt: string,
+            context: { path: string; validateSession: boolean },
+          ) => Promise<unknown>;
+        }) =>
+          execute({}, bootstrapPrompt(), {
+            path: 'cold_rebuild',
+            validateSession: false,
+          }),
+      );
+
+      await answerFastAgentQuestion({
+        ...reportTurnParams,
+        adapter: callbacks(),
+      });
+
+      const prompt = mocks.generateText.mock.calls[0]![0].prompt as string;
+
+      // 1. Not missing context: both newer completed turns survive.
+      expect(prompt).toContain(
+        'Correction: the migration was renumbered and the rollout is unblocked.',
+      );
+      expect(prompt).toContain(
+        'Understood, the rollout is unblocked and the migration is renumbered.',
+      );
+
+      // 2. Not an ordering error: the newer turns precede the report being
+      //    executed, which is the last thing in the prompt.
+      const correctionAt = prompt.indexOf('Correction: the migration');
+      const assistantAt = prompt.indexOf(
+        'Understood, the rollout is unblocked',
+      );
+      const reportAt = prompt.lastIndexOf(
+        'still blocked on the failing migration',
+      );
+      expect(correctionAt).toBeGreaterThan(-1);
+      expect(assistantAt).toBeGreaterThan(correctionAt);
+      expect(reportAt).toBeGreaterThan(assistantAt);
+
+      // 3. Provenance is preserved, and it is what distinguishes the report
+      //    from the newer turns: the report was observed earlier even though
+      //    it is executed last.
+      expect(prompt).toContain('"authority":"delegated_task"');
+      expect(prompt).toContain('"subject":{"type":"task_run","id":"42"}');
+      expect(prompt).toContain(
+        `"observedAt":"${new Date(1_000).toISOString()}"`,
+      );
+      expect(prompt).toContain(
+        `"observedAt":"${new Date(2_000).toISOString()}"`,
+      );
+    });
+
+    it('continues warm without discarding the native transcript that holds the newer turns', async () => {
+      // Warm continuation sends only the delta, so the newer turns must stay
+      // in the native session rather than being rebuilt away.
+      mocks.getSession.mockResolvedValue({
+        id: 'conversation-1',
+        compatibilityMessages: [],
+        openCodeSessionId: 'opencode-session-1',
+        openCodeProjectionHash: projectFastAgentCanonicalEvents([
+          staleReportRow,
+          newerHumanRow,
+          newerAssistantRow,
+        ]).stateHash,
+        openCodeProjectedThroughSeq: 12,
+      });
+
+      await answerFastAgentQuestion({
+        ...reportTurnParams,
+        adapter: callbacks(),
+      });
+
+      // The native session that already contains the newer turns is reused.
+      expect(mocks.invalidateSession).not.toHaveBeenCalled();
+      expect(mocks.runSession).toHaveBeenCalledWith(
+        expect.objectContaining({ persistedSessionId: 'opencode-session-1' }),
+      );
+      expect(mocks.captureInferenceContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionPath: 'warm',
+          promptKind: 'turn_delta',
+        }),
+      );
+      // The delta still carries the report's provenance so its age is
+      // visible against the transcript it is appended to.
+      const delta = mocks.generateText.mock.calls[0]![0].prompt as string;
+      expect(delta).toContain('"authority":"delegated_task"');
+      expect(delta).toContain(
+        `"observedAt":"${new Date(1_000).toISOString()}"`,
+      );
+    });
+
+    it('gives the human turn after the report equivalent knowledge', async () => {
+      const reportReplyRow = canonicalRow({
+        id: 'report-reply-row',
+        eventId: `${REPORT_EVENT_ID}:assistant:0`,
+        sequence: 13,
+        role: 'assistant',
+        text: 'Noted the task report.',
+        observedAtMs: 3_000,
+      });
+      mocks.loadCanonicalMessages.mockResolvedValue([
+        staleReportRow,
+        newerHumanRow,
+        newerAssistantRow,
+        reportReplyRow,
+      ]);
+      mocks.getSession.mockResolvedValue({
+        id: 'conversation-1',
+        compatibilityMessages: [],
+        openCodeSessionId: null,
+      });
+      mocks.runSession.mockImplementation(
+        ({
+          bootstrapPrompt,
+          execute,
+        }: {
+          bootstrapPrompt: () => string;
+          execute: (
+            session: { id?: string },
+            selectedPrompt: string,
+            context: { path: string; validateSession: boolean },
+          ) => Promise<unknown>;
+        }) =>
+          execute({}, bootstrapPrompt(), {
+            path: 'cold_rebuild',
+            validateSession: false,
+          }),
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        question: 'Where does the rollout actually stand?',
+        currentMessageId: 'human-after-report',
+        adapter: callbacks(),
+      });
+
+      const prompt = mocks.generateText.mock.calls[0]![0].prompt as string;
+      // The correction, its reply, and the report all remain available, so a
+      // later human turn is not reasoning from a narrower context.
+      expect(prompt).toContain(
+        'Correction: the migration was renumbered and the rollout is unblocked.',
+      );
+      expect(prompt).toContain(
+        'Understood, the rollout is unblocked and the migration is renumbered.',
+      );
+      expect(prompt).toContain('still blocked on the failing migration');
+      expect(prompt).toContain('"authority":"delegated_task"');
+    });
+  });
+
   it('leaves pending human rows for whole-turn delivery without a native-ready capability', async () => {
     vi.useFakeTimers();
     try {
