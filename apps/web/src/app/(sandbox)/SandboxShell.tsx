@@ -137,10 +137,9 @@ export function SandboxShell({
           )}
         </div>
 
-        {isSignedIn ? <MobileSessionSwitcher /> : null}
-
         {/* Main layout with side nav on desktop */}
         <div className="flex flex-1 min-h-0 overflow-hidden">
+          {isSignedIn ? <MobileSessionSwitcher /> : null}
           {isSignedIn && <SideNav setupIncomplete={needsAdminSetup} />}
           <SandboxLayoutContext.Provider value={sandboxLayoutValue}>
             <div className="flex flex-1 min-h-0 min-w-0 md:rounded-l-sm md:shadow-md">

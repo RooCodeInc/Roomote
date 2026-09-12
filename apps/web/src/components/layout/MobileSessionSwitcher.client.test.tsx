@@ -79,7 +79,7 @@ describe('MobileSessionSwitcher', () => {
 
     expect(listInput.value).toEqual({ ownedOnly: true, limit: 20 });
     const links = screen.getAllByRole('link');
-    expect(links.map((link) => link.textContent)).toEqual([
+    expect(links.map((link) => link.getAttribute('aria-label'))).toEqual([
       'First session',
       'Current session',
       'Unread result',
@@ -91,18 +91,16 @@ describe('MobileSessionSwitcher', () => {
     expect(screen.getByLabelText('Running')).toBeVisible();
   });
 
-  it('collapses without hiding new-session access', () => {
+  it('keeps navigation available while collapsed and reveals titles on expand', () => {
     render(
       <SessionNavigationStateProvider>
         <MobileSessionSwitcher />
       </SessionNavigationStateProvider>,
     );
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Collapse recent sessions' }),
-    );
-    expect(screen.queryByRole('link')).not.toBeInTheDocument();
-    expect(screen.getByText('Current session')).toBeVisible();
+    expect(screen.getAllByRole('link')).toHaveLength(3);
+    expect(screen.queryByText('Current session')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Current session' })).toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('New Session dialog');
@@ -111,5 +109,11 @@ describe('MobileSessionSwitcher', () => {
       screen.getByRole('button', { name: 'Expand recent sessions' }),
     );
     expect(screen.getAllByRole('link')).toHaveLength(3);
+    expect(screen.getByText('Current session')).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Collapse recent sessions' }),
+    );
+    expect(screen.queryByText('Current session')).not.toBeInTheDocument();
   });
 });

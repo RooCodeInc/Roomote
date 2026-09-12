@@ -32,7 +32,7 @@ export function SessionNavigationStateProvider({
   const draftsRef = useRef(new Map<string, string>());
   const scrollPositionsRef = useRef(new Map<string, number>());
   const pendingSwitchesRef = useRef(new Set<string>());
-  const [isSwitcherExpanded, setSwitcherExpanded] = useState(true);
+  const [isSwitcherExpanded, setSwitcherExpanded] = useState(false);
 
   const getDraft = useCallback(
     (sessionId: string) => draftsRef.current.get(sessionId) ?? '',

@@ -8,9 +8,9 @@ import { useMediaQuery } from 'usehooks-ts';
 
 import {
   Button,
-  ChevronDown,
-  ChevronUp,
   MessageSquareIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
 } from '@/components/system';
 import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
@@ -55,91 +55,108 @@ export function MobileSessionSwitcher() {
     <>
       <nav
         aria-label="Recent sessions"
-        className="shrink-0 border-b bg-card px-2 py-1.5 md:hidden"
+        className="relative z-nav-header h-full w-12 shrink-0 md:hidden"
       >
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Button
-            type="button"
-            variant="ghost"
-            size={isExpanded ? 'icon' : 'sm'}
+        <div
+          className={cn(
+            'absolute inset-y-0 left-0 flex w-12 flex-col overflow-hidden border-r bg-card px-1 py-2 transition-[width,box-shadow] duration-200',
+            isExpanded && 'w-56 shadow-xl',
+          )}
+        >
+          <div
             className={cn(
-              'shrink-0 text-muted-foreground',
-              isExpanded && 'size-9',
+              'flex h-10 shrink-0 items-center',
+              isExpanded ? 'justify-between gap-2' : 'justify-center',
             )}
-            aria-label={
-              isExpanded ? 'Collapse recent sessions' : 'Expand recent sessions'
-            }
-            onClick={() => navigationState?.setSwitcherExpanded(!isExpanded)}
           >
-            {isExpanded ? <ChevronUp /> : <ChevronDown />}
-            {!isExpanded ? <span>Sessions</span> : null}
-          </Button>
-          {isExpanded ? (
-            <div className="scroll-thin flex min-w-0 flex-1 gap-1.5 overflow-x-auto overscroll-x-contain">
-              {sessions.map((session) => {
-                const isActive = session.id === currentSessionId;
-                const needsAttention =
-                  session.unread ||
-                  session.cachedStatus === 'needs_input' ||
-                  session.cachedStatus === 'blocked';
-                const isRunning = session.cachedStatus === 'active';
+            {isExpanded ? (
+              <span className="min-w-0 flex-1 truncate pl-2 text-sm font-semibold">
+                Recent sessions
+              </span>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-10 shrink-0 text-muted-foreground"
+              aria-expanded={isExpanded}
+              aria-label={
+                isExpanded
+                  ? 'Collapse recent sessions'
+                  : 'Expand recent sessions'
+              }
+              onClick={() => navigationState?.setSwitcherExpanded(!isExpanded)}
+            >
+              {isExpanded ? <PanelLeftClose /> : <PanelLeftOpen />}
+            </Button>
+          </div>
+          <div className="scroll-thin min-h-0 flex-1 space-y-1 overflow-y-auto py-1">
+            {sessions.map((session) => {
+              const isActive = session.id === currentSessionId;
+              const needsAttention =
+                session.unread ||
+                session.cachedStatus === 'needs_input' ||
+                session.cachedStatus === 'blocked';
+              const isRunning = session.cachedStatus === 'active';
 
-                return (
-                  <Link
-                    key={session.id}
-                    href={`/sessions/${session.id}`}
-                    prefetch
-                    aria-current={isActive ? 'page' : undefined}
-                    aria-label={session.title}
-                    onNavigate={() => {
-                      if (!isActive) {
-                        navigationState?.prepareSessionSwitch(session.id);
-                      }
-                    }}
-                    className={cn(
-                      'ph-no-capture flex h-9 min-w-30 max-w-40 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-sm font-medium transition-colors',
-                      isActive
-                        ? 'border-accent-foreground bg-foreground text-accent-bright-foreground dark:bg-accent-foreground dark:text-card'
-                        : 'border-border bg-background text-muted-foreground hover:text-accent-foreground',
-                    )}
-                  >
-                    <MessageSquareIcon
-                      className="size-4 shrink-0"
-                      aria-hidden="true"
-                    />
-                    <span className="min-w-0 flex-1 truncate">
-                      {session.title}
-                    </span>
+              return (
+                <Link
+                  key={session.id}
+                  href={`/sessions/${session.id}`}
+                  prefetch
+                  title={!isExpanded ? session.title : undefined}
+                  aria-current={isActive ? 'page' : undefined}
+                  aria-label={session.title}
+                  onNavigate={() => {
+                    if (!isActive) {
+                      navigationState?.prepareSessionSwitch(session.id);
+                    }
+                  }}
+                  className={cn(
+                    'ph-no-capture flex h-10 w-full items-center rounded-lg px-1 text-sm font-medium transition-colors',
+                    isActive
+                      ? 'bg-foreground text-accent-bright-foreground dark:bg-accent-foreground dark:text-card'
+                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                  )}
+                >
+                  <span className="relative flex size-8 shrink-0 items-center justify-center">
+                    <MessageSquareIcon className="size-4" aria-hidden="true" />
                     {needsAttention ? (
                       <span
-                        className="size-2 shrink-0 rounded-full bg-warning"
+                        className="absolute right-0 top-0 size-2 rounded-full bg-warning ring-2 ring-card"
                         aria-label="Needs attention"
                       />
                     ) : isRunning ? (
                       <span
-                        className="size-2 shrink-0 rounded-full border border-current opacity-50"
+                        className="absolute right-0 top-0 size-2 rounded-full border border-current bg-card opacity-70"
                         aria-label="Running"
                       />
                     ) : null}
-                  </Link>
-                );
-              })}
-            </div>
-          ) : (
-            <span className="min-w-0 flex-1 truncate px-1 text-sm font-medium text-muted-foreground">
-              {sessions.find((session) => session.id === currentSessionId)
-                ?.title ?? 'Current session'}
-            </span>
-          )}
+                  </span>
+                  {isExpanded ? (
+                    <span className="min-w-0 flex-1 truncate pr-2">
+                      {session.title}
+                    </span>
+                  ) : null}
+                </Link>
+              );
+            })}
+          </div>
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="size-9 shrink-0 text-muted-foreground"
+            className={cn(
+              'h-10 w-full shrink-0 justify-start px-1 text-muted-foreground',
+              !isExpanded && 'justify-center',
+            )}
             aria-label="New Session"
             onClick={() => setIsNewTaskDialogOpen(true)}
           >
-            <Plus />
+            <span className="flex size-8 shrink-0 items-center justify-center">
+              <Plus />
+            </span>
+            {isExpanded ? <span className="pr-2">New Session</span> : null}
           </Button>
         </div>
       </nav>
