@@ -2685,13 +2685,21 @@ describe('deliverFastAgentParentEvent', () => {
         expect.any(Object),
         parent.sessionId,
       );
-      expect(mocks.recordProviderMessage).toHaveBeenCalledWith({
-        sessionId: parent.sessionId,
-        conversation: expect.objectContaining({ surface }),
-        messageId:
-          rootMessageId ??
-          (surface === 'teams' ? 'teams-message-1' : 'telegram-message-2'),
-      });
+      expect(mocks.recordProviderMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: parent.sessionId,
+          conversation: expect.objectContaining({ surface }),
+          messageId:
+            rootMessageId ??
+            (surface === 'teams' ? 'teams-message-1' : 'telegram-message-2'),
+          ...(surface === 'telegram'
+            ? {
+                messageText:
+                  'Automation: Retry scan\n\nRetry failures increased.',
+              }
+            : {}),
+        }),
+      );
     },
   );
 

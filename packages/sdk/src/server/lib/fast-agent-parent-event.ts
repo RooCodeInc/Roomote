@@ -2051,6 +2051,7 @@ async function createTelegramFastAgentParentTurn(
           sessionId: session.id,
           conversation,
           messageId: posted.lastTextMessageId ?? posted.messageId,
+          messageText: displayedMessage,
         });
         if (action) {
           const messageId = posted.lastTextMessageId ?? posted.messageId;

@@ -674,6 +674,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         sessionId: session.id,
         conversation,
         messageId: posted.lastTextMessageId ?? posted.messageId,
+        messageText: message,
       });
       return { messageId: posted.messageId };
     };

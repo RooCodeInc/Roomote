@@ -1,0 +1,1 @@
+ALTER TABLE "fast_agent_provider_messages" ADD COLUMN "message_text" text;

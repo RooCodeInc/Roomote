@@ -3655,6 +3655,8 @@ export const fastAgentMessages = pgTable(
  * conversation address can host more than one Fast session. Inbound replies
  * use these server-written rows to recover the canonical session without
  * trusting identifiers embedded in message text or webhook routing metadata.
+ * Stored reply text lets reaction turns retain their exact target after the
+ * provider-native conversation has gone cold.
  */
 export const fastAgentProviderMessages = pgTable(
   'fast_agent_provider_messages',
@@ -3670,6 +3672,7 @@ export const fastAgentProviderMessages = pgTable(
     channelId: text('channel_id').notNull(),
     threadId: text('thread_id'),
     messageId: text('message_id').notNull(),
+    messageText: text('message_text'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },

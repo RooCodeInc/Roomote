@@ -41,7 +41,11 @@ function matchesProviderRoute(
 }
 
 export async function recordFastAgentProviderMessage(
-  input: ProviderRoute & { sessionId: string; messageId: string },
+  input: ProviderRoute & {
+    sessionId: string;
+    messageId: string;
+    messageText?: string;
+  },
 ): Promise<boolean> {
   await db
     .insert(fastAgentProviderMessages)
@@ -52,6 +56,7 @@ export async function recordFastAgentProviderMessage(
       channelId: input.channelId,
       threadId: input.threadId ?? null,
       messageId: input.messageId,
+      messageText: input.messageText,
     })
     .onConflictDoUpdate({
       target: [
@@ -63,6 +68,9 @@ export async function recordFastAgentProviderMessage(
       set: {
         conversationId: input.sessionId,
         threadId: input.threadId ?? null,
+        ...(input.messageText !== undefined
+          ? { messageText: input.messageText }
+          : {}),
         updatedAt: new Date(),
       },
     });
@@ -73,6 +81,7 @@ export async function recordFastAgentConversationMessage(input: {
   sessionId: string;
   conversation: FastAgentConversation;
   messageId: string;
+  messageText?: string;
 }): Promise<boolean> {
   const { conversation } = input;
   if (
@@ -94,6 +103,9 @@ export async function recordFastAgentConversationMessage(input: {
       ? { threadId: conversation.replyTarget.threadId }
       : {}),
     messageId: input.messageId,
+    ...(input.messageText !== undefined
+      ? { messageText: input.messageText }
+      : {}),
   });
 }
 
@@ -161,7 +173,9 @@ export async function findFastAgentSessionForProviderReply(
 
 export async function findFastAgentSessionForProviderMessage(
   input: ProviderRoute & { messageId: string; userId?: string },
-): Promise<FastAgentConversationRecord | null> {
+): Promise<
+  (FastAgentConversationRecord & { providerMessageText: string | null }) | null
+> {
   const binding = await db.query.fastAgentProviderMessages.findFirst({
     where: and(
       eq(fastAgentProviderMessages.provider, input.provider),
@@ -169,7 +183,7 @@ export async function findFastAgentSessionForProviderMessage(
       eq(fastAgentProviderMessages.channelId, input.channelId),
       eq(fastAgentProviderMessages.messageId, input.messageId),
     ),
-    columns: { conversationId: true, threadId: true },
+    columns: { conversationId: true, threadId: true, messageText: true },
   });
   if (
     !binding ||
@@ -187,7 +201,7 @@ export async function findFastAgentSessionForProviderMessage(
       ...input,
       ...(binding.threadId ? { threadId: binding.threadId } : {}),
     })
-    ? session
+    ? { ...session, providerMessageText: binding.messageText }
     : null;
 }
 

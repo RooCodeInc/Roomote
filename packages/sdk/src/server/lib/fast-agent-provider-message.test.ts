@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { db, fastAgentConversations, userFactory } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  fastAgentConversations,
+  userFactory,
+} from '@roomote/db/server';
 
 import {
   findFastAgentSessionForProviderMessage,
@@ -111,6 +116,49 @@ describe('Fast provider message bindings', () => {
         userId: otherUser.id,
       }),
     ).resolves.toBeNull();
+  });
+
+  it('returns durable Telegram target text after the conversation goes cold', async () => {
+    const suffix = crypto.randomUUID();
+    const { user, conversation } = await createFastConversation({
+      surface: 'telegram',
+      workspaceId: `chat:${suffix}`,
+      conversationId: `topic:${suffix}`,
+      channelId: `chat:${suffix}`,
+      threadId: `topic:${suffix}`,
+    });
+    await recordFastAgentProviderMessage({
+      sessionId: conversation.id,
+      provider: 'telegram',
+      workspaceId: `chat:${suffix}`,
+      channelId: `chat:${suffix}`,
+      threadId: `topic:${suffix}`,
+      messageId: `message:${suffix}`,
+      messageText: 'Should I deploy this now?',
+    });
+    await db
+      .update(fastAgentConversations)
+      .set({
+        openCodeSessionId: null,
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      })
+      .where(eq(fastAgentConversations.id, conversation.id));
+
+    await expect(
+      findFastAgentSessionForProviderMessage({
+        provider: 'telegram',
+        workspaceId: `chat:${suffix}`,
+        channelId: `chat:${suffix}`,
+        threadId: `topic:${suffix}`,
+        messageId: `message:${suffix}`,
+        userId: user.id,
+      }),
+    ).resolves.toMatchObject({
+      id: conversation.id,
+      userId: user.id,
+      openCodeSessionId: null,
+      providerMessageText: 'Should I deploy this now?',
+    });
   });
 
   it('resolves a Discord DM reply to the bound Fast session', async () => {

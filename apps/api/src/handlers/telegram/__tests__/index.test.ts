@@ -565,6 +565,7 @@ describe('Telegram webhook handler', () => {
     findFastMessageSessionMock.mockResolvedValue({
       id: 'fast-session-1',
       userId: 'mapped-user-1',
+      providerMessageText: 'Should I deploy this now?',
       conversation: {
         surface: 'telegram',
         workspaceId: '222',
@@ -610,6 +611,10 @@ describe('Telegram webhook handler', () => {
         externalInput: expect.objectContaining({
           provider: 'telegram',
           reactions: [{ name: '❤️' }],
+          message: expect.objectContaining({
+            messageId: '777',
+            text: 'Should I deploy this now?',
+          }),
         }),
       }),
     );

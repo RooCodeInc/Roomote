@@ -250,6 +250,9 @@ telegram.post('/', async (c) => {
         channelId: chatId,
         messageId,
         ...(threadId ? { threadId } : {}),
+        ...(fastSession.providerMessageText
+          ? { text: fastSession.providerMessageText }
+          : {}),
       },
       eventId,
     };

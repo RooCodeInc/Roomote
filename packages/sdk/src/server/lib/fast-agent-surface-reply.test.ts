@@ -870,6 +870,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       expect(binding?.messageId).toBe(
         surface === 'teams' ? 'teams-message-1' : 'telegram-message-2',
       );
+      expect(binding?.messageText).toBe(surface === 'telegram' ? 'Done' : null);
       expect(replace).toHaveBeenCalledWith(
         expect.objectContaining({
           channelId,
@@ -878,6 +879,14 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
           text: expect.stringContaining('Updated'),
         }),
       );
+      if (surface === 'telegram') {
+        await expect(
+          db.query.fastAgentProviderMessages.findFirst({
+            where: eq(fastAgentProviderMessages.id, binding!.id),
+            columns: { messageText: true },
+          }),
+        ).resolves.toEqual({ messageText: 'Updated' });
+      }
     },
   );
 

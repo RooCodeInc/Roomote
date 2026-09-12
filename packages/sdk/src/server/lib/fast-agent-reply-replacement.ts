@@ -279,6 +279,7 @@ export function createTelegramFastReplyReplacer(params: {
       sessionId: params.sessionId,
       conversation: params.conversation,
       messageId: handle.messageId,
+      messageText: message,
     });
     return handle;
   };
