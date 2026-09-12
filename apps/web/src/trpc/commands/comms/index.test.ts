@@ -241,8 +241,15 @@ vi.mock('@roomote/communication/teams-credential-validation', () => ({
 }));
 
 vi.mock('@/lib/server/env', () => ({
-  Env: { R_APP_URL: 'https://app.example.com' },
+  Env: {
+    R_APP_URL: 'https://app.example.com',
+    get R_CLOUD_ENABLED() {
+      return process.env.R_CLOUD_ENABLED;
+    },
+  },
   isEmailChannelEnabled: () => process.env.R_EMAIL_CHANNEL_ENABLED === 'true',
+  isRoomoteCloudEnabled: (value: string | boolean | undefined) =>
+    value === true || value === 'true' || value === '1',
 }));
 
 vi.mock('../environment-variables', () => ({
@@ -305,6 +312,7 @@ describe('comms commands', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.R_CLOUD_ENABLED;
     mockTxSelect.mockReset();
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
     mockGetPersistedEnvironmentVariableValues.mockResolvedValue({});
@@ -810,6 +818,27 @@ describe('comms commands', () => {
       } finally {
         process.env.R_EMAIL_CHANNEL_ENABLED = 'true';
       }
+    });
+
+    it('rejects Cloud-managed Email mutations before provider or database work', async () => {
+      process.env.R_CLOUD_ENABLED = 'true';
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: { R_AGENTMAIL_API_KEY: 'replacement-key' },
+        }),
+      ).rejects.toThrow('Email configuration is managed by Roomote Cloud.');
+      await expect(
+        clearCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+        }),
+      ).rejects.toThrow('Email configuration is managed by Roomote Cloud.');
+
+      expect(mockAgentMailListInboxes).not.toHaveBeenCalled();
+      expect(mockAgentMailDeleteWebhook).not.toHaveBeenCalled();
+      expect(mockDbTransaction).not.toHaveBeenCalled();
+      expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
     });
   });
 
