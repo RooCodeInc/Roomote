@@ -1917,6 +1917,35 @@ async function createTelegramFastAgentParentTurn(
                 suggestions.length > 0,
               )
             : message;
+        const action =
+          params.event.type === 'pull_request_feedback' &&
+          params.event.suggestedActionQuestion &&
+          params.event.suggestedActionPrompt &&
+          params.event.pullRequest.repository &&
+          params.event.pullRequest.number
+            ? {
+                nonce: buildPrReviewActionNonce(params.event),
+                taskId: params.event.taskId,
+                followUpPrompt: params.event.suggestedActionPrompt,
+                repository: params.event.pullRequest.repository,
+                prNumber: params.event.pullRequest.number,
+                prUrl: params.event.pullRequest.url,
+              }
+            : null;
+
+        if (action) {
+          await setPendingPrReviewAction({
+            nonce: action.nonce,
+            provider: 'telegram',
+            taskId: action.taskId,
+            repository: action.repository,
+            prNumber: action.prNumber,
+            prUrl: action.prUrl,
+            channelId: conversation.replyTarget.channelId,
+            threadId: conversation.replyTarget.threadId ?? null,
+            followUpPrompt: action.followUpPrompt,
+          });
+        }
         const posted = await postTextThreadReplyWithFooter({
           provider,
           input: {
@@ -1927,6 +1956,35 @@ async function createTelegramFastAgentParentTurn(
             text: reportMessage,
             textFormat: 'markdown',
             images,
+            ...(action
+              ? {
+                  buttons: [
+                    [
+                      {
+                        text: PR_REVIEW_ACTION_LABELS.yes,
+                        callbackData: buildPrReviewActionCallbackData(
+                          'yes',
+                          action.nonce,
+                        ),
+                      },
+                      {
+                        text: PR_REVIEW_ACTION_LABELS.auto,
+                        callbackData: buildPrReviewActionCallbackData(
+                          'auto',
+                          action.nonce,
+                        ),
+                      },
+                      {
+                        text: PR_REVIEW_ACTION_LABELS.dismiss,
+                        callbackData: buildPrReviewActionCallbackData(
+                          'dismiss',
+                          action.nonce,
+                        ),
+                      },
+                    ],
+                  ],
+                }
+              : {}),
           },
           footerText: buildFastSessionReplyFooterText({
             provider: 'telegram',
@@ -1940,6 +1998,16 @@ async function createTelegramFastAgentParentTurn(
           conversation,
           messageId: posted.lastTextMessageId ?? posted.messageId,
         });
+        if (action) {
+          const { superseded } =
+            await attachPendingPrReviewActionMessageWithRetirement(
+              action.nonce,
+              posted.lastTextMessageId ?? posted.messageId,
+            );
+          if (superseded.length > 0) {
+            await retirePrReviewActionMessagesBestEffort(superseded);
+          }
+        }
         if (
           isFastAutomationReportEvent(params.event) &&
           !kickoff &&

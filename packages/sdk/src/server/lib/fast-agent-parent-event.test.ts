@@ -3358,6 +3358,94 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('delivers Telegram pull request feedback with persisted inline actions', async () => {
+    const feedbackEvent = {
+      type: 'pull_request_feedback' as const,
+      feedbackId: 'feedback-telegram',
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: 'Fix review feedback',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'open' as const,
+      },
+      summary: 'Alice requested changes.',
+      suggestedActionQuestion: 'Want me to resolve these issues?',
+      suggestedActionPrompt: 'Address the requested changes.',
+    };
+    const telegramParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-chat-1',
+        conversationId: 'telegram-chat-1:topic-7',
+        replyTarget: { channelId: 'telegram-chat-1', threadId: 'topic-7' },
+      },
+    };
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'There is new PR feedback.',
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: telegramParent,
+      event: feedbackEvent,
+    });
+
+    expect(mocks.setPendingPrReviewAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'telegram',
+        taskId: 'task-1',
+        repository: 'acme/web',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/web/pull/42',
+        channelId: 'telegram-chat-1',
+        threadId: 'topic-7',
+        followUpPrompt: 'Address the requested changes.',
+        nonce: expect.any(String),
+      }),
+    );
+    const nonce = mocks.setPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    expect(mocks.telegramPostMessage).toHaveBeenCalledWith({
+      channelId: 'telegram-chat-1',
+      threadId: 'topic-7',
+      text: expect.stringMatching(
+        /^There is new PR feedback\.\n\nReply anytime · \[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\) · \[Open in Roomote\]\(.*\/sessions\/.*\)$/,
+      ),
+      textFormat: 'markdown',
+      images: [],
+      buttons: [
+        [
+          {
+            text: 'Resolve these issues',
+            callbackData: `prr:y:${nonce}`,
+          },
+          {
+            text: 'Auto-resolve on this PR',
+            callbackData: `prr:a:${nonce}`,
+          },
+          { text: 'Dismiss', callbackData: `prr:d:${nonce}` },
+        ],
+      ],
+    });
+    expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenCalledWith(
+      nonce,
+      'telegram-message-2',
+    );
+  });
+
   it('preserves Discord action callbacks when attachment failure retries the post', async () => {
     const feedbackEvent = {
       type: 'pull_request_feedback' as const,
