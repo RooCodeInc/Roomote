@@ -1,6 +1,6 @@
 {
-  "id": "78faf767-b110-4ac3-966e-07f3ced5db5f",
-  "prevId": "34ef594d-bdb7-43df-a351-bf2550b16bcf",
+  "id": "a8f7f585-4f2b-4529-8598-eb58551ef0ac",
+  "prevId": "78faf767-b110-4ac3-966e-07f3ced5db5f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4959,6 +4959,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "message_text": {
+          "name": "message_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",

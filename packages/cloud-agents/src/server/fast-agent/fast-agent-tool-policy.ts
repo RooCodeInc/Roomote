@@ -26,6 +26,7 @@ export const FAST_AGENT_SUBAGENT_TOOL_FILTER: Record<string, boolean> = {
   task: false,
   roomote_manage_custom_automations: false,
   roomote_create_custom_skill: false,
+  roomote_update_custom_skill: false,
   ...Object.fromEntries(
     Object.values(FAST_AGENT_NATIVE_TOOL_NAMES).map((name) => [name, false]),
   ),

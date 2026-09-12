@@ -8201,6 +8201,27 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             scope: 'instance',
           },
         ],
+        [
+          'update_custom_skill',
+          {
+            skillId: 'instance:00000000-0000-4000-8000-000000000001',
+            expectedVersion: 1,
+            content: {
+              type: 'update_content',
+              update_content: {
+                content_updates: [{ old_str: 'Check', new_str: 'Review' }],
+              },
+            },
+          },
+          {
+            success: true,
+            persisted: true,
+            skillId: 'instance:00000000-0000-4000-8000-000000000001',
+            name: 'example-checklist',
+            scope: 'instance',
+            version: 2,
+          },
+        ],
       ])(
         'lets the Fast parent call %s through actor-authorized native MCP',
         async (toolName, args, result) => {

@@ -5,6 +5,7 @@ import {
   environments,
   eq,
   inArray,
+  updateCustomSkillFromAgent,
   userFactory,
   users,
 } from '@roomote/db/server';
@@ -99,7 +100,7 @@ describe('instanceSkills router with real database authorization', () => {
       const other = caller({ ...otherAuth, isAdmin });
 
       await expect(
-        other.update({ skillId, ...definition() }),
+        other.update({ skillId, expectedVersion: 1, ...definition() }),
       ).rejects.toMatchObject({ code: 'FORBIDDEN' });
       await expect(other.delete({ skillId })).rejects.toMatchObject({
         code: 'FORBIDDEN',
@@ -121,7 +122,7 @@ describe('instanceSkills router with real database authorization', () => {
         description: 'Updated description',
         content: 'Updated review instructions.\n',
       };
-      await caller(auth).update({ skillId, ...updated });
+      await caller(auth).update({ skillId, expectedVersion: 1, ...updated });
       expect(await caller(otherAuth).get({ skillId })).toMatchObject(updated);
       await caller(auth).delete({ skillId });
       skillIds.splice(skillIds.indexOf(skillId), 1);
@@ -135,6 +136,34 @@ describe('instanceSkills router with real database authorization', () => {
       });
     },
   );
+
+  it('rejects a stale Settings edit after an agent update', async () => {
+    const { skillId, input } = await createSkill();
+    const loaded = await caller(memberAuth).get({ skillId });
+    await updateCustomSkillFromAgent({
+      actorUserId: memberAuth.userId,
+      skillId: `instance:${skillId}`,
+      expectedVersion: loaded.version,
+      content: {
+        type: 'replace_content',
+        replace_content: { new_str: 'Agent-updated instructions.\n' },
+      },
+    });
+
+    await expect(
+      caller(memberAuth).update({
+        ...input,
+        skillId,
+        expectedVersion: loaded.version,
+        content: 'Stale Settings instructions.\n',
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(await caller(memberAuth).get({ skillId })).toMatchObject({
+      ...input,
+      content: 'Agent-updated instructions.\n',
+      version: 2,
+    });
+  });
 
   it.each(['unknown', 'deleted-member', 'deleted-admin'] as const)(
     'denies every operation for an %s actor even with isAdmin=true',
@@ -159,7 +188,7 @@ describe('instanceSkills router with real database authorization', () => {
         () => denied.list(),
         () => denied.get({ skillId }),
         () => denied.create(definition()),
-        () => denied.update({ skillId, ...definition() }),
+        () => denied.update({ skillId, expectedVersion: 1, ...definition() }),
         () => denied.delete({ skillId }),
       ]) {
         await expect(operation()).rejects.toMatchObject({ code: 'FORBIDDEN' });
@@ -187,7 +216,11 @@ describe('instanceSkills router with real database authorization', () => {
     const { skillId } = await createSkill();
     await caller(memberAuth).list();
     await caller(memberAuth).get({ skillId });
-    await caller(memberAuth).update({ skillId, ...definition() });
+    await caller(memberAuth).update({
+      skillId,
+      expectedVersion: 1,
+      ...definition(),
+    });
     await caller(memberAuth).delete({ skillId });
     skillIds.splice(skillIds.indexOf(skillId), 1);
     expect(await readEnvironment()).toEqual(before);
@@ -203,7 +236,13 @@ describe('instanceSkills router with real database authorization', () => {
       const member = caller(memberAuth);
       for (const operation of [
         () => member.create({ ...definition(), ...extra }),
-        () => member.update({ skillId, ...definition(), ...extra }),
+        () =>
+          member.update({
+            skillId,
+            expectedVersion: 1,
+            ...definition(),
+            ...extra,
+          }),
         () => member.get({ skillId, ...extra }),
         () => member.delete({ skillId, ...extra }),
       ]) {
@@ -221,6 +260,7 @@ describe('instanceSkills router with real database authorization', () => {
       caller(memberAuth).update({
         ...input,
         skillId,
+        expectedVersion: 1,
         content: 'x'.repeat(64 * 1024),
       }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
