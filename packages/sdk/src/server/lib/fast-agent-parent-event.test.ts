@@ -313,6 +313,7 @@ import {
   deliverFastAgentParentEventWithLock,
   FastAgentParentEventDeliveryError,
 } from './fast-agent-parent-event';
+import { FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS } from './fast-agent-telegram-activity';
 
 const parent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
@@ -2103,7 +2104,11 @@ describe('deliverFastAgentParentEvent', () => {
         vi.useFakeTimers();
         try {
           adapter.activity.start();
-          await vi.advanceTimersByTimeAsync(0);
+          await vi.advanceTimersByTimeAsync(
+            surface === 'telegram'
+              ? FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS
+              : 0,
+          );
           expect(typing).toHaveBeenCalledWith(
             surface === 'telegram'
               ? expect.objectContaining({
@@ -2118,10 +2123,18 @@ describe('deliverFastAgentParentEvent', () => {
           expect(typing).toHaveBeenCalledTimes(2);
           const reply = { purpose: 'closeout', message: 'Working' };
           await adapter.postReply(reply);
-          await vi.advanceTimersByTimeAsync(surface === 'telegram' ? 500 : 0);
+          await vi.advanceTimersByTimeAsync(
+            surface === 'telegram'
+              ? FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS
+              : 0,
+          );
           expect(typing).toHaveBeenCalledTimes(3);
           await adapter.replaceReply({ messageId: '123' }, reply);
-          await vi.advanceTimersByTimeAsync(surface === 'telegram' ? 500 : 0);
+          await vi.advanceTimersByTimeAsync(
+            surface === 'telegram'
+              ? FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS
+              : 0,
+          );
           expect(typing).toHaveBeenCalledTimes(4);
           const editMessage =
             surface === 'discord'

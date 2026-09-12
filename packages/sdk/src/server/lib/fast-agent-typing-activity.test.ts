@@ -118,6 +118,22 @@ describe('Fast typing activity', () => {
     expect(sendTyping).not.toHaveBeenCalled();
   });
 
+  it('delays the initial request and cancels it when the turn settles quickly', async () => {
+    const sendTyping = vi.fn().mockResolvedValue(undefined);
+    const activity = createFastAgentTypingActivity({
+      sendTyping,
+      intervalMs: 4_000,
+      startDelayMs: 300,
+    });
+
+    activity.start();
+    await vi.advanceTimersByTimeAsync(299);
+    expect(sendTyping).not.toHaveBeenCalled();
+    await activity.settle();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sendTyping).not.toHaveBeenCalled();
+  });
+
   it('pauses and drains an issued request, then resumes without losing ownership', async () => {
     let resolveRequest!: () => void;
     const request = new Promise<void>((resolve) => {
