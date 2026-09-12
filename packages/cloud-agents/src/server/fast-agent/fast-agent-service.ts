@@ -4120,7 +4120,8 @@ export async function answerFastAgentQuestion({
             if (
               result.textFallback &&
               (conversation.surface === 'slack' ||
-                conversation.surface === 'discord')
+                conversation.surface === 'discord' ||
+                conversation.surface === 'telegram')
             ) {
               const signature = JSON.stringify([
                 'progress',
