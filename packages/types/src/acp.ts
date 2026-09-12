@@ -1218,7 +1218,7 @@ export interface AcpToolResultPayload {
 export interface ShowWidgetFallbackDelivery {
   toolCallId: string;
   title: string | null;
-  textFallback: string;
+  textFallback: string | null;
   widgetUrl: string;
 }
 

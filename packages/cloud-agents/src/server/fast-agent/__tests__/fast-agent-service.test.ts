@@ -4224,6 +4224,66 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('posts the Fast widget preview with its Telegram session link', async () => {
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'On it.',
+        });
+        await invokeTool(nativeToolNames.showWidget, {
+          html: '<p>Safe</p>',
+          textFallback: 'Status: all systems operational.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: { ...baseParams.conversation, surface: 'telegram' },
+      adapter,
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'progress',
+      message: `Status: all systems operational.\n\n[View widget](${buildFastSessionUrl('telegram', 'conversation-1')})`,
+    });
+  });
+
+  it.each(['slack', 'discord', 'teams', 'telegram', 'agentmail'] as const)(
+    'posts the Fast widget link on %s when the optional preview is omitted',
+    async (surface) => {
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'On it.',
+          });
+          await invokeTool(nativeToolNames.showWidget, {
+            html: '<p>Safe</p>',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: { ...baseParams.conversation, surface },
+        adapter,
+      });
+
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'progress',
+        message: `[View widget](${buildFastSessionUrl(surface, 'conversation-1')})`,
+      });
+    },
+  );
+
   it('rejects a compact widget that exceeds the limit when pretty-serialized', async () => {
     const adapter = callbacks();
     const textFallback = 'This must not be posted.';
