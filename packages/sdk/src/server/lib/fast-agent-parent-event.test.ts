@@ -581,6 +581,7 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({ conversation: webParent.conversation }),
     );
+    expect(mocks.findSession).toHaveBeenCalledWith({ id: parent.sessionId });
     expect(mocks.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ channel: 'C123', thread_ts: '100.001' }),
     );

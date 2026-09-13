@@ -661,6 +661,10 @@ async function processDiscordGatewayEvent(
   ) {
     return { ok: true, ignored: 'discord_fast_session_user_mismatch' };
   }
+  const crossSurfaceReply =
+    repliedFastSession?.conversation.surface === 'web'
+      ? repliedFastSession
+      : null;
   // Message-backed Discord threads share the immutable report root's ID;
   // a reply reference inside the thread may point to any later message.
   const automationReportRootMessageId = message
@@ -910,7 +914,7 @@ async function processDiscordGatewayEvent(
     ? { images: processedAttachments.images }
     : {};
 
-  if (attentionReply && message) {
+  if ((attentionReply || crossSurfaceReply) && message) {
     const replyToMessageId = message.message_reference?.message_id;
     const deliveryConversation = {
       surface: 'discord' as const,
@@ -923,11 +927,13 @@ async function processDiscordGatewayEvent(
           : {}),
       },
     };
-    const fastConversationId = await resolveSessionAttentionFastConversation({
-      sessionId: attentionReply.sessionId,
-      userId: senderUserId,
-      deliveryConversation,
-    });
+    const fastConversationId = crossSurfaceReply
+      ? crossSurfaceReply.id
+      : await resolveSessionAttentionFastConversation({
+          sessionId: attentionReply!.sessionId,
+          userId: senderUserId,
+          deliveryConversation,
+        });
     const continued = fastConversationId
       ? await queueFastAgentSurfaceReply({
           sessionId: fastConversationId,

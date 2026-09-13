@@ -741,7 +741,7 @@ async function createSlackFastAgentParentTurn(
   const [session, installation] = await Promise.all([
     fastAgentConversationRepository.findById({
       id: params.parent.sessionId,
-      fallbackConversation,
+      ...(params.deliveryConversation ? {} : { fallbackConversation }),
     }),
     db.query.slackInstallations.findFirst({
       where: and(
@@ -1387,7 +1387,7 @@ async function createDiscordFastAgentParentTurn(
   const [session, provider] = await Promise.all([
     fastAgentConversationRepository.findById({
       id: params.parent.sessionId,
-      fallbackConversation,
+      ...(params.deliveryConversation ? {} : { fallbackConversation }),
     }),
     createDiscordCommunicationProviderFromRuntimeCredentials(),
   ]);
@@ -1649,7 +1649,7 @@ async function createTeamsFastAgentParentTurn(
   const [session, provider] = await Promise.all([
     fastAgentConversationRepository.findById({
       id: params.parent.sessionId,
-      fallbackConversation,
+      ...(params.deliveryConversation ? {} : { fallbackConversation }),
     }),
     createTeamsCommunicationProviderFromRuntimeCredentials(),
   ]);
@@ -1828,7 +1828,7 @@ async function createAgentMailFastAgentParentTurn(
   const [session, provider] = await Promise.all([
     fastAgentConversationRepository.findById({
       id: params.parent.sessionId,
-      fallbackConversation,
+      ...(params.deliveryConversation ? {} : { fallbackConversation }),
     }),
     createAgentMailCommunicationProviderFromRuntimeCredentials(),
   ]);
@@ -1907,7 +1907,7 @@ async function createTelegramFastAgentParentTurn(
   const [session, provider] = await Promise.all([
     fastAgentConversationRepository.findById({
       id: params.parent.sessionId,
-      fallbackConversation,
+      ...(params.deliveryConversation ? {} : { fallbackConversation }),
     }),
     createTelegramCommunicationProviderFromRuntimeCredentials(),
   ]);

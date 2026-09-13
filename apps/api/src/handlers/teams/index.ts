@@ -2325,15 +2325,37 @@ teams.post('/', async (c) => {
         reason: 'fast_session_user_mismatch',
       });
     }
-    if (fastSession.conversation.surface !== 'teams') {
+    const crossSurface = fastSession.conversation.surface === 'web';
+    const nativeTeamsConversation =
+      fastSession.conversation.surface === 'teams'
+        ? fastSession.conversation
+        : null;
+    if (!crossSurface && !nativeTeamsConversation) {
       return c.json({
         ok: true,
         queued: false,
         reason: 'fast_session_surface_mismatch',
       });
     }
+    const deliveryConversation = crossSurface
+      ? resolveTeamsFastConversation({
+          activity,
+          metadata,
+          mappedUserId,
+          currentMessageId: queuedMessage.ts,
+        })
+      : undefined;
+    if (crossSurface && !deliveryConversation) {
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'fast_session_delivery_unavailable',
+      });
+    }
     const activeRoute = await findTeamsConversationRoute(
-      fastSession.conversation.replyTarget.channelId,
+      crossSurface
+        ? deliveryConversation!.replyTarget.channelId
+        : nativeTeamsConversation!.replyTarget.channelId,
       tenantId,
     );
     if (!activeRoute) {
@@ -2359,6 +2381,7 @@ teams.post('/', async (c) => {
       senderDisplayName: activity.from?.name?.trim() || null,
       question,
       currentMessageId: queuedMessage.ts,
+      ...(deliveryConversation ? { deliveryConversation } : {}),
       ...(fastMessage.images ? { images: fastMessage.images } : {}),
     });
     if (!continued) {

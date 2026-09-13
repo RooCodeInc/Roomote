@@ -690,7 +690,8 @@ telegram.post('/', async (c) => {
         reason: 'fast_session_user_mismatch',
       });
     }
-    if (fastSession.conversation.surface !== 'telegram') {
+    const crossSurface = fastSession.conversation.surface === 'web';
+    if (!crossSurface && fastSession.conversation.surface !== 'telegram') {
       return c.json({
         ok: true,
         queued: false,
@@ -716,12 +717,26 @@ telegram.post('/', async (c) => {
         .trim() ||
       message.from?.username?.trim() ||
       null;
+    const deliveryConversation = crossSurface
+      ? {
+          surface: 'telegram' as const,
+          workspaceId: metadata.communicationChannelId,
+          conversationId: `notification:${replyToMessageId ?? metadata.communicationThreadId ?? metadata.communicationChannelId}:user:${senderUserId}`,
+          replyTarget: {
+            channelId: metadata.communicationChannelId,
+            ...(metadata.communicationThreadId
+              ? { threadId: metadata.communicationThreadId }
+              : {}),
+          },
+        }
+      : undefined;
     const continued = await queueFastAgentSurfaceReply({
       sessionId: fastSession.id,
       userId: senderUserId,
       senderDisplayName,
       question,
       currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
+      ...(deliveryConversation ? { deliveryConversation } : {}),
       ...(fastMessage.agentContext
         ? { agentContext: fastMessage.agentContext }
         : {}),
