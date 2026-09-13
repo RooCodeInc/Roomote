@@ -138,7 +138,7 @@ function normalizeSuggestion(raw: string): string | null {
   return text;
 }
 
-export type HomeComposerSuggestionsResult = {
+type HomeComposerSuggestionsResult = {
   suggestions: string[];
 };
 
