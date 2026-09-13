@@ -2300,13 +2300,54 @@ describe('deliverFastAgentParentEvent', () => {
       expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           channelId: 'telegram-chat-1',
-          text: `### Weekly scan\n\n${message}`,
+          text: `<h3>Weekly scan</h3>\n\n${message}`,
           footerText: `Reply anytime · [Open in Roomote](https://api.roomote.example/sessions/${parent.sessionId}?utm_source=telegram&utm_medium=link&utm_campaign=telegram.fast_reply)`,
           textFormat: 'markdown',
         }),
       );
     },
   );
+
+  it('renders Markdown-sensitive automation names as literal Telegram heading text', async () => {
+    const telegramParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-chat-1',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'telegram-chat-1' },
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: 'No issues found.',
+      }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: telegramParent,
+      event: {
+        type: 'automation_triggered',
+        eventId: 'automation-1:occurrence-1',
+        automationId: 'automation-1',
+        automationName:
+          'Weekly **scan** [Open](https://example.test) <b>raw</b> & more',
+        prompt: 'Find actionable regressions.',
+        trigger: 'schedule',
+      },
+    });
+
+    expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: [
+          '<h3>Weekly **scan** [Open](https://example.test) &lt;b&gt;raw&lt;/b&gt; &amp; more</h3>',
+          'No issues found.',
+        ].join('\n\n'),
+        textFormat: 'markdown',
+      }),
+    );
+  });
 
   it.each(['new report', 'existing report', 'task settled'] as const)(
     'reasserts Discord typing after %s and its suggestion messages',

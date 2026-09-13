@@ -439,7 +439,11 @@ function buildTelegramAutomationMessage(params: {
   automationName: string;
   message: string;
 }): string {
-  return `### ${params.automationName}\n\n${params.message}`;
+  const automationName = params.automationName
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+  return `<h3>${automationName}</h3>\n\n${params.message}`;
 }
 
 /** Groups a report's suggestion cards; unique per run occurrence. */
