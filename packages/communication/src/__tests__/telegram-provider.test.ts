@@ -400,7 +400,7 @@ describe('TelegramCommunicationProvider', () => {
     });
   });
 
-  it('honors an explicit reply target on the first topic message', async () => {
+  it('omits an explicit reply target while preserving topic routing', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({
         ok: true,
@@ -440,10 +440,6 @@ describe('TelegramCommunicationProvider', () => {
           chat_id: '-100456',
           rich_message: { markdown: '<p>hello from Roomote</p>' },
           message_thread_id: 7,
-          reply_parameters: {
-            message_id: 42,
-            allow_sending_without_reply: true,
-          },
         }),
       }),
     );
@@ -587,7 +583,7 @@ describe('TelegramCommunicationProvider', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it('posts a native rich footer while preserving topic, reply, and keyboard fields', async () => {
+  it('posts a native rich footer while preserving topic and keyboard fields', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({
         ok: true,
@@ -628,10 +624,6 @@ describe('TelegramCommunicationProvider', () => {
       reply_markup: {
         inline_keyboard: [[{ text: 'Open', url: 'https://roomote.test/s/1' }]],
       },
-      reply_parameters: {
-        message_id: 42,
-        allow_sending_without_reply: true,
-      },
     });
   });
 
@@ -655,7 +647,7 @@ describe('TelegramCommunicationProvider', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it('splits long messages into multiple sends and anchors the reply on the first', async () => {
+  it('keeps topic targeting and omits reply metadata on every long-message chunk', async () => {
     const fetchMock = vi.fn().mockImplementation(async () =>
       jsonResponse({
         ok: true,
@@ -673,7 +665,8 @@ describe('TelegramCommunicationProvider', () => {
       (_, i) => `line ${i} ${'x'.repeat(30)}`,
     ).join('\n');
     const result = await provider.postMessage({
-      channelId: '123',
+      channelId: '-100456',
+      threadId: '7',
       replyToMessageId: '42',
       text: longText,
     });
@@ -686,15 +679,14 @@ describe('TelegramCommunicationProvider', () => {
 
     const firstBody = JSON.parse(
       (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
-    ) as { reply_parameters?: unknown };
+    ) as { message_thread_id?: number; reply_parameters?: unknown };
     const lastBody = JSON.parse(
       (fetchMock.mock.calls.at(-1)?.[1] as RequestInit).body as string,
-    ) as { reply_parameters?: unknown };
+    ) as { message_thread_id?: number; reply_parameters?: unknown };
 
-    expect(firstBody.reply_parameters).toEqual({
-      message_id: 42,
-      allow_sending_without_reply: true,
-    });
+    expect(firstBody.message_thread_id).toBe(7);
+    expect(lastBody.message_thread_id).toBe(7);
+    expect(firstBody.reply_parameters).toBeUndefined();
     expect(lastBody.reply_parameters).toBeUndefined();
   });
 
@@ -812,7 +804,7 @@ describe('TelegramCommunicationProvider', () => {
     });
   });
 
-  it('keeps embedded native HTML above 4096 with topic and reply semantics', async () => {
+  it('keeps embedded native HTML above 4096 with topic routing', async () => {
     const fetchMock = vi.fn().mockImplementation(async () =>
       jsonResponse({
         ok: true,
@@ -852,7 +844,7 @@ describe('TelegramCommunicationProvider', () => {
     expect(bodies).toHaveLength(1);
     expect(bodies[0]?.rich_message.markdown.length).toBeGreaterThan(4_096);
     expect(bodies.every((body) => body.message_thread_id === 7)).toBe(true);
-    expect(bodies[0]?.reply_parameters?.message_id).toBe(42);
+    expect(bodies[0]?.reply_parameters).toBeUndefined();
     expect(result.lastTextMessageId).toBe('211');
   });
 
@@ -1021,7 +1013,7 @@ describe('TelegramCommunicationProvider', () => {
     expect(photoBody.caption).toBe('the shot');
   });
 
-  it('anchors the reply on the photo for image-only messages', async () => {
+  it('omits the reply target on a private-chat image-only message', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -1045,10 +1037,7 @@ describe('TelegramCommunicationProvider', () => {
       (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
     ) as { reply_parameters?: { message_id: number } };
 
-    expect(photoBody.reply_parameters).toEqual({
-      message_id: 42,
-      allow_sending_without_reply: true,
-    });
+    expect(photoBody.reply_parameters).toBeUndefined();
   });
 
   it('treats whitespace-only text with an image as image-only', async () => {

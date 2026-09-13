@@ -110,10 +110,6 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     const text = input.text;
     const images = input.images ?? [];
     const threadId = parsePositiveInteger(input.threadId);
-    // Honor an explicit reply target when callers supply one (task closeouts,
-    // launch-failure recovery, onboarding threads). Callers that prefer a
-    // free-floating chronological send simply omit replyToMessageId.
-    const replyToMessageId = parsePositiveInteger(input.replyToMessageId);
     const footerText = input.footerText;
     const hasText = Boolean(text?.trim() || footerText?.trim());
 
@@ -147,9 +143,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
         chatId: input.channelId,
         richMessage: chunk.richMessage,
         threadId,
-        // Reply threading only anchors the first message of a long reply;
-        // buttons attach to the last message so they sit under the content.
-        replyToMessageId: index === 0 ? replyToMessageId : undefined,
+        // Buttons attach to the last message so they sit under the content.
         replyMarkup: index === lastSendIndex ? replyMarkup : undefined,
       });
 
@@ -163,8 +157,6 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
         url: image.url,
         caption: image.altText,
         threadId,
-        replyToMessageId:
-          firstResult === null && index === 0 ? replyToMessageId : undefined,
         replyMarkup:
           chunks.length + index === lastSendIndex ? replyMarkup : undefined,
       });
@@ -196,7 +188,6 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     url: string;
     caption?: string;
     threadId?: number;
-    replyToMessageId?: number;
     replyMarkup?: TelegramInlineKeyboardMarkup;
   }): Promise<{ message_id: number; message_thread_id?: number }> {
     const response = await this.fetchWithRetry(
@@ -210,14 +201,6 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
           ...(params.caption ? { caption: params.caption } : {}),
           ...(params.threadId ? { message_thread_id: params.threadId } : {}),
           ...(params.replyMarkup ? { reply_markup: params.replyMarkup } : {}),
-          ...(params.replyToMessageId
-            ? {
-                reply_parameters: {
-                  message_id: params.replyToMessageId,
-                  allow_sending_without_reply: true,
-                },
-              }
-            : {}),
         }),
       },
       { method: 'sendPhoto', retryNetworkErrors: false },
@@ -240,7 +223,6 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       chatId: params.chatId,
       richMessage: chunk!.richMessage,
       threadId: params.threadId,
-      replyToMessageId: params.replyToMessageId,
       replyMarkup: params.replyMarkup,
     });
   }
@@ -249,7 +231,6 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     chatId: string;
     richMessage: TelegramInputRichMessage;
     threadId?: number;
-    replyToMessageId?: number;
     replyMarkup?: TelegramInlineKeyboardMarkup;
   }): Promise<{ message_id: number; message_thread_id?: number }> {
     const response = await this.fetchWithRetry(
@@ -262,14 +243,6 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
           rich_message: params.richMessage,
           ...(params.threadId ? { message_thread_id: params.threadId } : {}),
           ...(params.replyMarkup ? { reply_markup: params.replyMarkup } : {}),
-          ...(params.replyToMessageId
-            ? {
-                reply_parameters: {
-                  message_id: params.replyToMessageId,
-                  allow_sending_without_reply: true,
-                },
-              }
-            : {}),
         }),
       },
       { method: 'sendRichMessage', retryNetworkErrors: false },
