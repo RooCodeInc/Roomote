@@ -15,6 +15,7 @@ import {
   canStartAgentMailConversationWithUser,
   startAgentMailConversationWithResult,
 } from './agentmail/outbound';
+import { createAgentMailCommunicationProviderFromRuntimeCredentials } from './agentmail-communication';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
@@ -240,14 +241,33 @@ async function sendSlackUserDirectMessage(
   logContext: string,
   blocks?: unknown[],
   idempotencyKey?: string,
+  replyAnchor?: UserDirectMessageReceipt,
 ): Promise<UserDirectMessageReceipt | null> {
   try {
-    const destination = await resolveSlackUserDirectMessage(userId);
+    const destination = replyAnchor
+      ? await (async () => {
+          const installation = (
+            await db.query.slackInstallations.findMany({
+              where: eq(slackInstallations.isActive, true),
+              columns: { botAccessToken: true, teamId: true },
+            })
+          ).find(({ teamId }) => teamId === replyAnchor.workspaceId);
+          return installation
+            ? {
+                channelId: replyAnchor.channelId,
+                slack: new SlackNotifier(installation.botAccessToken),
+                teamId: installation.teamId,
+              }
+            : null;
+        })()
+      : await resolveSlackUserDirectMessage(userId);
     if (destination) {
+      const threadId = replyAnchor?.threadId ?? replyAnchor?.messageId;
       const messageTs = await destination.slack.postMessage({
         channel: destination.channelId,
         text,
         blocks: blocks ?? [{ type: 'markdown', text }],
+        ...(threadId ? { thread_ts: threadId } : {}),
         ...(idempotencyKey ? { client_msg_id: idempotencyKey } : {}),
       });
 
@@ -257,6 +277,7 @@ async function sendSlackUserDirectMessage(
           workspaceId: destination.teamId,
           channelId: destination.channelId,
           messageId: messageTs,
+          threadId: threadId ?? messageTs,
         };
       }
     }
@@ -273,14 +294,17 @@ async function sendTeamsUserDirectMessage(
   userId: string,
   text: string,
   logContext: string,
+  replyAnchor?: UserDirectMessageReceipt,
 ): Promise<UserDirectMessageReceipt | null> {
   try {
-    const mapping = await db.query.teamsUserMappings.findFirst({
-      where: eq(teamsUserMappings.userId, userId),
-      columns: { teamsUserId: true, teamsTenantId: true },
-    });
+    const mapping = replyAnchor
+      ? null
+      : await db.query.teamsUserMappings.findFirst({
+          where: eq(teamsUserMappings.userId, userId),
+          columns: { teamsUserId: true, teamsTenantId: true },
+        });
 
-    if (!mapping) {
+    if (!mapping && !replyAnchor) {
       return null;
     }
 
@@ -299,19 +323,30 @@ async function sendTeamsUserDirectMessage(
       return null;
     }
 
-    const posted = await provider.postDirectMessage({
-      serviceUrl: conversation.serviceUrl,
-      tenantId: mapping.teamsTenantId,
-      userId: mapping.teamsUserId,
-      text,
-      textFormat: 'markdown',
-    });
+    const threadId = replyAnchor?.threadId ?? replyAnchor?.messageId;
+    const posted = replyAnchor
+      ? await provider.postMessage({
+          channelId: replyAnchor.channelId,
+          serviceUrl: conversation.serviceUrl,
+          tenantId: replyAnchor.workspaceId,
+          text,
+          textFormat: 'markdown',
+          ...(threadId ? { threadId, replyToMessageId: threadId } : {}),
+        })
+      : await provider.postDirectMessage({
+          serviceUrl: conversation.serviceUrl,
+          tenantId: mapping!.teamsTenantId,
+          userId: mapping!.teamsUserId,
+          text,
+          textFormat: 'markdown',
+        });
 
     return {
       provider: 'teams',
-      workspaceId: mapping.teamsTenantId,
+      workspaceId: replyAnchor?.workspaceId ?? mapping!.teamsTenantId,
       channelId: posted.channelId,
       messageId: posted.messageId,
+      threadId: threadId ?? posted.messageId,
     };
   } catch (error) {
     console.warn(
@@ -327,12 +362,15 @@ async function sendTelegramUserDirectMessage(
   text: string,
   logContext: string,
   idempotencyKey?: string,
+  replyAnchor?: UserDirectMessageReceipt,
 ): Promise<UserDirectMessageReceipt | null> {
   try {
-    const mapping = await db.query.telegramUserMappings.findFirst({
-      where: eq(telegramUserMappings.userId, userId),
-      columns: { telegramChatId: true },
-    });
+    const mapping = replyAnchor
+      ? { telegramChatId: replyAnchor.channelId }
+      : await db.query.telegramUserMappings.findFirst({
+          where: eq(telegramUserMappings.userId, userId),
+          columns: { telegramChatId: true },
+        });
 
     if (!mapping) {
       return null;
@@ -349,6 +387,7 @@ async function sendTelegramUserDirectMessage(
       channelId: mapping.telegramChatId,
       text,
       textFormat: 'markdown',
+      ...(replyAnchor?.threadId ? { threadId: replyAnchor.threadId } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
     });
 
@@ -386,11 +425,36 @@ async function sendAgentMailUserDirectMessage(
   text: string,
   logContext: string,
   idempotencyKey?: string,
+  replyAnchor?: UserDirectMessageReceipt,
 ): Promise<{
   delivered: boolean;
   receipt: UserDirectMessageReceipt | null;
 }> {
   try {
+    if (replyAnchor) {
+      const provider =
+        await createAgentMailCommunicationProviderFromRuntimeCredentials();
+      if (!provider) return { delivered: false, receipt: null };
+      const posted = await provider.postMessage({
+        channelId: replyAnchor.workspaceId,
+        threadId: replyAnchor.channelId,
+        text,
+        textFormat: 'markdown',
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+      });
+      return {
+        delivered: true,
+        receipt: {
+          provider: 'agentmail',
+          workspaceId: replyAnchor.workspaceId,
+          channelId: replyAnchor.channelId,
+          messageId: posted.lastTextMessageId ?? posted.messageId,
+          ...((posted.threadId ?? replyAnchor.threadId)
+            ? { threadId: posted.threadId ?? replyAnchor.threadId }
+            : {}),
+        },
+      };
+    }
     const result = await startAgentMailConversationWithResult({
       userId,
       subject: deriveEmailSubject(text),
@@ -398,23 +462,23 @@ async function sendAgentMailUserDirectMessage(
       logContext,
       ...(idempotencyKey ? { clientSendId: idempotencyKey } : {}),
     });
-    const replyAnchor = result.sent
+    const resultAnchor = result.sent
       ? (result.replyAnchor ?? result.conversation)
       : null;
     return {
       delivered: result.sent,
       receipt:
-        result.sent && replyAnchor
+        result.sent && resultAnchor
           ? {
               provider: 'agentmail',
-              workspaceId: replyAnchor.inboxId,
+              workspaceId: resultAnchor.inboxId,
               channelId:
                 result.conversation?.conversationId ??
-                replyAnchor.providerThreadId,
+                resultAnchor.providerThreadId,
               messageId:
-                replyAnchor.messageId ??
-                `thread:${replyAnchor.providerThreadId}`,
-              threadId: replyAnchor.providerThreadId,
+                resultAnchor.messageId ??
+                `thread:${resultAnchor.providerThreadId}`,
+              threadId: resultAnchor.providerThreadId,
             }
           : null,
     };
@@ -431,9 +495,12 @@ async function sendDiscordUserDirectMessage(
   text: string,
   logContext: string,
   idempotencyKey?: string,
+  replyAnchor?: UserDirectMessageReceipt,
 ): Promise<UserDirectMessageReceipt | null> {
   try {
-    const destination = await findDiscordUserDirectMessageDestination(userId);
+    const destination = replyAnchor
+      ? { channelId: replyAnchor.channelId }
+      : await findDiscordUserDirectMessageDestination(userId);
     if (!destination) {
       return null;
     }
@@ -448,6 +515,11 @@ async function sendDiscordUserDirectMessage(
       channelId: destination.channelId,
       text,
       textFormat: 'markdown',
+      ...(replyAnchor?.threadId
+        ? { threadId: replyAnchor.threadId }
+        : replyAnchor?.messageId
+          ? { replyToMessageId: replyAnchor.messageId }
+          : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
     });
     return {
@@ -526,9 +598,8 @@ export async function sendUserDirectMessage({
 }
 
 /**
- * Best-effort DM to a Roomote user on every chat integration that is both
- * connected on this deployment and linked to the user. Failures are logged
- * and swallowed; returns the providers that accepted the message.
+ * Best-effort DM to a Roomote user through the first personal integration that
+ * accepts it. Failures are logged and swallowed so the waterfall can continue.
  */
 export async function sendUserDirectMessageBestEffort({
   userId,
@@ -557,54 +628,79 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
   teamsText,
   logContext,
   idempotencyKey,
+  replyAnchor,
 }: {
   userId: string;
   text: string;
   teamsText?: string;
   logContext: string;
   idempotencyKey?: string;
+  replyAnchor?: UserDirectMessageReceipt;
 }): Promise<{
   deliveredProviders: UserDirectMessageProvider[];
   receipts: UserDirectMessageReceipt[];
 }> {
-  const [slack, teams, telegram, discord] = await Promise.all([
-    sendSlackUserDirectMessage(
-      userId,
-      text,
-      logContext,
-      undefined,
-      idempotencyKey,
+  const providers: UserDirectMessageProvider[] = [
+    ...(replyAnchor ? [replyAnchor.provider] : []),
+    ...(['slack', 'teams', 'telegram', 'discord', 'agentmail'] as const).filter(
+      (provider) => provider !== replyAnchor?.provider,
     ),
-    sendTeamsUserDirectMessage(userId, teamsText ?? text, logContext),
-    sendTelegramUserDirectMessage(userId, text, logContext, idempotencyKey),
-    sendDiscordUserDirectMessage(userId, text, logContext, idempotencyKey),
-  ]);
+  ];
 
-  const chatReceipts = [slack, teams, telegram, discord].filter(
-    (receipt): receipt is UserDirectMessageReceipt => receipt !== null,
-  );
-  const chatDelivered = chatReceipts.length > 0;
-
-  // Email is the fallback reach, not another parallel copy: emailing a user
-  // who already got the message in chat violates the email-cadence contract
-  // (email is low-frequency by design).
-  const agentmail = chatDelivered
-    ? { delivered: false, receipt: null }
-    : await sendAgentMailUserDirectMessage(
+  for (const provider of providers) {
+    const anchor = provider === replyAnchor?.provider ? replyAnchor : undefined;
+    if (provider === 'agentmail') {
+      const result = await sendAgentMailUserDirectMessage(
         userId,
         text,
         logContext,
         idempotencyKey,
+        anchor,
       );
+      if (result.delivered) {
+        return {
+          deliveredProviders: ['agentmail'],
+          receipts: result.receipt ? [result.receipt] : [],
+        };
+      }
+      continue;
+    }
+    const receipt =
+      provider === 'slack'
+        ? await sendSlackUserDirectMessage(
+            userId,
+            text,
+            logContext,
+            undefined,
+            idempotencyKey,
+            anchor,
+          )
+        : provider === 'teams'
+          ? await sendTeamsUserDirectMessage(
+              userId,
+              teamsText ?? text,
+              logContext,
+              anchor,
+            )
+          : provider === 'telegram'
+            ? await sendTelegramUserDirectMessage(
+                userId,
+                text,
+                logContext,
+                idempotencyKey,
+                anchor,
+              )
+            : await sendDiscordUserDirectMessage(
+                userId,
+                text,
+                logContext,
+                idempotencyKey,
+                anchor,
+              );
+    if (receipt) {
+      return { deliveredProviders: [receipt.provider], receipts: [receipt] };
+    }
+  }
 
-  return {
-    deliveredProviders: [
-      ...chatReceipts.map((receipt) => receipt.provider),
-      ...(agentmail.delivered ? (['agentmail'] as const) : []),
-    ],
-    receipts: [
-      ...chatReceipts,
-      ...(agentmail.receipt ? [agentmail.receipt] : []),
-    ],
-  };
+  return { deliveredProviders: [], receipts: [] };
 }

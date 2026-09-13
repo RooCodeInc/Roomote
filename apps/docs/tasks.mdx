@@ -44,10 +44,11 @@ work. Board and list choices remain in the URL so views are shareable.
 
 When a web Session has a new response or a task needs input while its initiator
 is away, Roomote sends a personal notification with a link back to the Session.
-Notifications go to the initiator's linked Slack, Teams, Telegram, and Discord
-chats where available; verified email is used only when no chat delivery
-succeeds. Roomote skips the notification while the initiator is present in the
-Session.
+The notification includes Roomote's response and goes to the first successful
+personal destination in this order: Slack, Teams, Telegram, Discord, then
+verified email. Later notifications for the same Session reuse that provider
+thread when it remains available. Roomote skips the notification while the
+initiator is present in the Session.
 
 Reply directly to a notification in Slack, Teams, Telegram, Discord, or email
 to continue the same Session. Use the provider's reply action so Roomote can

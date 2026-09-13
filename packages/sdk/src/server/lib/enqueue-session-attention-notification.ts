@@ -12,12 +12,14 @@ export type SessionAttentionNotificationJob =
       runId: number;
       eventId: string;
       kind: SessionAttentionKind;
+      message?: string;
     }
   | {
       target: 'fast_session';
       fastConversationId: string;
       eventId: string;
       kind: SessionAttentionKind;
+      message?: string;
     };
 
 export async function enqueueSessionAttentionNotification(
