@@ -2108,11 +2108,16 @@ async function createTelegramFastAgentParentTurn(
           }),
         });
         activity.reassert();
-        await recordFastAgentConversationMessageBestEffort({
-          sessionId: session.id,
-          conversation,
-          messageId: posted.lastTextMessageId ?? posted.messageId,
-        });
+        for (const messageId of new Set([
+          posted.lastTextMessageId ?? posted.messageId,
+          ...(posted.messageIds ?? []),
+        ])) {
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId,
+          });
+        }
         if (action) {
           const messageId = posted.lastTextMessageId ?? posted.messageId;
           try {

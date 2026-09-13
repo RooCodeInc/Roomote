@@ -951,6 +951,13 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     mocks.prepareFiles
       .mockResolvedValueOnce({ files: [video], fallbackText: '' })
       .mockResolvedValueOnce({ files: [file], fallbackText: '' });
+    mocks.telegramPostMessage.mockResolvedValueOnce({
+      provider: 'telegram',
+      channelId: '123',
+      messageId: 'telegram-text',
+      lastTextMessageId: 'telegram-text',
+      messageIds: ['telegram-text', 'telegram-video', 'telegram-file'],
+    });
     const user = await userFactory.create();
     const conversation = await createConversation({
       userId: user.id,
@@ -984,6 +991,14 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({ files: [video, file] }),
     );
+    const bindings = await db.query.fastAgentProviderMessages.findMany({
+      where: eq(fastAgentProviderMessages.conversationId, conversation.id),
+    });
+    expect(bindings.map((binding) => binding.messageId).sort()).toEqual([
+      'telegram-file',
+      'telegram-text',
+      'telegram-video',
+    ]);
   });
 });
 

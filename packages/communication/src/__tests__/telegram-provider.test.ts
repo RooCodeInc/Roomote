@@ -1121,6 +1121,40 @@ describe('TelegramCommunicationProvider', () => {
     });
   });
 
+  it('returns every message id when text and native files are sent together', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 340 } }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 341 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    const result = await provider.postMessage({
+      channelId: '123',
+      text: 'The report is ready.',
+      files: [
+        {
+          bytes: Uint8Array.from([1]),
+          filename: 'report.pdf',
+          contentType: 'application/pdf',
+          kind: 'document',
+          fallbackText: 'View file: https://roomote.test/artifact',
+        },
+      ],
+    });
+
+    expect(result.messageId).toBe('340');
+    expect(result.lastTextMessageId).toBe('340');
+    expect(result.messageIds).toEqual(['340', '341']);
+  });
+
   it('anchors the reply on the photo for image-only messages', async () => {
     const fetchMock = vi
       .fn()

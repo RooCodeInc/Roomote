@@ -1158,6 +1158,13 @@ describe('deliverFastAgentParentEvent', () => {
     mocks.prepareFiles
       .mockResolvedValueOnce({ files: [video], fallbackText: '' })
       .mockResolvedValueOnce({ files: [file], fallbackText: '' });
+    mocks.telegramPostMessage.mockResolvedValueOnce({
+      provider: 'telegram',
+      channelId: 'telegram-chat-1',
+      messageId: 'telegram-text',
+      lastTextMessageId: 'telegram-text',
+      messageIds: ['telegram-text', 'telegram-video', 'telegram-file'],
+    });
     mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
       adapter.postReply({
         purpose: 'closeout',
@@ -1195,6 +1202,12 @@ describe('deliverFastAgentParentEvent', () => {
     });
     expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({ files: [video, file] }),
+    );
+    expect(mocks.recordProviderMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: 'telegram-video' }),
+    );
+    expect(mocks.recordProviderMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: 'telegram-file' }),
     );
   });
 

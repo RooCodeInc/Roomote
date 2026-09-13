@@ -141,6 +141,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       message_id: number;
       message_thread_id?: number;
     } | null = null;
+    const messageIds: string[] = [];
 
     const replyMarkup = buildTelegramReplyMarkup(input.buttons);
     const lastSendIndex = chunks.length + images.length + files.length - 1;
@@ -158,6 +159,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
 
       firstResult ??= result;
       lastTextResult = result;
+      messageIds.push(String(result.message_id));
     }
 
     for (const [index, image] of images.entries()) {
@@ -173,6 +175,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       });
 
       firstResult ??= result;
+      messageIds.push(String(result.message_id));
     }
 
     for (const [index, file] of files.entries()) {
@@ -202,6 +205,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
         });
       }
       firstResult ??= result;
+      messageIds.push(String(result.message_id));
     }
 
     if (!firstResult) {
@@ -212,6 +216,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       provider: 'telegram',
       channelId: input.channelId,
       messageId: String(firstResult.message_id),
+      ...(messageIds.length > 1 ? { messageIds } : {}),
       ...(lastTextResult
         ? { lastTextMessageId: String(lastTextResult.message_id) }
         : {}),

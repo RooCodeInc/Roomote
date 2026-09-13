@@ -73,6 +73,8 @@ export type CommunicationPostMessageResult = {
   provider: CommunicationProvider;
   channelId: string;
   messageId: string;
+  /** All IDs when one logical post produces multiple provider messages. */
+  messageIds?: string[];
   /** The final text-bearing message when a provider splits one post. */
   lastTextMessageId?: string;
   threadId?: string;
