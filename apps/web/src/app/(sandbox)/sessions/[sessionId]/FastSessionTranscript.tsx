@@ -1,5 +1,7 @@
 'use client';
 
+import { SessionSecrets } from '@/components/sessions/SessionSecrets';
+
 import {
   useCallback,
   useEffect,
@@ -393,6 +395,7 @@ export function FastSessionTranscript({
   owner,
   headerExtras,
   headerActions,
+  secretSessionId,
   timelineExtras,
   sessionGoal,
   autoStartVoice = false,
@@ -410,6 +413,7 @@ export function FastSessionTranscript({
   owner?: TranscriptOwner;
   headerExtras?: ReactNode;
   headerActions?: ReactNode;
+  secretSessionId?: string;
   timelineExtras?: ReactNode;
   sessionGoal?: SessionGoal | null;
   /**
@@ -1453,7 +1457,17 @@ export function FastSessionTranscript({
         <WorkspaceHeader
           className="py-3.25"
           contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-row !flex-nowrap`}
-          actions={headerActions}
+          actions={
+            <>
+              {secretSessionId ? (
+                <SessionSecrets
+                  key={secretSessionId}
+                  sessionId={secretSessionId}
+                />
+              ) : null}
+              {headerActions}
+            </>
+          }
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <h1

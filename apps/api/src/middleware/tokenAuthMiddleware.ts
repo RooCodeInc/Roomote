@@ -5,6 +5,7 @@ import {
   validateAuthToken,
   validateMcpAccessToken,
   validateRunToken,
+  validateSessionBrokerToken,
 } from '@roomote/auth';
 import { db, deploymentSettings, eq, users } from '@roomote/db/server';
 import { isRoomoteDeploymentDisabled } from '@roomote/types';
@@ -57,6 +58,20 @@ export const tokenAuthMiddleware = () =>
     const token = extractBearerToken(c);
 
     if (token) {
+      // This token is intentionally invalid on every other API/MCP resource.
+      if (c.req.path === '/api/mcp/http-integrations') {
+        try {
+          const auth = await validateSessionBrokerToken(token);
+          if (await deploymentAllowsTokenAuth())
+            c.set('sessionBrokerAuth', auth);
+        } catch {
+          // Ordinary user and run tokens retain their existing semantics.
+        }
+        if (c.get('sessionBrokerAuth')) {
+          await next();
+          return;
+        }
+      }
       // Try run token first (has more specific claims)
       let isRunToken = false;
 

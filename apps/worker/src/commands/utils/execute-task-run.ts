@@ -15,6 +15,7 @@ import {
 import { type TaskRun, sdk } from '@roomote/sdk/client';
 
 import { WorkerEnv } from '../../env';
+import { waitForSessionEgressDelivery } from '../../env/session-egress-bootstrap';
 import {
   type HarnessLogger,
   createStartupLogger,
@@ -397,6 +398,15 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
     // object with system-level entries.
     const userEnvVars = { ...envVars };
 
+    // Session-egress client configuration (proxy, PUBLIC CA bundle, and
+    // substitute tokens) is part of the runtime env so shells, the harness,
+    // and repo commands all see the same ordinary-client settings. It wins
+    // over deployment-provided proxy variables: with egress enforced outside
+    // the sandbox, any other proxy is unreachable anyway.
+    if (!workerEnv.sessionEgressBootstrapRequired) {
+      Object.assign(envVars, workerEnv.buildSessionEgressClientEnv());
+    }
+
     // Worker config values are read once here so their captured values
     // (auth keys, API URLs) can be reused throughout setup and runtime.
     const taskWorkspace = resolveTaskWorkspace(taskRun.payload);
@@ -519,6 +529,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
     );
 
     const runEnvironmentSetupInBackground =
+      !workerEnv.sessionEgressBootstrapRequired &&
       shouldRunParallelTaskEnvironmentSetup({
         taskRun,
         jobContext,
@@ -639,6 +650,25 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       runId: taskRun.id,
       field: 'setupCompletedAt',
     });
+
+    if (workerEnv.sessionEgressBootstrapRequired) {
+      const nonce = workerEnv.sessionEgressBootstrapNonce;
+      await sdk.mcpConnections.markSessionEgressBootstrapReady(nonce);
+      const delivery = await waitForSessionEgressDelivery(
+        () => sdk.mcpConnections.getSessionEgressDelivery(nonce),
+        backgroundEnvironmentSetupController.cancelSignal,
+      );
+      workerEnv.acceptSessionEgressDelivery(delivery);
+      Object.assign(envVars, workerEnv.buildSessionEgressClientEnv());
+      workerEnv.setRuntimeEnv(envVars);
+      await injectEnvVars(envVars, taskRun, {
+        previewProxyBaseUrl: workerEnv.previewProxyBaseUrl,
+        previewProxySubdomainSuffix: workerEnv.previewProxySubdomainSuffix,
+        sourceControlToken: jobContext.sourceControlToken,
+        omitInheritedModelRuntimeEnvFromShell:
+          taskWorkspace.type === 'environment',
+      });
+    }
 
     // setupCompletedAt only marks the blocking portion of setup; environment
     // setup may keep running in the background. Track its real lifecycle so

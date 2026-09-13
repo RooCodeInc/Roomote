@@ -115,6 +115,54 @@ vi.mock('@/components/sessions/SessionViewers', () => ({
 import SessionDetailPage, { generateMetadata } from './page';
 
 describe('Session detail page', () => {
+  it.each(['user-1', 'other-user'])(
+    'exposes secret management only to the owner with canonical identity (%s)',
+    async (userId) => {
+      authorizeMock.mockResolvedValue({
+        success: true,
+        userId,
+        isAdmin: false,
+      });
+      getSessionByIdCommandMock.mockResolvedValue({
+        id: '6a1f8f1e-0000-4000-8000-000000000006',
+        ownerUserId: 'user-1',
+        title: 'Session',
+        ownerName: 'Owner',
+        sourceSurface: 'web',
+        fastConversationId: '6a1f8f1e-0000-4000-8000-000000000005',
+        tasks: [],
+        artifacts: [],
+        inferenceCostMicroUsd: 0,
+        directInferenceCostMicroUsd: 0,
+        createdAt: new Date(),
+        status: 'active',
+      });
+      getFastSessionByIdMock.mockResolvedValue({
+        id: '6a1f8f1e-0000-4000-8000-000000000005',
+        messages: [],
+        model: null,
+        reasoningEffort: null,
+      });
+      renderToStaticMarkup(
+        await SessionDetailPage({
+          params: Promise.resolve({
+            sessionId: '6a1f8f1e-0000-4000-8000-000000000006',
+          }),
+        }),
+      );
+      expect(transcriptMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: '6a1f8f1e-0000-4000-8000-000000000005',
+          secretSessionId:
+            userId === 'user-1'
+              ? '6a1f8f1e-0000-4000-8000-000000000006'
+              : undefined,
+        }),
+        undefined,
+      );
+    },
+  );
+
   beforeEach(() => {
     vi.clearAllMocks();
     resolveEffectiveModelRuntimeEnvMock.mockResolvedValue({});

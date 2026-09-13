@@ -49,6 +49,20 @@ const productionCoreEnv: NodeJS.ProcessEnv = {
 };
 
 describe('Env', () => {
+  it('defaults HTTP integrations off and parses explicit opt-in values', () => {
+    expect(
+      createRoomoteEnv(productionCoreEnv).R_HTTP_INTEGRATIONS_ENABLED,
+    ).toBe(false);
+    for (const value of ['true', '1', 'false', '0']) {
+      expect(
+        createRoomoteEnv({
+          ...productionCoreEnv,
+          R_HTTP_INTEGRATIONS_ENABLED: value,
+        }).R_HTTP_INTEGRATIONS_ENABLED,
+      ).toBe(value === 'true' || value === '1');
+    }
+  });
+
   it('loads critical runtime settings with expected types and constraints', () => {
     expect(['test', 'development', 'production']).toContain(Env.NODE_ENV);
 
