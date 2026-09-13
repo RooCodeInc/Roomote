@@ -734,15 +734,19 @@ telegram.post('/', async (c) => {
     if (queuedMessage.userId && queuedMessage.text?.trim()) {
       const { tryHandleTelegramRequestUserInputMessage } =
         await import('./request-user-input.js');
-      const handled = await tryHandleTelegramRequestUserInputMessage({
-        activeRunId: activeRun.id,
-        userId: queuedMessage.userId,
-        text: queuedMessage.text,
-        chatId: metadata.communicationChannelId,
-        threadId: metadata.communicationThreadId,
-      });
-      if (handled) {
-        if (queuedMessage.images?.length) {
+      const requestUserInputResult =
+        await tryHandleTelegramRequestUserInputMessage({
+          activeRunId: activeRun.id,
+          userId: queuedMessage.userId,
+          text: queuedMessage.text,
+          chatId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+        });
+      if (requestUserInputResult) {
+        if (
+          requestUserInputResult === 'submitted' &&
+          queuedMessage.images?.length
+        ) {
           await syncActingUserForInboundMessage({
             logContext: 'telegram.requestUserInputImage',
             runId: activeRun.id,

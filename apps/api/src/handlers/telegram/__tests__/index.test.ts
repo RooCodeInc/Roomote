@@ -1749,6 +1749,66 @@ describe('Telegram webhook handler', () => {
     );
   });
 
+  it('does not let a losing image answer replace the winning actor or image', async () => {
+    mockTelegramLinkedSender('losing-user');
+    taskRunsFindFirstMock.mockResolvedValueOnce({
+      id: 77,
+      status: 'running',
+      machineId: 'machine-1',
+      taskId: 'task-1',
+      payload: {},
+    });
+    redisGetMock.mockResolvedValueOnce(
+      JSON.stringify({
+        requestId: 'request-1',
+        runId: 77,
+        taskId: 'task-1',
+        provider: 'telegram',
+        conversationId: '222',
+        questions: [
+          {
+            id: 'answer',
+            header: 'Answer',
+            question: 'What should I use?',
+            options: [],
+            isOther: true,
+            isSecret: false,
+          },
+        ],
+        status: 'pending',
+        promptMessageId: '900',
+        currentQuestionIndex: 0,
+        answers: {},
+        createdAt: 1,
+      }),
+    );
+    redisEvalMock.mockResolvedValueOnce(0);
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        update_id: 124,
+        message: {
+          text: undefined,
+          photo: [
+            {
+              file_id: 'photo-large',
+              file_unique_id: 'photo-2',
+              width: 1280,
+              height: 720,
+            },
+          ],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      requestUserInput: true,
+    });
+    expect(queueCommunicationMessageOnceMock).not.toHaveBeenCalled();
+    expect(setTrustedRunActingUserMock).not.toHaveBeenCalled();
+  });
+
   it('answers a /start request in Fast as the linked sender', async () => {
     mockTelegramLinkedSender('launch-owner-2');
     taskRunsFindFirstMock

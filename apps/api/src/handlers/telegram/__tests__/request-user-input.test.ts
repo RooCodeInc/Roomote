@@ -126,7 +126,7 @@ describe('Telegram request_user_input messages', () => {
         chatId: 'chat-1',
         threadId: 'topic-1',
       }),
-    ).resolves.toBe(true);
+    ).resolves.toBe('submitted');
 
     expect(mocks.retirePrompt).toHaveBeenCalledWith({
       channelId: 'chat-1',

@@ -129,7 +129,7 @@ export async function tryHandleTelegramRequestUserInputMessage(params: {
   text: string;
   chatId: string;
   threadId?: string | null;
-}): Promise<boolean> {
+}): Promise<false | 'submitted' | 'already_received'> {
   const conversationId = params.threadId?.trim() || params.chatId;
   const pendingRequest = await getPendingCommunicationRequestUserInput(
     'telegram',
@@ -153,7 +153,7 @@ export async function tryHandleTelegramRequestUserInputMessage(params: {
       threadId: params.threadId ?? undefined,
       text: 'I already received your answer. Please wait for the agent to continue.',
     });
-    return true;
+    return 'already_received';
   }
 
   const parsedReply = parseAcpRequestUserInputAnswerReply(
@@ -191,7 +191,7 @@ export async function tryHandleTelegramRequestUserInputMessage(params: {
       threadId: params.threadId ?? undefined,
       text: 'I already received your answer. Please wait for the agent to continue.',
     });
-    return true;
+    return 'already_received';
   }
 
   await confirmAnswer({
@@ -201,7 +201,7 @@ export async function tryHandleTelegramRequestUserInputMessage(params: {
     answerText,
     cancelled,
   });
-  return true;
+  return 'submitted';
 }
 
 export async function tryHandleTelegramRequestUserInputCallback(params: {
