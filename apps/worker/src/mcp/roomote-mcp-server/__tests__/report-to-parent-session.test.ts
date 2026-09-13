@@ -24,6 +24,8 @@ describe('handleReportToParentSession', () => {
         taskId: 'task-1',
         purpose: 'progress',
         message: 'The implementation is ready for validation.',
+        videoArtifactIds: ['video-1'],
+        fileArtifactIds: ['file-1'],
       },
       {
         token: 'token',
@@ -50,6 +52,8 @@ describe('handleReportToParentSession', () => {
       deliverySignature: expect.stringMatching(/^[a-f0-9]{64}$/),
       purpose: 'progress',
       message: 'The implementation is ready for validation.',
+      videoArtifactIds: ['video-1'],
+      fileArtifactIds: ['file-1'],
     });
     expect(result.content[0]?.text).toContain('"relayed":true');
     expect(result.content[0]?.text).toContain('"relayId":');

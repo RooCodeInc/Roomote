@@ -225,6 +225,52 @@ describe('Telegram update helpers', () => {
     ).toMatchObject({ text: 'Audio attachment: voice message' });
   });
 
+  it.each([
+    {
+      field: 'video',
+      media: {
+        file_id: 'video-file',
+        file_unique_id: 'video-unique',
+        width: 1280,
+        height: 720,
+        duration: 5,
+        file_name: 'repro.mp4',
+        mime_type: 'video/mp4',
+        file_size: 1234,
+      },
+      text: 'Video attachment: repro.mp4',
+    },
+    {
+      field: 'video_note',
+      media: {
+        file_id: 'video-note-file',
+        file_unique_id: 'video-note-unique',
+        length: 384,
+        duration: 5,
+        file_size: 1234,
+      },
+      text: 'Video attachment: video note',
+    },
+  ])(
+    'accepts native Telegram $field messages as task entries',
+    ({ field, media, text }) => {
+      const parsed = parseTelegramUpdate({
+        update_id: 1009,
+        message: {
+          message_id: 50,
+          chat: { id: 123, type: 'private' },
+          [field]: media,
+        },
+      });
+
+      expect(parsed.success).toBe(true);
+      expect(isTelegramTaskEntryUpdate(parsed.data!)).toBe(true);
+      expect(
+        telegramUpdateToQueuedCommunicationMessage(parsed.data!),
+      ).toMatchObject({ text });
+    },
+  );
+
   it('tracks Telegram forum topics as communication threads', () => {
     const parsed = parseTelegramUpdate({
       update_id: 1002,

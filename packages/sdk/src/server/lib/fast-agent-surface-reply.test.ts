@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   createActivity: vi.fn(() => ({ start: vi.fn(), settle: vi.fn() })),
   slackPostThreadMessage: vi.fn(),
   deliverVideos: vi.fn(),
+  prepareFiles: vi.fn(),
   slackUpdateMessage: vi.fn(),
   admitHumanFollowUp: vi.fn(),
   admitInline: vi.fn(),
@@ -34,6 +35,9 @@ vi.mock('./artifacts/create-session-artifact', () => ({
 }));
 vi.mock('./fast-agent-session-videos', () => ({
   deliverFastAgentSessionVideos: mocks.deliverVideos,
+}));
+vi.mock('./fast-agent-session-files', () => ({
+  prepareFastAgentSessionFiles: mocks.prepareFiles,
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -159,6 +163,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.telegramResolveForumTopicIcon.mockResolvedValue(undefined);
+    mocks.prepareFiles.mockResolvedValue({ files: [], fallbackText: '' });
     mocks.teamsPostMessage.mockResolvedValue({
       provider: 'teams',
       channelId: 'teams-channel-1',
@@ -925,6 +930,59 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         replyToMessageId: '777',
         text: expect.not.stringContaining('external_input'),
       }),
+    );
+  });
+
+  it('delivers selected Telegram videos and general files on ordinary Fast replies', async () => {
+    const video = {
+      bytes: Uint8Array.from([1]),
+      filename: 'demo.mp4',
+      contentType: 'video/mp4',
+      kind: 'video' as const,
+      fallbackText: 'View video',
+    };
+    const file = {
+      bytes: Uint8Array.from([2]),
+      filename: 'report.pdf',
+      contentType: 'application/pdf',
+      kind: 'document' as const,
+      fallbackText: 'View file',
+    };
+    mocks.prepareFiles
+      .mockResolvedValueOnce({ files: [video], fallbackText: '' })
+      .mockResolvedValueOnce({ files: [file], fallbackText: '' });
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      replyTarget: { channelId: '123' },
+    });
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Matt',
+      question: 'Create media',
+    });
+
+    await delivery!.adapter.postReply({
+      purpose: 'closeout',
+      message: 'Created both artifacts.',
+      videoArtifactIds: ['video-1'],
+      fileArtifactIds: ['file-1'],
+    });
+
+    expect(mocks.prepareFiles).toHaveBeenNthCalledWith(1, {
+      artifactIds: ['video-1'],
+      sessionId: conversation.id,
+      kind: 'video',
+    });
+    expect(mocks.prepareFiles).toHaveBeenNthCalledWith(2, {
+      artifactIds: ['file-1'],
+      sessionId: conversation.id,
+      kind: 'document',
+    });
+    expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ files: [video, file] }),
     );
   });
 });

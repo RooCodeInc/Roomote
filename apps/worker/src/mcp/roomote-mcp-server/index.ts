@@ -1609,6 +1609,22 @@ if (
           .describe(
             'Optional already-uploaded artifact IDs for images to attach. A reply must not claim an image or screenshot is attached, shown, or included unless the matching imageArtifactIds or imagePaths are supplied. If attachment delivery fails, provide an accessible artifact viewer link and say that the image could not be attached.',
           ),
+        ...(reportsToParentSession
+          ? {
+              videoArtifactIds: z
+                .array(z.string())
+                .optional()
+                .describe(
+                  'Optional already-uploaded video artifact IDs for native delivery by supported parent chat providers. Never claim a video is attached unless the matching IDs are supplied; preserve viewer links as fallback.',
+                ),
+              fileArtifactIds: z
+                .array(z.string())
+                .optional()
+                .describe(
+                  'Optional already-uploaded non-image, non-video artifact IDs for native Telegram document delivery. Preserve viewer links as fallback and never claim a file is attached unless the matching IDs are supplied.',
+                ),
+            }
+          : {}),
         ...(supportsDataVisualizations
           ? {
               charts: dataVisualizationInputsSchema
@@ -1667,6 +1683,8 @@ if (
               message: params.message,
               imagePaths: params.imagePaths,
               imageArtifactIds: params.imageArtifactIds,
+              videoArtifactIds: params.videoArtifactIds,
+              fileArtifactIds: params.fileArtifactIds,
               charts: params.charts as DataVisualizationInput[] | undefined,
             },
             artifactConfig,

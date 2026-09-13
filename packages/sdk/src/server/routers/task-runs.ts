@@ -117,6 +117,8 @@ const parentSessionReportSchema = z.object({
   purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
   message: z.string().trim().min(1),
   imageArtifactIds: z.array(z.string().min(1)).optional(),
+  videoArtifactIds: z.array(z.string().min(1)).optional(),
+  fileArtifactIds: z.array(z.string().min(1)).optional(),
   charts: dataVisualizationInputsSchema.optional(),
 });
 

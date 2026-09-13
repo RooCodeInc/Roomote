@@ -1149,6 +1149,65 @@ describe('Telegram webhook handler', () => {
     );
   });
 
+  it.each([
+    {
+      field: 'video',
+      media: {
+        file_id: 'native-video-file',
+        file_unique_id: 'native-video-1',
+        width: 1280,
+        height: 720,
+        duration: 5,
+        file_name: 'native.mp4',
+        mime_type: 'video/mp4',
+      },
+      filename: 'native.mp4',
+    },
+    {
+      field: 'video_note',
+      media: {
+        file_id: 'video-note-file',
+        file_unique_id: 'video-note-1',
+        length: 384,
+        duration: 5,
+      },
+      filename: 'video-note.mp4',
+    },
+  ])(
+    'passes native Telegram $field descriptions to Fast',
+    async ({ field, media, filename }) => {
+      mockTelegramLinkedSender('mapped-user-1');
+      downloadFileMock.mockResolvedValueOnce({
+        bytes: new Uint8Array([1, 2, 3]),
+        filePath: filename,
+        contentType: 'video/mp4',
+      });
+
+      const response = await postTelegramUpdate(
+        createTelegramUpdate({
+          message: { text: undefined, [field]: media },
+        }),
+      );
+
+      await expect(response.json()).resolves.toMatchObject({
+        fastAnswered: true,
+        fastDefaulted: true,
+      });
+      expect(downloadFileMock).toHaveBeenCalledWith(
+        media.file_id,
+        20 * 1024 * 1024,
+      );
+      expect(continueFastReplyMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          question: expect.stringContaining('The video shows an error.'),
+          attachmentTexts: [
+            `Video attachment description: ${filename}\nThe video shows an error.`,
+          ],
+        }),
+      );
+    },
+  );
+
   it('keeps unsupported Telegram documents out of new Fast attachment context', async () => {
     mockTelegramLinkedSender('mapped-user-1');
 

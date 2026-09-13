@@ -562,7 +562,12 @@ telegram.post('/', async (c) => {
     ? String(repliedToReportRootId)
     : undefined;
   const hasMedia = Boolean(
-    message.photo?.length || message.document || message.audio || message.voice,
+    message.photo?.length ||
+    message.document ||
+    message.audio ||
+    message.voice ||
+    message.video ||
+    message.video_note,
   );
   const fastSession =
     !newTaskCommand && !goalCommand

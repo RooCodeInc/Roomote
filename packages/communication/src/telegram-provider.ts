@@ -1,6 +1,7 @@
 import type {
   CommunicationChannelMessagesResult,
   CommunicationMessageButton,
+  CommunicationMessageFile,
   CommunicationPostMessageInput,
   CommunicationPostMessageResult,
   CommunicationProviderAdapter,
@@ -50,6 +51,7 @@ type TelegramApiResponse =
 const DEFAULT_TELEGRAM_TIMEOUT_MS = 10_000;
 const DEFAULT_TELEGRAM_MAX_RETRIES = 2;
 const TELEGRAM_RETRY_BASE_DELAY_MS = 250;
+const TELEGRAM_MAX_FILE_BYTES = 50 * 1024 * 1024;
 
 function parsePositiveInteger(value: string | undefined): number | undefined {
   if (!value) {
@@ -109,6 +111,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
   ): Promise<CommunicationPostMessageResult> {
     const text = input.text;
     const images = input.images ?? [];
+    const files = input.files ?? [];
     const threadId = parsePositiveInteger(input.threadId);
     // Honor an explicit reply target when callers supply one (task closeouts,
     // launch-failure recovery, onboarding threads). Callers that prefer a
@@ -117,8 +120,8 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     const footerText = input.footerText;
     const hasText = Boolean(text?.trim() || footerText?.trim());
 
-    if (!hasText && images.length === 0) {
-      throw new Error('Telegram postMessage requires text or images.');
+    if (!hasText && images.length === 0 && files.length === 0) {
+      throw new Error('Telegram postMessage requires text, images, or files.');
     }
     const chunks = hasText
       ? planTelegramRichMessages({
@@ -140,7 +143,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     } | null = null;
 
     const replyMarkup = buildTelegramReplyMarkup(input.buttons);
-    const lastSendIndex = chunks.length + images.length - 1;
+    const lastSendIndex = chunks.length + images.length + files.length - 1;
 
     for (const [index, chunk] of chunks.entries()) {
       const result = await this.sendRichMessageChunk({
@@ -172,6 +175,35 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       firstResult ??= result;
     }
 
+    for (const [index, file] of files.entries()) {
+      const sendIndex = chunks.length + images.length + index;
+      let result;
+      try {
+        result = await this.sendFile({
+          chatId: input.channelId,
+          file,
+          threadId,
+          replyToMessageId:
+            firstResult === null && index === 0 ? replyToMessageId : undefined,
+          replyMarkup: sendIndex === lastSendIndex ? replyMarkup : undefined,
+        });
+      } catch {
+        const [fallback] = planTelegramRichMessages({
+          text: file.fallbackText,
+          textFormat: 'plain',
+        });
+        result = await this.sendRichMessageChunk({
+          chatId: input.channelId,
+          richMessage: fallback!.richMessage,
+          threadId,
+          replyToMessageId:
+            firstResult === null && index === 0 ? replyToMessageId : undefined,
+          replyMarkup: sendIndex === lastSendIndex ? replyMarkup : undefined,
+        });
+      }
+      firstResult ??= result;
+    }
+
     if (!firstResult) {
       throw new Error('Telegram postMessage produced no message chunks.');
     }
@@ -189,6 +221,65 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
           ? { threadId: input.threadId }
           : {}),
     };
+  }
+
+  private async sendFile(params: {
+    chatId: string;
+    file: CommunicationMessageFile;
+    threadId?: number;
+    replyToMessageId?: number;
+    replyMarkup?: TelegramInlineKeyboardMarkup;
+  }): Promise<{ message_id: number; message_thread_id?: number }> {
+    if (
+      params.file.bytes.byteLength === 0 ||
+      params.file.bytes.byteLength > TELEGRAM_MAX_FILE_BYTES
+    ) {
+      throw new Error('Telegram file exceeds the native delivery size limit.');
+    }
+
+    const method = params.file.kind === 'video' ? 'sendVideo' : 'sendDocument';
+    const field = params.file.kind === 'video' ? 'video' : 'document';
+    const body = new FormData();
+    body.set('chat_id', params.chatId);
+    body.set(
+      field,
+      new Blob([Uint8Array.from(params.file.bytes)], {
+        type: params.file.contentType,
+      }),
+      params.file.filename,
+    );
+    if (params.threadId) {
+      body.set('message_thread_id', String(params.threadId));
+    }
+    if (params.file.kind === 'video') {
+      body.set('supports_streaming', 'true');
+    }
+    if (params.replyToMessageId) {
+      body.set(
+        'reply_parameters',
+        JSON.stringify({
+          message_id: params.replyToMessageId,
+          allow_sending_without_reply: true,
+        }),
+      );
+    }
+    if (params.replyMarkup) {
+      body.set('reply_markup', JSON.stringify(params.replyMarkup));
+    }
+
+    const response = await this.fetchWithRetry(
+      `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/${method}`,
+      { method: 'POST', body },
+      { method, retryNetworkErrors: false },
+    );
+    const parsed = (await response
+      .json()
+      .catch(() => null)) as TelegramApiResponse | null;
+    if (response.ok && parsed?.ok) return parsed.result;
+    const description = parsed && !parsed.ok ? parsed.description : undefined;
+    throw new Error(
+      `Telegram ${method} failed (${response.status}): ${description ?? response.statusText}`,
+    );
   }
 
   private async sendPhoto(params: {

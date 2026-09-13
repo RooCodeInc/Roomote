@@ -37,6 +37,7 @@ import { createDiscordCommunicationProviderFromRuntimeCredentials } from './disc
 import { createSlackFastReplyStream } from './fast-agent-slack-reply-stream';
 import { resolveFastAgentSessionImages } from './fast-agent-session-images';
 import { deliverFastAgentSessionVideos } from './fast-agent-session-videos';
+import { prepareFastAgentSessionFiles } from './fast-agent-session-files';
 import { findSlackConversationSubjectByUserId } from './slack-conversation-log';
 import {
   createFastAgentCommunicationTaskLauncher,
@@ -651,7 +652,24 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     });
     const postReply: FastAgentTurnAdapter['postReply'] = async ({
       message,
+      videoArtifactIds = [],
+      fileArtifactIds = [],
     }) => {
+      const [videos, files] = await Promise.all([
+        prepareFastAgentSessionFiles({
+          artifactIds: videoArtifactIds,
+          sessionId: session.id,
+          kind: 'video',
+        }),
+        prepareFastAgentSessionFiles({
+          artifactIds: fileArtifactIds,
+          sessionId: session.id,
+          kind: 'document',
+        }),
+      ]);
+      message = [message, videos.fallbackText, files.fallbackText]
+        .filter(Boolean)
+        .join('\n\n');
       const posted = await postTextThreadReplyWithFooter({
         provider,
         input: {
@@ -662,6 +680,9 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           ...(replyToMessageId ? { replyToMessageId } : {}),
           text: message,
           textFormat: 'markdown',
+          ...(videos.files.length || files.files.length
+            ? { files: [...videos.files, ...files.files] }
+            : {}),
         },
         footerText: buildFastSessionReplyFooterText({
           provider: 'telegram',

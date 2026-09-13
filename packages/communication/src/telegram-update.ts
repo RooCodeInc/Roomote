@@ -83,6 +83,29 @@ const telegramVoiceSchema = z
   })
   .passthrough();
 
+const telegramVideoSchema = z
+  .object({
+    file_id: z.string(),
+    file_unique_id: z.string(),
+    width: z.number().int(),
+    height: z.number().int(),
+    duration: z.number().int(),
+    file_name: z.string().optional(),
+    mime_type: z.string().optional(),
+    file_size: z.number().int().optional(),
+  })
+  .passthrough();
+
+const telegramVideoNoteSchema = z
+  .object({
+    file_id: z.string(),
+    file_unique_id: z.string(),
+    length: z.number().int(),
+    duration: z.number().int(),
+    file_size: z.number().int().optional(),
+  })
+  .passthrough();
+
 const telegramRepliedToMessageSchema = z
   .object({
     message_id: z.number().int(),
@@ -92,6 +115,8 @@ const telegramRepliedToMessageSchema = z
     document: telegramDocumentSchema.optional(),
     audio: telegramAudioSchema.optional(),
     voice: telegramVoiceSchema.optional(),
+    video: telegramVideoSchema.optional(),
+    video_note: telegramVideoNoteSchema.optional(),
     from: telegramUserSchema.optional(),
   })
   .passthrough();
@@ -107,6 +132,8 @@ const telegramMessageSchema = z
     document: telegramDocumentSchema.optional(),
     audio: telegramAudioSchema.optional(),
     voice: telegramVoiceSchema.optional(),
+    video: telegramVideoSchema.optional(),
+    video_note: telegramVideoNoteSchema.optional(),
     from: telegramUserSchema.optional(),
     chat: telegramChatSchema,
     entities: z.array(telegramMessageEntitySchema).optional(),
@@ -145,7 +172,15 @@ const telegramMessageReactionSchema = z
   })
   .passthrough();
 
-export const telegramUpdateSchema = z
+type TelegramUpdateValue = {
+  update_id: number;
+  message?: z.infer<typeof telegramMessageSchema>;
+  edited_message?: z.infer<typeof telegramMessageSchema>;
+  callback_query?: z.infer<typeof telegramCallbackQuerySchema>;
+  message_reaction?: z.infer<typeof telegramMessageReactionSchema>;
+};
+
+const telegramUpdateSchemaValue: z.ZodType<TelegramUpdateValue> = z
   .object({
     update_id: z.number().int(),
     message: telegramMessageSchema.optional(),
@@ -155,7 +190,10 @@ export const telegramUpdateSchema = z
   })
   .passthrough();
 
-export type TelegramUpdate = z.infer<typeof telegramUpdateSchema>;
+export const telegramUpdateSchema: typeof telegramUpdateSchemaValue =
+  telegramUpdateSchemaValue;
+
+export type TelegramUpdate = TelegramUpdateValue;
 export type TelegramMessage = z.infer<typeof telegramMessageSchema>;
 export type TelegramCallbackQuery = z.infer<typeof telegramCallbackQuerySchema>;
 export type TelegramMessageReaction = z.infer<
@@ -191,6 +229,8 @@ function getTelegramMessageContent(message: {
   document?: { file_name?: string };
   audio?: { file_name?: string };
   voice?: unknown;
+  video?: { file_name?: string };
+  video_note?: unknown;
 }): string | undefined {
   const text = normalizeWhitespace(message.text ?? message.caption ?? '');
   if (text) {
@@ -207,7 +247,11 @@ function getTelegramMessageContent(message: {
         ? `Audio attachment${message.audio.file_name ? `: ${message.audio.file_name}` : ''}`
         : message.voice
           ? 'Audio attachment: voice message'
-          : undefined;
+          : message.video
+            ? `Video attachment${message.video.file_name ? `: ${message.video.file_name}` : ''}`
+            : message.video_note
+              ? 'Video attachment: video note'
+              : undefined;
 }
 
 export function getTelegramRepliedToMessageContext(
@@ -604,7 +648,9 @@ export function isTelegramTaskEntryUpdate(
       message.photo?.length ||
       message.document ||
       message.audio ||
-      message.voice) &&
+      message.voice ||
+      message.video ||
+      message.video_note) &&
     (isTelegramPrivateChat(message) ||
       isTelegramBotMentioned(message, options)),
   );
@@ -764,7 +810,11 @@ export function telegramUpdateToQueuedCommunicationMessage(
           ? `Audio attachment${message.audio.file_name ? `: ${message.audio.file_name}` : ''}`
           : message.voice
             ? 'Audio attachment: voice message'
-            : '';
+            : message.video
+              ? `Video attachment${message.video.file_name ? `: ${message.video.file_name}` : ''}`
+              : message.video_note
+                ? 'Video attachment: video note'
+                : '';
 
   if (!text) {
     return null;

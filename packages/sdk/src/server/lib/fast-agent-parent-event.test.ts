@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   findTaskPullRequests: vi.fn(),
   postMessage: vi.fn(),
   deliverVideos: vi.fn(),
+  prepareFiles: vi.fn(),
   updateMessage: vi.fn(),
   addReaction: vi.fn(),
   resolveSlackReactionNames: vi.fn(),
@@ -71,6 +72,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('./fast-agent-session-videos', () => ({
   deliverFastAgentSessionVideos: mocks.deliverVideos,
+}));
+vi.mock('./fast-agent-session-files', () => ({
+  prepareFastAgentSessionFiles: mocks.prepareFiles,
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -402,6 +406,7 @@ describe('deliverFastAgentParentEvent', () => {
     });
     mocks.resolveUserMcpServerConfigs.mockResolvedValue({});
     mocks.isVoiceCallActive.mockResolvedValue(false);
+    mocks.prepareFiles.mockResolvedValue({ files: [], fallbackText: '' });
     mocks.postSlackSuggestions.mockResolvedValue(undefined);
     mocks.postDiscordSuggestions.mockResolvedValue(undefined);
     mocks.postTeamsSuggestions.mockResolvedValue(undefined);
@@ -1125,6 +1130,73 @@ describe('deliverFastAgentParentEvent', () => {
       }
     },
   );
+
+  it('delivers selected child-report videos and files through Telegram', async () => {
+    const telegramParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-chat-1',
+        conversationId: 'telegram-conversation-1',
+        replyTarget: { channelId: 'telegram-chat-1' },
+      },
+    };
+    const video = {
+      bytes: Uint8Array.from([1]),
+      filename: 'demo.mp4',
+      contentType: 'video/mp4',
+      kind: 'video' as const,
+      fallbackText: 'View video',
+    };
+    const file = {
+      bytes: Uint8Array.from([2]),
+      filename: 'report.pdf',
+      contentType: 'application/pdf',
+      kind: 'document' as const,
+      fallbackText: 'View file',
+    };
+    mocks.prepareFiles
+      .mockResolvedValueOnce({ files: [video], fallbackText: '' })
+      .mockResolvedValueOnce({ files: [file], fallbackText: '' });
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: 'The artifacts are ready.',
+        videoArtifactIds: ['video-1'],
+        fileArtifactIds: ['file-1'],
+      }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: telegramParent,
+      event: {
+        type: 'child_message',
+        taskId: 'task-1',
+        runId: 42,
+        messageId: '44444444-4444-4444-8444-444444444444',
+        purpose: 'closeout',
+        message: 'The artifacts are ready.',
+        videoArtifactIds: ['video-1'],
+        fileArtifactIds: ['file-1'],
+      },
+    });
+
+    expect(mocks.prepareFiles).toHaveBeenNthCalledWith(1, {
+      artifactIds: ['video-1'],
+      sessionId: parent.sessionId,
+      kind: 'video',
+      event: { artifactIds: ['video-1'], taskId: 'task-1', runId: 42 },
+    });
+    expect(mocks.prepareFiles).toHaveBeenNthCalledWith(2, {
+      artifactIds: ['file-1'],
+      sessionId: parent.sessionId,
+      kind: 'document',
+      event: { artifactIds: ['file-1'], taskId: 'task-1', runId: 42 },
+    });
+    expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ files: [video, file] }),
+    );
+  });
 
   it('updates the Slack root for a channel-backed automation turn', async () => {
     const chart = {

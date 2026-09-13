@@ -254,6 +254,7 @@ const chatReplyArgsSchema = z.object({
   purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
   imageArtifactIds: z.array(z.string()).optional(),
   videoArtifactIds: z.array(z.string()).optional(),
+  fileArtifactIds: z.array(z.string()).optional(),
   charts: dataVisualizationInputsSchema.optional(),
   suggestions: z
     .array(
@@ -2601,6 +2602,9 @@ export async function answerFastAgentQuestion({
           ...(reply.videoArtifactIds?.length
             ? { videoArtifactIds: reply.videoArtifactIds }
             : {}),
+          ...(reply.fileArtifactIds?.length
+            ? { fileArtifactIds: reply.fileArtifactIds }
+            : {}),
           ...(reply.kickoff ? { kickoff: true } : {}),
           ...(reply.taskNavigation ? { taskNavigation: true } : {}),
         },
@@ -3987,6 +3991,7 @@ export async function answerFastAgentQuestion({
             }
             const requestedImageArtifactIds = args.imageArtifactIds ?? [];
             const requestedVideoArtifactIds = args.videoArtifactIds ?? [];
+            const requestedFileArtifactIds = args.fileArtifactIds ?? [];
             const signatureImageArtifactIds =
               requestedImageArtifactIds.length > 0
                 ? requestedImageArtifactIds
@@ -3996,6 +4001,7 @@ export async function answerFastAgentQuestion({
               message,
               signatureImageArtifactIds,
               requestedVideoArtifactIds,
+              requestedFileArtifactIds,
               args.suggestions ?? [],
               args.charts ?? defaultCharts,
             ]);
@@ -4024,6 +4030,9 @@ export async function answerFastAgentQuestion({
                   : {}),
                 ...(requestedVideoArtifactIds.length
                   ? { videoArtifactIds: requestedVideoArtifactIds }
+                  : {}),
+                ...(requestedFileArtifactIds.length
+                  ? { fileArtifactIds: requestedFileArtifactIds }
                   : {}),
                 ...(args.suggestions?.length
                   ? { suggestions: args.suggestions }
