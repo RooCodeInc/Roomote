@@ -3,7 +3,7 @@ import type {
   ButtonHTMLAttributes,
   ReactNode,
 } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 const state = vi.hoisted(() => ({
   pathname: '/',
@@ -62,6 +62,7 @@ vi.mock('@/components/system', () => ({
   House: Icon,
   Rows4: Icon,
   NotepadText: Icon,
+  Plus: Icon,
   GalleryVerticalEnd: Icon,
   ChartColumnIncreasing: Icon,
   Lightbulb: Icon,
@@ -115,6 +116,20 @@ describe('NavbarDrawer', () => {
       'href',
       '/settings',
     );
+  });
+
+  it('opens a new Session from the first navigation action', () => {
+    const onNewSession = vi.fn();
+    render(<NavbarDrawer onNewSession={onNewSession} />);
+
+    const newSession = screen.getByRole('button', { name: 'New Session' });
+    const home = screen.getByRole('link', { name: 'Home' });
+
+    expect(newSession.compareDocumentPosition(home)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    fireEvent.click(newSession);
+    expect(onNewSession).toHaveBeenCalledOnce();
   });
 
   it('keeps settings as the only admin/navigation destination in the drawer', () => {

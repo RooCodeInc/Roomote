@@ -70,9 +70,19 @@ vi.mock('@/components/tasks/NewTaskDialog', () => ({
 }));
 
 vi.mock('./NavbarDrawer', () => ({
-  NavbarDrawer: ({ setupIncomplete }: { setupIncomplete?: boolean }) => {
+  NavbarDrawer: ({
+    setupIncomplete,
+    onNewSession,
+  }: {
+    setupIncomplete?: boolean;
+    onNewSession?: () => void;
+  }) => {
     state.drawerSetupIncomplete = setupIncomplete ?? false;
-    return <div>NavbarDrawer</div>;
+    return (
+      <button type="button" onClick={onNewSession}>
+        Drawer New Session
+      </button>
+    );
   },
 }));
 
@@ -123,6 +133,17 @@ describe('NavbarHeader', () => {
     );
 
     fireEvent.click(newSessionButton);
+
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
+      'data-open',
+      'true',
+    );
+  });
+
+  it('opens the same new session dialog from the mobile drawer', () => {
+    render(<NavbarHeader />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Drawer New Session' }));
 
     expect(screen.getByTestId('new-task-dialog')).toHaveAttribute(
       'data-open',

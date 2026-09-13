@@ -39,7 +39,10 @@ export const NavbarHeader = ({
         )}
         {...props}
       >
-        <NavbarDrawer setupIncomplete={setupIncomplete} />
+        <NavbarDrawer
+          setupIncomplete={setupIncomplete}
+          onNewSession={() => setIsNewTaskDialogOpen(true)}
+        />
         {setupIncomplete ? (
           <Image
             src={MOBILE_HEADER_LOGO_SRC}

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useMediaQuery } from 'usehooks-ts';
 import {
   Menu,
+  Plus,
   X,
   Settings,
   Tooltip,
@@ -30,8 +31,10 @@ import {
 
 export const NavbarDrawer = ({
   setupIncomplete = false,
+  onNewSession,
 }: {
   setupIncomplete?: boolean;
+  onNewSession?: () => void;
 }) => {
   const pathname = usePathname();
   const { isAdmin } = useAuthorizedUser();
@@ -73,6 +76,20 @@ export const NavbarDrawer = ({
             </DrawerHeader>
 
             <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-4">
+              <Button
+                variant="ghost"
+                size="lg"
+                className="justify-start"
+                aria-label="New Session"
+                onClick={() => {
+                  setOpen(false);
+                  onNewSession?.();
+                }}
+              >
+                <Plus className="size-5" />
+                New Session
+              </Button>
+
               {visibleNavItems.map((item) => {
                 const Icon = item.icon;
                 const disabled = setupIncomplete && item.requiresSetup;
