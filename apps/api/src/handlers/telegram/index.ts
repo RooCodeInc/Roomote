@@ -887,6 +887,7 @@ telegram.post('/', async (c) => {
 
       await replyToTelegramSnapshotResume({
         launchResult: resumeLaunch,
+        isDedicatedTopic: completedRun.payload.telegramTaskTopic === true,
         conversation: {
           ...conversation,
           replyToMessageId: metadata.communicationMessageId,
@@ -904,6 +905,7 @@ telegram.post('/', async (c) => {
           chatId: metadata.communicationChannelId,
           threadId: metadata.communicationThreadId,
           replyToMessageId: metadata.communicationMessageId,
+          isDedicatedTopic: completedRun.payload.telegramTaskTopic === true,
           text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
         });
 

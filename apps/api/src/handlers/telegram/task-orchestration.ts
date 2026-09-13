@@ -28,11 +28,13 @@ export async function resumeTelegramTaskFromSnapshot(input: {
 export async function replyToTelegramSnapshotResume(input: {
   launchResult: Awaited<ReturnType<typeof resumeTelegramTaskFromSnapshot>>;
   conversation: TelegramConversationRef & { replyToMessageId?: string };
+  isDedicatedTopic: boolean;
 }): Promise<void> {
   await postTelegramMessageBestEffort({
     chatId: input.conversation.chatId,
     threadId: input.conversation.threadId,
     replyToMessageId: input.conversation.replyToMessageId,
+    isDedicatedTopic: input.isDedicatedTopic,
     text: `Reconnected this Telegram chat to the task: ${getTaskUrl({
       taskId: input.launchResult.taskId,
       utm: {

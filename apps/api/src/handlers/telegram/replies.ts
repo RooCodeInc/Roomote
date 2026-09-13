@@ -49,6 +49,7 @@ export async function postTelegramMessageBestEffort(input: {
   chatId: string;
   threadId?: string;
   replyToMessageId?: string;
+  isDedicatedTopic?: boolean;
   text: string;
   textFormat?: 'plain' | 'markdown';
   buttons?: CommunicationMessageButton[][];
@@ -66,6 +67,7 @@ export async function postTelegramMessageBestEffort(input: {
     const replyToMessageId = resolveTelegramReplyToMessageId({
       channelId: input.chatId,
       replyToMessageId: input.replyToMessageId,
+      isDedicatedTopic: input.isDedicatedTopic,
     });
     const result = await provider.postMessage({
       channelId: input.chatId,

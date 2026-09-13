@@ -203,8 +203,9 @@ export async function launchTelegramTask(input: {
     // The source message is in the previous topic (usually General), so only
     // the mirrored request can be used as a reply anchor in the new topic.
     replyToMessageId: createdTopic
-      ? undefined
+      ? topicRootMessage?.messageId
       : metadata.communicationMessageId,
+    isDedicatedTopic: Boolean(createdTopic),
     text: buildTelegramTaskAcknowledgementText({
       workspaceDisplayName: input.workspace.workspaceDisplayName,
       started: Boolean(taskUrl),

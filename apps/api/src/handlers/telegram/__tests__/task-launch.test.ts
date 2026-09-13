@@ -174,7 +174,8 @@ describe('Telegram task topic launch', () => {
       expect.objectContaining({
         chatId: '-100111000111',
         threadId: '77',
-        replyToMessageId: undefined,
+        replyToMessageId: '900',
+        isDedicatedTopic: true,
       }),
     );
     expect(postTelegramMessageBestEffortMock).toHaveBeenNthCalledWith(3, {

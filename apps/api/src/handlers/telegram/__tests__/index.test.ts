@@ -325,6 +325,16 @@ vi.mock('@roomote/sdk/server', () => ({
 }));
 
 vi.mock('@roomote/communication/telegram-provider', () => ({
+  resolveTelegramReplyToMessageId: ({
+    channelId,
+    replyToMessageId,
+    isDedicatedTopic,
+  }: {
+    channelId: string;
+    replyToMessageId?: string;
+    isDedicatedTopic?: boolean;
+  }) =>
+    Number(channelId) > 0 || isDedicatedTopic ? undefined : replyToMessageId,
   TelegramCommunicationProvider: vi.fn().mockImplementation(function () {
     return {
       addReaction: addReactionMock,
@@ -577,7 +587,6 @@ describe('Telegram webhook handler', () => {
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '222',
-        replyToMessageId: '777',
         text: expect.stringContaining(
           'Future review feedback on this PR will get resolved automatically.',
         ),
@@ -1862,7 +1871,6 @@ describe('Telegram webhook handler', () => {
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '222',
-        replyToMessageId: '456',
         text: expect.stringContaining("couldn't start a conversation"),
       }),
     );
@@ -1880,8 +1888,10 @@ describe('Telegram webhook handler', () => {
         repo: 'RooCodeInc/Roomote',
         environmentId: 'env-1',
         communicationProvider: 'telegram',
-        communicationChannelId: '222',
+        communicationChannelId: '-100222',
+        communicationThreadId: '77',
         communicationMessageId: '123',
+        telegramTaskTopic: true,
       },
       port: 3000,
       snapshotId: 'snapshot-1',
@@ -1900,6 +1910,8 @@ describe('Telegram webhook handler', () => {
         message: {
           text: '/start continue this',
           entities: [{ type: 'bot_command', offset: 0, length: 6 }],
+          message_thread_id: 77,
+          chat: { id: -100222, type: 'supergroup', is_forum: true },
         },
       }),
     );
@@ -1926,13 +1938,15 @@ describe('Telegram webhook handler', () => {
             queuedCommunicationMessages: [
               expect.objectContaining({
                 provider: 'telegram',
-                text: 'continue this',
+                text: '/start continue this',
                 userId: 'launch-owner-4',
               }),
             ],
             communicationProvider: 'telegram',
-            communicationChannelId: '222',
+            communicationChannelId: '-100222',
+            communicationThreadId: '77',
             communicationMessageId: '456',
+            telegramTaskTopic: true,
           }),
         }),
       }),
@@ -1942,13 +1956,14 @@ describe('Telegram webhook handler', () => {
     );
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        channelId: '222',
-        replyToMessageId: '456',
+        channelId: '-100222',
+        threadId: '77',
         text: expect.stringContaining('Reconnected this Telegram chat'),
       }),
     );
+    expect(postMessageMock.mock.calls[0]?.[0].replyToMessageId).toBeUndefined();
     expect(addReactionMock).toHaveBeenCalledExactlyOnceWith({
-      channelId: '222',
+      channelId: '-100222',
       messageId: '456',
       name: 'eyes',
     });
@@ -2207,7 +2222,6 @@ describe('Telegram webhook handler', () => {
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '222',
-        replyToMessageId: '456',
         text: expect.stringContaining('in a new topic'),
       }),
     );
@@ -2301,7 +2315,6 @@ describe('Telegram webhook handler', () => {
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '222',
-        replyToMessageId: '456',
         text: expect.stringContaining('`/new fix the flaky auth test`'),
       }),
     );
@@ -2829,7 +2842,6 @@ describe('Telegram webhook handler', () => {
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '222',
-        replyToMessageId: '777',
         text: 'Canceled the task.',
       }),
     );
