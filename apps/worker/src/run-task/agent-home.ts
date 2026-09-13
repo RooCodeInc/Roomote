@@ -1705,6 +1705,8 @@ function resolveModelBackedOpenCodeConfig(
   const exploreEffectiveModel = exploreModel ?? effectiveCodingModel;
   const exploreAgent = {
     [ROOMOTE_OPENCODE_EXPLORE_AGENT_NAME]: createExploreAgentConfig({
+      // Without a dedicated model, OpenCode's Task tool inherits the parent
+      // turn's provider, model, and variant, including mid-task switches.
       model: exploreModel,
       reasoningOptions: exploreModelReasoningEffort
         ? buildOpenCodeModelReasoningOptions(
