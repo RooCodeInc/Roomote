@@ -7,6 +7,7 @@ const {
   mockDiscordPostMessage,
   mockDiscordUserMappingsFindFirst,
   mockPostDirectMessage,
+  mockTeamsPostMessage,
   mockSlackInstallationsFindMany,
   mockSlackPostMessage,
   mockSlackUserMappingsFindFirst,
@@ -15,6 +16,7 @@ const {
   mockTelegramUserMappingsFindFirst,
   mockStartAgentMailConversation,
   mockCanStartAgentMailConversation,
+  mockAgentMailPostMessage,
 } = vi.hoisted(() => ({
   mockOpenConversation: vi.fn(),
   mockCreateDiscordDirectMessage: vi.fn(),
@@ -22,6 +24,7 @@ const {
   mockDiscordPostMessage: vi.fn(),
   mockDiscordUserMappingsFindFirst: vi.fn(),
   mockPostDirectMessage: vi.fn(),
+  mockTeamsPostMessage: vi.fn(),
   mockSlackInstallationsFindMany: vi.fn(),
   mockSlackPostMessage: vi.fn(),
   mockSlackUserMappingsFindFirst: vi.fn(),
@@ -30,6 +33,7 @@ const {
   mockTelegramUserMappingsFindFirst: vi.fn(),
   mockStartAgentMailConversation: vi.fn(),
   mockCanStartAgentMailConversation: vi.fn(),
+  mockAgentMailPostMessage: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -71,6 +75,7 @@ vi.mock('./teams-communication', () => ({
   createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(async () => ({
     createDirectMessage: mockCreateTeamsDirectMessage,
     postDirectMessage: mockPostDirectMessage,
+    postMessage: mockTeamsPostMessage,
   })),
 }));
 
@@ -92,6 +97,12 @@ vi.mock('./agentmail/outbound', () => ({
   canStartAgentMailConversationWithUser: mockCanStartAgentMailConversation,
   startAgentMailConversation: mockStartAgentMailConversation,
   startAgentMailConversationWithResult: mockStartAgentMailConversation,
+}));
+
+vi.mock('./agentmail-communication', () => ({
+  createAgentMailCommunicationProviderFromRuntimeCredentials: vi.fn(
+    async () => ({ postMessage: mockAgentMailPostMessage }),
+  ),
 }));
 
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
@@ -323,14 +334,14 @@ describe('sendUserDirectMessageBestEffort', () => {
     });
   });
 
-  it('uses only linked personal chat routes and does not fall through to email', async () => {
+  it('stops after the first successful personal route', async () => {
     const delivered = await sendUserDirectMessageBestEffort({
       userId: 'user-1',
       text: 'Your GitHub installation request was approved.',
       logContext: 'test',
     });
 
-    expect(delivered).toEqual(['slack', 'teams', 'telegram', 'discord']);
+    expect(delivered).toEqual(['slack']);
 
     expect(mockOpenConversation).toHaveBeenCalledWith('U123');
     expect(mockSlackPostMessage).toHaveBeenCalledWith({
@@ -343,26 +354,9 @@ describe('sendUserDirectMessageBestEffort', () => {
         },
       ],
     });
-
-    expect(mockPostDirectMessage).toHaveBeenCalledWith({
-      serviceUrl: 'https://smba.example.com/amer/',
-      tenantId: 'tenant-1',
-      userId: 'teams-user-1',
-      text: 'Your GitHub installation request was approved.',
-      textFormat: 'markdown',
-    });
-
-    expect(mockTelegramPostMessage).toHaveBeenCalledWith({
-      channelId: '424242',
-      text: 'Your GitHub installation request was approved.',
-      textFormat: 'markdown',
-    });
-
-    expect(mockDiscordPostMessage).toHaveBeenCalledWith({
-      channelId: 'discord-dm-1',
-      text: 'Your GitHub installation request was approved.',
-      textFormat: 'markdown',
-    });
+    expect(mockPostDirectMessage).not.toHaveBeenCalled();
+    expect(mockTelegramPostMessage).not.toHaveBeenCalled();
+    expect(mockDiscordPostMessage).not.toHaveBeenCalled();
     expect(mockStartAgentMailConversation).not.toHaveBeenCalled();
   });
 
@@ -439,6 +433,8 @@ describe('sendUserDirectMessageBestEffort', () => {
   });
 
   it('skips a provider whose credentials are not configured', async () => {
+    mockSlackUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockTeamsUserMappingsFindFirst.mockResolvedValue(undefined);
     vi.mocked(
       createTelegramCommunicationProviderFromRuntimeCredentials,
     ).mockResolvedValueOnce(null);
@@ -449,11 +445,11 @@ describe('sendUserDirectMessageBestEffort', () => {
       logContext: 'test',
     });
 
-    expect(delivered).toEqual(['slack', 'teams', 'discord']);
+    expect(delivered).toEqual(['discord']);
     expect(mockTelegramPostMessage).not.toHaveBeenCalled();
   });
 
-  it('swallows a provider error and still delivers the others', async () => {
+  it('falls through after a provider error and stops on the next success', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockSlackPostMessage.mockRejectedValue(new Error('slack is down'));
 
@@ -463,12 +459,40 @@ describe('sendUserDirectMessageBestEffort', () => {
       logContext: 'test',
     });
 
-    expect(delivered).toEqual(['teams', 'telegram', 'discord']);
+    expect(delivered).toEqual(['teams']);
     expect(warnSpy).toHaveBeenCalledWith(
       '[test] Failed to send Slack DM: slack is down',
     );
+    expect(mockTelegramPostMessage).not.toHaveBeenCalled();
+    expect(mockDiscordPostMessage).not.toHaveBeenCalled();
 
     warnSpy.mockRestore();
+  });
+
+  it('reuses a successful provider thread for the next Session notification', async () => {
+    const first = await sendUserDirectMessageBestEffortWithReceipts({
+      userId: 'user-1',
+      text: 'First response',
+      logContext: 'test',
+    });
+    mockSlackPostMessage.mockResolvedValueOnce('1720000000.000200');
+
+    const second = await sendUserDirectMessageBestEffortWithReceipts({
+      userId: 'user-1',
+      text: 'Second response',
+      logContext: 'test',
+      replyAnchor: first.receipts[0]!,
+    });
+
+    expect(second.deliveredProviders).toEqual(['slack']);
+    expect(mockSlackPostMessage).toHaveBeenLastCalledWith({
+      channel: 'D123',
+      text: 'Second response',
+      blocks: [{ type: 'markdown', text: 'Second response' }],
+      thread_ts: '1720000000.000100',
+    });
+    expect(mockOpenConversation).toHaveBeenCalledTimes(1);
+    expect(mockPostDirectMessage).not.toHaveBeenCalled();
   });
 });
 

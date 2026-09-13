@@ -1025,6 +1025,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(notifyUserAttention).toHaveBeenCalledWith({
       kind: 'result_ready',
       eventId: expect.any(String),
+      message: 'It coordinates incoming requests.',
     });
     expect(mocks.captureInferenceContext).toHaveBeenCalledOnce();
     expect(mocks.captureInferenceContext).toHaveBeenCalledWith(
@@ -1510,6 +1511,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(notifyUserAttention).toHaveBeenCalledWith({
         kind: 'input_needed',
         eventId: expect.stringMatching(/^rui:/),
+        message: 'Which tools would you like to connect?',
       });
       expect(mocks.upsertMessage).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -5393,6 +5395,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(notifyUserAttention).toHaveBeenCalledWith({
         kind: 'result_ready',
         eventId: expect.any(String),
+        message: 'All done.',
       });
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
@@ -5420,6 +5423,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(notifyUserAttention).toHaveBeenCalledWith({
         kind: 'input_needed',
         eventId: expect.any(String),
+        message: 'Which environment?',
       });
     });
 

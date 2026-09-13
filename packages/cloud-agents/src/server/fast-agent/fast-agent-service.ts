@@ -2966,6 +2966,7 @@ export async function answerFastAgentQuestion({
   let userAttention: {
     kind: 'result_ready' | 'input_needed';
     eventId: string;
+    message?: string;
   } = { kind: 'result_ready', eventId: turnId };
   let userAttentionReady = false;
   const notifyUserAttention = async () => {
@@ -3424,6 +3425,7 @@ export async function answerFastAgentQuestion({
               ? 'input_needed'
               : 'result_ready',
           eventId: turnId,
+          message: replyWithImages.message,
         };
         userAttentionReady = true;
         closedInstructionVersions.add(instructionVersion);
@@ -4700,7 +4702,13 @@ export async function answerFastAgentQuestion({
               ...(preset ? { preset } : {}),
               questions,
             });
-            userAttention = { kind: 'input_needed', eventId: requestId };
+            userAttention = {
+              kind: 'input_needed',
+              eventId: requestId,
+              message: questions
+                .map((question) => question.question)
+                .join('\n'),
+            };
             userAttentionReady = true;
             visibleUpdatePosted = true;
             closedInstructionVersions.add(instructionVersion);
@@ -4831,6 +4839,7 @@ export async function answerFastAgentQuestion({
               ? 'input_needed'
               : 'result_ready',
           eventId: turnId,
+          message: recordedCloseout.text,
         };
         userAttentionReady = true;
       } else {
@@ -5591,6 +5600,7 @@ export async function answerFastAgentQuestion({
         inferenceRetryMessageIndex = undefined;
         inferenceRetryCanonicalEvent = undefined;
         lastVisibleMessage = message;
+        userAttention = { ...userAttention, message };
         userAttentionReady = true;
       } catch (postError) {
         console.error(

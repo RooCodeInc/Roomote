@@ -341,11 +341,12 @@ async function runWebFastAgentTurn({
       adapter: {
         ...(durableSessionId
           ? {
-              notifyUserAttention: ({ kind, eventId }) =>
+              notifyUserAttention: ({ kind, eventId, message }) =>
                 notifyFastWebSessionAttention({
                   fastConversationId: durableSessionId,
                   kind,
                   eventId,
+                  message,
                 }).then(() => undefined),
             }
           : {}),
