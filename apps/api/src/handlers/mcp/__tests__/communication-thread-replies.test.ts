@@ -124,6 +124,16 @@ vi.mock('@roomote/communication', () => ({
       ...input,
       text: [input.text, footerText].filter(Boolean).join('\n\n'),
     }),
+  resolveTelegramReplyToMessageId: ({
+    channelId,
+    replyToMessageId,
+    isDedicatedTopic,
+  }: {
+    channelId: string;
+    replyToMessageId?: string;
+    isDedicatedTopic?: boolean;
+  }) =>
+    Number(channelId) > 0 || isDedicatedTopic ? undefined : replyToMessageId,
 }));
 
 vi.mock('@roomote/communication/chat-messages', () => ({
@@ -192,7 +202,7 @@ const telegramTaskRun = {
   prNumber: null,
   payload: {
     communicationProvider: 'telegram',
-    communicationChannelId: '222',
+    communicationChannelId: '-222',
     communicationMessageId: '100',
   },
 };
@@ -843,7 +853,7 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
     expect(response).not.toBeNull();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        channelId: '222',
+        channelId: '-222',
         replyToMessageId: '200',
       }),
     );
@@ -859,7 +869,7 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
 
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        channelId: '222',
+        channelId: '-222',
         replyToMessageId: '100',
       }),
     );
@@ -875,7 +885,7 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
 
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        channelId: '222',
+        channelId: '-222',
         replyToMessageId: '100',
       }),
     );
@@ -888,9 +898,48 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
     });
 
     expect(sendChatActionMock).toHaveBeenCalledWith(
-      expect.objectContaining({ channelId: '222' }),
+      expect.objectContaining({ channelId: '-222' }),
     );
   });
+
+  it.each([
+    {
+      name: 'private chat',
+      payload: {
+        communicationProvider: 'telegram',
+        communicationChannelId: '222',
+        communicationMessageId: '100',
+      },
+    },
+    {
+      name: 'dedicated task topic',
+      payload: {
+        communicationProvider: 'telegram',
+        communicationChannelId: '-222',
+        communicationThreadId: '77',
+        communicationMessageId: '100',
+        telegramTaskTopic: true,
+      },
+    },
+  ])(
+    'omits reply quotes in a $name while preserving its route',
+    async ({ payload }) => {
+      await maybeSendCommunicationThreadReply({
+        taskRun: { ...telegramTaskRun, payload },
+        parsedBody: { text: 'done', images: [] },
+      });
+
+      expect(postMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channelId: payload.communicationChannelId,
+          ...(payload.communicationThreadId
+            ? { threadId: payload.communicationThreadId }
+            : {}),
+          replyToMessageId: undefined,
+        }),
+      );
+    },
+  );
 
   it('routes Telegram replies through managed footer delivery without extra posts', async () => {
     await maybeSendCommunicationThreadReply({
@@ -915,7 +964,7 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
     expect(response).not.toBeNull();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        channelId: '222',
+        channelId: '-222',
         text: 'done\n\nCurrent task footer',
       }),
     );

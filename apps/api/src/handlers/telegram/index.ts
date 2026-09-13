@@ -788,7 +788,7 @@ telegram.post('/', async (c) => {
       chatId: conversation.chatId,
       threadId: conversation.threadId ?? null,
     });
-    // Track the latest inbound user message id so later outbound replies quote
+    // Track the latest inbound user message id so shared-chat replies can quote
     // the most recent user message instead of the original launch message.
     await setLatestInboundMessageId(
       'telegram',

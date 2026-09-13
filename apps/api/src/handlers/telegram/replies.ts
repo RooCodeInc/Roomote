@@ -1,4 +1,7 @@
-import type { CommunicationMessageButton } from '@roomote/communication';
+import {
+  resolveTelegramReplyToMessageId,
+  type CommunicationMessageButton,
+} from '@roomote/communication';
 import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
 import { createTelegramCommunicationProviderFromRuntimeCredentials as createTelegramCommunicationProvider } from '@roomote/sdk/server';
 
@@ -60,12 +63,14 @@ export async function postTelegramMessageBestEffort(input: {
   }
 
   try {
+    const replyToMessageId = resolveTelegramReplyToMessageId({
+      channelId: input.chatId,
+      replyToMessageId: input.replyToMessageId,
+    });
     const result = await provider.postMessage({
       channelId: input.chatId,
       ...(input.threadId ? { threadId: input.threadId } : {}),
-      ...(input.replyToMessageId
-        ? { replyToMessageId: input.replyToMessageId }
-        : {}),
+      ...(replyToMessageId ? { replyToMessageId } : {}),
       text: input.text,
       ...(input.textFormat ? { textFormat: input.textFormat } : {}),
       ...(input.buttons ? { buttons: input.buttons } : {}),

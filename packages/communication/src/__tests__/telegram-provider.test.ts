@@ -449,6 +449,30 @@ describe('TelegramCommunicationProvider', () => {
     );
   });
 
+  it('omits explicit reply targets in private chats', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 99 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '123',
+      replyToMessageId: '42',
+      text: 'hello from Roomote',
+    });
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
+    ) as { reply_parameters?: unknown };
+    expect(body.reply_parameters).toBeUndefined();
+  });
+
   it('leaves messages free-floating when no reply target is supplied', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({
@@ -655,7 +679,7 @@ describe('TelegramCommunicationProvider', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it('splits long messages into multiple sends and anchors the reply on the first', async () => {
+  it('keeps topic targeting on every long-message chunk and anchors only the first', async () => {
     const fetchMock = vi.fn().mockImplementation(async () =>
       jsonResponse({
         ok: true,
@@ -673,7 +697,8 @@ describe('TelegramCommunicationProvider', () => {
       (_, i) => `line ${i} ${'x'.repeat(30)}`,
     ).join('\n');
     const result = await provider.postMessage({
-      channelId: '123',
+      channelId: '-100456',
+      threadId: '7',
       replyToMessageId: '42',
       text: longText,
     });
@@ -686,11 +711,13 @@ describe('TelegramCommunicationProvider', () => {
 
     const firstBody = JSON.parse(
       (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
-    ) as { reply_parameters?: unknown };
+    ) as { message_thread_id?: number; reply_parameters?: unknown };
     const lastBody = JSON.parse(
       (fetchMock.mock.calls.at(-1)?.[1] as RequestInit).body as string,
-    ) as { reply_parameters?: unknown };
+    ) as { message_thread_id?: number; reply_parameters?: unknown };
 
+    expect(firstBody.message_thread_id).toBe(7);
+    expect(lastBody.message_thread_id).toBe(7);
     expect(firstBody.reply_parameters).toEqual({
       message_id: 42,
       allow_sending_without_reply: true,
@@ -1021,7 +1048,7 @@ describe('TelegramCommunicationProvider', () => {
     expect(photoBody.caption).toBe('the shot');
   });
 
-  it('anchors the reply on the photo for image-only messages', async () => {
+  it('omits the reply target on a private-chat image-only message', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -1045,10 +1072,7 @@ describe('TelegramCommunicationProvider', () => {
       (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
     ) as { reply_parameters?: { message_id: number } };
 
-    expect(photoBody.reply_parameters).toEqual({
-      message_id: 42,
-      allow_sending_without_reply: true,
-    });
+    expect(photoBody.reply_parameters).toBeUndefined();
   });
 
   it('treats whitespace-only text with an image as image-only', async () => {

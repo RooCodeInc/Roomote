@@ -2320,9 +2320,9 @@ describe('finishRun', () => {
     const telegramPayload = {
       repo: 'owner/repo',
       communicationProvider: 'telegram',
-      communicationChannelId: 'chat-1',
-      communicationThreadId: 'topic-1',
-      communicationMessageId: 'message-1',
+      communicationChannelId: '-100123',
+      communicationThreadId: '77',
+      communicationMessageId: '42',
     } as unknown as TaskRun['payload'];
 
     beforeEach(() => {
@@ -2331,7 +2331,7 @@ describe('finishRun', () => {
       });
     });
 
-    it('posts failure details into the originating Telegram topic', async () => {
+    it('quotes failure details in an arbitrary shared Telegram topic', async () => {
       mockFindFirstRun.mockResolvedValue(makeRun({ payload: telegramPayload }));
 
       await finishRun({
@@ -2341,11 +2341,37 @@ describe('finishRun', () => {
       });
 
       expect(mockTelegramPostMessage).toHaveBeenCalledWith({
-        channelId: 'chat-1',
-        threadId: 'topic-1',
+        channelId: '-100123',
+        threadId: '77',
+        replyToMessageId: '42',
         text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n**Error details:** The provider returned an error: API key is invalid.\n\n[Open the task](https://example.com/task)",
         textFormat: 'markdown',
       });
+    });
+
+    it('omits failure reply quotes in a dedicated Telegram task topic', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun({
+          payload: {
+            ...telegramPayload,
+            telegramTaskTopic: true,
+          } as TaskRun['payload'],
+        }),
+      );
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'task failed',
+      });
+
+      expect(mockTelegramPostMessage.mock.calls[0]?.[0]).toMatchObject({
+        channelId: '-100123',
+        threadId: '77',
+      });
+      expect(
+        mockTelegramPostMessage.mock.calls[0]?.[0].replyToMessageId,
+      ).toBeUndefined();
     });
   });
 

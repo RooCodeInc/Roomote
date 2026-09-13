@@ -23,6 +23,7 @@ import {
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
   getDiscordFooterlessFinalChunk,
+  resolveTelegramReplyToMessageId,
   resolveFastSessionReplyFooterContext,
   postTextThreadReplyWithFooter,
 } from '@roomote/communication';
@@ -612,21 +613,26 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     if (!provider) {
       return null;
     }
-    const replyToMessageId = params.replyToMessageId ?? params.currentMessageId;
     let activity = createFastAgentTelegramActivity({
       provider,
       replyTarget: conversation.replyTarget,
     });
     const threadId = conversation.replyTarget.threadId;
-    if (
+    const isManagedTopic = Boolean(
       threadId &&
       (await isFastAgentManagedTelegramTopic({
         sessionId: session.id,
         workspaceId: conversation.workspaceId,
         channelId: conversation.replyTarget.channelId,
         threadId,
-      }))
-    ) {
+      })),
+    );
+    const replyToMessageId = resolveTelegramReplyToMessageId({
+      channelId: conversation.replyTarget.channelId,
+      replyToMessageId: params.replyToMessageId ?? params.currentMessageId,
+      isDedicatedTopic: isManagedTopic,
+    });
+    if (threadId && isManagedTopic) {
       activity = addFastAgentTelegramTopicTitleSync({
         activity,
         provider,

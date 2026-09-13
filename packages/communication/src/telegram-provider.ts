@@ -61,6 +61,21 @@ function parsePositiveInteger(value: string | undefined): number | undefined {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+export function isTelegramPrivateChatId(channelId: string): boolean {
+  const parsed = Number(channelId);
+  return Number.isSafeInteger(parsed) && parsed > 0;
+}
+
+export function resolveTelegramReplyToMessageId(input: {
+  channelId: string;
+  replyToMessageId?: string;
+  isDedicatedTopic?: boolean;
+}): string | undefined {
+  return isTelegramPrivateChatId(input.channelId) || input.isDedicatedTopic
+    ? undefined
+    : input.replyToMessageId;
+}
+
 type TelegramInlineKeyboardMarkup = {
   inline_keyboard: Array<
     Array<{ text: string; callback_data?: string; url?: string }>
@@ -110,10 +125,14 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     const text = input.text;
     const images = input.images ?? [];
     const threadId = parsePositiveInteger(input.threadId);
-    // Honor an explicit reply target when callers supply one (task closeouts,
-    // launch-failure recovery, onboarding threads). Callers that prefer a
-    // free-floating chronological send simply omit replyToMessageId.
-    const replyToMessageId = parsePositiveInteger(input.replyToMessageId);
+    // Telegram's reply preview is useful in shared chats, but redundant in a
+    // private conversation where every bot message already has one recipient.
+    const replyToMessageId = parsePositiveInteger(
+      resolveTelegramReplyToMessageId({
+        channelId: input.channelId,
+        replyToMessageId: input.replyToMessageId,
+      }),
+    );
     const footerText = input.footerText;
     const hasText = Boolean(text?.trim() || footerText?.trim());
 

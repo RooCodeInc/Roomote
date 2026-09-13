@@ -368,6 +368,71 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     expect(mocks.telegramEditForumTopic).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      name: 'private chat',
+      channelId: '123',
+      threadId: undefined,
+      managed: false,
+      expectedReplyToMessageId: undefined,
+    },
+    {
+      name: 'dedicated session topic',
+      channelId: '-100123',
+      threadId: '77',
+      managed: true,
+      expectedReplyToMessageId: undefined,
+    },
+    {
+      name: 'shared group topic',
+      channelId: '-100123',
+      threadId: '77',
+      managed: false,
+      expectedReplyToMessageId: '42',
+    },
+  ])(
+    'uses the Telegram reply-quote policy in a $name',
+    async ({ channelId, threadId, managed, expectedReplyToMessageId }) => {
+      const user = await userFactory.create();
+      const conversation = await createConversation({
+        userId: user.id,
+        surface: 'telegram',
+        replyTarget: { channelId, ...(threadId ? { threadId } : {}) },
+      });
+      if (managed) {
+        await db.insert(fastAgentProviderMessages).values({
+          conversationId: conversation.id,
+          provider: 'telegram',
+          workspaceId: conversation.workspaceId,
+          channelId,
+          threadId: threadId!,
+          messageId: threadId!,
+        });
+      }
+
+      const delivery = await buildFastAgentSurfaceReplyDelivery({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Matt',
+        question: 'Follow up',
+        currentMessageId: '42',
+      });
+      await delivery!.adapter.postReply({
+        purpose: 'closeout',
+        message: 'Done',
+      });
+
+      const posted = mocks.telegramPostMessage.mock.calls[0]?.[0];
+      expect(posted).toEqual(
+        expect.objectContaining({
+          channelId,
+          ...(threadId ? { threadId } : {}),
+        }),
+      );
+      expect(posted?.replyToMessageId).toBe(expectedReplyToMessageId);
+    },
+  );
+
   it.each(['discord', 'telegram'] as const)(
     'reasserts %s after successful posts and replacements but not after a late post',
     async (surface) => {

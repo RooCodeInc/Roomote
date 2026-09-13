@@ -24,6 +24,7 @@ import {
 import { getTaskUrl } from '@roomote/cloud-agents/server';
 import { getRedis } from '@roomote/redis';
 import { SlackNotifier } from '@roomote/slack';
+import { resolveTelegramReplyToMessageId } from '@roomote/communication/telegram-provider';
 
 import { createAgentMailCommunicationProviderFromRuntimeCredentials } from '../agentmail-communication';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../discord-communication';
@@ -193,11 +194,21 @@ async function notifyThreadedMarkdownProvider(
 
   const threadId = getCommunicationThreadIdFromTaskPayload(run.payload);
   const messageId = getCommunicationMessageIdFromTaskPayload(run.payload);
+  const replyToMessageId =
+    provider === 'telegram'
+      ? resolveTelegramReplyToMessageId({
+          channelId,
+          replyToMessageId: messageId ?? undefined,
+          isDedicatedTopic: run.payload.telegramTaskTopic === true,
+        })
+      : !threadId
+        ? messageId
+        : undefined;
 
   await adapter.postMessage({
     channelId,
     ...(threadId ? { threadId } : {}),
-    ...(!threadId && messageId ? { replyToMessageId: messageId } : {}),
+    ...(replyToMessageId ? { replyToMessageId } : {}),
     text: buildMarkdownNotificationText(run, error, provider),
     textFormat: 'markdown',
   });
