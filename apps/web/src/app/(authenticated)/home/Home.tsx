@@ -3,8 +3,11 @@
 import Image from 'next/image';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { DiscordLogoIcon } from '@radix-ui/react-icons';
+import { useQuery } from '@tanstack/react-query';
 
 import { cn } from '@/lib/utils';
+import { useAuthorizedUser } from '@/hooks/useUser';
+import { useTRPC } from '@/trpc/client';
 import {
   Button,
   Calendar,
@@ -72,8 +75,26 @@ export function Home({
     number | undefined
   >(undefined);
 
+  const { brainConfigured } = useAuthorizedUser();
+  const trpc = useTRPC();
+  const suggestionsQuery = useQuery(
+    trpc.home.composerSuggestions.queryOptions(undefined, {
+      enabled: brainConfigured === true,
+      // Recheck for newly completed memories on a later Home visit without
+      // repeatedly invoking the helper model for an unchanged memory revision.
+      staleTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+    }),
+  );
+  const generatedSuggestions = suggestionsQuery.data?.suggestions ?? [];
+  const promptPlaceholders =
+    generatedSuggestions.length > 0
+      ? generatedSuggestions
+      : HOME_PROMPT_PLACEHOLDERS;
+
   const activePromptPlaceholder =
-    HOME_PROMPT_PLACEHOLDERS[placeholderIndex] ?? FALLBACK_PROMPT_PLACEHOLDER;
+    promptPlaceholders[placeholderIndex % promptPlaceholders.length] ??
+    FALLBACK_PROMPT_PLACEHOLDER;
 
   const contentColumnRef = useRef<HTMLDivElement>(null);
   const promptCardRef = useRef<HTMLDivElement>(null);
@@ -89,20 +110,20 @@ export function Home({
   }, [initialPlaceholderIndex]);
 
   useEffect(() => {
-    if (HOME_PROMPT_PLACEHOLDERS.length <= 1) {
+    if (promptPlaceholders.length <= 1) {
       return;
     }
 
     const intervalId = window.setInterval(() => {
       setPlaceholderIndex(
-        (currentIndex) => (currentIndex + 1) % HOME_PROMPT_PLACEHOLDERS.length,
+        (currentIndex) => (currentIndex + 1) % promptPlaceholders.length,
       );
     }, 5_000);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [promptPlaceholders.length]);
 
   // Dynamically compute the max textarea height so it can grow to fill the
   // available space without pushing the bottom-sheet tabs off screen.
