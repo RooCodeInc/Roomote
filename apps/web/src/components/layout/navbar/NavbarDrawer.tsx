@@ -11,6 +11,7 @@ import {
 } from '@/components/system';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useResultsPage } from '@/hooks/useResultsPage';
+import { MobileSessionSwitcher } from '@/components/layout/MobileSessionSwitcher';
 
 import {
   Button,
@@ -67,7 +68,7 @@ export const NavbarDrawer = ({
               </div>
             </DrawerHeader>
 
-            <div className="flex flex-1 flex-col gap-2 p-4">
+            <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-4">
               {visibleNavItems.map((item) => {
                 const Icon = item.icon;
                 const disabled = setupIncomplete && item.requiresSetup;
@@ -116,6 +117,8 @@ export const NavbarDrawer = ({
                   Settings
                 </Link>
               </Button>
+
+              <MobileSessionSwitcher />
             </div>
           </div>
         </DrawerContent>

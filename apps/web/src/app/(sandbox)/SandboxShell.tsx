@@ -13,7 +13,6 @@ import { useUser } from '@/hooks/useUser';
 import { useTRPC } from '@/trpc/client';
 
 import { NavbarHeader, SideNav, Logo } from '@/components/layout';
-import { MobileSessionSwitcher } from '@/components/layout/MobileSessionSwitcher';
 import { Spinner } from '@/components/system';
 import { SessionNavigationStateProvider } from '@/hooks/useSessionNavigationState';
 
@@ -124,10 +123,7 @@ export function SandboxShell({
           className={`md:hidden top-0 ${zIndex('NAV_HEADER')} w-full shrink-0 bg-card`}
         >
           {isSignedIn ? (
-            <NavbarHeader
-              setupIncomplete={needsAdminSetup}
-              showNewSessionAction={!pathname.startsWith('/sessions/')}
-            />
+            <NavbarHeader setupIncomplete={needsAdminSetup} />
           ) : (
             <div className="h-(--header-height) mx-auto px-3 flex items-center">
               <Link href="/" className="shrink-0">
@@ -139,7 +135,6 @@ export function SandboxShell({
 
         {/* Main layout with side nav on desktop */}
         <div className="flex flex-1 min-h-0 overflow-hidden">
-          {isSignedIn ? <MobileSessionSwitcher /> : null}
           {isSignedIn && <SideNav setupIncomplete={needsAdminSetup} />}
           <SandboxLayoutContext.Provider value={sandboxLayoutValue}>
             <div className="flex flex-1 min-h-0 min-w-0 md:rounded-l-sm md:shadow-md">

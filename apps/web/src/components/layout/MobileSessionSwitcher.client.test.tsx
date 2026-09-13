@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 
 import { SessionNavigationStateProvider } from '@/hooks/useSessionNavigationState';
 
@@ -60,11 +60,6 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
-vi.mock('@/components/tasks/NewTaskDialog', () => ({
-  NewTaskDialog: ({ open }: { open: boolean }) =>
-    open ? <div role="dialog">New Session dialog</div> : null,
-}));
-
 describe('MobileSessionSwitcher', () => {
   beforeEach(() => {
     pathnameState.value = '/sessions/session-b';
@@ -78,6 +73,9 @@ describe('MobileSessionSwitcher', () => {
     );
 
     expect(listInput.value).toEqual({ ownedOnly: true, limit: 20 });
+    expect(
+      screen.getByRole('heading', { name: 'Recent sessions' }),
+    ).toBeVisible();
     const links = screen.getAllByRole('link');
     expect(links.map((link) => link.getAttribute('aria-label'))).toEqual([
       'First session',
@@ -91,7 +89,9 @@ describe('MobileSessionSwitcher', () => {
     expect(screen.getByLabelText('Running')).toBeVisible();
   });
 
-  it('keeps navigation available while collapsed and reveals titles on expand', () => {
+  it('keeps recent sessions available outside a session route', () => {
+    pathnameState.value = '/settings';
+
     render(
       <SessionNavigationStateProvider>
         <MobileSessionSwitcher />
@@ -99,21 +99,9 @@ describe('MobileSessionSwitcher', () => {
     );
 
     expect(screen.getAllByRole('link')).toHaveLength(3);
-    expect(screen.queryByText('Current session')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Current session' })).toBeVisible();
-
-    fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
-    expect(screen.getByRole('dialog')).toHaveTextContent('New Session dialog');
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Expand recent sessions' }),
-    );
-    expect(screen.getAllByRole('link')).toHaveLength(3);
     expect(screen.getByText('Current session')).toBeVisible();
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Collapse recent sessions' }),
-    );
-    expect(screen.queryByText('Current session')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { current: 'page' }),
+    ).not.toBeInTheDocument();
   });
 });

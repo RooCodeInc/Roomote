@@ -17,8 +17,6 @@ type SessionNavigationState = {
   setScrollPosition: (sessionId: string, scrollTop: number) => void;
   prepareSessionSwitch: (sessionId: string) => void;
   consumeSessionSwitch: (sessionId: string) => boolean;
-  isSwitcherExpanded: boolean;
-  setSwitcherExpanded: (expanded: boolean) => void;
 };
 
 const SessionNavigationStateContext =
@@ -32,7 +30,6 @@ export function SessionNavigationStateProvider({
   const draftsRef = useRef(new Map<string, string>());
   const scrollPositionsRef = useRef(new Map<string, number>());
   const pendingSwitchesRef = useRef(new Set<string>());
-  const [isSwitcherExpanded, setSwitcherExpanded] = useState(false);
 
   const getDraft = useCallback(
     (sessionId: string) => draftsRef.current.get(sessionId) ?? '',
@@ -69,14 +66,11 @@ export function SessionNavigationStateProvider({
       setScrollPosition,
       prepareSessionSwitch,
       consumeSessionSwitch,
-      isSwitcherExpanded,
-      setSwitcherExpanded,
     }),
     [
       consumeSessionSwitch,
       getDraft,
       getScrollPosition,
-      isSwitcherExpanded,
       prepareSessionSwitch,
       setDraft,
       setScrollPosition,

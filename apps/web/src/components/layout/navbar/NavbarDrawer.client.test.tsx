@@ -40,6 +40,14 @@ vi.mock('@/hooks/useResultsPage', () => ({
   useResultsPage: () => ({ enabled: false, isLoading: false }),
 }));
 
+vi.mock('@/components/layout/MobileSessionSwitcher', () => ({
+  MobileSessionSwitcher: () => (
+    <section>
+      <h3>Recent sessions</h3>
+    </section>
+  ),
+}));
+
 vi.mock('@/components/system', () => ({
   Menu: Icon,
   X: Icon,
@@ -112,6 +120,19 @@ describe('NavbarDrawer', () => {
     expect(
       screen.queryByRole('button', { name: /support/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows recent sessions below the navigation options', () => {
+    render(<NavbarDrawer />);
+
+    const settings = screen.getByRole('link', { name: /settings/i });
+    const recentSessions = screen.getByRole('heading', {
+      name: 'Recent sessions',
+    });
+
+    expect(settings.compareDocumentPosition(recentSessions)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
   });
 
   it('keeps setup-gated destinations visible but disabled with an explanation', () => {
