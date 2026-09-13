@@ -29,6 +29,22 @@ export {
   notifyWebTaskInitiatorOnSettle,
   type WebTaskInitiatorSettleNotificationResult,
 } from './lib/task-runs/notify-web-task-initiator-on-settle';
+export { continueDirectTaskAttentionReply } from './lib/task-runs/continue-direct-task-attention-reply';
+export {
+  findSessionAttentionNotificationReply,
+  hasTaskRunAttentionNotification,
+  notifyDirectWebTaskAttention,
+  notifyFastWebSessionAttention,
+  processSessionAttentionNotificationJob,
+  resolveSessionAttentionFastConversation,
+  type SessionAttentionKind,
+  type SessionAttentionNotificationResult,
+} from './lib/session-attention-notification';
+export {
+  SESSION_ATTENTION_NOTIFICATION_JOB,
+  enqueueSessionAttentionNotification,
+  type SessionAttentionNotificationJob,
+} from './lib/enqueue-session-attention-notification';
 export {
   AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
   AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
@@ -340,10 +356,13 @@ export {
   findSlackUserDirectMessageDestination,
   findUserDirectMessageDestination,
   hasUserDirectMessageIdentity,
+  hasAnyUserDirectMessageIdentity,
   sendUserDirectMessage,
   sendUserDirectMessageBestEffort,
+  sendUserDirectMessageBestEffortWithReceipts,
   type UserDirectMessageDestination,
   type UserDirectMessageProvider,
+  type UserDirectMessageReceipt,
 } from './lib/user-direct-message';
 
 export {

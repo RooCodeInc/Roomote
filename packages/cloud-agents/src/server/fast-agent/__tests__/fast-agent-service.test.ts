@@ -1026,7 +1026,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('delivers native chat replies without showing their tool event', async () => {
-    const adapter = callbacks();
+    const notifyUserAttention = vi.fn();
+    const adapter = callbacks({ notifyUserAttention });
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
@@ -1037,6 +1038,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledWith({
       purpose: 'closeout',
       message: 'It coordinates incoming requests.',
+    });
+    expect(notifyUserAttention).toHaveBeenCalledWith({
+      kind: 'result_ready',
+      eventId: expect.any(String),
     });
     expect(mocks.captureInferenceContext).toHaveBeenCalledOnce();
     expect(mocks.captureInferenceContext).toHaveBeenCalledWith(
@@ -1156,6 +1161,35 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       sessionId: 'conversation-1',
       openCodeSessionId: 'opencode-session-1',
     });
+  });
+
+  it('uses provider behavior with canonical web Session persistence', async () => {
+    const canonicalConversation = {
+      surface: 'web' as const,
+      workspaceId: 'web',
+      conversationId: 'conversation-1',
+    };
+    const deliveryConversation = {
+      surface: 'telegram' as const,
+      workspaceId: 'chat-1',
+      conversationId: 'notification:chat-1:user:user-1',
+      replyTarget: { channelId: 'chat-1' },
+    };
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: deliveryConversation,
+      canonicalConversation,
+      adapter: callbacks(),
+    });
+
+    expect(mocks.getSession).toHaveBeenCalledWith({
+      userId: baseParams.userId,
+      conversation: canonicalConversation,
+    });
+    expect(mocks.captureInferenceContext).toHaveBeenCalledWith(
+      expect.objectContaining({ surface: 'telegram' }),
+    );
   });
 
   it('preserves explicit video selections in delivery, canonical persistence, and reply deduplication', async () => {
@@ -1980,6 +2014,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         },
       ];
       const requestUserInput = vi.fn();
+      const notifyUserAttention = vi.fn();
       const resolveUserInputPreset = vi.fn(async () => questions);
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
@@ -2007,7 +2042,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         platformEventKind: 'setup',
         platformEventVisibility: 'required',
         setupSession: true,
-        adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+        adapter: callbacks({
+          requestUserInput,
+          resolveUserInputPreset,
+          notifyUserAttention,
+        }),
       });
       expect(resolveUserInputPreset.mock.calls).toEqual([
         setupIntegrationAnswers === undefined
@@ -2018,6 +2057,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         requestId: expect.any(String),
         preset: 'setup_integrations',
         questions,
+      });
+      expect(notifyUserAttention).toHaveBeenCalledWith({
+        kind: 'input_needed',
+        eventId: expect.stringMatching(/^rui:/),
       });
       expect(mocks.upsertMessage).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -5884,10 +5927,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ],
       });
       const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+      const notifyUserAttention = vi.fn();
 
       const result = await answerFastAgentQuestion({
         ...baseParams,
-        adapter: callbacks({ postReply }),
+        adapter: callbacks({ postReply, notifyUserAttention }),
         durableAdmission,
         resumedAfterInterruption: true,
       });
@@ -5897,7 +5941,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(result).toBe('All done.');
       expect(mocks.generateText).not.toHaveBeenCalled();
       expect(postReply).not.toHaveBeenCalled();
+      expect(notifyUserAttention).toHaveBeenCalledWith({
+        kind: 'result_ready',
+        eventId: expect.any(String),
+      });
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
+    });
+
+    it('preserves clarification attention when a delivered turn resumes', async () => {
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        ...attemptCounters,
+        events: [
+          {
+            kind: 'reply',
+            text: 'Which environment?',
+            purpose: 'clarification',
+          },
+        ],
+      });
+      const notifyUserAttention = vi.fn();
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ notifyUserAttention }),
+        durableAdmission,
+        resumedAfterInterruption: true,
+      });
+
+      expect(notifyUserAttention).toHaveBeenCalledWith({
+        kind: 'input_needed',
+        eventId: expect.any(String),
+      });
     });
 
     it('settles a resumed turn whose closeout replaced the retry notice, leaving the completed call as the last event', async () => {

@@ -233,6 +233,8 @@ export {
   sessionWakeupsRelations,
   fastAgentProviderMessages,
   fastAgentProviderMessagesRelations,
+  sessionAttentionNotifications,
+  sessionAttentionNotificationMessages,
   fastAgentPrFeedbackDeliveries,
   fastAgentPrFeedbackDeliveriesRelations,
   slackConversationMessages,

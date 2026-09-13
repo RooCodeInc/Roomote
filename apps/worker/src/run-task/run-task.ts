@@ -17,6 +17,7 @@ import {
   type QueuedCommunicationMessage,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
+  getFastAgentParentFromPayload,
   getTaskReportConsumerFromPayload,
   isCommunicationProvider,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
@@ -684,6 +685,12 @@ export const runTask = async ({
   skipExternalSleepAction = false,
   keepaliveMsOverride,
 }: RunTaskOptions) => {
+  const userAttentionNotificationsEnabled = Boolean(
+    task?.surface === 'web' &&
+    task.initiatorUserId &&
+    !getFastAgentParentFromPayload(taskRun.payload),
+  );
+
   await sdk.taskRuns.update({
     id: taskRun.id,
     status: RunStatus.Spawning,
@@ -1399,6 +1406,7 @@ export const runTask = async ({
         ),
       ),
       taskRun,
+      userAttentionNotificationsEnabled,
       developerInstructionsContent: harnessDeveloperInstructions,
       callbacks,
       context,
@@ -1447,6 +1455,13 @@ export const runTask = async ({
       callbacks: {
         onTaskCompletionSettled: async (completionId: string) => {
           await settleMissingChatCloseoutFallback(context, completionId);
+          if (userAttentionNotificationsEnabled) {
+            await sdk.taskRuns.notifyUserAttention({
+              id: taskRun.id,
+              kind: 'result_ready',
+              eventId: completionId,
+            });
+          }
         },
         onBeforeTaskCompletion: async (completionId: string) => {
           if (taskCancellation.signal.aborted) {

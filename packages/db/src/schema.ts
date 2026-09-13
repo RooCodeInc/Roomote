@@ -3702,6 +3702,95 @@ export const fastAgentProviderMessages = pgTable(
 );
 
 /**
+ * session_attention_notifications
+ *
+ * Durable, per-attention-event delivery claims. A single user-facing event may
+ * fan out to several linked chat providers, while this row owns deduplication
+ * and presence suppression across retries.
+ */
+export const sessionAttentionNotifications = pgTable(
+  'session_attention_notifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    runId: integer('run_id').references(() => taskRuns.id, {
+      onDelete: 'set null',
+    }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    eventKey: text('event_key').notNull(),
+    kind: text('kind').notNull().$type<'result_ready' | 'input_needed'>(),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    outcome: text('outcome').$type<
+      'delivered' | 'skipped_present' | 'failed'
+    >(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_attention_notifications_event_unique').on(
+      table.sessionId,
+      table.eventKey,
+    ),
+    index('session_attention_notifications_run_idx').on(table.runId),
+    check(
+      'session_attention_notifications_kind_check',
+      sql`${table.kind} in ('result_ready', 'input_needed')`,
+    ),
+    check(
+      'session_attention_notifications_outcome_check',
+      sql`${table.outcome} IS NULL OR ${table.outcome} in ('delivered', 'skipped_present', 'failed')`,
+    ),
+  ],
+);
+
+/** Provider message anchors that make explicit notification replies routable. */
+export const sessionAttentionNotificationMessages = pgTable(
+  'session_attention_notification_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    notificationId: uuid('notification_id')
+      .notNull()
+      .references(() => sessionAttentionNotifications.id, {
+        onDelete: 'cascade',
+      }),
+    provider: text('provider')
+      .notNull()
+      .$type<'discord' | 'slack' | 'teams' | 'telegram' | 'agentmail'>(),
+    workspaceId: text('workspace_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    threadId: text('thread_id'),
+    messageId: text('message_id').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_attention_notification_messages_route_unique').on(
+      table.provider,
+      table.workspaceId,
+      table.channelId,
+      table.messageId,
+    ),
+    index('session_attention_notification_messages_thread_idx').on(
+      table.provider,
+      table.workspaceId,
+      table.channelId,
+      table.threadId,
+    ),
+    check(
+      'session_attention_notification_messages_provider_check',
+      sql`${table.provider} in ('discord', 'slack', 'teams', 'telegram', 'agentmail')`,
+    ),
+  ],
+);
+
+/**
  * fast_agent_pr_feedback_deliveries
  *
  * Durable conversation-scoped claims for PR feedback presented by Fast.

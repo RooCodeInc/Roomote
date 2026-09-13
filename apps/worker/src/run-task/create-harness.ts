@@ -45,6 +45,7 @@ interface CreateHarnessOptions {
    */
   operatorEnvVars?: Record<string, string>;
   taskRun: DequeuedTaskRun['taskRun'];
+  userAttentionNotificationsEnabled?: boolean;
   developerInstructionsContent?: string;
   callbacks: RunTaskCallbacks;
   context: RunTaskContext;
@@ -84,6 +85,7 @@ export async function createHarness({
   deploymentMcpServers,
   operatorEnvVars,
   taskRun,
+  userAttentionNotificationsEnabled,
   developerInstructionsContent,
   callbacks,
   context,
@@ -214,6 +216,7 @@ export async function createHarness({
   const unsubscribe = subscribeHarnessCallbacks({
     harness: reconnectableHarness,
     taskRun,
+    userAttentionNotificationsEnabled,
     callbacks,
     context,
     logger,

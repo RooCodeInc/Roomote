@@ -1273,7 +1273,11 @@ const LOST_TOOL_RESULT_TEXT =
   'Tool result lost due to restart. The call may or may not have taken effect; check before repeating it.';
 
 type FastAgentRecordedCloseout =
-  | { kind: 'delivered'; text: string }
+  | {
+      kind: 'delivered';
+      purpose: 'closeout' | 'clarification';
+      text: string;
+    }
   | { kind: 'lost'; purpose: 'closeout' | 'clarification'; text: string };
 
 /**
@@ -1295,7 +1299,7 @@ function findRecordedCloseout(
   if (!last) return null;
   if (last.kind === 'reply') {
     return last.purpose === 'closeout' || last.purpose === 'clarification'
-      ? { kind: 'delivered', text: last.text }
+      ? { kind: 'delivered', purpose: last.purpose, text: last.text }
       : null;
   }
   if (
@@ -1317,7 +1321,11 @@ function findRecordedCloseout(
       .find(
         (event): event is FastAgentTurnAttemptReply => event.kind === 'reply',
       );
-    return { kind: 'delivered', text: text || lastReply?.text || '' };
+    return {
+      kind: 'delivered',
+      purpose,
+      text: text || lastReply?.text || '',
+    };
   }
   if (last.status !== 'unknown') return null;
   return text ? { kind: 'lost', purpose, text } : null;
@@ -1655,6 +1663,7 @@ export async function answerFastAgentQuestion({
   userId,
   apiBaseUrl,
   conversation,
+  canonicalConversation,
   currentMessageId,
   senderDisplayName,
   senderExternalId,
@@ -1691,6 +1700,8 @@ export async function answerFastAgentQuestion({
   userId: string;
   apiBaseUrl?: string;
   conversation: FastAgentConversation;
+  /** Stable Session identity when this turn is delivered on another surface. */
+  canonicalConversation?: FastAgentConversation;
   currentMessageId?: string;
   senderDisplayName?: string;
   senderExternalId?: string;
@@ -2958,6 +2969,22 @@ export async function answerFastAgentQuestion({
     void finishSurface();
   };
   signal?.addEventListener('abort', abortActivity, { once: true });
+  let visibleUpdatePosted = false;
+  let userAttention: {
+    kind: 'result_ready' | 'input_needed';
+    eventId: string;
+  } = { kind: 'result_ready', eventId: turnId };
+  let userAttentionReady = false;
+  const notifyUserAttention = async () => {
+    if (!userAttentionReady) return;
+    try {
+      await adapter.notifyUserAttention?.(userAttention);
+    } catch (error) {
+      console.warn(
+        `[Fast Agent] Failed to notify user attention: ${formatErrorForLog(error)}`,
+      );
+    }
+  };
   try {
     if (signal?.aborted || turnLockSignal?.aborted) {
       // Setup can finish after an abort already released the lock.
@@ -2994,7 +3021,10 @@ export async function answerFastAgentQuestion({
         );
         return { models: [], defaultModelId: undefined };
       }),
-      getOrCreateFastAgentSession({ userId, conversation }),
+      getOrCreateFastAgentSession({
+        userId,
+        conversation: canonicalConversation ?? conversation,
+      }),
       listFastAgentIntegrations(
         { userId, apiBaseUrl },
         adapter.resolveMcpServerConfigs,
@@ -3322,11 +3352,10 @@ export async function answerFastAgentQuestion({
             (event.purpose === 'progress' && !event.inferenceRetryNotice)),
       ),
     );
-    let visibleUpdatePosted = resumedWithDeliveredAcknowledgement;
+    visibleUpdatePosted = resumedWithDeliveredAcknowledgement;
     let substantiveWorkAcknowledged = resumedWithDeliveredAcknowledgement;
     let nativeToolInvoked = false;
     let retriedTaskStart = false;
-
     const mirrorPendingMessages = async (strict = false) => {
       const pending = turnVisibleMessages.slice(mirroredMessageCount);
       if (pending.length === 0) return;
@@ -3396,6 +3425,14 @@ export async function answerFastAgentQuestion({
         replyWithImages.purpose === 'closeout' ||
         replyWithImages.purpose === 'clarification'
       ) {
+        userAttention = {
+          kind:
+            replyWithImages.purpose === 'clarification'
+              ? 'input_needed'
+              : 'result_ready',
+          eventId: turnId,
+        };
+        userAttentionReady = true;
         closedInstructionVersions.add(instructionVersion);
       }
       if (mirrorImmediately) {
@@ -4752,6 +4789,8 @@ export async function answerFastAgentQuestion({
               ...(preset ? { preset } : {}),
               questions,
             });
+            userAttention = { kind: 'input_needed', eventId: requestId };
+            userAttentionReady = true;
             visibleUpdatePosted = true;
             closedInstructionVersions.add(instructionVersion);
             return { success: true, requestId, closed: true };
@@ -4875,6 +4914,14 @@ export async function answerFastAgentQuestion({
         closedInstructionVersions.add(currentInstructionVersion);
         lastVisibleMessage = recordedCloseout.text;
         visibleUpdatePosted = true;
+        userAttention = {
+          kind:
+            recordedCloseout.purpose === 'clarification'
+              ? 'input_needed'
+              : 'result_ready',
+          eventId: turnId,
+        };
+        userAttentionReady = true;
       } else {
         console.info(
           `[Fast Agent] Resumed turn ${turnId} was cut off inside its closeout; posting it again.`,
@@ -4886,6 +4933,7 @@ export async function answerFastAgentQuestion({
       }
       await settleDurableTurn();
       await mirrorPendingMessages();
+      await notifyUserAttention();
       return lastVisibleMessage;
     }
     diagnostics.markInferenceQueued();
@@ -5458,6 +5506,7 @@ export async function answerFastAgentQuestion({
     }
     await settleDurableTurn();
     await mirrorPendingMessages();
+    await notifyUserAttention();
     return lastVisibleMessage;
   } catch (error) {
     if (error instanceof FastAgentDurableRetryScheduledError) {
@@ -5631,6 +5680,7 @@ export async function answerFastAgentQuestion({
         inferenceRetryMessageIndex = undefined;
         inferenceRetryCanonicalEvent = undefined;
         lastVisibleMessage = message;
+        userAttentionReady = true;
       } catch (postError) {
         console.error(
           `[Fast Agent] Failed to post error closeout: ${formatErrorForLog(postError)}`,
@@ -5650,6 +5700,7 @@ export async function answerFastAgentQuestion({
       }
     }
     await settleDurableTurn();
+    await notifyUserAttention();
     return lastVisibleMessage || message;
   } finally {
     if (respondingLeaseRenewalTimer) clearInterval(respondingLeaseRenewalTimer);

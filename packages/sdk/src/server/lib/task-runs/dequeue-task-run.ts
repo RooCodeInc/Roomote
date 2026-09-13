@@ -51,6 +51,8 @@ import {
 export type DequeuedTaskContext = {
   id: string;
   title: string;
+  surface: Task['surface'];
+  initiatorUserId: string | null;
   /** The initial task prompt (tasks.prompt); per-attempt prompt is top-level. */
   prompt: string | null;
   harnessInstructions: string | null;
@@ -67,6 +69,8 @@ export function buildDequeuedTaskContext(task: Task): DequeuedTaskContext {
   return {
     id: task.id,
     title: task.title,
+    surface: task.surface,
+    initiatorUserId: task.initiatorUserId ?? null,
     prompt: task.prompt ?? null,
     harnessInstructions: task.harnessInstructions ?? null,
     requestedWorkKind: task.requestedWorkKind,
