@@ -6,10 +6,7 @@ import type {
   FastAgentReplyStream,
   FastAgentTurnActivity,
 } from '@roomote/cloud-agents/server';
-import {
-  isTelegramPrivateChatId,
-  type TelegramCommunicationProvider,
-} from '@roomote/communication';
+import type { TelegramCommunicationProvider } from '@roomote/communication';
 
 import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 
@@ -30,6 +27,11 @@ export async function runWithFastAgentTelegramActivityReassertion<T>(
   } finally {
     activity.reassert();
   }
+}
+
+function isTelegramPrivateChatId(channelId: string): boolean {
+  const parsed = Number(channelId);
+  return Number.isSafeInteger(parsed) && parsed > 0;
 }
 
 /**

@@ -400,7 +400,7 @@ describe('TelegramCommunicationProvider', () => {
     });
   });
 
-  it('honors an explicit reply target on the first topic message', async () => {
+  it('omits an explicit reply target while preserving topic routing', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({
         ok: true,
@@ -440,37 +440,9 @@ describe('TelegramCommunicationProvider', () => {
           chat_id: '-100456',
           rich_message: { markdown: '<p>hello from Roomote</p>' },
           message_thread_id: 7,
-          reply_parameters: {
-            message_id: 42,
-            allow_sending_without_reply: true,
-          },
         }),
       }),
     );
-  });
-
-  it('omits explicit reply targets in private chats', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse({ ok: true, result: { message_id: 99 } }),
-      );
-    const provider = new TelegramCommunicationProvider({
-      botToken: 'bot-token',
-      apiBaseUrl: 'https://telegram.example.test',
-      fetch: fetchMock as typeof fetch,
-    });
-
-    await provider.postMessage({
-      channelId: '123',
-      replyToMessageId: '42',
-      text: 'hello from Roomote',
-    });
-
-    const body = JSON.parse(
-      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
-    ) as { reply_parameters?: unknown };
-    expect(body.reply_parameters).toBeUndefined();
   });
 
   it('leaves messages free-floating when no reply target is supplied', async () => {
@@ -611,7 +583,7 @@ describe('TelegramCommunicationProvider', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it('posts a native rich footer while preserving topic, reply, and keyboard fields', async () => {
+  it('posts a native rich footer while preserving topic and keyboard fields', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({
         ok: true,
@@ -652,10 +624,6 @@ describe('TelegramCommunicationProvider', () => {
       reply_markup: {
         inline_keyboard: [[{ text: 'Open', url: 'https://roomote.test/s/1' }]],
       },
-      reply_parameters: {
-        message_id: 42,
-        allow_sending_without_reply: true,
-      },
     });
   });
 
@@ -679,7 +647,7 @@ describe('TelegramCommunicationProvider', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it('keeps topic targeting on every long-message chunk and anchors only the first', async () => {
+  it('keeps topic targeting and omits reply metadata on every long-message chunk', async () => {
     const fetchMock = vi.fn().mockImplementation(async () =>
       jsonResponse({
         ok: true,
@@ -718,10 +686,7 @@ describe('TelegramCommunicationProvider', () => {
 
     expect(firstBody.message_thread_id).toBe(7);
     expect(lastBody.message_thread_id).toBe(7);
-    expect(firstBody.reply_parameters).toEqual({
-      message_id: 42,
-      allow_sending_without_reply: true,
-    });
+    expect(firstBody.reply_parameters).toBeUndefined();
     expect(lastBody.reply_parameters).toBeUndefined();
   });
 
@@ -839,7 +804,7 @@ describe('TelegramCommunicationProvider', () => {
     });
   });
 
-  it('keeps embedded native HTML above 4096 with topic and reply semantics', async () => {
+  it('keeps embedded native HTML above 4096 with topic routing', async () => {
     const fetchMock = vi.fn().mockImplementation(async () =>
       jsonResponse({
         ok: true,
@@ -879,7 +844,7 @@ describe('TelegramCommunicationProvider', () => {
     expect(bodies).toHaveLength(1);
     expect(bodies[0]?.rich_message.markdown.length).toBeGreaterThan(4_096);
     expect(bodies.every((body) => body.message_thread_id === 7)).toBe(true);
-    expect(bodies[0]?.reply_parameters?.message_id).toBe(42);
+    expect(bodies[0]?.reply_parameters).toBeUndefined();
     expect(result.lastTextMessageId).toBe('211');
   });
 

@@ -20,7 +20,6 @@ import {
   TASK_STARTUP_FAILURE_TEXT,
 } from '@roomote/communication/chat-messages';
 import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
-import { resolveTelegramReplyToMessageId } from '@roomote/communication/telegram-provider';
 import { createAgentMailCommunicationProviderFromRuntimeCredentials } from '../agentmail-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../telegram-communication';
@@ -1071,11 +1070,6 @@ async function sendTelegramFailureNotification(
 
   const threadId = getCommunicationThreadIdFromTaskPayload(run.payload);
   const messageId = getCommunicationMessageIdFromTaskPayload(run.payload);
-  const replyToMessageId = resolveTelegramReplyToMessageId({
-    channelId,
-    replyToMessageId: messageId ?? undefined,
-    isDedicatedTopic: run.payload.telegramTaskTopic === true,
-  });
   const failureText = hasReachedTaskRuntime(run)
     ? TASK_RUNTIME_FAILURE_TEXT
     : TASK_STARTUP_FAILURE_TEXT;
@@ -1094,7 +1088,7 @@ async function sendTelegramFailureNotification(
   await provider.postMessage({
     channelId,
     ...(threadId ? { threadId } : {}),
-    ...(replyToMessageId ? { replyToMessageId } : {}),
+    ...(!threadId && messageId ? { replyToMessageId: messageId } : {}),
     text,
     textFormat: 'markdown',
   });

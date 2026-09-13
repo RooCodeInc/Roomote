@@ -3,7 +3,6 @@ import {
   clearLatestUserMessageForReplyQuoteIfId,
   chunkDiscordMessage,
   getLatestInboundMessageId,
-  resolveTelegramReplyToMessageId,
   getLatestUserMessageForReplyQuote,
   postTextThreadReplyWithFooter,
   type DiscordCommunicationProvider,
@@ -503,9 +502,9 @@ async function sendTelegramThreadReply(params: {
     );
   }
 
-  // Prefer the most recent inbound user message id when shared-chat context
-  // needs a reply quote. Falls back to the launch communicationMessageId when
-  // no follow-up has arrived; private and dedicated-topic sends discard it.
+  // Prefer the most recent inbound user message id so the reply quotes the
+  // latest user message rather than the original launch message. Falls back
+  // to the launch communicationMessageId when no follow-up has arrived.
   let replyToMessageId = messageId;
   try {
     const latestInboundMessageId = await getLatestInboundMessageId(
@@ -542,15 +541,7 @@ async function sendTelegramThreadReply(params: {
     const input = {
       channelId,
       ...(threadId ? { threadId } : {}),
-      replyToMessageId: resolveTelegramReplyToMessageId({
-        channelId,
-        replyToMessageId: replyToMessageId ?? undefined,
-        isDedicatedTopic:
-          typeof params.taskRun.payload === 'object' &&
-          params.taskRun.payload !== null &&
-          'telegramTaskTopic' in params.taskRun.payload &&
-          params.taskRun.payload.telegramTaskTopic === true,
-      }),
+      replyToMessageId: replyToMessageId ?? undefined,
       ...(text ? { text } : {}),
       textFormat: 'markdown' as const,
       images,

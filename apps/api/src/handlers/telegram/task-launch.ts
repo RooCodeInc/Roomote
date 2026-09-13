@@ -205,7 +205,6 @@ export async function launchTelegramTask(input: {
     replyToMessageId: createdTopic
       ? topicRootMessage?.messageId
       : metadata.communicationMessageId,
-    isDedicatedTopic: Boolean(createdTopic),
     text: buildTelegramTaskAcknowledgementText({
       workspaceDisplayName: input.workspace.workspaceDisplayName,
       started: Boolean(taskUrl),

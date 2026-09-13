@@ -44,12 +44,6 @@ function baseState(): MockTelegramState {
   };
 }
 
-function sharedGroupState(): MockTelegramState {
-  const state = baseState();
-  state.messages![0]!.chat_id = '-100222000222';
-  return state;
-}
-
 async function startServer(
   state: MockTelegramState = baseState(),
   roomoteTarget?: { webhookUrl: string; secretToken: string },
@@ -150,18 +144,18 @@ describe('MockTelegramServer', () => {
     ).rejects.toThrow('chat is not a forum');
   });
 
-  it('stores a bot message quoting the supplied inbound reply target', async () => {
-    const { server, baseUrl } = await startServer(sharedGroupState());
+  it('stores a bot message without quoting the supplied inbound reply target', async () => {
+    const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());
 
     const provider = providerFor(baseUrl);
     const result = await provider.postMessage({
-      channelId: '-100222000222',
+      channelId: '111000111',
       text: 'On it — taking a look now.',
       replyToMessageId: '1000',
     });
 
-    expect(result.channelId).toBe('-100222000222');
+    expect(result.channelId).toBe('111000111');
 
     const messages = server.getState().messages ?? [];
     const botMessage = messages.find((m) => m.from.is_bot);
@@ -169,12 +163,12 @@ describe('MockTelegramServer', () => {
     expect(botMessage?.rich_message).toEqual({
       markdown: '<p>On it — taking a look now.</p>',
     });
-    expect(botMessage?.reply_to_message_id).toBe(1000);
+    expect(botMessage?.reply_to_message_id).toBeUndefined();
     expect(result.messageId).toBe(String(botMessage?.message_id));
   });
 
-  it('anchors only the first chunk of a long reply when a reply target is supplied', async () => {
-    const { server, baseUrl } = await startServer(sharedGroupState());
+  it('omits reply metadata from every chunk of a long reply', async () => {
+    const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());
 
     const provider = providerFor(baseUrl);
@@ -182,7 +176,7 @@ describe('MockTelegramServer', () => {
     const longText = Array.from({ length: 500 }, () => line).join('\n');
 
     await provider.postMessage({
-      channelId: '-100222000222',
+      channelId: '111000111',
       text: longText,
       textFormat: 'markdown',
       replyToMessageId: '1000',
@@ -200,11 +194,8 @@ describe('MockTelegramServer', () => {
       ).toBeLessThanOrEqual(TELEGRAM_MAX_RICH_MESSAGE_LENGTH);
     }
 
-    expect(botMessages[0]?.reply_to_message_id).toBe(1000);
     expect(
-      botMessages
-        .slice(1)
-        .every((message) => message.reply_to_message_id === undefined),
+      botMessages.every((message) => message.reply_to_message_id === undefined),
     ).toBe(true);
 
     const withButtons = botMessages.filter((m) => m.reply_markup !== undefined);
