@@ -152,6 +152,48 @@ describe('generateOpenCodeConfig provider support', () => {
     }
   });
 
+  it.each([
+    ['the configured explore model', 'openrouter/anthropic/claude-haiku-4.5'],
+    ['the default explore model', undefined],
+  ])('prevents recursive Task delegation with %s', (_, exploreModel) => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        ...(exploreModel ? { R_EXPLORE_MODEL: exploreModel } : {}),
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      agent: Record<
+        string,
+        {
+          model?: string;
+          permission?: Record<string, string>;
+          tools?: Record<string, boolean>;
+        }
+      >;
+      permission: Record<string, string>;
+    };
+
+    expect(config.agent.explore).toMatchObject({
+      permission: { task: 'deny' },
+      tools: {
+        roomote_send_chat_reply: false,
+        roomote_report_to_parent_session: false,
+        roomote_post_to_channel: false,
+      },
+    });
+    expect(config.agent.explore?.model).toBe(exploreModel);
+    expect(config.permission).toMatchObject({
+      task: 'allow',
+      bash: 'allow',
+      read: 'allow',
+      grep: 'allow',
+    });
+    expect(config.agent.build).toBeUndefined();
+  });
+
   it('installs the Roomote identity plugin for standard task sessions', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

@@ -20,6 +20,10 @@ describe('opencode-server bootstrap', () => {
     roomote_post_to_channel: false,
     roomote_reply_to_slack_thread: false,
   };
+  const defaultExploreAgentConfig = {
+    permission: { task: 'deny' },
+    tools: slackPostingToolExclusions,
+  };
 
   function createLogger() {
     return {
@@ -1387,6 +1391,7 @@ describe('opencode-server bootstrap', () => {
     expect(baseConfig.agent).toEqual({
       judge: expect.objectContaining({ model: 'test-provider/main-model' }),
       advisor: expect.objectContaining({ model: 'test-provider/main-model' }),
+      explore: defaultExploreAgentConfig,
       architect: expect.objectContaining({ mode: 'primary' }),
       general: {
         disable: true,
@@ -1441,6 +1446,7 @@ describe('opencode-server bootstrap', () => {
       advisor: expect.objectContaining({
         model: 'test-provider/override-model',
       }),
+      explore: defaultExploreAgentConfig,
       architect: expect.objectContaining({ mode: 'primary' }),
       general: {
         disable: true,
@@ -1475,6 +1481,7 @@ describe('opencode-server bootstrap', () => {
     expect(baseConfig.agent?.explore).toEqual({
       model: 'openrouter/anthropic/claude-haiku-4',
       options: { reasoning: { effort: 'high' } },
+      permission: { task: 'deny' },
       tools: slackPostingToolExclusions,
     });
     expect(runtimeEnv).not.toHaveProperty('R_EXPLORE_MODEL');
