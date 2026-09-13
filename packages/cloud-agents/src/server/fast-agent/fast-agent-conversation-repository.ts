@@ -827,6 +827,7 @@ export interface FastAgentConversationRepository {
     sessionId?: string;
     /** Title to seed only when this call creates the conversation. */
     initialTitle?: string;
+    privacy?: 'shared' | 'private';
     initialModel?: string;
     initialReasoningEffort?: ReasoningEffort;
   }): Promise<FastAgentConversationGetOrCreateResult>;
@@ -987,6 +988,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
       conversation,
       sessionId,
       initialTitle,
+      privacy = 'shared',
       initialModel,
       initialReasoningEffort,
     }) {
@@ -994,6 +996,14 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         owner ?? (userId ? { kind: 'user' as const, userId } : null);
       if (!resolvedOwner) {
         throw new Error('Fast conversation owner is required.');
+      }
+      if (
+        privacy === 'private' &&
+        (resolvedOwner.kind !== 'user' || conversation.surface !== 'web')
+      ) {
+        throw new Error(
+          'Private Sessions require a user-owned web conversation.',
+        );
       }
       if (resolvedOwner.kind === 'automation') {
         await ensureAutomationRowsOnce();
@@ -1023,10 +1033,25 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-session-binding:${sessionId}`}, 0))`,
           );
           const [bound] = await tx
-            .select({ fastConversationId: sessions.fastConversationId })
+            .select({
+              fastConversationId: sessions.fastConversationId,
+              privacy: sessions.privacy,
+              privateOwnerUserId: sessions.privateOwnerUserId,
+            })
             .from(sessions)
             .where(eq(sessions.id, sessionId))
             .limit(1);
+          const requestedPrivateOwner =
+            privacy === 'private' && resolvedOwner.kind === 'user'
+              ? resolvedOwner.userId
+              : null;
+          if (
+            bound &&
+            (bound.privacy !== privacy ||
+              bound.privateOwnerUserId !== requestedPrivateOwner)
+          ) {
+            throw new Error('Session privacy does not match the conversation.');
+          }
           if (bound?.fastConversationId) {
             return {
               ...(await loadConversationRecord(tx, bound.fastConversationId)),
@@ -1044,6 +1069,11 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               ownerAutomation:
                 resolvedOwner.kind === 'automation'
                   ? resolvedOwner.automationKey
+                  : null,
+              privacy,
+              privateOwnerUserId:
+                privacy === 'private' && resolvedOwner.kind === 'user'
+                  ? resolvedOwner.userId
                   : null,
               title: initialTitle?.trim() || null,
               model: initialModel,
@@ -1074,6 +1104,11 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         }
         if (!record) {
           throw new Error('Failed to create or load Fast conversation.');
+        }
+        if (record.privacy !== privacy) {
+          throw new Error(
+            'Fast conversation privacy does not match the caller.',
+          );
         }
         // Only an explicit owner asserts who the conversation belongs to. A
         // bare userId is the acting sender: it becomes the owner when this

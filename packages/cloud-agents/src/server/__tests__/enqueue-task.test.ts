@@ -219,6 +219,33 @@ afterAll(async () => {
 });
 
 describe('enqueueTask initiator stamping', () => {
+  it('stamps private web tasks and rejects non-web private launches', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+      privacy: 'private',
+    });
+
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, run.taskId) }),
+    ).resolves.toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: userId,
+    });
+    await expect(
+      launchFresh({
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'slack',
+        trigger: 'message',
+        privacy: 'private',
+      }),
+    ).rejects.toThrow('linked user on the web surface');
+  });
+
   it('persists an optional task goal on a fresh launch', async () => {
     const userId = await createUser();
     const run = await launchFresh({

@@ -48,6 +48,7 @@ export async function getOrCreateFastAgentSession({
   conversation,
   sessionId,
   initialTitle,
+  privacy,
   initialModel,
   initialReasoningEffort,
 }: {
@@ -58,6 +59,7 @@ export async function getOrCreateFastAgentSession({
   sessionId?: string;
   /** Title to seed only when this call creates the conversation. */
   initialTitle?: string;
+  privacy?: 'shared' | 'private';
   initialModel?: string;
   initialReasoningEffort?: ReasoningEffort;
 }): Promise<FastAgentSessionRecord> {
@@ -67,6 +69,7 @@ export async function getOrCreateFastAgentSession({
     conversation,
     ...(sessionId ? { sessionId } : {}),
     ...(initialTitle ? { initialTitle } : {}),
+    ...(privacy ? { privacy } : {}),
     ...(initialModel !== undefined ? { initialModel } : {}),
     ...(initialReasoningEffort !== undefined ? { initialReasoningEffort } : {}),
   });
