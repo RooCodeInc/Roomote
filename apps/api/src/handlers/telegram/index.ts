@@ -742,6 +742,18 @@ telegram.post('/', async (c) => {
         threadId: metadata.communicationThreadId,
       });
       if (handled) {
+        if (queuedMessage.images?.length) {
+          await syncActingUserForInboundMessage({
+            logContext: 'telegram.requestUserInputImage',
+            runId: activeRun.id,
+            senderUserId: queuedMessage.userId,
+          });
+          await queueCommunicationMessageOnce(
+            'telegram',
+            activeRun.id,
+            queuedMessage,
+          );
+        }
         await ackTelegramMessageBestEffort({
           chatId: metadata.communicationChannelId,
           messageId: metadata.communicationMessageId,
@@ -753,16 +765,6 @@ telegram.post('/', async (c) => {
           requestUserInput: true,
         });
       }
-    }
-
-    if (!queuedMessage.text?.trim()) {
-      const { retireSupersededTelegramRequestUserInput } =
-        await import('./request-user-input.js');
-      await retireSupersededTelegramRequestUserInput({
-        activeRunId: activeRun.id,
-        chatId: metadata.communicationChannelId,
-        threadId: metadata.communicationThreadId,
-      });
     }
 
     // Trusted pre-queue actor switch; see acting-user-sync.ts. The worker

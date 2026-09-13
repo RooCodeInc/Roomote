@@ -42,10 +42,7 @@ vi.mock('../replies.js', () => ({
   postTelegramMessageBestEffort: vi.fn(),
 }));
 
-import {
-  retireSupersededTelegramRequestUserInput,
-  tryHandleTelegramRequestUserInputMessage,
-} from '../request-user-input.js';
+import { tryHandleTelegramRequestUserInputMessage } from '../request-user-input.js';
 
 describe('Telegram request_user_input messages', () => {
   beforeEach(() => {
@@ -112,17 +109,6 @@ describe('Telegram request_user_input messages', () => {
       threadId: 'topic-1',
     });
 
-    expect(mocks.retirePrompt).not.toHaveBeenCalled();
-  });
-
-  it('does not retire a prompt owned by another run in the same chat', async () => {
-    await retireSupersededTelegramRequestUserInput({
-      activeRunId: 99,
-      chatId: 'chat-1',
-      threadId: 'topic-1',
-    });
-
-    expect(mocks.clearPending).not.toHaveBeenCalled();
     expect(mocks.retirePrompt).not.toHaveBeenCalled();
   });
 

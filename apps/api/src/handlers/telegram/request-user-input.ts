@@ -123,31 +123,6 @@ async function retirePendingPrompt(params: {
   });
 }
 
-export async function retireSupersededTelegramRequestUserInput(params: {
-  activeRunId: number;
-  chatId: string;
-  threadId?: string | null;
-}): Promise<void> {
-  const conversationId = params.threadId?.trim() || params.chatId;
-  const pendingRequest = await getPendingCommunicationRequestUserInput(
-    'telegram',
-    conversationId,
-  );
-  if (
-    !pendingRequest ||
-    pendingRequest.runId !== params.activeRunId ||
-    pendingRequest.status !== 'pending'
-  ) {
-    return;
-  }
-
-  await retirePendingPrompt({
-    ...params,
-    conversationId,
-    pendingRequest,
-  });
-}
-
 export async function tryHandleTelegramRequestUserInputMessage(params: {
   activeRunId: number;
   userId: string;
