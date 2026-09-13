@@ -192,6 +192,9 @@ export async function processFastAgentMessage(params: {
         : {}),
       ...(event.user ? { senderExternalId: event.user } : {}),
       directedAtRoomote,
+      ...(params.originSessionId
+        ? { deliveryConversation: incomingConversation }
+        : {}),
     };
     let durableTurn: FastAgentDurableTurn | null = null;
     if (needsCanonicalAdmission) {
