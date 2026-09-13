@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
+import { useState } from 'react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   SETUP_RECEIPT_INPUT_KIND,
@@ -20,6 +21,10 @@ import {
   clearPendingFastSessionLaunch,
   stagePendingFastSessionLaunch,
 } from '@/lib/pending-fast-session-launch';
+import {
+  SessionNavigationStateProvider,
+  useSessionNavigationState,
+} from '@/hooks/useSessionNavigationState';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -467,6 +472,68 @@ describe('FastSessionTranscript', () => {
     userEmail,
     userImageUrl,
     createdAt: new Date(ts),
+  });
+
+  it('restores each Session draft and scroll position without focusing after a direct switch', () => {
+    function SessionSwitchHarness() {
+      const [sessionId, setSessionId] = useState('session-a');
+      const navigationState = useSessionNavigationState();
+      const switchTo = (nextSessionId: string) => {
+        navigationState?.prepareSessionSwitch(nextSessionId);
+        setSessionId(nextSessionId);
+      };
+
+      return (
+        <>
+          <button type="button" onClick={() => switchTo('session-a')}>
+            Session A
+          </button>
+          <button type="button" onClick={() => switchTo('session-b')}>
+            Session B
+          </button>
+          <FastSessionTranscript
+            key={sessionId}
+            sessionId={sessionId}
+            initialMessages={[]}
+            canReply
+          />
+        </>
+      );
+    }
+
+    render(
+      <SessionNavigationStateProvider>
+        <SessionSwitchHarness />
+      </SessionNavigationStateProvider>,
+    );
+
+    const sessionAInput = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(sessionAInput, { target: { value: 'Draft for A' } });
+    const sessionAScroll = screen.getByRole('log').firstElementChild!;
+    sessionAScroll.scrollTop = 146;
+    fireEvent.scroll(sessionAScroll);
+
+    const sessionBButton = screen.getByRole('button', { name: 'Session B' });
+    sessionBButton.focus();
+    fireEvent.click(sessionBButton);
+
+    const sessionBInput = screen.getByPlaceholderText('Message agent');
+    expect(sessionBInput).toHaveValue('');
+    expect(sessionBInput).not.toHaveFocus();
+    fireEvent.change(sessionBInput, { target: { value: 'Draft for B' } });
+
+    const sessionAButton = screen.getByRole('button', { name: 'Session A' });
+    sessionAButton.focus();
+    fireEvent.click(sessionAButton);
+
+    expect(screen.getByPlaceholderText('Message agent')).toHaveValue(
+      'Draft for A',
+    );
+    expect(screen.getByPlaceholderText('Message agent')).not.toHaveFocus();
+    expect(screen.getByRole('log').firstElementChild).toHaveProperty(
+      'scrollTop',
+      146,
+    );
   });
 
   it('renders charts restored from persisted Session messages', () => {
@@ -1114,9 +1181,9 @@ describe('FastSessionTranscript', () => {
       expect(screen.getByText(actionLabel)).toBeInTheDocument();
       expect(screen.getByText('human guidance')).toBeInTheDocument();
       if (status === 'failed') {
-        expect(screen.getByText('Failed')).toBeInTheDocument();
+        expect(screen.getByText('Failed')).toHaveClass('sr-only');
       } else {
-        expect(screen.getByText('Completed')).toBeInTheDocument();
+        expect(screen.getByText('Completed')).toHaveClass('sr-only');
       }
       expect(screen.queryByText('Structured input request')).toBeNull();
     },
@@ -3276,6 +3343,53 @@ describe('FastSessionTranscript', () => {
         });
       });
       expect(screen.getByText('Call ended · 9s')).toBeInTheDocument();
+    });
+
+    it('persists the call end only after a delayed call start finishes', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      let resolveStart!: (value: { eventId: string }) => void;
+      recordVoiceCallEventMutate.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveStart = resolve;
+          }),
+      );
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />
+      );
+      const { rerender } = render(transcript());
+
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      liveVoiceState.startedAt = 1_000;
+      rerender(transcript());
+      await waitFor(() =>
+        expect(recordVoiceCallEventMutate).toHaveBeenCalledWith({
+          sessionId: 'session-1',
+          phase: 'started',
+        }),
+      );
+
+      liveVoiceState.active = false;
+      liveVoiceState.status = 'idle';
+      liveVoiceState.startedAt = null;
+      rerender(transcript());
+      expect(recordVoiceCallEventMutate).toHaveBeenCalledTimes(1);
+
+      resolveStart({ eventId: 'voice-call:started' });
+      await waitFor(() => {
+        expect(recordVoiceCallEventMutate).toHaveBeenCalledTimes(2);
+        expect(recordVoiceCallEventMutate).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            sessionId: 'session-1',
+            phase: 'ended',
+          }),
+        );
+      });
     });
 
     it('attributes a streamed first reply to its own delegation even after a second request', async () => {

@@ -13,6 +13,7 @@ const {
   mockTeamsUserMappingsFindFirst,
   mockTelegramPostMessage,
   mockTelegramUserMappingsFindFirst,
+  mockStartAgentMailConversation,
 } = vi.hoisted(() => ({
   mockOpenConversation: vi.fn(),
   mockCreateDiscordDirectMessage: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockTeamsUserMappingsFindFirst: vi.fn(),
   mockTelegramPostMessage: vi.fn(),
   mockTelegramUserMappingsFindFirst: vi.fn(),
+  mockStartAgentMailConversation: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -82,6 +84,11 @@ vi.mock('./teams-primary-conversation', () => ({
     serviceUrl: 'https://smba.example.com/amer/',
     conversationType: 'personal',
   })),
+}));
+
+vi.mock('./agentmail/outbound', () => ({
+  canStartAgentMailConversationWithUser: vi.fn(),
+  startAgentMailConversation: mockStartAgentMailConversation,
 }));
 
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
@@ -192,6 +199,7 @@ describe('sendUserDirectMessage', () => {
     mockDiscordPostMessage.mockResolvedValue({
       messageId: 'discord-message-1',
     });
+    mockStartAgentMailConversation.mockResolvedValue(true);
   });
 
   it('sends to a linked Discord DM', async () => {
@@ -242,7 +250,7 @@ describe('sendUserDirectMessageBestEffort', () => {
     });
   });
 
-  it('sends the message on every provider with a linked identity', async () => {
+  it('uses only linked personal chat routes and does not fall through to email', async () => {
     const delivered = await sendUserDirectMessageBestEffort({
       userId: 'user-1',
       text: 'Your GitHub installation request was approved.',
@@ -276,6 +284,44 @@ describe('sendUserDirectMessageBestEffort', () => {
       text: 'Your GitHub installation request was approved.',
       textFormat: 'markdown',
     });
+    expect(mockStartAgentMailConversation).not.toHaveBeenCalled();
+  });
+
+  it('falls back to email after personal chat routes without consulting shared channels', async () => {
+    mockSlackUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockTeamsUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockTelegramUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockDiscordUserMappingsFindFirst.mockResolvedValue(undefined);
+
+    const delivered = await sendUserDirectMessageBestEffort({
+      userId: 'user-1',
+      text: 'Task completed.',
+      logContext: 'test',
+      idempotencyKey: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    });
+
+    expect(delivered).toEqual(['agentmail']);
+    expect(mockStartAgentMailConversation).toHaveBeenCalledWith({
+      userId: 'user-1',
+      subject: 'Task completed.',
+      text: 'Task completed.',
+      logContext: 'test',
+      clientSendId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    });
+    const emailCallOrder =
+      mockStartAgentMailConversation.mock.invocationCallOrder[0]!;
+    expect(
+      mockSlackUserMappingsFindFirst.mock.invocationCallOrder[0],
+    ).toBeLessThan(emailCallOrder);
+    expect(
+      mockTeamsUserMappingsFindFirst.mock.invocationCallOrder[0],
+    ).toBeLessThan(emailCallOrder);
+    expect(
+      mockTelegramUserMappingsFindFirst.mock.invocationCallOrder[0],
+    ).toBeLessThan(emailCallOrder);
+    expect(
+      mockDiscordUserMappingsFindFirst.mock.invocationCallOrder[0],
+    ).toBeLessThan(emailCallOrder);
   });
 
   it('sends the message when Discord is the only linked provider', async () => {

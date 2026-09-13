@@ -25,6 +25,7 @@ import {
   brainMemoryEvents,
   brainSyncState,
   taskRuns,
+  tasks,
 } from '../schema';
 import { runInTransactionIfAvailable } from './transaction-utils';
 import { createMemoryOutboxLifecycle } from './memory-outbox-lifecycle';
@@ -465,19 +466,31 @@ export async function requeueBrainMemoryEventsForTasks(
  * connecting the brain sucks in the deployment's task history rather than
  * only learning from tasks completed after enablement. Idempotent via the
  * unique(runId) constraint; the drainer distills the backlog batch by batch.
+ *
+ * `requeueLinkable` re-puts memories already in the Brain so a page-shape
+ * change reaches them. It is deliberately narrow: only standard-workflow
+ * tasks a linked Roomote member started, completed after the given time.
+ * Reviews, conflict resolution, scans, and automation-started work gain
+ * nothing from the replay, and a deployment's whole history re-embedded at
+ * once is a burst every managed tenant would land on the shared embedder
+ * together.
  */
 export async function backfillBrainMemoryEvents(
   database: DatabaseOrTransaction,
-  options: { requeueCompleted?: boolean } = {},
+  options: { requeueLinkable?: { completedAfter: Date } } = {},
 ): Promise<number> {
-  const requeued = options.requeueCompleted
+  const requeued = options.requeueLinkable
     ? ((await database.execute(
         sql`UPDATE ${brainMemoryEvents} AS event
             SET status = 'pending', attempts = 0, last_error = NULL, updated_at = now()
             FROM ${taskRuns} AS run
+            JOIN ${tasks} AS task ON task.id = run.task_id
             WHERE event.run_id = run.id
               AND event.status = 'done'
               AND run.status = 'completed'
+              AND run.completed_at > ${options.requeueLinkable.completedAfter.toISOString()}::timestamptz
+              AND task.workflow = 'standard'
+              AND task.initiator_user_id IS NOT NULL
             RETURNING event.id`,
       )) as unknown as Array<{ id: string }>)
     : [];

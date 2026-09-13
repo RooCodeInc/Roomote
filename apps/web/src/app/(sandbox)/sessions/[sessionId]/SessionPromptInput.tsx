@@ -10,6 +10,10 @@ import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
 import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
 import {
+  useSessionDraft,
+  useSessionNavigationState,
+} from '@/hooks/useSessionNavigationState';
+import {
   SUGGESTION_MIN_HISTORY_MESSAGES,
   useGhostSuggestion,
 } from '@/hooks/useGhostSuggestion';
@@ -152,7 +156,11 @@ export function SessionPromptInput({
 }) {
   const trpc = useTRPC();
   const trpcClient = useTRPCClient();
-  const [prompt, setPrompt] = useState('');
+  const { draft: prompt, setDraft: setPrompt } = useSessionDraft(sessionId);
+  const navigationState = useSessionNavigationState();
+  const [shouldAutoFocus] = useState(
+    () => !navigationState?.consumeSessionSwitch(sessionId),
+  );
   const [isTextareaFocused, setIsTextareaFocused] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const [model, setModel] = useState(initialModel ?? '');
@@ -161,7 +169,7 @@ export function SessionPromptInput({
   const [isUpdatingModelSelection, setIsUpdatingModelSelection] =
     useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  useAutoFocusOnce(textareaRef, !isBusy);
+  useAutoFocusOnce(textareaRef, !isBusy && shouldAutoFocus);
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => setPrompt(text),
     getPrefix: () => prompt,

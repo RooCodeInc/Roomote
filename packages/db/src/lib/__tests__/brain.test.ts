@@ -15,6 +15,7 @@ import {
   tasks,
   taskRuns,
   taskFactory,
+  userFactory,
   brainMemoryEvents,
   brainCollectorItems,
   brainSyncState,
@@ -47,8 +48,11 @@ import { runMemoryOutboxLifecycleContract } from './memory-outbox-lifecycle.cont
 
 const createdTaskIds: string[] = [];
 
-async function makeCompletedRun(completedAt?: Date) {
-  const task = await taskFactory.create({ state: 'active' });
+async function makeCompletedRun(
+  completedAt?: Date,
+  taskParams: Parameters<typeof taskFactory.create>[0] = {},
+) {
+  const task = await taskFactory.create({ state: 'active', ...taskParams });
   createdTaskIds.push(task.id);
 
   const [run] = await db
@@ -723,25 +727,53 @@ describe('backfillBrainMemoryEvents', () => {
     expect(runningEvents).toHaveLength(0);
   });
 
-  it('requeues completed memories for a one-time metadata replay', async () => {
-    const completed = await makeCompletedRun();
-    await saveBrainAgentSummary(db, completed.id, 'Keep this summary.');
-    const claimed = await claimPendingBrainMemoryEvents(db, 10);
-    const event = claimed.find((row) => row.runId === completed.id);
-    await settleBrainMemoryEvent(db, event!.id, event!.revision, 'done');
+  it('requeues only linkable recent memories for a one-time metadata replay', async () => {
+    const user = await userFactory.create();
+    const now = Date.now();
+    const recent = new Date(now - 24 * 60 * 60 * 1000);
+    const stale = new Date(now - 400 * 24 * 60 * 60 * 1000);
+    const linkable = await makeCompletedRun(recent, {
+      initiatorUserId: user.id,
+    });
+    const tooOld = await makeCompletedRun(stale, {
+      initiatorUserId: user.id,
+    });
+    const review = await makeCompletedRun(recent, {
+      initiatorUserId: user.id,
+      workflow: 'pr_review',
+    });
+    const unlinked = await makeCompletedRun(recent);
+    await saveBrainAgentSummary(db, linkable.id, 'Keep this summary.');
+    // Every fixture run reaches the Brain once before the replay is asked for.
+    await backfillBrainMemoryEvents(db);
+    const claimed = await claimPendingBrainMemoryEvents(db, 1_000);
+    for (const event of claimed) {
+      await settleBrainMemoryEvent(db, event.id, event.revision, 'done');
+    }
 
-    await backfillBrainMemoryEvents(db, { requeueCompleted: true });
+    await backfillBrainMemoryEvents(db, {
+      requeueLinkable: {
+        completedAfter: new Date(now - 90 * 24 * 60 * 60 * 1000),
+      },
+    });
 
-    const [requeued] = await db
-      .select()
-      .from(brainMemoryEvents)
-      .where(eq(brainMemoryEvents.runId, completed.id));
-    expect(requeued).toMatchObject({
+    const statusOf = async (runId: number) => {
+      const [row] = await db
+        .select()
+        .from(brainMemoryEvents)
+        .where(eq(brainMemoryEvents.runId, runId));
+      return row;
+    };
+
+    expect(await statusOf(linkable.id)).toMatchObject({
       status: 'pending',
       attempts: 0,
       lastError: null,
       agentSummary: 'Keep this summary.',
     });
+    expect((await statusOf(tooOld.id))?.status).toBe('done');
+    expect((await statusOf(review.id))?.status).toBe('done');
+    expect((await statusOf(unlinked.id))?.status).toBe('done');
   });
 });
 

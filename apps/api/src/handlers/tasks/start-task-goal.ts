@@ -1,14 +1,16 @@
-import { sendMessageToTask } from '../tasks/sendMessageToTask.js';
 import { prepareTaskGoalActivation } from '@roomote/db/server';
 import {
   DEFAULT_TASK_GOAL_MAX_CONTINUATIONS,
   type TaskGoal,
 } from '@roomote/types';
 
-export async function startDiscordTaskGoal(input: {
+import { sendMessageToTask } from './sendMessageToTask.js';
+
+export async function startTaskGoal(input: {
   taskId: string;
   userId: string;
   objective: string;
+  source: 'discord' | 'telegram';
   clientMessageId: string;
 }): Promise<{ success: true } | { success: false; error: string }> {
   const goal = {
@@ -40,7 +42,7 @@ export async function startDiscordTaskGoal(input: {
       taskId: input.taskId,
       userId: input.userId,
       message: input.objective,
-      source: 'discord',
+      source: input.source,
       clientMessageId: input.clientMessageId,
       goalContext,
     });

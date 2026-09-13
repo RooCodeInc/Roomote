@@ -21,6 +21,15 @@ export {
   maybeEnqueueBrainMemoryForCompletedRun,
 } from './lib/task-runs/finish-run';
 export {
+  WEB_TASK_INITIATOR_SETTLE_NOTIFICATION_JOB,
+  enqueueWebTaskInitiatorSettleNotification,
+  type WebTaskInitiatorSettleNotificationJob,
+} from './lib/task-runs/enqueue-web-task-initiator-settle-notification';
+export {
+  notifyWebTaskInitiatorOnSettle,
+  type WebTaskInitiatorSettleNotificationResult,
+} from './lib/task-runs/notify-web-task-initiator-on-settle';
+export {
   AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
   AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
   AUTOMATION_RECOMMENDATION_REPOSITORY_CAP,
@@ -50,6 +59,7 @@ export {
 } from './lib/task-runs/record-task-inference-usage';
 export { findTaskRunByRunTokenClaims } from './lib/task-runs/find-task-run';
 export { stopTaskRun } from './lib/task-runs/stop-task-run';
+export { settleLiveTaskMessageOnExit } from './lib/task-runs/settle-live-task-message-on-exit';
 export { createSnapshot } from './lib/task-runs/enqueue-snapshot';
 export {
   enqueueTaskSleep,
@@ -217,6 +227,7 @@ export { refreshCurrentThreadFooters } from './lib/thread-footer-refresh';
 export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/teams-communication';
 
 export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib/telegram-communication';
+export { retireTelegramRequestUserInputPromptBestEffort } from './lib/communication-request-user-input';
 
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
 export { syncFastAgentSlackTitleBestEffort } from './lib/fast-agent-slack-title-sync';

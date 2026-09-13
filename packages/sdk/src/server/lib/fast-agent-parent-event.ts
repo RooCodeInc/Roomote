@@ -8,6 +8,7 @@ import {
   createFastAgentTaskLauncher,
   createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
+  isFastAgentVoiceCallActive,
   resolveApiBaseUrl,
   type FastAgentConversationRecord,
   type FastAgentTurnLockHandle,
@@ -66,7 +67,7 @@ import {
   type FastAgentSourceControlReplyTarget,
   type FastAgentParent,
   type PullRequestStatus,
-  type RunStatus,
+  RunStatus,
   type TaskRunErrorCode,
   type SourceControlProvider,
   type StandardTask,
@@ -111,9 +112,22 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-
 import { createAgentMailCommunicationProviderFromRuntimeCredentials } from './agentmail-communication';
 import { AgentMailRecipientUnavailableError } from './agentmail/outbound';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
+import {
+  settleTelegramLiveTaskStreamForRun,
+  startTelegramLiveTaskStream,
+  type TelegramLiveTaskStreamProvider,
+} from './telegram-live-task-stream';
 import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
+import {
+  createFastAgentTelegramActivity,
+  runWithFastAgentTelegramActivityReassertion,
+} from './fast-agent-telegram-activity';
 import { findTeamsConversationRoute } from '../automations/destination';
-import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
+import {
+  isFastAgentManagedTelegramTopic,
+  recordFastAgentConversationMessageBestEffort,
+} from './fast-agent-provider-message';
+import { addFastAgentTelegramTopicTitleSync } from './fast-agent-telegram-title-sync';
 import {
   createDiscordFastReplyReplacer,
   createSlackFastReplyReplacer,
@@ -419,6 +433,17 @@ function isFastAutomationReportEvent(
     event.type === 'automation_triggered' ||
     (event.type === 'task_settled' && Boolean(event.customAutomationId))
   );
+}
+
+function buildTelegramAutomationMessage(params: {
+  automationName: string;
+  message: string;
+}): string {
+  const automationName = params.automationName
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+  return `<h3>${automationName}</h3>\n\n${params.message}`;
 }
 
 /** Groups a report's suggestion cards; unique per run occurrence. */
@@ -1209,6 +1234,8 @@ export function createFastAgentCommunicationTaskLauncher(params: {
   serviceUrl?: string;
   /** Set when the conversation is a custom automation run. */
   automation?: FastAutomationLaunchContext | null;
+  /** Enables Telegram's single-message live task status for Fast delegation. */
+  telegramLiveTaskProvider?: TelegramLiveTaskStreamProvider;
 }): LaunchFastAgentTask {
   const { payload: automationPayload, ...automationLaunchOptions } =
     params.automation
@@ -1221,6 +1248,28 @@ export function createFastAgentCommunicationTaskLauncher(params: {
     userId: params.userId,
     surface: params.conversation.surface,
     taskUrlCampaign: 'fast-delegation',
+    ...(params.telegramLiveTaskProvider &&
+    params.conversation.surface === 'telegram'
+      ? {
+          rendersTaskLink: true,
+          afterKickoff: (taskRun, context) =>
+            startTelegramLiveTaskStream({
+              provider: params.telegramLiveTaskProvider!,
+              taskRun,
+              taskUrl: context.taskUrl,
+              channelId: params.conversation.replyTarget.channelId,
+              ...(params.conversation.replyTarget.threadId
+                ? { threadId: params.conversation.replyTarget.threadId }
+                : {}),
+            }),
+          onQueueFailure: (taskRun) =>
+            settleTelegramLiveTaskStreamForRun({
+              taskId: taskRun.taskId,
+              payload: { liveTaskStream: true },
+              status: RunStatus.Canceled,
+            }),
+        }
+      : {}),
     ...automationLaunchOptions,
     buildTask: ({
       prompt,
@@ -1235,6 +1284,10 @@ export function createFastAgentCommunicationTaskLauncher(params: {
         description: prompt,
         ...automationPayload,
         communicationProvider: params.conversation.surface,
+        ...(params.telegramLiveTaskProvider &&
+        params.conversation.surface === 'telegram'
+          ? { liveTaskStream: true }
+          : {}),
         communicationChannelId: params.conversation.replyTarget.channelId,
         ...(params.conversation.surface === 'agentmail'
           ? { communicationThreadId: params.conversation.conversationId }
@@ -1833,10 +1886,30 @@ async function createTelegramFastAgentParentTurn(
   }
   const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
   const conversation = session.conversation;
-  const activity = createFastAgentTypingActivity({
-    sendTyping: () => provider.sendChatAction(conversation.replyTarget),
-    intervalMs: 4_000,
+  let activity = createFastAgentTelegramActivity({
+    provider,
+    replyTarget: conversation.replyTarget,
   });
+  const threadId = conversation.replyTarget.threadId;
+  if (
+    threadId &&
+    (await isFastAgentManagedTelegramTopic({
+      sessionId: session.id,
+      workspaceId: conversation.workspaceId,
+      channelId: conversation.replyTarget.channelId,
+      threadId,
+    }))
+  ) {
+    activity = addFastAgentTelegramTopicTitleSync({
+      activity,
+      provider,
+      sessionId: session.id,
+      channelId: conversation.replyTarget.channelId,
+      threadId,
+      resolveSession: () =>
+        fastAgentConversationRepository.findById({ id: session.id }),
+    });
+  }
   const replaceReply = createTelegramFastReplyReplacer({
     provider,
     conversation,
@@ -1844,19 +1917,26 @@ async function createTelegramFastAgentParentTurn(
     sessionId: session.id,
     footerContext: params.footerContext,
   });
+  const automation = await resolveFastAutomationLaunchContext({
+    event: params.event,
+    conversation,
+  });
+  const launchTask = createFastAgentCommunicationTaskLauncher({
+    userId: actorUserId,
+    conversation,
+    telegramLiveTaskProvider: provider,
+    automation,
+  });
   return {
     userId: actorUserId,
     conversation,
     adapter: {
       activity,
-      launchTask: createFastAgentCommunicationTaskLauncher({
-        userId: actorUserId,
-        conversation,
-        automation: await resolveFastAutomationLaunchContext({
-          event: params.event,
-          conversation,
-        }),
-      }),
+      launchTask: async (input) => {
+        return runWithFastAgentTelegramActivityReassertion(activity, () =>
+          launchTask(input),
+        );
+      },
       replaceReply: async (handle, reply) => {
         const result = await replaceReply(handle, reply);
         activity.reassert();
@@ -1881,6 +1961,42 @@ async function createTelegramFastAgentParentTurn(
                 suggestions.length > 0,
               )
             : message;
+        const displayedMessage =
+          automation && (kickoff || isFastAutomationReportEvent(params.event))
+            ? buildTelegramAutomationMessage({
+                automationName: automation.automationName,
+                message: reportMessage,
+              })
+            : reportMessage;
+        const action =
+          params.event.type === 'pull_request_feedback' &&
+          params.event.suggestedActionQuestion &&
+          params.event.suggestedActionPrompt &&
+          params.event.pullRequest.repository &&
+          params.event.pullRequest.number
+            ? {
+                nonce: buildPrReviewActionNonce(params.event),
+                taskId: params.event.taskId,
+                followUpPrompt: params.event.suggestedActionPrompt,
+                repository: params.event.pullRequest.repository,
+                prNumber: params.event.pullRequest.number,
+                prUrl: params.event.pullRequest.url,
+              }
+            : null;
+
+        if (action) {
+          await setPendingPrReviewAction({
+            nonce: action.nonce,
+            provider: 'telegram',
+            taskId: action.taskId,
+            repository: action.repository,
+            prNumber: action.prNumber,
+            prUrl: action.prUrl,
+            channelId: conversation.replyTarget.channelId,
+            threadId: conversation.replyTarget.threadId ?? null,
+            followUpPrompt: action.followUpPrompt,
+          });
+        }
         const posted = await postTextThreadReplyWithFooter({
           provider,
           input: {
@@ -1888,9 +2004,40 @@ async function createTelegramFastAgentParentTurn(
             ...(conversation.replyTarget.threadId
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
-            text: reportMessage,
+            text: displayedMessage,
             textFormat: 'markdown',
             images,
+            ...(action
+              ? {
+                  buttons: [
+                    [
+                      {
+                        text: PR_REVIEW_ACTION_LABELS.yes,
+                        callbackData: buildPrReviewActionCallbackData(
+                          'yes',
+                          action.nonce,
+                        ),
+                      },
+                    ],
+                    [
+                      {
+                        text: PR_REVIEW_ACTION_LABELS.auto,
+                        callbackData: buildPrReviewActionCallbackData(
+                          'auto',
+                          action.nonce,
+                        ),
+                      },
+                      {
+                        text: PR_REVIEW_ACTION_LABELS.dismiss,
+                        callbackData: buildPrReviewActionCallbackData(
+                          'dismiss',
+                          action.nonce,
+                        ),
+                      },
+                    ],
+                  ],
+                }
+              : {}),
           },
           footerText: buildFastSessionReplyFooterText({
             provider: 'telegram',
@@ -1904,6 +2051,29 @@ async function createTelegramFastAgentParentTurn(
           conversation,
           messageId: posted.lastTextMessageId ?? posted.messageId,
         });
+        if (action) {
+          const messageId = posted.lastTextMessageId ?? posted.messageId;
+          try {
+            const { superseded } =
+              await attachPendingPrReviewActionMessageWithRetirement(
+                action.nonce,
+                messageId,
+              );
+            if (superseded.length > 0) {
+              await retirePrReviewActionMessagesBestEffort(superseded);
+            }
+          } catch (error) {
+            await retirePrReviewActionMessagesBestEffort([
+              {
+                provider: 'telegram',
+                channelId: conversation.replyTarget.channelId,
+                threadId: conversation.replyTarget.threadId ?? null,
+                messageId,
+              },
+            ]);
+            throw error;
+          }
+        }
         if (
           isFastAutomationReportEvent(params.event) &&
           !kickoff &&
@@ -2561,11 +2731,18 @@ export async function deliverFastAgentParentEventWithLock(
     // origin matches its own apiBaseUrl, so a mismatched pair silently drops
     // every deployment MCP server from parent-event turns.
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
+    const voiceMode =
+      params.event.type === 'scheduled_wakeup'
+        ? await isFastAgentVoiceCallActive(params.parent.sessionId)
+        : humanFollowUp?.voiceMode;
     await answerFastAgentQuestion({
       question:
         humanFollowUp?.question ??
         `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
       ...(humanFollowUp?.images ? { images: humanFollowUp.images } : {}),
+      ...(humanFollowUp?.attachmentTexts
+        ? { attachmentTexts: humanFollowUp.attachmentTexts }
+        : {}),
       userId: humanFollowUp?.userId ?? parentTurn.userId,
       conversation: parentTurn.conversation,
       currentMessageId:
@@ -2600,7 +2777,7 @@ export async function deliverFastAgentParentEventWithLock(
         (humanFollowUp ? 'human' : 'platform_event'),
       ...(humanFollowUp?.input ? { input: humanFollowUp.input } : {}),
       ...(humanFollowUp?.setupSession ? { setupSession: true } : {}),
-      ...(humanFollowUp?.voiceMode ? { voiceMode: true } : {}),
+      ...(voiceMode ? { voiceMode: true } : {}),
       ...(humanFollowUp?.setupContext
         ? { setupSnapshot: humanFollowUp.setupContext.setupSnapshot }
         : {}),

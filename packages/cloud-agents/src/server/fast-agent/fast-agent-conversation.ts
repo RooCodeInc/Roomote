@@ -5,6 +5,8 @@ import type {
   ReasoningEffort,
 } from '@roomote/types';
 
+import type { TelegramTopicIconEmoji } from '../llm-task-title';
+
 export {
   isFastAgentCommunicationConversation,
   type FastAgentConversation,
@@ -155,7 +157,13 @@ export type FastAgentTurnActivity = {
   settle: (options?: { keepProcessing?: boolean }) => Promise<void>;
   /** Synchronously cancel delayed starts and fence new status writes, then drain issued writes. */
   dispose: () => Promise<void>;
-  updateTitle?: (title: string | null) => void;
+  updateTitle?: (
+    title: string | null,
+    metadata?: {
+      iconEmoji?: TelegramTopicIconEmoji | null;
+      titleChanged?: boolean;
+    },
+  ) => void;
 };
 
 export type FastAgentMcpServerConfig = {
@@ -196,6 +204,8 @@ export type FastAgentTurnAdapter = {
   postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
   /** Surfaces with a streaming API render the reply as it is written. */
   createReplyStream?: () => FastAgentReplyStream;
+  /** Override the default delay before an incomplete reply opens a stream. */
+  replyStreamStartDelayMs?: number;
   replaceReply?: (
     handle: FastAgentReplyHandle,
     reply: FastAgentReply,

@@ -946,6 +946,24 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('keeps the system prompt stable when voice mode changes', async () => {
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'How is the task going?',
+      currentMessageId: '100.3',
+      voiceMode: true,
+      adapter: callbacks(),
+    });
+
+    const textTurn = mocks.generateText.mock.calls[0]?.[0];
+    const voiceTurn = mocks.generateText.mock.calls[1]?.[0];
+    expect(voiceTurn?.system).toBe(textTurn?.system);
+    expect(textTurn?.system).toContain('## Voice Calls');
+    expect(textTurn?.prompt).not.toContain('<voice_mode active="true" />');
+    expect(voiceTurn?.prompt).toContain('<voice_mode active="true" />');
+  });
+
   it('cuts the trailing model request once the closeout is delivered', async () => {
     const adapter = callbacks();
     const abortedAtSecondRequest = vi.fn();
@@ -4757,6 +4775,66 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('posts the Fast widget preview with its Telegram session link', async () => {
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'On it.',
+        });
+        await invokeTool(nativeToolNames.showWidget, {
+          html: '<p>Safe</p>',
+          textFallback: 'Status: all systems operational.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: { ...baseParams.conversation, surface: 'telegram' },
+      adapter,
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'progress',
+      message: `Status: all systems operational.\n\n[View widget](${buildFastSessionUrl('telegram', 'conversation-1')})`,
+    });
+  });
+
+  it.each(['slack', 'discord', 'teams', 'telegram', 'agentmail'] as const)(
+    'posts the Fast widget link on %s when the optional preview is omitted',
+    async (surface) => {
+      const adapter = callbacks();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'On it.',
+          });
+          await invokeTool(nativeToolNames.showWidget, {
+            html: '<p>Safe</p>',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: { ...baseParams.conversation, surface },
+        adapter,
+      });
+
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'progress',
+        message: `[View widget](${buildFastSessionUrl(surface, 'conversation-1')})`,
+      });
+    },
+  );
+
   it('rejects a compact widget that exceeds the limit when pretty-serialized', async () => {
     const adapter = callbacks();
     const textFallback = 'This must not be posted.';
@@ -5085,6 +5163,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           }),
         ).resolves.toEqual({
           success: true,
+          availableToolCount: 1,
           tools: [
             expect.objectContaining({
               integrationId: 'github',
@@ -7598,6 +7677,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     ]);
     const toolResults: unknown[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -7656,6 +7736,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     // Lookups need no acknowledgement and return the schema to call with.
     expect(toolResults[0]).toEqual({
       success: true,
+      availableToolCount: 2,
       tools: [
         {
           integrationId: 'github',
@@ -7669,7 +7750,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       success: false,
       error: expect.stringContaining('"missing"'),
     });
-    expect(toolResults[2]).toEqual({ success: true, tools: [] });
+    expect(toolResults[2]).toEqual({
+      success: true,
+      tools: [],
+      availableToolCount: 2,
+      emptyReason: 'no_filter_match',
+      guidance: expect.stringContaining('only integrationId'),
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'conversationId="100.1" messageId="100.2" queryTermCount=1 availableIntegrationCount=1 availableToolCount=2 emptyReason="no_filter_match"',
+      ),
+    );
     // Calls follow the same gate as natively mounted MCP tools.
     expect(toolResults[3]).toEqual({
       success: false,
@@ -8658,6 +8750,27 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             skillId: '00000000-0000-4000-8000-000000000001',
             name: 'example-checklist',
             scope: 'instance',
+          },
+        ],
+        [
+          'update_custom_skill',
+          {
+            skillId: 'instance:00000000-0000-4000-8000-000000000001',
+            expectedVersion: 1,
+            content: {
+              type: 'update_content',
+              update_content: {
+                content_updates: [{ old_str: 'Check', new_str: 'Review' }],
+              },
+            },
+          },
+          {
+            success: true,
+            persisted: true,
+            skillId: 'instance:00000000-0000-4000-8000-000000000001',
+            name: 'example-checklist',
+            scope: 'instance',
+            version: 2,
           },
         ],
       ])(

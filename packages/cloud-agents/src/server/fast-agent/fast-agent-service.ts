@@ -28,6 +28,7 @@ import {
   dataVisualizationInputsSchema,
   fastAgentHumanFollowUpEventSchema,
   formatErrorForLog,
+  formatSingleLineLog,
   manageWakeupsInputSchema,
   sessionSecretRequestSchema,
   sessionSecretPrepareSchema,
@@ -37,6 +38,8 @@ import {
   type ReasoningEffort,
   type RunStatus,
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
+  INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE,
+  INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE,
   matchIntegrationTools,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
@@ -523,13 +526,19 @@ function findFastAgentIntegrationTools(
 ): {
   tools: IntegrationToolCandidate[];
   truncated: boolean;
+  availableToolCount: number;
   unknownIntegration: boolean;
 } {
   if (
     args.integrationId &&
     !integrations.some((integration) => integration.id === args.integrationId)
   ) {
-    return { tools: [], truncated: false, unknownIntegration: true };
+    return {
+      tools: [],
+      truncated: false,
+      availableToolCount: 0,
+      unknownIntegration: true,
+    };
   }
   const candidates = integrations.flatMap((integration) =>
     integration.tools.map((tool) => ({
@@ -1440,6 +1449,7 @@ function buildFastAgentMessages({
   resumedAfterInterruption = false,
   resumedAfterInferenceRetry = false,
   previousAttempt,
+  voiceMode = false,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -1460,6 +1470,7 @@ function buildFastAgentMessages({
   resumedAfterInferenceRetry?: boolean;
   /** What an earlier attempt at this same turn already did, when resuming. */
   previousAttempt?: FastAgentTurnAttemptSummary | null;
+  voiceMode?: boolean;
 }): {
   bootstrapMessages: ModelMessage[];
   turnMessages: ModelMessage[];
@@ -1496,6 +1507,7 @@ function buildFastAgentMessages({
           )
         : normalizedQuestion;
   const currentUserMessageText = [
+    voiceMode ? '<voice_mode active="true" />' : undefined,
     explicitSkillInvocationContext,
     wrappedCurrentUserMessageText,
   ]
@@ -2167,7 +2179,12 @@ export async function answerFastAgentQuestion({
   // Platform events (automation reports, task settlements) post whole.
   const surfaceReplyStream = createFastAgentSurfaceReplyStreamer({
     ...(adapter.createReplyStream && !platformEvent
-      ? { createStream: adapter.createReplyStream }
+      ? {
+          createStream: adapter.createReplyStream,
+          ...(adapter.replyStreamStartDelayMs !== undefined
+            ? { startDelayMs: adapter.replyStreamStartDelayMs }
+            : {}),
+        }
       : {}),
   });
   const onAssistantTextUpdated = (update: NonTaskOpenCodeAssistantText) => {
@@ -3203,7 +3220,11 @@ export async function answerFastAgentQuestion({
       (platformEvent && platformEventKind === 'automation')
     ) {
       void refreshFastAgentSessionTitle({ sessionId: session.id, userId }).then(
-        (title) => adapter.activity?.updateTitle?.(title),
+        (generated) =>
+          adapter.activity?.updateTitle?.(generated?.title ?? null, {
+            iconEmoji: generated?.iconEmoji ?? null,
+            titleChanged: generated?.titleChanged,
+          }),
       );
     }
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
@@ -3249,6 +3270,7 @@ export async function answerFastAgentQuestion({
       resumedAfterInterruption,
       resumedAfterInferenceRetry,
       previousAttempt,
+      voiceMode,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
       Env.RELEASE_PRODUCT_VERSION,
@@ -3276,7 +3298,6 @@ export async function answerFastAgentQuestion({
       appEnv: Env.R_APP_ENV,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
-      voiceMode,
       therapistModeEnabled,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
@@ -3809,12 +3830,42 @@ export async function answerFastAgentQuestion({
           error: `No on-demand deployment MCP server with id "${args.integrationId}" is available in fast mode.`,
         };
       }
+      const emptyReason =
+        found.tools.length === 0
+          ? found.availableToolCount > 0
+            ? 'no_filter_match'
+            : 'no_exposed_tools'
+          : undefined;
+      if (found.tools.length === 0) {
+        console.warn(
+          formatSingleLineLog(
+            '[Fast Agent] On-demand integration lookup returned no tools.',
+            {
+              workspaceId: conversation.workspaceId,
+              conversationId: conversation.conversationId,
+              messageId: currentMessageId,
+              integrationId: args.integrationId,
+              toolName: args.toolName,
+              queryTermCount: args.query?.trim().split(/\s+/u).length ?? 0,
+              availableIntegrationCount: onDemandIntegrations.length,
+              availableToolCount: found.availableToolCount,
+              emptyReason,
+            },
+          ),
+        );
+      }
       return {
         success: true as const,
         tools: found.tools,
+        availableToolCount: found.availableToolCount,
+        ...(emptyReason ? { emptyReason } : {}),
         ...(found.truncated
           ? { guidance: INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE }
-          : {}),
+          : emptyReason === 'no_filter_match'
+            ? { guidance: INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE }
+            : emptyReason === 'no_exposed_tools'
+              ? { guidance: INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE }
+              : {}),
       };
     };
     // Subagents may look up and call on-demand deployment MCP tools; every
@@ -4083,21 +4134,17 @@ export async function answerFastAgentQuestion({
               };
             }
 
-            if (
-              result.textFallback &&
-              (conversation.surface === 'slack' ||
-                conversation.surface === 'discord')
-            ) {
-              const signature = JSON.stringify([
-                'progress',
-                result.textFallback,
-                [],
-              ]);
+            if (isFastAgentCommunicationConversation(conversation)) {
+              const widgetLink = `[View widget](${buildFastSessionUrl(conversation.surface, session.id)})`;
+              const message = result.textFallback
+                ? `${result.textFallback}\n\n${widgetLink}`
+                : widgetLink;
+              const signature = JSON.stringify(['progress', message, []]);
               if (!completedChatReplySignatures.has(signature)) {
                 throwIfTurnCancelled();
                 await postReply({
                   purpose: 'progress',
-                  message: `${result.textFallback}\n\n[View widget](${buildFastSessionUrl(conversation.surface, session.id)})`,
+                  message,
                 });
                 completedChatReplySignatures.add(signature);
               }

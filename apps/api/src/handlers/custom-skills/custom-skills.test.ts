@@ -2,18 +2,21 @@ import { Hono } from 'hono';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   CREATE_CUSTOM_SKILL_TOOL,
-  type CreateCustomSkillInput,
+  UPDATE_CUSTOM_SKILL_TOOL,
+  type UpdateCustomSkillInput,
 } from '@roomote/types';
 import { customSkillsRouter } from './index';
 import { registerRoomoteCustomSkillsTool } from '../mcp/roomote-custom-skills-tool';
 import type { McpAuth } from '../mcp/middleware';
 
-const { create, resolve } = vi.hoisted(() => ({
+const { create, resolve, update } = vi.hoisted(() => ({
   create: vi.fn(),
   resolve: vi.fn(),
+  update: vi.fn(),
 }));
 vi.mock('@roomote/db/server', () => ({
   createCustomSkill: create,
+  updateCustomSkillFromAgent: update,
   CreateCustomSkillError: class extends Error {},
 }));
 vi.mock('../mcp/proxy-utils', () => ({
@@ -39,7 +42,38 @@ beforeEach(() => {
     success: true,
     name: input.name,
     scope: 'instance',
+    version: 1,
   });
+  update.mockResolvedValue({
+    persisted: true,
+    success: true,
+    skillId: 'instance:00000000-0000-4000-8000-000000000001',
+    name: input.name,
+    scope: 'instance',
+    version: 2,
+  });
+});
+it('updates by exact instance ID with the resolved acting identity', async () => {
+  const updateInput: UpdateCustomSkillInput = {
+    skillId: 'instance:00000000-0000-4000-8000-000000000001',
+    expectedVersion: 1,
+    content: {
+      type: 'update_content',
+      update_content: {
+        content_updates: [{ old_str: 'Instructions', new_str: 'Updated' }],
+      },
+    },
+  };
+  const response = await app().request('/custom-skills', {
+    method: 'PATCH',
+    body: JSON.stringify(updateInput),
+  });
+  expect(response.status).toBe(200);
+  expect(update).toHaveBeenCalledWith({
+    ...updateInput,
+    actorUserId: 'resolved-member',
+  });
+  await expect(response.json()).resolves.toMatchObject({ version: 2 });
 });
 function app() {
   const app = new Hono<{ Variables: { mcpAuth: McpAuth } }>();
@@ -100,9 +134,9 @@ it('rejects malformed bodies, missing fields, and caller-supplied scope or ident
   expect(create).not.toHaveBeenCalled();
 });
 it('registers the shared MCP contract and calls the same in-process route', async () => {
-  let handler!: (params: CreateCustomSkillInput) => Promise<unknown>;
-  const registerTool = vi.fn((_name, _config, callback) => {
-    handler = callback;
+  const handlers = new Map<string, (params: never) => Promise<unknown>>();
+  const registerTool = vi.fn((name, _config, callback) => {
+    handlers.set(name, callback);
   });
   registerRoomoteCustomSkillsTool(
     { registerTool } as unknown as McpServer,
@@ -118,11 +152,17 @@ it('registers the shared MCP contract and calls the same in-process route', asyn
       environmentIds: [],
     }).success,
   ).toBe(false);
-  expect(await handler(input)).toMatchObject({
+  expect(
+    await handlers.get(CREATE_CUSTOM_SKILL_TOOL.name)!(input as never),
+  ).toMatchObject({
     content: [expect.objectContaining({ type: 'text' })],
   });
   expect(create).toHaveBeenCalledWith({
     ...input,
     actorUserId: 'resolved-member',
   });
+  expect(registerTool.mock.calls[1]?.[0]).toBe(UPDATE_CUSTOM_SKILL_TOOL.name);
+  expect(registerTool.mock.calls[1]?.[1].inputSchema.shape).toEqual(
+    UPDATE_CUSTOM_SKILL_TOOL.inputSchema,
+  );
 });

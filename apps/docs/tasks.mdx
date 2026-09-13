@@ -40,6 +40,15 @@ execution count, workspace or pull-request context, aggregate cost, and unread
 state. Use the **Tasks** scope when you only want Sessions containing execution
 work. Board and list choices remain in the URL so views are shareable.
 
+## Task completion notifications
+
+When a task started from the web completes, fails, or is canceled while its
+initiator is away from the Session, Roomote sends a personal notification with
+a link back to the task. Notifications go to the initiator's linked Slack,
+Teams, Telegram, and Discord chats where available; verified email is used only
+when no chat delivery succeeds. Roomote skips this notification while the
+initiator is present in the Session.
+
 ## Recover from a failed start
 
 When a task cannot start, select **Try in a new task** to open an editable task

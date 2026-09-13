@@ -27,15 +27,19 @@ assert.equal(process.platform, 'linux');
 assert.equal(Env.APP_ENV, 'development');
 assert.equal(Env.S3_ENDPOINT, 'http://localhost:19000');
 assert.equal(Env.S3_PRESIGN_ENDPOINT ?? Env.S3_ENDPOINT, Env.S3_ENDPOINT);
-const release = 'RELEASE.2025-09-07T16-13-09Z';
-const builds: Record<string, { platform: string; sha256: string }> = {
+const release = 'RELEASE.2025-10-15T17-29-55Z';
+const previousRelease = 'RELEASE.2025-09-07T16-13-09Z';
+const sourceVersion = 'v0.0.0-20251015172955-9e49d5e7a648';
+const sourceSum = 'h1:6TdolSCLSs2nwm8i0PpWDqf9iX2Ty9WQK8wmr7dCnUM=';
+const sourceGoModSum = 'h1:yCWDkwWO9IWpGsT4mreDDN/B/QVmK2zC666uInRAcqE=';
+const builds: Record<string, { goarch: string; sha256: string }> = {
   x64: {
-    platform: 'linux-amd64',
-    sha256: '7c5bd8512c6e966455b1d198209358b2d191c77a83ab377c4073281065fb855f',
+    goarch: 'amd64',
+    sha256: 'fbc76569ea811e9c8602fd9993e9c854d0f543e50696ab12c11cdfc0ff8457b1',
   },
   arm64: {
-    platform: 'linux-arm64',
-    sha256: '5c83cd2cf151717ba0243f73e1c7802ff36e272b67144bdd7f1f7d684fd6f03d',
+    goarch: 'arm64',
+    sha256: '529f084ea73a516a680542a53883cbc92547658f8a78e35ff4a87dca630f91e6',
   },
 };
 const build = builds[process.arch];
@@ -43,6 +47,7 @@ assert.ok(build, 'MinIO sandbox bootstrap supports Linux x64 and arm64');
 const directory = join(homedir(), '.cache', 'roomote-minio');
 await mkdir(directory, { recursive: true, mode: 0o700 });
 const binary = join(directory, `minio.${release}`);
+const previousBinary = join(directory, `minio.${previousRelease}`);
 const checksum = async (path: string) =>
   createHash('sha256')
     .update(await readFile(path))
@@ -50,23 +55,62 @@ const checksum = async (path: string) =>
 try {
   assert.equal(await checksum(binary), build.sha256);
 } catch {
-  const temporary = `${binary}.${randomUUID()}.tmp`;
+  const temporaryDirectory = join(directory, `.build.${randomUUID()}`);
+  const temporary = join(temporaryDirectory, 'minio');
   try {
-    execFileSync('curl', [
-      '--fail',
-      '--silent',
-      '--show-error',
-      '--location',
-      '--retry',
-      '2',
-      '--connect-timeout',
-      '15',
-      '--max-time',
-      '120',
-      '--output',
-      temporary,
-      `https://dl.min.io/server/minio/release/${build.platform}/archive/minio.${release}`,
-    ]);
+    await mkdir(temporaryDirectory, { mode: 0o700 });
+    const goEnvironment = {
+      ...process.env,
+      CGO_ENABLED: '0',
+      GOARCH: build.goarch,
+      GOENV: 'off',
+      GONOSUMDB: '',
+      GOOS: 'linux',
+      GOPRIVATE: '',
+      GOPROXY: 'https://proxy.golang.org',
+      GOSUMDB: 'sum.golang.org',
+      GOTOOLCHAIN: 'local',
+    };
+    const go = execFileSync('mise', ['which', 'go'], {
+      encoding: 'utf8',
+    }).trim();
+    assert.equal(
+      execFileSync(go, ['version'], {
+        encoding: 'utf8',
+        env: goEnvironment,
+      }).trim(),
+      `go version go1.24.8 linux/${build.goarch}`,
+      'MinIO build requires the repository-pinned Go toolchain',
+    );
+    // Community MinIO is source-only; the Go checksum database authenticates
+    // the pinned upstream module before a reproducible, checksum-pinned build.
+    const source = JSON.parse(
+      execFileSync(
+        go,
+        ['mod', 'download', '-json', `github.com/minio/minio@${release}`],
+        {
+          encoding: 'utf8',
+          env: goEnvironment,
+          timeout: 120_000,
+        },
+      ),
+    ) as { Dir: string; GoModSum: string; Sum: string; Version: string };
+    assert.equal(source.Version, sourceVersion, 'Unexpected MinIO source');
+    assert.equal(source.Sum, sourceSum, 'MinIO source checksum mismatch');
+    assert.equal(
+      source.GoModSum,
+      sourceGoModSum,
+      'MinIO module checksum mismatch',
+    );
+    execFileSync(go, ['build', '-trimpath', '-o', temporary, '.'], {
+      cwd: source.Dir,
+      stdio: 'inherit',
+      timeout: 540_000,
+      env: {
+        ...goEnvironment,
+        GOFLAGS: '-mod=readonly',
+      },
+    });
     assert.equal(
       await checksum(temporary),
       build.sha256,
@@ -75,7 +119,7 @@ try {
     await chmod(temporary, 0o700);
     await rename(temporary, binary);
   } finally {
-    await rm(temporary, { force: true });
+    await rm(temporaryDirectory, { force: true, recursive: true });
   }
 }
 
@@ -96,7 +140,9 @@ const processes = JSON.parse(pm2(['jlist'])) as {
   pm2_env: { pm_exec_path: string; status: string };
 }[];
 const existing = processes.find((entry) => entry.name === processName);
-if (existing) {
+const upgrading = existing?.pm2_env.pm_exec_path === previousBinary;
+if (upgrading) pm2(['delete', processName]);
+if (existing && !upgrading) {
   assert.equal(
     existing.pm2_env.pm_exec_path,
     binary,
@@ -198,7 +244,7 @@ try {
   );
 } catch (error) {
   // Do not leave a newly created restart loop behind when setup fails.
-  if (!existing) pm2(['delete', processName]);
+  if (!existing || upgrading) pm2(['delete', processName]);
   throw error;
 } finally {
   s3.destroy();

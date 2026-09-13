@@ -40,6 +40,7 @@ type Skill = SkillDefinition & {
   id: string;
   canManage: boolean;
   createdByName?: string | null;
+  version: number;
 };
 
 function SkillEditor({
@@ -96,7 +97,12 @@ function SkillEditor({
             className="space-y-4"
             onSubmit={form.handleSubmit(
               (values) => {
-                if (skill) update.mutate({ ...values, skillId: skill.id });
+                if (skill)
+                  update.mutate({
+                    ...values,
+                    expectedVersion: skill.version,
+                    skillId: skill.id,
+                  });
                 else create.mutate(values);
               },
               () => {

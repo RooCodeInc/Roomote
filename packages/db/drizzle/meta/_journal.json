@@ -624,6 +624,13 @@
       "when": 1789158001585,
       "tag": "0088_wooden_cardiac",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1789320821498,
+      "tag": "0089_vengeful_iron_fist",
+      "breakpoints": true
     }
   ]
 }

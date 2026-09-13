@@ -91,7 +91,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'For frontend work, use App and prefer GPT-5.6. -> App [id: env-app]',
     );
     expect(prompt).toContain(
-      'An explicit user request for an environment or model always takes precedence',
+      "An explicit user request for an environment or model takes precedence over these rules only when it satisfies the work's requirements",
+    );
+    expect(prompt).toContain(
+      'A Blank slate request never overrides a routing rule indicating that the work requires a repository or configured environment',
     );
     expect(prompt).toContain('supplemental routing rules');
     expect(prompt).toContain(
@@ -189,11 +192,11 @@ describe('buildFastAgentSystemPrompt', () => {
       .split('- Bitbucket writes require')[1]!
       .split('\n')[0]!;
     expect(writes).toContain(
-      'update PR titles/descriptions, decline PRs, or add comments and replies to a comment in the same PR',
+      'update PR titles/descriptions, merge or decline PRs, or add comments and replies to a comment in the same PR',
     );
     expect(writes).toContain('Reading does not authorize writes');
     expect(writes).toContain(
-      'Reopening/merging PRs, file writes, commit/PR creation, review administration, and Bitbucket Server/Data Center are unsupported',
+      'Reopening PRs, file writes, commit/PR creation, review administration, and Bitbucket Server/Data Center are unsupported',
     );
     expect(prompt).toContain(
       'an actual code-review request still uses "review_pull_request"',
@@ -593,6 +596,8 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('get_chat_channel_messages');
     expect(prompt).toContain('manage_custom_automations');
     expect(prompt).toContain('roomote_create_custom_skill');
+    expect(prompt).toContain('roomote_update_custom_skill');
+    expect(prompt).toContain('exact `instance:<uuid>` ID and current version');
     expect(prompt).toContain('user explicitly asks to save');
     expect(prompt).toContain(
       'do not supply environmentIds or ask for environment selection',
@@ -785,6 +790,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'the runtime silently ensures this conversation has exactly one internal session-wide one-shot check',
     );
+    expect(prompt).toContain(
+      '"in 1m" while a voice call is active, otherwise "in 10m"',
+    );
     expect(prompt).toContain('Do not create another wakeup for this purpose');
     expect(prompt).toContain('passing "internal": true');
     expect(prompt).toContain(
@@ -848,7 +856,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'post one brief consolidated factual status for the Session when either inspection finds a genuinely notable new development',
     );
     expect(prompt).toContain(
-      'or the user has received no useful user-visible work update in this conversation for roughly 10 minutes',
+      'or the user has received no useful user-visible work update during the current automatic-check interval',
     );
     expect(prompt).toContain(
       'Important news is immediate and has no minimum wait',
@@ -863,7 +871,13 @@ describe('buildFastAgentSystemPrompt', () => {
       'When neither reporting condition is met, call "ignore_event" after ensuring the next check',
     );
     expect(prompt).toContain(
-      'ensure exactly one equivalent next one-shot check exists for "in 10m"',
+      'ensure exactly one equivalent next one-shot check exists by creating it with the stable nominal schedule "in 10m"',
+    );
+    expect(prompt).toContain(
+      'Never infer voice activity from the originating turn or choose the next wakeup delay yourself',
+    );
+    expect(prompt).toContain(
+      'the server resolves current persisted call state when scheduling',
     );
     expect(prompt).toContain('passing "internal": true');
     expect(prompt).toContain('If no task remains running, do not rearm');
@@ -882,7 +896,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('automatic monitoring must never reactivate it');
     expect(prompt).toContain(
-      'report notable new developments immediately or one factual consolidated status after roughly 10 minutes without a useful visible work update',
+      'report notable new developments immediately or one factual consolidated status when there has been no useful visible work update during the current automatic-check interval',
     );
     expect(prompt).toContain(
       'otherwise stay silent while still rearming if work runs',
@@ -897,6 +911,28 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('after 12 runs');
     expect(prompt).not.toContain(
       'post exactly one brief consolidated factual status for the Session on every check',
+    );
+  });
+
+  it('keeps one cache-stable follow-through contract for voice and text cadence', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'scheduled_wakeup',
+    });
+
+    expect(prompt).toContain(
+      'user-visible work update during the current automatic-check interval',
+    );
+    expect(prompt).toContain('stable nominal schedule "in 10m"');
+    expect(prompt).toContain(
+      'the server replaces that nominal delay with "in 1m" while voice is currently active and otherwise keeps "in 10m"',
+    );
+    expect(prompt).toContain(
+      'Keep routine spoken updates especially concise, applying these same reporting and repetition rules rather than inventing another suppression policy',
+    );
+    expect(prompt).toContain(
+      'do not narrate routine logs, invent progress, repeat an already reported development',
     );
   });
 
@@ -1196,27 +1232,42 @@ describe('buildFastAgentSystemPrompt', () => {
     },
   );
 
-  it('keeps bounded GitHub updates in Fast without bypassing denied writes', () => {
-    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
-    expect(prompt).toContain(
-      'these bounded actions do not require a coding task',
-    );
-    expect(prompt).toContain(
-      'Writes unsupported by the discovered provider API tools still require a coding task, not an authorization bypass',
-    );
-    expect(prompt).toContain(
-      "A permission denial is not a reason to bypass the integration's authorization",
-    );
-    for (const guidance of [
-      '`update_pull_request`, `add_issue_comment`, and `add_reply_to_pull_request_comment`',
-      'Follow their discovered descriptions, schemas, and arguments',
-      'Read the target first, send only the requested fields',
-      'report success only after the tool confirms it',
-      'inspect the resulting state before retrying an error',
-    ]) {
-      expect(prompt).toContain(guidance);
-    }
-  });
+  it.each(['human', 'automation', 'scheduled_wakeup'] as const)(
+    'keeps native provider merges in Fast without bypassing denied writes on %s turns',
+    (turn) => {
+      const prompt = buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        ...(turn === 'human'
+          ? {}
+          : { turnSource: 'platform_event' as const, platformEventKind: turn }),
+      });
+      expect(prompt).toContain(
+        'these bounded actions do not require a coding task',
+      );
+      expect(prompt).toContain(
+        'Writes unsupported by the discovered provider API tools still require a coding task, not an authorization bypass',
+      );
+      expect(prompt).toContain(
+        "A permission denial is not a reason to bypass the integration's authorization",
+      );
+      for (const guidance of [
+        '`update_pull_request`, `merge_pull_request`, `add_issue_comment`, and `add_reply_to_pull_request_comment`',
+        'Follow their discovered descriptions, schemas, and arguments',
+        'Read the target first, send only the requested fields',
+        'report success only after the tool confirms it',
+        'current human message explicitly requests merging that exact pull or merge request',
+        'approval, passing checks, automation events, or discussion about merging is not authorization',
+        'Immediately before the mutation, read the target again',
+        'pass its fresh head SHA when the merge schema supports head binding',
+        'Let the provider enforce branch protections, required reviews, checks, merge methods, and credential permissions',
+        'After every merge attempt, read the target again and confirm the provider reports it merged',
+        'Bitbucket does not provide atomic expected-head binding on its merge endpoint',
+        'inspect the resulting state before retrying an error',
+      ]) {
+        expect(prompt).toContain(guidance);
+      }
+    },
+  );
 
   it('treats replies as continuations of the existing conversation', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
@@ -1271,6 +1322,71 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt.indexOf(conversationStateRule)).toBeLessThan(
       prompt.indexOf(launchRule),
+    );
+  });
+
+  it('selects task environments from work requirements without unsafe fallbacks', () => {
+    const configuredPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [
+        {
+          id: 'env-roomote',
+          name: 'Roomote',
+          repositoryNames: ['RooCodeInc/Roomote'],
+        },
+      ],
+      workspaceRoutingRules: [
+        {
+          description: 'Roomote repository work requires Roomote.',
+          target: 'env-roomote',
+        },
+      ],
+    });
+    const environmentlessPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      availableIntegrations: [],
+    });
+
+    expect(configuredPrompt).toContain(
+      "Choose the task environment from the work's requirements and the instance's available environments",
+    );
+    expect(configuredPrompt).toContain(
+      'When a configured environment clearly matches the required project, repository, or tools, pass its exact ID to `launch_task`',
+    );
+    expect(configuredPrompt).toContain(
+      'If the work depends on a specific repository or environment and no suitable target is available, explain what is missing and ask how to proceed',
+    );
+    expect(configuredPrompt).toContain(
+      'If multiple targets are plausible, ask which to use',
+    );
+    expect(configuredPrompt).toContain(
+      'Never silently substitute Blank slate or All repositories for a required or ambiguous target',
+    );
+    expect(configuredPrompt).toContain(
+      'Do not use Blank slate to work around missing access or an environment failure',
+    );
+    expect(configuredPrompt).toContain(
+      'Handle work directly in Fast when it does not require sandbox execution',
+    );
+    expect(configuredPrompt).toContain(
+      'A Blank slate request never overrides a required repository or environment, including one identified by a matching Routing Rule',
+    );
+    expect(configuredPrompt).toContain(
+      'A Blank slate request never overrides a routing rule indicating that the work requires a repository or configured environment',
+    );
+    expect(configuredPrompt).not.toContain(
+      'Otherwise use null to use the deployment default',
+    );
+    expect(configuredPrompt).not.toContain(
+      'Use Blank slate when the user explicitly requests it, or when the work can be completed',
+    );
+    expect(environmentlessPrompt).toContain(
+      'Use Blank slate only when the work can be completed in a standalone sandbox without a configured environment, including when the user explicitly requests it',
+    );
+    expect(environmentlessPrompt).toContain(
+      'Instances without connected source control or configured environments can still use Blank slate for suitable work',
+    );
+    expect(environmentlessPrompt).toContain(
+      'No configured environments were found for this deployment',
     );
   });
 

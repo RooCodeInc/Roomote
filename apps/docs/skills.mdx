@@ -117,6 +117,13 @@ Names use lowercase letters, numbers, and hyphens, up to 64 characters. Each
 description is limited to 1,024 characters, and the rendered Markdown document
 to 64 KiB. An instance can hold up to 128 instance skills.
 
+You can also ask Fast to update an instance skill you created. Fast reloads the
+skill first and applies the edit only if its version is still current. Focused
+edits use exact text replacements; missing or repeated text is rejected unless
+you explicitly ask to replace every occurrence. Metadata and content changes
+are saved together, so a permission, naming, replacement, or version conflict
+does not leave a partial edit. Admins may update any instance skill.
+
 Deleting a skill removes it from future discovery and runtime refreshes, not
 from text already loaded in an active conversation. Locally modified skill
 files in an existing coding workspace are preserved rather than deleted as

@@ -12,6 +12,7 @@ import type { ResultInboxItem } from '@/trpc/commands/results';
 const mocks = vi.hoisted(() => ({
   act: vi.fn(),
   clear: vi.fn(),
+  list: vi.fn(),
   replace: vi.fn(),
 }));
 
@@ -78,7 +79,7 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['results', 'list'],
         queryOptions: () => ({
           queryKey: ['results', 'list'],
-          queryFn: async () => currentResults,
+          queryFn: mocks.list,
         }),
       },
       unreadCount: { queryKey: () => ['results', 'count'] },
@@ -102,11 +103,14 @@ function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <ResultsPage />
-    </QueryClientProvider>,
-  );
+  return {
+    queryClient,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <ResultsPage />
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 import { ResultsPage } from './ResultsPage';
@@ -115,6 +119,7 @@ describe('ResultsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     currentResults = results;
+    mocks.list.mockImplementation(async () => currentResults);
     mocks.act.mockImplementation(
       async (variables: { id: string; kind: string }) => {
         currentResults = currentResults.filter(
@@ -128,6 +133,55 @@ describe('ResultsPage', () => {
       currentResults = [];
       return { success: true };
     });
+  });
+
+  it('shows a retry action instead of an empty inbox when the initial load fails', async () => {
+    mocks.list.mockRejectedValue(new Error('List failed'));
+
+    renderPage();
+
+    expect(
+      await screen.findByText('Failed to load results.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.queryByText('No unread results')).not.toBeInTheDocument();
+  });
+
+  it('refetches the results query when Retry is clicked', async () => {
+    mocks.list.mockRejectedValue(new Error('List failed'));
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+  });
+
+  it('recovers to the honest empty state after a successful retry', async () => {
+    mocks.list
+      .mockRejectedValueOnce(new Error('List failed'))
+      .mockResolvedValueOnce([]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByText('No unread results')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Failed to load results.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps loaded results visible when a later refetch fails', async () => {
+    const { queryClient } = renderPage();
+    await screen.findByText('Security Auditor');
+    mocks.list.mockRejectedValueOnce(new Error('Refresh failed'));
+
+    await queryClient.refetchQueries({ queryKey: ['results', 'list'] });
+
+    expect(screen.getByText('Security Auditor')).toBeInTheDocument();
+    expect(screen.getByText('Code Quality Auditor')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Failed to load results.'),
+    ).not.toBeInTheDocument();
   });
 
   it('uses the requested column order and compact row actions', async () => {

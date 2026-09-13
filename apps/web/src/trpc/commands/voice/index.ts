@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import {
   appendFastAgentVisibleMessages,
+  refreshOwnTaskFollowThroughWakeupCadence,
   upsertFastAgentMessage,
 } from '@roomote/cloud-agents/server';
 import {
@@ -210,7 +211,6 @@ export async function recordVoiceTurnCommand(
   }).catch((error: unknown) => {
     console.warn('[voice] Failed to add a voice turn to Fast history', error);
   });
-
   return { eventId };
 }
 
@@ -255,6 +255,15 @@ export async function recordVoiceCallEventCommand(
       nativeSessionId: null,
       nativeMessageId: null,
     },
+  });
+  await refreshOwnTaskFollowThroughWakeupCadence({
+    conversationId: session.id,
+    userId: auth.userId,
+  }).catch((error: unknown) => {
+    console.warn(
+      '[voice] Failed to refresh task follow-through cadence',
+      error,
+    );
   });
 
   return { eventId };

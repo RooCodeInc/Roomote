@@ -28,8 +28,10 @@ import {
 
 import {
   generateLlmTaskTitle,
+  generateLlmTaskTitleWithIcon,
   isFallbackTaskTitle,
   LLM_TITLE_LOCKED_CHECKPOINT,
+  type GeneratedTaskTitle,
   type TaskTitleMessage,
 } from '../llm-task-title';
 
@@ -177,7 +179,7 @@ export async function refreshFastAgentSessionTitle({
 }: {
   sessionId: string;
   userId: string;
-}): Promise<string | null> {
+}): Promise<(GeneratedTaskTitle & { titleChanged: boolean }) | null> {
   try {
     const conversation = await db.query.fastAgentConversations.findFirst({
       where: eq(fastAgentConversations.id, sessionId),
@@ -192,7 +194,7 @@ export async function refreshFastAgentSessionTitle({
       return null;
     }
     if (conversation.titleEditedByUserAt) {
-      return conversation.title;
+      return null;
     }
 
     const rows = await db
@@ -245,19 +247,20 @@ export async function refreshFastAgentSessionTitle({
       checkpoint <= conversation.llmTitleCheckpoint ||
       messages.length === 0
     ) {
-      return conversation.title;
+      return null;
     }
 
-    const title = await generateLlmTaskTitle({
+    const generated = await generateLlmTaskTitleWithIcon({
       userId,
       taskId: null,
       messages,
     });
+    const { title } = generated;
     if (isFallbackTaskTitle(title)) {
-      return conversation.title;
+      return null;
     }
 
-    return await db.transaction(async (tx) => {
+    const persistedTitle = await db.transaction(async (tx) => {
       // Re-read the conversation title under a row lock: the pre-generation
       // snapshot may be stale by now, and the session guard below must match
       // the title the session was actually seeded/synced from.
@@ -266,7 +269,7 @@ export async function refreshFastAgentSessionTitle({
         .from(fastAgentConversations)
         .where(eq(fastAgentConversations.id, sessionId))
         .for('update');
-      if (!current) return conversation.title;
+      if (!current) return null;
 
       const [updatedConversation] = await tx
         .update(fastAgentConversations)
@@ -279,7 +282,7 @@ export async function refreshFastAgentSessionTitle({
           ),
         )
         .returning({ id: fastAgentConversations.id });
-      if (!updatedConversation) return current.title;
+      if (!updatedConversation) return null;
 
       // Keep the unified Session's title in step with the generated
       // conversation title, but never clobber a manual Session rename: only
@@ -308,8 +311,14 @@ export async function refreshFastAgentSessionTitle({
             inArray(sessions.title, [...previousTitleCandidates]),
           ),
         );
-      return title;
+      return { title, titleChanged: current.title !== title };
     });
+    return persistedTitle
+      ? {
+          ...persistedTitle,
+          iconEmoji: generated.iconEmoji,
+        }
+      : null;
   } catch (error) {
     console.error(
       `[Fast Agent] Failed to refresh session title session=${sessionId}: ${formatErrorForLog(error)}`,
