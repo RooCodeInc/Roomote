@@ -33,6 +33,7 @@ vi.mock('next/navigation', () => ({
 
 const {
   replyMutate,
+  startGoalMutate,
   reviewActionMutate,
   updateModelSelectionMutate,
   preparePromptAttachments,
@@ -46,6 +47,7 @@ const {
   liveVoiceState,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
+  startGoalMutate: vi.fn(),
   reviewActionMutate: vi.fn(),
   updateModelSelectionMutate: vi.fn(),
   preparePromptAttachments: vi.fn(),
@@ -126,6 +128,7 @@ vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
     fastSessions: {
       reply: { mutate: replyMutate },
+      startGoal: { mutate: startGoalMutate },
       reviewAction: { mutate: reviewActionMutate },
       updateModelSelection: { mutate: updateModelSelectionMutate },
     },
@@ -289,6 +292,8 @@ class FakeEventSource {
 beforeEach(() => {
   FakeEventSource.instances = [];
   replyMutate.mockReset();
+  startGoalMutate.mockReset();
+  startGoalMutate.mockResolvedValue({ success: true, goal: {} });
   reviewActionMutate.mockReset();
   updateModelSelectionMutate.mockReset();
   preparePromptAttachments.mockImplementation(({ text }: { text: string }) =>
@@ -3587,5 +3592,50 @@ describe('FastSessionTranscript', () => {
       await waitFor(() => expect(voiceStatusQuery).toHaveBeenCalled());
       expect(liveVoiceState.start).not.toHaveBeenCalled();
     });
+  });
+
+  it('shows the Session-owned goal above the transcript', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        sessionGoal={{
+          objective: 'Ship the complete release',
+          generation: 'goal-generation:one',
+          status: 'active',
+          maxContinuations: 5,
+          continuationsUsed: 2,
+          blockedReason: null,
+          completedAt: null,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Ship the complete release')).toBeInTheDocument();
+    expect(
+      screen.getByText(/active - 2\/5 continuations/i),
+    ).toBeInTheDocument();
+  });
+
+  it('starts /goal from the Session composer without sending a normal reply', async () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: '/goal ship the release' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() =>
+      expect(startGoalMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        objective: 'ship the release',
+      }),
+    );
+    expect(replyMutate).not.toHaveBeenCalled();
   });
 });

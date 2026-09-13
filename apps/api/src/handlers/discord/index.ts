@@ -22,6 +22,7 @@ import {
 import { reactionEmojiMatches } from '@roomote/communication/reaction-emoji';
 import {
   buildFastAgentReactionExternalInputQuestion,
+  getOrCreateFastAgentSession,
   hasFastAgentSession,
   type FastAgentReactionExternalInput,
 } from '@roomote/cloud-agents/server';
@@ -39,6 +40,7 @@ import {
   isFastAgentProviderMessage,
   queueFastAgentSurfaceReply,
   restoreDiscordLinkCode,
+  startFastSessionGoal,
   upsertDiscordInstallation,
   upsertDiscordUserMapping,
   enqueueDiscordGatewayEvent,
@@ -47,7 +49,6 @@ import {
 import { apiLogger } from '../../logging.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
-import { startTaskGoal } from '../tasks/start-task-goal.js';
 import {
   findActiveCommunicationTaskRun,
   findCompletedCommunicationTaskRunWithSnapshot,
@@ -147,7 +148,7 @@ const DISCORD_HELP_MESSAGE = [
   '',
   '**Available commands**',
   '`/new request:<request>` — start a fresh task.',
-  '`/goal objective:<objective>` — keep working toward an objective across multiple turns.',
+  '`/goal objective:<objective>` — keep this Session working toward an objective across multiple turns.',
   '`/link code:<code>` — link this Discord account in a DM with me.',
   '`/help` — show this message.',
   '',
@@ -817,34 +818,42 @@ async function processDiscordGatewayEvent(
       });
       return { ok: true, goalStarted: false, reason: 'missing_objective' };
     }
-    if (!activeRun) {
-      await replyToDiscordEvent({
-        provider: resolved.provider,
-        applicationId: resolved.applicationId,
+    const fastConversation = {
+      surface: 'discord' as const,
+      workspaceId: channel.guildId ?? 'dm',
+      conversationId: getDiscordFastConversationId(
         channel,
-        interaction: interactionReplyContext(event),
-        text: 'Use `/goal` in an active Roomote task thread or DM. Start a task with `/new` or mention me first.',
-        ephemeral: true,
-      });
-      return { ok: true, goalStarted: false, reason: 'no_active_task' };
-    }
-
-    const result = await startTaskGoal({
-      taskId: activeRun.taskId,
+        interaction?.id ?? event.eventId,
+      ),
+      replyTarget: {
+        channelId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
+      },
+    };
+    const session = await getOrCreateFastAgentSession({
       userId: senderUserId,
+      conversation: fastConversation,
+    });
+    const result = await startFastSessionGoal({
+      sessionId: session.id,
+      userId: senderUserId,
+      senderDisplayName: sender.global_name ?? sender.username,
       objective: command.objective,
-      source: 'discord',
-      clientMessageId: interaction?.id ?? event.eventId,
+      currentMessageId: interaction?.id ?? event.eventId,
     });
     await replyToDiscordEvent({
       provider: resolved.provider,
       applicationId: resolved.applicationId,
       channel,
       interaction: interactionReplyContext(event),
-      text: result.success ? 'Goal Mode enabled.' : result.error,
+      text: result.success
+        ? `Pursuing goal: ${command.objective}`
+        : result.error,
       ephemeral: true,
     });
-    return { ok: true, goalStarted: result.success, runId: activeRun.id };
+    return { ok: true, goalStarted: result.success, sessionId: session.id };
   }
 
   const messageAttachments = message

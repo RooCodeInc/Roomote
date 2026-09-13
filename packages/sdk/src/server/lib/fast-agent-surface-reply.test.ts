@@ -113,6 +113,8 @@ import {
   fastAgentConversations,
   fastAgentProviderMessages,
   fastAgentMessages,
+  ensureSessionForFastConversation,
+  getSessionGoal,
   slackInstallations,
   userFactory,
 } from '@roomote/db/server';
@@ -122,6 +124,7 @@ import {
   continueFastAgentSurfaceReply,
   continueFastAgentSurfaceReplyWithLock,
   queueFastAgentSurfaceReply,
+  startFastSessionGoal,
 } from './fast-agent-surface-reply';
 import { FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS } from './fast-agent-telegram-activity';
 
@@ -511,6 +514,37 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     ).rejects.toThrow('database unavailable');
     expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
       expect.objectContaining({ forceQueue: true }),
+    );
+  });
+
+  it('persists the goal on the unified Session before admitting the Fast turn', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'web',
+    });
+    const session = await ensureSessionForFastConversation(db, conversation.id);
+
+    await expect(
+      startFastSessionGoal({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Matt',
+        objective: 'Ship the complete release',
+        currentMessageId: 'goal-message-1',
+      }),
+    ).resolves.toMatchObject({ success: true });
+
+    await expect(getSessionGoal(session.id)).resolves.toMatchObject({
+      objective: 'Ship the complete release',
+      status: 'active',
+    });
+    expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          question: 'Ship the complete release',
+        }),
+      }),
     );
   });
 

@@ -25,7 +25,7 @@ import type {
   TaskTrigger,
   TaskVisibility,
   TaskState,
-  TaskGoalStatus,
+  SessionGoalStatus,
   TaskInitiatorKind,
   CommitAuthorKind,
   RunKind,
@@ -771,30 +771,6 @@ export const tasks = pgTable(
     model: text('model').notNull(),
     // Initial task prompt. Per-attempt/resume prompts stay on runs.
     prompt: text('prompt'),
-    goalObjective: text('goal_objective'),
-    goalStatus: text('goal_status').$type<TaskGoalStatus>(),
-    goalMaxContinuations: integer('goal_max_continuations'),
-    goalContinuationsUsed: integer('goal_continuations_used')
-      .notNull()
-      .default(0),
-    goalBlockedReason: text('goal_blocked_reason'),
-    goalCompletedAt: timestamp('goal_completed_at'),
-    goalLastContinuationId: text('goal_last_continuation_id'),
-    goalContinuationIds: text('goal_continuation_ids')
-      .array()
-      .notNull()
-      .default(sql`'{}'::text[]`),
-    goalGenerationIds: text('goal_generation_ids')
-      .array()
-      .notNull()
-      .default(sql`'{}'::text[]`),
-    goalBlockerCandidateReason: text('goal_blocker_candidate_reason'),
-    goalBlockerCandidateCount: integer('goal_blocker_candidate_count')
-      .notNull()
-      .default(0),
-    goalBlockerLastContinuationUsed: integer(
-      'goal_blocker_last_continuation_used',
-    ),
     /**
      * Draft prompt text the user was composing when the sandbox went to
      * sleep. Saved periodically while typing so it can be restored after
@@ -871,18 +847,6 @@ export const tasks = pgTable(
     check(
       'tasks_state_check',
       sql`${table.state} in ('active', 'completed', 'failed', 'canceled')`,
-    ),
-    check(
-      'tasks_goal_status_check',
-      sql`${table.goalStatus} IS NULL OR ${table.goalStatus} in ('active', 'complete', 'blocked', 'budget_limited')`,
-    ),
-    check(
-      'tasks_goal_continuations_check',
-      sql`${table.goalContinuationsUsed} >= 0 AND (${table.goalMaxContinuations} IS NULL OR ${table.goalMaxContinuations} > 0)`,
-    ),
-    check(
-      'tasks_goal_blocker_candidate_count_check',
-      sql`${table.goalBlockerCandidateCount} >= 0`,
     ),
     check('tasks_harness_check', sql`${table.harness} in ('opencode-server')`),
     check(
@@ -4206,6 +4170,61 @@ export const sessions = pgTable(
     check(
       'sessions_cached_status_check',
       sql`${table.cachedStatus} IS NULL OR ${table.cachedStatus} in ('active', 'needs_input', 'blocked', 'ready')`,
+    ),
+  ],
+);
+
+/**
+ * Session-owned Goal Mode state. Child tasks are execution units and never
+ * own or advance this lifecycle. The legacy tasks.goal_* columns remain for
+ * N-1 rollback only and are intentionally not read or written by new code.
+ */
+export const sessionGoals = pgTable(
+  'session_goals',
+  {
+    sessionId: uuid('session_id')
+      .primaryKey()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    objective: text('objective').notNull(),
+    status: text('status').notNull().$type<SessionGoalStatus>(),
+    maxContinuations: integer('max_continuations').notNull(),
+    continuationsUsed: integer('continuations_used').notNull().default(0),
+    blockedReason: text('blocked_reason'),
+    completedAt: timestamp('completed_at'),
+    lastContinuationId: text('last_continuation_id').notNull(),
+    continuationIds: text('continuation_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    generationIds: text('generation_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    blockerCandidateReason: text('blocker_candidate_reason'),
+    blockerCandidateCount: integer('blocker_candidate_count')
+      .notNull()
+      .default(0),
+    blockerLastContinuationUsed: integer('blocker_last_continuation_used'),
+    startedAt: timestamp('started_at').notNull().defaultNow(),
+    endedAt: timestamp('ended_at'),
+    createdByUserId: text('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'session_goals_status_check',
+      sql`${table.status} in ('active', 'complete', 'blocked', 'budget_limited', 'canceled')`,
+    ),
+    check(
+      'session_goals_continuations_check',
+      sql`${table.continuationsUsed} >= 0 AND ${table.maxContinuations} > 0`,
+    ),
+    check(
+      'session_goals_blocker_candidate_count_check',
+      sql`${table.blockerCandidateCount} >= 0`,
     ),
   ],
 );

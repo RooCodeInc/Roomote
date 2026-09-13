@@ -8,10 +8,7 @@ const {
   taskRunsDoneMock,
   taskRunsActivateSlackReplyTargetMock,
   taskRunsClearActiveSlackReplyTargetMock,
-  taskRunsGetGoalMock,
-  taskRunsClaimGoalContinuationMock,
   taskRunsRecordEventMock,
-  taskRunsReleaseGoalContinuationMock,
   taskRunsStampMilestoneMock,
   taskRunsSyncActingUserIdMock,
   taskRunsSetHarnessSessionIdMock,
@@ -53,10 +50,7 @@ const {
     reactionsAllowed: false,
   }),
   taskRunsClearActiveSlackReplyTargetMock: vi.fn().mockResolvedValue(undefined),
-  taskRunsGetGoalMock: vi.fn().mockResolvedValue(null),
-  taskRunsClaimGoalContinuationMock: vi.fn(),
   taskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
-  taskRunsReleaseGoalContinuationMock: vi.fn().mockResolvedValue(true),
   taskRunsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
   taskRunsSyncActingUserIdMock: vi
     .fn()
@@ -176,10 +170,7 @@ vi.mock('@roomote/sdk/client', () => ({
       activateSlackReplyTarget: taskRunsActivateSlackReplyTargetMock,
       clearActiveSlackReplyTarget: taskRunsClearActiveSlackReplyTargetMock,
       done: taskRunsDoneMock,
-      getGoal: taskRunsGetGoalMock,
-      claimGoalContinuation: taskRunsClaimGoalContinuationMock,
       recordEvent: taskRunsRecordEventMock,
-      releaseGoalContinuation: taskRunsReleaseGoalContinuationMock,
       stampMilestone: taskRunsStampMilestoneMock,
       setHarnessSessionId: taskRunsSetHarnessSessionIdMock,
       syncActingUserId: taskRunsSyncActingUserIdMock,
@@ -360,23 +351,6 @@ describe('runTask', () => {
     });
     taskRunsStampMilestoneMock.mockReset();
     taskRunsStampMilestoneMock.mockResolvedValue(undefined);
-    taskRunsClaimGoalContinuationMock.mockReset();
-    taskRunsGetGoalMock.mockReset();
-    taskRunsGetGoalMock.mockResolvedValue(null);
-    taskRunsClaimGoalContinuationMock.mockResolvedValue({
-      updated: true,
-      goal: {
-        objective: 'Complete the goal',
-        generation: 'goal-generation:continuation',
-        status: 'active',
-        maxContinuations: 5,
-        continuationsUsed: 1,
-        blockedReason: null,
-        completedAt: null,
-      },
-    });
-    taskRunsReleaseGoalContinuationMock.mockReset();
-    taskRunsReleaseGoalContinuationMock.mockResolvedValue(true);
     taskRunsSyncActingUserIdMock.mockReset();
     taskRunsSyncActingUserIdMock.mockImplementation(
       async ({ newUserId }: { newUserId: string }) => ({
@@ -2711,124 +2685,6 @@ describe('runTask', () => {
     );
   });
 
-  it('continues a goal enabled after the runtime starts', async () => {
-    await runTask({
-      taskRun: {
-        id: 407,
-        taskId: 'task-407',
-        payloadKind: TaskPayloadKind.StandardTask,
-        harness: 'opencode-server',
-        payload: {},
-        result: null,
-      } as never,
-      envVars: {},
-      workspacePath: '/tmp/workspace',
-      prompt: 'do work',
-      harnessInstructions: undefined,
-      agentInstructions: undefined,
-      environmentConfig: undefined,
-      callbacks: {},
-      context: {},
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        log: vi.fn(),
-      } as never,
-      workerEnv: {
-        buildUserFacingEnv: vi.fn(() => ({})),
-        roomoteAppUrl: 'http://localhost:3000',
-        trpcUrl: 'http://localhost:3001',
-        authToken: 'auth-token',
-        appEnv: 'test',
-        setRuntimeEnv: vi.fn(),
-      } as never,
-    });
-
-    const manager = harnessManagerInstances[0]!;
-    const decision =
-      manager.callbacks?.onBeforeTaskCompletion?.('completion-race');
-
-    await expect(decision).resolves.toMatchObject({
-      disposition: 'continue',
-      prompt: {
-        goalContext: expect.objectContaining({
-          objective: 'Complete the goal',
-          generation: 'goal-generation:continuation',
-        }),
-        source: 'goal-continuation',
-        clientMessageId: 'goal-continuation:completion-race',
-      },
-    });
-    expect(manager.sendFollowUpPrompt).not.toHaveBeenCalled();
-  });
-
-  it('includes the latest active goal on integration follow-up delivery', async () => {
-    taskRunsGetGoalMock.mockResolvedValue({
-      objective: 'Complete the active goal',
-      generation: 'goal-generation:integration',
-      status: 'active',
-      maxContinuations: 5,
-      continuationsUsed: 2,
-      blockedReason: null,
-      completedAt: null,
-    });
-
-    await runTask({
-      taskRun: {
-        id: 408,
-        taskId: 'task-408',
-        payloadKind: TaskPayloadKind.StandardTask,
-        harness: 'opencode-server',
-        payload: {},
-        result: null,
-      } as never,
-      envVars: {},
-      workspacePath: '/tmp/workspace',
-      prompt: 'do work',
-      harnessInstructions: undefined,
-      agentInstructions: undefined,
-      environmentConfig: undefined,
-      callbacks: {},
-      context: {},
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        log: vi.fn(),
-      } as never,
-      workerEnv: {
-        buildUserFacingEnv: vi.fn(() => ({})),
-        roomoteAppUrl: 'http://localhost:3000',
-        trpcUrl: 'http://localhost:3001',
-        authToken: 'auth-token',
-        appEnv: 'test',
-        setRuntimeEnv: vi.fn(),
-      } as never,
-    });
-
-    const pollingOptions = startPollingMock.mock.calls.at(-1)?.[0];
-    await expect(
-      pollingOptions?.sendPrompt({
-        prompt: '<discord_message>Continue.</discord_message>',
-        source: 'discord',
-      }),
-    ).resolves.toBe(true);
-    expect(taskRunsGetGoalMock).toHaveBeenCalledWith({ runId: 408 });
-    expect(
-      harnessManagerInstances.at(-1)?.sendFollowUpPrompt,
-    ).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: '<discord_message>Continue.</discord_message>',
-        source: 'discord',
-        goalContext: expect.objectContaining({
-          generation: 'goal-generation:integration',
-          status: 'active',
-        }),
-      }),
-    );
-  });
-
   describe('background environment setup settled notices', () => {
     type SettledListener = (outcome: EnvironmentSetupSettledOutcome) => void;
 
@@ -2911,24 +2767,15 @@ describe('runTask', () => {
     });
 
     it('does not duplicate a settled notice across concurrent state events', async () => {
-      let resolveGoalLookup!: (value: null) => void;
-      taskRunsGetGoalMock.mockImplementationOnce(
-        () =>
-          new Promise<null>((resolve) => {
-            resolveGoalLookup = resolve;
-          }),
-      );
       const { manager, settledListener } = await runTaskWithBackgroundSetup();
 
       manager.emit('taskStateEvent', 'taskStarted');
       settledListener!({ status: 'fulfilled', warningMessages: [] });
       manager.emit('stateChange', 'running', {});
-      resolveGoalLookup(null);
 
       await vi.waitFor(() => {
         expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
       });
-      expect(taskRunsGetGoalMock).toHaveBeenCalledTimes(1);
     });
 
     it('restores a settled notice when the harness rejects delivery', async () => {

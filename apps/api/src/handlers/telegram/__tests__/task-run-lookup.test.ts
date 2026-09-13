@@ -88,7 +88,6 @@ vi.mock('@roomote/db/server', () => {
 });
 
 import {
-  findActiveTelegramSessionTaskRun,
   findActiveTelegramTaskRun,
   findTelegramAutomationReportRun,
 } from '../task-run-lookup';
@@ -125,29 +124,6 @@ describe('Telegram task run topic lookup', () => {
 
     expect(threadCondition?.strings?.join('')).not.toContain('IS NULL');
     expect(threadCondition?.values).toContain('77');
-  });
-
-  it('matches a root-chat Fast session and linked active task', async () => {
-    await findActiveTelegramSessionTaskRun({
-      chatId: '111000111',
-      userId: 'user-1',
-    });
-
-    const where = whereMock.mock.calls[0]?.[0] as {
-      conditions: Array<{ isNull?: unknown; left?: unknown; right?: unknown }>;
-    };
-
-    expect(where.conditions).toContainEqual({
-      isNull: 'fastAgentConversations.currentReplyThreadId',
-    });
-    expect(where.conditions).toContainEqual({
-      left: 'fastAgentConversations.userId',
-      right: 'user-1',
-    });
-    expect(where.conditions).toContainEqual({
-      left: 'tasks.state',
-      right: 'active',
-    });
   });
 
   it('looks up an announcer report by the replied-to root message id', async () => {

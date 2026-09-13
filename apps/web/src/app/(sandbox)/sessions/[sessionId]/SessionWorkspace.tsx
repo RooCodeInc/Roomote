@@ -19,6 +19,7 @@ import {
   isTaskExecutingTurn,
   type ReasoningEffort,
   type RunStatus,
+  type SessionGoal,
 } from '@roomote/types';
 
 import {
@@ -189,6 +190,7 @@ export type SessionInfo = {
   };
   createdAt: Date;
   status: string | null;
+  goal?: SessionGoal | null;
   tasks: SessionTaskSummary[];
   artifacts?: SessionArtifact[];
   taskSource?: 'unified' | 'fast';

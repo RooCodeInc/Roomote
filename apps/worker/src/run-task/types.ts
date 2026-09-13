@@ -64,9 +64,7 @@ export interface BackgroundEnvironmentSetupNotifier {
 type TaskChannelBindings = Pick<
   DequeuedTaskRun['task'],
   'slackChannelId' | 'slackThreadTs' | 'linearSessionId'
-> & {
-  goal?: DequeuedTaskRun['task']['goal'];
-};
+>;
 
 type Todo = {
   id: string;

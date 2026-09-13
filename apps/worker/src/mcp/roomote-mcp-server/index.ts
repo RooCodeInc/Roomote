@@ -96,7 +96,6 @@ import {
   handleCreateCustomSkill,
   handleUpdateCustomSkill,
 } from './custom-skills.js';
-import { handleManageGoal } from './goal.js';
 import {
   handleGetSessionMessages,
   handleGetSessionSummary,
@@ -624,38 +623,6 @@ const manageTasksInputSchema = {
       'For update_models: desired reasoning level for the role ("extra high" maps to xhigh). A level qualifier trailing a model name ("Luna Max", "Sonnet high") is this field, not part of the model id — pass it here alongside the model. Omit to use the deployment default level.',
     ),
 } satisfies Record<string, z.ZodTypeAny>;
-
-roomoteMcpServer.registerTool(
-  'manage_goal',
-  {
-    title: 'Manage Goal',
-    description:
-      'Read or finish the current task goal. Use get to inspect it. Use complete only after the full objective is verified. Use blocked only when progress cannot continue without user input or an external state change. The agent cannot create, replace, pause, resume, or clear goals.',
-    inputSchema: {
-      action: z.enum(['get', 'complete', 'blocked']),
-      generation: z
-        .string()
-        .max(200)
-        .nullable()
-        .optional()
-        .describe(
-          'Required for complete and blocked. Pass the exact generation assigned in the current turn goal instructions.',
-        ),
-      reason: z
-        .string()
-        .max(2_000)
-        .optional()
-        .describe('Required for blocked; explain the concrete blocker.'),
-    },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (params): Promise<ToolResult> => handleManageGoal(params),
-);
 
 roomoteMcpServer.registerTool(
   'manage_tasks',

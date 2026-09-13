@@ -371,10 +371,12 @@ describe('PromptInput', () => {
           mutate: sandboxSendPromptMutateMock,
         },
       },
-      taskRuns: {
-        startGoal: {
+      fastSessions: {
+        startGoalForTask: {
           mutate: taskRunStartGoalMutateMock,
         },
+      },
+      taskRuns: {
         cancel: {
           mutate: taskRunCancelMutateMock,
         },
@@ -1058,9 +1060,8 @@ describe('PromptInput', () => {
     await waitFor(() => {
       expect(taskRunStartGoalMutateMock).toHaveBeenCalledWith({
         taskId: 'task-goal',
-        goal: { objective: 'ship the release' },
+        objective: 'ship the release',
         clientMessageId: expect.any(String),
-        userImageUrl: undefined,
       });
     });
     expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
@@ -1071,7 +1072,9 @@ describe('PromptInput', () => {
       }),
     );
     expect(appendOptimisticAcpEventMock).not.toHaveBeenCalled();
-    expect(toastSuccessMock).toHaveBeenCalledWith('Goal Mode enabled');
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      'Pursuing goal: ship the release',
+    );
   });
 
   it('requires an objective for the Goal Mode command', () => {

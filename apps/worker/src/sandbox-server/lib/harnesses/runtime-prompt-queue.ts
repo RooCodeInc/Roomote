@@ -1,4 +1,4 @@
-import { ACP_ENVELOPE_EVENT_TYPES, type TaskGoal } from '@roomote/types';
+import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 import type { QueuedPromptMessageSnapshot } from '../harness';
 import type { PersistableEnvelope } from '../runtime-envelope-builder';
@@ -50,7 +50,6 @@ export class RuntimePromptQueue {
     userName?: string;
     userImageUrl?: string;
     clientMessageId?: string;
-    goalContext?: TaskGoal;
   }): string {
     // Hidden platform follow-ups reuse one clientMessageId per logical
     // notification (e.g. the PR re-review prompt for a run), so a newer
@@ -76,7 +75,6 @@ export class RuntimePromptQueue {
       userName: prompt.userName,
       userImageUrl: prompt.userImageUrl,
       clientMessageId: prompt.clientMessageId,
-      goalContext: prompt.goalContext,
       timestamp: Date.now(),
     };
 
@@ -249,7 +247,6 @@ export class RuntimePromptQueue {
       ...(message.clientMessageId
         ? { clientMessageId: message.clientMessageId }
         : {}),
-      ...(message.goalContext ? { goalContext: message.goalContext } : {}),
       timestamp: message.timestamp,
     }));
     this.queuedMessageIdCounter = this.queuedMessages.reduce(

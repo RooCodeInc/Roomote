@@ -91,12 +91,6 @@ function BoardTaskCard({ task }: { task: Task }) {
       <div className="text-base font-semibold leading-snug -mt-1">
         {stripMarkdown(stripHtmlTags(task.title))}
       </div>
-      {getTaskBoardColumn(task) === 'blocked' && task.goalBlockedReason && (
-        <p className="line-clamp-2 text-xs text-destructive">
-          {task.goalBlockedReason}
-        </p>
-      )}
-
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         {(task.taskRun.payload.environmentId ||
           task.taskRun.payload.repo ||

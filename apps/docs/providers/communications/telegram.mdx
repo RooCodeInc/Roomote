@@ -108,7 +108,7 @@ up on tasks on their behalf.
    the same Fast session continues
 4. use `/new <request>` and confirm a fresh conversation opens in its own
    topic when Threaded Mode is enabled
-5. while a task is active, use `/goal <objective>` and confirm Goal Mode starts
+5. use `/goal <objective>` and confirm the acknowledgement repeats the objective
 6. reply in the task topic to send a follow-up
 
 Every message from a linked user enters a Fast Session: in private chats
@@ -118,8 +118,8 @@ another mention, and a direct reply to a Fast message resumes the bound
 session even when the chat has no topics. Sessions are isolated by linked
 Roomote user. `/new` starts a fresh conversation instead of continuing the
 current one, opening a new topic when Telegram supports it; in a plain private
-chat the request joins that chat's conversation. `/goal` keeps an active task
-working toward the supplied objective; it does not start a task by itself.
+chat the request joins that chat's conversation. `/goal` makes the Fast Session
+own and pursue the supplied objective; Fast may delegate child tasks as needed.
 
 While a private-chat Fast turn is running, Telegram shows a non-empty
 **Roomote is working...** rich-message draft, then replaces it with rich response

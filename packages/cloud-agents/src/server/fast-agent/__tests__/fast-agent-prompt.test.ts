@@ -1737,4 +1737,27 @@ describe('buildFastAgentSystemPrompt', () => {
       'If an account-specific request needs a GitHub identity and `sender_github` is absent, ask',
     );
   });
+
+  it('makes an active Session goal authoritative across delegated tasks', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      sessionGoal: {
+        objective: 'Ship the complete release',
+        generation: 'goal-generation:one',
+        status: 'active',
+        maxContinuations: 5,
+        continuationsUsed: 2,
+        blockedReason: null,
+        completedAt: null,
+      },
+    });
+
+    expect(prompt).toContain('## Session Goal');
+    expect(prompt).toContain('Objective: Ship the complete release');
+    expect(prompt).toContain('Continuations used: 2/5');
+    expect(prompt).toContain(
+      'This goal belongs to the Fast Session, not to any delegated task',
+    );
+    expect(prompt).toContain('Use `manage_goal`');
+  });
 });

@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   startPinnedLaunch: vi.fn(),
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
+  getSessionForTask: vi.fn(),
+  startSessionGoal: vi.fn(),
   getFastSessionTasks: vi.fn(),
   currentEpochSeconds: vi.fn(),
   createSessionArtifact: vi.fn(),
@@ -51,6 +53,7 @@ vi.mock('@roomote/sdk/server', () => ({
   resolveUserMcpServerConfigs: vi.fn(),
   wakeFastAgentParentEventAt: vi.fn(),
   wakeFastAgentParentEventNow: vi.fn(),
+  startFastSessionGoal: mocks.startSessionGoal,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -63,6 +66,7 @@ vi.mock('@roomote/db/server', () => ({
   fastAgentMessages: {},
   sessions: {},
   getSessionForFastConversation: mocks.getUnifiedSession,
+  getSessionForTask: mocks.getSessionForTask,
   ensureSessionForFastConversation: mocks.getUnifiedSession,
 }));
 
@@ -100,6 +104,8 @@ import {
   replyToFastSessionCommand,
   scheduleWebFastAgentTurn,
   startFastSessionCommand,
+  startFastSessionGoalCommand,
+  startFastSessionGoalForTaskCommand,
   startSetupFastSessionCommand,
   updateFastSessionModelSelectionCommand,
   submitFastSessionUserInputCommand,
@@ -622,6 +628,48 @@ const session = {
   model: null,
   reasoningEffort: null,
 };
+
+describe('Session Goal Mode commands', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.findAccessibleSession.mockResolvedValue(session);
+    mocks.startSessionGoal.mockResolvedValue({ success: true, goal: {} });
+  });
+
+  it('starts a goal directly on the Fast Session', async () => {
+    await startFastSessionGoalCommand(auth, {
+      sessionId: session.id,
+      objective: 'Ship the release',
+      clientMessageId: 'message-1',
+    });
+
+    expect(mocks.startSessionGoal).toHaveBeenCalledWith({
+      sessionId: session.id,
+      userId: 'user-1',
+      senderDisplayName: 'User One',
+      objective: 'Ship the release',
+      currentMessageId: 'message-1',
+    });
+  });
+
+  it('maps a task-page goal to its owning Fast Session', async () => {
+    mocks.getSessionForTask.mockResolvedValue({
+      fastConversationId: session.id,
+    });
+
+    await startFastSessionGoalForTaskCommand(auth, {
+      taskId: 'task-1',
+      objective: 'Finish the task outcome',
+    });
+
+    expect(mocks.startSessionGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: session.id,
+        objective: 'Finish the task outcome',
+      }),
+    );
+  });
+});
 
 describe('scheduleWebFastAgentTurn', () => {
   beforeEach(() => {

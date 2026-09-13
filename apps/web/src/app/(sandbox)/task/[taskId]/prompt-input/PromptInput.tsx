@@ -570,12 +570,12 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           optimisticClientMessageId = clientMessageId;
 
           if (goalObjective !== null) {
-            const started = await trpcClient.taskRuns.startGoal.mutate({
-              taskId: taskRun.taskId,
-              goal: { objective: goalObjective },
-              clientMessageId,
-              userImageUrl,
-            });
+            const started =
+              await trpcClient.fastSessions.startGoalForTask.mutate({
+                taskId: taskRun.taskId,
+                objective: goalObjective,
+                clientMessageId,
+              });
 
             if (!started.success) {
               throw new Error(started.error);
@@ -593,7 +593,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           }
 
           if (goalObjective !== null) {
-            toast.success('Goal Mode enabled');
+            toast.success(`Pursuing goal: ${goalObjective}`);
           }
 
           handleMessageSent();

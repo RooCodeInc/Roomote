@@ -14,8 +14,16 @@ import {
   type FastAgentTurnAdapter,
   type FastAgentTurnLockHandle,
 } from '@roomote/cloud-agents/server';
-import { and, db, eq, slackInstallations } from '@roomote/db/server';
 import {
+  and,
+  db,
+  eq,
+  getSessionForFastConversation,
+  replaceSessionGoal,
+  slackInstallations,
+} from '@roomote/db/server';
+import {
+  DEFAULT_SESSION_GOAL_MAX_CONTINUATIONS,
   isFastAgentSourceControlConversation,
   type FastAgentHumanFollowUpEvent,
 } from '@roomote/types';
@@ -1043,4 +1051,42 @@ export async function queueFastAgentSurfaceReply(
     },
   );
   return true;
+}
+
+export async function startFastSessionGoal(
+  params: Omit<FastAgentSurfaceReplyParams, 'question'> & {
+    objective: string;
+  },
+): Promise<
+  | { success: true; goal: import('@roomote/types').SessionGoal }
+  | { success: false; error: string }
+> {
+  const session = await getSessionForFastConversation(db, params.sessionId);
+  if (!session) {
+    return { success: false, error: 'Session not found.' };
+  }
+  const activation = await replaceSessionGoal({
+    sessionId: session.id,
+    userId: params.userId,
+    goal: {
+      objective: params.objective,
+      maxContinuations: DEFAULT_SESSION_GOAL_MAX_CONTINUATIONS,
+    },
+  });
+  try {
+    const { objective, ...replyParams } = params;
+    const queued = await queueFastAgentSurfaceReply({
+      ...replyParams,
+      question: objective,
+    });
+    if (queued) return { success: true, goal: activation.goal };
+    await activation.rollback();
+    return {
+      success: false,
+      error: 'The Session goal could not be delivered. Please try again.',
+    };
+  } catch (error) {
+    await activation.rollback().catch(() => undefined);
+    throw error;
+  }
 }
