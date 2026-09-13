@@ -39,6 +39,13 @@ describe('TelegramCommunicationProvider', () => {
     expect(isTelegramThreadUnavailableError('message thread not found')).toBe(
       false,
     );
+    expect(
+      isTelegramThreadUnavailableError(
+        new Error(
+          `${'Telegram sendRichMessage failed (400):'.repeat(10_000)} other failure`,
+        ),
+      ),
+    ).toBe(false);
   });
 
   it('registers the supported slash commands', async () => {

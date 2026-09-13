@@ -16,11 +16,12 @@ import {
 } from './telegram-format';
 
 export function isTelegramThreadUnavailableError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  const prefix = 'telegram sendrichmessage failed (400):';
   return (
-    error instanceof Error &&
-    /Telegram sendRichMessage failed \(400\):.*message thread not found/i.test(
-      error.message,
-    )
+    message.startsWith(prefix) &&
+    message.slice(prefix.length).includes('message thread not found')
   );
 }
 
