@@ -18,6 +18,7 @@ vi.mock('@roomote/sdk/client', () => ({
       recordMessageEnvelope: vi.fn().mockResolvedValue(null),
       recordInferenceUsage: vi.fn().mockResolvedValue({ recorded: true }),
       stampMilestone: vi.fn().mockResolvedValue(undefined),
+      notifyUserAttention: vi.fn().mockResolvedValue('delivered'),
     },
   },
 }));
@@ -943,6 +944,11 @@ describe('subscribeHarnessCallbacks', () => {
         },
         {},
       );
+      expect(sdk.taskRuns.notifyUserAttention).toHaveBeenCalledWith({
+        id: 50,
+        kind: 'input_needed',
+        eventId: 'rui:session:turn:call',
+      });
     });
 
     await unsubscribe();
