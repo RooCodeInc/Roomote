@@ -54,7 +54,9 @@ to continue the same Session. Use the provider's reply action so Roomote can
 match the message to the Session; a separate top-level message starts or
 continues that provider's ordinary conversation instead. Direct task replies
 return to the notified task, while replies to Fast Session notifications keep
-the Session's existing context.
+the Session's existing context. If a Teams personal chat does not attach reply
+metadata, start the message with `continue:` to continue the most recent
+attention notification from the past seven days.
 
 Failed and canceled tasks retain a terminal notification fallback. Roomote
 deduplicates delivery across task completion, retries, and Fast parent reports.

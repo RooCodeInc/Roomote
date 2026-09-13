@@ -398,16 +398,23 @@ async function sendAgentMailUserDirectMessage(
       logContext,
       ...(idempotencyKey ? { clientSendId: idempotencyKey } : {}),
     });
+    const replyAnchor = result.sent
+      ? (result.replyAnchor ?? result.conversation)
+      : null;
     return {
       delivered: result.sent,
       receipt:
-        result.sent && result.conversation?.messageId
+        result.sent && replyAnchor
           ? {
               provider: 'agentmail',
-              workspaceId: result.conversation.inboxId,
-              channelId: result.conversation.conversationId,
-              messageId: result.conversation.messageId,
-              threadId: result.conversation.providerThreadId,
+              workspaceId: replyAnchor.inboxId,
+              channelId:
+                result.conversation?.conversationId ??
+                replyAnchor.providerThreadId,
+              messageId:
+                replyAnchor.messageId ??
+                `thread:${replyAnchor.providerThreadId}`,
+              threadId: replyAnchor.providerThreadId,
             }
           : null,
     };
@@ -547,11 +554,13 @@ export async function sendUserDirectMessageBestEffort({
 export async function sendUserDirectMessageBestEffortWithReceipts({
   userId,
   text,
+  teamsText,
   logContext,
   idempotencyKey,
 }: {
   userId: string;
   text: string;
+  teamsText?: string;
   logContext: string;
   idempotencyKey?: string;
 }): Promise<{
@@ -566,7 +575,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
       undefined,
       idempotencyKey,
     ),
-    sendTeamsUserDirectMessage(userId, text, logContext),
+    sendTeamsUserDirectMessage(userId, teamsText ?? text, logContext),
     sendTelegramUserDirectMessage(userId, text, logContext, idempotencyKey),
     sendDiscordUserDirectMessage(userId, text, logContext, idempotencyKey),
   ]);

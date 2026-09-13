@@ -2215,6 +2215,9 @@ teams.post('/', async (c) => {
     );
   }
   const replyToMessageId = activity.replyToId?.trim();
+  const explicitAttentionContinuation = /^continue:\s*/iu.test(
+    queuedMessage.text.trim(),
+  );
   const tenantId = metadata.teamsTenantId;
   const fastChannelId = getTeamsBaseConversationId(
     metadata.communicationChannelId,
@@ -2226,9 +2229,10 @@ teams.post('/', async (c) => {
           workspaceId: tenantId,
           channelId: fastChannelId,
           userId: mappedUserId,
-          ...(replyToMessageId
-            ? { replyToMessageId }
-            : { allowLatestChannelMatch: true }),
+          ...(replyToMessageId ? { replyToMessageId } : {}),
+          ...(explicitAttentionContinuation
+            ? { allowLatestChannelMatch: true }
+            : {}),
         })
       : ({ status: 'none' } as const);
   const attentionReply =
@@ -2254,7 +2258,9 @@ teams.post('/', async (c) => {
       attention: attentionReply,
       userId: mappedUserId,
       senderDisplayName: activity.from?.name?.trim() || null,
-      question: fastMessage.text.trim(),
+      question: explicitAttentionContinuation
+        ? fastMessage.text.replace(/^continue:\s*/iu, '').trim()
+        : fastMessage.text.trim(),
       currentMessageId: queuedMessage.ts,
       deliveryConversation,
       ...(fastMessage.images ? { images: fastMessage.images } : {}),

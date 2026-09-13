@@ -150,14 +150,15 @@ async function deliverNotification(
   sessionUrl.searchParams.set('utm_medium', 'direct_message');
   sessionUrl.searchParams.set('utm_campaign', 'session-attention');
 
-  const { deliveredProviders, receipts } =
-    await sendUserDirectMessageBestEffortWithReceipts({
-      userId: subject.userId,
-      text: `**${subject.title}** ${statusText}\n\nReply to this message to continue, or [open the Session](${sessionUrl.toString()}).`,
-      logContext: 'sessionAttentionNotification',
-      idempotencyKey: buildIdempotencyKey(subject.sessionId, subject.eventKey),
-    });
-  if (deliveredProviders.length === 0) {
+  const notificationText = `**${subject.title}** ${statusText}\n\nReply to this message to continue, or [open the Session](${sessionUrl.toString()}).`;
+  const { receipts } = await sendUserDirectMessageBestEffortWithReceipts({
+    userId: subject.userId,
+    text: notificationText,
+    teamsText: `${notificationText}\n\nIf Teams does not attach the reply, start your message with \`continue:\`.`,
+    logContext: 'sessionAttentionNotification',
+    idempotencyKey: buildIdempotencyKey(subject.sessionId, subject.eventKey),
+  });
+  if (receipts.length === 0) {
     await markOutcome(claim.id, claim.leaseToken, 'failed');
     return 'failed';
   }
@@ -217,12 +218,12 @@ export async function notifyDirectWebTaskAttention(
     return 'not_applicable';
   }
 
-  if (enqueueRetry) {
-    await enqueueSessionAttentionNotification(
-      { target: 'task', ...input },
-      { delay: RECOVERY_DELAY_MS },
-    );
-  }
+  const recoveryScheduled = enqueueRetry
+    ? await enqueueSessionAttentionNotification(
+        { target: 'task', ...input },
+        { delay: RECOVERY_DELAY_MS },
+      )
+    : true;
 
   const result = await deliverNotification({
     sessionId: session.id,
@@ -233,6 +234,19 @@ export async function notifyDirectWebTaskAttention(
     taskId: run.taskId,
     runId: run.id,
   });
+  if (result === 'failed' && !recoveryScheduled) {
+    await db
+      .delete(sessionAttentionNotifications)
+      .where(
+        and(
+          eq(
+            sessionAttentionNotifications.eventKey,
+            `task:${run.id}:${input.kind}:${input.eventId}`,
+          ),
+          eq(sessionAttentionNotifications.outcome, 'failed'),
+        ),
+      );
+  }
   return result;
 }
 
@@ -345,7 +359,14 @@ export async function findSessionAttentionNotificationReply(input: {
       and(
         eq(sessionAttentionNotificationMessages.provider, input.provider),
         eq(sessionAttentionNotificationMessages.workspaceId, input.workspaceId),
-        eq(sessionAttentionNotificationMessages.channelId, input.channelId),
+        ...(input.provider === 'agentmail' && input.threadId
+          ? []
+          : [
+              eq(
+                sessionAttentionNotificationMessages.channelId,
+                input.channelId,
+              ),
+            ]),
         ...(input.replyToMessageId
           ? [
               eq(

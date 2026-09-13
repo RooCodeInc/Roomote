@@ -272,6 +272,11 @@ export type StartAgentMailConversationResult =
         messageId: string | null;
         providerThreadId: string;
       } | null;
+      replyAnchor: {
+        inboxId: string;
+        messageId: string | null;
+        providerThreadId: string;
+      } | null;
     };
 
 /** Reserve a replyable conversation without sending its first email yet. */
@@ -416,7 +421,17 @@ export async function startAgentMailConversationWithResult(input: {
     );
   }
 
-  return { sent: true, conversation };
+  return {
+    sent: true,
+    conversation,
+    replyAnchor: response.thread_id
+      ? {
+          inboxId,
+          messageId: response.message_id ?? null,
+          providerThreadId: response.thread_id,
+        }
+      : null,
+  };
 }
 
 export async function startAgentMailConversation(

@@ -101,6 +101,7 @@ import {
   hasAnyUserDirectMessageIdentity,
   sendUserDirectMessage,
   sendUserDirectMessageBestEffort,
+  sendUserDirectMessageBestEffortWithReceipts,
 } from './user-direct-message';
 
 describe('findSlackUserDirectMessageDestination', () => {
@@ -244,6 +245,41 @@ describe('sendUserDirectMessage', () => {
         logContext: 'test',
       }),
     ).resolves.toBe(true);
+  });
+
+  it('uses an AgentMail thread as the reply receipt when recording fails', async () => {
+    mockSlackUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockTeamsUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockTelegramUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockDiscordUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockStartAgentMailConversation.mockResolvedValue({
+      sent: true,
+      conversation: null,
+      replyAnchor: {
+        inboxId: 'roomote@example.com',
+        messageId: null,
+        providerThreadId: 'email-thread-1',
+      },
+    });
+
+    await expect(
+      sendUserDirectMessageBestEffortWithReceipts({
+        userId: 'user-1',
+        text: 'Task completed.',
+        logContext: 'test',
+      }),
+    ).resolves.toEqual({
+      deliveredProviders: ['agentmail'],
+      receipts: [
+        {
+          provider: 'agentmail',
+          workspaceId: 'roomote@example.com',
+          channelId: 'email-thread-1',
+          messageId: 'thread:email-thread-1',
+          threadId: 'email-thread-1',
+        },
+      ],
+    });
   });
 });
 

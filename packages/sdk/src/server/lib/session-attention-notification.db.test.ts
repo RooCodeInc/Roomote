@@ -188,6 +188,22 @@ describe('session attention notifications', () => {
     await expect(hasTaskRunAttentionNotification(run.id)).resolves.toBe(true);
   });
 
+  it('restores terminal fallback when recovery admission and delivery fail', async () => {
+    const { run } = await createDirectWebRun();
+    mocks.enqueue.mockResolvedValue(false);
+    mocks.send.mockResolvedValue({ deliveredProviders: [], receipts: [] });
+
+    await expect(
+      notifyDirectWebTaskAttention({
+        runId: run.id,
+        kind: 'result_ready',
+        eventId: 'completion-without-recovery',
+      }),
+    ).resolves.toBe('failed');
+
+    await expect(hasTaskRunAttentionNotification(run.id)).resolves.toBe(false);
+  });
+
   it('leaves Fast-delegated child attention to the parent Session', async () => {
     const { run } = await createDirectWebRun({
       fastAgentParent: {
@@ -327,5 +343,23 @@ describe('session attention notifications', () => {
         },
       });
     }
+
+    await expect(
+      findSessionAttentionNotificationReply({
+        provider: 'agentmail',
+        workspaceId: 'inbox@example.com',
+        channelId: 'conversation-created-by-inbound',
+        threadId: `email-thread:${messageId}`,
+        userId: user.id,
+      }),
+    ).resolves.toEqual({
+      status: 'owned',
+      attention: {
+        sessionId: session.id,
+        taskId: run.taskId,
+        runId: run.id,
+        kind: 'result_ready',
+      },
+    });
   });
 });

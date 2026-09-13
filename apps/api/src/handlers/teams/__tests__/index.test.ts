@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as suggestionLaunch from '../../tasks/suggestion-launch.js';
 import * as suggestionStart from '../suggestion-start.js';
 import type { FastAgentConversation } from '@roomote/types';
+import { findSessionAttentionNotificationReply } from '@roomote/sdk/server';
+import { continueSessionAttentionReply } from '../../tasks/continue-session-attention-reply.js';
 
 vi.mock('../../tasks/suggestion-launch.js', async (importOriginal) => ({
   ...(await importOriginal<
@@ -2302,6 +2304,66 @@ describe('Teams webhook handler', () => {
       },
     });
     expect(enqueueTaskMock).not.toHaveBeenCalled();
+    expect(findSessionAttentionNotificationReply).toHaveBeenCalledWith({
+      provider: 'teams',
+      workspaceId: 'tenant-1',
+      channelId: 'a:personal-conversation',
+      userId: 'mapped-user-1',
+    });
+  });
+
+  it('continues the latest personal-chat attention notification when explicitly requested', async () => {
+    findFirstMock.mockResolvedValue(null);
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    vi.mocked(findSessionAttentionNotificationReply).mockResolvedValueOnce({
+      status: 'owned',
+      attention: {
+        sessionId: 'session-1',
+        taskId: null,
+        runId: null,
+        kind: 'result_ready',
+      },
+    });
+    vi.mocked(continueSessionAttentionReply).mockResolvedValueOnce(true);
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          id: 'personal-attention-1',
+          text: 'continue: show me the result',
+          entities: [],
+          replyToId: undefined,
+          conversation: {
+            id: 'a:personal-conversation',
+            tenantId: 'tenant-1',
+            conversationType: 'personal',
+          },
+        }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      fastAnswered: true,
+      fastContinued: true,
+    });
+    expect(findSessionAttentionNotificationReply).toHaveBeenCalledWith({
+      provider: 'teams',
+      workspaceId: 'tenant-1',
+      channelId: 'a:personal-conversation',
+      userId: 'mapped-user-1',
+      allowLatestChannelMatch: true,
+    });
+    expect(continueSessionAttentionReply).toHaveBeenCalledWith(
+      expect.objectContaining({ question: 'show me the result' }),
+    );
   });
 
   it('ignores channel messages without a bot mention when no active task run exists', async () => {
