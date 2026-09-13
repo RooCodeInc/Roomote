@@ -136,6 +136,12 @@ says so in the chat instead of starting a task another way. Fast automation
 reports can target a Telegram chat, topic, or owner direct message; replies
 continue the report's Fast session.
 
+Fast-delegated coding tasks use one editable live status message with elapsed
+time, expandable progress details, and a link to the selected task. When a task
+finishes successfully, Telegram leaves its last useful progress update in place
+instead of replacing it with a generic **Completed** message. If the task later
+resumes, Roomote continues updating the same live message.
+
 Roomote sends all Telegram text replies as rich messages, including
 acknowledgements, progress, final replies, and editable live-task status. Every
 Markdown-authored reply uses Telegram's native Rich Markdown support, preserving
