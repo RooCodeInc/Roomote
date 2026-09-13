@@ -88,7 +88,6 @@ afterEach(async () => {
     await db.delete(taskRuns).where(eq(taskRuns.taskId, taskId));
     await db.delete(tasks).where(eq(tasks.id, taskId));
   }
-  await db.delete(automations);
 });
 
 describe('resetBrainIngestionState', () => {
@@ -133,7 +132,10 @@ describe('listRecentUserTaskMemoryRuns', () => {
   it('returns only landed user-initiated memories owned by the requested user', async () => {
     const owner = await userFactory.create();
     const otherUser = await userFactory.create();
-    await db.insert(automations).values({ key: 'issue_fixer' });
+    await db
+      .insert(automations)
+      .values({ key: 'issue_fixer' })
+      .onConflictDoNothing();
     const olderOwned = await makeCompletedRun(
       new Date('2026-09-10T12:00:00Z'),
       { initiatorUserId: owner.id },
