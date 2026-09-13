@@ -14,6 +14,34 @@ import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 type TaskAuth = { userId: string | null; isAdmin?: boolean };
 type SessionAuth = { userId: string; isAdmin: boolean };
 
+function privateRecordAccess(
+  auth: TaskAuth,
+  privacy: SQLWrapper,
+  ownerUserId: SQLWrapper,
+): SQL {
+  return sql`(${privacy} = 'shared' OR (${privacy} = 'private' AND ${ownerUserId} = ${auth.userId}))`;
+}
+
+export function privateTaskAccess(auth: TaskAuth): SQL {
+  return privateRecordAccess(auth, tasks.privacy, tasks.privateOwnerUserId);
+}
+
+export function privateSessionAccess(auth: TaskAuth): SQL {
+  return privateRecordAccess(
+    auth,
+    sessions.privacy,
+    sessions.privateOwnerUserId,
+  );
+}
+
+export function privateFastSessionAccess(auth: TaskAuth): SQL {
+  return privateRecordAccess(
+    auth,
+    fastAgentConversations.privacy,
+    fastAgentConversations.privateOwnerUserId,
+  );
+}
+
 // Every provenance row must resolve to an owned automation. Keep null IDs:
 // missing, malformed, deleted, and creatorless provenance must fail closed.
 function allAutomationsOwned(auth: SessionAuth, provenance: SQL) {
@@ -25,11 +53,12 @@ function allAutomationsOwned(auth: SessionAuth, provenance: SQL) {
   )`;
 }
 
-export function customAutomationTaskAccess(auth: TaskAuth) {
-  if (auth.isAdmin) return undefined;
+export function customAutomationTaskAccess(auth: TaskAuth): SQL {
+  const privateAccess = privateTaskAccess(auth);
+  if (auth.isAdmin) return privateAccess;
   // Attribution and participation are not ownership. Text comparison also
   // makes missing, malformed, and deleted automation provenance fail closed.
-  return sql`(${tasks.initiatorAutomation} is distinct from 'custom_automation'
+  return sql`${privateAccess} and (${tasks.initiatorAutomation} is distinct from 'custom_automation'
     or exists (
       select 1 from ${customAutomations} a
       where a.id::text = ${tasks.actorExternalId}
@@ -37,26 +66,31 @@ export function customAutomationTaskAccess(auth: TaskAuth) {
     ))`;
 }
 
-export function customAutomationSessionAccess(auth: SessionAuth) {
-  if (auth.isAdmin) return undefined;
+export function customAutomationSessionAccess(auth: SessionAuth): SQL {
+  const privateAccess = privateSessionAccess(auth);
+  if (auth.isAdmin) return privateAccess;
   const linkedAutomationTasks = sql`
     select t.actor_external_id as automation_id from ${sessionTasks} st
     inner join ${tasks} t on t.id = st.task_id
     where st.session_id = ${sessions.id}
       and t.initiator_automation = 'custom_automation'`;
 
-  return sql`${allAutomationsOwned(auth, linkedAutomationTasks)} and (
+  return sql`${privateAccess} and ${allAutomationsOwned(auth, linkedAutomationTasks)} and (
     ${sessions.ownerAutomation} is distinct from 'custom_automation'
     or ${sessions.fastConversationId} is not null
     or exists (${linkedAutomationTasks})
-  ) and ${customAutomationFastSessionAccess(auth, sessions.fastConversationId)}`;
+  ) and ${customAutomationFastSessionAccess(auth, sessions.fastConversationId, false)}`;
 }
 
 export function customAutomationFastSessionAccess(
   auth: SessionAuth,
   conversationId: SQLWrapper = fastAgentConversations.id,
-) {
-  if (auth.isAdmin) return undefined;
+  enforcePrivateAccess = true,
+): SQL {
+  const privateAccess = enforcePrivateAccess
+    ? privateFastSessionAccess(auth)
+    : sql`true`;
+  if (auth.isAdmin) return privateAccess;
 
   // Fast automation runs are user-owned. Resolve the automation from durable
   // launch provenance, not the conversation's run-as user or participation.
@@ -106,5 +140,5 @@ export function customAutomationFastSessionAccess(
           and s.fast_conversation_id in (select id from conversation_ids)
       ))`;
 
-  return allAutomationsOwned(auth, provenance);
+  return sql`${privateAccess} and ${allAutomationsOwned(auth, provenance)}`;
 }

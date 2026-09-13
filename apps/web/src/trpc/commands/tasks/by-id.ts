@@ -9,6 +9,7 @@ import {
   taskRuns,
   tasks,
   users,
+  privateTaskAccess,
 } from '@roomote/db/server';
 import { getSlackTeamIdFromTaskPayload } from '@roomote/types';
 
@@ -82,7 +83,13 @@ async function getTaskByIdForCurrentOrg(
       .from(tasks)
       .leftJoin(users, eq(tasks.initiatorUserId, users.id))
       .leftJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
-      .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
+      .where(
+        and(
+          eq(tasks.id, taskId),
+          isNull(tasks.deletedAt),
+          privateTaskAccess(auth),
+        ),
+      )
       .orderBy(desc(taskRuns.id))
       .limit(1),
     getLatestTaskPullRequestsByTaskId([taskId]),

@@ -20,6 +20,7 @@ import {
   llmUsageEvents,
   lt,
   or,
+  privateSessionAccess,
   sessionParticipants,
   sessionPins,
   sessions,
@@ -83,7 +84,7 @@ function sessionScope(auth: SessionAuth) {
 // The /sessions listing mirrors the /tasks listing instead: admins see every
 // Session, other users see the Sessions they own, participate in, or spoke in.
 function sessionListScope(auth: SessionAuth) {
-  if (auth.isAdmin) return undefined;
+  if (auth.isAdmin) return sessionScope(auth);
   return and(
     sessionScope(auth),
     or(
@@ -485,6 +486,8 @@ const baseSelection = {
   ownerKind: sessions.ownerKind,
   ownerUserId: sessions.ownerUserId,
   ownerAutomation: sessions.ownerAutomation,
+  privacy: sessions.privacy,
+  privateOwnerUserId: sessions.privateOwnerUserId,
   ownerName: users.name,
   ownerEmail: users.email,
   ownerImageUrl: users.imageUrl,
@@ -801,7 +804,7 @@ export async function findAccessibleSession(
   return session ?? null;
 }
 
-/** Direct-link reads for authenticated deployment members, not action authorization. */
+/** Direct-link reads remain collaborative for shared Sessions. */
 export async function findReadableSession(
   auth: SessionAuth,
   sessionId: string,
@@ -812,9 +815,12 @@ export async function findReadableSession(
     .from(sessions)
     .leftJoin(users, eq(users.id, sessions.ownerUserId))
     .where(
-      or(
-        eq(sessions.id, sessionId),
-        eq(sessions.fastConversationId, sessionId),
+      and(
+        or(
+          eq(sessions.id, sessionId),
+          eq(sessions.fastConversationId, sessionId),
+        ),
+        privateSessionAccess(auth),
       ),
     )
     .limit(1);

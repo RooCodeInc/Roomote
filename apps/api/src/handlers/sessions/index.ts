@@ -84,7 +84,7 @@ async function findAccessibleSession(sessionId: string, auth: McpAuth) {
       and(
         eq(fastAgentConversations.id, sessionId),
         customAutomationHistoryAccess(auth, 'fast'),
-        customAutomationHistoryAccess(auth, 'session'),
+        or(isNull(sessions.id), customAutomationHistoryAccess(auth, 'session')),
       ),
     )
     .limit(1);

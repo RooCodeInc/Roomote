@@ -607,4 +607,36 @@ describe('custom automation task history access', () => {
       deleteTasksCommand(otherAuth, { taskIds: [ordinary.id] }),
     ).resolves.toMatchObject({ deletedCount: 1 });
   });
+
+  it('keeps private task reads and actions owner-only, including for admins', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    await runFactory.create({ taskId: task.id });
+    const ownerAuth = { userId: owner.id, isAdmin: false } as UserAuthSuccess;
+
+    await expect(canReadTask(ownerAuth, task.id)).resolves.toBe(true);
+    await expect(canAccessTask(ownerAuth, task.id)).resolves.toBe(true);
+    await expect(
+      getTaskByIdCommand(ownerAuth, { taskId: task.id }),
+    ).resolves.toMatchObject({ id: task.id, privacy: 'private' });
+
+    for (const auth of [
+      { userId: other.id, isAdmin: false },
+      { userId: other.id, isAdmin: true },
+    ] as UserAuthSuccess[]) {
+      await expect(canReadTask(auth, task.id)).resolves.toBe(false);
+      await expect(canAccessTask(auth, task.id)).resolves.toBe(false);
+      await expect(
+        getTaskByIdCommand(auth, { taskId: task.id }),
+      ).resolves.toBeNull();
+      await expect(
+        resolveTaskByIdAccessCommand(auth, { taskId: task.id }),
+      ).resolves.toEqual({ kind: 'not-found' });
+    }
+  });
 });
