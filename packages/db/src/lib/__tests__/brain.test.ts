@@ -155,13 +155,16 @@ describe('listRecentUserTaskMemoryRuns', () => {
         actorExternalId: null,
       },
     );
-    const unlinkedSystem = await makeCompletedRun(
+    await db
+      .update(taskRuns)
+      .set({ actingUserId: owner.id })
+      .where(eq(taskRuns.id, automation.id));
+    const ownerAttributedSystem = await makeCompletedRun(
       new Date('2026-09-15T12:00:00Z'),
       {
         surface: 'system',
         initiatorKind: 'user',
-        initiatorUserId: null,
-        actorExternalId: 'system',
+        initiatorUserId: owner.id,
       },
     );
     const pendingOwned = await makeCompletedRun(
@@ -174,7 +177,7 @@ describe('listRecentUserTaskMemoryRuns', () => {
       { runId: newerOwned.id, status: 'done' },
       { runId: otherOwned.id, status: 'done' },
       { runId: automation.id, status: 'done' },
-      { runId: unlinkedSystem.id, status: 'done' },
+      { runId: ownerAttributedSystem.id, status: 'done' },
       { runId: pendingOwned.id, status: 'pending' },
     ]);
 

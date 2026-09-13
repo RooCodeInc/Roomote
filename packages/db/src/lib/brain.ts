@@ -10,6 +10,7 @@ import {
   lt,
   lte,
   max,
+  ne,
   or,
   sql,
 } from 'drizzle-orm';
@@ -40,9 +41,9 @@ export type RecentUserTaskMemoryRun = {
 };
 
 /**
- * Recent task-memory pages known to have landed for one task owner. Selecting
- * ownership here avoids reading another member's Brain page merely to inspect
- * its metadata.
+ * Recent task-memory pages known to have landed for one user-initiated task.
+ * Selecting ownership and origin here avoids reading another member's or a
+ * system-launched task's Brain page merely to inspect its metadata.
  */
 export async function listRecentUserTaskMemoryRuns(
   database: DatabaseOrTransaction,
@@ -63,6 +64,7 @@ export async function listRecentUserTaskMemoryRuns(
         eq(taskRuns.status, RunStatus.Completed),
         eq(tasks.initiatorKind, 'user'),
         eq(tasks.initiatorUserId, input.userId),
+        ne(tasks.surface, 'system'),
       ),
     )
     .orderBy(desc(taskRuns.completedAt), desc(taskRuns.id))
