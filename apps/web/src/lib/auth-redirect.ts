@@ -1,3 +1,37 @@
+const AUTH_REDIRECT_BASE_URL = 'https://roomote.local';
+
+export function getSafeSignInRedirectPath(
+  redirectParam: string | string[] | null | undefined,
+  fallback: string,
+): string {
+  const redirectPath = Array.isArray(redirectParam)
+    ? redirectParam[0]
+    : redirectParam;
+
+  if (
+    !redirectPath ||
+    !redirectPath.startsWith('/') ||
+    redirectPath.startsWith('//')
+  ) {
+    return fallback;
+  }
+
+  try {
+    const parsed = new URL(redirectPath, AUTH_REDIRECT_BASE_URL);
+    if (
+      parsed.origin !== AUTH_REDIRECT_BASE_URL ||
+      parsed.pathname === '/sign-in' ||
+      parsed.pathname.startsWith('/sign-in/')
+    ) {
+      return fallback;
+    }
+  } catch {
+    return fallback;
+  }
+
+  return redirectPath;
+}
+
 export function normalizeAuthRedirect(
   redirectParam: string | null | undefined,
   currentOrigin: string,
