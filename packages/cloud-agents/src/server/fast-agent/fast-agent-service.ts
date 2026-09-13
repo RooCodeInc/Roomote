@@ -1809,7 +1809,6 @@ export async function answerFastAgentQuestion({
   let canonicalConversationId: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
-  let acceptedTaskInstructionPending = false;
   let nativeToolInvoked = false;
   let turnFailureStage:
     | 'setup'
@@ -3316,12 +3315,9 @@ export async function answerFastAgentQuestion({
     const currentTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
     );
-    const restoredTaskMessageState = taskMessageGuard.restore(
-      previousAttempt?.events ?? [],
-      [...currentTasks.keys()],
-    );
-    acceptedTaskInstructionPending =
-      restoredTaskMessageState.acceptedTaskInstructionPending;
+    taskMessageGuard.restore(previousAttempt?.events ?? [], [
+      ...currentTasks.keys(),
+    ]);
     const currentMessageSender = platformEvent
       ? undefined
       : {
@@ -4506,13 +4502,6 @@ export async function answerFastAgentQuestion({
                 },
               ),
             );
-            if (
-              result.success === true &&
-              result.delivery === 'accepted' &&
-              result.responsePending === true
-            ) {
-              acceptedTaskInstructionPending = true;
-            }
             return result;
           }
 
@@ -4546,6 +4535,7 @@ export async function answerFastAgentQuestion({
               target.taskId,
             );
             if (result.success) {
+              taskMessageGuard.clearPendingResponse(target.taskId);
               currentTasks.delete(target.taskId);
             }
             return result;
@@ -4580,6 +4570,9 @@ export async function answerFastAgentQuestion({
               { userId, apiBaseUrl },
               { taskId: target.taskId, userInitiated: args.userInitiated },
             );
+            if (result.success) {
+              taskMessageGuard.clearPendingResponse(target.taskId);
+            }
             return result;
           }
 
@@ -5635,7 +5628,7 @@ export async function answerFastAgentQuestion({
 
     if (
       error instanceof FastAgentOpenCodeSessionRecoveryError &&
-      acceptedTaskInstructionPending
+      taskMessageGuard.hasPendingResponse()
     ) {
       const retryAt = await deferLostSessionContinuation();
       if (retryAt) {
@@ -5659,7 +5652,7 @@ export async function answerFastAgentQuestion({
         : formatFastAgentUnclassifiedFailure(
             error,
             turnFailureStage,
-            acceptedTaskInstructionPending,
+            taskMessageGuard.hasPendingResponse(),
           );
     // The error closeout is recorded like any other closeout: its intent
     // before the post and its reply row right after, so a run that resumes

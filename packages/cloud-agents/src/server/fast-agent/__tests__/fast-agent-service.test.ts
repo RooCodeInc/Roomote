@@ -9780,6 +9780,127 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it.each([
+    [nativeToolNames.cancelTask, { taskId: 'task-1' }],
+    [nativeToolNames.stopTask, { taskId: 'task-1', userInitiated: true }],
+  ])(
+    'does not continue session loss after successful %s',
+    async (tool, args) => {
+      mocks.getActiveTasks.mockResolvedValue([
+        { taskId: 'task-1', title: 'Checkout', status: 'running' },
+      ]);
+      mocks.sendTaskMessage.mockResolvedValue({
+        success: true,
+        delivery: 'accepted',
+        responsePending: true,
+      });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’ll update that task.',
+          });
+          await invokeTool(nativeToolNames.sendTaskMessage, {
+            taskId: 'task-1',
+            message: 'Continue the existing work.',
+          });
+          await invokeTool(tool, args);
+          return '';
+        },
+      );
+      mocks.runSession.mockImplementationOnce(async ({ prompt, execute }) => {
+        await execute({ id: 'opencode-session-1' }, prompt, {
+          path: 'warm',
+          validateSession: false,
+        });
+        throw new FastAgentOpenCodeSessionRecoveryError(
+          new Error('OpenCode session not found.'),
+          1,
+          true,
+        );
+      });
+      const requestDurableRetry = vi.fn().mockResolvedValue(undefined);
+      const adapter = callbacks({ requestDurableRetry });
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter,
+          durableAdmission: { eventId: 'durable-row-1' },
+        }),
+      ).resolves.toBe(
+        'Roomote lost the inference session. Automatic recovery stopped to avoid repeating completed actions.',
+      );
+      expect(requestDurableRetry).not.toHaveBeenCalled();
+      expect(mocks.scheduleDurableRetry).not.toHaveBeenCalled();
+      expect(mocks.sendTaskMessage).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    [nativeToolNames.cancelTask, { taskId: 'task-1' }, 'cancel'],
+    [
+      nativeToolNames.stopTask,
+      { taskId: 'task-1', userInitiated: true },
+      'stop',
+    ],
+  ])(
+    'keeps session-loss continuation eligible after failed %s',
+    async (tool, args, operation) => {
+      mocks.getActiveTasks.mockResolvedValue([
+        { taskId: 'task-1', title: 'Checkout', status: 'running' },
+      ]);
+      mocks.sendTaskMessage.mockResolvedValue({
+        success: true,
+        delivery: 'accepted',
+        responsePending: true,
+      });
+      if (operation === 'cancel') {
+        mocks.cancelTask.mockResolvedValueOnce({ success: false });
+      } else {
+        mocks.stopTask.mockResolvedValueOnce({ success: false });
+      }
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’ll update that task.',
+          });
+          await invokeTool(nativeToolNames.sendTaskMessage, {
+            taskId: 'task-1',
+            message: 'Continue the existing work.',
+          });
+          await invokeTool(tool, args);
+          return '';
+        },
+      );
+      mocks.runSession.mockImplementationOnce(async ({ prompt, execute }) => {
+        await execute({ id: 'opencode-session-1' }, prompt, {
+          path: 'warm',
+          validateSession: false,
+        });
+        throw new FastAgentOpenCodeSessionRecoveryError(
+          new Error('OpenCode session not found.'),
+          1,
+          true,
+        );
+      });
+      const requestDurableRetry = vi.fn().mockResolvedValue(undefined);
+      const adapter = callbacks({ requestDurableRetry });
+
+      await expect(
+        answerFastAgentQuestion({
+          ...baseParams,
+          adapter,
+          durableAdmission: { eventId: 'durable-row-1' },
+        }),
+      ).rejects.toBeInstanceOf(FastAgentDurableRetryScheduledError);
+      expect(requestDurableRetry).toHaveBeenCalledOnce();
+    },
+  );
+
   it('stops after one resumed session-loss failure without replaying the instruction', async () => {
     mocks.getActiveTasks.mockResolvedValue([
       { taskId: 'task-1', taskRunStatus: 'running' },

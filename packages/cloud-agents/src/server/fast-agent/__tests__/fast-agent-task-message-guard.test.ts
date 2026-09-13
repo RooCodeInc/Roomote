@@ -161,6 +161,63 @@ describe('FastAgentTaskMessageGuard', () => {
     expect(deliver).not.toHaveBeenCalled();
   });
 
+  it.each(['cancel_task', 'stop_task'])(
+    'clears a restored pending response after successful %s',
+    (tool) => {
+      const guard = new FastAgentTaskMessageGuard();
+      const restored = guard.restore(
+        [
+          action({
+            result: JSON.stringify({
+              success: true,
+              taskId: 'task-1',
+              delivery: 'accepted',
+              responsePending: true,
+            }),
+          }),
+          action({
+            tool,
+            arguments: { taskId: 'task-1' },
+            result: JSON.stringify({ success: true, taskId: 'task-1' }),
+          }),
+        ],
+        ['task-1'],
+      );
+
+      expect(restored).toEqual({ acceptedTaskInstructionPending: false });
+      expect(guard.hasPendingResponse()).toBe(false);
+    },
+  );
+
+  it.each(['cancel_task', 'stop_task'])(
+    'keeps a restored pending response after failed %s',
+    (tool) => {
+      const guard = new FastAgentTaskMessageGuard();
+      const restored = guard.restore(
+        [
+          action({
+            result: JSON.stringify({
+              success: true,
+              taskId: 'task-1',
+              delivery: 'accepted',
+              responsePending: true,
+            }),
+          }),
+          action({
+            tool,
+            status: 'failed',
+            arguments: { taskId: 'task-1' },
+            result: JSON.stringify({ success: false, taskId: 'task-1' }),
+          }),
+        ],
+        ['task-1'],
+      );
+
+      expect(restored).toEqual({ acceptedTaskInstructionPending: true });
+      expect(guard.hasPendingResponse()).toBe(true);
+    },
+  );
+
   it.each([
     {
       status: 'failed',

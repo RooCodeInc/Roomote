@@ -26,14 +26,20 @@ export class FastAgentTaskMessageGuard {
     this.receipts.clear();
   }
 
+  hasPendingResponse(): boolean {
+    return this.pendingResponses.size > 0;
+  }
+
+  clearPendingResponse(taskId: string): void {
+    this.pendingResponses.delete(taskId);
+  }
+
   restore(
     events: FastAgentTurnAttemptEvent[],
     currentTaskIds: string[],
   ): { acceptedTaskInstructionPending: boolean } {
-    let acceptedTaskInstructionPending = false;
     for (const event of events) {
-      if (event.kind !== 'action' || event.tool !== 'send_task_message')
-        continue;
+      if (event.kind !== 'action') continue;
       let result: Result = {};
       try {
         const parsed: unknown = JSON.parse(event.result ?? '{}');
@@ -57,6 +63,13 @@ export class FastAgentTaskMessageGuard {
           )
           ?.trim() ??
         (currentTaskIds.length === 1 ? currentTaskIds[0] : undefined);
+      if (event.tool === 'cancel_task' || event.tool === 'stop_task') {
+        if (taskId && event.status === 'completed' && result.success === true) {
+          this.clearPendingResponse(taskId);
+        }
+        continue;
+      }
+      if (event.tool !== 'send_task_message') continue;
       if (!taskId) {
         for (const id of currentTaskIds) this.unresolved.add(id);
         continue;
@@ -70,7 +83,6 @@ export class FastAgentTaskMessageGuard {
           typeof args.includeAttachments === 'boolean')
       ) {
         if (result.delivery === 'accepted' && result.responsePending === true) {
-          acceptedTaskInstructionPending = true;
           this.pendingResponses.add(taskId);
         }
         this.remember(taskId, signature(args as MessageArgs), {
@@ -81,7 +93,7 @@ export class FastAgentTaskMessageGuard {
         this.unresolved.add(taskId);
       }
     }
-    return { acceptedTaskInstructionPending };
+    return { acceptedTaskInstructionPending: this.hasPendingResponse() };
   }
 
   private remember(taskId: string, key: string, result: Result): void {
