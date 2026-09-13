@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
 import { getDeploymentAccountLinkHelpText } from '@roomote/db/server';
 
 import {
@@ -50,6 +51,11 @@ export default async function Page(props: {
       getSignedInAuthContext(),
       getDeploymentAccountLinkHelpText(),
     ]);
+
+  if (authContext.success) {
+    redirect('/');
+  }
+
   // A visitor bounced here by the seat gate still holds their Better Auth
   // session cookie, so re-running the auth evaluation identifies them and
   // lets the form explain the rejection instead of silently offering
