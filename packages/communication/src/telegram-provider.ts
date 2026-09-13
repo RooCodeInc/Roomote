@@ -15,6 +15,15 @@ import {
   type TelegramInputRichMessage,
 } from './telegram-format';
 
+export function isTelegramThreadUnavailableError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /Telegram sendRichMessage failed \(400\):.*message thread not found/i.test(
+      error.message,
+    )
+  );
+}
+
 export type TelegramCommunicationProviderOptions = {
   botToken: string;
   apiBaseUrl?: string;

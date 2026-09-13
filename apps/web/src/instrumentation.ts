@@ -25,6 +25,10 @@ export async function register() {
 
     await bootstrapWebRuntimeEnv();
 
+    const { installWebFastAgentGracefulShutdown } =
+      await import('@/lib/server/fast-agent-graceful-shutdown');
+    installWebFastAgentGracefulShutdown();
+
     // Non-fatal, detached reconciliation of E2B/Daytona/Blaxel artifacts.
     // A release image or worker-runtime schema change creates a replacement
     // artifact and atomically activates it only after the build succeeds.

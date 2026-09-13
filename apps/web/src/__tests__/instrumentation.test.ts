@@ -1,5 +1,10 @@
-const { bootstrapWebRuntimeEnvMock, sentryInitMock } = vi.hoisted(() => ({
+const {
+  bootstrapWebRuntimeEnvMock,
+  installWebFastAgentGracefulShutdownMock,
+  sentryInitMock,
+} = vi.hoisted(() => ({
   bootstrapWebRuntimeEnvMock: vi.fn(),
+  installWebFastAgentGracefulShutdownMock: vi.fn(),
   sentryInitMock: vi.fn(),
 }));
 
@@ -11,6 +16,11 @@ vi.mock('@/lib/sentry-config', () => ({
   isWebSentryEnabled: () => true,
   resolveWebSentryEnvironment: () => 'test',
   resolveWebSentryRelease: () => 'test-release',
+}));
+
+vi.mock('@/lib/server/fast-agent-graceful-shutdown', () => ({
+  installWebFastAgentGracefulShutdown: () =>
+    installWebFastAgentGracefulShutdownMock(),
 }));
 
 vi.mock('@sentry/nextjs', () => ({
@@ -60,6 +70,15 @@ describe('web instrumentation', () => {
         release: 'test-release',
       }),
     );
+  });
+
+  it('installs Fast turn handoff in the Node runtime', async () => {
+    process.env.NEXT_RUNTIME = 'nodejs';
+
+    const instrumentation = await import('../instrumentation');
+    await instrumentation.register();
+
+    expect(installWebFastAgentGracefulShutdownMock).toHaveBeenCalledOnce();
   });
 
   it('initializes edge runtime Sentry with explicit release attribution', async () => {
