@@ -13,6 +13,7 @@ import {
   CardContent,
   Check,
   CircleAlert,
+  CircleX,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -20,7 +21,9 @@ import {
   DialogHeader,
   DialogTitle,
   Empty,
+  EmptyDescription,
   EmptyHeader,
+  EmptyMedia,
   EmptyTitle,
   Skeleton,
   X,
@@ -178,7 +181,26 @@ export function ResultsPage() {
           ) : null}
         </header>
 
-        {results.length === 0 ? (
+        {listQuery.isError && listQuery.data === undefined ? (
+          <Empty className="border">
+            <EmptyHeader>
+              <EmptyMedia variant="icon" className="text-destructive">
+                <CircleX />
+              </EmptyMedia>
+              <EmptyDescription className="text-sm">
+                Failed to load results.
+              </EmptyDescription>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void listQuery.refetch()}
+              >
+                Retry
+              </Button>
+            </EmptyHeader>
+          </Empty>
+        ) : results.length === 0 ? (
           <Empty className="border">
             <EmptyHeader>
               <EmptyTitle>No unread results</EmptyTitle>
