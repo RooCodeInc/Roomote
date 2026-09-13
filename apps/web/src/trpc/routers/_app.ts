@@ -100,6 +100,7 @@ import {
 } from '@/types';
 
 import { protectedProcedure, publicProcedure, createRouter } from '../init';
+import { getHomeComposerSuggestionsCommand } from '../commands/home/composer-suggestions';
 
 import {
   getTasksCommand,
@@ -980,6 +981,12 @@ const automationsRouter = createRouter({
 });
 
 export const appRouter = createRouter({
+  home: createRouter({
+    composerSuggestions: protectedProcedure.query(({ ctx: { auth } }) =>
+      getHomeComposerSuggestionsCommand(auth),
+    ),
+  }),
+
   statuspage: createRouter({
     incident: publicProcedure.query(() => getStatuspageIncident()),
   }),

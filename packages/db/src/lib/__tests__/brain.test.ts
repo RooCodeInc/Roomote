@@ -16,6 +16,7 @@ import {
   taskRuns,
   taskFactory,
   userFactory,
+  automations,
   brainMemoryEvents,
   brainCollectorItems,
   brainSyncState,
@@ -38,6 +39,7 @@ import {
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
   listBrainCollectorItemsBySlugPrefix,
+  listRecentUserTaskMemoryRuns,
   seedBrainCollectorItems,
   upsertBrainCollectorItems,
   upsertBrainSyncState,
@@ -123,6 +125,91 @@ describe('resetBrainIngestionState', () => {
       lastError: null,
       processedAt: null,
     });
+  });
+});
+
+describe('listRecentUserTaskMemoryRuns', () => {
+  it('returns only landed user-initiated memories owned by the requested user', async () => {
+    const owner = await userFactory.create();
+    const otherUser = await userFactory.create();
+    await db
+      .insert(automations)
+      .values({ key: 'issue_fixer' })
+      .onConflictDoNothing();
+    const olderOwned = await makeCompletedRun(
+      new Date('2026-09-10T12:00:00Z'),
+      { initiatorUserId: owner.id },
+    );
+    const newerOwned = await makeCompletedRun(
+      new Date('2026-09-12T12:00:00Z'),
+      { initiatorUserId: owner.id },
+    );
+    const otherOwned = await makeCompletedRun(
+      new Date('2026-09-13T12:00:00Z'),
+      { initiatorUserId: otherUser.id },
+    );
+    const automation = await makeCompletedRun(
+      new Date('2026-09-14T12:00:00Z'),
+      {
+        initiatorKind: 'automation',
+        initiatorUserId: null,
+        initiatorAutomation: 'issue_fixer',
+        actorExternalId: null,
+      },
+    );
+    await db
+      .update(taskRuns)
+      .set({ actingUserId: owner.id })
+      .where(eq(taskRuns.id, automation.id));
+    const ownerAttributedSystem = await makeCompletedRun(
+      new Date('2026-09-15T12:00:00Z'),
+      {
+        surface: 'system',
+        initiatorKind: 'user',
+        initiatorUserId: owner.id,
+      },
+    );
+    const hiddenOwned = await makeCompletedRun(
+      new Date('2026-09-15T13:00:00Z'),
+      { initiatorUserId: owner.id, visibility: 'hidden' },
+    );
+    const deletedOwned = await makeCompletedRun(
+      new Date('2026-09-15T14:00:00Z'),
+      { initiatorUserId: owner.id, deletedAt: new Date() },
+    );
+    const pendingOwned = await makeCompletedRun(
+      new Date('2026-09-16T12:00:00Z'),
+      { initiatorUserId: owner.id },
+    );
+
+    await db.insert(brainMemoryEvents).values([
+      { runId: olderOwned.id, status: 'done' },
+      { runId: newerOwned.id, status: 'done' },
+      { runId: otherOwned.id, status: 'done' },
+      { runId: automation.id, status: 'done' },
+      { runId: ownerAttributedSystem.id, status: 'done' },
+      { runId: hiddenOwned.id, status: 'done' },
+      { runId: deletedOwned.id, status: 'done' },
+      { runId: pendingOwned.id, status: 'pending' },
+    ]);
+
+    await expect(
+      listRecentUserTaskMemoryRuns(db, { userId: owner.id, limit: 5 }),
+    ).resolves.toEqual([
+      {
+        taskId: newerOwned.taskId,
+        runId: newerOwned.id,
+        completedAt: new Date('2026-09-12T12:00:00Z'),
+      },
+      {
+        taskId: olderOwned.taskId,
+        runId: olderOwned.id,
+        completedAt: new Date('2026-09-10T12:00:00Z'),
+      },
+    ]);
+    await expect(
+      listRecentUserTaskMemoryRuns(db, { userId: owner.id, limit: 1 }),
+    ).resolves.toHaveLength(1);
   });
 });
 

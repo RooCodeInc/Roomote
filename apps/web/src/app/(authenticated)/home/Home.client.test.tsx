@@ -20,6 +20,8 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
   { id: 'env-2', name: 'Secondary Env' },
 ];
 let currentEnvironmentsPending = false;
+let currentBrainConfigured = false;
+let currentHomeSuggestions: string[] = [];
 let capturedSubmitWithMetaKey: boolean | undefined;
 let capturedDefaultReasoningEffort: string | null | undefined;
 let submittedPromptText = 'Test prompt';
@@ -64,6 +66,20 @@ vi.mock('sonner', () => ({
   }),
 }));
 
+vi.mock('@tanstack/react-query', () => ({
+  useQuery: () => ({ data: { suggestions: currentHomeSuggestions } }),
+}));
+
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    home: {
+      composerSuggestions: {
+        queryOptions: vi.fn(() => ({})),
+      },
+    },
+  }),
+}));
+
 vi.mock('@/hooks/useUser', () => ({
   useUser: () => ({
     authStatus: 'signed-in',
@@ -76,6 +92,7 @@ vi.mock('@/hooks/useUser', () => ({
     name: 'Test User',
     primaryEmail: 'test@example.com',
     cloudEnabled: false,
+    brainConfigured: currentBrainConfigured,
     resource: {
       username: 'tester',
       fullName: 'Test User',
@@ -279,6 +296,8 @@ describe('Home', () => {
       { id: 'env-2', name: 'Secondary Env' },
     ];
     currentEnvironmentsPending = false;
+    currentBrainConfigured = false;
+    currentHomeSuggestions = [];
     capturedSubmitWithMetaKey = undefined;
     capturedDefaultReasoningEffort = undefined;
     submittedPromptText = 'Test prompt';
@@ -575,6 +594,44 @@ describe('Home', () => {
 
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
         'Find a TODO in the code and fix it',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cycles generated memory suggestions using the existing timing', async () => {
+    vi.useFakeTimers();
+    currentBrainConfigured = true;
+    currentHomeSuggestions = [
+      'Add regression coverage for recent authentication fixes',
+      'Review the latest deployment reliability follow-ups',
+      'Document the new session handoff behavior clearly',
+      'Investigate recent flaky integration test failures',
+      'Ship the pending accessibility improvements safely',
+    ];
+
+    try {
+      render(<Home initialPlaceholderIndex={0} />);
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[0]!,
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[1]!,
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[4]!,
       );
     } finally {
       vi.useRealTimers();

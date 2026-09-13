@@ -10,6 +10,7 @@ import {
   lt,
   lte,
   max,
+  ne,
   or,
   sql,
 } from 'drizzle-orm';
@@ -29,9 +30,48 @@ import {
 } from '../schema';
 import { runInTransactionIfAvailable } from './transaction-utils';
 import { createMemoryOutboxLifecycle } from './memory-outbox-lifecycle';
+import { isVisibleTask } from './tasks';
 
 export type BrainSyncStateRow = typeof brainSyncState.$inferSelect;
 export type BrainCollectorItemRow = typeof brainCollectorItems.$inferSelect;
+
+export type RecentUserTaskMemoryRun = {
+  taskId: string;
+  runId: number;
+  completedAt: Date | null;
+};
+
+/**
+ * Recent task-memory pages known to have landed for one user-initiated task.
+ * Selecting ownership and origin here avoids reading another member's or a
+ * system-launched task's Brain page merely to inspect its metadata.
+ */
+export async function listRecentUserTaskMemoryRuns(
+  database: DatabaseOrTransaction,
+  input: { userId: string; limit: number },
+): Promise<RecentUserTaskMemoryRun[]> {
+  return database
+    .select({
+      taskId: tasks.id,
+      runId: taskRuns.id,
+      completedAt: taskRuns.completedAt,
+    })
+    .from(brainMemoryEvents)
+    .innerJoin(taskRuns, eq(taskRuns.id, brainMemoryEvents.runId))
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        eq(brainMemoryEvents.status, 'done'),
+        eq(taskRuns.status, RunStatus.Completed),
+        eq(tasks.initiatorKind, 'user'),
+        eq(tasks.initiatorUserId, input.userId),
+        ne(tasks.surface, 'system'),
+        isVisibleTask(),
+      ),
+    )
+    .orderBy(desc(taskRuns.completedAt), desc(taskRuns.id))
+    .limit(input.limit);
+}
 
 export async function upsertBrainCollectorItems(
   database: DatabaseOrTransaction,
