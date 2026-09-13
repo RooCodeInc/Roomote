@@ -34,7 +34,9 @@ export function SessionSecrets({ sessionId }: { sessionId: string }) {
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
         if (!nextOpen && window.location.hash === '#session-secrets') {
-          window.location.hash = '';
+          const url = new URL(window.location.href);
+          url.hash = '';
+          window.history.replaceState(window.history.state, '', url);
         }
       }}
     >

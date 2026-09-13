@@ -422,8 +422,13 @@ it('opens only from approval links and clears the hash when closed', async () =>
   window.location.hash = '#session-secrets';
   fireEvent(window, new HashChangeEvent('hashchange'));
   await screen.findByLabelText('API key');
+  const historyLength = window.history.length;
+  const replaceState = vi.spyOn(window.history, 'replaceState');
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-  await waitFor(() => expect(window.location.hash).toBe(''));
+  await waitFor(() => expect(replaceState).toHaveBeenCalledOnce());
+  const replacementUrl = replaceState.mock.calls[0]![2] as URL;
+  expect(replacementUrl.hash).toBe('');
+  expect(window.history.length).toBe(historyLength);
   window.location.hash = '#session-secrets';
   fireEvent(window, new HashChangeEvent('hashchange'));
   await screen.findByLabelText('API key');
