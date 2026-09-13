@@ -17,6 +17,12 @@ const {
   mockStartAgentMailConversation,
   mockCanStartAgentMailConversation,
   mockAgentMailPostMessage,
+  mockPostSlackRootWithFooter,
+  mockPostSlackThreadWithFooter,
+  mockBuildFooterText,
+  mockPostTextWithFooter,
+  mockDeliverManagedFooter,
+  mockSetFooterRecord,
 } = vi.hoisted(() => ({
   mockOpenConversation: vi.fn(),
   mockCreateDiscordDirectMessage: vi.fn(),
@@ -34,6 +40,12 @@ const {
   mockStartAgentMailConversation: vi.fn(),
   mockCanStartAgentMailConversation: vi.fn(),
   mockAgentMailPostMessage: vi.fn(),
+  mockPostSlackRootWithFooter: vi.fn(),
+  mockPostSlackThreadWithFooter: vi.fn(),
+  mockBuildFooterText: vi.fn(),
+  mockPostTextWithFooter: vi.fn(),
+  mockDeliverManagedFooter: vi.fn(),
+  mockSetFooterRecord: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -69,6 +81,35 @@ vi.mock('@roomote/slack', () => ({
       postMessage: mockSlackPostMessage,
     };
   }),
+  postSlackRootMessageWithFooterText: mockPostSlackRootWithFooter,
+  postSlackThreadMessageWithFooterText: mockPostSlackThreadWithFooter,
+}));
+
+vi.mock('@roomote/communication', () => ({
+  buildFastSessionReplyFooterText: mockBuildFooterText,
+  postTextThreadReplyWithFooter: mockPostTextWithFooter,
+  deliverManagedThreadReplyFooter: mockDeliverManagedFooter,
+  setThreadReplyFooterRecord: mockSetFooterRecord,
+  getDiscordFooterlessFinalChunk: ({
+    textWithFooter,
+  }: {
+    textWithFooter: string;
+  }) => textWithFooter,
+}));
+
+vi.mock('./fast-agent-slack-reply-blocks', () => ({
+  buildFastAgentSlackReplyBodyBlocks: ({
+    message,
+    quote,
+  }: {
+    message: string;
+    quote?: string | null;
+  }) => [
+    ...(quote
+      ? [{ type: 'section', text: { type: 'mrkdwn', text: quote } }]
+      : []),
+    { type: 'markdown', text: message },
+  ],
 }));
 
 vi.mock('./teams-communication', () => ({
@@ -304,6 +345,17 @@ describe('sendUserDirectMessageBestEffort', () => {
     mockSlackUserMappingsFindFirst.mockResolvedValue({ slackUserId: 'U123' });
     mockOpenConversation.mockResolvedValue('D123');
     mockSlackPostMessage.mockResolvedValue('1720000000.000100');
+    mockPostSlackRootWithFooter.mockResolvedValue('1720000000.000100');
+    mockPostSlackThreadWithFooter.mockResolvedValue('1720000000.000200');
+    mockBuildFooterText.mockImplementation(
+      ({ provider, sessionId }) =>
+        `Reply anytime · [Open in Roomote](https://roomote.test/sessions/${sessionId}?provider=${provider})`,
+    );
+    mockPostTextWithFooter.mockResolvedValue({
+      channelId: 'teams-dm-1',
+      messageId: 'teams-message-1',
+    });
+    mockSetFooterRecord.mockResolvedValue(true);
 
     mockTeamsUserMappingsFindFirst.mockResolvedValue({
       teamsUserId: 'teams-user-1',
@@ -493,6 +545,75 @@ describe('sendUserDirectMessageBestEffort', () => {
     });
     expect(mockOpenConversation).toHaveBeenCalledTimes(1);
     expect(mockPostDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it('uses the standard Slack footer carrier for the first notification and relocates it later', async () => {
+    const presentation = {
+      sessionId: 'session-1',
+      initialUserMessage: {
+        senderDisplayName: 'Taylor',
+        text: 'What time is it?',
+      },
+    };
+    const first = await sendUserDirectMessageBestEffortWithReceipts({
+      userId: 'user-1',
+      text: 'It is 4:15 PM.',
+      logContext: 'test',
+      presentation,
+    });
+
+    expect(mockPostSlackRootWithFooter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'D123',
+        text: expect.stringContaining('Taylor'),
+        footerText: expect.stringContaining('Reply anytime'),
+      }),
+    );
+    await sendUserDirectMessageBestEffortWithReceipts({
+      userId: 'user-1',
+      text: 'A later response.',
+      logContext: 'test',
+      replyAnchor: first.receipts[0]!,
+      presentation: { sessionId: 'session-1' },
+    });
+    expect(mockPostSlackThreadWithFooter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'D123',
+        threadTs: '1720000000.000100',
+        text: 'A later response.',
+        footerText: expect.stringContaining('Reply anytime'),
+      }),
+    );
+  });
+
+  it('uses the shared managed footer delivery after falling through to Teams', async () => {
+    mockSlackUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockCreateTeamsDirectMessage.mockResolvedValue({ channelId: 'teams-dm-1' });
+
+    await expect(
+      sendUserDirectMessageBestEffortWithReceipts({
+        userId: 'user-1',
+        text: 'It is ready.',
+        logContext: 'test',
+        presentation: { sessionId: 'session-1' },
+      }),
+    ).resolves.toMatchObject({ deliveredProviders: ['teams'] });
+
+    expect(mockPostTextWithFooter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          channelId: 'teams-dm-1',
+          text: 'It is ready.',
+        }),
+        footerText: expect.stringContaining('Reply anytime'),
+      }),
+    );
+    expect(mockSetFooterRecord).toHaveBeenCalledWith(
+      'teams',
+      'teams-dm-1',
+      'teams-message-1',
+      expect.objectContaining({ messageId: 'teams-message-1' }),
+    );
   });
 
   it('continues AgentMail notifications through the stored conversation', async () => {

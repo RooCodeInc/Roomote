@@ -9,7 +9,18 @@ import {
   telegramUserMappings,
 } from '@roomote/db/server';
 import type { CommunicationProvider } from '@roomote/types';
-import { SlackNotifier } from '@roomote/slack';
+import {
+  buildFastSessionReplyFooterText,
+  deliverManagedThreadReplyFooter,
+  getDiscordFooterlessFinalChunk,
+  postTextThreadReplyWithFooter,
+  setThreadReplyFooterRecord,
+} from '@roomote/communication';
+import {
+  postSlackRootMessageWithFooterText,
+  postSlackThreadMessageWithFooterText,
+  SlackNotifier,
+} from '@roomote/slack';
 
 import {
   canStartAgentMailConversationWithUser,
@@ -20,6 +31,11 @@ import { createDiscordCommunicationProviderFromRuntimeCredentials } from './disc
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { findTeamsPrimaryConversation } from './teams-primary-conversation';
+import {
+  buildMarkdownReplyQuote,
+  buildSlackReplyQuote,
+} from './fast-agent-reply-quote';
+import { buildFastAgentSlackReplyBodyBlocks } from './fast-agent-slack-reply-blocks';
 
 export type UserDirectMessageProvider =
   | 'slack'
@@ -41,6 +57,30 @@ export type UserDirectMessageReceipt = {
   messageId: string;
   threadId?: string;
 };
+
+type UserDirectMessagePresentation = {
+  sessionId: string;
+  initialUserMessage?: { senderDisplayName: string | null; text: string };
+};
+
+function presentDirectMessage(
+  provider: UserDirectMessageProvider,
+  text: string,
+  presentation?: UserDirectMessagePresentation,
+) {
+  if (!presentation) return { text, quote: null, footerText: null };
+  const quote = presentation.initialUserMessage
+    ? provider === 'slack'
+      ? buildSlackReplyQuote(presentation.initialUserMessage)
+      : buildMarkdownReplyQuote(presentation.initialUserMessage)
+    : null;
+  const bodyText = [quote, text].filter(Boolean).join('\n\n');
+  const footerText = buildFastSessionReplyFooterText({
+    provider,
+    sessionId: presentation.sessionId,
+  });
+  return { text: `${bodyText}\n\n${footerText}`, bodyText, quote, footerText };
+}
 
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -242,6 +282,7 @@ async function sendSlackUserDirectMessage(
   blocks?: unknown[],
   idempotencyKey?: string,
   replyAnchor?: UserDirectMessageReceipt,
+  presentation?: UserDirectMessagePresentation,
 ): Promise<UserDirectMessageReceipt | null> {
   try {
     const destination = replyAnchor
@@ -263,13 +304,41 @@ async function sendSlackUserDirectMessage(
       : await resolveSlackUserDirectMessage(userId);
     if (destination) {
       const threadId = replyAnchor?.threadId ?? replyAnchor?.messageId;
-      const messageTs = await destination.slack.postMessage({
-        channel: destination.channelId,
-        text,
-        blocks: blocks ?? [{ type: 'markdown', text }],
-        ...(threadId ? { thread_ts: threadId } : {}),
-        ...(idempotencyKey ? { client_msg_id: idempotencyKey } : {}),
-      });
+      const presented = presentDirectMessage('slack', text, presentation);
+      const bodyBlocks =
+        blocks ??
+        (presentation
+          ? buildFastAgentSlackReplyBodyBlocks({
+              message: text,
+              quote: presented.quote,
+            })
+          : [{ type: 'markdown', text }]);
+      const messageTs = presentation
+        ? threadId
+          ? await postSlackThreadMessageWithFooterText({
+              slack: destination.slack,
+              channel: destination.channelId,
+              threadTs: threadId,
+              text: presented.bodyText!,
+              bodyBlocks,
+              footerText: presented.footerText!,
+              ...(idempotencyKey ? { clientMsgId: idempotencyKey } : {}),
+            })
+          : await postSlackRootMessageWithFooterText({
+              slack: destination.slack,
+              channel: destination.channelId,
+              text: presented.bodyText!,
+              bodyBlocks,
+              footerText: presented.footerText!,
+              ...(idempotencyKey ? { clientMsgId: idempotencyKey } : {}),
+            })
+        : await destination.slack.postMessage({
+            channel: destination.channelId,
+            text,
+            blocks: bodyBlocks,
+            ...(threadId ? { thread_ts: threadId } : {}),
+            ...(idempotencyKey ? { client_msg_id: idempotencyKey } : {}),
+          });
 
       if (messageTs) {
         return {
@@ -295,6 +364,7 @@ async function sendTeamsUserDirectMessage(
   text: string,
   logContext: string,
   replyAnchor?: UserDirectMessageReceipt,
+  presentation?: UserDirectMessagePresentation,
 ): Promise<UserDirectMessageReceipt | null> {
   try {
     const mapping = replyAnchor
@@ -324,22 +394,61 @@ async function sendTeamsUserDirectMessage(
     }
 
     const threadId = replyAnchor?.threadId ?? replyAnchor?.messageId;
-    const posted = replyAnchor
-      ? await provider.postMessage({
-          channelId: replyAnchor.channelId,
-          serviceUrl: conversation.serviceUrl,
-          tenantId: replyAnchor.workspaceId,
-          text,
-          textFormat: 'markdown',
-          ...(threadId ? { threadId, replyToMessageId: threadId } : {}),
+    const presented = presentDirectMessage('teams', text, presentation);
+    const destination = replyAnchor
+      ? { channelId: replyAnchor.channelId }
+      : presentation
+        ? await provider.createDirectMessage({
+            serviceUrl: conversation.serviceUrl,
+            tenantId: mapping!.teamsTenantId,
+            userId: mapping!.teamsUserId,
+          })
+        : null;
+    const posted = presentation
+      ? await postTextThreadReplyWithFooter({
+          provider,
+          input: {
+            channelId: destination!.channelId,
+            serviceUrl: conversation.serviceUrl,
+            tenantId: replyAnchor?.workspaceId ?? mapping!.teamsTenantId,
+            text: presented.bodyText,
+            textFormat: 'markdown',
+            ...(threadId ? { replyToMessageId: threadId } : {}),
+          },
+          footerText: presented.footerText!,
         })
-      : await provider.postDirectMessage({
-          serviceUrl: conversation.serviceUrl,
-          tenantId: mapping!.teamsTenantId,
-          userId: mapping!.teamsUserId,
-          text,
-          textFormat: 'markdown',
-        });
+      : replyAnchor
+        ? await provider.postMessage({
+            channelId: destination!.channelId,
+            serviceUrl: conversation.serviceUrl,
+            tenantId: replyAnchor.workspaceId,
+            text,
+            textFormat: 'markdown',
+            ...(threadId ? { threadId, replyToMessageId: threadId } : {}),
+          })
+        : await provider.postDirectMessage({
+            serviceUrl: conversation.serviceUrl,
+            tenantId: mapping!.teamsTenantId,
+            userId: mapping!.teamsUserId,
+            text,
+            textFormat: 'markdown',
+          });
+    if (presentation && !replyAnchor) {
+      await setThreadReplyFooterRecord(
+        'teams',
+        destination!.channelId,
+        posted.messageId,
+        {
+          messageId: posted.messageId,
+          textWithoutFooter: presented.bodyText ?? '',
+          refresh: {
+            footerText: presented.footerText!,
+            channelId: destination!.channelId,
+            serviceUrl: conversation.serviceUrl,
+          },
+        },
+      ).catch(() => undefined);
+    }
 
     return {
       provider: 'teams',
@@ -363,6 +472,7 @@ async function sendTelegramUserDirectMessage(
   logContext: string,
   idempotencyKey?: string,
   replyAnchor?: UserDirectMessageReceipt,
+  presentation?: UserDirectMessagePresentation,
 ): Promise<UserDirectMessageReceipt | null> {
   try {
     const mapping = replyAnchor
@@ -383,20 +493,40 @@ async function sendTelegramUserDirectMessage(
       return null;
     }
 
-    const posted = await provider.postMessage({
-      channelId: mapping.telegramChatId,
-      text,
-      textFormat: 'markdown',
-      ...(replyAnchor?.threadId ? { threadId: replyAnchor.threadId } : {}),
-      ...(idempotencyKey ? { idempotencyKey } : {}),
-    });
+    const presented = presentDirectMessage('telegram', text, presentation);
+    const posted = presentation
+      ? await postTextThreadReplyWithFooter({
+          provider,
+          input: {
+            channelId: mapping.telegramChatId,
+            text: presented.bodyText,
+            textFormat: 'markdown',
+            ...(replyAnchor?.threadId
+              ? { threadId: replyAnchor.threadId }
+              : {}),
+            ...(idempotencyKey ? { idempotencyKey } : {}),
+          },
+          footerText: presented.footerText!,
+        })
+      : await provider.postMessage({
+          channelId: mapping.telegramChatId,
+          text,
+          textFormat: 'markdown',
+          ...(replyAnchor?.threadId ? { threadId: replyAnchor.threadId } : {}),
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+        });
 
     return {
       provider: 'telegram',
       workspaceId: mapping.telegramChatId,
       channelId: mapping.telegramChatId,
-      messageId: posted.lastTextMessageId ?? posted.messageId,
-      ...(posted.threadId ? { threadId: posted.threadId } : {}),
+      messageId:
+        ('lastTextMessageId' in posted
+          ? posted.lastTextMessageId
+          : undefined) ?? posted.messageId,
+      ...('threadId' in posted && posted.threadId
+        ? { threadId: posted.threadId }
+        : {}),
     };
   } catch (error) {
     console.warn(
@@ -426,11 +556,13 @@ async function sendAgentMailUserDirectMessage(
   logContext: string,
   idempotencyKey?: string,
   replyAnchor?: UserDirectMessageReceipt,
+  presentation?: UserDirectMessagePresentation,
 ): Promise<{
   delivered: boolean;
   receipt: UserDirectMessageReceipt | null;
 }> {
   try {
+    const presented = presentDirectMessage('agentmail', text, presentation);
     if (replyAnchor) {
       const provider =
         await createAgentMailCommunicationProviderFromRuntimeCredentials();
@@ -438,7 +570,7 @@ async function sendAgentMailUserDirectMessage(
       const posted = await provider.postMessage({
         channelId: replyAnchor.workspaceId,
         threadId: replyAnchor.channelId,
-        text,
+        text: presented.text,
         textFormat: 'markdown',
         ...(idempotencyKey ? { idempotencyKey } : {}),
       });
@@ -458,7 +590,7 @@ async function sendAgentMailUserDirectMessage(
     const result = await startAgentMailConversationWithResult({
       userId,
       subject: deriveEmailSubject(text),
-      text,
+      text: presented.text,
       logContext,
       ...(idempotencyKey ? { clientSendId: idempotencyKey } : {}),
     });
@@ -496,6 +628,7 @@ async function sendDiscordUserDirectMessage(
   logContext: string,
   idempotencyKey?: string,
   replyAnchor?: UserDirectMessageReceipt,
+  presentation?: UserDirectMessagePresentation,
 ): Promise<UserDirectMessageReceipt | null> {
   try {
     const destination = replyAnchor
@@ -511,23 +644,68 @@ async function sendDiscordUserDirectMessage(
       return null;
     }
 
-    const posted = await provider.postMessage({
+    const presented = presentDirectMessage('discord', text, presentation);
+    const route = {
       channelId: destination.channelId,
-      text,
-      textFormat: 'markdown',
       ...(replyAnchor?.threadId
         ? { threadId: replyAnchor.threadId }
         : replyAnchor?.messageId
           ? { replyToMessageId: replyAnchor.messageId }
           : {}),
-      ...(idempotencyKey ? { idempotencyKey } : {}),
-    });
+    };
+    const posted = presentation
+      ? await deliverManagedThreadReplyFooter({
+          provider: 'discord',
+          providerLabel: 'Discord',
+          channelId: destination.channelId,
+          footerStateThreadId: replyAnchor?.threadId ?? 'root',
+          lockKey: `discord:thread_reply_footer_lock:${destination.channelId}:${replyAnchor?.threadId ?? 'root'}`,
+          logRef: 'personal notification',
+          logContext,
+          postReplyWithFooter: async () => {
+            const textWithFooter = presented.text;
+            const result = await provider.postMessage({
+              ...route,
+              text: textWithFooter,
+              textFormat: 'markdown',
+              ...(idempotencyKey ? { idempotencyKey } : {}),
+            });
+            return {
+              messageId: result.lastTextMessageId ?? result.messageId,
+              textWithoutFooter: getDiscordFooterlessFinalChunk({
+                textWithFooter,
+                footerText: presented.footerText!,
+              }),
+              refresh: {
+                footerText: presented.footerText!,
+                channelId: replyAnchor?.threadId ?? destination.channelId,
+              },
+            };
+          },
+          clearPreviousFooter: (record) =>
+            provider.editMessage({
+              channelId: record.refresh?.channelId ?? destination.channelId,
+              messageId: record.messageId,
+              text: record.textWithoutFooter,
+            }),
+        })
+      : await provider.postMessage({
+          ...route,
+          text,
+          textFormat: 'markdown',
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+        });
     return {
       provider: 'discord',
       workspaceId: 'dm',
       channelId: destination.channelId,
-      messageId: posted.lastTextMessageId ?? posted.messageId,
-      ...(posted.threadId ? { threadId: posted.threadId } : {}),
+      messageId:
+        ('lastTextMessageId' in posted
+          ? posted.lastTextMessageId
+          : undefined) ?? posted.messageId,
+      ...('threadId' in posted && posted.threadId
+        ? { threadId: posted.threadId }
+        : {}),
     };
   } catch (error) {
     console.warn(
@@ -629,6 +807,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
   logContext,
   idempotencyKey,
   replyAnchor,
+  presentation,
 }: {
   userId: string;
   text: string;
@@ -636,6 +815,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
   logContext: string;
   idempotencyKey?: string;
   replyAnchor?: UserDirectMessageReceipt;
+  presentation?: UserDirectMessagePresentation;
 }): Promise<{
   deliveredProviders: UserDirectMessageProvider[];
   receipts: UserDirectMessageReceipt[];
@@ -656,6 +836,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
         logContext,
         idempotencyKey,
         anchor,
+        presentation,
       );
       if (result.delivered) {
         return {
@@ -674,6 +855,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
             undefined,
             idempotencyKey,
             anchor,
+            presentation,
           )
         : provider === 'teams'
           ? await sendTeamsUserDirectMessage(
@@ -681,6 +863,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
               teamsText ?? text,
               logContext,
               anchor,
+              presentation,
             )
           : provider === 'telegram'
             ? await sendTelegramUserDirectMessage(
@@ -689,6 +872,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
                 logContext,
                 idempotencyKey,
                 anchor,
+                presentation,
               )
             : await sendDiscordUserDirectMessage(
                 userId,
@@ -696,6 +880,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
                 logContext,
                 idempotencyKey,
                 anchor,
+                presentation,
               );
     if (receipt) {
       return { deliveredProviders: [receipt.provider], receipts: [receipt] };

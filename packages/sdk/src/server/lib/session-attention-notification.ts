@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
-import { Env } from '@roomote/env';
 import {
   and,
+  asc,
   db,
   desc,
   eq,
@@ -17,12 +17,16 @@ import {
   sessions,
   taskRuns,
   taskMessages,
+  fastAgentMessages,
+  users,
 } from '@roomote/db/server';
 import { isSessionUserPresent } from '@roomote/redis';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   extractAcpMessageText,
+  extractVisibleAcpPromptText,
   getFastAgentParentFromPayload,
+  isSystemInjectedAcpPromptText,
 } from '@roomote/types';
 
 import {
@@ -56,6 +60,8 @@ type NotificationSubject = {
   taskId?: string;
   runId?: number;
   message?: string;
+  fastConversationId?: string;
+  initialPrompt?: string | null;
 };
 
 function buildIdempotencyKey(sessionId: string, eventKey: string): string {
@@ -148,16 +154,26 @@ async function deliverNotification(
     return 'skipped';
   }
 
-  const sessionUrl = new URL(`/sessions/${subject.sessionId}`, Env.R_APP_URL);
-  sessionUrl.searchParams.set('utm_source', 'notification');
-  sessionUrl.searchParams.set('utm_medium', 'direct_message');
-  sessionUrl.searchParams.set('utm_campaign', 'session-attention');
-
   const responseText = subject.message?.trim();
-  const notificationText = `${responseText || (subject.kind === 'input_needed' ? 'Your input is needed.' : 'A new response is ready.')}\n\nReply to this message to continue, or [open the Session](${sessionUrl.toString()}).`;
+  const notificationText =
+    responseText ||
+    (subject.kind === 'input_needed'
+      ? 'Your input is needed.'
+      : 'A new response is ready.');
   const replyAnchor = await findLatestSessionAttentionReceipt({
     sessionId: subject.sessionId,
     userId: subject.userId,
+  });
+  const presentation = await resolveSessionAttentionPresentation({
+    sessionId: subject.sessionId,
+    userId: subject.userId,
+    ...(subject.initialPrompt !== undefined
+      ? { taskPrompt: subject.initialPrompt }
+      : {}),
+    ...(subject.fastConversationId
+      ? { fastConversationId: subject.fastConversationId }
+      : {}),
+    includeInitialMessage: !replyAnchor,
   });
   const { receipts } = await sendUserDirectMessageBestEffortWithReceipts({
     userId: subject.userId,
@@ -166,6 +182,7 @@ async function deliverNotification(
     logContext: 'sessionAttentionNotification',
     idempotencyKey: buildIdempotencyKey(subject.sessionId, subject.eventKey),
     ...(replyAnchor ? { replyAnchor } : {}),
+    presentation,
   });
   if (receipts.length === 0) {
     await markOutcome(claim.id, claim.leaseToken, 'failed');
@@ -208,7 +225,10 @@ export async function notifyDirectWebTaskAttention(
         columns: {
           id: true,
           initiatorUserId: true,
+          initiatorKind: true,
+          trigger: true,
           surface: true,
+          prompt: true,
         },
       },
     },
@@ -216,6 +236,8 @@ export async function notifyDirectWebTaskAttention(
   if (
     !run?.task ||
     run.task.surface !== 'web' ||
+    run.task.trigger !== 'manual' ||
+    run.task.initiatorKind !== 'user' ||
     !run.task.initiatorUserId ||
     getFastAgentParentFromPayload(run.payload)
   ) {
@@ -241,6 +263,7 @@ export async function notifyDirectWebTaskAttention(
     kind: input.kind,
     taskId: run.taskId,
     runId: run.id,
+    initialPrompt: run.task.prompt,
     message:
       input.message ??
       (await findTaskAttentionMessage(run.id, input.kind, input.eventId)),
@@ -267,6 +290,7 @@ export async function notifyFastWebSessionAttention(
     eventId: string;
     kind: SessionAttentionKind;
     message?: string;
+    manual: boolean;
   },
   enqueueRetry = true,
 ): Promise<SessionAttentionNotificationResult> {
@@ -278,7 +302,11 @@ export async function notifyFastWebSessionAttention(
       sourceSurface: true,
     },
   });
-  if (!session?.ownerUserId || session.sourceSurface !== 'web') {
+  if (
+    !session?.ownerUserId ||
+    session.sourceSurface !== 'web' ||
+    input.manual !== true
+  ) {
     return 'not_applicable';
   }
   if (!(await hasAnyUserDirectMessageIdentity(session.ownerUserId))) {
@@ -296,8 +324,50 @@ export async function notifyFastWebSessionAttention(
     eventKey: `fast:${input.kind}:${input.eventId}`,
     kind: input.kind,
     message: input.message,
+    fastConversationId: input.fastConversationId,
   });
   return result;
+}
+
+export async function resolveSessionAttentionPresentation(input: {
+  sessionId: string;
+  userId: string;
+  taskPrompt?: string | null;
+  fastConversationId?: string;
+  includeInitialMessage: boolean;
+}) {
+  if (!input.includeInitialMessage) return { sessionId: input.sessionId };
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, input.userId),
+    columns: { name: true },
+  });
+  let text = input.taskPrompt?.trim();
+  if (!text && input.fastConversationId) {
+    const message = await db.query.fastAgentMessages.findFirst({
+      where: and(
+        eq(fastAgentMessages.conversationId, input.fastConversationId),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+      ),
+      columns: { contentBlocks: true, payload: true },
+      orderBy: [asc(fastAgentMessages.ts), asc(fastAgentMessages.turnSeq)],
+    });
+    text = message
+      ? extractAcpMessageText(
+          message.contentBlocks,
+          message.payload as Record<string, unknown>,
+        )?.trim()
+      : undefined;
+  }
+  if (!text) return { sessionId: input.sessionId };
+  if (isSystemInjectedAcpPromptText(text)) {
+    text = extractVisibleAcpPromptText(text).trim();
+  }
+  return {
+    sessionId: input.sessionId,
+    ...(text
+      ? { initialUserMessage: { senderDisplayName: user?.name ?? null, text } }
+      : {}),
+  };
 }
 
 export async function findTaskAttentionMessage(

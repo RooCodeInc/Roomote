@@ -20,6 +20,7 @@ export type SessionAttentionNotificationJob =
       eventId: string;
       kind: SessionAttentionKind;
       message?: string;
+      manual: boolean;
     };
 
 export async function enqueueSessionAttentionNotification(

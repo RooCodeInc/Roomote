@@ -1073,6 +1073,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       kind: 'result_ready',
       eventId: expect.any(String),
       message: 'It coordinates incoming requests.',
+      manual: true,
     });
     expect(mocks.captureInferenceContext).toHaveBeenCalledOnce();
     expect(mocks.captureInferenceContext).toHaveBeenCalledWith(
@@ -2093,6 +2094,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         kind: 'input_needed',
         eventId: expect.stringMatching(/^rui:/),
         message: 'Which tools would you like to connect?',
+        manual: false,
       });
       expect(mocks.upsertMessage).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -5977,6 +5979,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         kind: 'result_ready',
         eventId: expect.any(String),
         message: 'All done.',
+        manual: true,
       });
       expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
     });
@@ -6005,6 +6008,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         kind: 'input_needed',
         eventId: expect.any(String),
         message: 'Which environment?',
+        manual: true,
       });
     });
 
@@ -9269,6 +9273,39 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
     },
   );
+
+  it('marks automation-delegated task results in a web Session as non-manual attention', async () => {
+    const notifyUserAttention = vi.fn();
+    const adapter = callbacks({ notifyUserAttention });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The scheduled report is ready.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: { ...baseParams.conversation, surface: 'web' },
+      adapter,
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      platformEventVisibility: 'required',
+      automationReport: true,
+    });
+
+    expect(notifyUserAttention).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'result_ready',
+        message: 'The scheduled report is ready.',
+        manual: false,
+      }),
+    );
+  });
 
   it('rejects a suggestion target outside the authorized environment catalog', async () => {
     const adapter = callbacks();

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   db,
   fastAgentConversations,
+  fastAgentMessages,
   runFactory,
   sessionFactory,
   sessionTasks,
@@ -42,6 +43,7 @@ async function createDirectWebRun(payload: Record<string, unknown> = {}) {
     initiatorUserId: user.id,
     surface: 'web',
     title: 'Review the result',
+    prompt: 'Please review the build result.',
   });
   const run = await runFactory.create({ taskId: task.id, payload });
   const session = await sessionFactory.create({
@@ -167,6 +169,37 @@ describe('session attention notifications', () => {
     expect(mocks.send).not.toHaveBeenCalled();
   });
 
+  it('excludes scheduled web tasks from direct attention notifications', async () => {
+    const user = await userFactory.create();
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+      surface: 'web',
+      trigger: 'schedule',
+    });
+    const run = await runFactory.create({ taskId: task.id });
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: user.id,
+      sourceSurface: 'web',
+      sourceTrigger: 'schedule',
+    });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+
+    await expect(
+      notifyDirectWebTaskAttention({
+        runId: run.id,
+        kind: 'result_ready',
+        eventId: 'scheduled-result',
+      }),
+    ).resolves.toBe('not_applicable');
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
   it('durably suppresses input-needed delivery while the user is present', async () => {
     const { run } = await createDirectWebRun();
     mocks.isPresent.mockResolvedValueOnce(true);
@@ -276,6 +309,17 @@ describe('session attention notifications', () => {
       sourceTrigger: 'message',
       fastConversationId: conversation!.id,
     });
+    await db.insert(fastAgentMessages).values({
+      conversationId: conversation!.id,
+      eventId: 'initial-user-message',
+      turnId: 'initial-turn',
+      turnSeq: 0,
+      ts: Date.now() - 1,
+      eventType: 'roomote_runtime.user_prompt',
+      role: 'user',
+      contentBlocks: [{ type: 'text', text: 'What time is it?' }],
+      payload: {},
+    });
 
     await expect(
       notifyFastWebSessionAttention({
@@ -283,6 +327,7 @@ describe('session attention notifications', () => {
         kind: 'result_ready',
         eventId: 'turn-1',
         message: 'The current time is 4:15 PM.',
+        manual: true,
       }),
     ).resolves.toBe('delivered');
     await expect(
@@ -290,16 +335,28 @@ describe('session attention notifications', () => {
         fastConversationId: conversation!.id,
         kind: 'result_ready',
         eventId: 'turn-1',
+        manual: true,
       }),
     ).resolves.toBe('already_claimed');
 
     expect(mocks.send).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining('The current time is 4:15 PM.'),
+        presentation: expect.objectContaining({
+          sessionId: session.id,
+          initialUserMessage: expect.objectContaining({
+            text: 'What time is it?',
+          }),
+        }),
       }),
     );
     expect(mocks.send).not.toHaveBeenCalledWith(
       expect.objectContaining({ text: expect.stringContaining(session.title) }),
+    );
+    expect(mocks.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('Reply to this message to continue'),
+      }),
     );
 
     await expect(
@@ -308,6 +365,7 @@ describe('session attention notifications', () => {
         kind: 'result_ready',
         eventId: 'turn-2',
         message: 'A later response.',
+        manual: true,
       }),
     ).resolves.toBe('delivered');
     expect(mocks.send).toHaveBeenLastCalledWith(
@@ -318,6 +376,7 @@ describe('session attention notifications', () => {
           channelId: 'D1',
           messageId,
         }),
+        presentation: { sessionId: session.id },
       }),
     );
 
@@ -347,6 +406,38 @@ describe('session attention notifications', () => {
         replyToMessageId: messageId,
       }),
     ).resolves.toEqual({ status: 'foreign' });
+  });
+
+  it('excludes automation attention even when it is presented in a web Session', async () => {
+    const user = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: 'web',
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: user.id,
+      sourceSurface: 'web',
+      sourceTrigger: 'message',
+      fastConversationId: conversation!.id,
+    });
+
+    await expect(
+      notifyFastWebSessionAttention({
+        fastConversationId: conversation!.id,
+        kind: 'result_ready',
+        eventId: 'automation-result',
+        message: 'Scheduled report',
+        manual: false,
+      }),
+    ).resolves.toBe('not_applicable');
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
   });
 
   it('records reply anchors for every supported personal provider', async () => {

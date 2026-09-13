@@ -2984,7 +2984,18 @@ export async function answerFastAgentQuestion({
     kind: 'result_ready' | 'input_needed';
     eventId: string;
     message?: string;
-  } = { kind: 'result_ready', eventId: turnId };
+    manual: boolean;
+  } = {
+    kind: 'result_ready',
+    eventId: turnId,
+    // Human web turns and their delegated-task results are manual attention;
+    // automation and scheduler platform events must never notify an absent user.
+    manual:
+      turnSource === 'human' ||
+      (turnSource === 'platform_event' &&
+        platformEventKind === 'delegated_task' &&
+        !automationReport),
+  };
   let userAttentionReady = false;
   const notifyUserAttention = async () => {
     if (!userAttentionReady) return;
@@ -3445,6 +3456,7 @@ export async function answerFastAgentQuestion({
               : 'result_ready',
           eventId: turnId,
           message: replyWithImages.message,
+          manual: userAttention.manual,
         };
         userAttentionReady = true;
         closedInstructionVersions.add(instructionVersion);
@@ -4840,6 +4852,7 @@ export async function answerFastAgentQuestion({
               message: questions
                 .map((question) => question.question)
                 .join('\n'),
+              manual: userAttention.manual,
             };
             userAttentionReady = true;
             visibleUpdatePosted = true;
@@ -4972,6 +4985,7 @@ export async function answerFastAgentQuestion({
               : 'result_ready',
           eventId: turnId,
           message: recordedCloseout.text,
+          manual: userAttention.manual,
         };
         userAttentionReady = true;
       } else {

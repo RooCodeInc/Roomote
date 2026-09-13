@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   sendPersonalNotification: vi.fn(),
   findLatestReceipt: vi.fn(),
   findTaskMessage: vi.fn(),
+  resolvePresentation: vi.fn(),
 }));
 
 function updateChain() {
@@ -50,6 +51,7 @@ vi.mock('../session-attention-notification', () => ({
   findLatestSessionAttentionReceipt: mocks.findLatestReceipt,
   findTaskAttentionMessage: mocks.findTaskMessage,
   hasTaskRunAttentionNotification: mocks.hasAttention,
+  resolveSessionAttentionPresentation: mocks.resolvePresentation,
 }));
 vi.mock('./fast-agent-delivery-claim', () => ({
   buildDeliveryClaimMarker: () => 'delivering:1',
@@ -64,6 +66,9 @@ const eligibleTask = {
   initiatorUserId: 'user-1',
   state: 'completed',
   surface: 'web',
+  trigger: 'manual',
+  initiatorKind: 'user',
+  prompt: 'Please ship the notification fallback.',
   title: 'Ship notification fallback',
   runs: [{ id: 42, status: RunStatus.Completed, startedAt: new Date() }],
 };
@@ -79,6 +84,7 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
     mocks.isPresent.mockResolvedValue(false);
     mocks.findLatestReceipt.mockResolvedValue(null);
     mocks.findTaskMessage.mockResolvedValue('The actual task response.');
+    mocks.resolvePresentation.mockResolvedValue({ sessionId: 'session-1' });
     mocks.sendPersonalNotification.mockResolvedValue({
       deliveredProviders: ['slack'],
       receipts: [],
@@ -111,6 +117,7 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
         idempotencyKey: expect.stringMatching(
           /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/,
         ),
+        presentation: { sessionId: 'session-1' },
       });
       expect(mocks.sendPersonalNotification).not.toHaveBeenCalledWith(
         expect.objectContaining({
@@ -140,6 +147,8 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
     ['non-web origin', { surface: 'slack' }],
     ['missing initiating user', { initiatorUserId: null }],
     ['task still active', { state: 'active' }],
+    ['scheduled task', { trigger: 'schedule' }],
+    ['automation initiator', { initiatorKind: 'automation' }],
   ])('suppresses %s', async (_label, override) => {
     mocks.findTask.mockResolvedValue({ ...eligibleTask, ...override });
 
