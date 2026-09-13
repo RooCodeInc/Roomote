@@ -58,6 +58,7 @@ import { publishCommunicationRequestUserInput } from '../lib/communication-reque
 import { publishFastAgentRequestUserInput } from '../lib/task-runs/publish-fast-agent-request-user-input';
 import { reportToParentSession } from '../lib/task-runs/report-to-parent-session';
 import { renderSlackLiveTaskCardForRun } from '../lib/task-runs/slack-live-task-stream';
+import { notifyDirectWebTaskAttention } from '../lib/session-attention-notification';
 import {
   authenticatedProcedure,
   isRunToken,
@@ -247,6 +248,16 @@ export const taskRunsRouter = router({
       taskPhase: taskPhase ?? null,
       sleepAt: sleepAt ?? null,
     }),
+  ),
+  notifyUserAttention: runScoped(
+    z.object({
+      id: z.number(),
+      eventId: z.string().min(1),
+      kind: z.enum(['result_ready', 'input_needed']),
+    }),
+    'id',
+  ).mutation(({ input: { id, eventId, kind } }) =>
+    notifyDirectWebTaskAttention({ runId: id, eventId, kind }),
   ),
   touchTaskRunHeartbeat: runScoped(
     z.object({

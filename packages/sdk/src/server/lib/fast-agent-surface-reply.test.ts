@@ -502,6 +502,11 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     mocks.admitHumanFollowUp.mockRejectedValueOnce(
       new Error('database unavailable'),
     );
+    const deliveryConversation = {
+      surface: 'web' as const,
+      workspaceId: 'notification',
+      conversationId: 'reply-route',
+    };
 
     await expect(
       queueFastAgentSurfaceReply({
@@ -510,10 +515,14 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         senderDisplayName: 'Matt',
         question: 'Follow up',
         currentMessageId: 'web-message-1',
+        deliveryConversation,
       }),
     ).rejects.toThrow('database unavailable');
     expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
-      expect.objectContaining({ forceQueue: true }),
+      expect.objectContaining({
+        forceQueue: true,
+        event: expect.objectContaining({ deliveryConversation }),
+      }),
     );
   });
 

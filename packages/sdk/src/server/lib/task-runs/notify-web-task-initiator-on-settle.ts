@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import { getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   and,
@@ -14,9 +12,11 @@ import {
   type TaskRun,
 } from '@roomote/db/server';
 import { isSessionUserPresent } from '@roomote/redis';
-import { RunStatus } from '@roomote/types';
+import { getFastAgentParentFromPayload, RunStatus } from '@roomote/types';
 
 import { sendUserDirectMessageBestEffort } from '../user-direct-message';
+import { hasTaskRunAttentionNotification } from '../session-attention-notification';
+import { buildDeterministicMessageId } from '../deterministic-message-id';
 import {
   buildDeliveryClaimMarker,
   buildDeliveryClaimPredicate,
@@ -37,10 +37,7 @@ export type WebTaskInitiatorSettleNotificationResult =
   | 'failed';
 
 function buildIdempotencyKey(runId: number): string {
-  const hash = createHash('sha256')
-    .update(`web-task-settlement:${runId}`)
-    .digest('hex');
-  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+  return buildDeterministicMessageId(`web-task-settlement:${runId}`);
 }
 
 function statusLabel(status: SettledStatus): string {
@@ -69,18 +66,29 @@ export async function notifyWebTaskInitiatorOnSettle(
       title: true,
     },
     with: {
-      runs: { columns: { id: true, status: true, startedAt: true } },
+      runs: {
+        columns: { id: true, status: true, startedAt: true, payload: true },
+      },
     },
   });
 
   const stateRun = task ? selectTaskStateRun(task.runs) : null;
+  const settledRun = task?.runs.find((candidate) => candidate.id === run.id);
   if (
     !task ||
     task.surface !== 'web' ||
     !task.initiatorUserId ||
     task.state === 'active' ||
     stateRun?.id !== run.id ||
-    stateRun.status !== status
+    stateRun.status !== status ||
+    getFastAgentParentFromPayload(settledRun?.payload)
+  ) {
+    return 'not_applicable';
+  }
+
+  if (
+    status === RunStatus.Completed &&
+    (await hasTaskRunAttentionNotification(run.id))
   ) {
     return 'not_applicable';
   }

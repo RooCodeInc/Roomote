@@ -104,6 +104,10 @@ export const updateRuntimeState = (
   options: AppRouterInput['taskRuns']['updateRuntimeState'],
 ) => client.taskRuns.updateRuntimeState.mutate(options);
 
+export const notifyUserAttention = (
+  options: AppRouterInput['taskRuns']['notifyUserAttention'],
+) => client.taskRuns.notifyUserAttention.mutate(options);
+
 export const touchTaskRunHeartbeat = (
   options: AppRouterInput['taskRuns']['touchTaskRunHeartbeat'],
   requestOptions?: TaskRunRequestOptions,

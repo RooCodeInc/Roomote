@@ -104,6 +104,10 @@ vi.mock('../provider.js', () => {
 });
 
 vi.mock('@roomote/sdk/server', () => ({
+  findSessionAttentionNotificationReply: vi.fn(async () => ({
+    status: 'none',
+  })),
+  resolveSessionAttentionFastConversation: vi.fn(async () => null),
   findDiscordMappedUserId: mocks.findMappedUserId,
   findDiscordInstallationByGuildId: mocks.findInstallation,
   consumeDiscordLinkCode: mocks.consumeLinkCode,
@@ -122,6 +126,9 @@ vi.mock('@roomote/sdk/server', () => ({
   persistFastAgentInlineHumanTurn: vi.fn(async () => null),
   wakeFastAgentParentEventNow: vi.fn(async () => undefined),
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
+}));
+vi.mock('../../tasks/continue-session-attention-reply', () => ({
+  continueSessionAttentionReply: vi.fn(async () => false),
 }));
 
 vi.mock('@roomote/sdk/server/communication', () => ({
@@ -1524,6 +1531,7 @@ describe('Discord Gateway event handler', () => {
       workspaceId: 'dm',
       channelId: 'dm-1',
       replyToMessageId: 'fast-report-1',
+      userId: 'roomote-user-1',
     });
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({

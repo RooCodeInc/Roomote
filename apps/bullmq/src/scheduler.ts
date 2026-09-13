@@ -13,6 +13,8 @@ import {
   sentryTriageJob,
   suggesterJob,
   notifyWebTaskInitiatorOnSettle,
+  processSessionAttentionNotificationJob,
+  type SessionAttentionNotificationJob,
   type WebTaskInitiatorSettleNotificationJob,
   type AutomationJobResult,
   type AutomationRunOpts,
@@ -291,6 +293,15 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
         throw new Error(
           `Personal settlement notification failed for run ${data.runId}`,
         );
+      }
+      return;
+    }
+    case ScheduledJobName.SessionAttentionNotification: {
+      const result = await processSessionAttentionNotificationJob(
+        job.data as SessionAttentionNotificationJob,
+      );
+      if (result === 'failed') {
+        throw new Error('Session attention notification failed');
       }
       return;
     }

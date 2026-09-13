@@ -157,6 +157,7 @@ function buildDiscordReplyQuote(params: {
 
 export type FastAgentSurfaceReplyDelivery = {
   conversation: FastAgentConversation;
+  canonicalConversation?: FastAgentConversation;
   adapter: Pick<
     FastAgentTurnAdapter,
     | 'activity'
@@ -187,6 +188,8 @@ type FastAgentSurfaceReplyParams = {
    */
   activeTasks?: FastAgentActiveTask[];
   externalInput?: FastAgentReactionExternalInput;
+  /** Per-turn provider route for an explicit cross-surface notification reply. */
+  deliveryConversation?: FastAgentConversation;
   /**
    * Admission-time hooks for callers that must not block on the whole turn
    * (suggestion launchers finalize their claim as soon as the turn is
@@ -227,6 +230,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   currentMessageId?: string;
   replyToMessageId?: string;
   externalInput?: FastAgentReactionExternalInput;
+  deliveryConversation?: FastAgentConversation;
 }): Promise<FastAgentSurfaceReplyDelivery | null> {
   const session = await fastAgentConversationRepository.findById({
     id: params.sessionId,
@@ -241,14 +245,20 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   if (!canAccess) {
     return null;
   }
-  const conversation = session.conversation;
+  const conversation = params.deliveryConversation ?? session.conversation;
   const createArtifact = buildFastAgentArtifactCreator(session.id);
+  const withCanonical = (
+    delivery: Omit<FastAgentSurfaceReplyDelivery, 'canonicalConversation'>,
+  ): FastAgentSurfaceReplyDelivery => ({
+    ...delivery,
+    canonicalConversation: session.conversation,
+  });
 
   if (conversation.surface === 'web' || conversation.surface === 'automation') {
     // No side channel to post into: the canonical transcript the service
     // persists is the reply surface, and the shared conversation context
     // carries the exchange into the automation's future runs.
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -257,7 +267,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         }),
         postReply: async () => {},
       },
-    };
+    });
   }
 
   const footerContext = await resolveFastSessionReplyFooterContext({
@@ -294,7 +304,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       slackTeamId: conversation.workspaceId,
     }).catch(() => null);
 
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -399,7 +409,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           footerContext,
         }),
       },
-    };
+    });
   }
 
   if (conversation.surface === 'discord') {
@@ -498,7 +508,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       activity.reassert();
       return result;
     };
-    return { conversation, adapter };
+    return withCanonical({ conversation, adapter });
   }
 
   if (conversation.surface === 'teams') {
@@ -513,7 +523,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       return null;
     }
     const serviceUrl = route.serviceUrl;
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -559,7 +569,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           footerContext,
         }),
       },
-    };
+    });
   }
 
   if (conversation.surface === 'linear') {
@@ -570,7 +580,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       return null;
     }
     const agentSessionId = conversation.replyTarget.channelId;
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -589,7 +599,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           return { messageId: buildLinearFastReplyMessageId() };
         },
       },
-    };
+    });
   }
 
   if (isFastAgentSourceControlConversation(conversation)) {
@@ -597,7 +607,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     if (!delivery) {
       return null;
     }
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -611,7 +621,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             : buildSourceControlReplyQuote({ text: params.question }),
         }),
       },
-    };
+    });
   }
 
   if (conversation.surface === 'telegram') {
@@ -685,7 +695,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       });
       return { messageId: posted.messageId };
     };
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         activity,
@@ -708,7 +718,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           return result;
         },
       },
-    };
+    });
   }
 
   if (conversation.surface === 'agentmail') {
@@ -724,7 +734,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     // from ever colliding — web-initiated turns have no unique inbound
     // message id, and a reused key with a different body is a provider 409.
     let agentMailPostIndex = 0;
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         launchTask: createFastAgentCommunicationTaskLauncher({
@@ -753,7 +763,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         },
         replaceReply: async (handle) => handle,
       },
-    };
+    });
   }
 
   return null;
@@ -804,6 +814,9 @@ function buildSurfaceHumanFollowUpEvent(
       : {}),
     ...(params.agentContext ? { agentContext: params.agentContext } : {}),
     ...(params.activeTasks?.length ? { activeTasks: params.activeTasks } : {}),
+    ...(params.deliveryConversation
+      ? { deliveryConversation: params.deliveryConversation }
+      : {}),
     ...(params.externalInput
       ? {
           senderExternalId: params.externalInput.reactor.externalUserId,
@@ -829,7 +842,7 @@ async function admitFastAgentSurfaceHumanFollowUp(
   return admitFastAgentHumanFollowUp({
     parent: {
       sessionId: params.sessionId,
-      conversation: delivery.conversation,
+      conversation: delivery.canonicalConversation ?? delivery.conversation,
     },
     event: buildSurfaceHumanFollowUpEvent(params),
     forceQueue: forceQueue && !params.externalInput,
@@ -847,7 +860,7 @@ async function runFastAgentSurfaceReply(
   const release =
     (admission?.kind === 'turn' ? admission.turnLock : null) ??
     (await acquireFastAgentTurnLock({
-      conversation: delivery.conversation,
+      conversation: delivery.canonicalConversation ?? delivery.conversation,
     }));
   if (!release) {
     params.onRejected?.();
@@ -933,7 +946,7 @@ async function runFastAgentSurfaceReplyWithLock(
       const inlineAdmission = await admitFastAgentInlineHumanTurn({
         parent: {
           sessionId: params.sessionId,
-          conversation: delivery.conversation,
+          conversation: delivery.canonicalConversation ?? delivery.conversation,
         },
         event: buildSurfaceHumanFollowUpEvent(params),
       }).catch((error) => {
@@ -967,6 +980,9 @@ async function runFastAgentSurfaceReplyWithLock(
       userId: params.userId,
       apiBaseUrl,
       conversation: delivery.conversation,
+      ...(delivery.canonicalConversation
+        ? { canonicalConversation: delivery.canonicalConversation }
+        : {}),
       currentMessageId: params.currentMessageId,
       signal: release.signal,
       ...(admittedTurn

@@ -1,6 +1,6 @@
 {
-  "id": "e8fefa44-0b8c-4f49-9297-133bd99b7de2",
-  "prevId": "78faf767-b110-4ac3-966e-07f3ced5db5f",
+  "id": "af18ef31-6578-475a-a395-851cf18b6e7e",
+  "prevId": "e8fefa44-0b8c-4f49-9297-133bd99b7de2",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -9578,6 +9578,166 @@
       },
       "isRLSEnabled": false
     },
+    "public.session_goals": {
+      "name": "session_goals",
+      "schema": "",
+      "columns": {
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "objective": {
+          "name": "objective",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "max_continuations": {
+          "name": "max_continuations",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "continuations_used": {
+          "name": "continuations_used",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "blocked_reason": {
+          "name": "blocked_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_continuation_id": {
+          "name": "last_continuation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "continuation_ids": {
+          "name": "continuation_ids",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "generation_ids": {
+          "name": "generation_ids",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "blocker_candidate_reason": {
+          "name": "blocker_candidate_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "blocker_candidate_count": {
+          "name": "blocker_candidate_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "blocker_last_continuation_used": {
+          "name": "blocker_last_continuation_used",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "session_goals_session_id_sessions_id_fk": {
+          "name": "session_goals_session_id_sessions_id_fk",
+          "tableFrom": "session_goals",
+          "tableTo": "sessions",
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "session_goals_created_by_user_id_users_id_fk": {
+          "name": "session_goals_created_by_user_id_users_id_fk",
+          "tableFrom": "session_goals",
+          "tableTo": "users",
+          "columnsFrom": ["created_by_user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "session_goals_status_check": {
+          "name": "session_goals_status_check",
+          "value": "\"session_goals\".\"status\" in ('active', 'complete', 'blocked', 'budget_limited', 'canceled')"
+        },
+        "session_goals_continuations_check": {
+          "name": "session_goals_continuations_check",
+          "value": "\"session_goals\".\"continuations_used\" >= 0 AND \"session_goals\".\"max_continuations\" > 0"
+        },
+        "session_goals_blocker_candidate_count_check": {
+          "name": "session_goals_blocker_candidate_count_check",
+          "value": "\"session_goals\".\"blocker_candidate_count\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.session_participants": {
       "name": "session_participants",
       "schema": "",
@@ -14078,82 +14238,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "goal_objective": {
-          "name": "goal_objective",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "goal_status": {
-          "name": "goal_status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "goal_max_continuations": {
-          "name": "goal_max_continuations",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "goal_continuations_used": {
-          "name": "goal_continuations_used",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "goal_blocked_reason": {
-          "name": "goal_blocked_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "goal_completed_at": {
-          "name": "goal_completed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "goal_last_continuation_id": {
-          "name": "goal_last_continuation_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "goal_continuation_ids": {
-          "name": "goal_continuation_ids",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "goal_generation_ids": {
-          "name": "goal_generation_ids",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "goal_blocker_candidate_reason": {
-          "name": "goal_blocker_candidate_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "goal_blocker_candidate_count": {
-          "name": "goal_blocker_candidate_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "goal_blocker_last_continuation_used": {
-          "name": "goal_blocker_last_continuation_used",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "draft_prompt": {
           "name": "draft_prompt",
           "type": "text",
@@ -14434,18 +14518,6 @@
         "tasks_state_check": {
           "name": "tasks_state_check",
           "value": "\"tasks\".\"state\" in ('active', 'completed', 'failed', 'canceled')"
-        },
-        "tasks_goal_status_check": {
-          "name": "tasks_goal_status_check",
-          "value": "\"tasks\".\"goal_status\" IS NULL OR \"tasks\".\"goal_status\" in ('active', 'complete', 'blocked', 'budget_limited')"
-        },
-        "tasks_goal_continuations_check": {
-          "name": "tasks_goal_continuations_check",
-          "value": "\"tasks\".\"goal_continuations_used\" >= 0 AND (\"tasks\".\"goal_max_continuations\" IS NULL OR \"tasks\".\"goal_max_continuations\" > 0)"
-        },
-        "tasks_goal_blocker_candidate_count_check": {
-          "name": "tasks_goal_blocker_candidate_count_check",
-          "value": "\"tasks\".\"goal_blocker_candidate_count\" >= 0"
         },
         "tasks_harness_check": {
           "name": "tasks_harness_check",

@@ -37,6 +37,7 @@ import {
   findDiscordMappedUserId,
   findFastAgentSessionForProviderMessage,
   findFastAgentSessionForProviderReply,
+  findSessionAttentionNotificationReply,
   isFastAgentProviderMessage,
   queueFastAgentSurfaceReply,
   restoreDiscordLinkCode,
@@ -47,6 +48,7 @@ import {
 } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
+import { continueSessionAttentionReply } from '../tasks/continue-session-attention-reply.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
 import {
@@ -603,6 +605,20 @@ async function processDiscordGatewayEvent(
       : {}),
   };
   const forceNewTask = command?.name === 'new';
+  const attentionResolution =
+    !forceNewTask && senderUserId && message?.message_reference?.message_id
+      ? await findSessionAttentionNotificationReply({
+          provider: 'discord',
+          workspaceId: channel.guildId ?? 'dm',
+          channelId: metadata.communicationChannelId,
+          userId: senderUserId,
+          replyToMessageId: message.message_reference.message_id,
+        })
+      : ({ status: 'none' } as const);
+  const attentionReply =
+    attentionResolution.status === 'owned'
+      ? attentionResolution.attention
+      : null;
   const repliedFastSession =
     !forceNewTask && message?.message_reference?.message_id
       ? await findFastAgentSessionForProviderReply({
@@ -613,8 +629,17 @@ async function processDiscordGatewayEvent(
             ? { threadId: metadata.communicationThreadId }
             : {}),
           replyToMessageId: message.message_reference.message_id,
+          ...(channel.isDirectMessage && senderUserId
+            ? { userId: senderUserId }
+            : {}),
         })
       : null;
+  if (attentionResolution.status === 'foreign') {
+    return {
+      ok: true,
+      ignored: 'discord_attention_notification_user_mismatch',
+    };
+  }
   if (
     !forceNewTask &&
     !repliedFastSession &&
@@ -633,6 +658,10 @@ async function processDiscordGatewayEvent(
   ) {
     return { ok: true, ignored: 'discord_fast_session_user_mismatch' };
   }
+  const crossSurfaceReply =
+    repliedFastSession?.conversation.surface === 'web'
+      ? repliedFastSession
+      : null;
   // Message-backed Discord threads share the immutable report root's ID;
   // a reply reference inside the thread may point to any later message.
   const automationReportRootMessageId = message
@@ -670,6 +699,7 @@ async function processDiscordGatewayEvent(
           : null
         : await findCompletedCommunicationTaskRunWithSnapshot(conversation);
   const isFastAgentConversation = Boolean(
+    attentionReply ??
     repliedFastSession ??
     (channel.isThread || channel.isDirectMessage
       ? await hasFastAgentSession({
@@ -888,6 +918,49 @@ async function processDiscordGatewayEvent(
   const fastAttachments = processedAttachments.images.length
     ? { images: processedAttachments.images }
     : {};
+
+  if ((attentionReply || crossSurfaceReply) && message) {
+    const replyToMessageId = message.message_reference?.message_id;
+    const deliveryConversation = {
+      surface: 'discord' as const,
+      workspaceId: channel.guildId ?? 'dm',
+      conversationId: `notification:${replyToMessageId}:user:${senderUserId}`,
+      replyTarget: {
+        channelId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
+      },
+    };
+    const continued = attentionReply
+      ? await continueSessionAttentionReply({
+          attention: attentionReply,
+          userId: senderUserId,
+          senderDisplayName: sender.global_name ?? sender.username,
+          question: fastEntryText,
+          currentMessageId: message.id,
+          deliveryConversation,
+          ...fastAttachments,
+          ...(processedAttachments.attachmentTexts.length
+            ? { attachmentTexts: processedAttachments.attachmentTexts }
+            : {}),
+        })
+      : await queueFastAgentSurfaceReply({
+          sessionId: crossSurfaceReply!.id,
+          userId: senderUserId,
+          senderDisplayName: sender.global_name ?? sender.username,
+          question: fastEntryText,
+          currentMessageId: message.id,
+          deliveryConversation,
+          ...fastAttachments,
+          ...(processedAttachments.attachmentTexts.length
+            ? { attachmentTexts: processedAttachments.attachmentTexts }
+            : {}),
+        });
+    return continued
+      ? { ok: true, fastAnswered: true, fastContinued: true }
+      : { ok: true, ignored: 'discord_fast_session_route_unavailable' };
+  }
 
   if (command?.name === 'new' && command.request && interaction) {
     // `/new` opens a fresh conversation. In a server it gets its own thread
