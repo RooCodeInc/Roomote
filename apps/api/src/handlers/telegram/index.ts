@@ -35,6 +35,7 @@ import { apiLogger } from '../../logging.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import { startTaskGoal } from '../tasks/start-task-goal.js';
 import {
+  findActiveTelegramSessionTaskRun,
   findActiveTelegramTaskRun,
   findCompletedTelegramTaskRunWithSnapshot,
   findTelegramAutomationReportRun,
@@ -661,13 +662,16 @@ telegram.post('/', async (c) => {
     : await findActiveTelegramTaskRun(conversation);
 
   if (goalCommand) {
-    const reply = async (text: string) =>
+    const reply = async (
+      text: string,
+      textFormat: 'plain' | 'markdown' = 'markdown',
+    ) =>
       postTelegramMessageBestEffort({
         chatId: metadata.communicationChannelId,
         threadId: metadata.communicationThreadId,
         replyToMessageId: metadata.communicationMessageId,
         text,
-        textFormat: 'markdown',
+        textFormat,
       });
 
     if (!goalCommand.objective) {
@@ -680,7 +684,13 @@ telegram.post('/', async (c) => {
         reason: 'missing_objective',
       });
     }
-    if (!activeRun) {
+    const goalRun =
+      activeRun ??
+      (await findActiveTelegramSessionTaskRun({
+        ...conversation,
+        userId: senderUserId,
+      }));
+    if (!goalRun) {
       await reply(
         'Use `/goal` in an active Roomote task chat or topic. Start a task with `/new` or message me first.',
       );
@@ -692,18 +702,21 @@ telegram.post('/', async (c) => {
     }
 
     const result = await startTaskGoal({
-      taskId: activeRun.taskId,
+      taskId: goalRun.taskId,
       userId: senderUserId,
       objective: goalCommand.objective,
       source: 'telegram',
       clientMessageId:
         metadata.communicationMessageId ?? `telegram:${update.update_id}`,
     });
-    await reply(result.success ? 'Goal Mode enabled.' : result.error);
+    await reply(
+      result.success ? `Pursuing goal: ${goalCommand.objective}` : result.error,
+      result.success ? 'plain' : 'markdown',
+    );
     return c.json({
       ok: true,
       goalStarted: result.success,
-      runId: activeRun.id,
+      runId: goalRun.id,
     });
   }
 

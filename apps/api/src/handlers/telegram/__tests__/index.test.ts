@@ -160,8 +160,26 @@ vi.mock('@roomote/db/server', () => ({
     result: 'result',
   },
   tasks: {
+    deletedAt: 'tasks.deletedAt',
     id: 'tasks.id',
     initiatorUserId: 'tasks.initiatorUserId',
+    state: 'tasks.state',
+  },
+  fastAgentConversations: {
+    currentReplyChannelId: 'fastAgentConversations.currentReplyChannelId',
+    currentReplyThreadId: 'fastAgentConversations.currentReplyThreadId',
+    id: 'fastAgentConversations.id',
+    surface: 'fastAgentConversations.surface',
+    userId: 'fastAgentConversations.userId',
+    workspaceId: 'fastAgentConversations.workspaceId',
+  },
+  sessions: {
+    fastConversationId: 'sessions.fastConversationId',
+    id: 'sessions.id',
+  },
+  sessionTasks: {
+    sessionId: 'sessionTasks.sessionId',
+    taskId: 'sessionTasks.taskId',
   },
   db: {
     insert: insertMock,
@@ -1510,7 +1528,7 @@ describe('Telegram webhook handler', () => {
     expect(getFastSessionMock).not.toHaveBeenCalled();
   });
 
-  it('enables Goal Mode for an active task', async () => {
+  it('enables Goal Mode for an active task and acknowledges the objective literally', async () => {
     mockTelegramLinkedSender();
     taskRunsFindFirstMock.mockResolvedValueOnce({
       id: 77,
@@ -1522,7 +1540,7 @@ describe('Telegram webhook handler', () => {
     const response = await postTelegramUpdate(
       createTelegramUpdate({
         message: {
-          text: '/goal ship the release',
+          text: '/goal ship_the *release*',
           entities: [{ type: 'bot_command', offset: 0, length: 5 }],
         },
       }),
@@ -1536,15 +1554,56 @@ describe('Telegram webhook handler', () => {
     expect(startTaskGoalMock).toHaveBeenCalledWith({
       taskId: 'task-1',
       userId: 'launch-owner-1',
-      objective: 'ship the release',
+      objective: 'ship_the *release*',
       source: 'telegram',
       clientMessageId: '456',
     });
     expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({ text: 'Goal Mode enabled.' }),
+      expect.objectContaining({
+        text: 'Pursuing goal: ship_the *release*',
+        textFormat: 'plain',
+      }),
     );
     expect(queueCommunicationMessageOnceMock).not.toHaveBeenCalled();
     expect(continueFastReplyMock).not.toHaveBeenCalled();
+  });
+
+  it('enables Goal Mode for an active task attached to the Telegram Fast session', async () => {
+    mockTelegramLinkedSender();
+    taskRunsFindFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      id: 88,
+      status: 'running',
+      taskId: 'task-fast',
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/goal finish the secure flow',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      goalStarted: true,
+      runId: 88,
+    });
+    expect(startTaskGoalMock).toHaveBeenCalledWith({
+      taskId: 'task-fast',
+      userId: 'launch-owner-1',
+      objective: 'finish the secure flow',
+      source: 'telegram',
+      clientMessageId: '456',
+    });
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Pursuing goal: finish the secure flow',
+        textFormat: 'plain',
+      }),
+    );
+    expect(queueFastReplyMock).not.toHaveBeenCalled();
   });
 
   it('shows /goal usage when the objective is missing', async () => {
