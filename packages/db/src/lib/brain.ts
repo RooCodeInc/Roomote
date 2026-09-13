@@ -30,6 +30,7 @@ import {
 } from '../schema';
 import { runInTransactionIfAvailable } from './transaction-utils';
 import { createMemoryOutboxLifecycle } from './memory-outbox-lifecycle';
+import { isVisibleTask } from './tasks';
 
 export type BrainSyncStateRow = typeof brainSyncState.$inferSelect;
 export type BrainCollectorItemRow = typeof brainCollectorItems.$inferSelect;
@@ -65,6 +66,7 @@ export async function listRecentUserTaskMemoryRuns(
         eq(tasks.initiatorKind, 'user'),
         eq(tasks.initiatorUserId, input.userId),
         ne(tasks.surface, 'system'),
+        isVisibleTask(),
       ),
     )
     .orderBy(desc(taskRuns.completedAt), desc(taskRuns.id))

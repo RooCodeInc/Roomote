@@ -169,6 +169,14 @@ describe('listRecentUserTaskMemoryRuns', () => {
         initiatorUserId: owner.id,
       },
     );
+    const hiddenOwned = await makeCompletedRun(
+      new Date('2026-09-15T13:00:00Z'),
+      { initiatorUserId: owner.id, visibility: 'hidden' },
+    );
+    const deletedOwned = await makeCompletedRun(
+      new Date('2026-09-15T14:00:00Z'),
+      { initiatorUserId: owner.id, deletedAt: new Date() },
+    );
     const pendingOwned = await makeCompletedRun(
       new Date('2026-09-16T12:00:00Z'),
       { initiatorUserId: owner.id },
@@ -180,6 +188,8 @@ describe('listRecentUserTaskMemoryRuns', () => {
       { runId: otherOwned.id, status: 'done' },
       { runId: automation.id, status: 'done' },
       { runId: ownerAttributedSystem.id, status: 'done' },
+      { runId: hiddenOwned.id, status: 'done' },
+      { runId: deletedOwned.id, status: 'done' },
       { runId: pendingOwned.id, status: 'pending' },
     ]);
 
