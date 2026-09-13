@@ -1483,15 +1483,13 @@ function createAdvisorModelInstructions(): string {
 }
 
 function createExploreAgentConfig(options: {
-  model: string;
+  model?: string;
   reasoningOptions?: Record<string, unknown> | null;
 }): Record<string, unknown> {
   return {
-    model: options.model,
+    ...(options.model ? { model: options.model } : {}),
     ...(options.reasoningOptions ? { options: options.reasoningOptions } : {}),
-    // Redundant with the built-in explore agent's wildcard-deny permission
-    // set, but kept explicit so every generated subagent override carries the
-    // Slack-posting exclusions.
+    permission: { task: 'deny' },
     tools: { ...SLACK_POSTING_TOOL_EXCLUSIONS },
   };
 }
@@ -1705,20 +1703,17 @@ function resolveModelBackedOpenCodeConfig(
     ),
   };
   const exploreEffectiveModel = exploreModel ?? effectiveCodingModel;
-  const exploreAgent =
-    exploreModel || exploreModelReasoningEffort
-      ? {
-          [ROOMOTE_OPENCODE_EXPLORE_AGENT_NAME]: createExploreAgentConfig({
-            model: exploreEffectiveModel,
-            reasoningOptions: exploreModelReasoningEffort
-              ? buildOpenCodeModelReasoningOptions(
-                  exploreEffectiveModel,
-                  exploreModelReasoningEffort,
-                )
-              : null,
-          }),
-        }
-      : undefined;
+  const exploreAgent = {
+    [ROOMOTE_OPENCODE_EXPLORE_AGENT_NAME]: createExploreAgentConfig({
+      model: exploreModel,
+      reasoningOptions: exploreModelReasoningEffort
+        ? buildOpenCodeModelReasoningOptions(
+            exploreEffectiveModel,
+            exploreModelReasoningEffort,
+          )
+        : null,
+    }),
+  };
   // Plan-mode turns run on Roomote's own `architect` primary agent instead of
   // OpenCode's built-in `plan` agent, so it is registered unconditionally.
   // When a planning model is configured, the agent-level model applies;
@@ -1748,7 +1743,7 @@ function resolveModelBackedOpenCodeConfig(
     ...(visualAgent ?? {}),
     ...(judgeAgent ?? {}),
     ...advisorAgent,
-    ...(exploreAgent ?? {}),
+    ...exploreAgent,
     ...architectAgent,
     ...generalAgent,
   };
