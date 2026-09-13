@@ -51,7 +51,7 @@ describe('Sign-in page', () => {
     getDeploymentAccountLinkHelpTextMock.mockResolvedValue(null);
   });
 
-  it('redirects an authenticated user to the homepage without refreshing the session', async () => {
+  it('redirects an authenticated user to the requested safe path without refreshing the session', async () => {
     getSignedInAuthContextMock.mockResolvedValue({ success: true });
 
     await expect(
@@ -59,9 +59,27 @@ describe('Sign-in page', () => {
     ).rejects.toThrow('NEXT_REDIRECT');
 
     expect(getSignedInAuthContextMock).toHaveBeenCalledWith();
-    expect(redirectMock).toHaveBeenCalledWith('/');
+    expect(redirectMock).toHaveBeenCalledWith('/settings');
     expect(signInPageClientMock).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['a missing redirect', {}],
+    ['an external redirect', { redirect_url: 'https://example.com' }],
+    ['a protocol-relative redirect', { redirect_url: '//example.com' }],
+    ['a sign-in redirect loop', { redirect_url: '/sign-in?invited=1' }],
+  ])(
+    'redirects an authenticated user to the homepage for %s',
+    async (_, searchParams) => {
+      getSignedInAuthContextMock.mockResolvedValue({ success: true });
+
+      await expect(
+        Page({ searchParams: Promise.resolve(searchParams) }),
+      ).rejects.toThrow('NEXT_REDIRECT');
+
+      expect(redirectMock).toHaveBeenCalledWith('/');
+    },
+  );
 
   it('renders the existing sign-in form for an unauthenticated visitor', async () => {
     getSignedInAuthContextMock.mockResolvedValue({
@@ -69,7 +87,9 @@ describe('Sign-in page', () => {
       error: 'Unauthorized: User required',
     });
 
-    const result = await Page({ searchParams: Promise.resolve({}) });
+    const result = await Page({
+      searchParams: Promise.resolve({ redirect_url: '/settings' }),
+    });
 
     expect(redirectMock).not.toHaveBeenCalled();
     expect(getSignedInAuthContextMock).toHaveBeenCalledWith();
