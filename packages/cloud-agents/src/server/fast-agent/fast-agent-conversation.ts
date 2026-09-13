@@ -224,6 +224,7 @@ export type FastAgentTurnAdapter = {
     kind: 'result_ready' | 'input_needed';
     eventId: string;
     message?: string;
+    manual: boolean;
   }) => Promise<void>;
   /** Resolve a trusted preset without accepting model-supplied options. */
   resolveUserInputPreset?: (

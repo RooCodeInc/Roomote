@@ -92,68 +92,10 @@ import {
 } from './fast-agent-telegram-activity';
 import { addFastAgentTelegramTopicTitleSync } from './fast-agent-telegram-title-sync';
 
-const SLACK_QUOTE_MAX_LENGTH = 100;
-const DISCORD_QUOTE_MAX_LENGTH = 280;
-
-function normalizeQuoteText(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
-}
-
-function truncateQuoteText(text: string, maxLength: number): string {
-  if (text.length <= maxLength) {
-    return text;
-  }
-
-  return `${text.slice(0, maxLength).trimEnd()}...`;
-}
-
-function escapeSlackMrkdwnText(text: string): string {
-  return text
-    .replaceAll('\\', '\\\\')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('*', '\\*')
-    .replaceAll('_', '\\_')
-    .replaceAll('~', '\\~')
-    .replaceAll('`', '\\`');
-}
-
-/** `>*{name}:* {text}` — the same one-line quote the task reply path uses. */
-function buildSlackReplyQuote(params: {
-  senderDisplayName: string | null;
-  text: string;
-}): string | null {
-  const username = escapeSlackMrkdwnText(
-    normalizeQuoteText(params.senderDisplayName ?? 'Someone'),
-  );
-  const text = escapeSlackMrkdwnText(
-    truncateQuoteText(normalizeQuoteText(params.text), SLACK_QUOTE_MAX_LENGTH),
-  );
-
-  if (!username || !text) {
-    return null;
-  }
-
-  return `>*${username}:* ${text}`;
-}
-
-function buildDiscordReplyQuote(params: {
-  senderDisplayName: string | null;
-  text: string;
-}): string | null {
-  const username = normalizeQuoteText(params.senderDisplayName ?? 'Someone');
-  const text = truncateQuoteText(
-    normalizeQuoteText(params.text),
-    DISCORD_QUOTE_MAX_LENGTH,
-  );
-
-  if (!username || !text) {
-    return null;
-  }
-
-  return `> **${username}:** ${text}`;
-}
+import {
+  buildMarkdownReplyQuote,
+  buildSlackReplyQuote,
+} from './fast-agent-reply-quote';
 
 export type FastAgentSurfaceReplyDelivery = {
   conversation: FastAgentConversation;
@@ -421,7 +363,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
 
     let pendingQuote = params.externalInput
       ? null
-      : buildDiscordReplyQuote({
+      : buildMarkdownReplyQuote({
           senderDisplayName: params.senderDisplayName,
           text: params.question,
         });

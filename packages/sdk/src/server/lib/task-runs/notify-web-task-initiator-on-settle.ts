@@ -19,6 +19,7 @@ import {
   findLatestSessionAttentionReceipt,
   findTaskAttentionMessage,
   hasTaskRunAttentionNotification,
+  resolveSessionAttentionPresentation,
 } from '../session-attention-notification';
 import { buildDeterministicMessageId } from '../deterministic-message-id';
 import {
@@ -67,6 +68,9 @@ export async function notifyWebTaskInitiatorOnSettle(
       initiatorUserId: true,
       state: true,
       surface: true,
+      trigger: true,
+      initiatorKind: true,
+      prompt: true,
     },
     with: {
       runs: {
@@ -80,6 +84,8 @@ export async function notifyWebTaskInitiatorOnSettle(
   if (
     !task ||
     task.surface !== 'web' ||
+    task.trigger !== 'manual' ||
+    task.initiatorKind !== 'user' ||
     !task.initiatorUserId ||
     task.state === 'active' ||
     stateRun?.id !== run.id ||
@@ -145,6 +151,16 @@ export async function notifyWebTaskInitiatorOnSettle(
         logContext: 'notifyWebTaskInitiatorOnSettle',
         idempotencyKey: buildIdempotencyKey(run.id),
         ...(replyAnchor ? { replyAnchor } : {}),
+        ...(session
+          ? {
+              presentation: await resolveSessionAttentionPresentation({
+                sessionId: session.id,
+                userId: task.initiatorUserId,
+                taskPrompt: task.prompt,
+                includeInitialMessage: !replyAnchor,
+              }),
+            }
+          : {}),
       });
 
     if (deliveredProviders.length === 0) {
