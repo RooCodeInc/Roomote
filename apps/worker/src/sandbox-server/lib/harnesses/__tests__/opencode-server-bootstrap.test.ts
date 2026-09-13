@@ -21,6 +21,7 @@ describe('opencode-server bootstrap', () => {
     roomote_reply_to_slack_thread: false,
   };
   const defaultExploreAgentConfig = {
+    model: 'test-provider/main-model',
     permission: { task: 'deny' },
     tools: slackPostingToolExclusions,
   };
@@ -1446,7 +1447,10 @@ describe('opencode-server bootstrap', () => {
       advisor: expect.objectContaining({
         model: 'test-provider/override-model',
       }),
-      explore: defaultExploreAgentConfig,
+      explore: {
+        ...defaultExploreAgentConfig,
+        model: 'test-provider/override-model',
+      },
       architect: expect.objectContaining({ mode: 'primary' }),
       general: {
         disable: true,

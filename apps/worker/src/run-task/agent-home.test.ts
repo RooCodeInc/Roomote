@@ -184,7 +184,9 @@ describe('generateOpenCodeConfig provider support', () => {
         roomote_post_to_channel: false,
       },
     });
-    expect(config.agent.explore?.model).toBe(exploreModel);
+    expect(config.agent.explore?.model).toBe(
+      exploreModel ?? 'openrouter/openai/gpt-5.6-terra',
+    );
     expect(config.permission).toMatchObject({
       task: 'allow',
       bash: 'allow',
