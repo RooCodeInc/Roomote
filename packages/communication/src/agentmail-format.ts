@@ -138,10 +138,32 @@ type MarkdownBlock =
   | { kind: 'footer'; text: string }
   | { kind: 'paragraph'; lines: string[] };
 
-const HEADING_PATTERN = /^(#{1,6})\s+(.*)$/;
 const UNORDERED_ITEM_PATTERN = /^[-*+]\s+(.*)$/;
 const ORDERED_ITEM_PATTERN = /^\d+[.)]\s+(.*)$/;
 const BLOCKQUOTE_PATTERN = /^>\s?(.*)$/;
+
+function parseHeading(line: string): { level: number; text: string } | null {
+  let level = 0;
+
+  while (line[level] === '#') {
+    level += 1;
+  }
+
+  if (level === 0 || level > 6 || !/\s/.test(line[level] ?? '')) {
+    return null;
+  }
+
+  let textStart = level + 1;
+
+  while (/\s/.test(line[textStart] ?? '')) {
+    textStart += 1;
+  }
+
+  return {
+    level,
+    text: line.slice(textStart).replace(/\r$/, ''),
+  };
+}
 
 function splitBlocks(
   text: string,
@@ -164,7 +186,7 @@ function splitBlocks(
       continue;
     }
 
-    const heading = HEADING_PATTERN.exec(line);
+    const heading = parseHeading(line);
 
     if (
       recognizeFinalFooter &&
@@ -179,12 +201,12 @@ function splitBlocks(
       continue;
     }
 
-    if (heading?.[1] && heading[2] !== undefined) {
+    if (heading) {
       flush();
       blocks.push({
         kind: 'heading',
-        level: heading[1].length,
-        text: heading[2],
+        level: heading.level,
+        text: heading.text,
       });
       continue;
     }
@@ -299,13 +321,81 @@ export function renderAgentMailHtml(markdown: string): string {
 }
 
 function stripInlineMarkdown(text: string): string {
-  return text
-    .replace(/\[([^\]\n]+)\]\(([^\s)]+)\)/g, '$1 ($2)')
+  return replaceMarkdownLinksWithText(text)
     .replace(/\*\*([^*\n]+)\*\*/g, '$1')
     .replace(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/g, '$1')
     .replace(/^_([^_\n](?:[^\n]*[^_\n])?)_$/gm, '$1')
     .replace(/~~([^~\n]+)~~/g, '$1')
     .replace(/`([^`\n]+)`/g, '$1');
+}
+
+function replaceMarkdownLinksWithText(text: string): string {
+  const parts: string[] = [];
+  let labelStart = -1;
+  let unchangedStart = 0;
+  let index = 0;
+
+  while (index < text.length) {
+    const character = text[index];
+
+    if (character === '\n') {
+      labelStart = -1;
+    } else if (character === '[' && labelStart === -1) {
+      labelStart = index;
+    } else if (character === ']') {
+      if (
+        labelStart !== -1 &&
+        index > labelStart + 1 &&
+        text[index + 1] === '('
+      ) {
+        const urlStart = index + 2;
+        let urlEnd = urlStart;
+
+        while (
+          urlEnd < text.length &&
+          text[urlEnd] !== ')' &&
+          !/\s/.test(text[urlEnd] ?? '')
+        ) {
+          urlEnd += 1;
+        }
+
+        if (urlEnd > urlStart && text[urlEnd] === ')') {
+          parts.push(
+            text.slice(unchangedStart, labelStart),
+            text.slice(labelStart + 1, index),
+            ' (',
+            text.slice(urlStart, urlEnd),
+            ')',
+          );
+          index = urlEnd + 1;
+          unchangedStart = index;
+          labelStart = -1;
+          continue;
+        }
+
+        if (urlEnd === text.length) {
+          break;
+        }
+
+        if (/\s/.test(text[urlEnd] ?? '')) {
+          index = urlEnd;
+          labelStart = -1;
+          continue;
+        }
+      }
+
+      labelStart = -1;
+    }
+
+    index += 1;
+  }
+
+  if (parts.length === 0) {
+    return text;
+  }
+
+  parts.push(text.slice(unchangedStart));
+  return parts.join('');
 }
 
 /**
@@ -333,9 +423,9 @@ export function renderAgentMailPlainText(markdown: string): string {
             return `--\n${stripInlineMarkdown(line.slice(AGENTMAIL_FOOTER_PREFIX.length))}`;
           }
 
-          const heading = HEADING_PATTERN.exec(line);
+          const heading = parseHeading(line);
           const blockquote = BLOCKQUOTE_PATTERN.exec(line);
-          const source = heading?.[2] ?? blockquote?.[1] ?? line;
+          const source = heading?.text ?? blockquote?.[1] ?? line;
 
           return stripInlineMarkdown(source);
         })
