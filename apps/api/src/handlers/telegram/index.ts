@@ -730,7 +730,7 @@ telegram.post('/', async (c) => {
       return c.json({ ok: true, ignored: 'unsupported_update' });
     }
 
-    // Prefer structured request_user_input answers over plain¡ follow-ups.
+    // Prefer structured request_user_input answers over plain follow-ups.
     if (queuedMessage.userId && queuedMessage.text?.trim()) {
       const { tryHandleTelegramRequestUserInputMessage } =
         await import('./request-user-input.js');
@@ -753,6 +753,16 @@ telegram.post('/', async (c) => {
           requestUserInput: true,
         });
       }
+    }
+
+    if (!queuedMessage.text?.trim()) {
+      const { retireSupersededTelegramRequestUserInput } =
+        await import('./request-user-input.js');
+      await retireSupersededTelegramRequestUserInput({
+        activeRunId: activeRun.id,
+        chatId: metadata.communicationChannelId,
+        threadId: metadata.communicationThreadId,
+      });
     }
 
     // Trusted pre-queue actor switch; see acting-user-sync.ts. The worker

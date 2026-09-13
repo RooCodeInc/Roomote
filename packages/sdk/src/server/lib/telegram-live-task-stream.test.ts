@@ -97,7 +97,7 @@ describe('Telegram live task stream', () => {
         messageId: '88',
         text: 'Running tests.\n\nChecking Telegram fallback behavior.',
         htmlText:
-          '<details><summary>Running tests.</summary>Checking Telegram fallback behavior.</details>',
+          '<details><summary>Running tests.</summary>\n\nChecking Telegram fallback behavior.\n\n</details>',
         footerText: expect.stringMatching(/^Open in Roomote:/),
         footerHtmlText: expect.stringMatching(/^<a href=/),
       }),

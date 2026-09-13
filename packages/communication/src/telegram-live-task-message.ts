@@ -14,6 +14,8 @@ export interface TelegramLiveTaskMessageContent {
 }
 
 const TELEGRAM_LIVE_TASK_SUMMARY_MAX_LENGTH = 120;
+const INTERNAL_ATTACHMENT_PATH =
+  /`?@?\/tmp\/roomote-opencode-visual-attachments\/[^\s`,)]+`?/g;
 
 function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
@@ -62,6 +64,7 @@ function buildRunningContent(progress: string): {
   summary: string;
   details?: string;
 } {
+  progress = progress.replace(INTERNAL_ATTACHMENT_PATH, 'the attached image');
   const [firstLine = '', ...remainingLines] = progress.split('\n');
   const normalizedFirstLine = firstLine.replace(/\s+/g, ' ').trim();
   const summary = truncate(
@@ -95,7 +98,8 @@ export function buildTelegramLiveTaskMessage(
   );
   const detailsPrefix = '<details><summary>';
   const detailsSummarySuffix = '</summary>';
-  const detailsSuffix = '</details>';
+  const detailsBodyPrefix = '\n\n';
+  const detailsSuffix = '\n\n</details>';
   const footerHtmlText = content.taskUrl
     ? `<a href="${escapeHtmlAttribute(content.taskUrl)}">Open in Roomote</a>`
     : undefined;
@@ -108,17 +112,19 @@ export function buildTelegramLiveTaskMessage(
         TELEGRAM_MAX_RICH_MESSAGE_LENGTH -
           detailsPrefix.length -
           detailsSummarySuffix.length -
+          detailsBodyPrefix.length -
           detailsSuffix.length -
           footerHtmlBudget,
       )
     : '';
   const htmlBody = running?.details
-    ? `${detailsPrefix}${escapedSummary}${detailsSummarySuffix}${escapeHtmlWithinBudget(
+    ? `${detailsPrefix}${escapedSummary}${detailsSummarySuffix}${detailsBodyPrefix}${escapeHtmlWithinBudget(
         running.details,
         TELEGRAM_MAX_RICH_MESSAGE_LENGTH -
           detailsPrefix.length -
           escapedSummary.length -
           detailsSummarySuffix.length -
+          detailsBodyPrefix.length -
           detailsSuffix.length -
           footerHtmlBudget,
       )}${detailsSuffix}`
