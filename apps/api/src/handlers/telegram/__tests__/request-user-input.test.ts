@@ -5,8 +5,7 @@ const mocks = vi.hoisted(() => ({
   retirePrompt: vi.fn(),
   submitPending: vi.fn(),
   setActingUser: vi.fn(),
-  createProvider: vi.fn(),
-  editMessageText: vi.fn(),
+  postMessage: vi.fn(),
 }));
 
 vi.mock('@roomote/communication', () => ({
@@ -32,14 +31,12 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  createTelegramCommunicationProviderFromRuntimeCredentials:
-    mocks.createProvider,
   retireTelegramRequestUserInputPromptBestEffort: mocks.retirePrompt,
 }));
 
 vi.mock('../replies.js', () => ({
   answerTelegramCallbackQueryBestEffort: vi.fn(),
-  postTelegramMessageBestEffort: vi.fn(),
+  postTelegramMessageBestEffort: mocks.postMessage,
 }));
 
 import { tryHandleTelegramRequestUserInputMessage } from '../request-user-input.js';
@@ -67,13 +64,9 @@ describe('Telegram request_user_input messages', () => {
     });
     mocks.clearPending.mockResolvedValue(true);
     mocks.parseAnswer.mockReturnValue(null);
-    mocks.retirePrompt.mockResolvedValue(undefined);
+    mocks.retirePrompt.mockResolvedValue(true);
     mocks.submitPending.mockResolvedValue(true);
     mocks.setActingUser.mockImplementation(({ operation }) => operation());
-    mocks.editMessageText.mockResolvedValue(undefined);
-    mocks.createProvider.mockResolvedValue({
-      editMessageText: mocks.editMessageText,
-    });
   });
 
   it('retires an unanswered prompt when an unrelated message supersedes it', async () => {
@@ -112,7 +105,7 @@ describe('Telegram request_user_input messages', () => {
     expect(mocks.retirePrompt).not.toHaveBeenCalled();
   });
 
-  it('retires durable controls before rendering a rich confirmation', async () => {
+  it('retires durable controls while rendering a rich confirmation', async () => {
     mocks.parseAnswer.mockReturnValue({
       resolution: 'answered',
       answers: { choice: { answers: ['One'] } },
@@ -132,16 +125,32 @@ describe('Telegram request_user_input messages', () => {
       channelId: 'chat-1',
       threadId: 'topic-1',
       messageId: 'message-1',
+      replacementText: '**Picked:** One',
     });
-    expect(mocks.editMessageText).toHaveBeenCalledWith({
-      channelId: 'chat-1',
-      messageId: 'message-1',
+    expect(mocks.retirePrompt).toHaveBeenCalledTimes(1);
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('posts the confirmation when prompt replacement fails', async () => {
+    mocks.parseAnswer.mockReturnValue({
+      resolution: 'answered',
+      answers: { choice: { answers: ['One'] } },
+    });
+    mocks.retirePrompt.mockResolvedValue(false);
+
+    await tryHandleTelegramRequestUserInputMessage({
+      activeRunId: 42,
+      userId: 'user-1',
+      text: '1',
+      chatId: 'chat-1',
+      threadId: 'topic-1',
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith({
+      chatId: 'chat-1',
+      threadId: 'topic-1',
       text: '**Picked:** One',
       textFormat: 'markdown',
-      buttons: [],
     });
-    expect(mocks.retirePrompt.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.editMessageText.mock.invocationCallOrder[0]!,
-    );
   });
 });

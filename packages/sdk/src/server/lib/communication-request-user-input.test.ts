@@ -162,4 +162,59 @@ describe('Telegram communication request_user_input', () => {
       mocks.editMessageReplyMarkup.mock.invocationCallOrder[0]!,
     );
   });
+
+  it('replaces an answered prompt and retires persisted controls in one operation', async () => {
+    mocks.getFooter.mockResolvedValue({
+      messageId: 'message-1',
+      textWithoutFooter: 'Question',
+      buttons: [[{ text: 'One', callbackData: 'rui:one' }]],
+      refresh: { footerText: 'Reply anytime', channelId: 'chat-1' },
+    });
+    mocks.setFooter.mockResolvedValue(true);
+
+    await expect(
+      retireTelegramRequestUserInputPromptBestEffort({
+        channelId: 'chat-1',
+        threadId: 'topic-1',
+        messageId: 'message-1',
+        replacementText: '**Picked:** One',
+      }),
+    ).resolves.toBe(true);
+
+    expect(mocks.setFooter).toHaveBeenCalledWith(
+      'telegram',
+      'chat-1',
+      'topic-1',
+      {
+        messageId: 'message-1',
+        textWithoutFooter: '**Picked:** One',
+        refresh: { footerText: 'Reply anytime', channelId: 'chat-1' },
+      },
+      expect.objectContaining({ keepTtl: true }),
+    );
+    expect(mocks.editMessageText).toHaveBeenCalledWith({
+      channelId: 'chat-1',
+      messageId: 'message-1',
+      text: '**Picked:** One',
+      textFormat: 'markdown',
+      buttons: [],
+    });
+    expect(mocks.editMessageReplyMarkup).not.toHaveBeenCalled();
+    expect(mocks.setFooter.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.editMessageText.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('reports prompt replacement failure so the caller can fall back', async () => {
+    mocks.editMessageText.mockRejectedValue(new Error('provider unavailable'));
+
+    await expect(
+      retireTelegramRequestUserInputPromptBestEffort({
+        channelId: 'chat-1',
+        threadId: 'topic-1',
+        messageId: 'message-1',
+        replacementText: '**Picked:** One',
+      }),
+    ).resolves.toBe(false);
+  });
 });
