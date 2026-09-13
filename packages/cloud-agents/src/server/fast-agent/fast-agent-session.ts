@@ -26,6 +26,7 @@ type FastAgentSessionRecord = {
   id: string;
   userId: string | null;
   owner: FastAgentConversationOwner;
+  privacy?: 'shared' | 'private';
   title: string | null;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;

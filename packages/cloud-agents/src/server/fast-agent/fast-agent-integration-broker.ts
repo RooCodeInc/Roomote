@@ -21,6 +21,7 @@ import {
 import { resolveGitLabInstanceHost } from '@roomote/gitlab';
 import {
   createMemoryMcpInstructions,
+  BRAIN_MCP_ID,
   MCP_INTEGRATION_PROXY_PATH_PREFIX,
   MCP_ROUTING_PROXY_PATH_PREFIX,
   ROOMOTE_MCP_ID,
@@ -71,6 +72,7 @@ type IntegrationAuditContext = BrokerContext & {
   sessionId: string;
   conversation: FastAgentConversation;
   messageId: string;
+  privacy?: 'shared' | 'private';
 };
 
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
@@ -627,6 +629,18 @@ export async function callFastAgentIntegration(
   if (!integration.tools.some((tool) => tool.name === request.toolName)) {
     throw new Error('That integration tool is not available to fast mode.');
   }
+  const privateBrainRead =
+    context.privacy === 'private' && request.integrationId === BRAIN_MCP_ID;
+  if (
+    context.privacy === 'private' &&
+    isMemoryMcpServer(request.integrationId) &&
+    request.integrationId !== BRAIN_MCP_ID
+  ) {
+    throw new Error('Private Sessions cannot write to shared memory.');
+  }
+  if (privateBrainRead && request.toolName === 'synthesize') {
+    throw new Error('Brain synthesis is unavailable in private Sessions.');
+  }
   if (
     request.integrationId === ROOMOTE_MCP_ID &&
     request.toolName === 'manage_tasks' &&
@@ -653,7 +667,7 @@ export async function callFastAgentIntegration(
     slackMessageTs: context.messageId,
     integrationId: integration.id,
     toolName: request.toolName,
-    arguments: request.args,
+    arguments: privateBrainRead ? {} : request.args,
   });
 
   try {
@@ -694,7 +708,9 @@ export async function callFastAgentIntegration(
       await completeSlackFastIntegrationCall({
         id: audit.id,
         status: 'succeeded',
-        resultPreview: serializeAuditPreview(result, 30_000),
+        resultPreview: privateBrainRead
+          ? null
+          : serializeAuditPreview(result, 30_000),
         startedAt: audit.startedAt,
       });
     } catch (error) {

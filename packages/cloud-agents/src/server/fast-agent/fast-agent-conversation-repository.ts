@@ -42,6 +42,7 @@ export type FastAgentConversationRecord = {
   id: string;
   userId: string | null;
   owner: FastAgentConversationOwner;
+  privacy?: 'shared' | 'private';
   title: string | null;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
@@ -968,6 +969,7 @@ async function loadConversationRecord(
     id: record.id,
     userId: record.userId,
     owner,
+    privacy: record.privacy,
     title: record.title,
     model: record.model,
     reasoningEffort: record.reasoningEffort,

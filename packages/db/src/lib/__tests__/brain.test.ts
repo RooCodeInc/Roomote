@@ -28,6 +28,7 @@ import {
   maybeEnqueueBrainMemoryEvent,
   saveBrainAgentSummary,
   requeueBrainMemoryEventsForTasks,
+  requeueFailedBrainMemoryEvents,
   resetBrainIngestionState,
   canonicalizeBrainCollectorItemSlugs,
   deleteBrainCollectorItems,
@@ -123,6 +124,43 @@ describe('resetBrainIngestionState', () => {
       lastError: null,
       processedAt: null,
     });
+  });
+});
+
+describe('private task memory exclusion', () => {
+  it('keeps automatic, explicit, requeue, and backfill paths terminally skipped', async () => {
+    const owner = await userFactory.create();
+    const run = await makeCompletedRun(undefined, {
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+
+    await maybeEnqueueBrainMemoryEvent(db, run.id);
+    await saveBrainAgentSummary(db, run.id, 'private canary summary');
+    expect(await requeueBrainMemoryEventsForTasks(db, [run.taskId])).toBe(0);
+    expect(await backfillBrainMemoryEvents(db)).toBe(0);
+
+    const [event] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.runId, run.id));
+    expect(event).toMatchObject({
+      status: 'skipped',
+      agentSummary: null,
+      lastError: 'private task',
+    });
+    await db
+      .update(brainMemoryEvents)
+      .set({ status: 'failed' })
+      .where(eq(brainMemoryEvents.runId, run.id));
+    expect(await requeueFailedBrainMemoryEvents(db)).toBe(0);
+    await expect(
+      db.query.brainMemoryEvents.findFirst({
+        where: eq(brainMemoryEvents.runId, run.id),
+      }),
+    ).resolves.toMatchObject({ status: 'failed' });
+    expect(await claimPendingBrainMemoryEvents(db, 10)).toEqual([]);
   });
 });
 

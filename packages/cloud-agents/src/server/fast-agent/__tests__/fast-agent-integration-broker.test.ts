@@ -1690,6 +1690,58 @@ describe('fast-agent integration broker', () => {
     });
   });
 
+  it('keeps private Brain reads out of audits and blocks shared-memory writes', async () => {
+    mocks.callMcpTool.mockResolvedValue({ results: ['Shared fact'] });
+    const privateContext = { ...auditContext, privacy: 'private' as const };
+    const brain = {
+      id: 'gbrain',
+      name: 'Brain',
+      description: 'Shared Brain',
+      tools: [{ name: 'query' }, { name: 'synthesize' }],
+    };
+
+    await expect(
+      callFastAgentIntegration(privateContext, [brain], {
+        integrationId: 'gbrain',
+        toolName: 'query',
+        args: { query: 'private canary query' },
+      }),
+    ).resolves.toEqual({ results: ['Shared fact'] });
+    expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({ arguments: {} }),
+    );
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({ resultPreview: null }),
+    );
+
+    await expect(
+      callFastAgentIntegration(privateContext, [brain], {
+        integrationId: 'gbrain',
+        toolName: 'synthesize',
+        args: { question: 'private canary query' },
+      }),
+    ).rejects.toThrow('Brain synthesis is unavailable');
+    await expect(
+      callFastAgentIntegration(
+        privateContext,
+        [
+          {
+            id: 'supermemory',
+            name: 'Supermemory',
+            description: 'Shared memory',
+            tools: [{ name: 'add_memory' }],
+          },
+        ],
+        {
+          integrationId: 'supermemory',
+          toolName: 'add_memory',
+          args: { content: 'private canary fact' },
+        },
+      ),
+    ).rejects.toThrow('cannot write to shared memory');
+    expect(mocks.callMcpTool).toHaveBeenCalledTimes(1);
+  });
+
   it('does not execute a tool when its durable audit cannot be created', async () => {
     mocks.beginIntegrationCall.mockRejectedValue(new Error('database offline'));
 

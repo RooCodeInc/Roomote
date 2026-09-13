@@ -5,6 +5,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
+  BRAIN_MCP_ID,
   CHAT_CHANNEL_POST_TOOL_NAME,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_CHANNELS_TOOL,
@@ -1779,6 +1780,7 @@ export async function answerFastAgentQuestion({
   const turnVisibleMessages: ModelMessage[] = [];
   let mirroredMessageCount = 0;
   let canonicalConversationId: string | null = null;
+  let currentSessionPrivacy: 'shared' | 'private' = 'shared';
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
   /** Last model OpenCode resolved for this turn, for the failure closeout. */
@@ -2644,6 +2646,8 @@ export async function answerFastAgentQuestion({
       title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction;
     const privatePersonalization =
       title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
+    const privateBrainRead =
+      currentSessionPrivacy === 'private' && mcpServerName === BRAIN_MCP_ID;
     const canonicalEvent = allocateCanonicalEvent(`tool:${ordinal}`);
     await persistCanonicalMessage(
       {
@@ -2668,7 +2672,9 @@ export async function answerFastAgentQuestion({
           serverName: mcpServerName,
           toolName: mcpToolName ?? title,
           command: null,
-          rawInput: { arguments: privatePersonalization ? {} : args },
+          rawInput: {
+            arguments: privatePersonalization || privateBrainRead ? {} : args,
+          },
         },
         source: conversation.surface,
         nativeSessionId: nativeSessionId ?? activeOpenCodeSessionId,
@@ -2700,14 +2706,22 @@ export async function answerFastAgentQuestion({
       result.success === false;
     const privatePersonalization =
       event.title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
-    const { output, truncated } = privatePersonalization
-      ? {
-          output: failed
-            ? 'Personalization was not updated'
-            : 'Personalization updated',
-          truncated: false,
-        }
-      : serializeFastAgentToolOutput(result);
+    const privateBrainRead =
+      currentSessionPrivacy === 'private' &&
+      event.mcpServerName === BRAIN_MCP_ID;
+    const { output, truncated } =
+      privatePersonalization || privateBrainRead
+        ? {
+            output: failed
+              ? privateBrainRead
+                ? 'Brain read failed'
+                : 'Personalization was not updated'
+              : privateBrainRead
+                ? 'Brain read completed'
+                : 'Personalization updated',
+            truncated: false,
+          }
+        : serializeFastAgentToolOutput(result);
     await persistCanonicalMessage(
       {
         ...event.canonicalEvent,
@@ -2733,7 +2747,10 @@ export async function answerFastAgentQuestion({
           command: null,
           exitCode: null,
           output,
-          rawInput: { arguments: privatePersonalization ? {} : event.args },
+          rawInput: {
+            arguments:
+              privatePersonalization || privateBrainRead ? {} : event.args,
+          },
         },
         source: conversation.surface,
         nativeSessionId: nativeSessionId ?? activeOpenCodeSessionId,
@@ -3076,11 +3093,30 @@ export async function answerFastAgentQuestion({
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
-    const availableIntegrations = selectFastRoomoteChannelTools({
+    currentSessionPrivacy = session.privacy ?? 'shared';
+    let availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
       conversation,
       currentMessageReactable,
     });
+    if (currentSessionPrivacy === 'private') {
+      availableIntegrations = availableIntegrations
+        .filter(
+          (integration) =>
+            !isMemoryMcpServer(integration.id) ||
+            integration.id === BRAIN_MCP_ID,
+        )
+        .map((integration) =>
+          integration.id === BRAIN_MCP_ID
+            ? {
+                ...integration,
+                tools: integration.tools.filter(
+                  (tool) => tool.name !== 'synthesize',
+                ),
+              }
+            : integration,
+        );
+    }
     canonicalConversationId = session.id;
     // A resumed run continues the same turn. Load what the earlier attempt
     // already did before anything is written: the model is told about it,
@@ -3774,6 +3810,7 @@ export async function answerFastAgentQuestion({
             userId,
             apiBaseUrl,
             sessionId: session.id,
+            privacy: currentSessionPrivacy,
             conversation,
             messageId: currentMessageId ?? conversation.conversationId,
           },
@@ -4573,7 +4610,9 @@ export async function answerFastAgentQuestion({
               return {
                 success: false,
                 error:
-                  "This conversation's memory is full. Start a new conversation to save further memories.",
+                  result.reason === 'private_conversation'
+                    ? 'Private Sessions cannot write to shared memory.'
+                    : "This conversation's memory is full. Start a new conversation to save further memories.",
               };
             }
             return {
