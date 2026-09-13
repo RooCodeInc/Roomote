@@ -9,13 +9,13 @@ vi.mock('@roomote/db/server', () => ({
   prepareTaskGoalActivation: mocks.prepareActivation,
 }));
 
-vi.mock('../../tasks/sendMessageToTask.js', () => ({
+vi.mock('../sendMessageToTask.js', () => ({
   sendMessageToTask: mocks.sendMessage,
 }));
 
-import { startDiscordTaskGoal } from '../goal-command.js';
+import { startTaskGoal } from '../start-task-goal.js';
 
-describe('startDiscordTaskGoal', () => {
+describe('startTaskGoal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.prepareActivation.mockResolvedValue({
@@ -28,31 +28,35 @@ describe('startDiscordTaskGoal', () => {
     mocks.rollback.mockResolvedValue(true);
   });
 
-  it('delivers the objective with trusted Goal Mode context before committing', async () => {
-    await expect(
-      startDiscordTaskGoal({
+  it.each(['discord', 'telegram'] as const)(
+    'delivers a %s objective with trusted Goal Mode context before committing',
+    async (source) => {
+      await expect(
+        startTaskGoal({
+          taskId: 'task-1',
+          userId: 'user-1',
+          objective: 'Ship the release',
+          source,
+          clientMessageId: 'message-1',
+        }),
+      ).resolves.toEqual({ success: true });
+
+      expect(mocks.sendMessage).toHaveBeenCalledWith({
         taskId: 'task-1',
         userId: 'user-1',
-        objective: 'Ship the release',
-        clientMessageId: 'interaction-1',
-      }),
-    ).resolves.toEqual({ success: true });
-
-    expect(mocks.sendMessage).toHaveBeenCalledWith({
-      taskId: 'task-1',
-      userId: 'user-1',
-      message: 'Ship the release',
-      source: 'discord',
-      clientMessageId: 'interaction-1',
-      goalContext: expect.objectContaining({
-        objective: 'Ship the release',
-        generation: 'goal-generation:1',
-        status: 'active',
-      }),
-    });
-    expect(mocks.commit).toHaveBeenCalledOnce();
-    expect(mocks.rollback).not.toHaveBeenCalled();
-  });
+        message: 'Ship the release',
+        source,
+        clientMessageId: 'message-1',
+        goalContext: expect.objectContaining({
+          objective: 'Ship the release',
+          generation: 'goal-generation:1',
+          status: 'active',
+        }),
+      });
+      expect(mocks.commit).toHaveBeenCalledOnce();
+      expect(mocks.rollback).not.toHaveBeenCalled();
+    },
+  );
 
   it('rolls back activation when prompt delivery fails', async () => {
     mocks.sendMessage.mockResolvedValue({
@@ -62,11 +66,12 @@ describe('startDiscordTaskGoal', () => {
     });
 
     await expect(
-      startDiscordTaskGoal({
+      startTaskGoal({
         taskId: 'task-1',
         userId: 'user-1',
         objective: 'Ship the release',
-        clientMessageId: 'interaction-1',
+        source: 'telegram',
+        clientMessageId: 'message-1',
       }),
     ).resolves.toEqual({
       success: false,
@@ -81,11 +86,12 @@ describe('startDiscordTaskGoal', () => {
     mocks.commit.mockRejectedValue(new Error('database unavailable'));
 
     await expect(
-      startDiscordTaskGoal({
+      startTaskGoal({
         taskId: 'task-1',
         userId: 'user-1',
         objective: 'Ship the release',
-        clientMessageId: 'interaction-1',
+        source: 'telegram',
+        clientMessageId: 'message-1',
       }),
     ).rejects.toThrow('database unavailable');
 

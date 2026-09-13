@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getNewTelegramMessageReactions,
+  getTelegramGoalCommand,
   getTelegramNewTaskCommand,
   getTelegramUpdateCallbackQuery,
   getTelegramUpdateCommunicationMetadata,
@@ -422,6 +423,52 @@ describe('Telegram update helpers', () => {
     ).toBe(false);
   });
 
+  it('does not trust Telegram mentions when the bot username is unavailable', () => {
+    const buildUpdate = (chatType: 'private' | 'group') =>
+      parseTelegramUpdate({
+        update_id: 1008,
+        message: {
+          message_id: 49,
+          text: '@someone $daily-brief summarize this',
+          chat: {
+            id: chatType === 'private' ? 5 : -100456,
+            type: chatType,
+            title: chatType === 'private' ? undefined : 'Engineering',
+          },
+          entities: [{ type: 'mention', offset: 0, length: 8 }],
+        },
+      }).data!;
+
+    const groupUpdate = buildUpdate('group');
+    expect(isTelegramTaskEntryUpdate(groupUpdate)).toBe(false);
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(groupUpdate),
+    ).toMatchObject({ text: '@someone $daily-brief summarize this' });
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(buildUpdate('private')),
+    ).toMatchObject({ text: '@someone $daily-brief summarize this' });
+  });
+
+  it('does not trust group bot commands when the bot username is unavailable', () => {
+    const parsed = parseTelegramUpdate({
+      update_id: 1009,
+      message: {
+        message_id: 50,
+        text: '/run@someone_else $daily-brief summarize this',
+        chat: { id: -100456, type: 'group', title: 'Engineering' },
+        entities: [{ type: 'bot_command', offset: 0, length: 17 }],
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(isTelegramTaskEntryUpdate(parsed.data!)).toBe(false);
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(parsed.data!),
+    ).toMatchObject({
+      text: '/run@someone_else $daily-brief summarize this',
+    });
+  });
+
   it('treats a bot command as an invocation only when it leads the message', () => {
     const buildUpdate = (
       text: string,
@@ -685,6 +732,20 @@ describe('Telegram update helpers', () => {
       ).toEqual({ command: 'new', text: 'fix the tests' });
     });
 
+    it('rejects group /new commands when the bot username is unavailable', () => {
+      expect(
+        getTelegramNewTaskCommand(
+          parse(
+            buildUpdate(
+              '/new@someone_else $daily-brief summarize this',
+              'group',
+              [{ type: 'bot_command', offset: 0, length: 17 }],
+            ),
+          ),
+        ),
+      ).toBeNull();
+    });
+
     it('accepts a leading bot mention as group targeting', () => {
       expect(
         getTelegramNewTaskCommand(
@@ -756,6 +817,71 @@ describe('Telegram update helpers', () => {
       expect(
         getTelegramNewTaskCommand(
           parse(buildUpdate('just a regular message', 'private')),
+        ),
+      ).toBeNull();
+    });
+  });
+
+  describe('getTelegramGoalCommand', () => {
+    const parse = (
+      text: string,
+      chatType: 'private' | 'group' = 'private',
+      entities: Array<{ type: string; offset: number; length: number }> = [],
+    ) =>
+      parseTelegramUpdate({
+        update_id: 2002,
+        message: {
+          message_id: 43,
+          chat: { id: chatType === 'private' ? 5 : -1007, type: chatType },
+          text,
+          entities,
+        },
+      }).data!;
+
+    it('extracts a private-chat objective', () => {
+      expect(
+        getTelegramGoalCommand(
+          parse('/goal ship the release', 'private', [
+            { type: 'bot_command', offset: 0, length: 5 },
+          ]),
+        ),
+      ).toEqual({ command: 'goal', objective: 'ship the release' });
+    });
+
+    it('requires group commands to target this bot', () => {
+      expect(
+        getTelegramGoalCommand(
+          parse('/goal@roomote_bot ship it', 'group', [
+            { type: 'bot_command', offset: 0, length: 17 },
+          ]),
+          { botUsername: 'roomote_bot' },
+        ),
+      ).toEqual({ command: 'goal', objective: 'ship it' });
+      expect(
+        getTelegramGoalCommand(
+          parse('/goal ship it', 'group', [
+            { type: 'bot_command', offset: 0, length: 5 },
+          ]),
+          { botUsername: 'roomote_bot' },
+        ),
+      ).toBeNull();
+    });
+
+    it('accepts a leading bot mention and rejects mid-sentence commands', () => {
+      expect(
+        getTelegramGoalCommand(
+          parse('@roomote_bot /goal ship it', 'group', [
+            { type: 'mention', offset: 0, length: 12 },
+            { type: 'bot_command', offset: 13, length: 5 },
+          ]),
+          { botUsername: 'roomote_bot' },
+        ),
+      ).toEqual({ command: 'goal', objective: 'ship it' });
+      expect(
+        getTelegramGoalCommand(
+          parse('please /goal ship it', 'private', [
+            { type: 'bot_command', offset: 7, length: 5 },
+          ]),
         ),
       ).toBeNull();
     });

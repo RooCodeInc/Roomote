@@ -3,12 +3,14 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { useStickToBottomContext } from 'use-stick-to-bottom';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   SETUP_RECEIPT_INPUT_KIND,
@@ -43,6 +45,7 @@ import {
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
+import { useSessionNavigationState } from '@/hooks/useSessionNavigationState';
 import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 import {
   SessionPromptInput,
@@ -346,6 +349,35 @@ function RunningTasksMessage({
   );
 }
 
+function SessionScrollRestoration({ sessionId }: { sessionId: string }) {
+  const { scrollRef, stopScroll } = useStickToBottomContext();
+  const navigationState = useSessionNavigationState();
+
+  useLayoutEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement || !navigationState) return;
+
+    const savedScrollTop = navigationState.getScrollPosition(sessionId);
+    if (savedScrollTop !== undefined) {
+      stopScroll();
+      scrollElement.scrollTop = savedScrollTop;
+    }
+
+    const saveScrollPosition = () => {
+      navigationState.setScrollPosition(sessionId, scrollElement.scrollTop);
+    };
+    scrollElement.addEventListener('scroll', saveScrollPosition, {
+      passive: true,
+    });
+
+    return () => {
+      scrollElement.removeEventListener('scroll', saveScrollPosition);
+    };
+  }, [navigationState, scrollRef, sessionId, stopScroll]);
+
+  return null;
+}
+
 export function FastSessionTranscript({
   sessionId,
   initialMessages,
@@ -385,6 +417,9 @@ export function FastSessionTranscript({
   autoStartVoice?: boolean;
 }) {
   const trpcClient = useTRPCClient();
+  const navigationState = useSessionNavigationState();
+  const hasSavedScrollPosition =
+    navigationState?.getScrollPosition(sessionId) !== undefined;
   const openTaskPanel = useOpenSessionTaskPanel();
   const openTasksPanel = useOpenSessionTasksPanel();
   const runningTaskCount = useSessionRunningTaskCount();
@@ -1439,7 +1474,10 @@ export function FastSessionTranscript({
             )}
           </div>
         </WorkspaceHeader>
-        <Conversation className="min-h-0 flex-1" initial="instant">
+        <Conversation
+          className="min-h-0 flex-1"
+          initial={hasSavedScrollPosition ? false : 'instant'}
+        >
           <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4 pt-0">
             {hasOlderMessages ? (
               <p className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
@@ -1508,6 +1546,7 @@ export function FastSessionTranscript({
               />
             ))}
           </ConversationContent>
+          <SessionScrollRestoration sessionId={sessionId} />
           <ConversationScrollButton />
         </Conversation>
         {canReply && !pendingInputRequest?.preset ? (

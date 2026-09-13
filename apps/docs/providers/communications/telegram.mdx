@@ -19,8 +19,8 @@ Use `<public-url>` below for your stable public Roomote URL.
 Message `@BotFather` in Telegram and create or select a bot. In the Roomote UI
 (**Settings > Communications > Telegram**), enter the bot token, then save.
 Roomote reads the bot identity from Telegram, generates a webhook secret,
-registers the Bot API webhook, and adds `/start`, `/help`, and `/new` to the
-bot's command menu for you.
+registers the Bot API webhook, and adds `/start`, `/help`, `/new`, and `/goal`
+to the bot's command menu for you.
 
 In BotFather, open **Bot Settings > Threaded Mode** and enable it. Roomote will
 then create a separate topic in your private bot chat for each new task. If
@@ -108,7 +108,8 @@ up on tasks on their behalf.
    the same Fast session continues
 4. use `/new <request>` and confirm a fresh conversation opens in its own
    topic when Threaded Mode is enabled
-5. reply in the task topic to send a follow-up
+5. while a task is active, use `/goal <objective>` and confirm Goal Mode starts
+6. reply in the task topic to send a follow-up
 
 Every message from a linked user enters a Fast Session: in private chats
 directly, and in groups from bot mentions. Fast answers directly or delegates
@@ -117,12 +118,13 @@ another mention, and a direct reply to a Fast message resumes the bound
 session even when the chat has no topics. Sessions are isolated by linked
 Roomote user. `/new` starts a fresh conversation instead of continuing the
 current one, opening a new topic when Telegram supports it; in a plain private
-chat the request joins that chat's conversation.
+chat the request joins that chat's conversation. `/goal` keeps an active task
+working toward the supplied objective; it does not start a task by itself.
 
 While a private-chat Fast turn is running, Telegram shows a non-empty
-**Roomote is working...** native draft, then replaces it with response text as
-generation continues. The completed response is always sent as a normal message
-so it remains in the conversation. Roomote keeps activity active across
+**Roomote is working...** rich-message draft, then replaces it with rich response
+text as generation continues. The completed response is always finalized as a
+durable rich message so it remains in the conversation. Roomote keeps activity active across
 intermediate replies while more work remains, and a final reply clears it
 naturally.
 Telegram does not support native drafts in group chats, so groups use
@@ -134,9 +136,19 @@ says so in the chat instead of starting a task another way. Fast automation
 reports can target a Telegram chat, topic, or owner direct message; replies
 continue the report's Fast session.
 
-Every Fast reply ends with a compact footer: **Reply anytime**, a plain
+Roomote sends all Telegram text replies as rich messages, including
+acknowledgements, progress, final replies, and editable live-task status. Every
+Markdown-authored reply uses Telegram's native Rich Markdown support, preserving
+GitHub Flavored Markdown features where Telegram supports them. Plain text and
+Roomote-generated controls use supported Rich HTML embedded in the same Markdown
+payload, so sends, edits, and drafts share one formatting path. Each
+Fast reply ends with a compact footer: **Reply anytime**, a plain
 running-task count when at least one task is running, links to pull requests the
 Session is working on, and **Open in Roomote**, which opens the Session transcript.
+Telegram renders this through its native rich-message footer presentation and
+controls its exact appearance. Rich text replies can remain in one message up to
+Telegram's 32,768-character rich-message limit; longer replies are split while
+keeping the footer on the final text message.
 Roomote keeps the footer on the latest reply current as delegated tasks start
 and finish (checking about every 30 seconds while work is running), and
 earlier replies drop their footer when a new reply posts.

@@ -124,8 +124,7 @@ export async function startTelegramLiveTaskStream(input: {
     const posted = await input.provider.postMessage({
       channelId: input.channelId,
       ...(input.threadId ? { threadId: input.threadId } : {}),
-      text: message.text,
-      htmlText: message.htmlText,
+      ...message,
     });
     postedMessageId = posted.messageId;
 

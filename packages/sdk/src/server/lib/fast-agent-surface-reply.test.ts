@@ -182,7 +182,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       editForumTopic: mocks.telegramEditForumTopic,
       resolveForumTopicIconCustomEmojiId: mocks.telegramResolveForumTopicIcon,
       sendChatAction: mocks.telegramTyping,
-      sendMessageDraft: mocks.telegramTyping,
+      sendRichMessageDraft: mocks.telegramTyping,
     });
     mocks.createDiscordProvider.mockResolvedValue({
       triggerTyping: mocks.discordTyping,
@@ -333,7 +333,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       currentMessageId: '78',
     });
     delivery!.adapter.activity?.updateTitle?.('Fix generated Fast title', {
-      category: 'fix',
+      iconEmoji: '🦠',
     });
     await delivery!.adapter.activity?.dispose();
 
@@ -343,13 +343,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       name: 'Fix generated Fast title',
       iconCustomEmojiId: 'bug-icon',
     });
-    expect(mocks.telegramResolveForumTopicIcon).toHaveBeenCalledWith([
-      '🦠',
-      '🔎',
-      '💡',
-      '💬',
-      '📝',
-    ]);
+    expect(mocks.telegramResolveForumTopicIcon).toHaveBeenCalledWith(['🦠']);
   });
 
   it('does not rename a user-owned Telegram topic', async () => {
@@ -864,7 +858,13 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
           channelId,
           ...(threadId ? { threadId } : {}),
           ...(currentMessageId ? { replyToMessageId: currentMessageId } : {}),
-          text: expect.stringContaining('[Open in Roomote]'),
+          text:
+            surface === 'telegram'
+              ? 'Done'
+              : expect.stringContaining('[Open in Roomote]'),
+          ...(surface === 'telegram'
+            ? { footerText: expect.stringContaining('[Open in Roomote]') }
+            : {}),
         }),
       );
       expect(binding?.messageId).toBe(

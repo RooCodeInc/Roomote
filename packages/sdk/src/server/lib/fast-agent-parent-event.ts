@@ -435,6 +435,17 @@ function isFastAutomationReportEvent(
   );
 }
 
+function buildTelegramAutomationMessage(params: {
+  automationName: string;
+  message: string;
+}): string {
+  const automationName = params.automationName
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+  return `<h3>${automationName}</h3>\n\n${params.message}`;
+}
+
 /** Groups a report's suggestion cards; unique per run occurrence. */
 function buildFastAutomationSuggestionEventId(
   event: Extract<
@@ -1906,14 +1917,15 @@ async function createTelegramFastAgentParentTurn(
     sessionId: session.id,
     footerContext: params.footerContext,
   });
+  const automation = await resolveFastAutomationLaunchContext({
+    event: params.event,
+    conversation,
+  });
   const launchTask = createFastAgentCommunicationTaskLauncher({
     userId: actorUserId,
     conversation,
     telegramLiveTaskProvider: provider,
-    automation: await resolveFastAutomationLaunchContext({
-      event: params.event,
-      conversation,
-    }),
+    automation,
   });
   return {
     userId: actorUserId,
@@ -1949,6 +1961,13 @@ async function createTelegramFastAgentParentTurn(
                 suggestions.length > 0,
               )
             : message;
+        const displayedMessage =
+          automation && (kickoff || isFastAutomationReportEvent(params.event))
+            ? buildTelegramAutomationMessage({
+                automationName: automation.automationName,
+                message: reportMessage,
+              })
+            : reportMessage;
         const action =
           params.event.type === 'pull_request_feedback' &&
           params.event.suggestedActionQuestion &&
@@ -1985,7 +2004,7 @@ async function createTelegramFastAgentParentTurn(
             ...(conversation.replyTarget.threadId
               ? { threadId: conversation.replyTarget.threadId }
               : {}),
-            text: reportMessage,
+            text: displayedMessage,
             textFormat: 'markdown',
             images,
             ...(action

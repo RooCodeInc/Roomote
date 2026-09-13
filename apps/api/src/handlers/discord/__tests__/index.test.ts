@@ -177,8 +177,8 @@ vi.mock('../task-orchestration.js', () => ({
   startNewDiscordTask: mocks.startNewTask,
 }));
 
-vi.mock('../goal-command.js', () => ({
-  startDiscordTaskGoal: mocks.startGoal,
+vi.mock('../../tasks/start-task-goal.js', () => ({
+  startTaskGoal: mocks.startGoal,
 }));
 
 vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
@@ -2384,6 +2384,7 @@ describe('Discord Gateway event handler', () => {
       taskId: 'task-23',
       userId: 'roomote-user-1',
       objective: 'Ship the release',
+      source: 'discord',
       clientMessageId: 'interaction-goal',
     });
     expect(mocks.reply).toHaveBeenCalledWith(

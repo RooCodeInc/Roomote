@@ -112,6 +112,19 @@ describe('deliverShowWidgetFallback', () => {
     );
   });
 
+  it('posts the widget link when optional preview text is absent', async () => {
+    await deliverShowWidgetFallback({
+      runId: 42,
+      delivery: { ...delivery, title: null, textFallback: null },
+      mcpTaskEnv,
+      logger,
+    });
+
+    expect(replyToChatThread).toHaveBeenCalledWith(expect.anything(), {
+      text: '[View widget](https://app.example.com/task/task-1#msg-1)',
+    });
+  });
+
   it('keeps persistence successful when the delivery claim is unavailable', async () => {
     claimDelivery.mockRejectedValue(new Error('claim unavailable'));
 

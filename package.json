@@ -32,7 +32,7 @@
     "db:reset": "pnpm db:down && docker volume rm -f roomote_pg_data roomote_redis_data roomote_minio_data && pnpm db:up",
     "db:seed": "pnpm --silent --filter @roomote/db db:seed",
     "db:seed:demo": "pnpm --silent --filter @roomote/db db:seed:demo",
-    "deployment:validate": "node deploy/ci/validate-deployment-artifacts.mjs",
+    "deployment:validate": "node --test deploy/ci/deployment-scripts.test.mjs && node deploy/ci/validate-deployment-artifacts.mjs",
     "deployment:smoke": "bash deploy/ci/deployment-smoke.sh",
     "dev": "pnpm --silent --filter @roomote/dev dev",
     "doctor": "pnpm --filter @roomote/dev run doctor",

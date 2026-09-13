@@ -4,7 +4,7 @@ import type {
 } from './provider';
 import type { TeamsCommunicationProvider } from './teams-provider';
 import type { TelegramCommunicationProvider } from './telegram-provider';
-import { chunkTelegramMarkdownAsHtml } from './telegram-format';
+import { planTelegramRichMessages } from './telegram-format';
 import {
   deliverManagedThreadReplyFooter,
   withThreadReplyFooterLock,
@@ -37,8 +37,22 @@ export async function editTextThreadFooterMessage(
       images: record.images,
     });
   } else {
+    const suffix = `\n\n`;
+    const hasFooter =
+      text !== record.textWithoutFooter &&
+      (record.textWithoutFooter === '' ||
+        text.startsWith(`${record.textWithoutFooter}${suffix}`));
     await provider.editMessageText({
       ...input,
+      text: hasFooter ? record.textWithoutFooter || '\u200b' : text,
+      ...(hasFooter
+        ? {
+            footerText: text.slice(
+              record.textWithoutFooter.length +
+                (record.textWithoutFooter ? suffix.length : 0),
+            ),
+          }
+        : {}),
       ...(record.buttons ? { buttons: record.buttons } : {}),
     });
   }
@@ -91,13 +105,18 @@ export async function postTextThreadReplyWithFooter(params: {
       } else {
         posted = await provider.postMessage({
           ...input,
-          text,
+          text: provider.provider === 'telegram' ? input.text : text,
+          ...(provider.provider === 'telegram' ? { footerText } : {}),
           textFormat: 'markdown',
         });
       }
       const finalChunk =
         provider.provider === 'telegram'
-          ? (chunkTelegramMarkdownAsHtml(text).at(-1)?.markdown ?? '')
+          ? (planTelegramRichMessages({
+              text: input.text ?? '',
+              footerText,
+              textFormat: 'markdown',
+            }).at(-1)?.text ?? '')
           : text;
       const textWithoutFooter =
         finalChunk === footerText
@@ -117,7 +136,9 @@ export async function postTextThreadReplyWithFooter(params: {
         ...(provider.provider === 'teams' && input.images?.length
           ? { images: input.images }
           : {}),
-        ...(finalChunk.endsWith(footerText) ? { refresh } : {}),
+        ...(provider.provider === 'telegram' || finalChunk.endsWith(footerText)
+          ? { refresh }
+          : {}),
       };
     },
     clearPreviousFooter: (record) =>
