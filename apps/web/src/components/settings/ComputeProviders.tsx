@@ -12,6 +12,7 @@ import {
 import { useTRPC } from '@/trpc/client';
 import {
   Alert,
+  Button,
   Cpu,
   Info,
   Select,
@@ -20,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
   Skeleton,
+  Spinner,
 } from '@/components/system';
 
 import { Section } from './Section';
@@ -172,11 +174,23 @@ export function ComputeProviders() {
     );
   }
 
-  if (status.isError) {
+  if (status.isError && !status.data) {
     return (
-      <p className="text-sm text-destructive">
-        Failed to load sandbox provider status.
-      </p>
+      <div className="space-y-3">
+        <p className="text-sm text-destructive">
+          Failed to load sandbox provider status.
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => void status.refetch()}
+          disabled={status.isFetching}
+          aria-busy={status.isFetching}
+        >
+          {status.isFetching ? <Spinner /> : null}
+          {status.isFetching ? 'Retrying...' : 'Retry'}
+        </Button>
+      </div>
     );
   }
 
