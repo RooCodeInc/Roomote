@@ -14,6 +14,7 @@ const {
   mockTelegramPostMessage,
   mockTelegramUserMappingsFindFirst,
   mockStartAgentMailConversation,
+  mockCanStartAgentMailConversation,
 } = vi.hoisted(() => ({
   mockOpenConversation: vi.fn(),
   mockCreateDiscordDirectMessage: vi.fn(),
@@ -28,6 +29,7 @@ const {
   mockTelegramPostMessage: vi.fn(),
   mockTelegramUserMappingsFindFirst: vi.fn(),
   mockStartAgentMailConversation: vi.fn(),
+  mockCanStartAgentMailConversation: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -87,7 +89,7 @@ vi.mock('./teams-primary-conversation', () => ({
 }));
 
 vi.mock('./agentmail/outbound', () => ({
-  canStartAgentMailConversationWithUser: vi.fn(),
+  canStartAgentMailConversationWithUser: mockCanStartAgentMailConversation,
   startAgentMailConversation: mockStartAgentMailConversation,
   startAgentMailConversationWithResult: mockStartAgentMailConversation,
 }));
@@ -96,6 +98,7 @@ import { createTelegramCommunicationProviderFromRuntimeCredentials } from './tel
 import {
   findSlackUserDirectMessageDestination,
   findUserDirectMessageDestination,
+  hasAnyUserDirectMessageIdentity,
   sendUserDirectMessage,
   sendUserDirectMessageBestEffort,
 } from './user-direct-message';
@@ -226,6 +229,22 @@ describe('sendUserDirectMessage', () => {
       textFormat: 'markdown',
     });
   });
+
+  it('treats an accepted email without a recorded receipt as delivered', async () => {
+    mockStartAgentMailConversation.mockResolvedValue({
+      sent: true,
+      conversation: null,
+    });
+
+    await expect(
+      sendUserDirectMessage({
+        provider: 'agentmail',
+        userId: 'user-1',
+        text: 'Task completed.',
+        logContext: 'test',
+      }),
+    ).resolves.toBe(true);
+  });
 });
 
 describe('sendUserDirectMessageBestEffort', () => {
@@ -281,6 +300,12 @@ describe('sendUserDirectMessageBestEffort', () => {
     expect(mockSlackPostMessage).toHaveBeenCalledWith({
       channel: 'D123',
       text: 'Your GitHub installation request was approved.',
+      blocks: [
+        {
+          type: 'markdown',
+          text: 'Your GitHub installation request was approved.',
+        },
+      ],
     });
 
     expect(mockPostDirectMessage).toHaveBeenCalledWith({
@@ -408,5 +433,19 @@ describe('sendUserDirectMessageBestEffort', () => {
     );
 
     warnSpy.mockRestore();
+  });
+});
+
+describe('hasAnyUserDirectMessageIdentity', () => {
+  it('returns false when the user has no personal destination', async () => {
+    mockSlackInstallationsFindMany.mockResolvedValue([]);
+    mockTeamsUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockTelegramUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockDiscordUserMappingsFindFirst.mockResolvedValue(undefined);
+    mockCanStartAgentMailConversation.mockResolvedValue(false);
+
+    await expect(hasAnyUserDirectMessageIdentity('user-1')).resolves.toBe(
+      false,
+    );
   });
 });

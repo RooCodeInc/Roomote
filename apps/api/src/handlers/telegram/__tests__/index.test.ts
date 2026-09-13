@@ -284,8 +284,9 @@ vi.mock('@roomote/communication/messages', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  findSessionAttentionNotificationReply: vi.fn(async () => null),
-  isSessionAttentionNotificationMessage: vi.fn(async () => false),
+  findSessionAttentionNotificationReply: vi.fn(async () => ({
+    status: 'none',
+  })),
   resolveSessionAttentionFastConversation: vi.fn(async () => null),
   continueFastAgentSurfaceReply: continueFastReplyMock,
   createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(async () =>
@@ -325,6 +326,9 @@ vi.mock('@roomote/sdk/server', () => ({
     retirePrReviewActionMessagesBestEffortMock,
   retireTelegramRequestUserInputPromptBestEffort:
     retireTelegramRequestUserInputPromptBestEffortMock,
+}));
+vi.mock('../../tasks/continue-session-attention-reply', () => ({
+  continueSessionAttentionReply: vi.fn(async () => false),
 }));
 
 vi.mock('@roomote/communication/telegram-provider', () => ({
@@ -928,7 +932,7 @@ describe('Telegram webhook handler', () => {
         deliveryConversation: {
           surface: 'telegram',
           workspaceId: '222',
-          conversationId: 'notification:401:user:mapped-user-1',
+          conversationId: 'notification:222:user:mapped-user-1',
           replyTarget: { channelId: '222' },
         },
       }),

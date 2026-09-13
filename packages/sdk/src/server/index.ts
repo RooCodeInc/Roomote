@@ -29,10 +29,10 @@ export {
   notifyWebTaskInitiatorOnSettle,
   type WebTaskInitiatorSettleNotificationResult,
 } from './lib/task-runs/notify-web-task-initiator-on-settle';
+export { continueDirectTaskAttentionReply } from './lib/task-runs/continue-direct-task-attention-reply';
 export {
   findSessionAttentionNotificationReply,
   hasTaskRunAttentionNotification,
-  isSessionAttentionNotificationMessage,
   notifyDirectWebTaskAttention,
   notifyFastWebSessionAttention,
   processSessionAttentionNotificationJob,
@@ -356,6 +356,7 @@ export {
   findSlackUserDirectMessageDestination,
   findUserDirectMessageDestination,
   hasUserDirectMessageIdentity,
+  hasAnyUserDirectMessageIdentity,
   sendUserDirectMessage,
   sendUserDirectMessageBestEffort,
   sendUserDirectMessageBestEffortWithReceipts,

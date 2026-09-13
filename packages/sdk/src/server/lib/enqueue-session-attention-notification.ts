@@ -1,13 +1,10 @@
 import { createHash } from 'node:crypto';
 
-import { Queue } from 'bullmq';
-import { getRedis } from '@roomote/redis';
-
 import type { SessionAttentionKind } from './session-attention-notification';
+import { enqueueScheduledNotification } from './enqueue-scheduled-notification';
 
 export const SESSION_ATTENTION_NOTIFICATION_JOB =
   'SessionAttentionNotification';
-const SCHEDULED_JOBS_QUEUE = 'scheduled-jobs';
 
 export type SessionAttentionNotificationJob =
   | {
@@ -23,33 +20,19 @@ export type SessionAttentionNotificationJob =
       kind: SessionAttentionKind;
     };
 
-let queue: Queue<SessionAttentionNotificationJob> | null = null;
-
-function getQueue(): Queue<SessionAttentionNotificationJob> {
-  queue ??= new Queue(SCHEDULED_JOBS_QUEUE, { connection: getRedis() });
-  return queue;
-}
-
 export async function enqueueSessionAttentionNotification(
   job: SessionAttentionNotificationJob,
+  options: { delay?: number } = {},
 ): Promise<boolean> {
-  try {
-    const digest = createHash('sha256')
-      .update(JSON.stringify(job))
-      .digest('hex')
-      .slice(0, 24);
-    await getQueue().add(SESSION_ATTENTION_NOTIFICATION_JOB, job, {
-      jobId: `session-attention-${digest}`,
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 2_000 },
-      removeOnComplete: { age: 3_600, count: 100 },
-      removeOnFail: { age: 24 * 3_600 },
-    });
-    return true;
-  } catch (error) {
-    console.error(
-      `[enqueueSessionAttentionNotification] Failed to enqueue retry: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return false;
-  }
+  const digest = createHash('sha256')
+    .update(JSON.stringify(job))
+    .digest('hex')
+    .slice(0, 24);
+  return enqueueScheduledNotification({
+    name: SESSION_ATTENTION_NOTIFICATION_JOB,
+    data: job,
+    jobId: `session-attention-${digest}`,
+    logContext: 'enqueueSessionAttentionNotification',
+    delay: options.delay,
+  });
 }

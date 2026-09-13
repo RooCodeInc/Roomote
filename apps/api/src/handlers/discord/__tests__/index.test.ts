@@ -104,8 +104,9 @@ vi.mock('../provider.js', () => {
 });
 
 vi.mock('@roomote/sdk/server', () => ({
-  findSessionAttentionNotificationReply: vi.fn(async () => null),
-  isSessionAttentionNotificationMessage: vi.fn(async () => false),
+  findSessionAttentionNotificationReply: vi.fn(async () => ({
+    status: 'none',
+  })),
   resolveSessionAttentionFastConversation: vi.fn(async () => null),
   findDiscordMappedUserId: mocks.findMappedUserId,
   findDiscordInstallationByGuildId: mocks.findInstallation,
@@ -124,6 +125,9 @@ vi.mock('@roomote/sdk/server', () => ({
   persistFastAgentInlineHumanTurn: vi.fn(async () => null),
   wakeFastAgentParentEventNow: vi.fn(async () => undefined),
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
+}));
+vi.mock('../../tasks/continue-session-attention-reply', () => ({
+  continueSessionAttentionReply: vi.fn(async () => false),
 }));
 
 vi.mock('@roomote/sdk/server/communication', () => ({

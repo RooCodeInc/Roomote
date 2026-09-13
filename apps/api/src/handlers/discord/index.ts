@@ -38,9 +38,7 @@ import {
   findFastAgentSessionForProviderReply,
   findSessionAttentionNotificationReply,
   isFastAgentProviderMessage,
-  isSessionAttentionNotificationMessage,
   queueFastAgentSurfaceReply,
-  resolveSessionAttentionFastConversation,
   restoreDiscordLinkCode,
   upsertDiscordInstallation,
   upsertDiscordUserMapping,
@@ -48,6 +46,7 @@ import {
 } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
+import { continueSessionAttentionReply } from '../tasks/continue-session-attention-reply.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
 import { startTaskGoal } from '../tasks/start-task-goal.js';
@@ -605,7 +604,7 @@ async function processDiscordGatewayEvent(
       : {}),
   };
   const forceNewTask = command?.name === 'new';
-  const attentionReply =
+  const attentionResolution =
     !forceNewTask && senderUserId && message?.message_reference?.message_id
       ? await findSessionAttentionNotificationReply({
           provider: 'discord',
@@ -614,6 +613,10 @@ async function processDiscordGatewayEvent(
           userId: senderUserId,
           replyToMessageId: message.message_reference.message_id,
         })
+      : ({ status: 'none' } as const);
+  const attentionReply =
+    attentionResolution.status === 'owned'
+      ? attentionResolution.attention
       : null;
   const repliedFastSession =
     !forceNewTask && message?.message_reference?.message_id
@@ -625,19 +628,12 @@ async function processDiscordGatewayEvent(
             ? { threadId: metadata.communicationThreadId }
             : {}),
           replyToMessageId: message.message_reference.message_id,
-          ...(senderUserId ? { userId: senderUserId } : {}),
+          ...(channel.isDirectMessage && senderUserId
+            ? { userId: senderUserId }
+            : {}),
         })
       : null;
-  if (
-    !attentionReply &&
-    message?.message_reference?.message_id &&
-    (await isSessionAttentionNotificationMessage({
-      provider: 'discord',
-      workspaceId: channel.guildId ?? 'dm',
-      channelId: metadata.communicationChannelId,
-      messageId: message.message_reference.message_id,
-    }))
-  ) {
+  if (attentionResolution.status === 'foreign') {
     return {
       ok: true,
       ignored: 'discord_attention_notification_user_mismatch',
@@ -927,16 +923,9 @@ async function processDiscordGatewayEvent(
           : {}),
       },
     };
-    const fastConversationId = crossSurfaceReply
-      ? crossSurfaceReply.id
-      : await resolveSessionAttentionFastConversation({
-          sessionId: attentionReply!.sessionId,
-          userId: senderUserId,
-          deliveryConversation,
-        });
-    const continued = fastConversationId
-      ? await queueFastAgentSurfaceReply({
-          sessionId: fastConversationId,
+    const continued = attentionReply
+      ? await continueSessionAttentionReply({
+          attention: attentionReply,
           userId: senderUserId,
           senderDisplayName: sender.global_name ?? sender.username,
           question: fastEntryText,
@@ -947,7 +936,18 @@ async function processDiscordGatewayEvent(
             ? { attachmentTexts: processedAttachments.attachmentTexts }
             : {}),
         })
-      : false;
+      : await queueFastAgentSurfaceReply({
+          sessionId: crossSurfaceReply!.id,
+          userId: senderUserId,
+          senderDisplayName: sender.global_name ?? sender.username,
+          question: fastEntryText,
+          currentMessageId: message.id,
+          deliveryConversation,
+          ...fastAttachments,
+          ...(processedAttachments.attachmentTexts.length
+            ? { attachmentTexts: processedAttachments.attachmentTexts }
+            : {}),
+        });
     return continued
       ? { ok: true, fastAnswered: true, fastContinued: true }
       : { ok: true, ignored: 'discord_fast_session_route_unavailable' };

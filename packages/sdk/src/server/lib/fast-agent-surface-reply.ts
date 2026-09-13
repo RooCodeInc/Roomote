@@ -149,6 +149,7 @@ function buildDiscordReplyQuote(params: {
 
 export type FastAgentSurfaceReplyDelivery = {
   conversation: FastAgentConversation;
+  canonicalConversation?: FastAgentConversation;
   adapter: Pick<
     FastAgentTurnAdapter,
     | 'activity'
@@ -238,12 +239,18 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   }
   const conversation = params.deliveryConversation ?? session.conversation;
   const createArtifact = buildFastAgentArtifactCreator(session.id);
+  const withCanonical = (
+    delivery: Omit<FastAgentSurfaceReplyDelivery, 'canonicalConversation'>,
+  ): FastAgentSurfaceReplyDelivery => ({
+    ...delivery,
+    canonicalConversation: session.conversation,
+  });
 
   if (conversation.surface === 'web' || conversation.surface === 'automation') {
     // No side channel to post into: the canonical transcript the service
     // persists is the reply surface, and the shared conversation context
     // carries the exchange into the automation's future runs.
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -252,7 +259,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         }),
         postReply: async () => {},
       },
-    };
+    });
   }
 
   const footerContext = await resolveFastSessionReplyFooterContext({
@@ -289,7 +296,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       slackTeamId: conversation.workspaceId,
     }).catch(() => null);
 
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -394,7 +401,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           footerContext,
         }),
       },
-    };
+    });
   }
 
   if (conversation.surface === 'discord') {
@@ -493,7 +500,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       activity.reassert();
       return result;
     };
-    return { conversation, adapter };
+    return withCanonical({ conversation, adapter });
   }
 
   if (conversation.surface === 'teams') {
@@ -508,7 +515,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       return null;
     }
     const serviceUrl = route.serviceUrl;
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -554,7 +561,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           footerContext,
         }),
       },
-    };
+    });
   }
 
   if (conversation.surface === 'linear') {
@@ -565,7 +572,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       return null;
     }
     const agentSessionId = conversation.replyTarget.channelId;
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -584,7 +591,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           return { messageId: buildLinearFastReplyMessageId() };
         },
       },
-    };
+    });
   }
 
   if (isFastAgentSourceControlConversation(conversation)) {
@@ -592,7 +599,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     if (!delivery) {
       return null;
     }
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -606,7 +613,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             : buildSourceControlReplyQuote({ text: params.question }),
         }),
       },
-    };
+    });
   }
 
   if (conversation.surface === 'telegram') {
@@ -680,7 +687,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       });
       return { messageId: posted.messageId };
     };
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         activity,
@@ -703,7 +710,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           return result;
         },
       },
-    };
+    });
   }
 
   if (conversation.surface === 'agentmail') {
@@ -719,7 +726,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     // from ever colliding — web-initiated turns have no unique inbound
     // message id, and a reused key with a different body is a provider 409.
     let agentMailPostIndex = 0;
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         launchTask: createFastAgentCommunicationTaskLauncher({
@@ -748,7 +755,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         },
         replaceReply: async (handle) => handle,
       },
-    };
+    });
   }
 
   return null;
@@ -827,7 +834,7 @@ async function admitFastAgentSurfaceHumanFollowUp(
   return admitFastAgentHumanFollowUp({
     parent: {
       sessionId: params.sessionId,
-      conversation: delivery.conversation,
+      conversation: delivery.canonicalConversation ?? delivery.conversation,
     },
     event: buildSurfaceHumanFollowUpEvent(params),
     forceQueue: forceQueue && !params.externalInput,
@@ -845,7 +852,7 @@ async function runFastAgentSurfaceReply(
   const release =
     (admission?.kind === 'turn' ? admission.turnLock : null) ??
     (await acquireFastAgentTurnLock({
-      conversation: delivery.conversation,
+      conversation: delivery.canonicalConversation ?? delivery.conversation,
     }));
   if (!release) {
     params.onRejected?.();
@@ -883,10 +890,7 @@ export async function continueFastAgentSurfaceReplyWithLock(
   params: FastAgentSurfaceReplyParams,
   turnLock: FastAgentTurnLockHandle,
 ): Promise<FastAgentSurfaceReplyWithLockOutcome> {
-  const builtDelivery = await buildFastAgentSurfaceReplyDelivery(params);
-  const delivery = builtDelivery
-    ? await useCanonicalConversationForDelivery(params, builtDelivery)
-    : null;
+  const delivery = await buildFastAgentSurfaceReplyDelivery(params);
   if (!delivery) {
     return { outcome: 'unroutable' };
   }
@@ -934,7 +938,7 @@ async function runFastAgentSurfaceReplyWithLock(
       const inlineAdmission = await admitFastAgentInlineHumanTurn({
         parent: {
           sessionId: params.sessionId,
-          conversation: delivery.conversation,
+          conversation: delivery.canonicalConversation ?? delivery.conversation,
         },
         event: buildSurfaceHumanFollowUpEvent(params),
       }).catch((error) => {
@@ -968,6 +972,9 @@ async function runFastAgentSurfaceReplyWithLock(
       userId: params.userId,
       apiBaseUrl,
       conversation: delivery.conversation,
+      ...(delivery.canonicalConversation
+        ? { canonicalConversation: delivery.canonicalConversation }
+        : {}),
       currentMessageId: params.currentMessageId,
       signal: release.signal,
       ...(admittedTurn
@@ -1034,10 +1041,7 @@ async function runFastAgentSurfaceReplyWithLock(
 export async function queueFastAgentSurfaceReply(
   params: FastAgentSurfaceReplyParams,
 ): Promise<boolean> {
-  const builtDelivery = await buildFastAgentSurfaceReplyDelivery(params);
-  const delivery = builtDelivery
-    ? await useCanonicalConversationForDelivery(params, builtDelivery)
-    : null;
+  const delivery = await buildFastAgentSurfaceReplyDelivery(params);
   if (!delivery) return false;
 
   const admission = await admitFastAgentSurfaceHumanFollowUp(
@@ -1055,17 +1059,4 @@ export async function queueFastAgentSurfaceReply(
     },
   );
   return true;
-}
-
-async function useCanonicalConversationForDelivery(
-  params: FastAgentSurfaceReplyParams,
-  delivery: FastAgentSurfaceReplyDelivery,
-): Promise<FastAgentSurfaceReplyDelivery> {
-  if (!params.deliveryConversation) return delivery;
-  const session = await fastAgentConversationRepository.findById({
-    id: params.sessionId,
-  });
-  return session
-    ? { ...delivery, conversation: session.conversation }
-    : delivery;
 }

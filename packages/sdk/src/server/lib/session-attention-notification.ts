@@ -1,13 +1,14 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 import { Env } from '@roomote/env';
 import {
   and,
   db,
+  desc,
   eq,
   getSessionForTask,
+  gt,
   isNull,
-  inArray,
   lt,
   or,
   sessionAttentionNotificationMessages,
@@ -17,21 +18,20 @@ import {
 } from '@roomote/db/server';
 import { isSessionUserPresent } from '@roomote/redis';
 import { getFastAgentParentFromPayload } from '@roomote/types';
-import {
-  getOrCreateFastAgentSession,
-  type FastAgentConversation,
-} from '@roomote/cloud-agents/server';
 
 import {
   sendUserDirectMessageBestEffortWithReceipts,
+  hasAnyUserDirectMessageIdentity,
   type UserDirectMessageProvider,
 } from './user-direct-message';
 import {
   enqueueSessionAttentionNotification,
   type SessionAttentionNotificationJob,
 } from './enqueue-session-attention-notification';
+import { buildDeterministicMessageId } from './deterministic-message-id';
 
 const DELIVERY_LEASE_MS = 2 * 60 * 1_000;
+const RECOVERY_DELAY_MS = DELIVERY_LEASE_MS + 5_000;
 
 export type SessionAttentionKind = 'result_ready' | 'input_needed';
 export type SessionAttentionNotificationResult =
@@ -52,10 +52,9 @@ type NotificationSubject = {
 };
 
 function buildIdempotencyKey(sessionId: string, eventKey: string): string {
-  const hash = createHash('sha256')
-    .update(`session-attention:${sessionId}:${eventKey}`)
-    .digest('hex');
-  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+  return buildDeterministicMessageId(
+    `session-attention:${sessionId}:${eventKey}`,
+  );
 }
 
 async function claimNotification(subject: NotificationSubject) {
@@ -104,8 +103,9 @@ async function markOutcome(
   id: string,
   leaseToken: string,
   outcome: 'delivered' | 'skipped_present' | 'failed',
+  executor: Pick<typeof db, 'update'> = db,
 ) {
-  await db
+  await executor
     .update(sessionAttentionNotifications)
     .set({
       outcome,
@@ -150,13 +150,14 @@ async function deliverNotification(
   sessionUrl.searchParams.set('utm_medium', 'direct_message');
   sessionUrl.searchParams.set('utm_campaign', 'session-attention');
 
-  const receipts = await sendUserDirectMessageBestEffortWithReceipts({
-    userId: subject.userId,
-    text: `**${subject.title}** ${statusText}\n\nReply to this message to continue, or [open the Session](${sessionUrl.toString()}).`,
-    logContext: 'sessionAttentionNotification',
-    idempotencyKey: buildIdempotencyKey(subject.sessionId, subject.eventKey),
-  });
-  if (receipts.length === 0) {
+  const { deliveredProviders, receipts } =
+    await sendUserDirectMessageBestEffortWithReceipts({
+      userId: subject.userId,
+      text: `**${subject.title}** ${statusText}\n\nReply to this message to continue, or [open the Session](${sessionUrl.toString()}).`,
+      logContext: 'sessionAttentionNotification',
+      idempotencyKey: buildIdempotencyKey(subject.sessionId, subject.eventKey),
+    });
+  if (deliveredProviders.length === 0) {
     await markOutcome(claim.id, claim.leaseToken, 'failed');
     return 'failed';
   }
@@ -175,20 +176,7 @@ async function deliverNotification(
         })),
       )
       .onConflictDoNothing();
-    await tx
-      .update(sessionAttentionNotifications)
-      .set({
-        outcome: 'delivered',
-        leaseToken: null,
-        leaseExpiresAt: null,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(sessionAttentionNotifications.id, claim.id),
-          eq(sessionAttentionNotifications.leaseToken, claim.leaseToken),
-        ),
-      );
+    await markOutcome(claim.id, claim.leaseToken, 'delivered', tx);
   });
   return 'delivered';
 }
@@ -225,6 +213,16 @@ export async function notifyDirectWebTaskAttention(
   }
   const session = await getSessionForTask(db, run.taskId);
   if (!session) return 'not_applicable';
+  if (!(await hasAnyUserDirectMessageIdentity(run.task.initiatorUserId))) {
+    return 'not_applicable';
+  }
+
+  if (enqueueRetry) {
+    await enqueueSessionAttentionNotification(
+      { target: 'task', ...input },
+      { delay: RECOVERY_DELAY_MS },
+    );
+  }
 
   const result = await deliverNotification({
     sessionId: session.id,
@@ -235,9 +233,6 @@ export async function notifyDirectWebTaskAttention(
     taskId: run.taskId,
     runId: run.id,
   });
-  if (result === 'failed' && enqueueRetry) {
-    await enqueueSessionAttentionNotification({ target: 'task', ...input });
-  }
   return result;
 }
 
@@ -261,6 +256,15 @@ export async function notifyFastWebSessionAttention(
   if (!session?.ownerUserId || session.sourceSurface !== 'web') {
     return 'not_applicable';
   }
+  if (!(await hasAnyUserDirectMessageIdentity(session.ownerUserId))) {
+    return 'not_applicable';
+  }
+  if (enqueueRetry) {
+    await enqueueSessionAttentionNotification(
+      { target: 'fast_session', ...input },
+      { delay: RECOVERY_DELAY_MS },
+    );
+  }
   const result = await deliverNotification({
     sessionId: session.id,
     userId: session.ownerUserId,
@@ -268,12 +272,6 @@ export async function notifyFastWebSessionAttention(
     eventKey: `fast:${input.kind}:${input.eventId}`,
     kind: input.kind,
   });
-  if (result === 'failed' && enqueueRetry) {
-    await enqueueSessionAttentionNotification({
-      target: 'fast_session',
-      ...input,
-    });
-  }
   return result;
 }
 
@@ -293,10 +291,6 @@ export async function hasTaskRunAttentionNotification(
       where: and(
         eq(sessionAttentionNotifications.runId, runId),
         eq(sessionAttentionNotifications.kind, 'result_ready'),
-        inArray(sessionAttentionNotifications.outcome, [
-          'delivered',
-          'skipped_present',
-        ]),
       ),
       columns: { id: true },
     }),
@@ -310,13 +304,34 @@ export async function findSessionAttentionNotificationReply(input: {
   userId: string;
   replyToMessageId?: string;
   threadId?: string;
-}): Promise<{ sessionId: string; kind: SessionAttentionKind } | null> {
-  if (!input.replyToMessageId && !input.threadId) return null;
+  allowLatestChannelMatch?: boolean;
+}): Promise<
+  | { status: 'none' }
+  | { status: 'foreign' }
+  | {
+      status: 'owned';
+      attention: {
+        sessionId: string;
+        taskId: string | null;
+        runId: number | null;
+        kind: SessionAttentionKind;
+      };
+    }
+> {
+  if (
+    !input.replyToMessageId &&
+    !input.threadId &&
+    !input.allowLatestChannelMatch
+  ) {
+    return { status: 'none' };
+  }
   const row = await db
     .select({
       sessionId: sessionAttentionNotifications.sessionId,
       userId: sessionAttentionNotifications.userId,
       kind: sessionAttentionNotifications.kind,
+      taskId: sessionAttentionNotifications.taskId,
+      runId: sessionAttentionNotifications.runId,
     })
     .from(sessionAttentionNotificationMessages)
     .innerJoin(
@@ -338,54 +353,45 @@ export async function findSessionAttentionNotificationReply(input: {
                 input.replyToMessageId,
               ),
             ]
-          : [
-              eq(
-                sessionAttentionNotificationMessages.threadId,
-                input.threadId!,
-              ),
-            ]),
+          : input.threadId
+            ? [
+                eq(
+                  sessionAttentionNotificationMessages.threadId,
+                  input.threadId,
+                ),
+              ]
+            : [
+                gt(
+                  sessionAttentionNotificationMessages.createdAt,
+                  new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000),
+                ),
+              ]),
       ),
     )
+    .orderBy(desc(sessionAttentionNotificationMessages.createdAt))
     .limit(1);
   const match = row[0];
-  return match?.userId === input.userId
-    ? { sessionId: match.sessionId, kind: match.kind }
-    : null;
-}
-
-export async function isSessionAttentionNotificationMessage(input: {
-  provider: UserDirectMessageProvider;
-  workspaceId: string;
-  channelId: string;
-  messageId: string;
-}): Promise<boolean> {
-  return Boolean(
-    await db.query.sessionAttentionNotificationMessages.findFirst({
-      where: and(
-        eq(sessionAttentionNotificationMessages.provider, input.provider),
-        eq(sessionAttentionNotificationMessages.workspaceId, input.workspaceId),
-        eq(sessionAttentionNotificationMessages.channelId, input.channelId),
-        eq(sessionAttentionNotificationMessages.messageId, input.messageId),
-      ),
-      columns: { id: true },
-    }),
-  );
+  if (!match) return { status: 'none' };
+  if (match.userId !== input.userId) return { status: 'foreign' };
+  return {
+    status: 'owned',
+    attention: {
+      sessionId: match.sessionId,
+      taskId: match.taskId,
+      runId: match.runId,
+      kind: match.kind,
+    },
+  };
 }
 
 export async function resolveSessionAttentionFastConversation(input: {
   sessionId: string;
   userId: string;
-  deliveryConversation: FastAgentConversation;
 }): Promise<string | null> {
   const session = await db.query.sessions.findFirst({
     where: eq(sessions.id, input.sessionId),
-    columns: { id: true, ownerUserId: true },
+    columns: { ownerUserId: true, fastConversationId: true },
   });
   if (!session || session.ownerUserId !== input.userId) return null;
-  const fastSession = await getOrCreateFastAgentSession({
-    userId: input.userId,
-    conversation: input.deliveryConversation,
-    sessionId: session.id,
-  });
-  return fastSession.id;
+  return session.fastConversationId;
 }

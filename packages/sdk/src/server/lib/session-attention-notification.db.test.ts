@@ -11,6 +11,8 @@ import {
 } from '@roomote/db/server';
 
 const mocks = vi.hoisted(() => ({
+  enqueue: vi.fn(),
+  hasAny: vi.fn(),
   isPresent: vi.fn(),
   send: vi.fn(),
 }));
@@ -19,7 +21,11 @@ vi.mock('@roomote/redis', () => ({
   isSessionUserPresent: mocks.isPresent,
 }));
 vi.mock('./user-direct-message', () => ({
+  hasAnyUserDirectMessageIdentity: mocks.hasAny,
   sendUserDirectMessageBestEffortWithReceipts: mocks.send,
+}));
+vi.mock('./enqueue-session-attention-notification', () => ({
+  enqueueSessionAttentionNotification: mocks.enqueue,
 }));
 
 import {
@@ -57,15 +63,20 @@ describe('session attention notifications', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.isPresent.mockResolvedValue(false);
+    mocks.hasAny.mockResolvedValue(true);
+    mocks.enqueue.mockResolvedValue(true);
     messageId = crypto.randomUUID();
-    mocks.send.mockResolvedValue([
-      {
-        provider: 'slack',
-        workspaceId: 'T1',
-        channelId: 'D1',
-        messageId,
-      },
-    ]);
+    mocks.send.mockResolvedValue({
+      deliveredProviders: ['slack'],
+      receipts: [
+        {
+          provider: 'slack',
+          workspaceId: 'T1',
+          channelId: 'D1',
+          messageId,
+        },
+      ],
+    });
   });
 
   it('notifies nonterminal direct-task completions once per completion id', async () => {
@@ -78,6 +89,18 @@ describe('session attention notifications', () => {
         eventId: 'completion-1',
       }),
     ).resolves.toBe('delivered');
+    expect(mocks.enqueue).toHaveBeenCalledWith(
+      {
+        target: 'task',
+        runId: run.id,
+        kind: 'result_ready',
+        eventId: 'completion-1',
+      },
+      { delay: 125_000 },
+    );
+    expect(mocks.enqueue.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.send.mock.invocationCallOrder[0]!,
+    );
     await expect(
       notifyDirectWebTaskAttention({
         runId: run.id,
@@ -94,6 +117,22 @@ describe('session attention notifications', () => {
     ).resolves.toBe('delivered');
 
     expect(mocks.send).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not claim or retry when the user has no personal destination', async () => {
+    const { run } = await createDirectWebRun();
+    mocks.hasAny.mockResolvedValue(false);
+
+    await expect(
+      notifyDirectWebTaskAttention({
+        runId: run.id,
+        kind: 'result_ready',
+        eventId: 'completion-without-destination',
+      }),
+    ).resolves.toBe('not_applicable');
+
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
   });
 
   it('durably suppresses input-needed delivery while the user is present', async () => {
@@ -132,9 +171,9 @@ describe('session attention notifications', () => {
     await expect(hasTaskRunAttentionNotification(run.id)).resolves.toBe(true);
   });
 
-  it('does not suppress terminal fallback after attention delivery fails', async () => {
+  it('keeps one notification owner after attention delivery fails', async () => {
     const { run } = await createDirectWebRun();
-    mocks.send.mockResolvedValue([]);
+    mocks.send.mockResolvedValue({ deliveredProviders: [], receipts: [] });
 
     await expect(
       notifyDirectWebTaskAttention(
@@ -146,7 +185,7 @@ describe('session attention notifications', () => {
         false,
       ),
     ).resolves.toBe('failed');
-    await expect(hasTaskRunAttentionNotification(run.id)).resolves.toBe(false);
+    await expect(hasTaskRunAttentionNotification(run.id)).resolves.toBe(true);
   });
 
   it('leaves Fast-delegated child attention to the parent Session', async () => {
@@ -213,7 +252,15 @@ describe('session attention notifications', () => {
         userId: user.id,
         replyToMessageId: messageId,
       }),
-    ).resolves.toEqual({ sessionId: session.id, kind: 'result_ready' });
+    ).resolves.toEqual({
+      status: 'owned',
+      attention: {
+        sessionId: session.id,
+        taskId: null,
+        runId: null,
+        kind: 'result_ready',
+      },
+    });
     await expect(
       findSessionAttentionNotificationReply({
         provider: 'slack',
@@ -222,7 +269,7 @@ describe('session attention notifications', () => {
         userId: 'someone-else',
         replyToMessageId: messageId,
       }),
-    ).resolves.toBeNull();
+    ).resolves.toEqual({ status: 'foreign' });
   });
 
   it('records reply anchors for every supported personal provider', async () => {
@@ -234,19 +281,21 @@ describe('session attention notifications', () => {
       ['discord', 'dm', 'discord-dm', 'discord-message'],
       ['agentmail', 'inbox@example.com', 'email-conversation', 'email-message'],
     ] as const;
-    mocks.send.mockResolvedValue(
-      providers.map(
-        ([provider, workspaceId, channelId, providerMessageId]) => ({
-          provider,
-          workspaceId,
-          channelId,
-          messageId: `${providerMessageId}:${messageId}`,
-          ...(provider === 'agentmail'
-            ? { threadId: `email-thread:${messageId}` }
-            : {}),
-        }),
-      ),
+    const receipts = providers.map(
+      ([provider, workspaceId, channelId, providerMessageId]) => ({
+        provider,
+        workspaceId,
+        channelId,
+        messageId: `${providerMessageId}:${messageId}`,
+        ...(provider === 'agentmail'
+          ? { threadId: `email-thread:${messageId}` }
+          : {}),
+      }),
     );
+    mocks.send.mockResolvedValue({
+      deliveredProviders: receipts.map((receipt) => receipt.provider),
+      receipts,
+    });
 
     await notifyDirectWebTaskAttention({
       runId: run.id,
@@ -268,7 +317,15 @@ describe('session attention notifications', () => {
           userId: user.id,
           replyToMessageId: `${providerMessageId}:${messageId}`,
         }),
-      ).resolves.toEqual({ sessionId: session.id, kind: 'result_ready' });
+      ).resolves.toEqual({
+        status: 'owned',
+        attention: {
+          sessionId: session.id,
+          taskId: run.taskId,
+          runId: run.id,
+          kind: 'result_ready',
+        },
+      });
     }
   });
 });

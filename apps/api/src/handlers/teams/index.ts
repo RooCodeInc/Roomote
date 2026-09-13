@@ -38,9 +38,7 @@ import {
   findSessionAttentionNotificationReply,
   findTeamsConversationRoute,
   isFastAgentProviderMessage,
-  isSessionAttentionNotificationMessage,
   queueFastAgentSurfaceReply,
-  resolveSessionAttentionFastConversation,
 } from '@roomote/sdk/server';
 import {
   exchangeMicrosoftDelegatedGraphToken,
@@ -127,6 +125,7 @@ import {
   resolveSuggestionFastConversation,
   resolveSuggestionOriginSessionId,
 } from '../tasks/suggestion-launch.js';
+import { continueSessionAttentionReply } from '../tasks/continue-session-attention-reply.js';
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
 const TEAMS_ACTIVITY_DEDUP_PREFIX = 'teams:activity:';
@@ -2220,51 +2219,46 @@ teams.post('/', async (c) => {
   const fastChannelId = getTeamsBaseConversationId(
     metadata.communicationChannelId,
   );
-  const attentionReply =
-    mappedUserId && tenantId && replyToMessageId
+  const attentionResolution =
+    mappedUserId && tenantId
       ? await findSessionAttentionNotificationReply({
           provider: 'teams',
           workspaceId: tenantId,
           channelId: fastChannelId,
           userId: mappedUserId,
-          replyToMessageId,
+          ...(replyToMessageId
+            ? { replyToMessageId }
+            : { allowLatestChannelMatch: true }),
         })
+      : ({ status: 'none' } as const);
+  const attentionReply =
+    attentionResolution.status === 'owned'
+      ? attentionResolution.attention
       : null;
-  if (attentionReply) {
-    const deliveryConversation = resolveTeamsFastConversation({
-      activity,
-      metadata,
-      mappedUserId: mappedUserId!,
-      currentMessageId: queuedMessage.ts,
-    });
-    if (!deliveryConversation) {
-      return c.json({
-        ok: true,
-        queued: false,
-        reason: 'fast_session_delivery_unavailable',
-      });
-    }
+  if (attentionReply && mappedUserId && tenantId) {
+    const deliveryConversation = {
+      surface: 'teams' as const,
+      workspaceId: tenantId,
+      conversationId: `notification:${attentionReply.sessionId}:user:${mappedUserId}`,
+      replyTarget: {
+        channelId: fastChannelId,
+        serviceUrl: metadata.communicationServiceUrl,
+      },
+    };
     const fastMessage = await attachTeamsActivityMediaToQueuedMessage(
       activity,
       queuedMessage,
-      { userId: mappedUserId! },
+      { userId: mappedUserId },
     );
-    const fastConversationId = await resolveSessionAttentionFastConversation({
-      sessionId: attentionReply.sessionId,
-      userId: mappedUserId!,
+    const continued = await continueSessionAttentionReply({
+      attention: attentionReply,
+      userId: mappedUserId,
+      senderDisplayName: activity.from?.name?.trim() || null,
+      question: fastMessage.text.trim(),
+      currentMessageId: queuedMessage.ts,
       deliveryConversation,
+      ...(fastMessage.images ? { images: fastMessage.images } : {}),
     });
-    const continued = fastConversationId
-      ? await queueFastAgentSurfaceReply({
-          sessionId: fastConversationId,
-          userId: mappedUserId!,
-          senderDisplayName: activity.from?.name?.trim() || null,
-          question: fastMessage.text.trim(),
-          currentMessageId: queuedMessage.ts,
-          deliveryConversation,
-          ...(fastMessage.images ? { images: fastMessage.images } : {}),
-        })
-      : false;
     return c.json(
       continued
         ? { ok: true, fastAnswered: true, fastContinued: true }
@@ -2275,16 +2269,7 @@ teams.post('/', async (c) => {
           },
     );
   }
-  if (
-    replyToMessageId &&
-    !attentionReply &&
-    (await isSessionAttentionNotificationMessage({
-      provider: 'teams',
-      workspaceId: tenantId ?? '',
-      channelId: fastChannelId,
-      messageId: replyToMessageId,
-    }))
-  ) {
+  if (attentionResolution.status === 'foreign') {
     return c.json({
       ok: true,
       queued: false,
@@ -2345,7 +2330,8 @@ teams.post('/', async (c) => {
           currentMessageId: queuedMessage.ts,
         })
       : undefined;
-    if (crossSurface && !deliveryConversation) {
+    const routeConversation = nativeTeamsConversation ?? deliveryConversation;
+    if (!routeConversation) {
       return c.json({
         ok: true,
         queued: false,
@@ -2353,9 +2339,7 @@ teams.post('/', async (c) => {
       });
     }
     const activeRoute = await findTeamsConversationRoute(
-      crossSurface
-        ? deliveryConversation!.replyTarget.channelId
-        : nativeTeamsConversation!.replyTarget.channelId,
+      routeConversation.replyTarget.channelId,
       tenantId,
     );
     if (!activeRoute) {

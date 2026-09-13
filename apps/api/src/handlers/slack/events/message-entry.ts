@@ -33,12 +33,10 @@ import {
   type TaskInitiator,
   isDeploymentReadOnlyError,
 } from '@roomote/types';
-import {
-  findSessionAttentionNotificationReply,
-  isSessionAttentionNotificationMessage,
-} from '@roomote/sdk/server';
+import { findSessionAttentionNotificationReply } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../../logging.js';
+import { continueSessionAttentionReply } from '../../tasks/continue-session-attention-reply.js';
 import {
   ROUTING_LOCK_TTL_SECONDS,
   SLACK_ROUTING_LOCK_PREFIX,
@@ -1141,7 +1139,7 @@ async function handleSlackEntryEvent(params: {
   }
 
   const threadId = event.thread_ts || event.ts;
-  const attentionReply = event.thread_ts
+  const attentionResolution = event.thread_ts
     ? await findSessionAttentionNotificationReply({
         provider: 'slack',
         workspaceId: teamId,
@@ -1149,17 +1147,28 @@ async function handleSlackEntryEvent(params: {
         userId: userMapping.userId,
         replyToMessageId: event.thread_ts,
       })
-    : null;
-  if (
-    event.thread_ts &&
-    !attentionReply &&
-    (await isSessionAttentionNotificationMessage({
-      provider: 'slack',
-      workspaceId: teamId,
-      channelId: event.channel,
-      messageId: event.thread_ts,
-    }))
-  ) {
+    : ({ status: 'none' } as const);
+  const attentionReply =
+    attentionResolution.status === 'owned'
+      ? attentionResolution.attention
+      : null;
+  if (attentionReply?.taskId) {
+    await continueSessionAttentionReply({
+      attention: attentionReply,
+      userId: userMapping.userId,
+      senderDisplayName: null,
+      question: (event.authoredText ?? event.text).trim(),
+      currentMessageId: event.ts,
+      deliveryConversation: {
+        surface: 'slack',
+        workspaceId: teamId,
+        conversationId: threadId,
+        replyTarget: { channelId: event.channel, threadId },
+      },
+    });
+    return;
+  }
+  if (attentionResolution.status === 'foreign') {
     return;
   }
 

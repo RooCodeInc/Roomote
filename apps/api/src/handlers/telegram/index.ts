@@ -48,10 +48,8 @@ import {
   findSessionAttentionNotificationReply,
   isTelegramLinkCode,
   isFastAgentProviderMessage,
-  isSessionAttentionNotificationMessage,
   queueFastAgentSurfaceReply,
   recordFastAgentConversationMessageBestEffort,
-  resolveSessionAttentionFastConversation,
   restoreTelegramLinkCode,
 } from '@roomote/sdk/server';
 import {
@@ -98,6 +96,22 @@ const TELEGRAM_FAST_UNAVAILABLE_MESSAGE =
 
 const TELEGRAM_LINK_REQUIRED_MESSAGE =
   '🔗 Link your Roomote account before starting tasks here. Generate a code under *Settings → Personal → Linked Accounts* and send it to me — until then I can’t attribute tasks to you.';
+
+function buildTelegramAttentionDeliveryConversation(input: {
+  chatId: string;
+  threadId?: string;
+  userId: string;
+}) {
+  return {
+    surface: 'telegram' as const,
+    workspaceId: input.chatId,
+    conversationId: `notification:${input.threadId ?? input.chatId}:user:${input.userId}`,
+    replyTarget: {
+      channelId: input.chatId,
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+    },
+  };
+}
 import {
   replyToTelegramSnapshotResume,
   resumeTelegramTaskFromSnapshot,
@@ -117,6 +131,7 @@ import {
   verifyTelegramWebhookSecret,
 } from './webhook-gate.js';
 import { appendAccountLinkHelpText } from '../account-link-help.js';
+import { continueSessionAttentionReply } from '../tasks/continue-session-attention-reply.js';
 
 // Deep-link payload used by the group "link account" button: tapping
 // https://t.me/<bot>?start=link opens the bot's DM with "/start link".
@@ -567,7 +582,7 @@ telegram.post('/', async (c) => {
   const hasMedia = Boolean(
     message.photo?.length || message.document || message.audio || message.voice,
   );
-  const attentionReply = replyToMessageId
+  const attentionResolution = replyToMessageId
     ? await findSessionAttentionNotificationReply({
         provider: 'telegram',
         workspaceId: metadata.communicationChannelId,
@@ -575,7 +590,11 @@ telegram.post('/', async (c) => {
         userId: senderUserId,
         replyToMessageId,
       })
-    : null;
+    : ({ status: 'none' } as const);
+  const attentionReply =
+    attentionResolution.status === 'owned'
+      ? attentionResolution.attention
+      : null;
   if (attentionReply && !newTaskCommand && !goalCommand) {
     const fastMessage = hasMedia
       ? await attachTelegramMediaToQueuedMessage({
@@ -588,46 +607,33 @@ telegram.post('/', async (c) => {
     if (!question) {
       return c.json({ ok: true, queued: false, reason: 'fast_message_empty' });
     }
-    const deliveryConversation = {
-      surface: 'telegram' as const,
-      workspaceId: metadata.communicationChannelId,
-      conversationId: `notification:${replyToMessageId}:user:${senderUserId}`,
-      replyTarget: {
-        channelId: metadata.communicationChannelId,
-        ...(metadata.communicationThreadId
-          ? { threadId: metadata.communicationThreadId }
-          : {}),
-      },
-    };
-    const fastConversationId = await resolveSessionAttentionFastConversation({
-      sessionId: attentionReply.sessionId,
+    const deliveryConversation = buildTelegramAttentionDeliveryConversation({
+      chatId: metadata.communicationChannelId,
+      threadId: metadata.communicationThreadId,
       userId: senderUserId,
-      deliveryConversation,
     });
-    const continued = fastConversationId
-      ? await queueFastAgentSurfaceReply({
-          sessionId: fastConversationId,
-          userId: senderUserId,
-          senderDisplayName:
-            [message.from?.first_name, message.from?.last_name]
-              .filter(Boolean)
-              .join(' ')
-              .trim() ||
-            message.from?.username?.trim() ||
-            null,
-          question,
-          currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
-          replyToMessageId,
-          deliveryConversation,
-          ...(fastMessage.agentContext
-            ? { agentContext: fastMessage.agentContext }
-            : {}),
-          ...(fastMessage.images ? { images: fastMessage.images } : {}),
-          ...(fastMessage.attachmentTexts
-            ? { attachmentTexts: fastMessage.attachmentTexts }
-            : {}),
-        })
-      : false;
+    const continued = await continueSessionAttentionReply({
+      attention: attentionReply,
+      userId: senderUserId,
+      senderDisplayName:
+        [message.from?.first_name, message.from?.last_name]
+          .filter(Boolean)
+          .join(' ')
+          .trim() ||
+        message.from?.username?.trim() ||
+        null,
+      question,
+      currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
+      replyToMessageId,
+      deliveryConversation,
+      ...(fastMessage.agentContext
+        ? { agentContext: fastMessage.agentContext }
+        : {}),
+      ...(fastMessage.images ? { images: fastMessage.images } : {}),
+      ...(fastMessage.attachmentTexts
+        ? { attachmentTexts: fastMessage.attachmentTexts }
+        : {}),
+    });
     return c.json(
       continued
         ? { ok: true, fastAnswered: true, fastContinued: true }
@@ -638,16 +644,7 @@ telegram.post('/', async (c) => {
           },
     );
   }
-  if (
-    replyToMessageId &&
-    !attentionReply &&
-    (await isSessionAttentionNotificationMessage({
-      provider: 'telegram',
-      workspaceId: metadata.communicationChannelId,
-      channelId: metadata.communicationChannelId,
-      messageId: replyToMessageId,
-    }))
-  ) {
+  if (attentionResolution.status === 'foreign') {
     return c.json({
       ok: true,
       queued: false,
@@ -718,17 +715,11 @@ telegram.post('/', async (c) => {
       message.from?.username?.trim() ||
       null;
     const deliveryConversation = crossSurface
-      ? {
-          surface: 'telegram' as const,
-          workspaceId: metadata.communicationChannelId,
-          conversationId: `notification:${replyToMessageId ?? metadata.communicationThreadId ?? metadata.communicationChannelId}:user:${senderUserId}`,
-          replyTarget: {
-            channelId: metadata.communicationChannelId,
-            ...(metadata.communicationThreadId
-              ? { threadId: metadata.communicationThreadId }
-              : {}),
-          },
-        }
+      ? buildTelegramAttentionDeliveryConversation({
+          chatId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+          userId: senderUserId,
+        })
       : undefined;
     const continued = await queueFastAgentSurfaceReply({
       sessionId: fastSession.id,

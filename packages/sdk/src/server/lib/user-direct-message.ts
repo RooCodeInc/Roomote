@@ -218,6 +218,22 @@ export async function hasUserDirectMessageIdentity(
   }
 }
 
+export async function hasAnyUserDirectMessageIdentity(
+  userId: string,
+): Promise<boolean> {
+  const providers: CommunicationProvider[] = [
+    'slack',
+    'teams',
+    'telegram',
+    'discord',
+    'agentmail',
+  ];
+  const available = await Promise.all(
+    providers.map((provider) => hasUserDirectMessageIdentity(provider, userId)),
+  );
+  return available.some(Boolean);
+}
+
 async function sendSlackUserDirectMessage(
   userId: string,
   text: string,
@@ -231,7 +247,7 @@ async function sendSlackUserDirectMessage(
       const messageTs = await destination.slack.postMessage({
         channel: destination.channelId,
         text,
-        ...(blocks ? { blocks } : {}),
+        blocks: blocks ?? [{ type: 'markdown', text }],
         ...(idempotencyKey ? { client_msg_id: idempotencyKey } : {}),
       });
 
@@ -370,7 +386,10 @@ async function sendAgentMailUserDirectMessage(
   text: string,
   logContext: string,
   idempotencyKey?: string,
-): Promise<UserDirectMessageReceipt | null> {
+): Promise<{
+  delivered: boolean;
+  receipt: UserDirectMessageReceipt | null;
+}> {
   try {
     const result = await startAgentMailConversationWithResult({
       userId,
@@ -379,20 +398,24 @@ async function sendAgentMailUserDirectMessage(
       logContext,
       ...(idempotencyKey ? { clientSendId: idempotencyKey } : {}),
     });
-    return result.sent && result.conversation?.messageId
-      ? {
-          provider: 'agentmail',
-          workspaceId: result.conversation.inboxId,
-          channelId: result.conversation.conversationId,
-          messageId: result.conversation.messageId,
-          threadId: result.conversation.providerThreadId,
-        }
-      : null;
+    return {
+      delivered: result.sent,
+      receipt:
+        result.sent && result.conversation?.messageId
+          ? {
+              provider: 'agentmail',
+              workspaceId: result.conversation.inboxId,
+              channelId: result.conversation.conversationId,
+              messageId: result.conversation.messageId,
+              threadId: result.conversation.providerThreadId,
+            }
+          : null,
+    };
   } catch (error) {
     console.warn(
       `[${logContext}] Failed to send email DM: ${formatError(error)}`,
     );
-    return null;
+    return { delivered: false, receipt: null };
   }
 }
 
@@ -484,14 +507,14 @@ export async function sendUserDirectMessage({
         ),
       );
     case 'agentmail':
-      return Boolean(
+      return (
         await sendAgentMailUserDirectMessage(
           userId,
           text,
           logContext,
           idempotencyKey,
-        ),
-      );
+        )
+      ).delivered;
   }
 }
 
@@ -518,7 +541,7 @@ export async function sendUserDirectMessageBestEffort({
       logContext,
       idempotencyKey,
     })
-  ).map((receipt) => receipt.provider);
+  ).deliveredProviders;
 }
 
 export async function sendUserDirectMessageBestEffortWithReceipts({
@@ -531,7 +554,10 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
   text: string;
   logContext: string;
   idempotencyKey?: string;
-}): Promise<UserDirectMessageReceipt[]> {
+}): Promise<{
+  deliveredProviders: UserDirectMessageProvider[];
+  receipts: UserDirectMessageReceipt[];
+}> {
   const [slack, teams, telegram, discord] = await Promise.all([
     sendSlackUserDirectMessage(
       userId,
@@ -554,7 +580,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
   // who already got the message in chat violates the email-cadence contract
   // (email is low-frequency by design).
   const agentmail = chatDelivered
-    ? null
+    ? { delivered: false, receipt: null }
     : await sendAgentMailUserDirectMessage(
         userId,
         text,
@@ -562,5 +588,14 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
         idempotencyKey,
       );
 
-  return [...chatReceipts, ...(agentmail ? [agentmail] : [])];
+  return {
+    deliveredProviders: [
+      ...chatReceipts.map((receipt) => receipt.provider),
+      ...(agentmail.delivered ? (['agentmail'] as const) : []),
+    ],
+    receipts: [
+      ...chatReceipts,
+      ...(agentmail.receipt ? [agentmail.receipt] : []),
+    ],
+  };
 }

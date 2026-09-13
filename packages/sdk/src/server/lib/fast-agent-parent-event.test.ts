@@ -579,7 +579,10 @@ describe('deliverFastAgentParentEvent', () => {
     );
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({ conversation: webParent.conversation }),
+      expect.objectContaining({
+        conversation: parent.conversation,
+        canonicalConversation: webParent.conversation,
+      }),
     );
     expect(mocks.findSession).toHaveBeenCalledWith({ id: parent.sessionId });
     expect(mocks.postMessage).toHaveBeenCalledWith(
@@ -3979,6 +3982,32 @@ describe('deliverFastAgentParentEvent', () => {
       }),
     );
     expect(input).not.toHaveProperty('activeTasks');
+  });
+
+  it('requires a visible closeout when a web parent receives task settlement', async () => {
+    await deliverFastAgentParentEvent({
+      parent: {
+        sessionId: parent.sessionId,
+        conversation: {
+          surface: 'web',
+          workspaceId: 'web',
+          conversationId: parent.sessionId,
+        },
+      },
+      event: {
+        type: 'task_settled',
+        taskId: 'task-1',
+        runId: 42,
+        title: 'Fix API',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ platformEventVisibility: 'required' }),
+    );
   });
 
   it('skips a claimed pull request event that became terminal before delivery', async () => {

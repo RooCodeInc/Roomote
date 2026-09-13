@@ -253,7 +253,12 @@ export async function processFastAgentMessage(params: {
       threadContext: serializedThreadContext,
       userId,
       apiBaseUrl,
-      conversation,
+      conversation: params.originSessionId
+        ? incomingConversation
+        : conversation,
+      ...(params.originSessionId
+        ? { canonicalConversation: conversation }
+        : {}),
       currentMessageId: event.ts,
       signal: activeTurnLock.signal,
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),

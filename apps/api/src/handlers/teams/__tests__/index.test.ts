@@ -305,8 +305,9 @@ vi.mock('@roomote/communication/teams-provider', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  findSessionAttentionNotificationReply: vi.fn(async () => null),
-  isSessionAttentionNotificationMessage: vi.fn(async () => false),
+  findSessionAttentionNotificationReply: vi.fn(async () => ({
+    status: 'none',
+  })),
   resolveSessionAttentionFastConversation: vi.fn(async () => null),
   continueFastAgentSurfaceReply: continueFastReplyMock,
   createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(async () =>
@@ -324,6 +325,9 @@ vi.mock('@roomote/sdk/server', () => ({
   findTeamsConversationRoute: findTeamsConversationRouteMock,
   isFastAgentProviderMessage: isFastProviderMessageMock,
   queueFastAgentSurfaceReply: queueFastReplyMock,
+}));
+vi.mock('../../tasks/continue-session-attention-reply', () => ({
+  continueSessionAttentionReply: vi.fn(async () => false),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({

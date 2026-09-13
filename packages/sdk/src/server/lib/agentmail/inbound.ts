@@ -66,6 +66,7 @@ import {
   findSessionAttentionNotificationReply,
   resolveSessionAttentionFastConversation,
 } from '../session-attention-notification';
+import { continueDirectTaskAttentionReply } from '../task-runs/continue-direct-task-attention-reply';
 
 export const AGENTMAIL_WEBHOOK_EVENT_QUEUE_NAME = 'agentmail-webhook-events';
 
@@ -753,6 +754,9 @@ async function deliverTurn(
   turn: DrainableTurn,
   conversation: AgentMailConversationRow,
   turnLock: FastAgentTurnLockHandle,
+  ownerAttentionResolution?: Awaited<
+    ReturnType<typeof findSessionAttentionNotificationReply>
+  >,
 ): Promise<TurnDeliveryOutcome> {
   // The reply route (in-reply-to, recipient) is read from the conversation
   // row when the reply is sent, so it is advanced here, for the turn about
@@ -770,19 +774,37 @@ async function deliverTurn(
     return { outcome: 'delivered' };
   }
 
-  const attentionReply = await findSessionAttentionNotificationReply({
-    provider: 'agentmail',
-    workspaceId: conversation.inboxId,
-    channelId: conversation.id,
-    userId: turn.senderUserId,
-    threadId: conversation.providerThreadId,
-  });
+  const attentionResolution =
+    turn.senderUserId === conversation.ownerUserId && ownerAttentionResolution
+      ? ownerAttentionResolution
+      : await findSessionAttentionNotificationReply({
+          provider: 'agentmail',
+          workspaceId: conversation.inboxId,
+          channelId: conversation.id,
+          userId: turn.senderUserId,
+          threadId: conversation.providerThreadId,
+        });
+  const attentionReply =
+    attentionResolution.status === 'owned'
+      ? attentionResolution.attention
+      : null;
   if (attentionReply) {
+    if (attentionReply.taskId && attentionReply.runId) {
+      const continued = await continueDirectTaskAttentionReply({
+        taskId: attentionReply.taskId,
+        runId: attentionReply.runId,
+        userId: turn.senderUserId,
+        question: buildTurnQuestionText(turn, conversation),
+        kind: attentionReply.kind,
+      });
+      if (!continued)
+        throw new AgentMailDeliveryUnavailableError(conversation.id);
+      return { outcome: 'delivered' };
+    }
     const deliveryConversation = buildAgentMailFastConversation(conversation);
     const fastConversationId = await resolveSessionAttentionFastConversation({
       sessionId: attentionReply.sessionId,
       userId: turn.senderUserId,
-      deliveryConversation,
     });
     if (!fastConversationId) {
       throw new AgentMailDeliveryUnavailableError(conversation.id);
@@ -912,19 +934,22 @@ export async function drainAgentMailInboundTurns(
     return;
   }
 
-  const attentionReply = await findSessionAttentionNotificationReply({
+  const attentionResolution = await findSessionAttentionNotificationReply({
     provider: 'agentmail',
     workspaceId: conversation.inboxId,
     channelId: conversation.id,
     userId: conversation.ownerUserId,
     threadId: conversation.providerThreadId,
   });
+  const attentionReply =
+    attentionResolution.status === 'owned'
+      ? attentionResolution.attention
+      : null;
   const deliveryConversation = buildAgentMailFastConversation(conversation);
   const fastConversationId = attentionReply
     ? await resolveSessionAttentionFastConversation({
         sessionId: attentionReply.sessionId,
         userId: conversation.ownerUserId,
-        deliveryConversation,
       })
     : null;
   const canonicalSession = fastConversationId
@@ -952,7 +977,12 @@ export async function drainAgentMailInboundTurns(
 
       let delivery: TurnDeliveryOutcome;
       try {
-        delivery = await deliverTurn(turn, conversation, turnLock);
+        delivery = await deliverTurn(
+          turn,
+          conversation,
+          turnLock,
+          attentionResolution,
+        );
       } catch (error) {
         if (error instanceof AgentMailDeliveryUnavailableError) {
           console.warn(`${LOG_PREFIX} ${error.message}`);

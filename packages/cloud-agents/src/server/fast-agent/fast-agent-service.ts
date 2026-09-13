@@ -1266,7 +1266,11 @@ const LOST_TOOL_RESULT_TEXT =
   'Tool result lost due to restart. The call may or may not have taken effect; check before repeating it.';
 
 type FastAgentRecordedCloseout =
-  | { kind: 'delivered'; text: string }
+  | {
+      kind: 'delivered';
+      purpose: 'closeout' | 'clarification';
+      text: string;
+    }
   | { kind: 'lost'; purpose: 'closeout' | 'clarification'; text: string };
 
 /**
@@ -1288,7 +1292,7 @@ function findRecordedCloseout(
   if (!last) return null;
   if (last.kind === 'reply') {
     return last.purpose === 'closeout' || last.purpose === 'clarification'
-      ? { kind: 'delivered', text: last.text }
+      ? { kind: 'delivered', purpose: last.purpose, text: last.text }
       : null;
   }
   if (
@@ -1310,7 +1314,11 @@ function findRecordedCloseout(
       .find(
         (event): event is FastAgentTurnAttemptReply => event.kind === 'reply',
       );
-    return { kind: 'delivered', text: text || lastReply?.text || '' };
+    return {
+      kind: 'delivered',
+      purpose,
+      text: text || lastReply?.text || '',
+    };
   }
   if (last.status !== 'unknown') return null;
   return text ? { kind: 'lost', purpose, text } : null;
@@ -1648,6 +1656,7 @@ export async function answerFastAgentQuestion({
   userId,
   apiBaseUrl,
   conversation,
+  canonicalConversation,
   currentMessageId,
   senderDisplayName,
   senderExternalId,
@@ -1684,6 +1693,8 @@ export async function answerFastAgentQuestion({
   userId: string;
   apiBaseUrl?: string;
   conversation: FastAgentConversation;
+  /** Stable Session identity when this turn is delivered on another surface. */
+  canonicalConversation?: FastAgentConversation;
   currentMessageId?: string;
   senderDisplayName?: string;
   senderExternalId?: string;
@@ -3003,7 +3014,10 @@ export async function answerFastAgentQuestion({
         );
         return { models: [], defaultModelId: undefined };
       }),
-      getOrCreateFastAgentSession({ userId, conversation }),
+      getOrCreateFastAgentSession({
+        userId,
+        conversation: canonicalConversation ?? conversation,
+      }),
       listFastAgentIntegrations(
         { userId, apiBaseUrl },
         adapter.resolveMcpServerConfigs,
@@ -4811,6 +4825,13 @@ export async function answerFastAgentQuestion({
         closedInstructionVersions.add(currentInstructionVersion);
         lastVisibleMessage = recordedCloseout.text;
         visibleUpdatePosted = true;
+        userAttention = {
+          kind:
+            recordedCloseout.purpose === 'clarification'
+              ? 'input_needed'
+              : 'result_ready',
+          eventId: turnId,
+        };
         userAttentionReady = true;
       } else {
         console.info(

@@ -864,6 +864,10 @@ describe('subscribeHarnessCallbacks', () => {
   it('forwards request_user_input envelopes as callback events', async () => {
     const { harness, emitEnvelope } = createRuntimeHarness();
     const callbacks = { onMessage: vi.fn().mockResolvedValue(undefined) };
+    const loggerWarn = vi.fn();
+    vi.mocked(sdk.taskRuns.notifyUserAttention).mockRejectedValueOnce(
+      new Error('api unavailable'),
+    );
 
     const unsubscribe = subscribeHarnessCallbacks({
       harness: harness as never,
@@ -874,7 +878,7 @@ describe('subscribeHarnessCallbacks', () => {
         runId: 50,
         filePath: '/tmp/test.log',
         info: vi.fn(),
-        warn: vi.fn(),
+        warn: loggerWarn,
         error: vi.fn(),
         log: vi.fn(),
       },
@@ -949,6 +953,9 @@ describe('subscribeHarnessCallbacks', () => {
         kind: 'input_needed',
         eventId: 'rui:session:turn:call',
       });
+      expect(loggerWarn).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to notify user attention'),
+      );
     });
 
     await unsubscribe();
