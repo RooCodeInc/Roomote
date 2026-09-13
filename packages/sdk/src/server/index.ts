@@ -227,6 +227,7 @@ export { refreshCurrentThreadFooters } from './lib/thread-footer-refresh';
 export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/teams-communication';
 
 export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib/telegram-communication';
+export { retireTelegramRequestUserInputPromptBestEffort } from './lib/communication-request-user-input';
 
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
 export { syncFastAgentSlackTitleBestEffort } from './lib/fast-agent-slack-title-sync';

@@ -730,18 +730,34 @@ telegram.post('/', async (c) => {
       return c.json({ ok: true, ignored: 'unsupported_update' });
     }
 
-    // Prefer structured request_user_input answers over plain¡ follow-ups.
+    // Prefer structured request_user_input answers over plain follow-ups.
     if (queuedMessage.userId && queuedMessage.text?.trim()) {
       const { tryHandleTelegramRequestUserInputMessage } =
         await import('./request-user-input.js');
-      const handled = await tryHandleTelegramRequestUserInputMessage({
-        activeRunId: activeRun.id,
-        userId: queuedMessage.userId,
-        text: queuedMessage.text,
-        chatId: metadata.communicationChannelId,
-        threadId: metadata.communicationThreadId,
-      });
-      if (handled) {
+      const requestUserInputResult =
+        await tryHandleTelegramRequestUserInputMessage({
+          activeRunId: activeRun.id,
+          userId: queuedMessage.userId,
+          text: queuedMessage.text,
+          chatId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+        });
+      if (requestUserInputResult) {
+        if (
+          requestUserInputResult === 'submitted' &&
+          queuedMessage.images?.length
+        ) {
+          await syncActingUserForInboundMessage({
+            logContext: 'telegram.requestUserInputImage',
+            runId: activeRun.id,
+            senderUserId: queuedMessage.userId,
+          });
+          await queueCommunicationMessageOnce(
+            'telegram',
+            activeRun.id,
+            queuedMessage,
+          );
+        }
         await ackTelegramMessageBestEffort({
           chatId: metadata.communicationChannelId,
           messageId: metadata.communicationMessageId,
