@@ -436,7 +436,8 @@ async function sendAgentMailUserDirectMessage(
         await createAgentMailCommunicationProviderFromRuntimeCredentials();
       if (!provider) return { delivered: false, receipt: null };
       const posted = await provider.postMessage({
-        channelId: replyAnchor.channelId,
+        channelId: replyAnchor.workspaceId,
+        threadId: replyAnchor.channelId,
         text,
         textFormat: 'markdown',
         ...(idempotencyKey ? { idempotencyKey } : {}),

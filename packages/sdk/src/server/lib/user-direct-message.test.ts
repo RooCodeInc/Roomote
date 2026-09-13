@@ -494,6 +494,46 @@ describe('sendUserDirectMessageBestEffort', () => {
     expect(mockOpenConversation).toHaveBeenCalledTimes(1);
     expect(mockPostDirectMessage).not.toHaveBeenCalled();
   });
+
+  it('continues AgentMail notifications through the stored conversation', async () => {
+    mockAgentMailPostMessage.mockResolvedValue({
+      messageId: 'email-message-2',
+      threadId: 'email-thread-1',
+    });
+
+    await expect(
+      sendUserDirectMessageBestEffortWithReceipts({
+        userId: 'user-1',
+        text: 'Second response',
+        logContext: 'test',
+        replyAnchor: {
+          provider: 'agentmail',
+          workspaceId: 'roomote@example.com',
+          channelId: 'email-conversation-1',
+          messageId: 'email-message-1',
+          threadId: 'email-thread-1',
+        },
+      }),
+    ).resolves.toEqual({
+      deliveredProviders: ['agentmail'],
+      receipts: [
+        {
+          provider: 'agentmail',
+          workspaceId: 'roomote@example.com',
+          channelId: 'email-conversation-1',
+          messageId: 'email-message-2',
+          threadId: 'email-thread-1',
+        },
+      ],
+    });
+    expect(mockAgentMailPostMessage).toHaveBeenCalledWith({
+      channelId: 'roomote@example.com',
+      threadId: 'email-conversation-1',
+      text: 'Second response',
+      textFormat: 'markdown',
+    });
+    expect(mockSlackPostMessage).not.toHaveBeenCalled();
+  });
 });
 
 describe('hasAnyUserDirectMessageIdentity', () => {
