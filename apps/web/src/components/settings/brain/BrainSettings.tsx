@@ -13,6 +13,7 @@ import { BrainEnableSection } from './BrainEnableSection';
 import { BrainMemoryIssuesSection } from './BrainMemoryIssuesSection';
 import { BrainSourcesSection } from './BrainSourcesSection';
 import { BrainStatusSection } from './BrainStatusSection';
+import { buildMemoryHref } from './brain-navigation';
 
 function BrainSettingsSkeleton() {
   return (
@@ -36,14 +37,7 @@ export function BrainSettings() {
   const [namespaceId, setNamespaceId] = useState<string | null>(null);
   const selectMemory = useCallback(
     (slug: string | null) => {
-      const params = new URLSearchParams(searchParams);
-      if (slug) {
-        params.set('memory', slug);
-      } else {
-        params.delete('memory');
-      }
-      const query = params.toString();
-      router.replace(query ? `${pathname}?${query}` : pathname, {
+      router.replace(buildMemoryHref(pathname, searchParams, slug), {
         scroll: false,
       });
     },

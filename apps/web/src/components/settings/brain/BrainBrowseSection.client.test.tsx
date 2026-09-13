@@ -11,14 +11,30 @@ import type { BrainCorpusSummary } from '@/trpc/commands/brain';
 
 const { listInputs, state } = vi.hoisted(() => ({
   listInputs: [] as Array<Record<string, unknown>>,
-  state: { pagePending: false },
+  state: {
+    pagePending: false,
+    pageData: undefined as
+      | undefined
+      | {
+          slug: string;
+          title: string;
+          updatedAt: Date;
+          content: string;
+          contentTruncated: boolean;
+        },
+  },
+}));
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/settings/memory',
+  useSearchParams: () => new URLSearchParams('section=browse'),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
   keepPreviousData: (previousData: unknown) => previousData,
   useQuery: (options: { queryKind?: string; input?: { offset?: number } }) =>
     options.queryKind === 'page'
-      ? { isPending: state.pagePending, data: undefined }
+      ? { isPending: state.pagePending, data: state.pageData }
       : {
           isPending: false,
           data: {
@@ -92,6 +108,7 @@ const corpus: BrainCorpusSummary = {
 beforeEach(() => {
   listInputs.length = 0;
   state.pagePending = false;
+  state.pageData = undefined;
 });
 
 afterEach(() => {
@@ -235,6 +252,40 @@ it('marks the selected memory and renders its preview beside the list', () => {
     'page',
   );
   expect(screen.getByText('Memory unavailable')).toBeInTheDocument();
+});
+
+it('navigates canonical Memory links without allowing unsafe relative URLs', () => {
+  const onSelectMemory = vi.fn();
+  state.pageData = {
+    slug: 'tasks/run-2',
+    title: 'Second run',
+    updatedAt: new Date('2026-01-02T00:00:00Z'),
+    content:
+      'Initiated by [A member](people/roomote-member-abc123). [Unsafe](javascript:alert(1)). [File](../../secret).',
+    contentTruncated: false,
+  };
+
+  render(
+    <BrainBrowseSection
+      corpus={corpus}
+      namespaceId={null}
+      selectedSlug="tasks/run-2"
+      onSelectNamespace={() => undefined}
+      onSelectMemory={onSelectMemory}
+    />,
+  );
+
+  const memberLink = screen.getByRole('link', { name: 'A member' });
+  expect(memberLink).toHaveAttribute(
+    'href',
+    '/settings/memory?section=browse&memory=people%2Froomote-member-abc123',
+  );
+  fireEvent.click(memberLink);
+  expect(onSelectMemory).toHaveBeenCalledWith('people/roomote-member-abc123');
+  expect(
+    screen.queryByRole('link', { name: 'Unsafe' }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: 'File' })).not.toBeInTheDocument();
 });
 
 it('waits 300 ms before showing a preview skeleton', () => {
