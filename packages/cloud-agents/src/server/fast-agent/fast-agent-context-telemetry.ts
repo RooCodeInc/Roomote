@@ -189,16 +189,22 @@ export function captureFastAgentInferenceAttemptOutcome(input: {
 }
 
 /**
- * Records bounded turn timings only. Identifiers, prompts, replies, repository
- * context, URLs, and error details must never be added to this event.
+ * Records bounded turn outcomes. Identifiers are hashed for incident
+ * correlation; prompts, replies, repository context, URLs, and error details
+ * must never be added to this event.
  */
 export function captureFastAgentTurnSettled(input: {
   userId: string;
+  sessionId?: string;
+  turnId: string;
   surface: FastAgentSurface;
   turnSource: FastAgentTurnSource;
   initialHumanTurn?: boolean;
   sessionPath?: FastAgentSessionPath;
   outcome: 'success' | 'failure';
+  failureReason?: string;
+  failureStage?: string;
+  terminalErrorFingerprint?: string;
   serviceDurationMs: number;
   firstResponseDurationMs?: number;
   sandboxlessStartupDurationMs?: number;
@@ -233,11 +239,16 @@ export function captureFastAgentTurnSettled(input: {
   void captureEvent('fast_turn_settled', {
     userId: input.userId,
     properties: {
+      session_id_hash: input.sessionId ? sha256(input.sessionId) : null,
+      turn_id_hash: sha256(input.turnId),
       surface: input.surface,
       turn_source: input.turnSource,
       initial_human_turn: input.initialHumanTurn ?? null,
       session_path: input.sessionPath ?? null,
       outcome: input.outcome,
+      failure_reason: input.failureReason ?? null,
+      failure_stage: input.failureStage ?? null,
+      terminal_error_fingerprint: input.terminalErrorFingerprint ?? null,
       service_duration_ms: input.serviceDurationMs,
       first_response_duration_ms: input.firstResponseDurationMs ?? null,
       sandboxless_startup_duration_ms:

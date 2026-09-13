@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   formatErrorForLog,
@@ -29,6 +31,7 @@ type FastAgentTurnDiagnosticsContext = {
   hasImages: boolean;
   modelRole: 'primary' | 'small' | 'orchestration';
   turnSource: FastAgentTurnSource;
+  turnId: string;
   userId: string;
 };
 
@@ -85,7 +88,9 @@ export class FastAgentTurnDiagnostics {
   private canonicalConversationId: string | null = null;
   private initialHumanTurn: boolean | undefined;
   private failureReason: string | undefined;
+  private failureStage: string | undefined;
   private terminalError: unknown;
+  private terminalErrorFingerprint: string | undefined;
   private visibleReplyCount = 0;
   private firstAssistantResponseAt: number | undefined;
   private resolvedModel: string | undefined;
@@ -347,10 +352,14 @@ export class FastAgentTurnDiagnostics {
     };
   }
 
-  recordFailure(reason: string, error: unknown): void {
+  recordFailure(reason: string, error: unknown, stage?: string): void {
     this.failed = true;
     this.failureReason = reason;
+    this.failureStage = stage;
     this.terminalError = error;
+    this.terminalErrorFingerprint = createHash('sha256')
+      .update(formatTerminalError(error))
+      .digest('hex');
   }
 
   finish(): void {
@@ -417,11 +426,16 @@ export class FastAgentTurnDiagnostics {
 
     captureFastAgentTurnSettled({
       userId: this.context.userId,
+      sessionId: this.canonicalConversationId ?? undefined,
+      turnId: this.context.turnId,
       surface: this.context.conversation.surface,
       turnSource: this.context.turnSource,
       initialHumanTurn: this.initialHumanTurn,
       sessionPath: this.sessionPath,
       outcome: this.failed ? 'failure' : 'success',
+      failureReason: this.failureReason,
+      failureStage: this.failureStage,
+      terminalErrorFingerprint: this.terminalErrorFingerprint,
       serviceDurationMs,
       firstResponseDurationMs,
       sandboxlessStartupDurationMs,

@@ -168,9 +168,11 @@ describe('captureFastAgentInferenceContext', () => {
     expect(JSON.stringify(captureEvent.mock.calls[0])).not.toContain('turn-1');
   });
 
-  it('records identifier-free first-response and startup timings', () => {
+  it('records privacy-safe turn correlation and startup timings', () => {
     captureFastAgentTurnSettled({
       userId: 'private-user-id',
+      sessionId: 'private-session-id',
+      turnId: 'private-turn-id',
       surface: 'web',
       turnSource: 'human',
       initialHumanTurn: true,
@@ -190,11 +192,16 @@ describe('captureFastAgentInferenceContext', () => {
     expect(captureEvent).toHaveBeenCalledWith('fast_turn_settled', {
       userId: 'private-user-id',
       properties: {
+        session_id_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+        turn_id_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
         surface: 'web',
         turn_source: 'human',
         initial_human_turn: true,
         session_path: 'cold_rebuild',
         outcome: 'success',
+        failure_reason: null,
+        failure_stage: null,
+        terminal_error_fingerprint: null,
         service_duration_ms: 1_250,
         first_response_duration_ms: 900,
         sandboxless_startup_duration_ms: 350,
@@ -234,11 +241,15 @@ describe('captureFastAgentInferenceContext', () => {
     expect(captureEvent.mock.calls[0]?.[1]?.properties).not.toHaveProperty(
       'turn_id',
     );
+    const event = JSON.stringify(captureEvent.mock.calls[0]);
+    expect(event).not.toContain('private-session-id');
+    expect(event).not.toContain('private-turn-id');
   });
 
   it('keeps an unavailable initial-turn classification explicit', () => {
     captureFastAgentTurnSettled({
       userId: 'private-user-id',
+      turnId: 'private-turn-id',
       surface: 'web',
       turnSource: 'human',
       outcome: 'failure',

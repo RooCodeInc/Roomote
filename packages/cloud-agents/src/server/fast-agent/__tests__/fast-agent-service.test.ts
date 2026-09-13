@@ -9706,6 +9706,64 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
   });
 
+  it('does not suggest replaying an accepted task instruction after a later turn failure', async () => {
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', taskRunStatus: 'running' },
+    ]);
+    mocks.sendTaskMessage.mockResolvedValue({
+      success: true,
+      delivery: 'accepted',
+      responsePending: true,
+    });
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll continue that task.',
+        });
+        await invokeTool(nativeToolNames.sendTaskMessage, {
+          taskId: 'task-1',
+          message: 'Continue the existing work.',
+        });
+        return '';
+      },
+    );
+    mocks.runSession.mockImplementationOnce(async ({ prompt, execute }) => {
+      await execute({ id: 'opencode-session-1' }, prompt, {
+        path: 'warm',
+        validateSession: false,
+      });
+      throw new Error('Failed after the task accepted the instruction.');
+    });
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toContain('it can keep running');
+    expect(mocks.sendTaskMessage).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenLastCalledWith({
+      purpose: 'closeout',
+      message:
+        'I sent the instruction to the task, and it can keep running, but I hit an error while finishing this response. Check the task’s current status before sending the instruction again.',
+    });
+    expect(adapter.postReply).not.toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining('try again'),
+      }),
+    );
+    expect(mocks.captureTurnSettled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'conversation-1',
+        outcome: 'failure',
+        failureReason: 'unclassified',
+        failureStage: 'inference',
+        openCodeProviderRetryEventCount: 0,
+        roomoteInferenceRetryCount: 0,
+      }),
+    );
+  });
+
   it('retries a gateway block from a clean compatibility bootstrap', async () => {
     vi.useFakeTimers();
     try {

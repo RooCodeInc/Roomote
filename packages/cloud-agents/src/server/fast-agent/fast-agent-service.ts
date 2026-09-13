@@ -1754,6 +1754,7 @@ export async function answerFastAgentQuestion({
     hasImages: images.length > 0,
     modelRole: FAST_AGENT_MODEL_ROLE,
     turnSource,
+    turnId,
     userId,
   });
   const platformEvent = turnSource === 'platform_event';
@@ -1770,6 +1771,12 @@ export async function answerFastAgentQuestion({
   let canonicalConversationId: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
+  let acceptedTaskInstructionPending = false;
+  let turnFailureStage:
+    | 'setup'
+    | 'inference'
+    | 'post_inference'
+    | 'settlement' = 'setup';
   /** Last model OpenCode resolved for this turn, for the failure closeout. */
   let lastResolvedInferenceModel: string | undefined;
   let currentInstructionVersion = 0;
@@ -4408,7 +4415,7 @@ export async function answerFastAgentQuestion({
                   attachmentTexts,
                 })
               : args.message;
-            return await taskMessageGuard.send(taskId, args, () =>
+            const result = await taskMessageGuard.send(taskId, args, () =>
               sendFastAgentTaskMessage(
                 { userId, apiBaseUrl },
                 {
@@ -4420,6 +4427,14 @@ export async function answerFastAgentQuestion({
                 },
               ),
             );
+            if (
+              result.success === true &&
+              result.delivery === 'accepted' &&
+              result.responsePending === true
+            ) {
+              acceptedTaskInstructionPending = true;
+            }
+            return result;
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask: {
@@ -4799,6 +4814,7 @@ export async function answerFastAgentQuestion({
       await mirrorPendingMessages();
       return lastVisibleMessage;
     }
+    turnFailureStage = 'inference';
     diagnostics.markInferenceQueued();
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
@@ -5303,6 +5319,7 @@ export async function answerFastAgentQuestion({
     const promptText = await promptTextPromise.finally(() => {
       diagnostics.markInferenceFinished();
     });
+    turnFailureStage = 'post_inference';
 
     throwIfTurnCancelled();
     const terminalInstructionVersion =
@@ -5367,6 +5384,7 @@ export async function answerFastAgentQuestion({
         );
       }
     }
+    turnFailureStage = 'settlement';
     await settleDurableTurn();
     await mirrorPendingMessages();
     return lastVisibleMessage;
@@ -5376,7 +5394,7 @@ export async function answerFastAgentQuestion({
       // resumed run to edit, its row waits for the scheduled time, and no
       // closeout is owed by this execution. The process-local OpenCode
       // session is dropped because the resumed run rebuilds from history.
-      diagnostics.recordFailure('cancelled', error);
+      diagnostics.recordFailure('cancelled', error, turnFailureStage);
       if (canonicalConversationId) {
         fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
       }
@@ -5399,6 +5417,7 @@ export async function answerFastAgentQuestion({
       storageDiagnostic
         ? wrapFastAgentStorageFullError(terminalError, storageDiagnostic)
         : terminalError,
+      turnFailureStage,
     );
     if (signal?.aborted) {
       const shutdownInterrupted =
@@ -5510,7 +5529,9 @@ export async function answerFastAgentQuestion({
             inferenceRetryAttempted,
             { detail: error.detail, model: lastResolvedInferenceModel },
           )
-        : 'I hit an error while handling that request. Please try again in a moment.';
+        : acceptedTaskInstructionPending
+          ? 'I sent the instruction to the task, and it can keep running, but I hit an error while finishing this response. Check the task’s current status before sending the instruction again.'
+          : 'I hit an error while handling that request. Please try again in a moment.';
     // The error closeout is recorded like any other closeout: its intent
     // before the post and its reply row right after, so a run that resumes
     // this turn sees it and does not post a second one.

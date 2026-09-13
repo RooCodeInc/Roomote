@@ -24,6 +24,7 @@ function createTestDiagnostics(now: () => number) {
       hasImages: false,
       modelRole: 'primary',
       turnSource: 'human',
+      turnId: 'private-turn-id',
       userId: 'user-1',
     },
     {
@@ -259,9 +260,11 @@ describe('FastAgentTurnDiagnostics', () => {
     const secret = 'sk-provider-secret-1234567890';
     const oversizedDetail = 'x'.repeat(5_000);
 
+    diagnostics.setCanonicalConversationId('private-session-id');
     diagnostics.recordFailure(
       'provider_error',
       new Error(`authorization: Bearer ${secret} ${oversizedDetail}`),
+      'inference',
     );
     currentTime = 3_010;
     diagnostics.finish();
@@ -272,6 +275,25 @@ describe('FastAgentTurnDiagnostics', () => {
     expect(logMessage).toContain('[redacted]');
     expect(logMessage).not.toContain(secret);
     expect(logMessage.length).toBeLessThan(5_000);
+    expect(captureEvent).toHaveBeenCalledWith(
+      'fast_turn_settled',
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          session_id_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          turn_id_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          failure_reason: 'provider_error',
+          failure_stage: 'inference',
+          terminal_error_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+          opencode_provider_retry_event_count: 0,
+          roomote_inference_retry_count: 0,
+        }),
+      }),
+    );
+    const event = JSON.stringify(captureEvent.mock.calls.at(-1));
+    expect(event).not.toContain(secret);
+    expect(event).not.toContain(oversizedDetail);
+    expect(event).not.toContain('private-session-id');
+    expect(event).not.toContain('private-turn-id');
   });
 
   it('never lets diagnostic logger failures replace the turn result', () => {
@@ -289,6 +311,7 @@ describe('FastAgentTurnDiagnostics', () => {
         hasImages: false,
         modelRole: 'primary',
         turnSource: 'human',
+        turnId: 'private-turn-id',
         userId: 'user-1',
       },
       { deployMarker: {}, logger, now: () => currentTime },
