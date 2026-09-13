@@ -290,6 +290,7 @@ class FakeEventSource {
 }
 
 beforeEach(() => {
+  window.location.hash = '';
   FakeEventSource.instances = [];
   replyMutate.mockReset();
   startGoalMutate.mockReset();
@@ -352,6 +353,7 @@ describe('FastSessionTranscript', () => {
       ),
     );
     vi.stubGlobal('fetch', fetchMock);
+    window.location.hash = '#session-secrets';
     render(
       <FastSessionTranscript
         sessionId="fast-conversation"
@@ -362,7 +364,6 @@ describe('FastSessionTranscript', () => {
     );
     const composer = screen.getByPlaceholderText('Message agent');
     fireEvent.change(composer, { target: { value: 'Keep this unsent draft' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Session secrets' }));
     await screen.findByLabelText('API key');
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/sessions/canonical-session/secrets',

@@ -116,7 +116,7 @@ import SessionDetailPage, { generateMetadata } from './page';
 
 describe('Session detail page', () => {
   it.each(['user-1', 'other-user'])(
-    'exposes secret management only to the owner with canonical identity (%s)',
+    'mounts secret approval only for the owner with canonical identity (%s)',
     async (userId) => {
       authorizeMock.mockResolvedValue({
         success: true,
