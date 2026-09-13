@@ -750,6 +750,24 @@ describe('startFastSessionCommand', () => {
     expect(mocks.after).toHaveBeenCalledOnce();
   });
 
+  it('declares private mode when creating a new web Session', async () => {
+    await startFastSessionCommand(auth, {
+      text: 'Review private context',
+      conversationId: '22222222-2222-4222-8222-222222222221',
+      privacy: 'private',
+    });
+
+    expect(mocks.getOrCreateSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      privacy: 'private',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: '22222222-2222-4222-8222-222222222221',
+      },
+    });
+  });
+
   it('runs a typed kickoff in voice mode when the Session is opened for a call', async () => {
     let scheduled: (() => Promise<void>) | undefined;
     mocks.after.mockImplementation((callback) => {

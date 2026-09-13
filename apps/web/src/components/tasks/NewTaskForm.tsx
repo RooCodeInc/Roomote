@@ -24,6 +24,7 @@ import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 import { type PromptInputMessage } from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
 import { useTaskLaunchConfig } from '@/components/tasks/TaskLaunchConfig';
+import { Lock, Switch } from '@/components/system';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
 
@@ -41,6 +42,7 @@ type FastSessionSubmission = {
   reasoningEffort?: ReasoningEffort | null;
   /** Open the Session for a voice call; it may start with nothing typed. */
   voiceCall?: boolean;
+  privacy?: 'shared' | 'private';
 };
 
 type NewTaskFormProps = {
@@ -78,6 +80,9 @@ export function NewTaskForm({
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<
     ReasoningEffort | null | undefined
   >(undefined);
+  const [privateSession, setPrivateSession] = useState(
+    searchParams.get('private') === '1',
+  );
 
   useEffect(() => setPromptText(initialPromptText), [initialPromptText]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
@@ -237,7 +242,7 @@ export function NewTaskForm({
   const voiceActive = openingVoiceSession;
 
   // Voice only applies to Fast sessions; an environment launch is a task.
-  const showVoice = voiceEnabled && !environmentIdParam;
+  const showVoice = voiceEnabled && !environmentIdParam && !privateSession;
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
@@ -268,6 +273,7 @@ export function NewTaskForm({
           images: submission.images,
           attachmentTexts: submission.attachmentTexts,
           model: selectedModelOverrideId,
+          ...(privateSession ? { privacy: 'private' as const } : {}),
           ...(selectedReasoningEffort !== undefined
             ? { reasoningEffort: selectedReasoningEffort }
             : {}),
@@ -291,6 +297,7 @@ export function NewTaskForm({
       startFastSession,
       selectedModelOverrideId,
       selectedReasoningEffort,
+      privateSession,
     ],
   );
 
@@ -319,16 +326,29 @@ export function NewTaskForm({
             : undefined
         }
         tools={
-          <SessionModelSwitcher
-            model={selectedModelOverrideId ?? ''}
-            onModelChange={(model) =>
-              setSelectedModelOverrideId(model || undefined)
-            }
-            reasoningEffort={selectedReasoningEffort ?? null}
-            onReasoningEffortChange={setSelectedReasoningEffort}
-            defaultModelId={defaultModelId}
-            defaultReasoningEffort={defaultReasoningEffort}
-          />
+          <div className="flex items-center gap-2">
+            {!environmentIdParam ? (
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Lock className="size-3.5" />
+                <span>Private</span>
+                <Switch
+                  checked={privateSession}
+                  onCheckedChange={setPrivateSession}
+                  aria-label="Start a private Session"
+                />
+              </label>
+            ) : null}
+            <SessionModelSwitcher
+              model={selectedModelOverrideId ?? ''}
+              onModelChange={(model) =>
+                setSelectedModelOverrideId(model || undefined)
+              }
+              reasoningEffort={selectedReasoningEffort ?? null}
+              onReasoningEffortChange={setSelectedReasoningEffort}
+              defaultModelId={defaultModelId}
+              defaultReasoningEffort={defaultReasoningEffort}
+            />
+          </div>
         }
       />
     </div>
