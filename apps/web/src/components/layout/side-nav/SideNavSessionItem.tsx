@@ -1,5 +1,6 @@
 import Link from 'next/link';
 
+import { useSessionNavigationState } from '@/hooks/useSessionNavigationState';
 import { cn } from '@/lib/utils';
 
 type SideNavSessionItemProps = {
@@ -14,10 +15,15 @@ export function SideNavSessionItem({
   session,
   isActive,
 }: SideNavSessionItemProps) {
+  const navigationState = useSessionNavigationState();
+
   return (
     <Link
       href={`/sessions/${session.id}`}
       aria-label={session.title}
+      onNavigate={() => {
+        if (!isActive) navigationState?.prepareSessionSwitch(session.id);
+      }}
       className={cn(
         'ph-no-capture flex min-h-10 w-full items-center rounded-lg pl-2 transition-all',
         isActive
