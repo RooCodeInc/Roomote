@@ -22,11 +22,9 @@ const MOBILE_HEADER_LOGO_SRC = '/logos/r.svg';
 export const NavbarHeader = ({
   className,
   setupIncomplete = false,
-  showNewSessionAction = true,
   ...props
 }: NavbarHeaderProps & {
   setupIncomplete?: boolean;
-  showNewSessionAction?: boolean;
 }) => {
   const { setOpen: openCommandPalette } = useCommandPalette();
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
@@ -41,7 +39,10 @@ export const NavbarHeader = ({
         )}
         {...props}
       >
-        <NavbarDrawer setupIncomplete={setupIncomplete} />
+        <NavbarDrawer
+          setupIncomplete={setupIncomplete}
+          onNewSession={() => setIsNewTaskDialogOpen(true)}
+        />
         {setupIncomplete ? (
           <Image
             src={MOBILE_HEADER_LOGO_SRC}
@@ -63,17 +64,15 @@ export const NavbarHeader = ({
             />
           </Link>
         )}
-        {showNewSessionAction ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setIsNewTaskDialogOpen(true)}
-            aria-label="New Session"
-            className="size-9 text-muted-foreground"
-          >
-            <Plus className="size-5" />
-          </Button>
-        ) : null}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setIsNewTaskDialogOpen(true)}
+          aria-label="New Session"
+          className="size-9 text-muted-foreground"
+        >
+          <Plus className="size-5" />
+        </Button>
         <div className="flex-1" />
         <div className="hidden md:flex items-center gap-2">
           <UserMenu />

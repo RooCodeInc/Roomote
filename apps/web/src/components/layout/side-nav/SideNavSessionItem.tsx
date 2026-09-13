@@ -7,6 +7,8 @@ type SideNavSessionItemProps = {
   session: {
     id: string;
     title: string;
+    cachedStatus?: string | null;
+    unread?: boolean;
   };
   isActive: boolean;
 };
@@ -16,11 +18,17 @@ export function SideNavSessionItem({
   isActive,
 }: SideNavSessionItemProps) {
   const navigationState = useSessionNavigationState();
+  const needsAttention =
+    session.unread ||
+    session.cachedStatus === 'needs_input' ||
+    session.cachedStatus === 'blocked';
+  const isRunning = session.cachedStatus === 'active';
 
   return (
     <Link
       href={`/sessions/${session.id}`}
       aria-label={session.title}
+      aria-current={isActive ? 'page' : undefined}
       onNavigate={() => {
         if (!isActive) navigationState?.prepareSessionSwitch(session.id);
       }}
@@ -37,6 +45,17 @@ export function SideNavSessionItem({
       >
         {session.title}
       </span>
+      {needsAttention ? (
+        <span
+          className="mr-2 size-2 shrink-0 rounded-full bg-warning"
+          aria-label="Needs attention"
+        />
+      ) : isRunning ? (
+        <span
+          className="mr-2 size-2 shrink-0 rounded-full border border-current opacity-70"
+          aria-label="Running"
+        />
+      ) : null}
     </Link>
   );
 }

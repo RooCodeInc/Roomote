@@ -266,11 +266,8 @@ vi.mock('./SideNavSessionItem', () => ({
   ),
 }));
 
-import {
-  SideNav,
-  getSessionIdFromPathname,
-  getTaskIdFromPathname,
-} from './SideNav';
+import { getSessionIdFromPathname } from './RecentSessions';
+import { SideNav, getTaskIdFromPathname } from './SideNav';
 
 describe('SideNav recent sessions', () => {
   beforeEach(() => {
