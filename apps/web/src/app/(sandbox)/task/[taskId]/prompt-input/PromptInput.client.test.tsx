@@ -26,7 +26,6 @@ const {
   removeOptimisticMessageMock,
   removeOptimisticQueuedMessageMock,
   sandboxSendPromptMutateMock,
-  taskRunStartGoalMutateMock,
   taskRunCancelMutateMock,
   toastErrorMock,
   toastSuccessMock,
@@ -65,7 +64,6 @@ const {
   removeOptimisticMessageMock: vi.fn(),
   removeOptimisticQueuedMessageMock: vi.fn(),
   sandboxSendPromptMutateMock: vi.fn(),
-  taskRunStartGoalMutateMock: vi.fn(),
   taskRunCancelMutateMock: vi.fn(),
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
@@ -360,7 +358,6 @@ describe('PromptInput', () => {
       },
     });
     sandboxSendPromptMutateMock.mockResolvedValue({ success: true });
-    taskRunStartGoalMutateMock.mockResolvedValue({ success: true });
     taskRunCancelMutateMock.mockResolvedValue({ success: true });
     preparePromptAttachmentsMock.mockImplementation(async (input) => ({
       text: input.text,
@@ -372,9 +369,6 @@ describe('PromptInput', () => {
         },
       },
       taskRuns: {
-        startGoal: {
-          mutate: taskRunStartGoalMutateMock,
-        },
         cancel: {
           mutate: taskRunCancelMutateMock,
         },
@@ -1026,55 +1020,7 @@ describe('PromptInput', () => {
     expect(directSandboxSendPromptMock).not.toHaveBeenCalled();
   });
 
-  it('queues Goal Mode optimistically during an active turn', async () => {
-    useSandboxConnectedMock.mockReturnValue(true);
-    useSandboxConnectionStatusMock.mockReturnValue({
-      connected: true,
-      connectionError: false,
-      reconnect: vi.fn(),
-    });
-    useSandboxTaskPhaseMock.mockReturnValue('running');
-    useSandboxClientMock.mockReturnValue({
-      commands: {
-        sendPrompt: { mutate: vi.fn() },
-        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
-      },
-    });
-
-    render(
-      <PromptInput
-        taskRun={createTaskRun(43, { taskId: 'task-goal' })}
-        onFileSearchOpen={() => {}}
-        onCommandSearchOpen={() => {}}
-      />,
-    );
-
-    const textarea = screen.getByPlaceholderText(/Message agent/i);
-    fireEvent.change(textarea, {
-      target: { value: '/goal ship the release' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-
-    await waitFor(() => {
-      expect(taskRunStartGoalMutateMock).toHaveBeenCalledWith({
-        taskId: 'task-goal',
-        goal: { objective: 'ship the release' },
-        clientMessageId: expect.any(String),
-        userImageUrl: undefined,
-      });
-    });
-    expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
-    expect(appendOptimisticQueuedMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: 'ship the release',
-        optimistic: true,
-      }),
-    );
-    expect(appendOptimisticAcpEventMock).not.toHaveBeenCalled();
-    expect(toastSuccessMock).toHaveBeenCalledWith('Goal Mode enabled');
-  });
-
-  it('requires an objective for the Goal Mode command', () => {
+  it('directs /goal users to the owning Session instead of the task', () => {
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: true,
@@ -1097,14 +1043,13 @@ describe('PromptInput', () => {
     );
 
     fireEvent.change(screen.getByPlaceholderText(/Message agent/i), {
-      target: { value: '/goal' },
+      target: { value: '/goal ship the release' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     expect(toastErrorMock).toHaveBeenCalledWith(
-      'Describe the goal after /goal.',
+      'Start Goal Mode from the Session conversation.',
     );
-    expect(taskRunStartGoalMutateMock).not.toHaveBeenCalled();
     expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
   });
 

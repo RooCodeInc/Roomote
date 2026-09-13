@@ -216,15 +216,37 @@ export function SessionPromptInput({
 
     consumeSuggestion();
 
-    // Always send the current picker state: it round-trips the persisted
-    // choice and clears it when the picker is reset to the default. The
-    // draft and attachments are only cleared once the send succeeds, so a
-    // failed reply is not lost.
-    const sent = await onSend({
-      ...message,
-      model: model || null,
-      reasoningEffort,
-    });
+    const goalMatch = /^\/goal(?:\s+([\s\S]*))?$/i.exec(message.text.trim());
+    let sent: boolean;
+    if (goalMatch) {
+      const objective = goalMatch[1]?.trim();
+      if (!objective) {
+        toast.error('Describe the goal after /goal.');
+        return;
+      }
+      if (message.files.length > 0) {
+        toast.error('Goal Mode does not support attachments.');
+        return;
+      }
+      const result = await trpcClient.fastSessions.startGoal.mutate({
+        sessionId,
+        objective,
+      });
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(`Pursuing goal: ${objective}`);
+      sent = true;
+    } else {
+      // Always send the current picker state: it round-trips the persisted
+      // choice and clears it when the picker is reset to the default.
+      sent = await onSend({
+        ...message,
+        model: model || null,
+        reasoningEffort,
+      });
+    }
     if (sent) {
       setPrompt('');
       setIsTextareaFocused(false);

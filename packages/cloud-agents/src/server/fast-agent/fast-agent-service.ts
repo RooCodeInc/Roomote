@@ -53,12 +53,16 @@ import {
   db,
   eq,
   fastAgentParentEvents,
+  claimSessionGoalContinuation,
+  getSessionGoalForConversation,
   getDeploymentTaskModelOptions,
   getSessionForFastConversation,
   getSessionForTask,
   inArray,
   isBrainEnabled,
   isNull,
+  markSessionGoalForConversation,
+  releaseSessionGoalContinuation,
   sql,
   touchSessionActivity,
 } from '@roomote/db/server';
@@ -74,6 +78,8 @@ import packageJson from '../../../../../package.json';
 import { appendAttachmentTextsToPromptText } from '../../file-attachments';
 import {
   ensureOwnTaskFollowThroughWakeup,
+  ensureSessionGoalContinuationWakeup,
+  cancelSessionGoalContinuationWakeups,
   handleManageWakeupsToolCall,
   normalizeManageWakeupsArgs,
 } from '../session-wakeups';
@@ -503,6 +509,10 @@ const taskIdArgsSchema = z.object({
 });
 const stopTaskArgsSchema = taskIdArgsSchema.extend({
   userInitiated: z.boolean(),
+});
+const manageGoalArgsSchema = z.object({
+  action: z.enum(['get', 'complete', 'blocked', 'canceled']),
+  reason: z.string().trim().min(1).optional(),
 });
 const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
 const findIntegrationToolsArgsSchema = z.object(
@@ -3258,6 +3268,7 @@ export async function answerFastAgentQuestion({
       );
     }
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
+    const sessionGoal = await getSessionGoalForConversation(session.id);
     const resolvedActiveTasks = [
       ...new Map(
         [...activeTasks, ...sessionActiveTasks].map((task) => [
@@ -3313,6 +3324,7 @@ export async function answerFastAgentQuestion({
       defaultTaskModelId: taskModelOptions.defaultModelId,
       availableIntegrations,
       activeTasks: resolvedActiveTasks,
+      sessionGoal,
       surface: conversation.surface,
       turnSource,
       input: humanInput,
@@ -4629,6 +4641,37 @@ export async function answerFastAgentQuestion({
             );
           }
 
+          case FAST_AGENT_NATIVE_TOOL_NAMES.manageGoal: {
+            const args = manageGoalArgsSchema.parse(call.args);
+            throwIfTurnCancelled();
+            if (args.action === 'get') {
+              const goal = await getSessionGoalForConversation(session.id);
+              return { success: true, goal };
+            }
+            if (!sessionGoal?.generation) {
+              return {
+                success: false,
+                error: 'There is no active Session goal.',
+              };
+            }
+            if (args.action === 'blocked' && !args.reason) {
+              return {
+                success: false,
+                error: 'A concrete blocker reason is required.',
+              };
+            }
+            const result = await markSessionGoalForConversation({
+              conversationId: session.id,
+              generation: sessionGoal.generation,
+              status: args.action,
+              ...(args.reason ? { reason: args.reason } : {}),
+            });
+            if (result.updated || result.reason === 'not_active') {
+              await cancelSessionGoalContinuationWakeups(session.id);
+            }
+            return { success: result.updated, ...result };
+          }
+
           case FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart: {
             if (!platformEvent || !adapter.retryTaskStart) {
               return {
@@ -5505,6 +5548,37 @@ export async function answerFastAgentQuestion({
       }
     }
     await settleDurableTurn();
+    const settledGoal = await getSessionGoalForConversation(session.id);
+    if (settledGoal?.status === 'active') {
+      const activeGoalTasks = await getActiveFastAgentTasks(session.id);
+      if (activeGoalTasks.length > 0) {
+        await cancelSessionGoalContinuationWakeups(session.id);
+      } else {
+        const continuationId = `${turnId}:goal-continuation`;
+        const claim = await claimSessionGoalContinuation({
+          conversationId: session.id,
+          continuationId,
+        });
+        if (claim.updated) {
+          try {
+            await ensureSessionGoalContinuationWakeup({
+              conversationId: session.id,
+              userId,
+            });
+          } catch (error) {
+            await releaseSessionGoalContinuation({
+              conversationId: session.id,
+              continuationId,
+            }).catch(() => undefined);
+            console.warn(
+              `[Fast Agent] Failed to schedule Session goal continuation: ${formatErrorForLog(error)}`,
+            );
+          }
+        }
+      }
+    } else {
+      await cancelSessionGoalContinuationWakeups(session.id);
+    }
     await mirrorPendingMessages();
     await notifyUserAttention();
     return lastVisibleMessage;

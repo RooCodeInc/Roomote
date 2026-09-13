@@ -475,6 +475,20 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.manageGoal]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Read or finish the active goal owned by this Fast Session. Use complete only after the entire objective is verified; use blocked only for a concrete repeated blocker; use canceled only when the user cancels or replaces the objective.",
+  args: {
+    action: z.enum(["get", "complete", "blocked", "canceled"]),
+    reason: z.string().min(1).optional().describe("Required for blocked; omit otherwise."),
+  },
+  execute: (args, context) => invoke("manage_goal", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"

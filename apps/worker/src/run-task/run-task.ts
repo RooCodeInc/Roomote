@@ -111,7 +111,6 @@ import {
   getInitialWorkflowPhase,
 } from './workflow-phase';
 import { wrapCommunicationMessage } from './communication-message-prompt';
-import { buildTaskGoalContinuationPrompt } from './task-goal';
 import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
 import { isMissingSlackReplyTargetProcedureError } from './slack-reply-target';
 
@@ -1463,64 +1462,6 @@ export const runTask = async ({
             });
           }
         },
-        onBeforeTaskCompletion: async (completionId: string) => {
-          if (taskCancellation.signal.aborted) {
-            return 'finalize' as const;
-          }
-
-          const claim = await sdk.taskRuns.claimGoalContinuation({
-            runId: taskRun.id,
-            continuationId: completionId,
-          });
-          if (!claim.updated) {
-            if (claim.reason === 'already_claimed') {
-              return 'ignore' as const;
-            }
-            if (!claim.goal) {
-              return 'finalize' as const;
-            }
-            await recordWorkerRuntimeEvent({
-              eventType: 'decision',
-              message: `Goal continuation stopped for task run #${taskRun.id}.`,
-              details: {
-                reason: claim.reason,
-                goalStatus: claim.goal?.status ?? null,
-              },
-            });
-            return 'finalize' as const;
-          }
-
-          const continuationEvent = (sent: boolean) => ({
-            eventType: 'decision' as const,
-            message: `Goal continuation ${sent ? 'started' : 'could not start'} for task run #${taskRun.id}.`,
-            details: {
-              reason: 'goal_continuation',
-              delivered: sent,
-              continuation: claim.goal.continuationsUsed,
-              maxContinuations: claim.goal.maxContinuations,
-            },
-          });
-          return {
-            disposition: 'continue' as const,
-            prompt: {
-              prompt: buildTaskGoalContinuationPrompt(claim.goal),
-              goalContext: claim.goal,
-              visibleInTranscript: false,
-              source: 'goal-continuation',
-              clientMessageId: `goal-continuation:${completionId}`,
-            },
-            onAccepted: () => {
-              void recordWorkerRuntimeEvent(continuationEvent(true));
-            },
-            onRejected: async () => {
-              await sdk.taskRuns.releaseGoalContinuation({
-                runId: taskRun.id,
-                continuationId: completionId,
-              });
-              await recordWorkerRuntimeEvent(continuationEvent(false));
-            },
-          };
-        },
         onStart: async (taskId: string) => {
           try {
             await sdk.taskRuns.setHarnessSessionId({
@@ -1616,11 +1557,6 @@ export const runTask = async ({
       | undefined;
     let runtimeTaskStartedForSetupNotice = false;
 
-    const getActiveGoalContext = async () => {
-      const goal = await sdk.taskRuns.getGoal({ runId: taskRun.id });
-      return goal?.status === 'active' ? goal : undefined;
-    };
-
     const deliverEnvironmentSetupNotice = async () => {
       const currentManager = harnessManager;
       const outcome = pendingEnvironmentSetupOutcome;
@@ -1652,24 +1588,12 @@ export const runTask = async ({
       // deliver the same setup outcome more than once.
       pendingEnvironmentSetupOutcome = undefined;
 
-      let goalContext;
-      try {
-        goalContext = await getActiveGoalContext();
-      } catch (error) {
-        pendingEnvironmentSetupOutcome ??= outcome;
-        logger.warn(
-          `[runTask] Delaying background environment setup notice for task run ${taskRun.id} because active goal lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return;
-      }
-
       const sent = currentManager.sendFollowUpPrompt({
         prompt: wakeFromIdle
           ? buildEnvironmentSetupSettledWakePrompt(outcome)
           : buildEnvironmentSetupSettledPrompt(outcome),
         visibleInTranscript: false,
         source: 'environment-setup',
-        goalContext,
       });
 
       if (!sent) {
@@ -1852,16 +1776,6 @@ export const runTask = async ({
 
       const workflowPhase =
         options.workflowPhase ?? getFollowUpWorkflowPhase(options.prompt);
-      let goalContext;
-      try {
-        goalContext = await getActiveGoalContext();
-      } catch (error) {
-        logger.warn(
-          `[runTask] Deferred resume prompt blocked for task run ${taskRun.id} because active goal lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        scheduleDeferredResumePromptRetry(options);
-        return false;
-      }
       const queued = harnessManager.sendFollowUpPrompt({
         prompt: options.prompt,
         images: options.images,
@@ -1871,7 +1785,6 @@ export const runTask = async ({
         clientMessageId: options.clientMessageId,
         // Attribute the turn to the identity actor-scoped routes resolve.
         userId: deferredPromptPrep.effectiveUserId ?? undefined,
-        goalContext,
       });
 
       if (queued) {
@@ -1910,18 +1823,10 @@ export const runTask = async ({
       const workflowPhase =
         options.workflowPhase ?? getFollowUpWorkflowPhase(options.prompt);
 
-      try {
-        return harnessManager.sendFollowUpPrompt({
-          ...options,
-          ...(workflowPhase ? { workflowPhase } : {}),
-          goalContext: await getActiveGoalContext(),
-        });
-      } catch (error) {
-        logger.warn(
-          `[runTask] Follow-up prompt blocked for task run ${taskRun.id} because active goal lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return false;
-      }
+      return harnessManager.sendFollowUpPrompt({
+        ...options,
+        ...(workflowPhase ? { workflowPhase } : {}),
+      });
     };
 
     const deliverQueuedSnapshotResumeSlackMessages = async (
@@ -2330,7 +2235,6 @@ export const runTask = async ({
           ? { workflowPhase: initialWorkflowPhase }
           : {}),
         visibleInTranscript: false,
-        ...(task?.goal?.status === 'active' ? { goalContext: task.goal } : {}),
       });
     } else {
       // Session mode: initialize without prompt.

@@ -63,8 +63,26 @@ vi.mock('@roomote/db/server', () => {
       threadTs: 'trackedMessages.threadTs',
     },
     tasks: {
+      deletedAt: 'tasks.deletedAt',
       id: 'tasks.id',
       initiatorUserId: 'tasks.initiatorUserId',
+      state: 'tasks.state',
+    },
+    fastAgentConversations: {
+      currentReplyChannelId: 'fastAgentConversations.currentReplyChannelId',
+      currentReplyThreadId: 'fastAgentConversations.currentReplyThreadId',
+      id: 'fastAgentConversations.id',
+      surface: 'fastAgentConversations.surface',
+      userId: 'fastAgentConversations.userId',
+      workspaceId: 'fastAgentConversations.workspaceId',
+    },
+    sessions: {
+      fastConversationId: 'sessions.fastConversationId',
+      id: 'sessions.id',
+    },
+    sessionTasks: {
+      sessionId: 'sessionTasks.sessionId',
+      taskId: 'sessionTasks.taskId',
     },
   };
 });

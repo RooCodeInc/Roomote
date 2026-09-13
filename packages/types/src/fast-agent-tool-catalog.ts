@@ -13,6 +13,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   inspectImages: 'inspect_images',
   launchTask: 'launch_task',
   manageWakeups: 'manage_wakeups',
+  manageGoal: 'manage_goal',
   retryTaskStart: 'retry_task_start',
   saveMemory: 'save_memory',
   updatePersonalization: 'update_personalization',
@@ -64,6 +65,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.launchTask, kind: ACP_TOOL_KINDS.task },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups,
+    kind: ACP_TOOL_KINDS.task,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.manageGoal,
     kind: ACP_TOOL_KINDS.task,
   },
   {

@@ -57,6 +57,12 @@ const mocks = vi.hoisted(() => ({
   getSessionForTask: vi.fn(),
   getPendingHumanFollowUp: vi.fn(),
   ensureOwnTaskFollowThroughWakeup: vi.fn(),
+  ensureSessionGoalContinuationWakeup: vi.fn(),
+  cancelSessionGoalContinuationWakeups: vi.fn(),
+  getSessionGoal: vi.fn(),
+  claimSessionGoalContinuation: vi.fn(),
+  releaseSessionGoalContinuation: vi.fn(),
+  markSessionGoal: vi.fn(),
   inArray: vi.fn((...values: unknown[]) => values),
   updateParentEventWhere: vi.fn(),
   nativeSteer: vi.fn(),
@@ -89,6 +95,8 @@ const nativeToolNames = vi.hoisted(
       ignoreEvent: 'ignore_event',
       inspectImages: 'inspect_images',
       launchTask: 'launch_task',
+      manageGoal: 'manage_goal',
+      manageWakeups: 'manage_wakeups',
       reviewPullRequest: 'review_pull_request',
       retryTaskStart: 'retry_task_start',
       saveMemory: 'save_memory',
@@ -155,6 +163,10 @@ vi.mock('../../available-environments', () => ({
 vi.mock('../../session-wakeups', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../session-wakeups')>()),
   ensureOwnTaskFollowThroughWakeup: mocks.ensureOwnTaskFollowThroughWakeup,
+  ensureSessionGoalContinuationWakeup:
+    mocks.ensureSessionGoalContinuationWakeup,
+  cancelSessionGoalContinuationWakeups:
+    mocks.cancelSessionGoalContinuationWakeups,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -192,6 +204,10 @@ vi.mock('@roomote/db/server', () => ({
   getSessionForFastConversation: mocks.getUnifiedSession,
   getSessionForTask: mocks.getSessionForTask,
   touchSessionActivity: mocks.touchSessionActivity,
+  getSessionGoalForConversation: mocks.getSessionGoal,
+  claimSessionGoalContinuation: mocks.claimSessionGoalContinuation,
+  releaseSessionGoalContinuation: mocks.releaseSessionGoalContinuation,
+  markSessionGoalForConversation: mocks.markSessionGoal,
 }));
 
 const NonTaskInputModalityUnsupportedError = vi.hoisted(
@@ -452,6 +468,20 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.getPendingHumanFollowUp.mockResolvedValue([]);
     mocks.ensureOwnTaskFollowThroughWakeup.mockResolvedValue(undefined);
+    mocks.ensureSessionGoalContinuationWakeup.mockResolvedValue(undefined);
+    mocks.cancelSessionGoalContinuationWakeups.mockResolvedValue(undefined);
+    mocks.getSessionGoal.mockResolvedValue(null);
+    mocks.claimSessionGoalContinuation.mockResolvedValue({
+      updated: false,
+      reason: 'not_active',
+      goal: null,
+    });
+    mocks.releaseSessionGoalContinuation.mockResolvedValue(false);
+    mocks.markSessionGoal.mockResolvedValue({
+      updated: false,
+      reason: 'not_active',
+      goal: null,
+    });
     mocks.updateParentEventWhere.mockResolvedValue(undefined);
     mocks.nativeSteer.mockResolvedValue(undefined);
     mocks.getNativeRuntime.mockImplementation(async () => {

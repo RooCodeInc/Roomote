@@ -143,6 +143,7 @@ export default async function SessionDetailPage({
       },
       createdAt: unifiedSession.createdAt,
       status: unifiedSession.status,
+      goal: unifiedSession.goal,
       tasks: unifiedSession.tasks,
       artifacts: unifiedSession.artifacts,
     };
@@ -183,6 +184,7 @@ export default async function SessionDetailPage({
                   defaultModelId={defaultModelId}
                   defaultReasoningEffort={defaultReasoningEffort}
                   autoStartVoice={autoStartVoice}
+                  sessionGoal={unifiedSession.goal}
                   {...(unifiedSession.ownerUserId
                     ? {
                         owner: {
@@ -262,6 +264,7 @@ export default async function SessionDetailPage({
     },
     createdAt: session.createdAt,
     status: null,
+    goal: null,
     tasks: [],
     artifacts: [],
     taskSource: 'fast',

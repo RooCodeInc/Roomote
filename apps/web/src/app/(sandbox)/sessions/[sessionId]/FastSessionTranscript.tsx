@@ -28,6 +28,7 @@ import {
   type PrReviewActionChoice,
   type AcpEventType,
   type ReasoningEffort,
+  type SessionGoal,
 } from '@roomote/types';
 
 import type { FastSessionMessage } from '@/lib/server/fast-sessions';
@@ -396,6 +397,7 @@ export function FastSessionTranscript({
   headerActions,
   secretSessionId,
   timelineExtras,
+  sessionGoal,
   autoStartVoice = false,
 }: {
   sessionId: string;
@@ -413,6 +415,7 @@ export function FastSessionTranscript({
   headerActions?: ReactNode;
   secretSessionId?: string;
   timelineExtras?: ReactNode;
+  sessionGoal?: SessionGoal | null;
   /**
    * Begin a voice conversation as soon as the page loads: set when the
    * session was opened from a voice utterance in the new-session composer,
@@ -1488,6 +1491,25 @@ export function FastSessionTranscript({
             )}
           </div>
         </WorkspaceHeader>
+        {sessionGoal ? (
+          <div className="mx-auto w-full max-w-4xl px-4 pb-3">
+            <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2">
+              <span className="mt-0.5 shrink-0 text-xs font-medium text-muted-foreground">
+                Goal
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-foreground">
+                  {sessionGoal.objective}
+                </p>
+                <p className="mt-0.5 text-xs capitalize text-muted-foreground">
+                  {sessionGoal.status.replace('_', ' ')} -{' '}
+                  {sessionGoal.continuationsUsed}/{sessionGoal.maxContinuations}{' '}
+                  continuations
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
         <Conversation
           className="min-h-0 flex-1"
           initial={hasSavedScrollPosition ? false : 'instant'}

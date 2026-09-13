@@ -4,7 +4,6 @@ import { z } from 'zod';
 import {
   getTaskToolInvocation,
   PRODUCT_NAME,
-  TASK_GOAL_STATUSES,
   taskToolDispatchPayloadSchema,
 } from '@roomote/types';
 
@@ -46,17 +45,6 @@ const sendPromptInputSchema = z
      * is not reachable from arbitrary clients.
      */
     visibleInTranscript: z.boolean().optional(),
-    goalContext: z
-      .object({
-        objective: z.string().max(10_000),
-        generation: z.string().max(200).nullable(),
-        status: z.enum(TASK_GOAL_STATUSES),
-        maxContinuations: z.number().int().min(1).max(20),
-        continuationsUsed: z.number().int().min(0),
-        blockedReason: z.string().nullable(),
-        completedAt: z.date().nullable(),
-      })
-      .optional(),
   })
   .superRefine((data, ctx) => {
     const hasPrompt =
@@ -167,7 +155,6 @@ export const sendPrompt = publicProcedure
           userName: input.userName,
           userImageUrl: input.userImageUrl,
           visibleInTranscript: input.visibleInTranscript,
-          goalContext: input.goalContext,
         });
 
         if (!success) {
@@ -230,7 +217,6 @@ export const sendPrompt = publicProcedure
         userImageUrl: input.userImageUrl,
         clientMessageId: input.clientMessageId,
         visibleInTranscript: input.visibleInTranscript,
-        goalContext: input.goalContext,
       });
 
       if (!success) {

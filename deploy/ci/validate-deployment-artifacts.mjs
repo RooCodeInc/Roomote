@@ -123,6 +123,30 @@ assert(
     ),
   'upgrade compatibility: startup failures must report Compose state and service logs',
 );
+assert(
+  upgradeCompatibility.includes("'session-goal-ownership-cutover'") &&
+    upgradeCompatibility.includes(
+      "'Goal Mode moved from unused task-owned columns to Session-owned storage'",
+    ) &&
+    upgradeCompatibility.includes(
+      "WHERE boundary.name = 'session-goal-ownership-cutover'",
+    ) &&
+    [
+      'goal_objective',
+      'goal_status',
+      'goal_max_continuations',
+      'goal_continuations_used',
+      'goal_blocked_reason',
+      'goal_completed_at',
+      'goal_last_continuation_id',
+      'goal_continuation_ids',
+      'goal_generation_ids',
+      'goal_blocker_candidate_reason',
+      'goal_blocker_candidate_count',
+      'goal_blocker_last_continuation_used',
+    ].every((column) => upgradeCompatibility.includes(`'${column}'`)),
+  'upgrade compatibility: Session goal cutover must exempt only the complete legacy task-goal shape',
+);
 
 function commandText(command) {
   if (Array.isArray(command)) return command.join(' ');
