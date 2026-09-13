@@ -73,7 +73,6 @@ describe('buildTelegramLiveTaskMessage', () => {
 
   it.each([
     ['waiting', 'Waiting for your input…'],
-    ['completed', 'Completed.'],
     ['failed', 'Task failed.'],
     ['stopped', 'Stopped.'],
   ] as const)('formats %s as one compact line', (status, expected) => {
@@ -137,11 +136,6 @@ describe('buildTelegramLiveTaskMessage', () => {
       '',
       'WAITING',
       joinMessage(buildTelegramLiveTaskMessage({ status: 'waiting', taskUrl })),
-      '',
-      'COMPLETED',
-      joinMessage(
-        buildTelegramLiveTaskMessage({ status: 'completed', taskUrl }),
-      ),
       '',
       'FAILED',
       joinMessage(buildTelegramLiveTaskMessage({ status: 'failed', taskUrl })),

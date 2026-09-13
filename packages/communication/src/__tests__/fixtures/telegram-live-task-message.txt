@@ -10,11 +10,6 @@ Waiting for your input…
 
 Open in Roomote: https://roomote.example/sessions/session-1?task=task-1&utm_source=telegram
 
-COMPLETED
-Completed.
-
-Open in Roomote: https://roomote.example/sessions/session-1?task=task-1&utm_source=telegram
-
 FAILED
 Task failed.
 
