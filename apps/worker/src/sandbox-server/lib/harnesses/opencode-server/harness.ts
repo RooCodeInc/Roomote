@@ -3603,9 +3603,12 @@ export class OpenCodeServerHarness
     const message = error instanceof Error ? error.message : String(error);
     const sessionId = 'opencode-session-create-failed';
     const timeoutMs = this.client.sessionCreateTimeoutMsValue;
+    // The request error may carry a slice of the raw OpenCode response body,
+    // so redact it and render it as code before it reaches the transcript.
+    const safeMessage = redactSecrets(message).replace(/`/gu, "'");
     const userText = message.includes('did not respond within')
       ? message
-      : `OpenCode session creation failed before the agent could start.\n\n${message}\n\nOpen the Logs sidebar and inspect harness.log for OpenCode lines (prefixed [opencode-server]).\n\n${formatOpenCodeSessionCreateTimeoutText(timeoutMs)}`;
+      : `OpenCode session creation failed before the agent could start.\n\n\`\`\`\n${safeMessage}\n\`\`\`\n\nOpen the Logs sidebar and inspect harness.log for OpenCode lines (prefixed [opencode-server]).\n\n${formatOpenCodeSessionCreateTimeoutText(timeoutMs)}`;
 
     this.logger.error(
       `OpenCode initial session create failed; failing the task terminally error=${message}`,

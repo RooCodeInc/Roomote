@@ -8,6 +8,7 @@ import type {
   OpenCodeSession,
   OpenCodeSessionMessage,
 } from './types';
+import { redactSecrets } from '@roomote/communication/redact-secrets';
 
 // Bound every unary OpenCode HTTP call so a wedged server cannot leave the
 // worker sitting forever on a bare `fetch` with only the task-wide cancel
@@ -484,7 +485,11 @@ export class OpenCodeServerClient {
         )}`,
       );
       throw new Error(
-        `OpenCode request failed method=${method} path=${path} status=${response.status}`,
+        `OpenCode request failed method=${method} path=${path} status=${response.status}${
+          responseText
+            ? ` body=${redactSecrets(responseText.slice(0, 300))}`
+            : ''
+        }`,
       );
     } catch (error) {
       const elapsedMs = Date.now() - startedAt;
