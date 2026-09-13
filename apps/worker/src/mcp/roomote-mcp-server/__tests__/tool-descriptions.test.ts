@@ -621,7 +621,7 @@ describe('roomote MCP tool descriptions', () => {
       'Choose the current Slack turn purpose before writing: ack, progress, closeout, or clarification.',
     );
     expect(replyTool.config.description).toContain(
-      `Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the Slack turn open.`,
+      `Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the Slack turn open.`,
     );
     expect(replyTool.config.description).toContain(
       "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next.",
@@ -645,7 +645,7 @@ describe('roomote MCP tool descriptions', () => {
       "Non-empty Markdown text to post in the Slack thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. Use the modern Slack Markdown contract from the Slack instructions; tables, headings, blockquotes, and fenced code blocks are allowed when they make the reply clearer.",
     );
     expect(getInputSchemaField(replyTool, 'purpose').description).toBe(
-      'The lifecycle purpose for this Slack-visible reply. Choose ack for the first visible response before work that will not post to Slack, progress for new useful state or silence prevention, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.',
+      'The lifecycle purpose for this Slack-visible reply. Choose ack for the first visible response before work that will not post to Slack, progress for new useful state, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.',
     );
     expect(replyTool.config.inputSchema.findings).toBeUndefined();
     expect(replyTool.config.inputSchema.questions).toBeUndefined();
@@ -945,7 +945,7 @@ describe('roomote MCP tool descriptions', () => {
     expect(description).toContain('complete engineering handoff');
     expect(description).toContain('do not send another generic ack');
     expect(description).toContain('meaningful work milestones');
-    expect(description).toContain('roughly 10 minutes of silence');
+    expect(description).not.toContain('10 minutes');
     expect(description).toContain(
       'without labeling the message as a progress update',
     );
@@ -953,6 +953,9 @@ describe('roomote MCP tool descriptions', () => {
     expect(getInputSchemaField(reportTool, 'message').description).toContain(
       'Non-empty Markdown report for the parent Session.',
     );
+    expect(
+      getInputSchemaField(reportTool, 'purpose').description,
+    ).not.toContain('10 minutes');
     expect(reportTool.config.inputSchema.suggestions).toBeUndefined();
     expect(
       getRegisteredTool(registeredTools, 'manage_artifacts').config.description,
@@ -1171,13 +1174,13 @@ describe('roomote MCP tool descriptions', () => {
     const chatReplyTool = getRegisteredTool(registeredTools, 'send_chat_reply');
 
     expect(chatReplyTool.config.description).toBe(
-      `Slack-visible: posts a lifecycle reply in the originating Slack thread. Choose the current Slack turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the Slack turn open. Use it again on later Slack turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. Supports the modern Slack Markdown contract from the Slack instructions. Use rich Markdown when it improves scanability. When the reply mentions actionable code references, follow the Slack prompt source-linking rule. Write the message so its content clearly matches the selected purpose.`,
+      `Slack-visible: posts a lifecycle reply in the originating Slack thread. Choose the current Slack turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the Slack turn open. Use it again on later Slack turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. Supports the modern Slack Markdown contract from the Slack instructions. Use rich Markdown when it improves scanability. When the reply mentions actionable code references, follow the Slack prompt source-linking rule. Write the message so its content clearly matches the selected purpose.`,
     );
     expect(getInputSchemaField(chatReplyTool, 'message').description).toBe(
       "Non-empty Markdown text to post in the Slack thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. Use the modern Slack Markdown contract from the Slack instructions; tables, headings, blockquotes, and fenced code blocks are allowed when they make the reply clearer.",
     );
     expect(getInputSchemaField(chatReplyTool, 'purpose').description).toBe(
-      'The lifecycle purpose for this Slack-visible reply. Choose ack for the first visible response before work that will not post to Slack, progress for new useful state or silence prevention, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.',
+      'The lifecycle purpose for this Slack-visible reply. Choose ack for the first visible response before work that will not post to Slack, progress for new useful state, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.',
     );
     expect(chatReplyTool.config.description).not.toContain(
       '<slack_modern_markdown>',
