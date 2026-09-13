@@ -6,9 +6,16 @@ import {
 } from '@roomote/cloud-agents/server';
 import { SESSION_STATUSES } from '@roomote/types';
 import {
+  and,
   advanceSessionReadCursor,
   cancelSessionWakeupsForConversation,
   db,
+  eq,
+  fastAgentConversations,
+  inArray,
+  sessions,
+  sessionTasks,
+  tasks,
 } from '@roomote/db/server';
 import { captureEvent } from '@roomote/telemetry/server';
 
@@ -33,6 +40,59 @@ import {
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
 
 export const sessionIdInputSchema = z.object({ sessionId: z.string().uuid() });
+
+export async function deletePrivateSessionCommand(
+  auth: UserAuthSuccess,
+  sessionId: string,
+) {
+  return db.transaction(async (tx) => {
+    const [session] = await tx
+      .select({
+        id: sessions.id,
+        fastConversationId: sessions.fastConversationId,
+      })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.id, sessionId),
+          eq(sessions.privacy, 'private'),
+          eq(sessions.privateOwnerUserId, auth.userId),
+        ),
+      )
+      .for('update');
+    if (!session) return { deleted: false };
+
+    const linkedTasks = await tx
+      .select({ taskId: sessionTasks.taskId })
+      .from(sessionTasks)
+      .where(eq(sessionTasks.sessionId, session.id));
+    const taskIds = linkedTasks.map(({ taskId }) => taskId);
+    if (taskIds.length > 0) {
+      await tx
+        .delete(tasks)
+        .where(
+          and(
+            inArray(tasks.id, taskIds),
+            eq(tasks.privacy, 'private'),
+            eq(tasks.privateOwnerUserId, auth.userId),
+          ),
+        );
+    }
+    await tx.delete(sessions).where(eq(sessions.id, session.id));
+    if (session.fastConversationId) {
+      await tx
+        .delete(fastAgentConversations)
+        .where(
+          and(
+            eq(fastAgentConversations.id, session.fastConversationId),
+            eq(fastAgentConversations.privacy, 'private'),
+            eq(fastAgentConversations.privateOwnerUserId, auth.userId),
+          ),
+        );
+    }
+    return { deleted: true };
+  });
+}
 const sessionTimelineCursorSchema = z.object({
   at: z.number().nonnegative(),
   seenIdsAtTimestamp: z.array(z.string()),

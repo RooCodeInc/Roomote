@@ -57,6 +57,7 @@
           "tasks",
           "goal-mode",
           "fast-sessions",
+          "private-sessions",
           "memory",
           "file-attachments",
           "voice"
