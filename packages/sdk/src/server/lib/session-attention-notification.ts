@@ -200,12 +200,14 @@ export async function notifyDirectWebTaskAttention(
           initiatorUserId: true,
           surface: true,
           title: true,
+          privacy: true,
         },
       },
     },
   });
   if (
     !run?.task ||
+    run.task.privacy === 'private' ||
     run.task.surface !== 'web' ||
     !run.task.initiatorUserId ||
     getFastAgentParentFromPayload(run.payload)
@@ -265,9 +267,14 @@ export async function notifyFastWebSessionAttention(
       ownerUserId: true,
       sourceSurface: true,
       title: true,
+      privacy: true,
     },
   });
-  if (!session?.ownerUserId || session.sourceSurface !== 'web') {
+  if (
+    !session?.ownerUserId ||
+    session.sourceSurface !== 'web' ||
+    session.privacy === 'private'
+  ) {
     return 'not_applicable';
   }
   if (!(await hasAnyUserDirectMessageIdentity(session.ownerUserId))) {

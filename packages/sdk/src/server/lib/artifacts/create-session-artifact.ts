@@ -3,6 +3,7 @@ import {
   db,
   ensureSessionForFastConversation,
   eq,
+  sessions,
   taskArtifacts,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
@@ -37,6 +38,13 @@ export async function createSessionArtifact(input: {
   contentType: string;
   artifactType: Exclude<TaskArtifactType, 'visual-proof'>;
 }) {
+  const session = await db.query.sessions.findFirst({
+    where: eq(sessions.id, input.sessionId),
+    columns: { privacy: true },
+  });
+  if (session?.privacy === 'private') {
+    throw new Error('Artifact creation is unavailable in private Sessions.');
+  }
   const pathError = validateTaskArtifactPath(input.path);
   if (pathError) throw new Error(pathError);
 
