@@ -13,6 +13,7 @@ import {
   validateTaskArtifactPath,
 } from '@roomote/types';
 import { canReadTask } from './custom-automation-task-access';
+import { findReadableSession } from './sessions';
 
 function withTypedArtifactType<T extends { artifactType: string }>(
   artifact: T,
@@ -33,6 +34,16 @@ type ArtifactAuth = {
   userId: string | null;
   isAdmin: boolean;
 };
+
+async function canReadSessionArtifacts(auth: ArtifactAuth, sessionId: string) {
+  if (!auth.userId) return false;
+  return Boolean(
+    await findReadableSession(
+      { userId: auth.userId, isAdmin: auth.isAdmin },
+      sessionId,
+    ),
+  );
+}
 
 /**
  * Get an artifact by its ID.
@@ -89,13 +100,14 @@ export async function getArtifactBySessionPath({
   sessionId,
   path,
   version,
-  auth: _auth,
+  auth,
 }: {
   sessionId: string;
   path: string;
   version?: number;
   auth: ArtifactAuth;
 }) {
+  if (!(await canReadSessionArtifacts(auth, sessionId))) return null;
   const artifact = await getSessionArtifactByPath({ sessionId, path, version });
   return artifact ? withTypedArtifactType(artifact) : null;
 }
@@ -103,12 +115,13 @@ export async function getArtifactBySessionPath({
 export async function getArtifactVersionsBySessionPath({
   sessionId,
   path,
-  auth: _auth,
+  auth,
 }: {
   sessionId: string;
   path: string;
   auth: ArtifactAuth;
 }) {
+  if (!(await canReadSessionArtifacts(auth, sessionId))) return [];
   return db
     .select({
       id: taskArtifacts.id,

@@ -1,6 +1,6 @@
 'use client';
 
-import { getTaskModelDisplayName } from '@roomote/types';
+import { getTaskModelDisplayName, NO_REPOSITORIES } from '@roomote/types';
 import type { ReactNode } from 'react';
 
 import {
@@ -92,8 +92,12 @@ export function TaskHeaderMetadata({
   className?: string;
 }) {
   const hasPullRequest = pullRequests.length > 0 || (prRepo && prNumber);
+  const hasWorkspace =
+    environmentId !== NO_REPOSITORIES &&
+    repo !== NO_REPOSITORIES &&
+    Boolean(environmentId || repo);
 
-  if (!model && !environmentId && !repo && !hasPullRequest) return null;
+  if (!model && !hasWorkspace && !hasPullRequest) return null;
 
   return (
     <div
@@ -110,7 +114,7 @@ export function TaskHeaderMetadata({
           iconClassName="text-muted-foreground"
         />
       ) : null}
-      {environmentId || repo ? (
+      {hasWorkspace ? (
         <WorkspaceBadge
           environmentId={environmentId}
           repo={repo}

@@ -31,6 +31,7 @@ import packageJson from '../../../../package.json';
 import { validateToken } from '@roomote/auth/client';
 import {
   buildRoomoteSystemPrompt,
+  FAST_ONLY_PACKAGED_SKILL_INVOCATIONS,
   resolveRoomoteReleaseVersion,
   stripLeadingSlackProductMention,
   wrapSlackMessage,
@@ -249,6 +250,8 @@ function getInitialSlackTurnMessageTs(taskRun: {
 
   // Non-Slack communication tasks track the launch message so turn-satisfaction
   // machinery (ack/closeout enforcement, current-turn reactions) applies.
+  // AgentMail (email) is deliberately excluded from that machinery: email is
+  // low-frequency and must never get ack/silence heartbeats.
   if (
     (payload.communicationProvider === 'telegram' ||
       payload.communicationProvider === 'teams' ||
@@ -939,7 +942,10 @@ export const runTask = async ({
       manualSkills: environmentConfig?.manualSkills,
       instanceSkills: runtimeInstanceSkills,
       repoLocalSkills,
-      excludeSkillNames: zeroIntegrationEnabled ? undefined : ['zero'],
+      excludeSkillNames: [
+        ...FAST_ONLY_PACKAGED_SKILL_INVOCATIONS,
+        ...(zeroIntegrationEnabled ? [] : ['zero']),
+      ],
     });
 
     if (skillsActivated) {
@@ -2056,6 +2062,8 @@ export const runTask = async ({
           return;
         }
 
+        // AgentMail (email) is deliberately excluded: email turns never feed
+        // the turn-satisfaction machinery (no ack/silence heartbeats).
         if (
           message.provider === 'slack' ||
           message.provider === 'telegram' ||

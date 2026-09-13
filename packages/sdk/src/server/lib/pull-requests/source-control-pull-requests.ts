@@ -756,6 +756,8 @@ async function createOrUpdateGitHubPullRequest({
     // base". Retargeting an open pull request is not something this tool
     // does; an explicit targetBranch with no matching pull request opens a
     // new one against that base instead.
+    // GitHub draft transitions use separate GraphQL mutations. Keep this REST
+    // request metadata-only so neither draft nor ready PRs change state here.
     const { data } = await octokit.rest.pulls.update({
       owner,
       repo,

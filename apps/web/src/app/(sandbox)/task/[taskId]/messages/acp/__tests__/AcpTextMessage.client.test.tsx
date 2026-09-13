@@ -882,6 +882,7 @@ describe('AcpTextMessage', () => {
           updateType: 'roomote_runtime.assistant_message',
           text: 'Hello',
           data: {},
+          userId: 'user-1',
           userName: 'Test User',
           userImageUrl: 'https://example.com/avatar.png',
         }}
@@ -898,6 +899,31 @@ describe('AcpTextMessage', () => {
       'data-content',
       'Test User',
     );
+    expect(
+      screen.getByRole('link', { name: 'View sessions by Test User' }),
+    ).toHaveAttribute('href', '/sessions?user=user-1');
+  });
+
+  it('keeps a user avatar non-interactive when its user ID is unavailable', () => {
+    render(
+      <AcpTextMessage
+        msg={{
+          id: 'message-1',
+          ts: 123,
+          role: 'user',
+          kind: 'text',
+          partial: false,
+          sessionId: 'session-1',
+          updateType: 'roomote_runtime.assistant_message',
+          text: 'Hello',
+          data: {},
+          userName: 'External User',
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText('External User')).toBeVisible();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 
   it('uses name and email in the avatar tooltip when email is available', () => {

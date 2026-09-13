@@ -7,7 +7,10 @@ import {
 } from '@/components/settings/UserProfileSection';
 import { ChangePasswordSection } from '@/components/settings/ChangePasswordSection';
 import { LinkedAccounts } from '@/components/settings/LinkedAccounts';
-import { UserPreferencesSection } from '@/components/settings';
+import {
+  PersonalizationSection,
+  UserPreferencesSection,
+} from '@/components/settings';
 
 export function PersonalSettingsPage({
   profile,
@@ -28,6 +31,7 @@ export function PersonalSettingsPage({
         <ChangePasswordSection mode={canChangePassword ? 'change' : 'set'} />
       ) : null}
       <UserPreferencesSection />
+      <PersonalizationSection />
       <LinkedAccounts />
     </SettingsShell>
   );

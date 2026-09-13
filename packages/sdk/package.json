@@ -48,6 +48,10 @@
       "import": "./src/server/lib/telegram-primary-chat.ts",
       "require": "./src/server/lib/telegram-primary-chat.ts"
     },
+    "./server/agentmail-outbound": {
+      "import": "./src/server/lib/agentmail/outbound.ts",
+      "require": "./src/server/lib/agentmail/outbound.ts"
+    },
     "./server/discord-persistence": {
       "import": "./src/server/lib/discord-persistence.ts",
       "require": "./src/server/lib/discord-persistence.ts"

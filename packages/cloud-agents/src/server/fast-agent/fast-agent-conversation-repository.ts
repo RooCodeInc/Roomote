@@ -67,6 +67,8 @@ export type FastAgentMessageWrite = Omit<
 
 export type FastAgentMessageUpsertResult = {
   initialHumanTurn: boolean;
+  /** True only for the transaction that created this canonical event row. */
+  inserted?: boolean;
 };
 
 export const INTERRUPTED_INFERENCE_RETRY_MESSAGE =
@@ -840,6 +842,7 @@ export interface FastAgentConversationRepository {
   upsertMessage(input: {
     conversationId: string;
     message: FastAgentMessageWrite;
+    insertOnly?: boolean;
   }): Promise<FastAgentMessageUpsertResult>;
   /** `null` forgets the native session so the next turn rebuilds it. */
   setOpenCodeSession(input: {
@@ -1236,7 +1239,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
       });
     },
 
-    async upsertMessage({ conversationId: requestedId, message }) {
+    async upsertMessage({ conversationId: requestedId, message, insertOnly }) {
       return db.transaction(async (tx) => {
         const conversationId = await resolveCanonicalId(tx, requestedId);
         await tx.execute(
@@ -1253,6 +1256,17 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         if (!conversation) {
           throw new Error('Fast conversation was not found.');
         }
+
+        const [existingEvent] = await tx
+          .select({ id: fastAgentMessages.id })
+          .from(fastAgentMessages)
+          .where(
+            and(
+              eq(fastAgentMessages.conversationId, conversationId),
+              eq(fastAgentMessages.eventId, message.eventId),
+            ),
+          )
+          .limit(1);
 
         const isSubstantiveHumanPrompt =
           message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
@@ -1307,10 +1321,18 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             (Boolean(currentHumanPrompt) || !hasCompatibilityHumanPrompt);
         }
 
-        await tx
+        const insert = tx
           .insert(fastAgentMessages)
-          .values({ conversationId, ...message })
-          .onConflictDoUpdate({
+          .values({ conversationId, ...message });
+        if (insertOnly) {
+          await insert.onConflictDoNothing({
+            target: [
+              fastAgentMessages.conversationId,
+              fastAgentMessages.eventId,
+            ],
+          });
+        } else {
+          await insert.onConflictDoUpdate({
             target: [
               fastAgentMessages.conversationId,
               fastAgentMessages.eventId,
@@ -1330,6 +1352,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               updatedAt: sql`now()`,
             },
           });
+        }
         await tx
           .update(fastAgentConversations)
           .set({ updatedAt: sql`now()` })
@@ -1371,7 +1394,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           }
         }
 
-        return { initialHumanTurn };
+        return { initialHumanTurn, inserted: !existingEvent };
       });
     },
 

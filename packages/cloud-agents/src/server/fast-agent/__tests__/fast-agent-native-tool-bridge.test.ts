@@ -8,7 +8,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
 import {
   SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
   SHOW_WIDGET_HEIGHT_DESCRIPTION,
@@ -152,6 +152,13 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain(
       'explicitly selected for native Slack delivery',
     );
+    expect(replySource).toContain('charts: z.array(chartInput).max(2)');
+    expect(replySource).toContain(
+      'every series must contain exactly one point for every category',
+    );
+    expect(replySource).toContain(
+      'native Block Kit data visualization blocks on Slack',
+    );
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(createArtifactSource).toContain('invoke("create_artifact"');
     expect(createArtifactSource).toContain('maximum 128 KiB');
@@ -174,8 +181,10 @@ describe('Fast native OpenCode tool bridge', () => {
       'explanation of what is being delegated',
     );
     expect(launchTaskSource).toContain(ALL_REPOSITORIES);
+    expect(launchTaskSource).toContain(NO_REPOSITORIES);
+    expect(launchTaskSource).toContain('for all active repositories');
     expect(launchTaskSource).toContain(
-      'to run against all active repositories',
+      'for a Blank slate sandbox without repositories',
     );
     expect(sendTaskMessageSource).toContain(
       'includeAttachments: z.boolean().optional()',
@@ -187,11 +196,18 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(showWidgetSource).toContain('invoke("show_widget"');
     expect(showWidgetSource).toContain('textFallback: z.string().max(4000)');
     expect(showWidgetSource).toContain(
-      'On Slack or Discord, textFallback is posted as a chat preview with a link to open the rendered widget',
+      'Create and share a rendered visual in the Session transcript',
     );
     expect(showWidgetSource).toContain(
-      'Optional chat preview shown on Slack or Discord with a link to open the rendered widget',
+      'Use it proactively to show, mock up, preview, or visualize an interface or interaction',
     );
+    expect(showWidgetSource).toContain(
+      'Optional short plain-text preview of the rendered visual',
+    );
+    expect(showWidgetSource).not.toContain('On Slack');
+    expect(showWidgetSource).not.toContain('communication provider');
+    expect(showWidgetSource).not.toContain('link to open');
+    expect(showWidgetSource).not.toContain('HTML inline');
     expect(showWidgetSource).not.toContain('textFallback is posted instead');
     expect(showWidgetSource).toContain(SHOW_WIDGET_THEME_GUIDANCE);
     expect(showWidgetSource).toContain(SHOW_WIDGET_FIXED_CANVAS_GUIDANCE);
@@ -232,9 +248,8 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(skillListSource).toContain('sourceOffset: z.number()');
     expect(skillListSource).toContain('nextSourceOffset');
     expect(skillListSource).toContain('Omit scope and name');
-    expect(skillListSource).toContain(
-      'exactly one of environmentId or repositoryId',
-    );
+    expect(skillListSource).toContain('environmentId wins when both are given');
+    expect(skillListSource).toContain('omit or pass null');
     // OpenCode wraps `args` in z.object itself; a bare union there produces
     // a schema OpenAI rejects, which takes every Fast turn down on its models.
     expect(requestUserInputSource).toContain('args: {');
@@ -278,6 +293,7 @@ describe('Fast native OpenCode tool bridge', () => {
       task: false,
       roomote_manage_custom_automations: false,
       roomote_create_custom_skill: false,
+      roomote_update_custom_skill: false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: false,
     });
     for (const rawFilesystemTool of [
@@ -356,17 +372,12 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
-  it('normalizes null skill arguments only for a Roomote-on-Roomote Fast host', async () => {
-    const inheritedTaskId = process.env.ROOMOTE_TASK_ID;
-    delete process.env.ROOMOTE_TASK_ID;
-    const runtime = await getFastAgentNativeToolRuntime(
-      'roomote-on-roomote-null-skill-args',
-      [],
-    );
-    const sessionId = 'roomote-on-roomote-null-skill-args-parent';
+  it('accepts null and filler optional skill arguments on every Fast host', async () => {
+    const runtime = await getFastAgentNativeToolRuntime('null-skill-args', []);
+    const sessionId = 'null-skill-args-parent';
     const unbind = bindFastAgentNativeToolExecutor(
       sessionId,
-      'roomote-on-roomote-null-skill-args-conversation',
+      'null-skill-args-conversation',
       async () => null,
       { allowSkillAccess: true, allowSpillRecovery: true },
     );
@@ -386,20 +397,32 @@ describe('Fast native OpenCode tool bridge', () => {
       await expect(
         callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.listSkills, {
           environmentId: null,
+          name: null,
           repositoryId: null,
+          sourceOffset: null,
         }),
-      ).resolves.toEqual({
-        success: false,
-        error: 'The requested skill catalog is unavailable.',
+      ).resolves.toMatchObject({
+        success: true,
+        result: {
+          counts: { packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length },
+        },
       });
-
-      process.env.ROOMOTE_TASK_ID = 'outer-coding-task';
+      // gpt-5.x models send every optional argument; an exact-name lookup
+      // with a filler continuation offset must still resolve the skill.
       await expect(
         callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.listSkills, {
           environmentId: null,
+          name: 'security-review',
           repositoryId: null,
+          sourceOffset: 0,
         }),
-      ).resolves.toMatchObject({ success: true });
+      ).resolves.toMatchObject({
+        success: true,
+        result: {
+          counts: { packaged: 1, total: 1 },
+          skills: [expect.objectContaining({ id: 'packaged:security-review' })],
+        },
+      });
       await expect(
         callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill, {
           id: 'packaged:security-review',
@@ -409,13 +432,26 @@ describe('Fast native OpenCode tool bridge', () => {
         success: true,
         result: { resource: 'SKILL.md' },
       });
+      await expect(
+        callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.listSkills, {
+          environmentId: '',
+        }),
+      ).resolves.toEqual({
+        success: false,
+        error: expect.stringContaining(
+          'Invalid list_skills arguments: environmentId:',
+        ),
+      });
+      await expect(
+        callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill, {
+          id: null,
+        }),
+      ).resolves.toEqual({
+        success: false,
+        error: expect.stringContaining('Invalid load_skill arguments: id:'),
+      });
     } finally {
       unbind();
-      if (inheritedTaskId === undefined) {
-        delete process.env.ROOMOTE_TASK_ID;
-      } else {
-        process.env.ROOMOTE_TASK_ID = inheritedTaskId;
-      }
     }
   });
 
@@ -598,27 +634,36 @@ describe('Fast native OpenCode tool bridge', () => {
         },
       });
 
+      // The environment scope wins when a model also fills repositoryId.
       const ambiguousCatalog = await callBridge({
         sessionID: parentSession,
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
         args: {
           environmentId: 'environment-1',
-          repositoryId: 'repo-1',
+          repositoryId: ',',
         },
       });
-      expect(JSON.parse(ambiguousCatalog.output)).toEqual({
-        success: false,
-        error: 'The requested skill catalog is unavailable.',
+      expect(JSON.parse(ambiguousCatalog.output)).toMatchObject({
+        success: true,
+        result: {
+          counts: { repository: 1 },
+          skills: expect.arrayContaining([
+            expect.objectContaining({ id: repositorySkillId }),
+          ]),
+        },
       });
 
+      // A continuation offset without an exact name is ignored.
       const invalidContinuation = await callBridge({
         sessionID: parentSession,
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
         args: { sourceOffset: 8 },
       });
-      expect(JSON.parse(invalidContinuation.output)).toEqual({
-        success: false,
-        error: 'The requested skill catalog is unavailable.',
+      expect(JSON.parse(invalidContinuation.output)).toMatchObject({
+        success: true,
+        result: {
+          counts: { packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length },
+        },
       });
 
       const skill = await callBridge({
@@ -825,6 +870,7 @@ describe('Fast native OpenCode tool bridge', () => {
       task: false,
       roomote_manage_custom_automations: false,
       roomote_create_custom_skill: false,
+      roomote_update_custom_skill: false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: false,
     });
     const unbind = bindFastAgentMcpToolExecutor(
@@ -946,6 +992,7 @@ describe('Fast native OpenCode tool bridge', () => {
       [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.stopTask]: true,
     });
     expect(namespacedMemberTool).toBe('roomote_manage_tasks');
     expect(Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)).not.toContain(

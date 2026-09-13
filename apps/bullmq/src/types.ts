@@ -19,6 +19,8 @@ export enum ScheduledJobName {
   BrainCollectors = 'BrainCollectors',
   BrainMaintenance = 'BrainMaintenance',
   SessionsReconcile = 'SessionsReconcile',
+  ThreadFooterRefresh = 'ThreadFooterRefresh',
+  WebTaskInitiatorSettleNotification = 'WebTaskInitiatorSettleNotification',
 }
 
 /**

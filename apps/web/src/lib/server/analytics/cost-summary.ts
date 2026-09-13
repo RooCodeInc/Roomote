@@ -17,7 +17,9 @@ export function buildCostChartAnalytics(rows: AnalyticsRow[]): {
       provider: string;
       model: string;
       cost: number;
+      tokens: number;
       taskCost: number;
+      taskTokens: number;
       prCost: number;
       tasks: Set<string>;
       prs: Set<string>;
@@ -32,15 +34,19 @@ export function buildCostChartAnalytics(rows: AnalyticsRow[]): {
       provider,
       model,
       cost: 0,
+      tokens: 0,
       taskCost: 0,
+      taskTokens: 0,
       prCost: 0,
       tasks: new Set<string>(),
       prs: new Set<string>(),
     };
     current.cost += row.value;
+    current.tokens += row.tokens ?? 0;
     if (row.meta?.canonicalTaskId) {
       current.tasks.add(row.meta.canonicalTaskId);
       current.taskCost += row.value;
+      current.taskTokens += row.tokens ?? 0;
       for (const prKey of row.meta.prKeys ?? []) {
         current.prs.add(prKey);
       }
@@ -58,14 +64,21 @@ export function buildCostChartAnalytics(rows: AnalyticsRow[]): {
         provider: row.provider,
         model: row.model,
         totalCost: row.cost,
+        totalTokens: row.tokens,
         costShare: totalCost === 0 ? 0 : (row.cost / totalCost) * 100,
         taskCount: row.tasks.size,
         averageCostPerTask:
           row.tasks.size === 0 ? 0 : row.taskCost / row.tasks.size,
+        averageTokensPerTask:
+          row.tasks.size === 0 ? 0 : row.taskTokens / row.tasks.size,
         averageCostPerPr: row.prs.size === 0 ? null : row.prCost / row.prs.size,
       }),
     )
-    .sort((left, right) => right.totalCost - left.totalCost);
+    .sort(
+      (left, right) =>
+        right.totalCost - left.totalCost ||
+        right.totalTokens - left.totalTokens,
+    );
 
   const taskIds = new Set<string>();
   const qualifyingPrs = new Set<string>();

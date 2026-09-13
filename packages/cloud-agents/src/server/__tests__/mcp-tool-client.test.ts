@@ -95,9 +95,36 @@ describe('extractMcpToolResultPayload', () => {
     [{ content: [] }, []],
     [{ content: [{ type: 'image' }] }, [{ type: 'image' }]],
     [{ custom: true }, { custom: true }],
-    [{ isError: true, content: [{ type: 'text', text: 'denied' }] }, 'denied'],
   ])('preserves extraction behavior for %j', (input, expected) => {
     expect(extractMcpToolResultPayload(input)).toEqual(expected);
+  });
+
+  it('rejects an error result before considering structured content', () => {
+    const errorText =
+      'missing_required_fields: severity_id is required because manual triage is disabled';
+
+    expect(() =>
+      extractMcpToolResultPayload({
+        isError: true,
+        structuredContent: {
+          created_at: '',
+          external_id: 0,
+          id: '',
+          mode: '',
+          name: '',
+          permalink: '',
+          reference: '',
+          reported_at: '',
+          status: '',
+        },
+        content: [{ type: 'text', text: errorText }],
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        name: 'McpToolCallError',
+        upstreamText: errorText,
+      }),
+    );
   });
 });
 

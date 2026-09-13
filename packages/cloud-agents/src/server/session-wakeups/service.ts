@@ -1,16 +1,21 @@
 import {
+  and,
   admitSessionWakeup,
   cancelSessionWakeup,
   db,
+  desc,
   deploymentSettings,
   eq,
+  fastAgentMessages,
   getSessionWakeupById,
   listSessionWakeups,
   type SessionWakeup,
 } from '@roomote/db/server';
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
   MAX_ACTIVE_SESSION_WAKEUPS,
   isSessionWakeupRecurring,
+  parseAcpVoiceCallPayload,
   type ManageWakeupsInput,
   type SessionWakeupReportPolicy,
   type SessionWakeupSummary,
@@ -25,6 +30,25 @@ import {
 } from './schedule';
 
 const DEFAULT_DEPLOYMENT_SETTINGS_ID = 'default';
+const OWN_TASK_FOLLOW_THROUGH_WAKEUP = {
+  name: 'Follow through on session tasks',
+  prompt:
+    'Run the Own Coding Task Follow-Through session check for all tasks in this conversation. Follow that system policy exactly, including inspection, reporting, correction, stopping, and rearming.',
+  reportPolicy: 'only_when_notable' as const,
+};
+const OWN_TASK_FOLLOW_THROUGH_SCHEDULE = {
+  voice: 'in 1m',
+  text: 'in 10m',
+} as const;
+
+function isOwnTaskFollowThroughInput(input: CreateSessionWakeupInput): boolean {
+  return (
+    input.internal === true &&
+    input.name.trim().replace(/\s+/g, ' ') ===
+      OWN_TASK_FOLLOW_THROUGH_WAKEUP.name &&
+    input.prompt.trim() === OWN_TASK_FOLLOW_THROUGH_WAKEUP.prompt
+  );
+}
 
 /** The conversation a wakeup tool call acts on, and who is acting. */
 export type SessionWakeupActor = {
@@ -38,6 +62,7 @@ export type CreateSessionWakeupInput = {
   /** One schedule string, e.g. "in 20m", "every 10m x3", "cron 0 9 * * 1-5". */
   schedule: string;
   reportPolicy?: SessionWakeupReportPolicy | null;
+  internal?: boolean;
 };
 
 export type CreateSessionWakeupResult = {
@@ -46,6 +71,79 @@ export type CreateSessionWakeupResult = {
   duplicate: boolean;
   timeZone: string;
 };
+
+export async function isFastAgentVoiceCallActive(
+  conversationId: string,
+): Promise<boolean> {
+  const marker = await db.query.fastAgentMessages.findFirst({
+    where: and(
+      eq(fastAgentMessages.conversationId, conversationId),
+      eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.VoiceCall),
+    ),
+    columns: { payload: true },
+    orderBy: [desc(fastAgentMessages.ts), desc(fastAgentMessages.createdAt)],
+  });
+  return parseAcpVoiceCallPayload(marker?.payload ?? null)?.phase === 'started';
+}
+
+async function ensureOwnTaskFollowThroughWakeupForMode(
+  actor: SessionWakeupActor,
+  voiceMode: boolean,
+  options: { onlyIfActive?: boolean } = {},
+): Promise<CreateSessionWakeupResult | null> {
+  const active = await listSessionWakeups(actor.conversationId);
+  const ownTaskWakeups = active.filter(
+    (wakeup) =>
+      wakeup.internal &&
+      wakeup.name === OWN_TASK_FOLLOW_THROUGH_WAKEUP.name &&
+      wakeup.prompt === OWN_TASK_FOLLOW_THROUGH_WAKEUP.prompt,
+  );
+  if (options.onlyIfActive && ownTaskWakeups.length === 0) return null;
+
+  const schedule = voiceMode
+    ? OWN_TASK_FOLLOW_THROUGH_SCHEDULE.voice
+    : OWN_TASK_FOLLOW_THROUGH_SCHEDULE.text;
+  const inMinutes = voiceMode ? 1 : 10;
+  await Promise.all(
+    ownTaskWakeups
+      .filter(
+        (wakeup) =>
+          wakeup.schedule.mode !== 'once' ||
+          wakeup.schedule.inMinutes !== inMinutes,
+      )
+      .map((wakeup) =>
+        cancelSessionWakeup({
+          id: wakeup.id,
+          conversationId: actor.conversationId,
+        }),
+      ),
+  );
+
+  return createSessionWakeup(actor, {
+    ...OWN_TASK_FOLLOW_THROUGH_WAKEUP,
+    schedule,
+    internal: true,
+  });
+}
+
+export async function ensureOwnTaskFollowThroughWakeup(
+  actor: SessionWakeupActor,
+): Promise<CreateSessionWakeupResult> {
+  return (await ensureOwnTaskFollowThroughWakeupForMode(
+    actor,
+    await isFastAgentVoiceCallActive(actor.conversationId),
+  ))!;
+}
+
+export async function refreshOwnTaskFollowThroughWakeupCadence(
+  actor: SessionWakeupActor,
+): Promise<CreateSessionWakeupResult | null> {
+  return ensureOwnTaskFollowThroughWakeupForMode(
+    actor,
+    await isFastAgentVoiceCallActive(actor.conversationId),
+    { onlyIfActive: true },
+  );
+}
 
 /**
  * Cron defaults and next-run confirmations use the deployment timezone when
@@ -76,6 +174,7 @@ export function toSessionWakeupSummary(
     schedule: row.schedule,
     scheduleDescription: describeSessionWakeupSchedule(row.schedule),
     reportPolicy: row.reportPolicy,
+    internal: row.internal,
     status: row.status,
     runCount: row.runCount,
     maxRuns: row.maxRuns,
@@ -114,6 +213,7 @@ export async function createSessionWakeup(
     prompt,
     schedule,
     reportPolicy,
+    internal: input.internal ?? false,
     maxRuns,
     until,
     nextRunAt: firstRunAt,
@@ -204,12 +304,16 @@ export async function handleManageWakeupsToolCall(
             error: 'create requires name, prompt, and schedule.',
           };
         }
-        const result = await createSessionWakeup(actor, {
+        const createInput = {
           name: input.name,
           prompt: input.prompt,
           schedule: input.schedule,
           reportPolicy: input.reportPolicy ?? null,
-        });
+          internal: input.internal ?? false,
+        };
+        const result = isOwnTaskFollowThroughInput(createInput)
+          ? await ensureOwnTaskFollowThroughWakeup(actor)
+          : await createSessionWakeup(actor, createInput);
         return {
           success: true,
           duplicate: result.duplicate,
@@ -218,7 +322,7 @@ export async function handleManageWakeupsToolCall(
           nextRunLocal: formatNextRun(result.wakeup.nextRunAt, result.timeZone),
           note: result.duplicate
             ? 'An equivalent wakeup was already active in this conversation; it was reused instead of creating a duplicate.'
-            : 'Scheduled. When it fires you will receive a scheduled_wakeup platform event in this conversation. Confirm the plan to the user in one sentence.',
+            : 'Scheduled. When it fires you will receive a scheduled_wakeup platform event in this conversation.',
         };
       }
       case 'list': {

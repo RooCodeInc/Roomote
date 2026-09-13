@@ -47,6 +47,7 @@ import {
 import { apiLogger } from '../../logging.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
+import { startTaskGoal } from '../tasks/start-task-goal.js';
 import {
   findActiveCommunicationTaskRun,
   findCompletedCommunicationTaskRunWithSnapshot,
@@ -87,7 +88,6 @@ import {
   discordMetadataForChannel,
   resolveDiscordChannelContext,
 } from './task-launch.js';
-import { startDiscordTaskGoal } from './goal-command.js';
 import {
   fetchDiscordRepliedToMessageBestEffort,
   fetchDiscordThreadHistoryBestEffort,
@@ -829,10 +829,11 @@ async function processDiscordGatewayEvent(
       return { ok: true, goalStarted: false, reason: 'no_active_task' };
     }
 
-    const result = await startDiscordTaskGoal({
+    const result = await startTaskGoal({
       taskId: activeRun.taskId,
       userId: senderUserId,
       objective: command.objective,
+      source: 'discord',
       clientMessageId: interaction?.id ?? event.eventId,
     });
     await replyToDiscordEvent({

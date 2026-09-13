@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
-import { activeRunStatuses, isExitedRunStatus } from '@roomote/types';
+import { isExitedRunStatus, runningRunStatuses } from '@roomote/types';
 
 import {
   BasicTooltip,
@@ -46,6 +46,11 @@ export function DelegatedTaskCard({
     ),
   );
   const title = data?.task?.title?.trim() || prompt || 'Delegated task';
+  const isCodeReviewTask = data?.task?.workflow === 'pr_review';
+  const taskLabel = isCodeReviewTask ? 'Code review agent' : 'Coding agent';
+  const agentDescription = isCodeReviewTask
+    ? 'code review task'
+    : 'coding task';
   const cancel = useCancelTaskRun({
     onSuccess: (result) => {
       if (result.success) {
@@ -60,7 +65,7 @@ export function DelegatedTaskCard({
   // byTaskId only returns a run to callers with execution access.
   const canStop =
     !!data?.taskRun &&
-    activeRunStatuses.some((status) => status === data.taskRun.status);
+    runningRunStatuses.some((status) => status === data.taskRun.status);
 
   return (
     <div className="my-2">
@@ -69,7 +74,7 @@ export function DelegatedTaskCard({
           type="button"
           className="group flex w-full cursor-pointer items-center gap-3 rounded-xl bg-card px-4 py-3 text-left hover:bg-card/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={() => onOpen(taskId)}
-          aria-label={`View coding task: ${title}`}
+          aria-label={`View ${agentDescription}: ${title}`}
         >
           <span className="relative shrink-0">
             <TaskRobotIcon taskId={taskId} size="sm" />
@@ -87,7 +92,7 @@ export function DelegatedTaskCard({
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-xs text-muted-foreground group-hover:text-accent-foreground">
-              Coding agent
+              {taskLabel}
             </span>
             {isPending ? (
               <Skeleton className="mt-1 h-4 w-2/3" />
@@ -106,10 +111,10 @@ export function DelegatedTaskCard({
           />
         </button>
         {canStop && (
-          <BasicTooltip content="Stop coding task">
+          <BasicTooltip content={`Stop ${agentDescription}`}>
             <button
               type="button"
-              aria-label="Stop coding task"
+              aria-label={`Stop ${agentDescription}`}
               aria-busy={cancel.isPending}
               disabled={cancel.isPending}
               className="absolute top-1/2 right-10 flex size-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-chart-4 hover:text-chart-4/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50"
@@ -118,7 +123,11 @@ export function DelegatedTaskCard({
                 event.stopPropagation();
                 if (!data?.taskRun || !canStop || cancel.isPending) return;
                 setCancelError(null);
-                cancel.mutate({ taskId, runId: data.taskRun.id });
+                cancel.mutate({
+                  taskId,
+                  runId: data.taskRun.id,
+                  terminate: false,
+                });
               }}
             >
               <SquareIcon

@@ -32,6 +32,7 @@ vi.mock('@roomote/bitbucket', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  isCiFailureTriageRepositoryEnabled: vi.fn().mockResolvedValue(true),
   launchCiFailureTriageForFailedRun: (...args: unknown[]) =>
     mockLaunchCiFailureTriageForFailedRun(...args),
 }));
@@ -59,6 +60,7 @@ import {
   handleBitbucketCommitStatus,
   parseBitbucketPipelineIdentityFromUrl,
 } from '../handleCommitStatus';
+import { isCiFailureTriageRepositoryEnabled } from '@roomote/sdk/server';
 
 function buildPayload(
   overrides: {
@@ -160,6 +162,16 @@ describe('parseBitbucketPipelineIdentityFromUrl', () => {
 });
 
 describe('handleBitbucketCommitStatus', () => {
+  it('gates excluded repositories before pipeline lookups or evidence fetches', async () => {
+    vi.mocked(isCiFailureTriageRepositoryEnabled).mockResolvedValueOnce(false);
+    expect(
+      (await handleBitbucketCommitStatus(buildPayload())).message,
+    ).toContain('outside');
+    expect(mockGetBitbucketPipeline).not.toHaveBeenCalled();
+    expect(mockGetBitbucketPipelineByBuildNumber).not.toHaveBeenCalled();
+    expect(mockGetBitbucketPipelineFailureEvidence).not.toHaveBeenCalled();
+    expect(mockLaunchCiFailureTriageForFailedRun).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mockDbFindMany.mockResolvedValue([

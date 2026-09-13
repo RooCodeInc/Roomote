@@ -4,7 +4,10 @@ import {
   getGitLabPipelineFailureEvidence,
   isNestedGitLabPipelineSource,
 } from '@roomote/gitlab';
-import { launchCiFailureTriageForFailedRun } from '@roomote/sdk/server';
+import {
+  launchCiFailureTriageForFailedRun,
+  isCiFailureTriageRepositoryEnabled,
+} from '@roomote/sdk/server';
 
 import { logApiError } from '../../logging';
 import type { WebhookResponse } from '../../types';
@@ -99,6 +102,11 @@ export async function handleGitLabPipeline(
   }
 
   const workflowName = (attrs.name ?? '').trim() || 'pipeline';
+  if (!(await isCiFailureTriageRepositoryEnabled(repo.id)))
+    return {
+      status: 'ok',
+      message: 'Repository is disabled or outside the CI failure triage scope',
+    };
   const runUrl = buildPipelineUrl(payload.project.web_url, attrs.id, attrs.url);
   const failureEvidence = await getGitLabPipelineFailureEvidence({
     projectId,

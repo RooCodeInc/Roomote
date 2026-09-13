@@ -39,7 +39,7 @@ function useWorkspaceSelection(
   }
 
   if (repo === ALL_REPOSITORIES) {
-    return { icon: BookCopy, label: 'All Repos' };
+    return { icon: BookCopy, label: 'All repositories' };
   }
 
   if (repo) {

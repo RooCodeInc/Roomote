@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { type ComponentProps, useState } from 'react';
 
 import { AutomationDestinationPicker } from './AutomationDestinationPicker';
 
@@ -6,6 +7,18 @@ const slackOptions = [{ id: 'C123', name: 'general', label: '#general' }];
 const discordOptions = [
   { id: 'D123', name: 'updates', label: '#updates · Discord' },
 ];
+
+beforeAll(() => {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  HTMLElement.prototype.getClientRects = () =>
+    [new DOMRect(0, 0, 100, 20)] as unknown as DOMRectList;
+});
+
+async function flushCloseAutoFocus() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
 
 describe('AutomationDestinationPicker', () => {
   it.each(['slack', 'discord'] as const)(
@@ -81,5 +94,151 @@ describe('AutomationDestinationPicker', () => {
     expect(
       screen.getByRole('combobox', { name: 'Destination channel' }),
     ).toHaveTextContent('#updates · Discord');
+  });
+
+  it('shows Email without any address or channel input', () => {
+    const onChange = vi.fn();
+    render(
+      <AutomationDestinationPicker
+        id="destination"
+        value={{
+          provider: 'email',
+          mode: 'direct_message',
+          channelId: 'verified:user-1:abc',
+        }}
+        availableProviders={['email']}
+        slackOptions={slackOptions}
+        discordOptions={discordOptions}
+        emailOptions={[
+          {
+            id: 'verified:user-1:abc',
+            name: 'owner@example.com',
+            label: 'owner@example.com · Verified',
+          },
+        ]}
+        onChange={onChange}
+      />,
+    );
+
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Email');
+    expect(
+      screen.getByText(
+        'Reports use only this selected identity and stop if it is no longer eligible.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Email address' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Email address' }),
+    ).toHaveTextContent('owner@example.com · Verified');
+    expect(
+      screen.queryByRole('combobox', { name: 'Email destination type' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('DM me')).not.toBeInTheDocument();
+  });
+
+  it('opens a newly required Discord channel Select after provider selection', async () => {
+    function Example() {
+      const [value, setValue] = useState<
+        ComponentProps<typeof AutomationDestinationPicker>['value']
+      >({
+        provider: 'none',
+        mode: 'channel',
+        channelId: '',
+      });
+      return (
+        <AutomationDestinationPicker
+          id="destination"
+          value={value}
+          availableProviders={['discord']}
+          slackOptions={slackOptions}
+          discordOptions={discordOptions}
+          onChange={setValue}
+        />
+      );
+    }
+
+    render(<Example />);
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    );
+    fireEvent.click(screen.getByRole('option', { name: 'Discord' }));
+    await flushCloseAutoFocus();
+
+    expect(screen.getByLabelText('Destination channel')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+  });
+
+  it('does not reopen a destination Select with an existing default', async () => {
+    function Example() {
+      const [value, setValue] = useState<
+        ComponentProps<typeof AutomationDestinationPicker>['value']
+      >({
+        provider: 'none',
+        mode: 'channel',
+        channelId: '',
+      });
+      return (
+        <AutomationDestinationPicker
+          id="destination"
+          value={value}
+          availableProviders={['discord']}
+          slackOptions={slackOptions}
+          discordOptions={discordOptions}
+          defaultDiscordChannelId="D123"
+          onChange={setValue}
+        />
+      );
+    }
+
+    render(<Example />);
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    );
+    fireEvent.click(screen.getByRole('option', { name: 'Discord' }));
+    await flushCloseAutoFocus();
+
+    expect(
+      screen.getByRole('combobox', { name: 'Destination channel' }),
+    ).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('does not open an empty destination Select', async () => {
+    function Example() {
+      const [value, setValue] = useState<
+        ComponentProps<typeof AutomationDestinationPicker>['value']
+      >({
+        provider: 'none',
+        mode: 'channel',
+        channelId: '',
+      });
+      return (
+        <AutomationDestinationPicker
+          id="destination"
+          value={value}
+          availableProviders={['discord']}
+          slackOptions={slackOptions}
+          discordOptions={[]}
+          onChange={setValue}
+        />
+      );
+    }
+
+    render(<Example />);
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    );
+    fireEvent.click(screen.getByRole('option', { name: 'Discord' }));
+    await flushCloseAutoFocus();
+
+    expect(
+      screen.getByRole('combobox', { name: 'Destination channel' }),
+    ).toHaveAttribute('aria-expanded', 'false');
   });
 });

@@ -108,8 +108,14 @@ export function AcpGroupedToolMessage({
           {showExpandedDetails ? (
             <ToolContent className="space-y-3 px-4 ml-1.5 mb-4 mt-2 border-l text-sm font-light text-muted-foreground">
               {group.items.map((item) => {
+                const itemPresentation = resolveToolPresentation(
+                  item.msg.data,
+                  item.msg.partial,
+                );
                 const sectionTitle = sanitizeSandboxPathString(
-                  item.objectLabel,
+                  itemPresentation.identity.toolName === 'manage_wakeups'
+                    ? `${itemPresentation.verb} ${itemPresentation.object}`
+                    : item.objectLabel,
                 );
                 const showItemDetails =
                   resolveToolPresentationPolicy(item.msg, {

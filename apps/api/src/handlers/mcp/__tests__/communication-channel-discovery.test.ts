@@ -181,6 +181,15 @@ describe('listCommunicationChannels', () => {
             },
           ],
         },
+        {
+          provider: 'agentmail',
+          platform: 'Email',
+          connected: false,
+          discoverySupported: false,
+          channels: [],
+          limitation:
+            'Email runs through a single Roomote inbox and conversations are inbound-initiated; there are no enumerable channels.',
+        },
       ],
     });
   });

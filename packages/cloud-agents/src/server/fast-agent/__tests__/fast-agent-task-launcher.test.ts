@@ -16,7 +16,11 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   fastAgentConversationRepository: { findById: mocks.findById },
 }));
 
-import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  NO_REPOSITORIES,
+  TaskPayloadKind,
+} from '@roomote/types';
 
 import {
   createFastAgentTaskLauncher,
@@ -245,6 +249,28 @@ describe('createFastAgentSlackTaskLauncher', () => {
     const task = mocks.enqueueTask.mock.calls[0]?.[0]?.task;
     expect(task.payload).toMatchObject({ repo: ALL_REPOSITORIES });
     expect(task.payload).not.toHaveProperty('environmentId');
+  });
+
+  it('lets a Session launch Blank slate instead of its inherited repository and environment', async () => {
+    const launchTask = createFastAgentSlackTaskLauncher({
+      userId: 'user-1',
+      teamId: 'T123',
+      channelId: 'C123',
+      threadTs: '100.001',
+      repoForPayload: 'acme/inherited',
+    });
+
+    await launchTask({
+      prompt: 'Create an artifact without source code',
+      environmentId: NO_REPOSITORIES,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff: vi.fn(),
+    });
+
+    const payload = mocks.enqueueTask.mock.calls[0]?.[0]?.task.payload;
+    expect(payload).toMatchObject({ repo: NO_REPOSITORIES });
+    expect(payload).not.toHaveProperty('environmentId');
+    expect(payload.repo).not.toBe('acme/inherited');
   });
 
   it('retains multiple Fast turn images in the child task payload', async () => {

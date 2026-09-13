@@ -93,6 +93,7 @@ function manifestEntry(params: {
   const prNumber = params.prNumber ?? 1;
 
   return {
+    repositoryId: `repository-${prNumber}`,
     externalPullRequestId: prNumber,
     repositoryFullName: params.repositoryFullName,
     sourceControlProvider: params.provider,

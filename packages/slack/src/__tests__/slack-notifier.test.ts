@@ -870,6 +870,21 @@ describe('SlackNotifier', () => {
 
       expect(result).toBe(false);
     });
+
+    it('treats an existing reaction as a successful acknowledgement', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: false, error: 'already_reacted' }),
+      });
+
+      const result = await notifier.addReaction({
+        channel: 'C123',
+        timestamp: '123.000',
+        name: 'eyes',
+      });
+
+      expect(result).toBe(true);
+    });
   });
 
   describe('removeReaction', () => {

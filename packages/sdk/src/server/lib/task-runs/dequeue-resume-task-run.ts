@@ -40,6 +40,10 @@ import {
   buildDequeuedTaskContext,
 } from './dequeue-task-run';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
+import {
+  appendPrivateTaskPersonalization,
+  getPrivateTaskPersonalizationInstructions,
+} from './task-personalization';
 
 type DequeueResumeTaskRunResult =
   | undefined
@@ -509,6 +513,13 @@ export const dequeueResumeTaskRun = async (
       });
     }
 
+    const privateInstructions = await getPrivateTaskPersonalizationInstructions(
+      {
+        actingUserId: result.taskRun.actingUserId,
+        initiatorKind: result.task.initiatorKind,
+        payloadKind: result.taskRun.payloadKind,
+      },
+    );
     const { error: _, task, ...rest } = result;
     return {
       ...rest,
@@ -519,7 +530,10 @@ export const dequeueResumeTaskRun = async (
       orgAgentInstructions: result.orgAgentInstructions,
       setupOnboardingTask:
         slackTaskRunRouting.route.kind === 'setup-onboarding',
-      harnessInstructions: task.harnessInstructions ?? undefined,
+      harnessInstructions: appendPrivateTaskPersonalization(
+        task.harnessInstructions ?? undefined,
+        privateInstructions,
+      ),
     };
   } catch (error) {
     console.error(

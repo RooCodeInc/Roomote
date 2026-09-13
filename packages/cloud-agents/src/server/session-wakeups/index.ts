@@ -25,9 +25,12 @@ export {
 export {
   cancelSessionWakeupForConversation,
   createSessionWakeup,
+  ensureOwnTaskFollowThroughWakeup,
+  isFastAgentVoiceCallActive,
   getSessionWakeupForConversation,
   handleManageWakeupsToolCall,
   listSessionWakeupsForConversation,
+  refreshOwnTaskFollowThroughWakeupCadence,
   resolveSessionWakeupTimeZone,
   toSessionWakeupSummary,
   type CancelSessionWakeupResult,

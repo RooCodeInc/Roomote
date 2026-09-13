@@ -47,7 +47,13 @@ describe('normalizeManageWakeupsArgs', () => {
         action: 'cancel',
         wakeupId: 'abc',
         reportPolicy: 'always',
+        internal: false,
       }),
-    ).toEqual({ action: 'cancel', wakeupId: 'abc', reportPolicy: 'always' });
+    ).toEqual({
+      action: 'cancel',
+      wakeupId: 'abc',
+      reportPolicy: 'always',
+      internal: false,
+    });
   });
 });

@@ -114,7 +114,6 @@ async function runHandler(
       updatedAt: new Date(),
     },
     teamId: 'T123',
-    ackEmoji: 'eyes',
     ...(launchCriteria ? { launchCriteria } : {}),
   });
 }

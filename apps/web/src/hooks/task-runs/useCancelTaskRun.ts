@@ -8,7 +8,7 @@ import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 type Data = { success: true } | { success: false; error: string };
 
-type Variables = { taskId: string; runId?: number };
+type Variables = { taskId: string; runId?: number; terminate?: boolean };
 
 type Options = Omit<UseMutationOptions<Data, Error, Variables>, 'mutationFn'>;
 

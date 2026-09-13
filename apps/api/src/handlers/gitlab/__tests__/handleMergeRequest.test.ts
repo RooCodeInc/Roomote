@@ -193,6 +193,26 @@ describe('handleGitLabMergeRequest', () => {
       'acme/backend',
       42,
       'draft',
+      { host: 'gitlab.com' },
+    );
+  });
+
+  it.each([
+    [
+      'https://GitLab.Example:8443/acme/backend/-/merge_requests/42',
+      'gitlab.example:8443',
+    ],
+    [undefined, null],
+    ['not-a-url', null],
+  ] as const)('scopes status updates using MR URL %s', async (url, host) => {
+    await handleGitLabMergeRequest(makePayload('close', { url }));
+
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'gitlab',
+      'acme/backend',
+      42,
+      'closed',
+      { host },
     );
   });
 
@@ -384,6 +404,7 @@ describe('handleGitLabMergeRequest', () => {
       'acme/backend',
       42,
       'merged',
+      { host: 'gitlab.com' },
     );
     expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
       expect.objectContaining({ targetBranch: 'main' }),
@@ -433,6 +454,7 @@ describe('handleGitLabMergeRequest', () => {
       'acme/backend',
       42,
       'closed',
+      { host: 'gitlab.com' },
     );
     expect(mockScheduleNotifyPullRequestTerminalStatus).toHaveBeenCalledWith(
       {

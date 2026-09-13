@@ -16,6 +16,9 @@ describe('Better Stack MCP tool policy', () => {
         'render_chart',
         'search_documentation',
         'sources',
+        'source',
+        'source_fields',
+        'query_instructions',
       ]),
     );
     expect(allowedToolNames).not.toContain('uptime_list_monitors_tool');
@@ -29,6 +32,25 @@ describe('Better Stack MCP tool policy', () => {
         { allowedToolNames },
       ),
     ).toEqual([{ name: 'monitors' }, { name: 'query' }]);
+  });
+
+  it('preserves metadata and query schemas while honoring disabled tools', () => {
+    const tools = [
+      { name: 'sources', inputSchema: { type: 'object' } },
+      { name: 'source', inputSchema: { required: ['id'] } },
+      {
+        name: 'query',
+        inputSchema: { required: ['query', 'source_id', 'table'] },
+      },
+      { name: 'remove_dashboard' },
+      { name: 'unverified_helper' },
+    ];
+    expect(
+      filterMcpToolDefinitions(tools, {
+        allowedToolNames: getAllowedIntegrationMcpToolNames('betterstack'),
+        disabledToolNames: ['query'],
+      }),
+    ).toEqual(tools.slice(0, 2));
   });
 });
 
@@ -101,5 +123,17 @@ describe('monday.com MCP tool policy', () => {
     expect(allowedToolNames).not.toContain('create_item');
     expect(allowedToolNames).not.toContain('change_item_column_values');
     expect(allowedToolNames).not.toContain('all_monday_api');
+  });
+});
+
+describe('Sentry MCP tool policy', () => {
+  it('does not allowlist tool names', () => {
+    // mcp.sentry.dev is catalog-first: tools/list advertises a small top-level
+    // surface and everything else runs through execute_sentry_tool, so a
+    // static name list silently hides most of the server. Read-only access is
+    // chosen by the admin in Sentry's consent dialog (the "Inspect Issues &
+    // Events" skill) and narrowed further with the per-deployment disabled
+    // tools list.
+    expect(getAllowedIntegrationMcpToolNames('sentry')).toBeUndefined();
   });
 });

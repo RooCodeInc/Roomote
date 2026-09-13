@@ -164,18 +164,3 @@ export async function checkRepoAccess(repoFullName: string): Promise<boolean> {
 
   return match.length > 0;
 }
-
-/**
- * Check whether the current user has access to a repository by its full name
- * (owner/repo). Returns true only when the repo is active, belongs to this
- * deployment, and its source-control connection is active.
- */
-export async function hasRepoAccess(
-  fullName: string,
-  authResult?: UserAuthSuccess,
-): Promise<boolean> {
-  if (authResult === undefined) {
-    await authorizeOrThrow();
-  }
-  return checkRepoAccess(fullName);
-}

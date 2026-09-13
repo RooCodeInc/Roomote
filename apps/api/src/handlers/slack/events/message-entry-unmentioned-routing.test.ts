@@ -5,7 +5,6 @@ const {
   hasPendingRoutingConfirmationMock,
   findRoomoteOwnedSlackThreadMock,
   markSlackThreadExplicitMentionRequiredMock,
-  getSlackThreadReplyFooterMessageTsMock,
   acquireRootBindingLockMock,
   releaseRootBindingLockMock,
   hasFastAgentSessionMock,
@@ -16,7 +15,6 @@ const {
   hasPendingRoutingConfirmationMock: vi.fn(),
   findRoomoteOwnedSlackThreadMock: vi.fn(),
   markSlackThreadExplicitMentionRequiredMock: vi.fn(),
-  getSlackThreadReplyFooterMessageTsMock: vi.fn(),
   acquireRootBindingLockMock: vi.fn(),
   releaseRootBindingLockMock: vi.fn(),
   hasFastAgentSessionMock: vi.fn(),
@@ -45,7 +43,6 @@ vi.mock('@roomote/slack', async (importOriginal) => ({
   hasPendingRoutingConfirmation: hasPendingRoutingConfirmationMock,
   markSlackThreadExplicitMentionRequired:
     markSlackThreadExplicitMentionRequiredMock,
-  getSlackThreadReplyFooterMessageTs: getSlackThreadReplyFooterMessageTsMock,
   findActiveSlackTaskRun: findActiveSlackTaskRunMock,
   findCompletedSlackTaskRunWithSnapshot:
     findCompletedSlackTaskRunWithSnapshotMock,
@@ -132,7 +129,6 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
       slackUserId: 'U111',
     });
     markSlackThreadExplicitMentionRequiredMock.mockResolvedValue(undefined);
-    getSlackThreadReplyFooterMessageTsMock.mockResolvedValue(null);
     acquireRootBindingLockMock.mockResolvedValue(releaseRootBindingLockMock);
     releaseRootBindingLockMock.mockResolvedValue(undefined);
     hasFastAgentSessionMock.mockResolvedValue(false);

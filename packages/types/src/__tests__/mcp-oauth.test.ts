@@ -1,4 +1,5 @@
 import {
+  DEFAULT_OPENAI_REALTIME_VOICE_ID,
   getMcpIntegration,
   getMcpIntegrationAuthorizationParameters,
   getMcpIntegrationConnectionScope,
@@ -9,6 +10,8 @@ import {
   isMcpConnectionNotionConfig,
   isMcpConnectionRipplingConfig,
   isMcpConnectionElevenLabsConfig,
+  isMcpConnectionVoiceConfig,
+  OPENAI_REALTIME_VOICE_OPTIONS,
   isMcpConnectionGbrainConfig,
   LINEAR_APP_OAUTH_SCOPES,
   MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
@@ -261,5 +264,68 @@ describe('Resend OAuth', () => {
     expect(getMcpIntegrationDefaultDisabledTools('resend')).not.toContain(
       'list-contacts',
     );
+  });
+});
+
+describe('Voice credential-only integration', () => {
+  it('is a deployment-scoped credential_only entry with no MCP url', () => {
+    expect(getMcpIntegration('voice')).toMatchObject({
+      name: 'Voice',
+      connectionScope: 'deployment',
+      connectionMode: 'admin_configured',
+      serverMode: 'credential_only',
+    });
+    expect(getMcpIntegration('voice')?.url).toBeUndefined();
+    expect(getMcpIntegrationDefaultDisabledTools('voice')).toEqual([]);
+  });
+
+  it('recognizes a valid stored Voice config and rejects others', () => {
+    expect(
+      isMcpConnectionVoiceConfig({ type: 'voice', encryptedApiKey: 'enc' }),
+    ).toBe(true);
+    expect(
+      isMcpConnectionVoiceConfig({
+        type: 'voice',
+        encryptedApiKey: 'enc',
+        voiceId: 'cedar',
+      }),
+    ).toBe(true);
+    expect(
+      isMcpConnectionVoiceConfig({
+        type: 'voice',
+        encryptedApiKey: 'enc',
+        voiceId: 'unsupported',
+      } as never),
+    ).toBe(false);
+    expect(
+      isMcpConnectionVoiceConfig({ type: 'voice', encryptedApiKey: '' }),
+    ).toBe(false);
+    expect(
+      isMcpConnectionVoiceConfig({
+        type: 'elevenlabs',
+        encryptedApiKey: 'enc',
+        voiceId: 'v1',
+      }),
+    ).toBe(false);
+    expect(isMcpConnectionVoiceConfig(null)).toBe(false);
+  });
+
+  it('defaults to a documented Australian voice when available, otherwise a provider recommendation', () => {
+    const australianVoice = OPENAI_REALTIME_VOICE_OPTIONS.find(
+      (voice) => voice.locale === 'en-AU',
+    );
+
+    expect(australianVoice).toBeUndefined();
+    expect(DEFAULT_OPENAI_REALTIME_VOICE_ID).toBe('marin');
+  });
+
+  it('lists voices alphabetically with the recommended ones marked', () => {
+    const labels = OPENAI_REALTIME_VOICE_OPTIONS.map((voice) => voice.label);
+    expect(labels).toEqual([...labels].sort((a, b) => a.localeCompare(b)));
+    expect(
+      OPENAI_REALTIME_VOICE_OPTIONS.filter((voice) => voice.recommended).map(
+        (voice) => voice.id,
+      ),
+    ).toEqual(['cedar', 'marin']);
   });
 });

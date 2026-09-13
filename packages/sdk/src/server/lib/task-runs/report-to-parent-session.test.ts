@@ -48,6 +48,15 @@ describe('reportToParentSession', () => {
         purpose: 'progress',
         message: 'The targeted tests are running.',
         imageArtifactIds: ['artifact-1', 'artifact-1'],
+        charts: [
+          {
+            title: 'Traffic sources',
+            chart: {
+              type: 'pie',
+              segments: [{ label: 'Search', value: 65 }],
+            },
+          },
+        ],
       }),
     ).resolves.toEqual({ relayed: true });
 
@@ -61,6 +70,15 @@ describe('reportToParentSession', () => {
         purpose: 'progress',
         message: 'The targeted tests are running.',
         imageArtifactIds: ['artifact-1'],
+        charts: [
+          {
+            title: 'Traffic sources',
+            chart: {
+              type: 'pie',
+              segments: [{ label: 'Search', value: 65 }],
+            },
+          },
+        ],
       },
     });
   });

@@ -106,7 +106,9 @@ vi.mock('@/trpc/client', () => ({
             return (
               artifactQueryState.dataByPath[
                 `${input.taskId ?? input.sessionId}:${input.path}`
-              ] ?? artifactQueryState.dataByPath[input.path]
+              ] ??
+              artifactQueryState.dataByPath[input.path] ??
+              null
             );
           },
           ...options,
@@ -590,7 +592,12 @@ describe('SessionWorkspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
 
-    expect(screen.queryByText('Session transcript')).not.toBeInTheDocument();
+    const hiddenTranscriptPanel = screen
+      .getByText('Session transcript')
+      .closest('[data-slot=resizable-panel]');
+    expect(hiddenTranscriptPanel).toHaveClass('max-md:hidden');
+    expect(hiddenTranscriptPanel).toHaveAttribute('inert');
+    expect(hiddenTranscriptPanel).toHaveAttribute('aria-hidden', 'true');
     expect(
       screen.getByRole('heading', { name: 'Session Info' }),
     ).toBeInTheDocument();
@@ -881,9 +888,12 @@ describe('SessionWorkspace', () => {
 
       expect(screen.getByLabelText('Full task task-1')).toBeInTheDocument();
       if (isMobile) {
-        expect(
-          screen.queryByText('Session transcript'),
-        ).not.toBeInTheDocument();
+        const hiddenTranscriptPanel = screen
+          .getByText('Session transcript')
+          .closest('[data-slot=resizable-panel]');
+        expect(hiddenTranscriptPanel).toHaveClass('max-md:hidden');
+        expect(hiddenTranscriptPanel).toHaveAttribute('inert');
+        expect(hiddenTranscriptPanel).toHaveAttribute('aria-hidden', 'true');
       } else {
         expect(screen.getByText('Session transcript')).toBeInTheDocument();
       }
@@ -931,9 +941,12 @@ describe('SessionWorkspace', () => {
 
       expect(screen.getByLabelText('Full task task-1')).toBeInTheDocument();
       if (isMobile) {
-        expect(
-          screen.queryByText('Session transcript'),
-        ).not.toBeInTheDocument();
+        const hiddenTranscriptPanel = screen
+          .getByText('Session transcript')
+          .closest('[data-slot=resizable-panel]');
+        expect(hiddenTranscriptPanel).toHaveClass('max-md:hidden');
+        expect(hiddenTranscriptPanel).toHaveAttribute('inert');
+        expect(hiddenTranscriptPanel).toHaveAttribute('aria-hidden', 'true');
       } else {
         expect(screen.getByText('Session transcript')).toBeInTheDocument();
       }
@@ -1155,6 +1168,14 @@ describe('SessionWorkspace', () => {
     expect(
       screen.getByRole('button', { name: 'Open Decision from Session' }),
     ).toBeVisible();
+    await waitFor(() =>
+      expect(artifactQueryInputs).toContainEqual({
+        sessionId: 'session-1',
+        path: 'notes/decision.md',
+        version: 1,
+        preview: true,
+      }),
+    );
     fireEvent.click(
       screen.getByRole('button', { name: 'Open Decision from Session' }),
     );

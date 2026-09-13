@@ -140,6 +140,32 @@ describe('initializeRepositories', () => {
     );
   });
 
+  it('creates a shared Blank slate workspace without listing or preparing repositories', async () => {
+    const configureSpy = vi
+      .spyOn(WorkspaceManager.prototype, 'configure')
+      .mockResolvedValue(undefined);
+    const prepareRepositorySpy = vi.spyOn(
+      WorkspaceManager.prototype,
+      'prepareRepository',
+    );
+
+    const result = await initializeRepositories(createLogger(), {
+      workspace: { type: 'no_repositories' },
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+    });
+
+    expect(result).toMatchObject({
+      workspacePath: expect.any(String),
+      repoPaths: {},
+      repoLocalSkills: [],
+      usesSharedWorkspaceRoot: true,
+    });
+    expect(configureSpy).not.toHaveBeenCalled();
+    expect(mockListRepositories).not.toHaveBeenCalled();
+    expect(prepareRepositorySpy).not.toHaveBeenCalled();
+  });
+
   it('resolves repository providers from the map before the scalar fallback', async () => {
     vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
       undefined,
@@ -477,6 +503,42 @@ describe('initializeRepositories', () => {
       node: '22.14.0',
     });
     expect(result.usesSharedWorkspaceRoot).toBe(true);
+  });
+
+  it('prepares repository-free environments without repository paths', async () => {
+    vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
+      undefined,
+    );
+    const prepareEnvironmentRepositoriesSpy = vi
+      .spyOn(WorkspaceManager.prototype, 'prepareEnvironmentRepositories')
+      .mockResolvedValue({ repoPaths: {} });
+    const installWorkspaceToolVersionsSpy = vi
+      .spyOn(WorkspaceManager.prototype, 'installWorkspaceToolVersions')
+      .mockResolvedValue(undefined);
+
+    const result = await initializeRepositories(createLogger(), {
+      workspace: {
+        type: 'environment',
+        environmentId: 'env_repository_free',
+        environmentConfig: {
+          name: 'Repository-free Environment',
+          repositories: [],
+          tool_versions: { node: '22.14.0' },
+        },
+      } as WorkspaceConfig,
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+    });
+
+    expect(prepareEnvironmentRepositoriesSpy).toHaveBeenCalled();
+    expect(installWorkspaceToolVersionsSpy).toHaveBeenCalledWith({
+      node: '22.14.0',
+    });
+    expect(result).toMatchObject({
+      repoPaths: {},
+      repoLocalSkills: [],
+      usesSharedWorkspaceRoot: true,
+    });
   });
 
   it('enables legacy-path cleanup only for snapshot environment preparation', async () => {

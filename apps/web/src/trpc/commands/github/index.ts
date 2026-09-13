@@ -29,13 +29,6 @@ export async function getGitHubPendingInstallationsCommand(
   return { pending: pending.length > 0 };
 }
 
-export async function getBranchesCommand(
-  auth: UserAuthSuccess,
-  input: { fullName: string },
-) {
-  return GitHub.getBranches({ userId: auth.userId, fullName: input.fullName });
-}
-
 export async function getCollaboratorsCommand(auth: UserAuthSuccess) {
   return GitHub.getCollaborators({ userId: auth.userId });
 }

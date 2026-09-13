@@ -1415,6 +1415,7 @@ const bitbucketPullRequestDetailsSchema = z
   .object({
     id: z.number(),
     title: z.string(),
+    state: z.string().optional(),
     description: z.string().nullable().optional(),
     source: z
       .object({
@@ -1433,6 +1434,10 @@ const bitbucketPullRequestDetailsSchema = z
       .object({
         branch: z
           .object({ name: z.string().optional() })
+          .passthrough()
+          .optional(),
+        repository: z
+          .object({ uuid: z.string(), full_name: z.string() })
           .passthrough()
           .optional(),
       })
@@ -1722,6 +1727,24 @@ export function createBitbucketRepositoryClient(
         bitbucketPullRequestDetailsSchema,
         {},
         'POST',
+      ),
+    mergePullRequest: (
+      number: number,
+      changes: {
+        mergeStrategy?: 'merge_commit' | 'squash' | 'fast_forward';
+      } = {},
+    ) =>
+      request(
+        `${prPath(number)}/merge`,
+        bitbucketPullRequestDetailsSchema,
+        {},
+        'POST',
+        {
+          close_source_branch: false,
+          ...(changes.mergeStrategy
+            ? { merge_strategy: changes.mergeStrategy }
+            : {}),
+        },
       ),
     createPullRequestComment: (
       number: number,

@@ -1,5 +1,11 @@
 import { type LucideIcon } from '@/components/system';
-import { ChartColumnIncreasing, House, Rows4, Zap } from '@/components/system';
+import {
+  ChartColumnIncreasing,
+  House,
+  NotepadText,
+  Rows4,
+  Zap,
+} from '@/components/system';
 
 interface PrimaryNavItem {
   icon: LucideIcon;
@@ -11,6 +17,7 @@ interface PrimaryNavItem {
   matchPaths: string[];
   adminOnly?: boolean;
   requiresSetup?: boolean;
+  resultsExperiment?: boolean;
 }
 
 export const SETUP_INCOMPLETE_NAV_TOOLTIP =
@@ -44,6 +51,16 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     requiresSetup: true,
   },
   {
+    icon: NotepadText,
+    href: '/results',
+    label: 'Results',
+    description: 'Review automation results',
+    matchExact: false,
+    matchPaths: ['/results'],
+    requiresSetup: true,
+    resultsExperiment: true,
+  },
+  {
     icon: ChartColumnIncreasing,
     href: '/analytics',
     label: 'Analytics',
@@ -57,6 +74,11 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
 
 export function getVisiblePrimaryNavItems(opts: {
   isAdmin: boolean;
+  resultsEnabled?: boolean;
 }): PrimaryNavItem[] {
-  return PRIMARY_NAV_ITEMS.filter((item) => !item.adminOnly || opts.isAdmin);
+  return PRIMARY_NAV_ITEMS.filter(
+    (item) =>
+      (!item.adminOnly || opts.isAdmin) &&
+      (!item.resultsExperiment || opts.resultsEnabled),
+  );
 }

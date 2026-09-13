@@ -88,6 +88,7 @@ export function ManagerChannelEditor({
   const [isEditing, setIsEditing] = useState(false);
   const [isEnteringCustomChannel, setIsEnteringCustomChannel] = useState(false);
   const wasSaving = useRef(false);
+  const customChannelRef = useRef<HTMLInputElement>(null);
 
   const configured = Boolean(savedSlackChannelId || savedDiscordChannelId);
   const hasValue = Boolean(
@@ -188,7 +189,8 @@ export function ManagerChannelEditor({
       <div className="max-w-md space-y-2">
         <div className="flex items-center gap-2">
           <Select
-            value={selectValue}
+            value={selectValue ?? ''}
+            handoffTargetOnSelect={customChannelRef}
             onValueChange={(nextValue) => {
               if (nextValue === CLEAR_MANAGER_CHANNEL_SELECT_VALUE) {
                 setIsEnteringCustomChannel(false);
@@ -288,6 +290,7 @@ export function ManagerChannelEditor({
         </div>
         {showCustomInput ? (
           <Input
+            ref={customChannelRef}
             value={value.slackChannel}
             onChange={(event) => {
               setIsEnteringCustomChannel(true);

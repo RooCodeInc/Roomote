@@ -31,10 +31,14 @@ export async function listEnvironments(
       id: env.id,
       name: env.name,
       description: env.description,
-      repositories: env.repositoryMappings.map((rm) => ({
-        id: rm.repository.id,
-        fullName: rm.repository.fullName,
-      })),
+      ...(env.repositoryMappings.length > 0
+        ? {
+            repositories: env.repositoryMappings.map((rm) => ({
+              id: rm.repository.id,
+              fullName: rm.repository.fullName,
+            })),
+          }
+        : {}),
     }));
 
     return c.json({ environments: environmentList });

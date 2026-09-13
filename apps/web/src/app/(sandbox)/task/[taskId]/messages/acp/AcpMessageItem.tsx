@@ -4,9 +4,11 @@ import type { AcpUiMessage } from './types';
 import { AcpCommandOutputMessage } from './AcpCommandOutputMessage';
 import { AcpReasoningMessage } from './AcpReasoningMessage';
 import { AcpTaskCancelledMessage } from './AcpTaskCancelledMessage';
+import { AcpVoiceCallMessage } from './AcpVoiceCallMessage';
 import { AcpTodoSectionMessage } from './AcpTodoSectionMessage';
 import { AcpTextMessage } from './AcpTextMessage';
 import { AcpToolMessage } from './AcpToolMessage';
+import { AcpSetupReceiptMessage } from './AcpSetupReceiptMessage';
 import { AcpUnknownMessage } from './AcpUnknownMessage';
 import { DelegatedTaskCard } from './DelegatedTaskCard';
 import { getDelegatedTaskDetails } from './delegated-task';
@@ -28,6 +30,8 @@ function AcpMessageItemBase({
   children,
 }: AcpMessageItemProps) {
   switch (msg.kind) {
+    case 'setup_receipt':
+      return <AcpSetupReceiptMessage msg={msg} />;
     case 'text':
       return <AcpTextMessage msg={msg} />;
     case 'reasoning':
@@ -69,6 +73,8 @@ function AcpMessageItemBase({
       return null;
     case 'task_cancelled':
       return <AcpTaskCancelledMessage msg={msg} />;
+    case 'voice_call':
+      return <AcpVoiceCallMessage msg={msg} />;
     default:
       return <AcpUnknownMessage msg={msg} />;
   }

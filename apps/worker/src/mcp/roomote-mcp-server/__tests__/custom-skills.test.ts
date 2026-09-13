@@ -1,6 +1,12 @@
-import type { CreateCustomSkillInput } from '@roomote/types';
+import type {
+  CreateCustomSkillInput,
+  UpdateCustomSkillInput,
+} from '@roomote/types';
 
-import { handleCreateCustomSkill } from '../custom-skills.js';
+import {
+  handleCreateCustomSkill,
+  handleUpdateCustomSkill,
+} from '../custom-skills.js';
 import type { RoomoteConfig } from '../types.js';
 
 const config: RoomoteConfig = {
@@ -138,5 +144,67 @@ describe('handleCreateCustomSkill', () => {
       ),
     ).rejects.toThrow();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('handleUpdateCustomSkill', () => {
+  const fetchMock = vi.fn();
+  const updateInput: UpdateCustomSkillInput = {
+    skillId: 'instance:00000000-0000-4000-8000-000000000001',
+    expectedVersion: 1,
+    content: {
+      type: 'update_content',
+      update_content: {
+        content_updates: [{ old_str: 'Check', new_str: 'Review' }],
+      },
+    },
+  };
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ...confirmation,
+          skillId: updateInput.skillId,
+          version: 2,
+        }),
+      ),
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('forwards the exact update contract and returns the new version', async () => {
+    const result = await handleUpdateCustomSkill(updateInput, config);
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      'https://api.example.com/api/mcp/custom-skills',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify(updateInput),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(JSON.parse(result.content[0]!.text!)).toEqual({
+      ...confirmation,
+      skillId: updateInput.skillId,
+      version: 2,
+    });
+  });
+
+  it('surfaces version conflicts without leaking response fields', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ error: 'Skill version conflict.', token: 'private' }),
+        { status: 409 },
+      ),
+    );
+    const result = await handleUpdateCustomSkill(updateInput, config);
+    expect(JSON.parse(result.content[0]!.text!)).toEqual({
+      success: false,
+      error: 'Skill version conflict.',
+      httpStatus: 409,
+    });
+    expect(JSON.stringify(result)).not.toContain('private');
   });
 });

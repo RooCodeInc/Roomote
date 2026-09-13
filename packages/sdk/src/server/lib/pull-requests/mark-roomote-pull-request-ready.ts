@@ -143,6 +143,7 @@ export async function markRoomotePullRequestReadyAfterCleanReview(input: {
         input.repository,
         input.prNumber,
         'open',
+        { host: repository.host, repositoryId: repository.id },
       );
     }
     return result;

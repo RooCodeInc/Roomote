@@ -76,38 +76,94 @@ async function sleepMergedPrOriginatingTask(taskId: string): Promise<void> {
   }
 }
 
-/**
- * Updates the status of all `task_pull_requests` rows matching the given
- * provider, repository, and PR number. This is a no-op when no matching rows
- * exist (e.g. the PR was not created by a Roomote task).
- */
+function normalizeHost(host: string | null | undefined): string | null {
+  if (!host?.trim()) return null;
+  try {
+    const url = new URL(`https://${host.trim()}`);
+    if (
+      url.username ||
+      url.password ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    ) {
+      return null;
+    }
+    return url.host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** Update only associations bound to the event's source-control instance. */
 export async function updateTaskPrStatus(
   provider: SourceControlProvider,
   repository: string,
   prNumber: number,
   status: PullRequestStatus,
+  scope: { host: string | null | undefined; repositoryId?: string },
 ): Promise<void> {
+  const host = normalizeHost(scope?.host);
+  if (!host && !scope?.repositoryId) return;
+
   const matchingPullRequest = and(
     eq(taskPullRequests.sourceControlProvider, provider),
     eq(taskPullRequests.repository, repository),
     eq(taskPullRequests.prNumber, prNumber),
   );
-  // Terminal statuses only update rows that are not already there, so the
-  // returned rows are the associations that actually transitioned and a
-  // replayed webhook does not re-trigger the downstream work below.
-  const matchingStatus = and(
-    matchingPullRequest,
-    ...(status === 'merged' || status === 'closed'
-      ? [
-          or(
-            isNull(taskPullRequests.status),
-            ne(taskPullRequests.status, status),
-          ),
-        ]
-      : []),
-  );
-
   const { updated, originatingTaskId } = await db.transaction(async (tx) => {
+    const candidates = await tx.query.taskPullRequests.findMany({
+      where: matchingPullRequest,
+      columns: { id: true, host: true, repositoryId: true, prUrl: true },
+      with: { repository: { columns: { host: true } } },
+    });
+    const ids = candidates
+      .filter((row) => {
+        if (
+          scope.repositoryId &&
+          row.repositoryId &&
+          row.repositoryId !== scope.repositoryId
+        ) {
+          return false;
+        }
+        // Legacy associations may predate host/repositoryId. Their persisted
+        // repository or absolute PR URL can still identify the instance; an
+        // unknown instance must never fall back to name/number-only matching.
+        let rowHost = normalizeHost(row.host ?? row.repository?.host);
+        if (row.host == null && row.repository?.host == null) {
+          try {
+            const url = new URL(row.prUrl);
+            if (url.protocol === 'https:' || url.protocol === 'http:') {
+              rowHost = normalizeHost(url.host);
+            }
+          } catch {
+            // No usable persisted URL provenance.
+          }
+        }
+        if (host && rowHost) return host === rowHost;
+        return Boolean(
+          scope.repositoryId && row.repositoryId === scope.repositoryId,
+        );
+      })
+      .map((row) => row.id);
+    if (ids.length === 0) return { updated: [], originatingTaskId: null };
+
+    const scopedPullRequest = and(
+      matchingPullRequest,
+      inArray(taskPullRequests.id, ids),
+    );
+    // Replayed terminal statuses must not requeue the same memories again.
+    const matchingStatus = and(
+      scopedPullRequest,
+      ...(status === 'merged' || status === 'closed'
+        ? [
+            or(
+              isNull(taskPullRequests.status),
+              ne(taskPullRequests.status, status),
+            ),
+          ]
+        : []),
+    );
     let originatingTaskId: string | null = null;
     if (status === 'merged') {
       const linkedTasks = await tx
@@ -116,7 +172,7 @@ export async function updateTaskPrStatus(
           createdByRoomote: taskPullRequests.createdByRoomote,
         })
         .from(taskPullRequests)
-        .where(matchingPullRequest);
+        .where(scopedPullRequest);
 
       for (const taskId of [
         ...new Set(linkedTasks.map((row) => row.taskId)),

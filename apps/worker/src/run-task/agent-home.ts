@@ -825,6 +825,11 @@ export function createIntegrationMcpInstructions(
       return [HTTP_INTEGRATIONS_INSTRUCTIONS];
     }
 
+    if (mcpServer.name === 'github') {
+      return [
+        '# GitHub reads\n\nDiscover GitHub tools through roomote_find_integration_tools with integrationId github. An eligible deployment GitHub App installation with an active connected repository is required, just as in Fast. Public github.com repositories do not themselves need to be connected, and no personal GitHub account linkage is required. Use the existing native tools and their discovered schemas for source reads, code search, issues, and pull requests. Searches require exactly one positive repo:owner/name qualifier. Private reads retain connected-repository authorization. Respect upstream pagination and search-index limits; disclose incomplete results. Never retry an authorization denial anonymously. This task MCP path is read-only, including for human-driven tasks; use the existing authorized coding-task source-control workflow for writes.',
+      ];
+    }
     if (isMemoryMcpServer(mcpServer.name)) {
       const primary = !hasPrimaryMemory;
       hasPrimaryMemory = true;
@@ -1748,13 +1753,11 @@ function resolveModelBackedOpenCodeConfig(
         : null,
     }),
   };
-  // OpenCode's built-in `general` agent is the default subagent type for
-  // background Task launches. A named config entry for a built-in agent
-  // merges onto it in place (OpenCode applies provided fields and merges the
-  // tools/permission rules over the built-in ruleset) rather than redefining
-  // it as a custom agent, so this only strips the Slack-posting tools.
+  // Keep implementation on the steerable root build agent instead of letting
+  // Task launches hand it to OpenCode's built-in general-purpose subagent.
   const generalAgent = {
     [OPENCODE_GENERAL_AGENT_NAME]: {
+      disable: true,
       tools: { ...SLACK_POSTING_TOOL_EXCLUSIONS },
     },
   };

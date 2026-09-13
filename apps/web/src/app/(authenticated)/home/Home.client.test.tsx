@@ -8,6 +8,10 @@ import {
 
 import { ALL_REPOSITORIES } from '@roomote/types';
 import type { PromptInputMessage } from '@/components/ai-elements';
+import {
+  clearPendingFastSessionLaunch,
+  getPendingFastSessionLaunch,
+} from '@/lib/pending-fast-session-launch';
 
 let currentSearchParams = '';
 let currentIsAdmin = true;
@@ -18,8 +22,10 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
 let currentEnvironmentsPending = false;
 let capturedSubmitWithMetaKey: boolean | undefined;
 let capturedDefaultReasoningEffort: string | null | undefined;
+let submittedPromptText = 'Test prompt';
 
 const {
+  voiceState,
   mockPush,
   mockToast,
   mockToastError,
@@ -29,6 +35,13 @@ const {
   mockPreparePromptAttachments,
   mockStartFastSession,
 } = vi.hoisted(() => ({
+  voiceState: {
+    enabled: false,
+    active: false,
+    start: vi.fn(),
+    stop: vi.fn(),
+    onUtterance: undefined as ((text: string) => void) | undefined,
+  },
   mockPush: vi.fn(),
   mockToast: vi.fn(),
   mockToastError: vi.fn(),
@@ -91,6 +104,24 @@ vi.mock('@/hooks/task-runs', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useVoiceEnabled', () => ({
+  useVoiceEnabled: () => voiceState.enabled,
+}));
+
+vi.mock('@/hooks/useLiveVoice', () => ({
+  useLiveVoice: ({ onUtterance }: { onUtterance: (text: string) => void }) => {
+    voiceState.onUtterance = onUtterance;
+    return {
+      active: voiceState.active,
+      status: voiceState.active ? 'listening' : 'idle',
+      start: voiceState.start,
+      stop: voiceState.stop,
+      speak: vi.fn(),
+      addContext: vi.fn(),
+    };
+  },
+}));
+
 vi.mock('@/lib/prompt-attachments', async () => {
   const actual = await vi.importActual<
     typeof import('@/lib/prompt-attachments')
@@ -142,6 +173,7 @@ vi.mock('@/components/tasks', async () => {
       submitDisabledReason,
       submitWithMetaKey,
       tools,
+      voice,
     }: {
       onSubmit: (message: PromptInputMessage) => Promise<void> | void;
       onPromptTextChange?: (value: string) => void;
@@ -150,6 +182,7 @@ vi.mock('@/components/tasks', async () => {
       submitDisabledReason?: string;
       submitWithMetaKey?: boolean;
       tools?: import('react').ReactNode;
+      voice?: { active: boolean; onToggle: () => void };
     }) => {
       capturedSubmitWithMetaKey = submitWithMetaKey;
 
@@ -160,8 +193,8 @@ vi.mock('@/components/tasks', async () => {
             if (submitDisabledReason) {
               return;
             }
-            onPromptTextChange?.('Test prompt');
-            const result = onSubmit({ text: 'Test prompt', files: [] });
+            onPromptTextChange?.(submittedPromptText);
+            const result = onSubmit({ text: submittedPromptText, files: [] });
 
             if (result instanceof Promise) {
               void result.catch(() => {});
@@ -172,6 +205,15 @@ vi.mock('@/components/tasks', async () => {
             +
           </button>
           {tools}
+          {voice ? (
+            <button
+              type="button"
+              aria-label="Voice conversation"
+              onClick={voice.onToggle}
+            >
+              Voice
+            </button>
+          ) : null}
           <div data-testid="prompt-placeholder">{placeholder}</div>
           <textarea
             aria-label="Task prompt"
@@ -225,6 +267,11 @@ vi.mock('@/components/tasks', async () => {
 
 describe('Home', () => {
   beforeEach(() => {
+    voiceState.enabled = false;
+    voiceState.active = false;
+    voiceState.start.mockReset();
+    voiceState.stop.mockReset();
+    voiceState.onUtterance = undefined;
     currentSearchParams = '';
     currentIsAdmin = true;
     currentEnvironments = [
@@ -234,6 +281,7 @@ describe('Home', () => {
     currentEnvironmentsPending = false;
     capturedSubmitWithMetaKey = undefined;
     capturedDefaultReasoningEffort = undefined;
+    submittedPromptText = 'Test prompt';
     localStorage.clear();
     vi.clearAllMocks();
 
@@ -242,9 +290,11 @@ describe('Home', () => {
       ({ text }: { text: string }) => Promise.resolve({ text }),
     );
     mockStartFastSession.mockResolvedValue({
-      sessionId: 'fast-session-1',
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      fastConversationId: '22222222-2222-4222-8222-222222222222',
       taskId: 'task-4',
     });
+    clearPendingFastSessionLaunch('11111111-1111-4111-8111-111111111111');
     mockUseLaunchTaskModels.mockReturnValue({
       data: {
         defaultModelId: 'openrouter/openai/gpt-5.4',
@@ -302,11 +352,22 @@ describe('Home', () => {
         images: undefined,
         attachmentTexts: undefined,
         model: undefined,
+        conversationId: expect.any(String),
       });
     });
 
     expect(mockStartFastSession).toHaveBeenCalledTimes(1);
-    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
+    expect(mockPush).toHaveBeenCalledWith(
+      '/sessions/11111111-1111-4111-8111-111111111111',
+    );
+    expect(
+      getPendingFastSessionLaunch('11111111-1111-4111-8111-111111111111'),
+    ).toEqual(
+      expect.objectContaining({
+        fastConversationId: '22222222-2222-4222-8222-222222222222',
+        text: 'Test prompt',
+      }),
+    );
   });
 
   it('starts a new Fast session with the selected non-default model', async () => {
@@ -323,6 +384,7 @@ describe('Home', () => {
         images: undefined,
         attachmentTexts: undefined,
         model: 'openrouter/z-ai/glm-5.2',
+        conversationId: expect.any(String),
       });
     });
   });
@@ -342,6 +404,7 @@ describe('Home', () => {
         images: undefined,
         attachmentTexts: undefined,
         model: undefined,
+        conversationId: expect.any(String),
       });
     });
   });
@@ -389,9 +452,12 @@ describe('Home', () => {
         images: ['data:image/png;base64,image-1'],
         attachmentTexts: undefined,
         model: undefined,
+        conversationId: expect.any(String),
       });
     });
-    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
+    expect(mockPush).toHaveBeenCalledWith(
+      '/sessions/11111111-1111-4111-8111-111111111111',
+    );
   });
 
   it('renders the feedback prompt below the input and opens its dialog', async () => {
@@ -530,9 +596,52 @@ describe('Home', () => {
         images: undefined,
         attachmentTexts: undefined,
         model: undefined,
+        conversationId: expect.any(String),
       });
     });
     expect(mockStartFastSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the client conversation identity after an ambiguous start failure', async () => {
+    mockStartFastSession
+      .mockRejectedValueOnce(new Error('Connection lost'))
+      .mockResolvedValueOnce({
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        fastConversationId: '22222222-2222-4222-8222-222222222222',
+      });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => expect(mockStartFastSession).toHaveBeenCalledTimes(2));
+
+    expect(mockStartFastSession.mock.calls[0]?.[0].conversationId).toBe(
+      mockStartFastSession.mock.calls[1]?.[0].conversationId,
+    );
+  });
+
+  it('uses a new conversation identity when an ambiguous retry changes', async () => {
+    mockStartFastSession
+      .mockRejectedValueOnce(new Error('Connection lost'))
+      .mockResolvedValueOnce({
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        fastConversationId: '22222222-2222-4222-8222-222222222222',
+      });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+    submittedPromptText = 'Corrected prompt';
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => expect(mockStartFastSession).toHaveBeenCalledTimes(2));
+
+    expect(mockStartFastSession.mock.calls[0]?.[0].conversationId).not.toBe(
+      mockStartFastSession.mock.calls[1]?.[0].conversationId,
+    );
+    expect(mockStartFastSession.mock.calls[1]?.[0].text).toBe(
+      'Corrected prompt',
+    );
   });
 
   it('renders onboarding guidance on Home', () => {
@@ -625,5 +734,36 @@ describe('Home', () => {
     expect(screen.getByTestId('selected-model-id')).toHaveTextContent(
       'openrouter/z-ai/glm-5.2',
     );
+  });
+
+  it('hides the voice conversation button when voice is not configured', async () => {
+    render(<Home initialPlaceholderIndex={0} />);
+    await screen.findByRole('button', { name: 'Submit prompt' });
+    expect(
+      screen.queryByRole('button', { name: 'Voice conversation' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('opens a Session for the call, sending anything already typed, and starts voice there', async () => {
+    voiceState.enabled = true;
+    mockStartFastSession.mockResolvedValue({ sessionId: 'fast-session-1' });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Voice conversation' }),
+    );
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: '',
+          voiceCall: true,
+          conversationId: expect.any(String),
+        }),
+      );
+    });
+    // No call is opened on the home page itself; the Session page owns it.
+    expect(voiceState.start).not.toHaveBeenCalled();
+    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1?voice=1');
   });
 });

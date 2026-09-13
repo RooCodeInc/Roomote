@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { CODE_SERVER_NAMED_PORT, RunStatus } from '@roomote/types';
 
 const {
   findFirstMock,
@@ -6,12 +7,14 @@ const {
   taskRunFindFirstMock,
   environmentFindFirstMock,
   resolveEffectivePreviewRuntimeConfigMock,
+  getSessionForTaskMock,
 } = vi.hoisted(() => ({
   findFirstMock: vi.fn(),
   findManyMock: vi.fn(),
   taskRunFindFirstMock: vi.fn(),
   environmentFindFirstMock: vi.fn(),
   resolveEffectivePreviewRuntimeConfigMock: vi.fn(),
+  getSessionForTaskMock: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -30,6 +33,7 @@ vi.mock('@roomote/db/server', () => ({
     },
   },
   eq: vi.fn((...args: unknown[]) => ({ eq: args })),
+  getSessionForTask: getSessionForTaskMock,
   taskPullRequests: {
     taskId: 'taskId',
   },
@@ -54,6 +58,7 @@ import {
   buildThreadReplyPrUrl,
   resolveThreadReplyFooterContext,
   resolveThreadReplyLinkedPrs,
+  resolveThreadReplyLivePreviewUrl,
 } from '../thread-reply-footer-context';
 
 function mockEnvironmentBackedTaskRun(params?: {
@@ -62,12 +67,14 @@ function mockEnvironmentBackedTaskRun(params?: {
   taskRunFindFirstMock.mockResolvedValue({
     payload: { environmentId: 'env-1' },
     primaryPortName: params?.primaryPortName ?? null,
+    status: RunStatus.Idle,
   });
 }
 
 describe('thread reply footer context', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getSessionForTaskMock.mockResolvedValue(null);
     findFirstMock.mockResolvedValue(null);
     findManyMock.mockResolvedValue([]);
     taskRunFindFirstMock.mockResolvedValue(null);
@@ -170,5 +177,45 @@ describe('thread reply footer context', () => {
       linkedPrs: [],
       livePreviewUrl: null,
     });
+  });
+
+  it.each([
+    { status: RunStatus.Completed },
+    { snapshotId: 'snapshot' },
+    { sleepRequestedAt: new Date() },
+    { snapshotRequestedAt: new Date() },
+  ])('omits unavailable previews (%j)', async (unavailable) => {
+    taskRunFindFirstMock.mockResolvedValue({
+      status: RunStatus.Idle,
+      payload: { environmentId: 'env-1' },
+      ...unavailable,
+    });
+    expect(await resolveThreadReplyLivePreviewUrl('task-1')).toBeNull();
+    expect(environmentFindFirstMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps an awake idle preview after a failed sleep attempt and skips system ports', async () => {
+    taskRunFindFirstMock.mockResolvedValue({
+      status: RunStatus.Idle,
+      payload: { environmentId: 'env-1' },
+      primaryPortName: CODE_SERVER_NAMED_PORT.name,
+      sleepRequestedAt: new Date(),
+      snapshotFailedAt: new Date(),
+    });
+    environmentFindFirstMock.mockResolvedValue({
+      config: {
+        ports: [
+          { name: CODE_SERVER_NAMED_PORT.name, port: 8080, primary: true },
+          { name: 'WEB', port: 3000 },
+        ],
+      },
+    });
+    expect(await resolveThreadReplyLivePreviewUrl('task-1')).toBe(
+      'https://task-1-web.preview.example.com',
+    );
+    environmentFindFirstMock.mockResolvedValue({
+      config: { ports: [{ name: CODE_SERVER_NAMED_PORT.name, port: 8080 }] },
+    });
+    expect(await resolveThreadReplyLivePreviewUrl('task-1')).toBeNull();
   });
 });

@@ -8,7 +8,6 @@ import type {
   SourceControlProvider,
   SuggestionCategory,
   SuggestionPriority,
-  TaskLaunchRequest,
   WorkspaceReadiness,
   RoomoteSearchSessionsResponse,
   RoomoteSessionMessagesResponse,
@@ -23,12 +22,10 @@ import type {
   TaskSummaryResponse,
   TaskComputeLogsResponse,
   TaskMessagesResponse,
-  LaunchTaskResponse,
   CancelTaskResponse,
   StopTaskResponse,
   UpdateTaskModelSelectionResponse,
   SendMessageResponse,
-  ListEnvironmentsResponse,
   ListTaskModelsResponse,
   CreateEnvironmentResponse,
   UpdateEnvironmentResponse,
@@ -219,6 +216,23 @@ export async function getTaskSummary(
   );
 }
 
+export async function recordAutomationResult(
+  config: RoomoteConfig,
+  taskId: string,
+  params: { content: string; dedupeKey: string },
+): Promise<{ recorded: boolean }> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/automation_result`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to record automation result',
+  );
+}
+
 export async function getTaskGoal(
   config: RoomoteConfig,
   runId: number,
@@ -320,25 +334,6 @@ export async function getTaskUpdates(
     `/api/mcp/tasks/${encodeURIComponent(taskId)}/updates${qs}`,
     {},
     'Failed to get task updates',
-  );
-}
-
-/**
- * Launch a new task via the platform API.
- */
-export async function launchTask(
-  config: RoomoteConfig,
-  params: TaskLaunchRequest,
-): Promise<LaunchTaskResponse> {
-  return apiFetch(
-    config,
-    '/api/mcp/tasks',
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    },
-    'Failed to launch task',
   );
 }
 
@@ -485,14 +480,16 @@ export async function readSourceControl(
 }
 
 /**
- * Write review interactions (replies, comments, thread resolution, reviews)
- * through the platform API.
+ * Write pull request state and review interactions through the platform API.
  */
 export async function writeSourceControl(
   config: RoomoteConfig,
   taskId: string,
   params: {
     action:
+      | 'close_pull_request'
+      | 'update_pull_request'
+      | 'reopen_pull_request'
       | 'reply_to_pull_request_comment'
       | 'create_pull_request_comment'
       | 'create_pull_request_review_comment'
@@ -506,7 +503,10 @@ export async function writeSourceControl(
     threadId?: string;
     commentId?: string;
     reviewId?: string;
+    targetBranch?: string;
+    title?: string;
     body?: string;
+    draft?: boolean;
     resolved?: boolean;
     reviewEvent?: 'approve' | 'request_changes' | 'comment';
     reviewers?: string[];
@@ -654,20 +654,6 @@ export async function steerMessageToTask(
 }
 
 /**
- * List environments via the platform API.
- */
-export async function listEnvironments(
-  config: RoomoteConfig,
-): Promise<ListEnvironmentsResponse> {
-  return apiFetch(
-    config,
-    '/api/mcp/environments',
-    {},
-    'Failed to list environments',
-  );
-}
-
-/**
  * Create a new environment via the platform API.
  */
 export async function createEnvironment(
@@ -757,5 +743,22 @@ export async function saveTaskMemory(
       body: JSON.stringify(params),
     },
     'Failed to save task memory',
+  );
+}
+
+export async function updatePersonalization(
+  config: RoomoteConfig,
+  runId: number,
+  params: { preference: string; confidence: 'explicit' | 'inferred' },
+): Promise<{ saved: boolean; reason?: string }> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/runs/${runId}/personalization`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to update personalization',
   );
 }

@@ -161,7 +161,7 @@ Roomote handles the work that pulls you off your main project:
 - **Build small features.** "Add a dark mode toggle to settings." It writes the
   code, runs the app, takes a screenshot, and opens a PR with a preview link.
 - **Start from scratch.** Create an empty GitHub repository from Roomote, then
-  use the first task to build the project in an isolated environment.
+  start a Session and let Roomote build the project in an isolated environment.
 - **Triage issues.** Connect Linear, Jira, or GitHub Issues. It reads new
   tickets, asks clarifying questions, and starts working.
 
@@ -186,8 +186,8 @@ copy-pasting.
 
 ## Teams and organizations
 
-Roomote is multiplayer by default. When someone assigns a task, the whole team
-sees the progress and the resulting PR.
+Roomote is multiplayer by default. When someone starts a Session, the whole
+team can follow the conversation, delegated work, and resulting PR.
 
 Features that matter at scale:
 
@@ -197,8 +197,8 @@ Features that matter at scale:
   and deploy process.
 - **Audit trail.** Every action is logged: which model was used, what tools
   were called, what code was written.
-- **Web UI.** Consumer-grade dashboard for managing tasks, reviewing output,
-  and configuring integrations.
+- **Web UI.** Consumer-grade dashboard for following Sessions, reviewing task
+  output, and configuring integrations.
 - **Live previews.** Agents spin up a preview URL so reviewers can click
   through changes before merging.
 
@@ -222,14 +222,15 @@ converts to Apache 2.0.
 
 **How is this different from Cursor / Copilot / Claude Code?**
 Those are IDE tools that help you write code faster in your editor. Roomote is a
-cloud agent: you assign it a task, walk away, and come back to a PR. It does not
-require an IDE or terminal session, but you can also connect Roomote to Claude
-Code, Codex, or Cursor through its OAuth MCP server and delegate work from the
-tools you already use.
+cloud agent: you start a Session, it delegates execution when needed, and you
+come back to a PR. It does not require an IDE or terminal session, but you can
+also connect Roomote to Claude Code, Codex, or Cursor through its OAuth MCP
+server and delegate work from the tools you already use.
 
 **Can I use Roomote from my existing coding agent?**
-Yes. Connect any OAuth-capable MCP client to your Roomote deployment to start,
-inspect, and steer Roomote tasks without switching tools. See the
+Yes. Connect any OAuth-capable MCP client to your Roomote deployment to start
+and continue Sessions or inspect and steer delegated tasks without switching
+tools. See the
 [Roomote MCP setup guide](https://docs.roomote.dev/integrations/roomote-mcp) for
 Claude Code, Codex, and Cursor instructions.
 

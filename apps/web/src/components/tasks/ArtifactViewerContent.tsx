@@ -17,6 +17,7 @@ import {
   getSessionArtifactViewUrl,
 } from '@/lib/artifact-view-urls';
 import { cn } from '@/lib/utils';
+import { isHtmlArtifact, isMarkdownArtifact } from '@/lib/artifact-types';
 
 import {
   Download,
@@ -105,20 +106,6 @@ function getLanguageFromPath(path: string): BundledLanguage {
 
   const ext = filename.split('.').pop()?.toLowerCase() ?? '';
   return extensionToLanguage[ext] ?? ('plaintext' as BundledLanguage);
-}
-
-function isHtmlArtifact(contentType: string, path: string): boolean {
-  const normalizedContentType =
-    contentType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
-  const extension = path.split('.').pop()?.toLowerCase();
-
-  return (
-    normalizedContentType === 'text/html' ||
-    normalizedContentType === 'application/xhtml+xml' ||
-    extension === 'html' ||
-    extension === 'htm' ||
-    extension === 'xhtml'
-  );
 }
 
 interface ArtifactViewerContentProps {
@@ -231,10 +218,7 @@ export function ArtifactViewerContent({
     ? isHtmlArtifact(artifact.contentType, artifact.path)
     : false;
   const isMarkdown =
-    !isHTML &&
-    !!artifact &&
-    (artifact.contentType.includes('markdown') ||
-      artifact.path.endsWith('.md'));
+    !!artifact && isMarkdownArtifact(artifact.contentType, artifact.path);
   const isImage = artifact?.contentType.startsWith('image/') ?? false;
   const isVideo = artifact?.contentType.startsWith('video/') ?? false;
   const isPDF = artifact?.contentType === 'application/pdf';

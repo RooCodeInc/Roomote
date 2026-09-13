@@ -4,7 +4,9 @@ import type { UserAuthSuccess } from '@/types';
 
 import {
   getPersonalPreferencesCommand,
+  getUserPersonalizationCommand,
   updatePersonalPreferencesCommand,
+  updateUserPersonalizationCommand,
 } from './index';
 
 function buildAuth(userId: string) {
@@ -88,5 +90,44 @@ describe('personal preferences', () => {
         narrationMode: true,
       }),
     );
+  });
+
+  it('keeps personalization owner-scoped even when another user is an admin', async () => {
+    const [owner, admin] = await Promise.all([
+      userFactory.create(),
+      userFactory.create({ role: 'admin' }),
+    ]);
+    await updateUserPersonalizationCommand(buildAuth(owner.id), {
+      expectedVersion: 0,
+      instructions: 'PRIVATE_SENTINEL',
+    });
+
+    await expect(
+      getUserPersonalizationCommand(buildAuth(admin.id)),
+    ).resolves.toEqual({
+      instructions: '',
+      learnFromConversations: true,
+      version: 0,
+    });
+  });
+
+  it('maps stale personalization writes to a conflict without overwriting', async () => {
+    const user = await userFactory.create();
+    const auth = buildAuth(user.id);
+    await updateUserPersonalizationCommand(auth, {
+      expectedVersion: 0,
+      instructions: 'First edit',
+    });
+
+    await expect(
+      updateUserPersonalizationCommand(auth, {
+        expectedVersion: 0,
+        instructions: 'Stale edit',
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    await expect(getUserPersonalizationCommand(auth)).resolves.toMatchObject({
+      instructions: 'First edit',
+      version: 1,
+    });
   });
 });

@@ -4,9 +4,25 @@ import {
   getTriggerableBackgroundAutomationDescriptorByKey,
   getTriggerableBackgroundAutomationSettingsHash,
   isTriggerableBackgroundAutomationKey,
+  TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS,
 } from '../background-automation-registry';
 
 describe('background automation registry', () => {
+  it('explicitly limits Additional rules to repository-scoped communication outputs', () => {
+    expect(
+      TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS.filter(
+        (descriptor) => 'additionalRules' in descriptor,
+      ).map((descriptor) => descriptor.automationKey),
+    ).toEqual([
+      'suggester',
+      'announcer',
+      'security_auditor',
+      'code_quality_auditor',
+      'ci_failure_triage',
+      'merge_announcer',
+    ]);
+  });
+
   it('keys descriptors by the canonical snake_case automation key', () => {
     const codeQualityAuditor =
       getTriggerableBackgroundAutomationDescriptorByKey('code_quality_auditor');

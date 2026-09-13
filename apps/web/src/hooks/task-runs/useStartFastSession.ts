@@ -36,6 +36,8 @@ type StartFastSessionVariables = {
   attachmentTexts?: string[];
   model?: string | null;
   reasoningEffort?: ReasoningEffort | null;
+  /** Stable client identity used to recover an ambiguous initial submit. */
+  conversationId?: string;
   /** Launch into a chosen workspace without a Fast decision. */
   pinnedLaunch?: {
     launchId: string;

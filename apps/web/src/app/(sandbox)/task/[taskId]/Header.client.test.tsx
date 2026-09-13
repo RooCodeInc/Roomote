@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NO_REPOSITORIES } from '@roomote/types';
 
 const {
   useSandboxLayoutMock,
@@ -229,6 +230,18 @@ describe('Header', () => {
       await screen.findByText('RooCodeInc/Roomote#42'),
     ).toBeInTheDocument();
     expect(screen.getByText('Workspace env-1')).toBeInTheDocument();
+  });
+
+  it('hides the workspace badge for no-repository tasks', () => {
+    renderHeader({
+      taskRun: {
+        payload: { repo: NO_REPOSITORIES },
+      } as never,
+    });
+
+    expect(
+      screen.queryByText(`Repo ${NO_REPOSITORIES}`),
+    ).not.toBeInTheDocument();
   });
 
   it('refreshes task lists after renaming a task', async () => {

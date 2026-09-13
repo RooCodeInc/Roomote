@@ -887,6 +887,7 @@ describe('preview-proxy integration', () => {
       expect(fallbackRes.status).toBe(200);
       expect(fallbackRes.text).toContain('Blocked Cookie');
       expect(fallbackRes.text).toContain('Open Preview in New Tab');
+      expect(fallbackRes.text).toContain('/logos/r.svg');
       expect(fallbackRes.text).toContain("type: 'roomote-load-complete'");
       expect(fallbackRes.text).not.toContain('__preview_token_redirect=');
     });

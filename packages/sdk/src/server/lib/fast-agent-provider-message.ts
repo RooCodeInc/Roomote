@@ -11,7 +11,12 @@ import {
   type FastAgentConversationRecord,
 } from '@roomote/cloud-agents/server';
 
-export type FastAgentReplyProvider = 'discord' | 'slack' | 'teams' | 'telegram';
+export type FastAgentReplyProvider =
+  | 'discord'
+  | 'slack'
+  | 'teams'
+  | 'telegram'
+  | 'agentmail';
 
 type ProviderRoute = {
   provider: FastAgentReplyProvider;
@@ -74,7 +79,8 @@ export async function recordFastAgentConversationMessage(input: {
     conversation.surface !== 'discord' &&
     conversation.surface !== 'slack' &&
     conversation.surface !== 'teams' &&
-    conversation.surface !== 'telegram'
+    conversation.surface !== 'telegram' &&
+    conversation.surface !== 'agentmail'
   ) {
     return false;
   }
@@ -201,6 +207,27 @@ export async function isFastAgentProviderMessage(input: {
       ...(input.channelId
         ? [eq(fastAgentProviderMessages.channelId, input.channelId)]
         : []),
+    ),
+    columns: { id: true },
+  });
+  return Boolean(binding);
+}
+
+/** Telegram uses the topic service-message id as the topic's thread id. */
+export async function isFastAgentManagedTelegramTopic(input: {
+  sessionId: string;
+  workspaceId: string;
+  channelId: string;
+  threadId: string;
+}): Promise<boolean> {
+  const binding = await db.query.fastAgentProviderMessages.findFirst({
+    where: and(
+      eq(fastAgentProviderMessages.conversationId, input.sessionId),
+      eq(fastAgentProviderMessages.provider, 'telegram'),
+      eq(fastAgentProviderMessages.workspaceId, input.workspaceId),
+      eq(fastAgentProviderMessages.channelId, input.channelId),
+      eq(fastAgentProviderMessages.threadId, input.threadId),
+      eq(fastAgentProviderMessages.messageId, input.threadId),
     ),
     columns: { id: true },
   });

@@ -7,10 +7,19 @@ import { AnalyticsStackedBarChart } from './AnalyticsStackedBarChart';
 const mockRechartsState = vi.hoisted(() => ({
   tooltipProps: null as Record<string, unknown> | null,
   barProps: [] as Array<Record<string, unknown>>,
+  lineProps: [] as Array<Record<string, unknown>>,
+  chartData: [] as Array<Record<string, unknown>>,
+  yAxisProps: [] as Array<Record<string, unknown>>,
   tooltipPayload: [
     { name: 'Radia Perlman', value: 2, color: '#ff9900' },
     { name: 'John Richmond', value: 1, color: '#3366ff' },
-  ] as Array<{ name: string; value: number; color: string }>,
+  ] as Array<{
+    name: string;
+    value: number;
+    color: string;
+    unit?: string;
+    payload?: { tokenSegments?: Record<string, number> };
+  }>,
 }));
 
 vi.mock('@/hooks/useIsMobile', () => ({
@@ -24,14 +33,28 @@ vi.mock('recharts', async () => {
     ResponsiveContainer: ({ children }: { children: React.ReactNode }) => (
       <div data-testid="responsive-container">{children}</div>
     ),
-    BarChart: ({ children }: { children: React.ReactNode }) => (
-      <div>{children}</div>
-    ),
+    ComposedChart: ({
+      children,
+      data,
+    }: {
+      children: React.ReactNode;
+      data: Array<Record<string, unknown>>;
+    }) => {
+      mockRechartsState.chartData = data;
+      return <div>{children}</div>;
+    },
     CartesianGrid: () => null,
     XAxis: () => null,
-    YAxis: () => null,
+    YAxis: (props: Record<string, unknown>) => {
+      mockRechartsState.yAxisProps.push(props);
+      return null;
+    },
     Bar: (props: Record<string, unknown>) => {
       mockRechartsState.barProps.push(props);
+      return null;
+    },
+    Line: (props: Record<string, unknown>) => {
+      mockRechartsState.lineProps.push(props);
       return null;
     },
     Tooltip: (props: Record<string, unknown>) => {
@@ -132,10 +155,45 @@ const PALETTE_CHART: AnalyticsChartResponse = {
   ],
 };
 
+const COST_CHART: AnalyticsChartResponse = {
+  object: 'costs',
+  viewBy: 'provider',
+  metric: 'cost',
+  total: 2,
+  tokenTotal: 3_500_000,
+  series: [
+    {
+      key: 'openai',
+      label: 'OpenAI',
+      total: 2,
+      tokenTotal: 1_500_000,
+    },
+    {
+      key: 'google',
+      label: 'Google',
+      total: 0,
+      tokenTotal: 2_000_000,
+    },
+  ],
+  buckets: [
+    {
+      key: '2026-03-27',
+      label: 'Mar 27',
+      total: 2,
+      tokenTotal: 3_500_000,
+      segments: { openai: 2, google: 0 },
+      tokenSegments: { openai: 1_500_000, google: 2_000_000 },
+    },
+  ],
+};
+
 describe('AnalyticsStackedBarChart', () => {
   beforeEach(() => {
     mockRechartsState.tooltipProps = null;
     mockRechartsState.barProps = [];
+    mockRechartsState.lineProps = [];
+    mockRechartsState.chartData = [];
+    mockRechartsState.yAxisProps = [];
     mockRechartsState.tooltipPayload = [
       { name: 'Radia Perlman', value: 2, color: '#ff9900' },
       { name: 'John Richmond', value: 1, color: '#3366ff' },
@@ -299,6 +357,96 @@ describe('AnalyticsStackedBarChart', () => {
       'var(--color-chart-3)',
       'var(--color-chart-4)',
     ]);
+  });
+
+  it('renders grouped cost bars and one aggregate token line on separate axes', () => {
+    const onSelectSegment = vi.fn();
+    mockRechartsState.tooltipPayload = [
+      {
+        name: 'OpenAI',
+        value: 2,
+        color: '#3366ff',
+        unit: 'cost',
+        payload: {
+          tokenSegments: { openai: 1_500_000, google: 2_000_000 },
+        },
+      },
+      {
+        name: 'Total tokens',
+        value: 3_500_000,
+        color: '#ff0000',
+        unit: 'tokens',
+        payload: {
+          tokenSegments: { openai: 1_500_000, google: 2_000_000 },
+        },
+      },
+    ];
+    render(
+      <AnalyticsStackedBarChart
+        axisLabel="Cost (USD)"
+        chart={COST_CHART}
+        granularity="day"
+        isLoading={false}
+        isError={false}
+        onResetFilters={vi.fn()}
+        onSelectSegment={onSelectSegment}
+      />,
+    );
+
+    expect(mockRechartsState.yAxisProps).toEqual([
+      expect.objectContaining({ yAxisId: 'cost' }),
+      expect.objectContaining({ yAxisId: 'tokens', orientation: 'right' }),
+    ]);
+    expect(mockRechartsState.barProps).toEqual([
+      expect.objectContaining({
+        dataKey: 'openai',
+        fill: 'var(--color-chart-1)',
+        stackId: 'cost',
+        unit: 'cost',
+        yAxisId: 'cost',
+      }),
+      expect.objectContaining({
+        dataKey: 'google',
+        fill: 'var(--color-chart-2)',
+        stackId: 'cost',
+        unit: 'cost',
+        yAxisId: 'cost',
+      }),
+    ]);
+    expect(mockRechartsState.lineProps).toEqual([
+      expect.objectContaining({
+        dataKey: 'tokenTotal',
+        name: 'Total tokens',
+        stroke: 'var(--color-foreground)',
+        strokeWidth: 3,
+        type: 'linear',
+        unit: 'tokens',
+        yAxisId: 'tokens',
+      }),
+    ]);
+    expect(mockRechartsState.chartData).toEqual([
+      expect.objectContaining({
+        tokenTotal: 3_500_000,
+        tokenSegments: { openai: 1_500_000, google: 2_000_000 },
+      }),
+    ]);
+    expect(screen.getByText('1.5M tokens')).toBeInTheDocument();
+    expect(screen.getByText('2M tokens')).toBeInTheDocument();
+    expect(screen.getByText('3.5M tokens')).toBeInTheDocument();
+
+    const costBarClick = mockRechartsState.barProps[0]?.onClick as (
+      data: unknown,
+    ) => void;
+    costBarClick({
+      payload: { bucketKey: '2026-03-27', label: 'Mar 27' },
+    });
+    expect(onSelectSegment).toHaveBeenLastCalledWith({
+      bucketKey: '2026-03-27',
+      bucketLabel: 'Mar 27',
+      seriesKey: 'openai',
+      seriesLabel: 'OpenAI',
+      metric: 'cost',
+    });
   });
 
   it('passes display labels to recharts while keeping stable series keys', () => {

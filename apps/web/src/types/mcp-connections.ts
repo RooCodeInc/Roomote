@@ -1,4 +1,7 @@
-import { normalizeGrafanaBaseUrl } from '@roomote/types';
+import {
+  isOpenAiRealtimeVoiceId,
+  normalizeGrafanaBaseUrl,
+} from '@roomote/types';
 import { z } from 'zod';
 
 const requiredSnowflakeField = (label: string) =>
@@ -68,6 +71,17 @@ export const saveElevenLabsConnectionSchema = z.object({
 
 export type SaveElevenLabsConnectionInput = z.infer<
   typeof saveElevenLabsConnectionSchema
+>;
+
+export const saveVoiceConnectionSchema = z.object({
+  apiKey: z.string().transform((value) => value.trim()),
+  voiceId: z
+    .string()
+    .refine(isOpenAiRealtimeVoiceId, 'Select a supported voice'),
+});
+
+export type SaveVoiceConnectionInput = z.infer<
+  typeof saveVoiceConnectionSchema
 >;
 
 export const saveVercelConnectionSchema = z.object({

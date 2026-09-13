@@ -45,6 +45,7 @@ import {
   linear,
   teams,
   telegram,
+  agentmail,
   discord,
   cloudDeploymentAccess,
   brainInference,
@@ -77,6 +78,12 @@ const PUBLIC_OIDC_PATHS = new Set([
 const SELF_AUTHENTICATING_WEBHOOK_PATHS = new Set([
   '/api/webhooks/teams',
   '/api/webhooks/telegram',
+  '/api/webhooks/agentmail',
+  // Signed one-click answer links from question emails authenticate via
+  // their own token; see handlers/agentmail.
+  '/api/webhooks/agentmail/answer',
+  // Signed List-Unsubscribe links/one-click posts, same token trust model.
+  '/api/webhooks/agentmail/unsubscribe',
   '/api/internal/discord/events',
   '/api/internal/discord/events/process',
   '/api/internal/cloud/deployment-access',
@@ -211,6 +218,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/webhooks/linear', linear);
   app.route('/api/webhooks/teams', teams);
   app.route('/api/webhooks/telegram', telegram);
+  app.route('/api/webhooks/agentmail', agentmail);
   app.route('/api/internal/discord', discord);
   app.route('/api/internal/cloud', cloudDeploymentAccess);
   app.route('/api/inference', inference);

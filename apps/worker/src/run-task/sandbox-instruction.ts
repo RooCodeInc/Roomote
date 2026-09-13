@@ -6,7 +6,7 @@ import type {
   NamedPort,
   ServiceConfig,
 } from '@roomote/types';
-import { appendInitialPath } from '@roomote/types';
+import { appendInitialPath, getDockerProjectLogFilePath } from '@roomote/types';
 
 function withDefinedEntries<T extends Record<string, unknown>>(
   value: T,
@@ -117,9 +117,10 @@ export function sanitizeEnvironmentConfigForPrompt(
     initialUrl: environmentConfig.initialUrl,
     ports: environmentConfig.ports?.map(sanitizeNamedPortForPrompt),
     tool_versions: environmentConfig.tool_versions,
-    repositories: environmentConfig.repositories.map(
-      sanitizeRepositoryForPrompt,
-    ),
+    repositories:
+      environmentConfig.repositories.length > 0
+        ? environmentConfig.repositories.map(sanitizeRepositoryForPrompt)
+        : undefined,
     services: environmentConfig.services?.map(sanitizeServiceForPrompt),
     docker_projects: environmentConfig.docker_projects?.map(
       sanitizeDockerProjectForPrompt,
@@ -179,6 +180,7 @@ export function buildSandboxInstruction(
 ): string | undefined {
   const lines: string[] = [
     'You are running inside a cloud sandbox. Your filesystem and processes are isolated to this sandbox instance.',
+    'Your sandbox user has passwordless `sudo`. When a missing system dependency blocks authorized work and `apt-get` is available, install only the necessary package in this sandbox rather than stopping; use noninteractive commands where suitable (for example, `sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y <package>`). These changes affect only this sandbox, not the host, and do not persist to other tasks or production; prefer existing or repository-managed tools and avoid unnecessary installs.',
   ];
   if (environmentConfig) {
     const safeConfig = sanitizeEnvironmentConfigForPrompt(environmentConfig);
@@ -191,19 +193,25 @@ export function buildSandboxInstruction(
       '```',
     );
 
-    if (hasRepositoryCommands(environmentConfig)) {
-      if (options?.backgroundEnvironmentSetupPending) {
+    const dockerProjects = environmentConfig.docker_projects ?? [];
+    const hasConfiguredDockerProjects = dockerProjects.length > 0;
+
+    if (options?.backgroundEnvironmentSetupPending) {
+      if (
+        hasRepositoryCommands(environmentConfig) ||
+        hasConfiguredDockerProjects
+      ) {
         lines.push(
           '',
-          'Repository setup commands from this environment configuration run in the background and may still be executing while you work. Do not assume dependencies are installed or services are ready: check `.roomote/setup-status.json` in the workspace root for live per-command status, and read the logs under `.roomote/setup-logs/` if something you need appears to be missing. Never re-run a setup command that is still marked as running.',
+          'Environment setup from this configuration runs automatically in the background and may still be executing while you work. This includes configured Docker projects and repository setup commands; do not start or re-run them yourself. Do not assume dependencies are installed or services are ready: check `.roomote/setup-status.json` in the workspace root for live status, and read the logs under `.roomote/setup-logs/` if something you need appears to be missing.',
           'If the requested work depends on setup that is still running (dependency installs, service startup, secret retrieval), wait for it instead of reporting that you are blocked and ending your turn: re-read `.roomote/setup-status.json` every 10-15 seconds until its top-level `state` reaches a terminal value (`completed`, `completed_with_warnings`, or `failed`), then continue the task from there. You will also receive an in-session `Environment setup update:` message when background setup finishes, so treat a still-running setup as normal startup, not a blocker to hand back to the user.',
         );
-      } else {
-        lines.push(
-          '',
-          'Repository setup commands from this environment configuration were already executed before your task started. Per-command results are recorded in `.roomote/setup-status.json` in the workspace root, with output logs under `.roomote/setup-logs/`.',
-        );
       }
+    } else if (hasRepositoryCommands(environmentConfig)) {
+      lines.push(
+        '',
+        'Repository setup commands from this environment configuration were already executed before your task started. Per-command results are recorded in `.roomote/setup-status.json` in the workspace root, with output logs under `.roomote/setup-logs/`.',
+      );
     }
 
     if (hasDetachedCommands(environmentConfig)) {
@@ -212,10 +220,25 @@ export function buildSandboxInstruction(
       );
     }
 
-    if (environmentConfig.docker_projects?.length) {
+    if (hasConfiguredDockerProjects) {
       lines.push(
         '',
-        'Roomote starts configured Docker projects with Docker Compose during environment setup. They may still be building or waiting for health checks when your task begins. Run `docker compose ls` to find each Roomote-managed project name and its config files, then inspect it with `docker compose --project-name <name> --file <file> ... ps` or `docker compose --project-name <name> --file <file> ... logs` (repeat `--file` for every listed config file). If a configured project is not listed yet, wait for the existing startup rather than starting a duplicate copy.',
+        'Roomote automatically starts configured Docker projects with Docker Compose during environment setup. Do not run `docker compose up`, build the projects, or start Docker yourself.',
+      );
+
+      if (options?.backgroundEnvironmentSetupPending) {
+        lines.push(
+          'Automatic Docker project startup may still be building images or waiting for health checks when your task begins. A project appears in `docker compose ls` only after its containers exist, so an empty listing while `.roomote/setup-status.json` is still `running` means startup is still in progress, not that Roomote skipped it.',
+        );
+      }
+
+      lines.push(
+        'Docker project startup logs:',
+        ...dockerProjects.map(
+          (project) =>
+            `- ${project.name}: \`${getDockerProjectLogFilePath(project.name)}\``,
+        ),
+        'Use these logs to follow build and startup progress. Once a project appears, inspect it with `docker compose ls`, then use `docker compose --project-name <name> --file <file> ... ps` or `docker compose --project-name <name> --file <file> ... logs` (repeat `--file` for every listed config file).',
       );
     }
 

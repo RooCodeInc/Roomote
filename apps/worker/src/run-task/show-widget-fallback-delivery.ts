@@ -38,10 +38,13 @@ export async function deliverShowWidgetFallback(input: {
     return;
   }
 
-  const text = input.delivery.title
-    ? `${input.delivery.title}\n\n${input.delivery.textFallback}`
-    : input.delivery.textFallback;
-  const message = `${text}\n\n[View widget](${input.delivery.widgetUrl})`;
+  const message = [
+    input.delivery.title,
+    input.delivery.textFallback,
+    `[View widget](${input.delivery.widgetUrl})`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   try {
     await replyToChatThread(config, { text: message });

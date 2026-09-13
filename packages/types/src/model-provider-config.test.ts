@@ -498,7 +498,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       roomoteSmallModel: 'opencode-go/gpt-5.6-luna',
       roomoteVisionModel: 'opencode-go/gpt-5.6-luna',
       roomoteCodeReviewModel: 'opencode-go/minimax-m3',
-      roomoteExploreModel: 'opencode-go/deepseek-v4-flash',
+      roomoteExploreModel: 'opencode-go/deepseek-flash',
       roomotePlanningModel: 'opencode-go/qwen3.8-max',
     });
   });
@@ -669,11 +669,11 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ]);
   });
 
-  it("uses each provider's DeepSeek V4 Flash 0731 model slug", () => {
+  it("uses each provider's DeepSeek V4.1 Flash model slug", () => {
     const deepSeekFlashByProvider = userSelectableProviders.flatMap(
       (provider) => {
         const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'DeepSeek V4 Flash 0731',
+          (suggestion) => suggestion.displayName === 'DeepSeek V4.1 Flash',
         );
 
         return model ? [{ providerId: provider.id, modelId: model.id }] : [];
@@ -683,27 +683,15 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(deepSeekFlashByProvider).toEqual([
       {
         providerId: 'openrouter',
-        modelId: 'openrouter/deepseek/deepseek-v4-flash-0731',
+        modelId: 'openrouter/deepseek/deepseek-v4.1-flash',
       },
       {
         providerId: 'vercel',
-        modelId: 'vercel/deepseek/deepseek-v4-flash-0731',
-      },
-      {
-        providerId: 'requesty',
-        modelId: 'requesty/deepseek-v4-flash-0731',
-      },
-      {
-        providerId: 'baseten',
-        modelId: 'baseten/deepseek-ai/DeepSeek-V4-Flash-0731',
-      },
-      {
-        providerId: 'opencode',
-        modelId: 'opencode/deepseek-v4-flash',
+        modelId: 'vercel/deepseek/deepseek-v4.1-flash-beta',
       },
       {
         providerId: 'opencode-go',
-        modelId: 'opencode-go/deepseek-v4-flash',
+        modelId: 'opencode-go/deepseek-flash',
       },
     ]);
   });
@@ -1017,7 +1005,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/gpt-5.6-terra@eu',
       'requesty/gpt-5.6-luna@eu',
       'requesty/vertex/gemini-3.8-flash',
-      'requesty/deepseek-v4-flash-0731',
       'requesty/glm-5.3-flash',
       'requesty/glm-5.3',
       'requesty/kimi-k3',

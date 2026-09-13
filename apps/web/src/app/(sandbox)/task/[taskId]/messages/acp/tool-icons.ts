@@ -3,6 +3,7 @@ import type { LucideProps } from 'lucide-react';
 
 import {
   type LucideIcon,
+  BookHeart,
   BookOpenText,
   BrandIcon,
   Bot,
@@ -20,6 +21,7 @@ import {
   SquarePen,
   Target,
   Terminal,
+  Timer,
   TriangleAlert,
   VectorSquare,
   Video,
@@ -39,6 +41,7 @@ export function toolIconForKey(key: ToolIconKey): LucideIcon {
   if (key === 'task') return Zap;
   if (key === 'message') return MessageSquareText;
   if (key === 'memory') return BookOpenText;
+  if (key === 'book-heart') return BookHeart;
   if (key === 'artifact') return HardDriveUpload;
   if (key === 'widget') return GalleryVerticalEnd;
   if (key === 'roomote') return RoomoteR;
@@ -50,6 +53,7 @@ export function toolIconForKey(key: ToolIconKey): LucideIcon {
   if (key === 'environment') return VectorSquare;
   if (key === 'alert') return TriangleAlert;
   if (key === 'messages') return MessagesSquare;
+  if (key === 'stopwatch') return Timer;
   return Wrench;
 }
 

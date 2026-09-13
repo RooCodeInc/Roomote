@@ -1,5 +1,6 @@
-import type { RunStatus } from '@roomote/types';
+import { isTaskExecutingTurn, type RunStatus } from '@roomote/types';
 import { db, taskRuns, eq } from '@roomote/db/server';
+import { notifyTaskRunThreadFooterRefresh } from '../thread-footer-refresh';
 
 type UpdateTaskRunRuntimeState = {
   taskPhase: string | null;
@@ -51,6 +52,13 @@ export async function updateTaskRunRuntimeState(
       .update(taskRuns)
       .set({ taskPhase: values.taskPhase, sleepAt: values.sleepAt })
       .where(eq(taskRuns.id, runId));
+
+    if (
+      isTaskExecutingTurn(current.status, current.taskPhase) !==
+      isTaskExecutingTurn(current.status, values.taskPhase)
+    ) {
+      notifyTaskRunThreadFooterRefresh(runId);
+    }
 
     return { updated: true };
   } catch (error) {

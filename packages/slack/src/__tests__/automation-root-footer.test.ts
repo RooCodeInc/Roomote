@@ -204,4 +204,49 @@ describe('refreshAutomationRootFooter', () => {
       ),
     ).toHaveLength(1);
   });
+
+  it('preserves top-level data visualizations while refreshing actions', async () => {
+    resolveThreadReplyLinkedPrsMock.mockResolvedValue([]);
+    const updateMessage = vi.fn().mockResolvedValue(true);
+    const chart = {
+      type: 'data_visualization',
+      title: 'Traffic sources',
+      chart: {
+        type: 'pie',
+        segments: [{ label: 'Search', value: 65 }],
+      },
+    };
+
+    await refreshAutomationRootFooter({
+      slack: {
+        getMessageBlocks: vi.fn().mockResolvedValue([
+          {
+            type: 'context',
+            block_id: 'roomote_automation_result_header',
+            elements: [],
+          },
+          chart,
+          {
+            type: 'actions',
+            block_id: 'roomote_automation_result_actions',
+            elements: [],
+          },
+        ]),
+        updateMessage,
+      },
+      channelId: 'C123',
+      messageTs: '1700000000.000001',
+      automationLabel: 'Traffic report',
+      automationIconUrl: 'https://example.com/chart.png',
+      configureUrl: 'https://example.com/automations#traffic',
+    });
+
+    const blocks = updateMessage.mock.calls[0]?.[0]?.message?.blocks ?? [];
+    expect(blocks).toContainEqual(chart);
+    expect(blocks.map((block: { type: string }) => block.type)).toEqual([
+      'context',
+      'data_visualization',
+      'actions',
+    ]);
+  });
 });

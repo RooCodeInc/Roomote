@@ -103,12 +103,18 @@ describe('Capture visual proof skill', () => {
     );
   });
 
-  it('prefers real state but allows disclosed simulation without permitting fabricated evidence', () => {
+  it('requires genuine state followed by disclosed simulation before blocking proof', () => {
     expect(skillContent).toContain(
-      'Prefer genuine application, database, authentication, feature-flag, fixture, test-record, or form-submission state when it is practical to establish',
+      'Follow this state-establishment sequence: (1) attempt genuine application, database, authentication, feature-flag, fixture, test-record, or form-submission state when practical',
     );
     expect(skillContent).toContain(
-      'transparent simulation may modify application source, hardcode a condition, role, feature state, or network response, mock UI or network responses, or arrange DOM or rendered component state',
+      '(2) if that fails, produce disclosed simulated proof on the actual UI',
+    );
+    expect(skillContent).toContain(
+      '(3) declare proof blocked only when neither genuine nor representative simulated/rendered proof is possible',
+    );
+    expect(skillContent).toContain(
+      'mark it unproved only when neither genuine nor representative simulated/rendered proof is possible',
     );
     expect(skillContent).toContain(
       "Every simulation, mock, source modification, or hardcoded state must be disclosed explicitly in each affected artifact's proof metadata and in the final proof report",
@@ -121,12 +127,30 @@ describe('Capture visual proof skill', () => {
     );
   });
 
-  it('allows exactly one recapture and stops on unreachable surfaces', () => {
+  it('keeps degraded infrastructure reporting separate from fallback proof work', () => {
+    expect(skillContent).toContain(
+      'An infrastructure defect may be reported as degraded capability when independently useful',
+    );
+    expect(skillContent).toContain(
+      'not as blocking UI proof while fallback remains',
+    );
+    expect(skillContent).toContain(
+      'Reporting a platform issue never terminates or replaces fallback proof work',
+    );
+    expect(skillContent).toContain(
+      'An infrastructure report alone is not a blocked proof result',
+    );
+  });
+
+  it('allows exactly one recapture and blocks only when the actual UI is unreachable', () => {
     expect(skillContent).toContain(
       'Recapture an artifact once when the first honest capture is obviously blank, clipped, or misses the required visible state. That is the only retry this skill allows.',
     );
     expect(skillContent).toContain(
-      'inspect the port or current HTTP response once, then return blocked with blocker type `browser surface unavailable`',
+      'If no UI responds, return `browser surface unavailable`',
+    );
+    expect(skillContent).toContain(
+      'If it responds, try disclosed simulated/rendered proof before returning `browser surface broken`',
     );
     expect(skillContent).toContain(
       'Do not loop on retries or improvise a different surface.',

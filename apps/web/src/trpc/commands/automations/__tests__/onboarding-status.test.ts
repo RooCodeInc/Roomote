@@ -1,12 +1,9 @@
-import {
-  automations,
-  db,
-  deploymentSettings,
-  inArray,
-  slackInstallations,
-  upsertAutomation,
-} from '@roomote/db/server';
-import { USER_FACING_AUTOMATION_KEYS } from '@roomote/types';
+const mockGetBackgroundAgentSettingsForDeployment = vi.hoisted(() => vi.fn());
+
+vi.mock('@roomote/db/server', () => ({
+  getBackgroundAgentSettingsForDeployment:
+    mockGetBackgroundAgentSettingsForDeployment,
+}));
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -37,13 +34,11 @@ const adminAuth: UserAuthSuccess = {
 describe('getAutomationOnboardingStatusCommand', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
-  beforeEach(async () => {
-    // Internal automation rows are referenced by other suites' task fixtures.
-    await db
-      .delete(automations)
-      .where(inArray(automations.key, USER_FACING_AUTOMATION_KEYS));
-    await db.delete(deploymentSettings);
-    await db.delete(slackInstallations);
+  beforeEach(() => {
+    mockGetBackgroundAgentSettingsForDeployment.mockResolvedValue({
+      providerUsageLimitFrequency: 'off',
+      managerStatsFrequency: 'off',
+    });
 
     fetchSpy = vi
       .spyOn(globalThis, 'fetch')
@@ -63,10 +58,9 @@ describe('getAutomationOnboardingStatusCommand', () => {
   });
 
   it('reports enabled automations once one is scheduled', async () => {
-    await upsertAutomation(db, {
-      key: 'manager_stats',
-      enabled: true,
-      schedule: { mode: 'weekly' },
+    mockGetBackgroundAgentSettingsForDeployment.mockResolvedValue({
+      providerUsageLimitFrequency: 'off',
+      managerStatsFrequency: 'weekly',
     });
 
     await expect(
@@ -77,10 +71,9 @@ describe('getAutomationOnboardingStatusCommand', () => {
   });
 
   it('still reports nothing enabled when an automation exists but is off', async () => {
-    await upsertAutomation(db, {
-      key: 'manager_stats',
-      enabled: false,
-      schedule: { mode: 'weekly' },
+    mockGetBackgroundAgentSettingsForDeployment.mockResolvedValue({
+      providerUsageLimitFrequency: 'off',
+      managerStatsFrequency: 'off',
     });
 
     await expect(

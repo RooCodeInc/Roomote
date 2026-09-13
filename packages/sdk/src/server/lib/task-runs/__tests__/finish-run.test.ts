@@ -30,6 +30,11 @@ const mockResolveDiscordRuntimeCredentials = vi.fn();
 const mockDiscordPostMessage = vi.fn();
 const mockNotifySourceRunOnSettle = vi.fn().mockResolvedValue(undefined);
 const mockNotifyFastAgentParentOnSettle = vi.fn().mockResolvedValue(undefined);
+const mockNotifyWebTaskInitiatorOnSettle = vi.fn().mockResolvedValue(undefined);
+const mockEnqueueWebTaskInitiatorSettleNotification = vi
+  .fn()
+  .mockResolvedValue(undefined);
+const mockSettleLiveTaskMessageOnExit = vi.fn().mockResolvedValue(undefined);
 const mockDbTransaction = vi.fn();
 const mockCaptureTaskSettled = vi.fn();
 const mockResolveDefaultComputeProvider = vi.fn().mockResolvedValue('modal');
@@ -295,6 +300,14 @@ vi.mock('../../telegram-communication', () => ({
   ) => mockCreateTelegramCommunicationProvider(...args),
 }));
 
+const mockCreateAgentMailCommunicationProvider = vi.fn();
+const mockAgentMailPostMessage = vi.fn();
+vi.mock('../../agentmail-communication', () => ({
+  createAgentMailCommunicationProviderFromRuntimeCredentials: (
+    ...args: unknown[]
+  ) => mockCreateAgentMailCommunicationProvider(...args),
+}));
+
 vi.mock('@roomote/communication/discord-provider', () => ({
   DiscordCommunicationProvider: class MockDiscordCommunicationProvider {
     postMessage = mockDiscordPostMessage;
@@ -323,6 +336,21 @@ vi.mock('../notify-source-run-on-settle', () => ({
 vi.mock('../notify-fast-agent-parent-on-settle', () => ({
   notifyFastAgentParentOnSettle: (...args: unknown[]) =>
     mockNotifyFastAgentParentOnSettle(...args),
+}));
+
+vi.mock('../notify-web-task-initiator-on-settle', () => ({
+  notifyWebTaskInitiatorOnSettle: (...args: unknown[]) =>
+    mockNotifyWebTaskInitiatorOnSettle(...args),
+}));
+
+vi.mock('../enqueue-web-task-initiator-settle-notification', () => ({
+  enqueueWebTaskInitiatorSettleNotification: (...args: unknown[]) =>
+    mockEnqueueWebTaskInitiatorSettleNotification(...args),
+}));
+
+vi.mock('../settle-live-task-message-on-exit', () => ({
+  settleLiveTaskMessageOnExit: (...args: unknown[]) =>
+    mockSettleLiveTaskMessageOnExit(...args),
 }));
 
 vi.mock('../../automation-result-metadata', () => ({
@@ -419,6 +447,8 @@ describe('finishRun', () => {
     mockDbExecute.mockResolvedValue([]);
     mockResolveDefaultComputeProvider.mockResolvedValue('modal');
     mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
+    mockNotifyFastAgentParentOnSettle.mockResolvedValue('admitted');
+    mockNotifyWebTaskInitiatorOnSettle.mockResolvedValue('delivered');
     syncRunRows = [];
     mockDbTransaction.mockImplementation(
       async (callback: (tx: unknown) => unknown) =>
@@ -456,6 +486,14 @@ describe('finishRun', () => {
       channelId: 'channel-1',
       threadId: 'thread-1',
       messageId: 'message-1',
+    });
+    mockAgentMailPostMessage.mockResolvedValue({
+      provider: 'agentmail',
+      channelId: 'roomote@agentmail.test',
+      messageId: 'email-message-1',
+    });
+    mockCreateAgentMailCommunicationProvider.mockResolvedValue({
+      postMessage: mockAgentMailPostMessage,
     });
     vi.mocked(createTaskRunGitHubToken).mockResolvedValue('github-token');
   });
@@ -544,6 +582,10 @@ describe('finishRun', () => {
         outcome,
         errorCode,
       );
+      expect(mockNotifyWebTaskInitiatorOnSettle).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1 }),
+        status,
+      );
     },
   );
 
@@ -553,6 +595,25 @@ describe('finishRun', () => {
     await finishRun({ id: 1, status: RunStatus.Idle });
 
     expect(mockCaptureTaskSettled).not.toHaveBeenCalled();
+    expect(mockNotifyWebTaskInitiatorOnSettle).not.toHaveBeenCalled();
+  });
+
+  it('continues terminal side effects when retry queue admission fails', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+    mockNotifyWebTaskInitiatorOnSettle.mockResolvedValue('failed');
+    mockEnqueueWebTaskInitiatorSettleNotification.mockResolvedValue(false);
+
+    await finishRun({ id: 1, status: RunStatus.Completed });
+
+    expect(mockEnqueueWebTaskInitiatorSettleNotification).toHaveBeenCalledWith({
+      runId: 1,
+      taskId: 'task-1',
+      status: RunStatus.Completed,
+    });
+    expect(mockNotifyFastAgentParentOnSettle).toHaveBeenCalledOnce();
+    expect(mockSettleLiveTaskMessageOnExit).toHaveBeenCalledOnce();
+    expect(mockCaptureTaskSettled).toHaveBeenCalledOnce();
+    expect(mockCleanupSandboxOidcTargetsForTaskRun).toHaveBeenCalledWith(1);
   });
 
   it('derives tasks.state completed via the shared sync when the job completes', async () => {
@@ -1909,6 +1970,101 @@ describe('finishRun', () => {
         status: RunStatus.Failed,
         error: 'test error',
       });
+    });
+  });
+
+  describe('AgentMail failure notification', () => {
+    const emailConversation = {
+      surface: 'agentmail' as const,
+      workspaceId: 'roomote@agentmail.test',
+      conversationId: '11111111-1111-4111-8111-111111111111',
+      replyTarget: { channelId: 'roomote@agentmail.test' },
+    };
+
+    it('lets the Fast parent exclusively deliver a delegated Email failure', async () => {
+      const job = makeRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Run the automation',
+          communicationProvider: 'agentmail',
+          communicationChannelId: 'roomote@agentmail.test',
+          communicationThreadId: emailConversation.conversationId,
+          fastAgentParent: {
+            sessionId: '22222222-2222-4222-8222-222222222222',
+            conversation: emailConversation,
+          },
+          customAutomationId: 'automation-1',
+        },
+      });
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockAgentMailPostMessage).not.toHaveBeenCalled();
+      expect(mockNotifyFastAgentParentOnSettle).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: job.taskId }),
+        RunStatus.Failed,
+        job.task.title,
+      );
+    });
+
+    it('uses the child Email fallback when Fast parent admission fails', async () => {
+      const job = makeRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Run the automation',
+          communicationProvider: 'agentmail',
+          communicationChannelId: 'roomote@agentmail.test',
+          communicationThreadId: emailConversation.conversationId,
+          fastAgentParent: {
+            sessionId: '22222222-2222-4222-8222-222222222222',
+            conversation: emailConversation,
+          },
+          customAutomationId: 'automation-1',
+        },
+      });
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+      mockNotifyFastAgentParentOnSettle.mockResolvedValueOnce('failed');
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockAgentMailPostMessage).toHaveBeenCalledOnce();
+    });
+
+    it('keeps direct Email task failures on the child finalizer path', async () => {
+      const job = makeRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Handle an email request',
+          communicationProvider: 'agentmail',
+          communicationChannelId: 'roomote@agentmail.test',
+          communicationThreadId: emailConversation.conversationId,
+        },
+      });
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockAgentMailPostMessage).toHaveBeenCalledOnce();
+      expect(mockNotifyFastAgentParentOnSettle).toHaveBeenCalledOnce();
     });
   });
 

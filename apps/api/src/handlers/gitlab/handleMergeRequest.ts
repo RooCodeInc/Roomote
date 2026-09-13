@@ -112,7 +112,9 @@ export async function handleGitLabMergeRequest(
         ? ('merged' as const)
         : ('closed' as const);
 
-    await updateTaskPrStatus('gitlab', repoFullName, mergeRequest.iid, status);
+    await updateTaskPrStatus('gitlab', repoFullName, mergeRequest.iid, status, {
+      host: toHostFromUrl(mergeRequest.url),
+    });
 
     scheduleSourceControlPullRequestFactSync({
       provider: 'gitlab',
@@ -165,6 +167,7 @@ export async function handleGitLabMergeRequest(
       repoFullName,
       mergeRequest.iid,
       mergeRequest.draft ? 'draft' : 'open',
+      { host: toHostFromUrl(mergeRequest.url) },
     );
   }
 

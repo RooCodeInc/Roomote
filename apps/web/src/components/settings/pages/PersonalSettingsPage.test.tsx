@@ -27,6 +27,7 @@ vi.mock('@/components/settings/LinkedAccounts', () => ({
 }));
 
 vi.mock('@/components/settings', () => ({
+  PersonalizationSection: () => <section>Personalization</section>,
   UserPreferencesSection: () => <section>User preferences</section>,
 }));
 
@@ -63,6 +64,7 @@ describe('PersonalSettingsPage', () => {
       undefined,
     );
     expect(screen.getByText('Change password')).toBeInTheDocument();
+    expect(screen.getByText('Personalization')).toBeInTheDocument();
   });
 
   it('renders password enrollment for OAuth-only users', () => {

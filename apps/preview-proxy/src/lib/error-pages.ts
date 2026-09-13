@@ -166,38 +166,6 @@ const SHARED_STYLE = `
           .step.completed .step-text { color: hsl(var(--muted-foreground)); }
           .error-container {
             display: none;
-            text-align: center;
-          }
-          .error-icon {
-            width: 2.5rem;
-            height: 2.5rem;
-            color: hsl(0 84.2% 60.2%);
-            margin: 0 auto 1rem;
-          }
-          .error-title {
-            font-size: 1rem;
-            font-weight: 600;
-            margin-bottom: 0.25rem;
-          }
-          .error-message {
-            font-size: 0.875rem;
-            color: hsl(var(--muted-foreground));
-            margin-bottom: 1rem;
-          }
-          .error-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.25rem;
-            font-size: 0.875rem;
-            color: hsl(var(--foreground));
-            text-decoration: none;
-            padding: 0.5rem 1rem;
-            border: 1px solid hsl(var(--border));
-            border-radius: 0.375rem;
-            transition: background-color 0.15s;
-          }
-          .error-link:hover {
-            background-color: hsl(var(--muted-foreground) / 0.1);
           }`;
 
 function wrapPage({
@@ -234,8 +202,10 @@ function wrapPage({
 export function render404Page(taskId: string): string {
   return wrapPage({
     title: 'Preview Not Found',
-    body: `<h1>Preview not found</h1>
-        <p>This preview is correctly configured, but the environment for task <code>${escapeHtml(taskId)}</code> does not exist or is not available.</p>
+    body: `<div class="header">
+          <h1 class="title">Preview not found</h1>
+          <p class="subtitle">This preview is correctly configured, but the environment for task <code>${escapeHtml(taskId)}</code> does not exist or is not available.</p>
+        </div>
         <p>This could mean:</p>
         <ul>
           <li>The task ID is incorrect</li>
@@ -253,8 +223,10 @@ export function renderUnavailablePage(taskId: string): string {
     title: 'Preview Starting...',
     extraHeadHtml: `
         <meta http-equiv="refresh" content="5">`,
-    body: `<h1>Preview starting...</h1>
-        <p>The environment for <code>${escapeHtml(taskId)}</code> is being prepared.</p>
+    body: `<div class="header">
+          <h1 class="title">Preview starting...</h1>
+          <p class="subtitle">The environment for <code>${escapeHtml(taskId)}</code> is being prepared.</p>
+        </div>
         <p>This page will refresh automatically.</p>
         <div class="spinner"></div>`,
   });
@@ -263,8 +235,10 @@ export function renderUnavailablePage(taskId: string): string {
 export function renderCompletedPage(taskId: string): string {
   return wrapPage({
     title: 'Preview Ended',
-    body: `<h1>Preview Ended</h1>
-        <p>The sandbox for task <code>${escapeHtml(taskId)}</code> has been terminated.</p>
+    body: `<div class="header">
+          <h1 class="title">Preview Ended</h1>
+          <p class="subtitle">The sandbox for task <code>${escapeHtml(taskId)}</code> has been terminated.</p>
+        </div>
         <p><a href="${config.R_APP_URL}/task/${escapeHtml(taskId)}" class="button">View task details →</a></p>`,
   });
 }
@@ -316,17 +290,11 @@ export function renderResumingPage(
             </div>
           </div>
           <div class="error-container" id="error-container">
-            <svg class="error-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-            </svg>
-            <h2 class="error-title">Resume Failed</h2>
-            <p class="error-message" id="error-text">Failed to resume sandbox.</p>
-            <a class="error-link" href="${config.R_APP_URL}/task/${taskId}">
-              View Task Details
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-              </svg>
-            </a>
+            <div class="header">
+              <h1 class="title">Resume Failed</h1>
+              <p class="subtitle" id="error-text">Failed to resume sandbox.</p>
+            </div>
+            <a class="button" href="${config.R_APP_URL}/task/${escapeHtml(taskId)}">View Task Details →</a>
           </div>`,
     script: `          const resumeStatusId = ${JSON.stringify(resumeStatusId)};
           const checkInterval = 2000;

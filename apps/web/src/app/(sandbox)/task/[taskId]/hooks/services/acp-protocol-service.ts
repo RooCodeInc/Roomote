@@ -6,6 +6,7 @@ import {
   type AcpRequestUserInputPayload,
   type AcpToolCallPayload,
   type AcpToolResultPayload,
+  type SetupReceiptPayload,
   type TaskMessageContentBlock,
   type TaskMessageRole,
   asBoolean,
@@ -18,6 +19,7 @@ import {
   extractOutputText,
   formatRequestUserInputResponseText,
   getAcpLogicalEventId,
+  getDataVisualizationBlocks,
   getImageUrisFromContentBlocks,
   getProviderRetryNoticeFromMessageData,
   inferAcpMessageKind,
@@ -29,6 +31,7 @@ import {
   resolveAcpTranscriptVisibility,
   textFromContentArray,
   ACP_ENVELOPE_EVENT_TYPES,
+  SETUP_RECEIPT_INPUT_KIND,
   ACP_LIVE_EVENT_TYPES,
 } from '@roomote/types';
 
@@ -334,6 +337,15 @@ export function toAcpUiMessage(
       null,
   };
 
+  if (metadataRecord.inputKind === SETUP_RECEIPT_INPUT_KIND) {
+    return {
+      ...base,
+      role: 'user',
+      kind: 'setup_receipt',
+      data: (payloadRecord.setupReceipt ?? {}) as SetupReceiptPayload,
+    } as AcpUiMessage;
+  }
+
   switch (normalized.kind) {
     case 'text':
       return {
@@ -352,6 +364,7 @@ export function toAcpUiMessage(
           payloadRecord,
         ),
         imageArtifacts: extractPayloadImageArtifacts(payloadRecord),
+        charts: getDataVisualizationBlocks(normalized.contentBlocks),
         clientMessageId: getAcpClientMessageId(normalized) ?? undefined,
         data: payloadRecord,
       };
@@ -412,6 +425,14 @@ export function toAcpUiMessage(
         ...base,
         role: 'system',
         kind: 'task_cancelled',
+        data: payloadRecord,
+      };
+
+    case 'voice_call':
+      return {
+        ...base,
+        role: 'system',
+        kind: 'voice_call',
         data: payloadRecord,
       };
 

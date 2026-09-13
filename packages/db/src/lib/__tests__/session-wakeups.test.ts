@@ -202,6 +202,39 @@ describe('session wakeup helpers', () => {
     }
   });
 
+  it('defaults wakeups to visible and deduplicates internal wakeups separately', async () => {
+    const { user, conversation } = await makeConversation();
+    const input = {
+      conversationId: conversation.id,
+      createdByUserId: user.id,
+      name: 'Check PR',
+      prompt: 'check pr',
+      schedule: { mode: 'interval' as const, everyMinutes: 10 },
+      reportPolicy: 'only_when_notable' as const,
+      maxRuns: null,
+      until: null,
+      nextRunAt: firstRunAt,
+    };
+
+    const visible = await admitSessionWakeup(input);
+    const internal = await admitSessionWakeup({ ...input, internal: true });
+    expect(visible).toMatchObject({
+      outcome: 'created',
+      wakeup: { internal: false },
+    });
+    expect(internal).toMatchObject({
+      outcome: 'created',
+      wakeup: { internal: true },
+    });
+    if (internal.outcome === 'cap_reached') throw new Error('Unexpected cap');
+    expect(
+      await admitSessionWakeup({ ...input, internal: true }),
+    ).toMatchObject({
+      outcome: 'duplicate',
+      wakeup: { id: internal.wakeup.id, internal: true },
+    });
+  });
+
   it('caps concurrent distinct creates at ten and still admits duplicates', async () => {
     const { user, conversation } = await makeConversation();
     const input = {

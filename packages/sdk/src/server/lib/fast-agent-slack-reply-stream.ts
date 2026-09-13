@@ -7,13 +7,13 @@ import {
   type FastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
-  ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
   updateSlackThreadMessageWithFooterText,
   type SlackNotifier,
 } from '@roomote/slack';
 
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
 import { deliverFastAgentSessionVideos } from './fast-agent-session-videos';
+import { buildFastAgentSlackReplyBodyBlocks } from './fast-agent-slack-reply-blocks';
 
 /**
  * Streams a Fast reply into a Slack thread with Slack's message streaming
@@ -98,23 +98,12 @@ export function createSlackFastReplyStream(params: {
             threadTs: params.threadTs,
             messageTs: ts,
             text: quote ? `${quote}\n${message}` : message,
-            bodyBlocks: [
-              ...(quote
-                ? [
-                    {
-                      type: 'section' as const,
-                      block_id: ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
-                      text: { type: 'mrkdwn' as const, text: quote },
-                    },
-                  ]
-                : []),
-              { type: 'markdown' as const, text: message },
-              ...images.map((image) => ({
-                type: 'image' as const,
-                image_url: image.url,
-                alt_text: image.altText,
-              })),
-            ],
+            bodyBlocks: buildFastAgentSlackReplyBodyBlocks({
+              message,
+              quote,
+              charts: reply.charts,
+              images,
+            }),
             footerText: buildFastSessionReplyFooterText({
               provider: 'slack',
               sessionId: params.sessionId,

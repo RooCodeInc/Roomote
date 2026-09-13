@@ -32,6 +32,7 @@ export type ToolIconKey =
   | 'task'
   | 'message'
   | 'memory'
+  | 'book-heart'
   | 'artifact'
   | 'widget'
   | 'roomote'
@@ -43,6 +44,7 @@ export type ToolIconKey =
   | 'environment'
   | 'alert'
   | 'messages'
+  | 'stopwatch'
   | 'tool';
 
 type ToolPresentationPhase = 'running' | 'completed' | 'failed';
@@ -107,7 +109,7 @@ const COMMUNICATION_TOOL_NAMES = new Set([
 ]);
 const TOOL_ICON_OVERRIDES: Readonly<Partial<Record<string, ToolIconKey>>> = {
   manage_custom_automations: 'task',
-  manage_wakeups: 'task',
+  manage_wakeups: 'stopwatch',
   get_about_me: 'roomote',
   describe_video: 'video',
   request_user_input: 'list',
@@ -116,6 +118,7 @@ const TOOL_ICON_OVERRIDES: Readonly<Partial<Record<string, ToolIconKey>>> = {
   manage_source_control: 'pull-request',
   manage_environments: 'environment',
   save_task_memory: 'memory',
+  update_personalization: 'book-heart',
   request_environment_variables: 'terminal',
   report_platform_issue: 'alert',
   submit_automation_work_items: 'task',
@@ -168,7 +171,12 @@ export function resolveToolPresentation(
     providerKind === 'mcp' && serverName
       ? getMcpIntegration(serverName)
       : undefined;
-  const displayName = toolName ? formatToolIdentifier(toolName) : 'Tool';
+  const displayName =
+    toolName === 'manage_wakeups'
+      ? 'Timer'
+      : toolName
+        ? formatToolIdentifier(toolName)
+        : 'Tool';
   const providerLabel =
     serverName === 'roomote' || serverName === 'gbrain'
       ? undefined
@@ -178,6 +186,7 @@ export function resolveToolPresentation(
     toolName,
     phase,
     readToolArguments(data),
+    toolName === 'manage_wakeups' ? readToolResult(data) : null,
     category,
     serverName,
     providerKind === 'native'
@@ -311,6 +320,7 @@ function resolveReceiptLanguage(
   toolName: string | null,
   phase: ToolPresentationPhase,
   args: ToolArguments | null,
+  result: ToolArguments | null,
   category: ToolPresentationCategory,
   serverName: string | null,
   nativeToolName: string | null,
@@ -348,6 +358,11 @@ function resolveReceiptLanguage(
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),
       object: 'chat reply',
     };
+  if (toolName === 'update_personalization')
+    return {
+      verb: byPhase('Updating', 'Personalization', 'Failed to update'),
+      object: byPhase('personalization', 'updated', 'personalization'),
+    };
   if (toolName === 'request_user_input')
     return {
       verb: byPhase('Asking for', 'Asked for', 'Failed to Ask for'),
@@ -362,6 +377,11 @@ function resolveReceiptLanguage(
     return {
       verb: byPhase('Receiving', 'Received', 'Failed to Receive'),
       object: 'task report',
+    };
+  if (toolName === 'report_to_voice')
+    return {
+      verb: byPhase('Reporting', 'Reported', 'Failed to Report'),
+      object: 'result to voice',
     };
   if (toolName === 'post_to_channel')
     return {
@@ -416,6 +436,8 @@ function resolveReceiptLanguage(
     };
   if (toolName === 'manage_tasks' && serverName === 'roomote')
     return manageTasksReceipt(args, phase);
+  if (toolName === 'manage_wakeups')
+    return manageWakeupsReceipt(args, result, phase);
   if (toolName === 'find_integration_tools')
     return {
       verb: byPhase('Searching', 'Searched', 'Failed to Search'),
@@ -496,6 +518,18 @@ export function readToolArguments(data: ToolData): ToolArguments | null {
     : input;
 }
 
+function readToolResult(data: ToolData): ToolArguments | null {
+  if (!('output' in data) || typeof data.output !== 'string') return null;
+  try {
+    const result = JSON.parse(data.output) as unknown;
+    return result && typeof result === 'object' && !Array.isArray(result)
+      ? (result as ToolArguments)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function stringArgument(
   args: ToolArguments | null,
   key: string,
@@ -553,8 +587,8 @@ function manageTasksReceipt(
       object: 'task',
     },
     get_messages: {
-      verb: byPhase('Getting', 'Received', 'Failed to Get'),
-      object: `message from ${target}`,
+      verb: byPhase('Checking', 'Checked', 'Failed to Check'),
+      object: `recent ${target} messages`,
     },
     send_message: {
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),
@@ -591,6 +625,44 @@ function manageTasksReceipt(
   };
 
   return action ? (receipts[action] ?? null) : null;
+}
+
+function manageWakeupsReceipt(
+  args: ToolArguments | null,
+  result: ToolArguments | null,
+  phase: ToolPresentationPhase,
+): { verb: string; object: string } {
+  const action = stringArgument(args, 'action');
+  const byPhase = (running: string, completed: string, failed: string) =>
+    phase === 'running' ? running : phase === 'failed' ? failed : completed;
+  const receipts: Record<string, { verb: string; object: string }> = {
+    create: {
+      verb:
+        phase === 'completed' && result?.duplicate === true
+          ? 'Reused'
+          : byPhase('Creating', 'Created', 'Failed to Create'),
+      object: 'timer',
+    },
+    list: {
+      verb: byPhase('Listing', 'Listed', 'Failed to List'),
+      object: 'timers',
+    },
+    get: {
+      verb: byPhase('Fetching', 'Fetched', 'Failed to Fetch'),
+      object: 'timer',
+    },
+    cancel: {
+      verb: byPhase('Canceling', 'Canceled', 'Failed to Cancel'),
+      object: 'timer',
+    },
+  };
+
+  return (
+    (action ? receipts[action] : undefined) ?? {
+      verb: byPhase('Updating', 'Updated', 'Failed to Update'),
+      object: 'timers',
+    }
+  );
 }
 
 export function summarizeToolGroup(

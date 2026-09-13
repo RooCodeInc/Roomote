@@ -6,6 +6,9 @@ import { nextCookies } from 'better-auth/next-js';
 import { genericOAuth, microsoftEntraId, slack } from 'better-auth/plugins';
 import { drizzleAdapter } from '@better-auth/drizzle-adapter';
 import { normalizeAdoLinkedAccountKey } from '@roomote/ado';
+// Subpath import on purpose: the SDK barrel drags the whole server graph
+// into auth, which the auth unit tests mock only partially.
+import { sendAgentMailSystemEmail } from '@roomote/sdk/server/agentmail-outbound';
 import type { SourceControlTokenBackedProvider } from '@roomote/types';
 
 import {
@@ -20,7 +23,7 @@ import {
 } from '@roomote/db/server';
 import * as dbSchema from '@roomote/db/server';
 
-import { Env, getBetterAuthSecret } from './env';
+import { Env, getBetterAuthSecret, isEmailChannelEnabled } from './env';
 import { getBetterAuthBaseUrlConfig } from './better-auth-base-url';
 import { withCanonicalForwardedProto } from './canonical-forwarded-proto';
 import { bootstrapWebRuntimeEnv } from './bootstrap-runtime-env';
@@ -56,6 +59,10 @@ type RoomoteAuth = {
       headers: Headers;
       query?: { disableRefresh?: boolean };
     }): Promise<AuthSessionResult>;
+    sendVerificationEmail(input: {
+      body: { callbackURL: string; email: string };
+      headers: Headers;
+    }): Promise<unknown>;
     requestPasswordReset(input: {
       body: {
         email: string;
@@ -79,6 +86,7 @@ let authSignature: string | null = null;
 const resetPasswordLinkCapture = new AsyncLocalStorage<{
   url?: string;
 }>();
+const verificationEmailDeliveryRequired = new AsyncLocalStorage<boolean>();
 export const PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS = 60 * 60;
 
 export async function capturePasswordResetLink(
@@ -87,6 +95,20 @@ export async function capturePasswordResetLink(
   const capture: { url?: string } = {};
   await resetPasswordLinkCapture.run(capture, callback);
   return capture.url ?? null;
+}
+
+export async function sendAuthenticatedVerificationEmail(input: {
+  callbackURL: string;
+  email: string;
+  headers: Headers;
+}): Promise<void> {
+  const roomoteAuth = await getAuth();
+  await verificationEmailDeliveryRequired.run(true, () =>
+    roomoteAuth.api.sendVerificationEmail({
+      body: { email: input.email, callbackURL: input.callbackURL },
+      headers: input.headers,
+    }),
+  );
 }
 type MicrosoftAuthAccountHookRow = {
   id?: unknown;
@@ -1028,6 +1050,8 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
       : []),
   ];
 
+  const emailChannelEnabled = isEmailChannelEnabled();
+
   return betterAuth({
     appName: 'Roomote',
     baseURL: getBetterAuthBaseUrlConfig({
@@ -1067,18 +1091,80 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
       modelName: 'authVerifications',
     },
     // Sign-up is gated by the invite/access checks in the database hooks
-    // below; password sign-in for existing accounts is always available.
+    // below. Password sign-in for existing accounts is always available:
+    // the email channel never gates sign-in on verification, because the
+    // deployment may have the channel flag on before its sender is
+    // configured (or an address may be suppressed after a bounce), and a
+    // verification gate would lock those accounts out with no way back in.
+    // Roomote only ever initiates email to an address it has verified, but
+    // that guarantee lives at the sending side (`emailVerified` or an
+    // explicitly linked address), not at sign-in.
     emailAndPassword: {
       enabled: true,
       resetPasswordTokenExpiresIn: PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS,
       revokeSessionsOnPasswordReset: true,
-      sendResetPassword: async ({ url }) => {
+      sendResetPassword: async ({ user, url }) => {
+        // Admin-initiated resets capture the link for the settings UI; with
+        // the email channel on, the user also gets it by email.
         const capture = resetPasswordLinkCapture.getStore();
         if (capture) {
           capture.url = url;
         }
+        if (emailChannelEnabled) {
+          await sendAgentMailSystemEmail({
+            to: user.email,
+            subject: 'Reset your Roomote password',
+            text: [
+              'A password reset was requested for your Roomote account.',
+              '',
+              `[Reset your password](${url})`,
+              '',
+              `This link expires in ${Math.round(PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS / 60)} minutes. If you did not request a reset, you can ignore this email.`,
+            ].join('\n'),
+            logContext: 'auth.sendResetPassword',
+          });
+        }
       },
     },
+    ...(emailChannelEnabled
+      ? {
+          // Verification is offered, never required: a new password sign-up
+          // gets a verification email so its address can be recognized on
+          // the email channel, and signs in right away regardless. Accounts
+          // from before the channel was enabled verify from Personal settings
+          // > Linked Accounts (Resend).
+          emailVerification: {
+            sendOnSignUp: true,
+            autoSignInAfterVerification: true,
+            sendVerificationEmail: async ({ user, url }) => {
+              const result = await sendAgentMailSystemEmail({
+                to: user.email,
+                subject: 'Verify your email for Roomote',
+                text: [
+                  'Confirm this address so Roomote recognizes it on the email channel.',
+                  '',
+                  `[Verify your email](${url})`,
+                  '',
+                  'If you did not create a Roomote account, you can ignore this email.',
+                ].join('\n'),
+                logContext: 'auth.sendVerificationEmail',
+              });
+              if (!result.sent) {
+                // Best effort: an unsent verification email (sender not yet
+                // configured, address suppressed) must never fail sign-up.
+                console.warn(
+                  `[auth] Could not send the verification email to ${user.email} (${result.reason}).`,
+                );
+                if (verificationEmailDeliveryRequired.getStore()) {
+                  throw new Error(
+                    'Verification email could not be delivered. Check the address or ask an admin to check the email configuration.',
+                  );
+                }
+              }
+            },
+          },
+        }
+      : {}),
     databaseHooks: {
       account: {
         create: {

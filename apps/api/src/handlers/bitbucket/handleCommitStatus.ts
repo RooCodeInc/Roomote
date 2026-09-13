@@ -9,7 +9,10 @@ import {
   stripUuidBraces,
 } from '@roomote/bitbucket';
 import { and, db, eq, or, repositories } from '@roomote/db/server';
-import { launchCiFailureTriageForFailedRun } from '@roomote/sdk/server';
+import {
+  launchCiFailureTriageForFailedRun,
+  isCiFailureTriageRepositoryEnabled,
+} from '@roomote/sdk/server';
 
 import { logApiError } from '../../logging';
 import type { WebhookResponse } from '../../types';
@@ -185,6 +188,11 @@ export async function handleBitbucketCommitStatus(
     };
   }
 
+  if (!(await isCiFailureTriageRepositoryEnabled(repo.id)))
+    return {
+      status: 'ok',
+      message: 'Repository is disabled or outside the CI failure triage scope',
+    };
   const defaultBranch = stripGitRef(repo.defaultBranch) || 'main';
   let headBranch = stripGitRef(status.refname);
   let headSha = (status.commit?.hash ?? '').trim();

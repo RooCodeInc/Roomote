@@ -11,6 +11,7 @@ import {
 import {
   CREATE_CUSTOM_SKILL_TOOL,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  UPDATE_CUSTOM_SKILL_TOOL,
 } from '@roomote/types';
 
 const thisFilePath = fileURLToPath(import.meta.url);
@@ -235,6 +236,24 @@ describe('roomote MCP tool descriptions', () => {
     ).toBe(false);
   });
 
+  it('registers the shared custom skill update descriptor', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(
+      registeredTools,
+      UPDATE_CUSTOM_SKILL_TOOL.name,
+    );
+    expect(tool.config.title).toBe(UPDATE_CUSTOM_SKILL_TOOL.title);
+    expect(tool.config.description).toBe(UPDATE_CUSTOM_SKILL_TOOL.description);
+    expect(tool.config.annotations).toEqual(
+      UPDATE_CUSTOM_SKILL_TOOL.annotations,
+    );
+    const schema = tool.config
+      .inputSchema as unknown as z.ZodObject<z.ZodRawShape>;
+    expect(Object.keys(schema.shape)).toEqual(
+      Object.keys(UPDATE_CUSTOM_SKILL_TOOL.inputSchema),
+    );
+  });
+
   it('requires a token before creating a custom skill', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -381,12 +400,11 @@ describe('roomote MCP tool descriptions', () => {
       'send_message',
       'search_tasks',
       'get_compute_logs',
-      'launch',
       'cancel',
-      'list_environments',
       'list_models',
       'update_models',
     ]);
+    expect(manageTasksTool.config.description).not.toContain('launch');
     expect(taskIdField.description).toBe(
       'Optional concrete task ID. When provided to get_summary, get_messages, get_updates, or send_message, targets that task instead of a Session. Required for task-only controls such as get_compute_logs and cancel.',
     );
@@ -397,6 +415,14 @@ describe('roomote MCP tool descriptions', () => {
       'targetTasks',
     );
     expect(manageTasksTool.config.inputSchema).not.toHaveProperty('targetType');
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty('prompt');
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty(
+      'environmentId',
+    );
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty('branch');
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty(
+      'notifyOnSettle',
+    );
   });
 
   it('keeps task model discovery beside task model switching', async () => {
@@ -458,12 +484,12 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
-  it('registers show_widget for presentational HTML in the task transcript', async () => {
+  it('registers show_widget for rendered visuals in the task transcript', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const tool = getRegisteredTool(registeredTools, 'show_widget');
 
     expect(tool.config.description).toContain(
-      'Render a presentational HTML widget in the current task transcript.',
+      'Create and share a rendered visual in the current task transcript.',
     );
     expect(tool.config.description).not.toContain('Roomote');
     expect(tool.config.description).toContain(
@@ -486,6 +512,9 @@ describe('roomote MCP tool descriptions', () => {
       'HTML, CSS, and inline SVG are displayed in a sandboxed iframe',
     );
     expect(tool.config.description).toContain('request_user_input');
+    expect(tool.config.description).not.toContain('communication provider');
+    expect(tool.config.description).not.toContain('link to open');
+    expect(tool.config.description).not.toContain('HTML inline');
     expect(getInputSchemaField(tool, 'html').description).toContain('HTML');
     expect(getInputSchemaField(tool, 'html').description).toContain(
       'Avoid long prose',
@@ -500,7 +529,7 @@ describe('roomote MCP tool descriptions', () => {
       SHOW_WIDGET_HEIGHT_DESCRIPTION,
     );
     expect(getInputSchemaField(tool, 'textFallback').description).toContain(
-      'originating chat surface',
+      'Optional short plain-text preview of the rendered visual',
     );
     for (const field of ['html', 'title', 'css', 'height', 'textFallback']) {
       expect(getInputSchemaField(tool, field).description).not.toContain(
@@ -527,6 +556,24 @@ describe('roomote MCP tool descriptions', () => {
 
     expect(artifactsTool.config.description).toContain(
       'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not posted to chat automatically; when the image should appear in the originating thread, pass returned artifact IDs to `send_chat_reply` via `imageArtifactIds` (or share `viewUrl`/`rawUrl` in the reply text for non-images).',
+    );
+  });
+
+  it('keeps platform issue reporting from replacing productive fallback work', async () => {
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_TASK_ID: 'task_123',
+    });
+    const tool = getRegisteredTool(registeredTools, 'report_platform_issue');
+
+    expect(tool.config.description).toContain(
+      'Report an admin-fixable Roomote platform, configuration, or access defect.',
+    );
+    expect(tool.config.description).toContain(
+      'When productive fallback work remains, describe the defect as degraded capability rather than a blocker',
+    );
+    expect(tool.config.description).toContain('continue that fallback work');
+    expect(tool.config.description).toContain(
+      'do not treat this report as task completion',
     );
   });
 
@@ -604,6 +651,29 @@ describe('roomote MCP tool descriptions', () => {
     expect(replyTool.config.inputSchema.questions).toBeUndefined();
     expect(replyTool.config.inputSchema.suggestedNextSteps).toBeUndefined();
     expect(replyTool.config.inputSchema.suggestions).toBeUndefined();
+    const charts = getInputSchemaField(replyTool, 'charts');
+    const chartsSchema = replyTool.config.inputSchema
+      .charts as unknown as z.ZodTypeAny;
+    expect(charts.description).toContain(
+      'native Slack data visualization blocks',
+    );
+    expect(
+      chartsSchema.safeParse([
+        {
+          title: 'Weekly sales',
+          chart: {
+            type: 'line',
+            series: [
+              {
+                name: 'Online',
+                data: [{ label: 'Week 1', value: 12 }],
+              },
+            ],
+            axis_config: { categories: ['Week 2'] },
+          },
+        },
+      ]).success,
+    ).toBe(false);
   });
 
   it('documents the Teams chat reply tool when Teams communication context exists', async () => {
@@ -635,6 +705,7 @@ describe('roomote MCP tool descriptions', () => {
       'Teams-visible reply',
     );
     expect(replyTool.config.inputSchema.suggestions).toBeUndefined();
+    expect(replyTool.config.inputSchema.charts).toBeUndefined();
     const reactionTool = getRegisteredTool(
       registeredTools,
       'send_chat_reaction_emoji',
@@ -1197,6 +1268,9 @@ describe('roomote MCP tool descriptions', () => {
       'manage_source_control',
     );
 
+    expect(sourceControlTool.config.description).toContain(
+      'The metadata refresh preserves its current draft or ready state; later human changes and opt-in clean-review promotion are separate transitions.',
+    );
     expect(sourceControlTool.handler).toBeDefined();
     const result = await sourceControlTool.handler?.({
       action: 'get_issue',
@@ -1392,6 +1466,106 @@ describe('roomote MCP tool descriptions', () => {
           prNumber: 12,
           reviewers: ['alice'],
           teamReviewers: ['platform'],
+        }),
+      }),
+    );
+  });
+
+  it('exposes and forwards close pull request actions', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          success: true,
+          action: 'close_pull_request',
+          provider: 'github',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          number: 12,
+          applied: true,
+          warnings: [],
+        }),
+      }),
+    );
+
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+      ROOMOTE_TASK_ID: 'task_123',
+    });
+    const sourceControlTool = getRegisteredTool(
+      registeredTools,
+      'manage_source_control',
+    );
+
+    await sourceControlTool.handler?.({
+      action: 'close_pull_request',
+      repositoryFullName: 'RooCodeInc/Roomote',
+      prNumber: 12,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/tasks/task_123/source_control',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'close_pull_request',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          prNumber: 12,
+        }),
+      }),
+    );
+  });
+
+  it('exposes and forwards explicit pull request update fields', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          success: true,
+          action: 'update_pull_request',
+          provider: 'github',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          number: 12,
+          applied: true,
+          warnings: [],
+        }),
+      }),
+    );
+
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+      ROOMOTE_TASK_ID: 'task_123',
+    });
+    const sourceControlTool = getRegisteredTool(
+      registeredTools,
+      'manage_source_control',
+    );
+
+    await sourceControlTool.handler?.({
+      action: 'update_pull_request',
+      repositoryFullName: 'RooCodeInc/Roomote',
+      prNumber: 12,
+      targetBranch: 'main',
+      title: 'Updated title',
+      body: '',
+      draft: false,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/tasks/task_123/source_control',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'update_pull_request',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          prNumber: 12,
+          targetBranch: 'main',
+          title: 'Updated title',
+          body: '',
+          draft: false,
         }),
       }),
     );

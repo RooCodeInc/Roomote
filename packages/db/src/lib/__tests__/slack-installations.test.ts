@@ -81,4 +81,49 @@ describe('findActiveSlackInstallationForChannel', () => {
       ).toBeNull();
     },
   );
+
+  it('strictly selects the second mapped installation with matching team identity', async () => {
+    await installation();
+    const owner = await installation();
+    await map(owner.id);
+    expect(
+      await findActiveSlackInstallationForChannel('C_MANAGER', owner.teamId),
+    ).toEqual(owner);
+  });
+
+  it('rejects a mapped owner whose team differs from the expected active installation', async () => {
+    const other = await installation();
+    await map((await installation()).id);
+    expect(
+      await findActiveSlackInstallationForChannel('C_MANAGER', other.teamId),
+    ).toBeNull();
+  });
+
+  it('does not use the sole active installation for an unmapped strict destination', async () => {
+    const owner = await installation();
+    expect(
+      await findActiveSlackInstallationForChannel('C_MANAGER', owner.teamId),
+    ).toBeNull();
+  });
+
+  it('rejects an inactive strict owner despite another active installation', async () => {
+    await installation();
+    const owner = await installation(false);
+    await map(owner.id);
+    expect(
+      await findActiveSlackInstallationForChannel('C_MANAGER', owner.teamId),
+    ).toBeNull();
+  });
+
+  it.each([true, false])(
+    'rejects strict ambiguous ownership even when the additional owner active=%s',
+    async (isActive) => {
+      const owner = await installation();
+      await map(owner.id);
+      await map((await installation(isActive)).id);
+      expect(
+        await findActiveSlackInstallationForChannel('C_MANAGER', owner.teamId),
+      ).toBeNull();
+    },
+  );
 });

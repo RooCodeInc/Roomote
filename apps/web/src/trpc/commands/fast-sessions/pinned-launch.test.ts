@@ -35,7 +35,11 @@ vi.mock('@/lib/server/source-control-provider', () => ({
   resolveSelectedRepositorySourceControlProvider: mocks.resolveSelectedProvider,
 }));
 
-import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  NO_REPOSITORIES,
+  TaskPayloadKind,
+} from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 import { startPinnedFastSessionLaunch } from './pinned-launch';
@@ -170,6 +174,35 @@ describe('startPinnedFastSessionLaunch', () => {
     };
     expect(launchInput.task.payload).not.toHaveProperty('description');
     expect(launchInput.task.payload).not.toHaveProperty('environmentId');
+  });
+
+  it('opens Blank slate without repository or environment provider lookup', async () => {
+    await startPinnedFastSessionLaunch(auth, {
+      text: 'Create a standalone artifact',
+      pinnedLaunch: {
+        launchId,
+        repo: NO_REPOSITORIES,
+        environmentId,
+      },
+    });
+
+    expect(mocks.getRepositories).not.toHaveBeenCalled();
+    expect(mocks.resolveSelectedProvider).toHaveBeenCalledWith([], []);
+    expect(mocks.resolveEnvironmentProvider).not.toHaveBeenCalled();
+    expect(mocks.launchPinned).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kickoffMessage: 'Started a task in Blank slate.',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: NO_REPOSITORIES,
+            description: 'Create a standalone artifact',
+          }),
+        }),
+      }),
+    );
+    const payload = mocks.launchPinned.mock.calls[0]?.[0]?.task.payload;
+    expect(payload).not.toHaveProperty('environmentId');
+    expect(payload).not.toHaveProperty('sourceControlProvider');
   });
 
   it('surfaces a read-only deployment as its stable error code', async () => {

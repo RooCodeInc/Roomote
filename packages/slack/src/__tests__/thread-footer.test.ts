@@ -1,17 +1,17 @@
+import { RunStatus } from '@roomote/types';
+
 const {
   findFirstMock,
   findManyMock,
   taskRunFindFirstMock,
   environmentFindFirstMock,
   resolveEffectivePreviewRuntimeConfigMock,
-  redisGetMock,
 } = vi.hoisted(() => ({
   findFirstMock: vi.fn(),
   findManyMock: vi.fn(),
   taskRunFindFirstMock: vi.fn(),
   environmentFindFirstMock: vi.fn(),
   resolveEffectivePreviewRuntimeConfigMock: vi.fn(),
-  redisGetMock: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -30,6 +30,7 @@ vi.mock('@roomote/db/server', () => ({
     },
   },
   eq: vi.fn((...args: unknown[]) => ({ eq: args })),
+  getSessionForTask: vi.fn().mockResolvedValue(null),
   taskPullRequests: {
     taskId: 'taskId',
   },
@@ -50,13 +51,10 @@ vi.mock('@roomote/env', () => ({
   },
 }));
 
-vi.mock('@roomote/redis', () => ({
-  getRedis: vi.fn(() => ({
-    get: redisGetMock,
-  })),
-}));
-
-import { getSlackThreadFooterText } from '../thread-footer';
+import {
+  buildSlackThreadFooterText,
+  getSlackThreadFooterText,
+} from '../thread-footer';
 
 function mockEnvironmentBackedTaskRun(params?: {
   primaryPortName?: string | null;
@@ -64,10 +62,26 @@ function mockEnvironmentBackedTaskRun(params?: {
   taskRunFindFirstMock.mockResolvedValue({
     payload: { environmentId: 'env-1' },
     primaryPortName: params?.primaryPortName ?? null,
+    status: RunStatus.Idle,
   });
 }
 
 describe('getSlackThreadFooterText', () => {
+  it('renders the owning Session transcript separately from task navigation', () => {
+    expect(
+      buildSlackThreadFooterText({
+        taskUrl: 'https://app.example.com/task/task-1?utm_source=slack',
+        webAppUrl: 'https://app.example.com/sessions/owner',
+        runningTasks: {
+          count: 1,
+          url: 'https://app.example.com/sessions/owner?task=task-1',
+        },
+      }),
+    ).toBe(
+      'Reply anytime · 1 task running · <https://app.example.com/sessions/owner?utm_source=slack|Open in Roomote>',
+    );
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     findFirstMock.mockResolvedValue(null);
@@ -79,16 +93,14 @@ describe('getSlackThreadFooterText', () => {
         previewProxyBaseUrl: 'https://preview.example.com',
       },
     });
-    redisGetMock.mockResolvedValue(null);
   });
 
-  it('prefers the linked task PR and uses the explicit-mention marker', async () => {
+  it('prefers the linked task PR', async () => {
     findFirstMock.mockResolvedValue({
       prUrl: 'https://github.com/roomote/app/pull/4321',
       prNumber: 4321,
       status: 'open',
     });
-    redisGetMock.mockResolvedValue('1');
 
     await expect(
       getSlackThreadFooterText({
@@ -100,7 +112,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on <https://github.com/roomote/app/pull/4321|PR #4321>, reply with @-mention or use the <https://app.example.com/task/task-1|web app>._',
+      'Reply anytime · <https://github.com/roomote/app/pull/4321|PR #4321> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -121,7 +133,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Reply or use the <https://app.example.com/task/task-1|web app>._',
+      'Reply anytime · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -136,11 +148,11 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on <https://github.com/roomote/app/pull/1234|PR #1234>, reply or use the <https://app.example.com/task/task-1|web app>._',
+      'Reply anytime · <https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
-  it('includes the live preview link alongside the PR for environment-backed tasks', async () => {
+  it('omits the live preview chunk alongside a PR', async () => {
     mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
     environmentFindFirstMock.mockResolvedValue({
       config: {
@@ -158,11 +170,11 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on <https://github.com/roomote/app/pull/1234|PR #1234>, <https://task-1-web.preview.example.com/auth/dev-login|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
+      'Reply anytime · <https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
-  it('includes the live preview link without a PR for environment-backed tasks', async () => {
+  it('omits the live preview chunk without a PR', async () => {
     mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
     environmentFindFirstMock.mockResolvedValue({
       config: {
@@ -180,7 +192,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on a <https://task-1-web.preview.example.com/auth/dev-login|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
+      'Reply anytime · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -210,7 +222,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on a <https://task-1-my-app.preview.example.com/?path=/story/example|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
+      'Reply anytime · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -232,7 +244,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on a <https://task-1-web.preview.example.com|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
+      'Reply anytime · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -255,7 +267,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on a <https://task-1-web.preview.example.com|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
+      'Reply anytime · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -275,7 +287,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Reply or use the <https://app.example.com/task/task-1|web app>._',
+      'Reply anytime · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -295,7 +307,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on <https://github.com/roomote/app/pull/1234|PR #1234>, reply or use the <https://app.example.com/task/task-1|web app>._',
+      'Reply anytime · <https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
 
     expect(environmentFindFirstMock).not.toHaveBeenCalled();
@@ -324,30 +336,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Reply or use the <https://app.example.com/task/task-1|web app>._',
-    );
-  });
-
-  it('keeps the explicit-mention instruction with the live preview link', async () => {
-    mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
-    environmentFindFirstMock.mockResolvedValue({
-      config: {
-        ports: [{ name: 'WEB', port: 3000 }],
-      },
-    });
-    redisGetMock.mockResolvedValue('1');
-
-    await expect(
-      getSlackThreadFooterText({
-        taskUrl: 'https://app.example.com/task/task-1',
-        taskId: 'task-1',
-        prRepo: null,
-        prNumber: null,
-        channelId: 'C123',
-        threadTs: '111.000',
-      }),
-    ).resolves.toBe(
-      '_Working on a <https://task-1-web.preview.example.com|live preview>, reply with @-mention or use the <https://app.example.com/task/task-1|web app>._',
+      'Reply anytime · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 });

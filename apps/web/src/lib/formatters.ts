@@ -169,15 +169,18 @@ export function formatTokens(tokens: number): string {
     return tokens.toString();
   }
 
+  const formatCompact = (value: number, suffix: string) =>
+    `${value.toFixed(2).replace(/\.0+$|(?<=\.[0-9])0$/, '')}${suffix}`;
+
   if (tokens < 1000000) {
-    return `${(tokens / 1000).toFixed(1)}K`;
+    return formatCompact(tokens / 1000, 'K');
   }
 
   if (tokens < 1000000000) {
-    return `${(tokens / 1000000).toFixed(1)}M`;
+    return formatCompact(tokens / 1000000, 'M');
   }
 
-  return `${(tokens / 1000000000).toFixed(1)}B`;
+  return formatCompact(tokens / 1000000000, 'B');
 }
 
 /**

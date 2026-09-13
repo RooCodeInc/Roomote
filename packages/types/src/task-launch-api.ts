@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { launchCodingHarnesses, REASONING_EFFORT_VALUES } from './task-runs';
 import { computeProviders } from './compute-providers';
-import { ALL_REPOSITORIES } from './constants';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from './constants';
 import { gitBranchNameSchema } from './git-ref';
 import {
   appendEnvironmentDefinitionGuidance,
@@ -30,9 +30,6 @@ export type TaskTypePromptAndWorkspacePayloadResult = {
   visibleInTranscript?: boolean;
 };
 
-export const ENVIRONMENT_DEFINITION_REPOSITORY_SELECTION_REQUIRED_ERROR =
-  'environment-definition tasks require at least one selected repository';
-
 export class TaskTypePromptAndWorkspacePayloadError extends Error {
   constructor(message: string) {
     super(message);
@@ -54,26 +51,28 @@ export function buildTaskTypePromptAndWorkspacePayload({
   setupGuidance?: string | null | undefined;
 }): TaskTypePromptAndWorkspacePayloadResult {
   const visibleInTranscript = type === 'standard' ? undefined : false;
-
-  if (
-    type === 'environment-definition' &&
-    (!repositoryFullNames || repositoryFullNames.length === 0) &&
-    (!repo || repo === ALL_REPOSITORIES)
-  ) {
-    throw new TaskTypePromptAndWorkspacePayloadError(
-      ENVIRONMENT_DEFINITION_REPOSITORY_SELECTION_REQUIRED_ERROR,
-    );
-  }
+  const environmentDefinitionRepositories =
+    repositoryFullNames && repositoryFullNames.length > 0
+      ? repositoryFullNames
+      : repo && repo !== ALL_REPOSITORIES && repo !== NO_REPOSITORIES
+        ? [repo]
+        : [];
 
   const workspacePayload =
-    repositoryFullNames && repositoryFullNames.length > 0
-      ? buildEnvironmentDefinitionWorkspacePayload(repositoryFullNames)
-      : { repo: repo ?? '' };
+    type === 'environment-definition'
+      ? buildEnvironmentDefinitionWorkspacePayload(
+          environmentDefinitionRepositories,
+        )
+      : repositoryFullNames && repositoryFullNames.length > 0
+        ? buildEnvironmentDefinitionWorkspacePayload(repositoryFullNames)
+        : { repo: repo ?? '' };
 
   if (type === 'environment-definition') {
     return {
       taskPrompt: appendEnvironmentDefinitionGuidance(
-        buildCreateEnvironmentDefinitionPrompt(repositoryFullNames ?? []),
+        buildCreateEnvironmentDefinitionPrompt(
+          environmentDefinitionRepositories,
+        ),
         [setupGuidance?.trim(), prompt?.trim()]
           .filter((value): value is string => Boolean(value))
           .join('\n\n'),
@@ -131,11 +130,8 @@ export const taskLaunchRequestSchema = z.object({
   trigger: z.enum(['onboarding', 'scheduled']).optional(),
   notifySlack: z.boolean().optional(),
   /**
-   * When true and the launch is authenticated as a task run, the platform
-   * delivers a message into that launching run's session when the spawned
-   * task's run settles (completes, fails, is canceled, or goes idle). Lets a
-   * parent task consume a spawned task's outcome deterministically instead of
-   * polling. Standard launches only.
+   * Deprecated compatibility input. Task-run-authenticated launches are
+   * rejected, and top-level user launches ignore this value.
    */
   notifyOnSettle: z.boolean().optional(),
   /** Pull request number for `pr-review` launches; `repo` names its repository. */

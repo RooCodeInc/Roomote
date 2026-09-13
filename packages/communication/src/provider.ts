@@ -40,6 +40,12 @@ export type CommunicationPostMessageInput = {
   /** Stable logical-send key used by providers that support deduplication. */
   idempotencyKey?: string;
   text?: string;
+  /** Provider-native HTML with `text` retained for splitting and bookkeeping. */
+  htmlText?: string;
+  /** Footer text kept separate for providers with native footer presentation. */
+  footerText?: string;
+  /** Provider-native footer HTML with `footerText` retained as source text. */
+  footerHtmlText?: string;
   blocks?: unknown[];
   images?: Array<{ url: string; altText: string; contentType?: string }>;
   serviceUrl?: string;
@@ -92,7 +98,8 @@ export type CommunicationOperation =
   | 'postMessage'
   | 'fetchThreadMessages'
   | 'fetchChannelMessages'
-  | 'addReaction';
+  | 'addReaction'
+  | 'removeReaction';
 
 export class UnsupportedCommunicationOperationError extends Error {
   readonly code = 'communication_operation_unsupported' as const;

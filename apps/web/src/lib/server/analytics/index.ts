@@ -107,6 +107,7 @@ function getAnalyticsDetailsColumns(
         { key: 'provider', label: 'Provider' },
         { key: 'model', label: 'Model' },
         { key: 'cost', label: 'Cost (USD)' },
+        { key: 'tokens', label: 'Tokens' },
         { key: 'taskTitle', label: 'Task' },
       ];
   }
@@ -301,7 +302,10 @@ export async function getAnalyticsDetails(
   },
   now: Date = new Date(),
 ): Promise<AnalyticsDetailsResponse> {
-  const metric = resolveAnalyticsMetric(input.object, input.metric);
+  const metric =
+    input.object === 'costs' && input.metric === 'tokens'
+      ? 'tokens'
+      : resolveAnalyticsMetric(input.object, input.metric);
   const rows = await getAnalyticsRows(
     auth,
     input.object,
@@ -340,6 +344,13 @@ export async function getAnalyticsDetails(
     seriesKey: input.seriesKey,
     columns: getAnalyticsDetailsColumns(input.object, metric),
     rows: matchingRows.map((row) => row.details),
-    total: matchingRows.reduce((sum, row) => sum + row.value, 0),
+    total: matchingRows.reduce(
+      (sum, row) =>
+        sum +
+        (input.object === 'costs' && metric === 'tokens'
+          ? (row.tokens ?? 0)
+          : row.value),
+      0,
+    ),
   };
 }

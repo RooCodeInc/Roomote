@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   replace: vi.fn(),
 }));
 const hooks = vi.hoisted(() => ({
+  useAnalyticsDetails: vi.fn(),
   useAnalyticsOverview: vi.fn(),
 }));
 
@@ -48,11 +49,7 @@ vi.mock('@/hooks/useDelayedRefetchLoading', () => ({
 }));
 
 vi.mock('@/hooks/analytics', () => ({
-  useAnalyticsDetails: () => ({
-    data: null,
-    isLoading: false,
-    isError: false,
-  }),
+  useAnalyticsDetails: hooks.useAnalyticsDetails,
   useAnalyticsOverview: hooks.useAnalyticsOverview,
   usePullRequestAnalyticsOverview: () => ({
     data: {
@@ -110,11 +107,38 @@ vi.mock('./AnalyticsControlRow', () => ({
 }));
 
 vi.mock('./AnalyticsStackedBarChart', () => ({
-  AnalyticsStackedBarChart: () => <div>chart</div>,
+  AnalyticsStackedBarChart: ({
+    onSelectSegment,
+  }: {
+    onSelectSegment: (selection: {
+      bucketKey: string;
+      bucketLabel: string;
+      seriesKey: string;
+      seriesLabel: string;
+      metric: 'tokens';
+    }) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() =>
+        onSelectSegment({
+          bucketKey: '2026-03-27',
+          bucketLabel: 'Mar 27',
+          seriesKey: 'openai',
+          seriesLabel: 'OpenAI',
+          metric: 'tokens',
+        })
+      }
+    >
+      Select token segment
+    </button>
+  ),
 }));
 
 vi.mock('./AnalyticsDetailsDialog', () => ({
-  AnalyticsDetailsDialog: () => null,
+  AnalyticsDetailsDialog: ({ metric }: { metric: string }) => (
+    <div data-testid="details-metric">{metric}</div>
+  ),
 }));
 
 vi.mock('./PullRequestSummaryCards', () => ({
@@ -129,6 +153,12 @@ describe('Analytics', () => {
     state.push.mockReset();
     state.replace.mockReset();
     hooks.useAnalyticsOverview.mockReset();
+    hooks.useAnalyticsDetails.mockReset();
+    hooks.useAnalyticsDetails.mockReturnValue({
+      data: null,
+      isLoading: false,
+      isError: false,
+    });
     hooks.useAnalyticsOverview.mockReturnValue({
       data: {
         chart: EMPTY_CHART,
@@ -171,6 +201,23 @@ describe('Analytics', () => {
 
     expect(screen.getByTestId('active-item')).toHaveTextContent('costs');
     expect(screen.getByRole('heading', { name: 'Costs' })).toBeInTheDocument();
+  });
+
+  it('uses the clicked token metric for cost details', () => {
+    render(<Analytics />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Select token segment' }),
+    );
+
+    expect(hooks.useAnalyticsDetails).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        object: 'costs',
+        metric: 'tokens',
+        seriesKey: 'openai',
+      }),
+    );
+    expect(screen.getByTestId('details-metric')).toHaveTextContent('tokens');
   });
 
   it('opens the canonical Costs URL from Tasks analytics', () => {

@@ -25,6 +25,23 @@ import {
 } from './setup-new';
 
 describe('setup-session metadata', () => {
+  it('adds pending discovery only to new sessions and preserves continuation on resume', () => {
+    const session = createSetupNewSetupSession({ sessionId: 'session' });
+    expect(
+      normalizeSetupNewSetupSession(session)?.integrationDiscoveryCompletedAt,
+    ).toBeNull();
+    const completedAt = '2026-09-09T12:00:00.000Z';
+    expect(
+      normalizeSetupNewSetupSession({
+        ...session,
+        integrationDiscoveryCompletedAt: completedAt,
+      })?.integrationDiscoveryCompletedAt,
+    ).toBe(completedAt);
+    const { integrationDiscoveryCompletedAt: _, ...legacy } = session;
+    expect(normalizeSetupNewSetupSession(legacy)).not.toHaveProperty(
+      'integrationDiscoveryCompletedAt',
+    );
+  });
   it('normalizes state without setup-session metadata to null', () => {
     const state = normalizeSetupNewState({});
 

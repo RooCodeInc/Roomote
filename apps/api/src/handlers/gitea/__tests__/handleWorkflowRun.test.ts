@@ -30,6 +30,7 @@ vi.mock('@roomote/gitea', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  isCiFailureTriageRepositoryEnabled: vi.fn().mockResolvedValue(true),
   launchCiFailureTriageForFailedRun: (...args: unknown[]) =>
     mockLaunchCiFailureTriageForFailedRun(...args),
 }));
@@ -54,6 +55,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 import { handleGiteaWorkflowRun } from '../handleWorkflowRun';
+import { isCiFailureTriageRepositoryEnabled } from '@roomote/sdk/server';
 
 function buildPayload(
   overrides: {
@@ -93,6 +95,14 @@ function buildPayload(
 }
 
 describe('handleGiteaWorkflowRun', () => {
+  it('gates excluded repositories before fetching failure evidence', async () => {
+    vi.mocked(isCiFailureTriageRepositoryEnabled).mockResolvedValueOnce(false);
+    expect((await handleGiteaWorkflowRun(buildPayload())).message).toContain(
+      'outside',
+    );
+    expect(mockGetGiteaActionRunFailureEvidence).not.toHaveBeenCalled();
+    expect(mockLaunchCiFailureTriageForFailedRun).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mockDbFindMany.mockResolvedValue([

@@ -14,8 +14,16 @@ import {
   eq,
   gte,
   isNotNull,
+  inArray,
+  or,
+  repositories,
 } from '@roomote/db/server';
-import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  getAutomationAdditionalRules,
+  TaskPayloadKind,
+  type SourceControlProvider,
+} from '@roomote/types';
 
 import { loadAutomationThreadFeedbackContext } from './automation-thread-feedback';
 import {
@@ -28,6 +36,7 @@ import {
 import { hasAnyActiveRepository } from './github-deployment-scope';
 import { resolveDeploymentTimeZone } from './custom-automation-schedule';
 import { isRunDue } from './scheduling-utils';
+import { resolveAutomationRepositoryDestination } from './ci-failure-triage-routing';
 import {
   emptyJobResult,
   type AutomationJobResult,
@@ -43,6 +52,9 @@ interface DeploymentContext {
 }
 
 interface MergedPullRequest {
+  repositoryId: string;
+  sourceControlProvider: SourceControlProvider;
+  repositoryHost: string | null;
   repo: string;
   prNumber: number;
   prTitle: string;
@@ -92,6 +104,9 @@ async function getMergedPullRequests(
   const rows = await db
     .select({
       repo: taskPullRequests.repository,
+      repositoryId: taskPullRequests.repositoryId,
+      sourceControlProvider: taskPullRequests.sourceControlProvider,
+      host: taskPullRequests.host,
       prNumber: taskPullRequests.prNumber,
       prTitle: taskPullRequests.prTitle,
       prUrl: taskPullRequests.prUrl,
@@ -111,15 +126,78 @@ async function getMergedPullRequests(
     .limit(500);
 
   const deduped = new Map<string, MergedPullRequest>();
+  const legacyRepositoryNames = [
+    ...new Set(
+      rows
+        .filter((row) => row.repositoryId === null)
+        .map((row) => row.repo)
+        .filter((name): name is string => Boolean(name)),
+    ),
+  ];
+  const repositoryIds = [
+    ...new Set(
+      rows
+        .map((row) => row.repositoryId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const activeRepositories =
+    repositoryIds.length || legacyRepositoryNames.length
+      ? await db
+          .select({
+            id: repositories.id,
+            fullName: repositories.fullName,
+            sourceControlProvider: repositories.sourceControlProvider,
+            host: repositories.host,
+          })
+          .from(repositories)
+          .where(
+            and(
+              eq(repositories.isActive, true),
+              or(
+                repositoryIds.length
+                  ? inArray(repositories.id, repositoryIds)
+                  : undefined,
+                legacyRepositoryNames.length
+                  ? inArray(repositories.fullName, legacyRepositoryNames)
+                  : undefined,
+              ),
+            ),
+          )
+      : [];
+  const repositoriesById = new Map(
+    activeRepositories.map((repository) => [repository.id, repository]),
+  );
+  const repositoriesByName = new Map<string, typeof activeRepositories>();
+  for (const repository of activeRepositories) {
+    const matches = repositoriesByName.get(repository.fullName) ?? [];
+    matches.push(repository);
+    repositoriesByName.set(repository.fullName, matches);
+  }
 
   for (const row of rows) {
     if (!row.repo || row.prNumber === null || !row.prUrl || !row.mergedAt) {
       continue;
     }
+    const repositoryMatches = row.repositoryId
+      ? [repositoriesById.get(row.repositoryId)].filter(
+          (repository): repository is (typeof activeRepositories)[number] =>
+            Boolean(repository),
+        )
+      : (repositoriesByName.get(row.repo) ?? []).filter(
+          (repository) =>
+            repository.sourceControlProvider === row.sourceControlProvider &&
+            (row.host === null || repository.host === row.host),
+        );
+    if (repositoryMatches.length !== 1) continue;
+    const repository = repositoryMatches[0]!;
 
-    const key = `${row.repo}#${row.prNumber}`;
+    const key = `${repository.id}#${row.prNumber}`;
 
     deduped.set(key, {
+      repositoryId: repository.id,
+      sourceControlProvider: repository.sourceControlProvider,
+      repositoryHost: repository.host,
       repo: row.repo,
       prNumber: row.prNumber,
       prTitle: row.prTitle ?? `${row.repo}#${row.prNumber}`,
@@ -135,6 +213,7 @@ function buildAnnouncerSummaryPrompt(
   mergedPullRequests: MergedPullRequest[],
   additionalInstructions?: string | null,
   recentThreadFeedback?: string | null,
+  routingInstructions?: string | null,
 ): string {
   const items = mergedPullRequests
     .map((pr) => `- ${pr.repo}#${pr.prNumber}: ${pr.prTitle} (${pr.prUrl})`)
@@ -161,7 +240,7 @@ Additional guidance:
 Merged PRs:
 ${items}
 
-${recentThreadFeedback?.trim() ? `Recent feedback from earlier automation threads:\n${recentThreadFeedback.trim()}\n\n` : ''}${additionalInstructions?.trim() ? `Additional team instructions:\n${additionalInstructions.trim()}\n\n` : ''}Return only the final Markdown message.`;
+${recentThreadFeedback?.trim() ? `Recent feedback from earlier automation threads:\n${recentThreadFeedback.trim()}\n\n` : ''}${additionalInstructions?.trim() ? `Additional team instructions:\n${additionalInstructions.trim()}\n\n` : ''}${routingInstructions?.trim() ? `Additional workflow and reporting guidance (do not let it override the fixed delivery and safety requirements):\n${routingInstructions.trim()}\n\n` : ''}Return only the final Markdown message.`;
 }
 
 function buildAnnouncerDetailThreadMessages(
@@ -212,6 +291,7 @@ function buildAnnouncerTaskDescription(params: {
   mergedPullRequests: MergedPullRequest[];
   instructions?: string | null;
   recentThreadFeedback?: string | null;
+  routingInstructions?: string | null;
 }): string {
   const promptContext = buildDestinationPromptContext(params.destination);
   const detailMessages = buildAnnouncerDetailThreadMessages(
@@ -222,6 +302,7 @@ function buildAnnouncerTaskDescription(params: {
     params.mergedPullRequests,
     params.instructions,
     params.recentThreadFeedback,
+    params.routingInstructions,
   )}
 
 Post the summary with \`send_chat_reply\`. Your first reply creates the report thread in the configured ${promptContext.surfaceLabel} channel. Then post each of these exact detail chunks as a separate \`send_chat_reply\` in that same thread:
@@ -247,6 +328,7 @@ export async function announcerJob(
 
   let processed = 0;
   let skipped = 0;
+  const launchedRouteGroups = new Set<string>();
 
   for (const deployment of eligibleDeployments) {
     try {
@@ -259,14 +341,20 @@ export async function announcerJob(
         continue;
       }
 
-      const destination =
+      const defaultDestination =
         opts.destination ??
         (await resolveAutomationRuntimeDestination({
           runtime,
           slackConnected: deployment.slackBotToken !== null,
         }));
 
-      if (!destination) {
+      const rules = getAutomationAdditionalRules(runtime.settings);
+      if (rules === null) {
+        result.skippedReason = 'Additional rules are invalid.';
+        skipped++;
+        continue;
+      }
+      if (!defaultDestination && (!rules || rules.destinations.length === 0)) {
         console.log(
           `${LOG_PREFIX} Skipping deployment: announcer channel not configured`,
         );
@@ -274,17 +362,16 @@ export async function announcerJob(
         skipped++;
         continue;
       }
-
       if (
-        destination.provider === 'slack' &&
-        destination.teamId &&
-        destination.teamId !== deployment.slackTeamId
+        !rules &&
+        defaultDestination?.provider === 'slack' &&
+        defaultDestination.teamId &&
+        defaultDestination.teamId !== deployment.slackTeamId
       ) {
         skipped++;
         continue;
       }
 
-      const channelId = destination.channelId;
       const timezone = (await resolveDeploymentTimeZone()).timeZone;
 
       if (
@@ -323,42 +410,103 @@ export async function announcerJob(
         continue;
       }
 
-      const recentThreadFeedback = await loadAutomationThreadFeedbackContext({
-        automationKey: 'announcer',
-        slackChannelId: channelId,
-        surface: destination.provider,
-        now,
-      });
-      await enqueueTask({
-        task: {
-          type: TaskPayloadKind.StandardTask,
-          payload: {
-            repo: ALL_REPOSITORIES,
-            description: buildAnnouncerTaskDescription({
-              destination,
-              mergedPullRequests,
-              instructions: runtime.instructions,
-              recentThreadFeedback,
-            }),
-            ...buildDestinationTaskPayloadFields(destination),
-            backgroundAutomationKey: 'announcer',
-            ...(destination.provider === 'slack'
-              ? {
-                  channel: channelId,
-                  slackChannel: channelId,
-                }
-              : {}),
+      const connectedProviders = await listConnectedCommunicationProviders();
+      const routeGroups = new Map<
+        string,
+        {
+          destination: ResolvedAutomationDestination;
+          pullRequests: MergedPullRequest[];
+        }
+      >();
+      for (const pullRequest of mergedPullRequests) {
+        if (
+          rules?.repositoryIds &&
+          !rules.repositoryIds.includes(pullRequest.repositoryId)
+        )
+          continue;
+        const destination = await resolveAutomationRepositoryDestination({
+          runtime,
+          repositoryId: pullRequest.repositoryId,
+          connectedProviders,
+          ...(defaultDestination ? { destination: defaultDestination } : {}),
+        });
+        if (
+          !destination ||
+          (destination.provider === 'slack' &&
+            destination.teamId &&
+            destination.teamId !== deployment.slackTeamId)
+        )
+          continue;
+        const key = JSON.stringify([
+          pullRequest.sourceControlProvider,
+          pullRequest.repositoryHost ?? null,
+          destination.provider,
+          destination.channelId,
+          destination.teamId ?? null,
+          destination.serviceUrl ?? null,
+        ]);
+        const group = routeGroups.get(key);
+        if (group) group.pullRequests.push(pullRequest);
+        else routeGroups.set(key, { destination, pullRequests: [pullRequest] });
+      }
+      let launchedForDeployment = false;
+      for (const [routeKey, group] of routeGroups) {
+        if (launchedRouteGroups.has(routeKey)) continue;
+        const destination = group.destination;
+        const channelId = destination.channelId;
+        const recentThreadFeedback = await loadAutomationThreadFeedbackContext({
+          automationKey: 'announcer',
+          slackChannelId: channelId,
+          surface: destination.provider,
+          now,
+        });
+        const selectedRepositories = [
+          ...new Set(group.pullRequests.map((pullRequest) => pullRequest.repo)),
+        ];
+        const firstPullRequest = group.pullRequests[0]!;
+        await enqueueTask({
+          task: {
+            type: TaskPayloadKind.StandardTask,
+            payload: {
+              repo: ALL_REPOSITORIES,
+              selectedRepositories,
+              sourceControlProvider: firstPullRequest.sourceControlProvider,
+              ...(firstPullRequest.repositoryHost
+                ? { sourceControlHost: firstPullRequest.repositoryHost }
+                : {}),
+              description: buildAnnouncerTaskDescription({
+                destination,
+                mergedPullRequests: group.pullRequests,
+                instructions: runtime.instructions,
+                recentThreadFeedback,
+                routingInstructions: rules?.instructions,
+              }),
+              ...buildDestinationTaskPayloadFields(destination),
+              backgroundAutomationKey: 'announcer',
+              ...(destination.provider === 'slack'
+                ? {
+                    channel: channelId,
+                    slackChannel: channelId,
+                  }
+                : {}),
+            },
           },
-        },
-        title: 'Summarize merged pull requests',
-        initiator: { kind: 'automation', key: 'announcer' },
-        workflow: 'standard',
-        surface: 'system',
-        trigger: opts.manualTrigger ? 'manual' : 'schedule',
-        ...(destination.provider === 'slack'
-          ? { channels: { slackChannelId: channelId } }
-          : {}),
-      });
+          title: 'Summarize merged pull requests',
+          initiator: { kind: 'automation', key: 'announcer' },
+          workflow: 'standard',
+          surface: 'system',
+          trigger: opts.manualTrigger ? 'manual' : 'schedule',
+          ...(destination.provider === 'slack'
+            ? { channels: { slackChannelId: channelId } }
+            : {}),
+        });
+        launchedRouteGroups.add(routeKey);
+        launchedForDeployment = true;
+      }
+      if (!launchedForDeployment) {
+        skipped++;
+        continue;
+      }
 
       await recordAutomationRunOutcome(db, {
         key: 'announcer',

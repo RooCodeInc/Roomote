@@ -391,32 +391,6 @@ export async function updateWorkspaceRoutingSettingsCommand(
   return settings;
 }
 
-/** Member workspace selection intentionally exposes no configuration or state. */
-export async function getAvailableEnvironmentsCommand(
-  _auth: UserAuthSuccess,
-  input?: { repository?: string },
-): Promise<Array<{ id: string; name: string }>> {
-  const envs = await db
-    .select({
-      id: environments.id,
-      name: environments.name,
-      config: environments.config,
-    })
-    .from(environments)
-    .where(and(buildOwnershipFilter(), eq(environments.isEval, false)))
-    .orderBy(desc(environments.updatedAt));
-
-  return envs
-    .filter((environment) =>
-      input?.repository
-        ? (environment.config as EnvironmentConfig).repositories?.some(
-            (repository) => repository.repository === input.repository,
-          )
-        : true,
-    )
-    .map(({ id, name }) => ({ id, name }));
-}
-
 export async function getEnvironmentNamesByIdsCommand(
   auth: UserAuthSuccess,
   input: { ids: string[] },
@@ -874,10 +848,6 @@ export async function startEnvironmentDefinitionTaskCommand(
 ) {
   assertAdmin(auth);
 
-  if (input.repositoryIds.length === 0) {
-    throw new Error('Select at least one repository before starting setup.');
-  }
-
   const { userId } = auth;
   const { selectedRepositories } = await resolveSelectedRepositories(
     auth,
@@ -920,9 +890,14 @@ export async function startEnvironmentDefinitionTaskCommand(
     // environment-setup skill bootstraps them with an initial commit, so the
     // prompt flags which selected repositories are empty. Non-GitHub repos
     // never appear in the empty-state map and are treated as non-empty.
-    const emptyStates = await GitHub.getRepositoryEmptyStates({
-      repositoryIds: selectedRepositories.map((repository) => repository.id),
-    });
+    const emptyStates =
+      selectedRepositories.length > 0
+        ? await GitHub.getRepositoryEmptyStates({
+            repositoryIds: selectedRepositories.map(
+              (repository) => repository.id,
+            ),
+          })
+        : new Map<string, boolean>();
 
     const emptyRepositoryFullNames = selectedRepositories
       .filter((repository) => emptyStates.get(repository.id) === true)

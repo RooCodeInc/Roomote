@@ -55,6 +55,10 @@ function mergeResultForUpdatedFields(
       updates.therapistMode === undefined
         ? mergedPreferences.therapistMode
         : result.therapistMode,
+    resultsPageEnabled:
+      updates.resultsPageEnabled === undefined
+        ? mergedPreferences.resultsPageEnabled
+        : result.resultsPageEnabled,
   };
 }
 
@@ -90,6 +94,12 @@ function rollbackUpdatedFields(
       mergedPreferences.therapistMode === optimisticPreferences.therapistMode
         ? previousPreferences.therapistMode
         : mergedPreferences.therapistMode,
+    resultsPageEnabled:
+      updates.resultsPageEnabled !== undefined &&
+      mergedPreferences.resultsPageEnabled ===
+        optimisticPreferences.resultsPageEnabled
+        ? previousPreferences.resultsPageEnabled
+        : mergedPreferences.resultsPageEnabled,
   };
 }
 

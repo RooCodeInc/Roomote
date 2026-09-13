@@ -73,6 +73,8 @@ async function runMayReportForRepository(
   }
 
   switch (workspace.type) {
+    case 'no_repositories':
+      return false;
     case 'repository':
       return identityMatches && workspace.repo === repository.fullName;
     case 'repository_set':

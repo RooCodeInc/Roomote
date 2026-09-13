@@ -150,6 +150,7 @@ vi.mock('../../monitoring/worker-release-metadata', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
+  FAST_ONLY_PACKAGED_SKILL_INVOCATIONS: ['doctor'],
   PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS: [
     'capture-visual-proof',
     'create-draft-pr',
@@ -3567,6 +3568,88 @@ describe('runTask', () => {
     );
   });
 
+  it('assembles automatic Docker startup guidance into developer instructions', async () => {
+    const { buildSandboxInstruction } = await vi.importActual<
+      typeof import('../sandbox-instruction')
+    >('../sandbox-instruction');
+    buildSandboxInstructionMock.mockImplementationOnce(
+      buildSandboxInstruction as never,
+    );
+
+    await runTask({
+      taskRun: {
+        id: 1516,
+        taskId: 'task-1516',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        payload: {},
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt: '',
+      harnessInstructions: undefined,
+      agentInstructions: undefined,
+      workspaceReadinessWarnings: [
+        'Environment setup is still running in the background. Docker projects may still be building or waiting for health checks, and repository setup commands may still be installing dependencies or preparing services.',
+      ],
+      environmentConfig: {
+        name: 'Docker environment',
+        repositories: [{ repository: 'owner/repo' }],
+        docker_projects: [
+          {
+            type: 'compose',
+            name: 'app',
+            repository: 'owner/repo',
+            files: ['compose.yaml'],
+          },
+        ],
+      },
+      backgroundEnvironmentSetup: {
+        hasPendingBackgroundSetup: true,
+        onSettled: vi.fn(),
+      },
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      harnessSessionId: undefined,
+      workerEnv: {
+        authToken: 'cloud-token',
+        roomoteAppUrl: 'https://api.example.test',
+        trpcUrl: 'https://web.example.test',
+        buildUserFacingEnv: vi.fn(() => ({
+          HOME: '/tmp/home',
+          PATH: '/usr/bin',
+        })),
+      } as never,
+    });
+
+    const developerInstructions = createHarnessMock.mock.calls[0]?.[0]
+      ?.developerInstructionsContent as string;
+
+    expect(developerInstructions).toContain('<environment-instructions>');
+    expect(developerInstructions).toContain(
+      'Environment setup from this configuration runs automatically in the background',
+    );
+    expect(developerInstructions).toContain(
+      'Roomote automatically starts configured Docker projects with Docker Compose during environment setup.',
+    );
+    expect(developerInstructions).toContain(
+      'Do not run `docker compose up`, build the projects, or start Docker yourself.',
+    );
+    expect(developerInstructions).toContain(
+      '- app: `/tmp/roomote-docker-projects/roomote-app.log`',
+    );
+    expect(developerInstructions).not.toContain(
+      'were already executed before your task started',
+    );
+  });
+
   it('keeps org-wide instructions in the parent startup prompt only', async () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
@@ -4346,7 +4429,7 @@ describe('runTask', () => {
       expect.objectContaining({
         homeDir: '/tmp/workspace/.roomote-runtime-home',
         sourceHomeDir: '/tmp/home',
-        excludeSkillNames: ['zero'],
+        excludeSkillNames: ['doctor', 'zero'],
       }),
     );
     expect(createHarnessMock).toHaveBeenCalledWith(

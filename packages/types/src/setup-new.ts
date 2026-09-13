@@ -158,6 +158,8 @@ export function isSetupStarterTaskId(
  */
 export type SetupNewSetupSession = {
   workflowVersion: number;
+  /** Missing on pre-discovery sessions; null means the optional conversation is pending. */
+  integrationDiscoveryCompletedAt?: string | null;
   /** Unified (canonical) session ID shown in routes and transcript. */
   sessionId: string;
   startedAt: string;
@@ -177,6 +179,7 @@ export function createSetupNewSetupSession(input: {
     sessionId: input.sessionId,
     startedAt: input.startedAt ?? new Date().toISOString(),
     starterTaskSelection: null,
+    integrationDiscoveryCompletedAt: null,
   };
 }
 
@@ -228,6 +231,15 @@ export function normalizeSetupNewSetupSession(
     sessionId,
     startedAt,
     starterTaskSelection,
+    ...(record.integrationDiscoveryCompletedAt === null
+      ? { integrationDiscoveryCompletedAt: null }
+      : asIsoTimestamp(record.integrationDiscoveryCompletedAt)
+        ? {
+            integrationDiscoveryCompletedAt: asIsoTimestamp(
+              record.integrationDiscoveryCompletedAt,
+            ),
+          }
+        : {}),
   };
 }
 

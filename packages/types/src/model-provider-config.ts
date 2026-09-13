@@ -604,7 +604,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-terra': 'vercel/openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'vercel/openai/gpt-5.6-luna',
       'gemini-3-8-flash': 'vercel/google/gemini-3.8-flash',
-      'deepseek-v4-flash-0731': 'vercel/deepseek/deepseek-v4-flash-0731',
+      'deepseek-v4-1-flash': 'vercel/deepseek/deepseek-v4.1-flash-beta',
       'deepseek-v4-pro-0813': 'vercel/deepseek/deepseek-v4-pro-0813',
       'glm-5-3-flash': 'vercel/zai/glm-5.3-flash',
       'glm-5-3': 'vercel/zai/glm-5.3',
@@ -641,7 +641,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-terra': 'requesty/gpt-5.6-terra@eu',
       'gpt-5-6-luna': 'requesty/gpt-5.6-luna@eu',
       'gemini-3-8-flash': 'requesty/vertex/gemini-3.8-flash',
-      'deepseek-v4-flash-0731': 'requesty/deepseek-v4-flash-0731',
       'glm-5-3-flash': 'requesty/glm-5.3-flash',
       'glm-5-3': 'requesty/glm-5.3',
       'kimi-k3': 'requesty/kimi-k3',
@@ -662,7 +661,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'baseten/moonshotai/Kimi-K2.7-Code',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
-      'deepseek-v4-flash-0731': 'baseten/deepseek-ai/DeepSeek-V4-Flash-0731',
       'deepseek-v4-pro-0813': 'baseten/deepseek-ai/DeepSeek-V4-Pro',
       'glm-5-2': 'baseten/zai-org/GLM-5.2',
       'kimi-k3': 'baseten/moonshotai/Kimi-K3',
@@ -859,8 +857,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-terra': 'opencode/gpt-5.6-terra',
       'gpt-5-6-luna': 'opencode/gpt-5.6-luna',
       'gemini-3-8-flash': 'opencode/gemini-3.8-flash',
-      // Zen serves the dated Flash release under this stable model alias.
-      'deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash',
       'deepseek-v4-pro-0813': 'opencode/deepseek-v4-pro',
       'glm-5-2': 'opencode/glm-5.2',
       'kimi-k3': 'opencode/kimi-k3',
@@ -894,7 +890,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // Go serves a broader catalog; only models in Roomote's central curated
     // recommendation list are suggested here.
     suggestedTaskModels: mapRecommendedTaskModels({
-      'deepseek-v4-flash-0731': 'opencode-go/deepseek-v4-flash',
+      'deepseek-v4-1-flash': 'opencode-go/deepseek-flash',
       'deepseek-v4-pro-0813': 'opencode-go/deepseek-v4-pro',
       'glm-5-3-flash': 'opencode-go/glm-5.3-flash',
       'glm-5-3': 'opencode-go/glm-5.3',
@@ -909,7 +905,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       helper: 'opencode-go/gpt-5.6-luna',
       vision: 'opencode-go/gpt-5.6-luna',
       codeReview: 'opencode-go/minimax-m3',
-      explore: 'opencode-go/deepseek-v4-flash',
+      explore: 'opencode-go/deepseek-flash',
       planning: 'opencode-go/qwen3.8-max',
     },
   },

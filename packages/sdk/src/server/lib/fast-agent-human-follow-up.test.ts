@@ -50,6 +50,7 @@ vi.mock('./fast-agent-parent-event-queue', () => ({
 
 import {
   admitFastAgentHumanFollowUp,
+  admitFastAgentInlineHumanTurn,
   persistFastAgentInlineHumanTurn,
 } from './fast-agent-human-follow-up';
 
@@ -206,6 +207,31 @@ describe('persistFastAgentInlineHumanTurn', () => {
     ).resolves.toBeNull();
     expect(mocks.updateWhere).not.toHaveBeenCalled();
   });
+
+  it('distinguishes a settled message from a fresh admission', async () => {
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: null,
+      discardedAt: new Date(),
+    });
+    await expect(
+      admitFastAgentInlineHumanTurn({ parent, event }),
+    ).resolves.toEqual({ status: 'settled' });
+
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: null,
+      discardedAt: null,
+    });
+    await expect(
+      admitFastAgentInlineHumanTurn({ parent, event }),
+    ).resolves.toEqual({
+      status: 'admitted',
+      turn: { id: 'row-1', eventKey: 'stable-event-key' },
+    });
+  });
 });
 
 describe('admitFastAgentHumanFollowUp', () => {
@@ -236,6 +262,26 @@ describe('admitFastAgentHumanFollowUp', () => {
       durable: { id: 'row-1', eventKey: 'stable-event-key' },
     });
     expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('flags a settled message so the inline turn is skipped', async () => {
+    const turnLock = vi.fn();
+    mocks.acquireTurnLock.mockResolvedValue(turnLock);
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: new Date(),
+      discardedAt: null,
+    });
+
+    await expect(
+      admitFastAgentHumanFollowUp({ parent, event }),
+    ).resolves.toEqual({
+      kind: 'turn',
+      turnLock,
+      durable: null,
+      settled: true,
+    });
   });
 
   it('still runs the turn inline when durable admission cannot be persisted', async () => {

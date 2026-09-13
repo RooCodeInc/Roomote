@@ -194,8 +194,11 @@ export function reconcileCandidate(
           review.commit_id === resolution &&
           review.user.login.toLowerCase() !== pr.user.login.toLowerCase() &&
           review.user.type === 'User' &&
-          ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(
-            review.author_association,
+          // Review association is not repository authority (admins can be CONTRIBUTOR).
+          ['admin', 'maintain', 'write'].includes(
+            api(
+              `repos/${repository}/collaborators/${encodeURIComponent(review.user.login)}/permission`,
+            )?.permission,
           ),
       )
     ) {

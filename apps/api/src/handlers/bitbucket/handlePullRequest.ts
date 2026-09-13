@@ -107,6 +107,9 @@ export async function handleBitbucketPullRequest(
   const repoFullName = payload.repository.full_name;
   const pullRequest = payload.pullrequest;
   const prNumber = getBitbucketPullRequestNumber(pullRequest);
+  const host = toHostFromUrl(
+    pullRequest.links?.html?.href ?? payload.repository.links?.html?.href ?? '',
+  );
 
   if (
     eventName === 'pullrequest:fulfilled' ||
@@ -116,7 +119,9 @@ export async function handleBitbucketPullRequest(
     const merged = isBitbucketPullRequestMerged(pullRequest);
     const status = merged ? ('merged' as const) : ('closed' as const);
 
-    await updateTaskPrStatus('bitbucket', repoFullName, prNumber, status);
+    await updateTaskPrStatus('bitbucket', repoFullName, prNumber, status, {
+      host,
+    });
 
     scheduleSourceControlPullRequestFactSync({
       provider: 'bitbucket',
@@ -169,6 +174,7 @@ export async function handleBitbucketPullRequest(
       repoFullName,
       prNumber,
       pullRequest.draft ? 'draft' : 'open',
+      { host },
     );
   }
 

@@ -15,8 +15,7 @@ import {
   prepareTaskGoalActivation,
   taskRuns,
 } from '@roomote/db/server';
-import { settleSlackLiveTaskCardForRun } from '@roomote/slack';
-import { stopTaskRun } from '@roomote/sdk/server';
+import { settleLiveTaskMessageOnExit, stopTaskRun } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
@@ -92,7 +91,7 @@ export async function startTaskGoalCommand(
 
 export async function cancelTaskRunCommand(
   auth: UserAuthSuccess,
-  input: { taskId: string; runId?: number },
+  input: { taskId: string; runId?: number; terminate?: boolean },
 ): Promise<{ success: true } | { success: false; error: string }> {
   try {
     await requireTaskAccess(auth, input.taskId);
@@ -121,22 +120,20 @@ export async function cancelTaskRunCommand(
 
     if (!isExitedRunStatus(job.status)) {
       if (input.runId !== undefined) {
+        const terminate = input.terminate !== false;
         const result = await stopTaskRun({
           run: job,
           authUserId: auth.userId,
-          terminate: true,
-          allowDirectCancelWithoutSandbox: true,
+          ...(terminate
+            ? { terminate: true, allowDirectCancelWithoutSandbox: true }
+            : {}),
           cancelledBy: { name: auth.name ?? undefined, source: 'web' },
         });
         if (!result.success) {
           return { success: false, error: result.error };
         }
-        if (result.mode === 'direct_cancel') {
-          void settleSlackLiveTaskCardForRun({
-            taskId: job.taskId,
-            payload: job.payload,
-            status: RunStatus.Canceled,
-          });
+        if (terminate && result.mode === 'direct_cancel') {
+          void settleLiveTaskMessageOnExit(job, RunStatus.Canceled);
         }
         return { success: true };
       }
@@ -170,12 +167,8 @@ export async function cancelTaskRunCommand(
       if (canceledRun) {
         void captureTaskSettled(canceledRun.id, 'canceled');
         // A run canceled before any worker claimed it has nobody else to
-        // settle its Slack task card.
-        void settleSlackLiveTaskCardForRun({
-          taskId: job.taskId,
-          payload: job.payload,
-          status: RunStatus.Canceled,
-        });
+        // settle its live task message.
+        void settleLiveTaskMessageOnExit(job, RunStatus.Canceled);
       }
     }
 

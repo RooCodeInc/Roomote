@@ -11,5 +11,3 @@ export * from './useFinishCreateGitHubAppManifest';
 export * from './useFinishCreateGitHubInstallation';
 export * from './useSyncGitHubInstallation';
 export * from './useSyncGitHubInstallations';
-
-export * from './useBranches';

@@ -44,6 +44,7 @@ import { githubPrReviewSync } from './workflows/githubPrReviewSync';
 import { githubPrReviewFollowUp } from './workflows/githubPrReviewFollowUp';
 import { standardTask } from './workflows/standardTask';
 import {
+  buildAgentMailMessageInstructions,
   buildChatProviderMessageInstructions,
   buildSlackMessageInstructions,
   buildTeamsMessageInstructions,
@@ -507,7 +508,9 @@ export async function generatePrompt({
         const chatInstructions =
           nonSlackChatProvider === 'teams'
             ? buildTeamsMessageInstructions()
-            : buildChatProviderMessageInstructions(nonSlackChatProvider);
+            : nonSlackChatProvider === 'agentmail'
+              ? buildAgentMailMessageInstructions()
+              : buildChatProviderMessageInstructions(nonSlackChatProvider);
         result.harnessInstructions = result.harnessInstructions
           ? `${chatInstructions}\n\n${result.harnessInstructions}`
           : chatInstructions;

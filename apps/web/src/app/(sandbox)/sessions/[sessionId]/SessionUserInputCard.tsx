@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react';
 import {
   parseAcpRequestUserInputPayload,
+  SETUP_INTEGRATION_CATEGORIES,
+  getSetupIntegrationQuestionId,
   type AcpRequestUserInputPayload,
 } from '@roomote/types';
 
@@ -356,7 +358,14 @@ export function SessionUserInputCard({
               })
             }
           >
-            Cancel
+            {request.questions.some((question) =>
+              SETUP_INTEGRATION_CATEGORIES.some(
+                (category) =>
+                  getSetupIntegrationQuestionId(category.id) === question.id,
+              ),
+            )
+              ? 'Skip tool setup'
+              : 'Cancel'}
           </Button>
         ) : null}
         <Button

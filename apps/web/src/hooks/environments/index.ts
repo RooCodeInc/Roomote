@@ -1,5 +1,4 @@
 export {
-  useAvailableEnvironments,
   useEnvironments,
   useEnvironment,
   useWorkspaceRoutingSettings,

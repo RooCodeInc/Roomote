@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { RunStatus } from '@roomote/types';
+import { NO_REPOSITORIES, RunStatus } from '@roomote/types';
 
 const useTaskSessionMock = vi.fn();
 const useTaskMessageEnvelopesMock = vi.fn();
@@ -250,6 +250,22 @@ describe('NestedTaskSidePanel', () => {
       refetchInterval: 2_000,
     });
     expect(useSleepInvalidationMock).toHaveBeenCalledWith(baseSession.taskRun);
+  });
+
+  it('hides the workspace badge for no-repository tasks', () => {
+    useTaskSessionMock.mockReturnValue({
+      ...baseSession,
+      taskRun: {
+        ...baseSession.taskRun,
+        payload: { environmentId: NO_REPOSITORIES },
+      },
+    });
+
+    render(<NestedTaskSidePanel taskId="child-1" onClose={vi.fn()} />);
+
+    expect(
+      screen.queryByText(`Workspace ${NO_REPOSITORIES}`),
+    ).not.toBeInTheDocument();
   });
 
   it('switches among tasks from the title dropdown', async () => {

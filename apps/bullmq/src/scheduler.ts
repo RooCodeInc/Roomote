@@ -12,6 +12,8 @@ import {
   securityAuditorJob,
   sentryTriageJob,
   suggesterJob,
+  notifyWebTaskInitiatorOnSettle,
+  type WebTaskInitiatorSettleNotificationJob,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from '@roomote/sdk/server';
@@ -36,6 +38,7 @@ import {
   brainCollectorsJob,
   brainMaintenanceJob,
   sessionsReconcileJob,
+  threadFooterRefreshJob,
 } from './scheduled-jobs';
 
 const QUEUE_NAME = 'scheduled-jobs';
@@ -229,6 +232,9 @@ async function createJobs(queue: Queue): Promise<void> {
   await queue.upsertJobScheduler(ScheduledJobName.SessionsReconcile, {
     every: 60 * 1000,
   });
+  await queue.upsertJobScheduler(ScheduledJobName.ThreadFooterRefresh, {
+    every: 30 * 1000,
+  });
 
   const schedulers = await queue.getJobSchedulers();
   console.log('[createJobs] getJobSchedulers ->', schedulers);
@@ -273,6 +279,21 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return brainMaintenanceJob();
     case ScheduledJobName.SessionsReconcile:
       return sessionsReconcileJob();
+    case ScheduledJobName.ThreadFooterRefresh:
+      return threadFooterRefreshJob();
+    case ScheduledJobName.WebTaskInitiatorSettleNotification: {
+      const data = job.data as WebTaskInitiatorSettleNotificationJob;
+      const result = await notifyWebTaskInitiatorOnSettle(
+        { id: data.runId, taskId: data.taskId },
+        data.status,
+      );
+      if (result === 'failed') {
+        throw new Error(
+          `Personal settlement notification failed for run ${data.runId}`,
+        );
+      }
+      return;
+    }
     case ScheduledJobName.CustomAutomations:
       await customAutomationsJob();
       return;

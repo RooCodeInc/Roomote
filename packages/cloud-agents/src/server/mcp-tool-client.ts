@@ -6,17 +6,18 @@
  * closes the transport.
  */
 
-type McpToolResult = {
-  isError?: boolean;
-  structuredContent?: unknown;
-  content?: Array<{ type?: string; text?: string }>;
-};
+import { parseMcpToolResult } from '@roomote/types';
 
 export class McpToolCallError extends Error {
-  constructor() {
-    // Upstream tool content can contain credentials; do not copy it into logs.
+  readonly upstreamText!: string | null;
+
+  constructor(upstreamText: string | null) {
     super('MCP tool reported an error (isError: true).');
     this.name = 'McpToolCallError';
+    Object.defineProperty(this, 'upstreamText', {
+      value: upstreamText,
+      enumerable: false,
+    });
   }
 }
 
@@ -83,40 +84,11 @@ export async function listMcpTools(options: {
 }
 
 export function extractMcpToolResultPayload(result: unknown): unknown | null {
-  if (!result || typeof result !== 'object') {
-    return result ?? null;
+  const parsed = parseMcpToolResult(result);
+  if (parsed.isError) {
+    throw new McpToolCallError(parsed.errorText);
   }
-
-  const toolResult = result as McpToolResult;
-
-  if (
-    'structuredContent' in toolResult &&
-    toolResult.structuredContent != null
-  ) {
-    return toolResult.structuredContent;
-  }
-
-  if ('content' in toolResult && Array.isArray(toolResult.content)) {
-    const textPart = toolResult.content.find(
-      (part: {
-        type?: string;
-        text?: string;
-      }): part is { type: 'text'; text: string } =>
-        part.type === 'text' && typeof part.text === 'string',
-    );
-
-    if (!textPart) {
-      return toolResult.content;
-    }
-
-    try {
-      return JSON.parse(textPart.text);
-    } catch {
-      return textPart.text;
-    }
-  }
-
-  return result;
+  return parsed.payload;
 }
 
 /**
@@ -160,13 +132,6 @@ export async function callMcpTool(options: {
       toolCallId: options.toolCallId ?? `mcp-tool-call:${options.toolName}`,
       messages: [],
     });
-    if (
-      result &&
-      typeof result === 'object' &&
-      (result as McpToolResult).isError === true
-    ) {
-      throw new McpToolCallError();
-    }
     return extractMcpToolResultPayload(result);
   } finally {
     await client.close().catch(() => undefined);

@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
   telegramEditMessage: vi.fn(),
+  telegramEditForumTopic: vi.fn(),
+  telegramResolveForumTopicIcon: vi.fn(),
   telegramTyping: vi.fn(),
   createDiscordProvider: vi.fn(),
   discordTyping: vi.fn(),
@@ -16,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   deliverVideos: vi.fn(),
   slackUpdateMessage: vi.fn(),
   admitHumanFollowUp: vi.fn(),
-  persistInline: vi.fn(),
+  admitInline: vi.fn(),
   acquireTurnLock: vi.fn(),
   answerQuestion: vi.fn(),
   resolveLinearClient: vi.fn(),
@@ -41,7 +43,11 @@ vi.mock('@roomote/slack', () => ({
   getSlackThreadReplyFooterMessageTs: vi.fn(async () => null),
   postSlackThreadMessageWithFooterText: mocks.slackPostThreadMessage,
   withSlackThreadReplyFooterLock: vi.fn(
-    async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
+    async ({
+      fn,
+    }: {
+      fn: (assertLock: () => Promise<void>) => Promise<unknown>;
+    }) => fn(async () => {}),
   ),
   ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID: 'quote',
   SlackNotifier: vi.fn(function () {
@@ -93,9 +99,13 @@ vi.mock('@roomote/cloud-agents/server', async (importOriginal) => ({
 
 vi.mock('./fast-agent-human-follow-up', () => ({
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
-  persistFastAgentInlineHumanTurn: mocks.persistInline,
+  admitFastAgentInlineHumanTurn: mocks.admitInline,
 }));
 
+import {
+  FastAgentDurableRetryScheduledError,
+  type FastAgentTurnLockHandle,
+} from '@roomote/cloud-agents/server';
 import {
   and,
   db,
@@ -110,8 +120,10 @@ import {
 import {
   buildFastAgentSurfaceReplyDelivery,
   continueFastAgentSurfaceReply,
+  continueFastAgentSurfaceReplyWithLock,
   queueFastAgentSurfaceReply,
 } from './fast-agent-surface-reply';
+import { FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS } from './fast-agent-telegram-activity';
 
 async function createConversation(input: {
   userId: string;
@@ -146,12 +158,14 @@ async function createConversation(input: {
 describe('buildFastAgentSurfaceReplyDelivery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.telegramResolveForumTopicIcon.mockResolvedValue(undefined);
     mocks.teamsPostMessage.mockResolvedValue({
       provider: 'teams',
       channelId: 'teams-channel-1',
       messageId: 'teams-message-1',
     });
     mocks.createTeamsProvider.mockResolvedValue({
+      provider: 'teams',
       postMessage: mocks.teamsPostMessage,
       updateMessage: mocks.teamsUpdateMessage,
     });
@@ -162,9 +176,13 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       lastTextMessageId: 'telegram-message-2',
     });
     mocks.createTelegramProvider.mockResolvedValue({
+      provider: 'telegram',
       postMessage: mocks.telegramPostMessage,
       editMessageText: mocks.telegramEditMessage,
+      editForumTopic: mocks.telegramEditForumTopic,
+      resolveForumTopicIconCustomEmojiId: mocks.telegramResolveForumTopicIcon,
       sendChatAction: mocks.telegramTyping,
+      sendRichMessageDraft: mocks.telegramTyping,
     });
     mocks.createDiscordProvider.mockResolvedValue({
       triggerTyping: mocks.discordTyping,
@@ -208,10 +226,19 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       try {
         delivery!.adapter.activity!.start();
-        await vi.advanceTimersByTimeAsync(0);
-        expect(typing).toHaveBeenCalledWith(replyTarget);
         await vi.advanceTimersByTimeAsync(
-          surface === 'discord' ? 8_000 : 4_000,
+          surface === 'telegram' ? FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS : 0,
+        );
+        expect(typing).toHaveBeenCalledWith(
+          surface === 'telegram'
+            ? expect.objectContaining({
+                ...replyTarget,
+                draftId: expect.any(Number),
+              })
+            : replyTarget,
+        );
+        await vi.advanceTimersByTimeAsync(
+          surface === 'discord' ? 8_000 : 25_000,
         );
         expect(typing).toHaveBeenCalledTimes(2);
         await delivery!.adapter.activity!.settle({ keepProcessing: true });
@@ -223,6 +250,123 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       }
     },
   );
+
+  it('streams a private Telegram reply through its native draft before final delivery', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      replyTarget: { channelId: '123', threadId: '77' },
+    });
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: null,
+      question: 'Explain this',
+      currentMessageId: '42',
+    });
+    const adapter = delivery!.adapter;
+    expect(adapter.createReplyStream).toBeTypeOf('function');
+    expect(adapter.replyStreamStartDelayMs).toBe(0);
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      adapter.activity!.start();
+      await vi.advanceTimersByTimeAsync(0);
+      const stream = adapter.createReplyStream!();
+      await stream.append('Partial answer');
+      await vi.advanceTimersByTimeAsync(800);
+      expect(mocks.telegramTyping).toHaveBeenLastCalledWith(
+        expect.objectContaining({ threadId: '77', text: 'Partial answer' }),
+      );
+      await expect(
+        stream.finish({ purpose: 'closeout', message: 'Final answer' }),
+      ).resolves.toEqual({ messageId: 'telegram-message-2' });
+      expect(mocks.telegramPostMessage).toHaveBeenCalled();
+      await adapter.activity!.settle();
+    } finally {
+      await adapter.activity!.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not offer Telegram draft streaming in groups', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      replyTarget: { channelId: '-100123', threadId: '77' },
+    });
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: null,
+      question: 'Explain this',
+    });
+
+    expect(delivery!.adapter.createReplyStream).toBeUndefined();
+  });
+
+  it('syncs generated titles to a managed Telegram Fast topic', async () => {
+    mocks.telegramResolveForumTopicIcon.mockResolvedValue('bug-icon');
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      title: 'Fix generated Fast title',
+      replyTarget: { channelId: 'telegram-chat', threadId: '77' },
+    });
+    await db.insert(fastAgentProviderMessages).values({
+      conversationId: conversation.id,
+      provider: 'telegram',
+      workspaceId: conversation.workspaceId,
+      channelId: 'telegram-chat',
+      threadId: '77',
+      messageId: '77',
+    });
+
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Matt',
+      question: 'Start here',
+      currentMessageId: '78',
+    });
+    delivery!.adapter.activity?.updateTitle?.('Fix generated Fast title', {
+      iconEmoji: '🦠',
+    });
+    await delivery!.adapter.activity?.dispose();
+
+    expect(mocks.telegramEditForumTopic).toHaveBeenCalledWith({
+      channelId: 'telegram-chat',
+      threadId: '77',
+      name: 'Fix generated Fast title',
+      iconCustomEmojiId: 'bug-icon',
+    });
+    expect(mocks.telegramResolveForumTopicIcon).toHaveBeenCalledWith(['🦠']);
+  });
+
+  it('does not rename a user-owned Telegram topic', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      title: 'Generated Fast title',
+      replyTarget: { channelId: 'telegram-chat', threadId: '77' },
+    });
+
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Matt',
+      question: 'Continue here',
+      currentMessageId: '78',
+    });
+    delivery!.adapter.activity?.updateTitle?.('Generated Fast title');
+    await delivery!.adapter.activity?.dispose();
+
+    expect(mocks.telegramEditForumTopic).not.toHaveBeenCalled();
+  });
 
   it.each(['discord', 'telegram'] as const)(
     'reasserts %s after successful posts and replacements but not after a late post',
@@ -254,12 +398,18 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       try {
         adapter.activity!.start();
-        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(
+          surface === 'telegram' ? FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS : 0,
+        );
         await adapter.postReply(reply);
-        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(
+          surface === 'telegram' ? FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS : 0,
+        );
         expect(typing).toHaveBeenCalledTimes(2);
         await adapter.replaceReply!({ messageId: '123' }, reply);
-        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(
+          surface === 'telegram' ? FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS : 0,
+        );
         expect(typing).toHaveBeenCalledTimes(3);
         editMessage.mockRejectedValueOnce(new Error('edit failed'));
         await expect(
@@ -708,7 +858,13 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
           channelId,
           ...(threadId ? { threadId } : {}),
           ...(currentMessageId ? { replyToMessageId: currentMessageId } : {}),
-          text: expect.stringContaining('Reply or use the [web app]'),
+          text:
+            surface === 'telegram'
+              ? 'Done'
+              : expect.stringContaining('[Open in Roomote]'),
+          ...(surface === 'telegram'
+            ? { footerText: expect.stringContaining('[Open in Roomote]') }
+            : {}),
         }),
       );
       expect(binding?.messageId).toBe(
@@ -718,7 +874,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         expect.objectContaining({
           channelId,
           messageId:
-            surface === 'teams' ? 'teams-message-1' : 'telegram-message-1',
+            surface === 'teams' ? 'teams-message-1' : 'telegram-message-2',
           text: expect.stringContaining('Updated'),
         }),
       );
@@ -795,6 +951,7 @@ describe('continueFastAgentSurfaceReply admission hooks', () => {
         userId: user.id,
         senderDisplayName: 'Matt',
         question: 'Follow up',
+        attachmentTexts: ['Attachment: notes.txt\nUse the new requirement.'],
         currentMessageId: 'message-1',
         onAccepted,
         onRejected,
@@ -803,6 +960,13 @@ describe('continueFastAgentSurfaceReply admission hooks', () => {
 
     expect(onAccepted).toHaveBeenCalledWith(abort);
     expect(onRejected).not.toHaveBeenCalled();
+    expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          attachmentTexts: ['Attachment: notes.txt\nUse the new requirement.'],
+        }),
+      }),
+    );
   });
 
   it('admits a reaction turn durably with its input and resumes a still-pending row', async () => {
@@ -863,7 +1027,7 @@ describe('continueFastAgentSurfaceReply admission hooks', () => {
       forceQueue: false,
     });
     expect(mocks.acquireTurnLock).not.toHaveBeenCalled();
-    expect(mocks.persistInline).not.toHaveBeenCalled();
+    expect(mocks.admitInline).not.toHaveBeenCalled();
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         input: { type: 'reaction', externalInput },
@@ -921,6 +1085,40 @@ describe('continueFastAgentSurfaceReply admission hooks', () => {
     expect(mocks.acquireTurnLock).not.toHaveBeenCalled();
   });
 
+  it('skips a message whose durable row already settled instead of re-running it', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'web',
+    });
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+      abort: vi.fn().mockResolvedValue(undefined),
+    });
+    // The queue resumed and delivered this message after an interruption;
+    // a redelivery must not run it a second time.
+    mocks.admitHumanFollowUp.mockResolvedValue({
+      kind: 'turn',
+      turnLock: release,
+      durable: null,
+      settled: true,
+    });
+
+    await expect(
+      continueFastAgentSurfaceReply({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Matt',
+        question: 'Follow up',
+        currentMessageId: 'web-message-1',
+      }),
+    ).resolves.toBe(true);
+
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    expect(mocks.admitInline).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
   it('reports rejection when the session has no delivery route', async () => {
     const user = await userFactory.create();
     const onAccepted = vi.fn();
@@ -941,5 +1139,118 @@ describe('continueFastAgentSurfaceReply admission hooks', () => {
     expect(onRejected).toHaveBeenCalledTimes(1);
     expect(onAccepted).not.toHaveBeenCalled();
     expect(mocks.admitHumanFollowUp).not.toHaveBeenCalled();
+  });
+});
+
+describe('continueFastAgentSurfaceReplyWithLock outcomes', () => {
+  function callerLock(): FastAgentTurnLockHandle {
+    return Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+      abort: vi.fn().mockResolvedValue(undefined),
+    }) as unknown as FastAgentTurnLockHandle;
+  }
+
+  it('reports an unroutable session without running anything', async () => {
+    const user = await userFactory.create();
+
+    await expect(
+      continueFastAgentSurfaceReplyWithLock(
+        {
+          sessionId: '00000000-0000-4000-8000-000000000000',
+          userId: user.id,
+          senderDisplayName: null,
+          question: 'Follow up',
+          currentMessageId: 'message-1',
+        },
+        callerLock(),
+      ),
+    ).resolves.toEqual({ outcome: 'unroutable' });
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it('skips a settled message under the caller-owned lock', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'web',
+    });
+    mocks.admitInline.mockResolvedValue({ status: 'settled' });
+    const lock = callerLock();
+
+    await expect(
+      continueFastAgentSurfaceReplyWithLock(
+        {
+          sessionId: conversation.id,
+          userId: user.id,
+          senderDisplayName: 'Matt',
+          question: 'Follow up',
+          currentMessageId: 'web-message-1',
+        },
+        lock,
+      ),
+    ).resolves.toEqual({ outcome: 'settled' });
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    expect(lock.durableRowId).toBeUndefined();
+  });
+
+  it('surfaces a parked turn with its retry time and unbinds the row from the lock', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'web',
+    });
+    mocks.admitInline.mockResolvedValue({
+      status: 'admitted',
+      turn: { id: 'row-1', eventKey: 'key-1' },
+    });
+    const retryAt = new Date(Date.now() + 60_000);
+    mocks.answerQuestion.mockRejectedValue(
+      new FastAgentDurableRetryScheduledError(retryAt),
+    );
+    const lock = callerLock();
+
+    await expect(
+      continueFastAgentSurfaceReplyWithLock(
+        {
+          sessionId: conversation.id,
+          userId: user.id,
+          senderDisplayName: 'Matt',
+          question: 'Follow up',
+          currentMessageId: 'web-message-1',
+        },
+        lock,
+      ),
+    ).resolves.toEqual({ outcome: 'parked', retryAt });
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ durableAdmission: { eventId: 'row-1' } }),
+    );
+    expect(lock.durableRowId).toBeUndefined();
+    expect(lock.durableResume).toBeUndefined();
+  });
+
+  it('reports delivery for a completed turn', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'web',
+    });
+    mocks.admitInline.mockResolvedValue({
+      status: 'admitted',
+      turn: { id: 'row-1', eventKey: 'key-1' },
+    });
+    mocks.answerQuestion.mockResolvedValue('');
+
+    await expect(
+      continueFastAgentSurfaceReplyWithLock(
+        {
+          sessionId: conversation.id,
+          userId: user.id,
+          senderDisplayName: 'Matt',
+          question: 'Follow up',
+          currentMessageId: 'web-message-1',
+        },
+        callerLock(),
+      ),
+    ).resolves.toEqual({ outcome: 'delivered' });
   });
 });

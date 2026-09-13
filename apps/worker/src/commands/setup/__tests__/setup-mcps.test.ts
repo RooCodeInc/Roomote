@@ -259,6 +259,31 @@ describe('resolveBuiltInMcpServers', () => {
     expect(servers).not.toHaveProperty('_roomote_http_integrations');
   });
 
+  it('provides the GitHub proxy with run-token auth, leaving installation eligibility to the API', () => {
+    process.env.TRPC_URL = 'https://api.example.com/';
+    const servers = resolveBuiltInMcpServers(
+      {
+        ROOMOTE_CLOUD_TOKEN: 'run-token',
+        ROOMOTE_AUTH_BYPASS_HEADER_NAME: 'x-preview-bypass',
+        ROOMOTE_AUTH_BYPASS_VALUE: 'bypass-value',
+      },
+      { userMcpServers: {} },
+    );
+    expect(servers.github).toEqual({
+      type: 'streamable-http',
+      url: 'https://api.example.com/api/mcp-routing/github',
+      headers: {
+        Authorization: 'Bearer run-token',
+        'x-preview-bypass': 'bypass-value',
+      },
+    });
+    expect(resolveBuiltInMcpServers({}).github).toBeUndefined();
+    delete process.env.TRPC_URL;
+    expect(
+      resolveBuiltInMcpServers({ ROOMOTE_CLOUD_TOKEN: 'run-token' }).github,
+    ).toBeUndefined();
+  });
+
   it('merges custom environment MCP servers', () => {
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(undefined, undefined, {

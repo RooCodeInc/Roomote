@@ -1,4 +1,8 @@
 export {
+  resolveAutomationRepositoryDestination,
+  isCiFailureTriageRepositoryEnabled,
+} from './automations/ci-failure-triage-routing';
+export {
   type AppRouter,
   type AppRouterInput,
   type AppRouterOutput,
@@ -16,6 +20,15 @@ export {
   finishRun,
   maybeEnqueueBrainMemoryForCompletedRun,
 } from './lib/task-runs/finish-run';
+export {
+  WEB_TASK_INITIATOR_SETTLE_NOTIFICATION_JOB,
+  enqueueWebTaskInitiatorSettleNotification,
+  type WebTaskInitiatorSettleNotificationJob,
+} from './lib/task-runs/enqueue-web-task-initiator-settle-notification';
+export {
+  notifyWebTaskInitiatorOnSettle,
+  type WebTaskInitiatorSettleNotificationResult,
+} from './lib/task-runs/notify-web-task-initiator-on-settle';
 export {
   AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
   AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
@@ -36,11 +49,17 @@ export {
   type AutomationSignalPrefetchJob,
 } from './lib/automation-recommendations';
 export {
+  CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+  resolveDefaultAutomationTarget,
+  type AutomationDestinationCapabilities,
+} from './lib/default-automation-destination';
+export {
   recordLlmUsage,
   type RecordLlmUsageInput,
 } from './lib/task-runs/record-task-inference-usage';
 export { findTaskRunByRunTokenClaims } from './lib/task-runs/find-task-run';
 export { stopTaskRun } from './lib/task-runs/stop-task-run';
+export { settleLiveTaskMessageOnExit } from './lib/task-runs/settle-live-task-message-on-exit';
 export { createSnapshot } from './lib/task-runs/enqueue-snapshot';
 export {
   enqueueTaskSleep,
@@ -203,10 +222,12 @@ export {
 } from './lib/discord-persistence';
 
 export { createDiscordCommunicationProviderFromRuntimeCredentials } from './lib/discord-communication';
+export { refreshCurrentThreadFooters } from './lib/thread-footer-refresh';
 
 export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/teams-communication';
 
 export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib/telegram-communication';
+export { retireTelegramRequestUserInputPromptBestEffort } from './lib/communication-request-user-input';
 
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
 export { syncFastAgentSlackTitleBestEffort } from './lib/fast-agent-slack-title-sync';
@@ -234,8 +255,10 @@ export {
 } from './lib/session-wakeups';
 export {
   admitFastAgentHumanFollowUp,
+  admitFastAgentInlineHumanTurn,
   persistFastAgentInlineHumanTurn,
   type FastAgentDurableTurn,
+  type FastAgentInlineHumanTurnAdmission,
   type FastAgentHumanFollowUpAdmission,
 } from './lib/fast-agent-human-follow-up';
 export {
@@ -248,6 +271,60 @@ export {
   getCommunicationProviderAdapter,
   type RuntimeCommunicationProviderAdapter,
 } from './lib/communication-providers';
+
+export { createAgentMailCommunicationProviderFromRuntimeCredentials } from './lib/agentmail-communication';
+
+export {
+  advanceAgentMailInboundAnchor,
+  normalizeEmailAddress,
+  recordAgentMailOutboundMessage,
+  resolveAgentMailReplyRoute,
+  resolveAgentMailSenderUserId,
+  resolveOrCreateAgentMailConversation,
+  type AgentMailConversationRow,
+  type AgentMailReplyRouteData,
+} from './lib/agentmail/conversation-store';
+
+export {
+  buildAgentMailRuiAnswerToken,
+  buildAgentMailRuiAnswerUrl,
+  verifyAgentMailRuiAnswerToken,
+} from './lib/agentmail/rui-answer-links';
+
+export {
+  buildAgentMailUnsubscribeToken,
+  buildAgentMailUnsubscribeUrl,
+  verifyAgentMailUnsubscribeToken,
+} from './lib/agentmail/unsubscribe-tokens';
+
+export {
+  AgentMailRecipientUnavailableError,
+  canStartAgentMailConversationWithUser,
+  isAgentMailAddressSuppressed,
+  listAgentMailOutboundIdentities,
+  listAvailableAgentMailOutboundIdentities,
+  resolveAgentMailOutboundAddress,
+  resolveAgentMailOutboundIdentity,
+  sendAgentMailSystemEmail,
+  startAgentMailConversation,
+  startAgentMailConversationWithResult,
+  suppressAgentMailAddress,
+  type AgentMailOutboundAddressResolution,
+  type AgentMailOutboundIdentity,
+  type AgentMailSystemEmailResult,
+  type StartAgentMailConversationResult,
+  type AgentMailSuppressionReason,
+} from './lib/agentmail/outbound';
+
+export {
+  AGENTMAIL_WEBHOOK_EVENT_QUEUE_NAME,
+  AgentMailConversationBusyError,
+  drainAgentMailInboundTurns,
+  processAgentMailWebhookEvent,
+  recordAgentMailWebhookEvent,
+  recoverPendingAgentMailWork,
+  type AgentMailWebhookEventJob,
+} from './lib/agentmail/inbound';
 
 export {
   findTelegramPrimaryChatId,

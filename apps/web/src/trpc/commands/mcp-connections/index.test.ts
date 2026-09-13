@@ -4,6 +4,7 @@ import {
   mcpConnections,
   userFactory,
 } from '@roomote/db/server';
+import { isMcpConnectionVoiceConfig } from '@roomote/types';
 
 const { captureEventMock } = vi.hoisted(() => ({
   captureEventMock: vi.fn(),
@@ -25,7 +26,10 @@ import type { UserAuthSuccess } from '@/types';
 
 import {
   connectMcpCommand,
+  getVoiceConnectionCommand,
+  getEffectiveMcpIntegrationsCommand,
   saveAsanaConnectionCommand,
+  saveVoiceConnectionCommand,
   setDeploymentMcpEnabledCommand,
 } from './index';
 
@@ -34,6 +38,11 @@ const adminAuth = {
   userType: 'user',
   userId: 'mcp-connections-admin',
   isAdmin: true,
+} as UserAuthSuccess;
+const memberAuth = {
+  ...adminAuth,
+  userId: 'mcp-connections-member',
+  isAdmin: false,
 } as UserAuthSuccess;
 
 async function cleanup() {
@@ -44,6 +53,7 @@ async function cleanup() {
 describe('MCP connection lifecycle telemetry', () => {
   beforeAll(async () => {
     await userFactory.create({ id: adminAuth.userId });
+    await userFactory.create({ id: memberAuth.userId });
   });
 
   beforeEach(async () => {
@@ -96,6 +106,54 @@ describe('MCP connection lifecycle telemetry', () => {
     expect(captureEventMock).not.toHaveBeenCalled();
   });
 
+  it('persists the selected Voice voice while preserving an existing key', async () => {
+    await saveVoiceConnectionCommand(adminAuth, {
+      apiKey: 'sk-voice',
+      voiceId: 'cedar',
+    });
+
+    const firstConnection = await db.query.mcpConnections.findFirst({
+      where: (table, { eq: whereEq }) => whereEq(table.mcpId, 'voice'),
+    });
+    expect(isMcpConnectionVoiceConfig(firstConnection?.authConfig)).toBe(true);
+    if (!isMcpConnectionVoiceConfig(firstConnection?.authConfig)) {
+      throw new Error('Expected a Voice connection');
+    }
+    const encryptedApiKey = firstConnection.authConfig.encryptedApiKey;
+    expect(firstConnection.authConfig.voiceId).toBe('cedar');
+    expect(encryptedApiKey).not.toContain('sk-voice');
+
+    await saveVoiceConnectionCommand(adminAuth, {
+      apiKey: '',
+      voiceId: 'coral',
+    });
+
+    const updatedConnection = await db.query.mcpConnections.findFirst({
+      where: (table, { eq: whereEq }) => whereEq(table.mcpId, 'voice'),
+    });
+    expect(updatedConnection?.authConfig).toMatchObject({
+      type: 'voice',
+      encryptedApiKey,
+      voiceId: 'coral',
+    });
+  });
+
+  it('returns the default voice for a legacy Voice connection without a selection', async () => {
+    await db.insert(mcpConnections).values({
+      userId: null,
+      mcpId: 'voice',
+      connectionRole: 'default',
+      authConfig: { type: 'voice', encryptedApiKey: 'legacy-encrypted-key' },
+      enabled: true,
+      authStatus: 'authenticated',
+    });
+
+    await expect(getVoiceConnectionCommand(adminAuth)).resolves.toMatchObject({
+      source: 'connection',
+      voiceId: 'marin',
+    });
+  });
+
   it('keeps Linear identity metadata while restarting authorization', async () => {
     const previousAuthConfig = {
       type: 'oauth_client' as const,
@@ -143,5 +201,45 @@ describe('MCP connection lifecycle telemetry', () => {
       authStatus: 'pending',
     });
     expect(reconnected?.refreshToken).toBeTruthy();
+  });
+
+  it('projects effective status from correctly scoped connections', async () => {
+    await db.insert(deploymentMcpEnablements).values([
+      { mcpId: 'sentry', enabled: true, enabledByUserId: adminAuth.userId },
+      { mcpId: 'monday', enabled: true, enabledByUserId: adminAuth.userId },
+    ]);
+    await db.insert(mcpConnections).values([
+      {
+        userId: null,
+        mcpId: 'sentry',
+        enabled: true,
+        authStatus: 'authenticated',
+      },
+      {
+        userId: memberAuth.userId,
+        mcpId: 'monday',
+        enabled: true,
+        authStatus: 'authenticated',
+      },
+    ]);
+
+    const integrations = await getEffectiveMcpIntegrationsCommand(adminAuth);
+
+    expect(integrations.find(({ id }) => id === 'sentry')).toMatchObject({
+      connectionScope: 'deployment',
+      enabled: true,
+      authStatus: 'authenticated',
+      status: 'connected',
+      capabilities: { agentTools: true, toolManagement: true },
+    });
+    expect(integrations.find(({ id }) => id === 'monday')).toMatchObject({
+      connectionScope: 'user',
+      enabled: true,
+      authStatus: null,
+      status: 'needs_connection',
+    });
+    expect(integrations.find(({ id }) => id === 'rippling')).toMatchObject({
+      capabilities: { agentTools: false, toolManagement: false },
+    });
   });
 });

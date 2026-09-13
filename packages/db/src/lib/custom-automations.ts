@@ -13,8 +13,10 @@ import {
   CUSTOM_AUTOMATION_CRON_MAX_LENGTH,
   CUSTOM_AUTOMATION_MODEL_MAX_LENGTH,
   FAST_EXECUTION,
+  NO_REPOSITORIES,
   MAX_CUSTOM_AUTOMATIONS,
   type ReasoningEffort,
+  type AutomationResultPriority,
 } from '@roomote/types';
 
 import { type DatabaseOrTransaction, db } from '../db';
@@ -35,6 +37,7 @@ export type CustomAutomationWriteInput = {
   name: string;
   prompt: string;
   enabled: boolean;
+  resultPriority?: AutomationResultPriority;
   scheduleMode: CustomAutomationScheduleMode;
   cronExpression?: string | null;
   /** Optional provider/model launch override; null uses the deployment default. */
@@ -50,12 +53,18 @@ export type CustomAutomationWriteInput = {
 function getExecutionTarget(environmentId: string): {
   executionMode: CustomAutomationExecutionMode;
   allRepositories: boolean;
+  noRepositories: boolean;
 } {
   return environmentId === FAST_EXECUTION
-    ? { executionMode: 'fast', allRepositories: false }
+    ? {
+        executionMode: 'fast',
+        allRepositories: false,
+        noRepositories: false,
+      }
     : {
         executionMode: 'sandbox_task',
         allRepositories: environmentId === ALL_REPOSITORIES,
+        noRepositories: environmentId === NO_REPOSITORIES,
       };
 }
 
@@ -208,18 +217,23 @@ export async function createCustomAutomation(
     );
   }
 
-  const { executionMode, allRepositories } = getExecutionTarget(
+  const { executionMode, allRepositories, noRepositories } = getExecutionTarget(
     input.environmentId,
   );
   const environment =
-    allRepositories || executionMode === 'fast'
+    allRepositories || noRepositories || executionMode === 'fast'
       ? null
       : await client.query.environments.findFirst({
           columns: { id: true },
           where: eq(environments.id, input.environmentId),
         });
 
-  if (executionMode === 'sandbox_task' && !allRepositories && !environment) {
+  if (
+    executionMode === 'sandbox_task' &&
+    !allRepositories &&
+    !noRepositories &&
+    !environment
+  ) {
     throw new Error('Selected environment was not found.');
   }
 
@@ -229,15 +243,17 @@ export async function createCustomAutomation(
       name,
       prompt,
       enabled: input.enabled,
+      resultPriority: input.resultPriority ?? 'normal',
       scheduleMode: input.scheduleMode,
       cronExpression,
       model,
       reasoningEffort,
       environmentId:
-        allRepositories || executionMode === 'fast'
+        allRepositories || noRepositories || executionMode === 'fast'
           ? null
           : input.environmentId,
       allRepositories,
+      noRepositories,
       executionMode,
       target: input.target,
       createdByUserId: input.createdByUserId ?? null,
@@ -264,18 +280,23 @@ export async function updateCustomAutomation(
     throw new Error('Custom automation was not found.');
   }
 
-  const { executionMode, allRepositories } = getExecutionTarget(
+  const { executionMode, allRepositories, noRepositories } = getExecutionTarget(
     input.environmentId,
   );
   const environment =
-    allRepositories || executionMode === 'fast'
+    allRepositories || noRepositories || executionMode === 'fast'
       ? null
       : await client.query.environments.findFirst({
           columns: { id: true },
           where: eq(environments.id, input.environmentId),
         });
 
-  if (executionMode === 'sandbox_task' && !allRepositories && !environment) {
+  if (
+    executionMode === 'sandbox_task' &&
+    !allRepositories &&
+    !noRepositories &&
+    !environment
+  ) {
     throw new Error('Selected environment was not found.');
   }
 
@@ -285,15 +306,17 @@ export async function updateCustomAutomation(
       name,
       prompt,
       enabled: input.enabled,
+      resultPriority: input.resultPriority ?? existing.resultPriority,
       scheduleMode: input.scheduleMode,
       cronExpression,
       model,
       reasoningEffort,
       environmentId:
-        allRepositories || executionMode === 'fast'
+        allRepositories || noRepositories || executionMode === 'fast'
           ? null
           : input.environmentId,
       allRepositories,
+      noRepositories,
       executionMode,
       target: input.target,
       updatedAt: new Date(),

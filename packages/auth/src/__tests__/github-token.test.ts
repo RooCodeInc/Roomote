@@ -177,6 +177,12 @@ describe('resolveRuntimeGitHubAppCredentials', () => {
       'GitHub App credentials are not configured.',
     );
   });
+
+  it('propagates deployment lookup errors instead of treating them as missing config', async () => {
+    const error = new Error('Deployment database unavailable');
+    mockResolveDeploymentEnvVar.mockRejectedValue(error);
+    await expect(resolveRuntimeGitHubAppCredentials()).rejects.toBe(error);
+  });
 });
 
 describe('createGitHubToken', () => {

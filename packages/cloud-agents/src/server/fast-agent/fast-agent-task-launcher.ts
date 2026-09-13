@@ -1,5 +1,6 @@
 import {
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
   buildSlackThreadPermalink,
   TaskPayloadKind,
@@ -18,6 +19,21 @@ import {
 import { getTaskUrl } from '../task-url';
 import type { LaunchFastAgentTask } from './fast-agent-conversation';
 import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
+
+function resolveFastAgentChildWorkspace(
+  environmentId: string | null,
+  fallbackRepo: string = ALL_REPOSITORIES,
+): { repo: string; environmentId?: string } {
+  if (environmentId === NO_REPOSITORIES) {
+    return { repo: NO_REPOSITORIES };
+  }
+
+  if (environmentId && environmentId !== ALL_REPOSITORIES) {
+    return { repo: fallbackRepo, environmentId };
+  }
+
+  return { repo: fallbackRepo };
+}
 
 export type FastAgentTaskLaunchHooks = {
   /**
@@ -202,7 +218,7 @@ export function createFastAgentSlackTaskLauncher(
     buildTask: ({ prompt, environmentId, model, reasoningEffort }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
-        repo: params.repoForPayload ?? ALL_REPOSITORIES,
+        ...resolveFastAgentChildWorkspace(environmentId, params.repoForPayload),
         description: prompt,
         ...(params.customAutomationId
           ? { customAutomationId: params.customAutomationId }
@@ -219,9 +235,6 @@ export function createFastAgentSlackTaskLauncher(
           : {}),
         ...(slackConversationUrl ? { slackConversationUrl } : {}),
         ...(params.liveTaskStream ? { liveTaskStream: true } : {}),
-        ...(environmentId && environmentId !== ALL_REPOSITORIES
-          ? { environmentId }
-          : {}),
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
@@ -242,11 +255,8 @@ export function createFastAgentWebTaskLauncher(params: {
     buildTask: ({ prompt, environmentId, model, reasoningEffort }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
-        repo: ALL_REPOSITORIES,
+        ...resolveFastAgentChildWorkspace(environmentId),
         description: prompt,
-        ...(environmentId && environmentId !== ALL_REPOSITORIES
-          ? { environmentId }
-          : {}),
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),

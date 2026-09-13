@@ -192,7 +192,7 @@ describe('getProviderUsageLimitSnapshots', () => {
       access: 'chatgpt-access',
       accountId: 'acct-1',
     });
-    const fetchImpl = vi.fn().mockResolvedValue(
+    const fetchImpl = vi.fn().mockImplementation(async () =>
       jsonResponse({
         plan_type: 'pro',
         rate_limit: {

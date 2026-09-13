@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { createClient } from '@roomote/sdk/client';
+import type { DataVisualizationInput } from '@roomote/types';
 
 import { buildApiHeaders } from './api-client.js';
 import {
@@ -21,6 +22,7 @@ export async function handleReportToParentSession(
     message: string;
     imagePaths?: string[];
     imageArtifactIds?: string[];
+    charts?: DataVisualizationInput[];
   },
   artifactConfig: ArtifactConfig,
 ): Promise<ToolResult> {
@@ -40,6 +42,7 @@ export async function handleReportToParentSession(
         message,
         imagePaths,
         imageArtifactIds,
+        charts: input.charts,
       }),
     )
     .digest('hex');
@@ -82,6 +85,7 @@ export async function handleReportToParentSession(
       purpose: input.purpose,
       message: message ?? '',
       ...(allArtifactIds.length ? { imageArtifactIds: allArtifactIds } : {}),
+      ...(input.charts?.length ? { charts: input.charts } : {}),
     });
 
     if (!result.relayed) {

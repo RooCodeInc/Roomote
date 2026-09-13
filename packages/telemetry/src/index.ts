@@ -150,7 +150,8 @@ export type ActivationAutomationDestinationProvider =
   | 'slack'
   | 'discord'
   | 'teams'
-  | 'telegram';
+  | 'telegram'
+  | 'email';
 
 export function toActivationAutomationDestinationProvider(
   provider: string | null | undefined,
@@ -158,7 +159,8 @@ export function toActivationAutomationDestinationProvider(
   return provider === 'slack' ||
     provider === 'discord' ||
     provider === 'teams' ||
-    provider === 'telegram'
+    provider === 'telegram' ||
+    provider === 'email'
     ? provider
     : null;
 }

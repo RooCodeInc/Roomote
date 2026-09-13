@@ -3,6 +3,7 @@ import { sdk } from '@roomote/sdk/client';
 
 import type {
   WorkspaceConfig,
+  NoRepositoriesWorkspace,
   RepositoryWorkspace,
   RepositorySetWorkspace,
   AllRepositoriesWorkspace,
@@ -55,6 +56,10 @@ export async function buildWorkspaceConfig({
       sourceBranch: workspace.sourceBranch,
       sourceSha: workspace.sourceSha,
     } satisfies EnvironmentWorkspace;
+  }
+
+  if (workspace.type === 'no_repositories') {
+    return { type: 'no_repositories' } satisfies NoRepositoriesWorkspace;
   }
 
   if (workspace.type === 'repository') {

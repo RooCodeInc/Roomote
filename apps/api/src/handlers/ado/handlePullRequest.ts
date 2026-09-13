@@ -238,6 +238,16 @@ export async function handleAdoPullRequest(
     pullRequest,
   });
 
+  const host = toHostFromUrl(
+    pullRequest._links?.web?.href ??
+      payload.resourceContainers?.account?.baseUrl ??
+      payload.resourceContainers?.collection?.baseUrl ??
+      pullRequest.repository.webUrl ??
+      pullRequest.repository.remoteUrl ??
+      pullRequest.repository.url ??
+      '',
+  );
+
   if (pullRequest.status === 'abandoned') {
     if (payload.eventType !== 'git.pullrequest.updated') {
       return {
@@ -251,6 +261,7 @@ export async function handleAdoPullRequest(
       repoFullName,
       pullRequest.pullRequestId,
       'closed',
+      { host },
     );
 
     scheduleAdoPullRequestFactSync(payload, repoFullName, 'closed');
@@ -298,6 +309,7 @@ export async function handleAdoPullRequest(
       repoFullName,
       pullRequest.pullRequestId,
       'merged',
+      { host },
     );
 
     scheduleAdoPullRequestFactSync(payload, repoFullName, 'merged');
@@ -342,6 +354,7 @@ export async function handleAdoPullRequest(
       repoFullName,
       pullRequest.pullRequestId,
       pullRequest.isDraft ? 'draft' : 'open',
+      { host },
     );
   }
 

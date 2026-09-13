@@ -2,6 +2,7 @@ import {
   db,
   environmentFactory,
   environments,
+  eq,
   fastAgentConversations,
   fastAgentMessages,
   inArray,
@@ -22,7 +23,10 @@ import {
   getCostAnalyticsRows,
 } from './cost-rows';
 import { buildChartData } from './chart';
+import { buildCostChartAnalytics } from './cost-summary';
 import { applyDimensionFilters, buildFilterOptions } from './dimensions';
+import { getAnalyticsDetails } from './index';
+import { getBucketStart } from './time-buckets';
 import type { AnalyticsRow } from './types';
 
 describe('getCostAnalyticsRows', () => {
@@ -92,6 +96,92 @@ describe('getCostAnalyticsRows', () => {
     expect(rowIds.has(oldEvent.id)).toBe(false);
   });
 
+  it('includes stored token totals for zero-cost usage without recomputing components', async () => {
+    const [insertedEvent] = await db
+      .insert(llmUsageEvents)
+      .values({
+        eventKey: `zero-cost-token-analytics-${crypto.randomUUID()}`,
+        providerId: 'zero-cost-provider',
+        modelId: 'zero-cost-model',
+        costSource: 'missing',
+        costMicroUsd: 0,
+        inputTokens: 100,
+        outputTokens: 50,
+        reasoningTokens: 25,
+        cacheReadTokens: 20,
+        cacheWriteTokens: 5,
+        totalTokens: 175,
+        messageCompletedAt: new Date('2026-07-15T12:00:00.000Z'),
+      })
+      .returning({ id: llmUsageEvents.id });
+    usageEventIds.push(insertedEvent!.id);
+
+    const rows = await getCostAnalyticsRows(
+      {} as UserAuthSuccess,
+      'all',
+      new Date('2026-07-16T16:00:00.000Z'),
+    );
+    const row = rows.find((candidate) => candidate.id === insertedEvent!.id)!;
+    const chart = buildChartData(
+      [row],
+      'costs',
+      'provider',
+      'cost',
+      'all',
+      'day',
+      new Date('2026-07-16T16:00:00.000Z'),
+    );
+
+    expect(row).toMatchObject({
+      value: 0,
+      tokens: 175,
+      details: { values: { cost: '0.00', tokens: '175' } },
+    });
+    expect(chart.total).toBe(0);
+    expect(chart.tokenTotal).toBe(175);
+    expect(chart.series).toEqual([
+      {
+        key: 'zero-cost-provider',
+        label: 'zero-cost-provider',
+        total: 0,
+        tokenTotal: 175,
+      },
+    ]);
+    expect(chart.buckets[0]?.tokenSegments).toEqual({
+      'zero-cost-provider': 175,
+    });
+    expect(chart.costBreakdown).toEqual([
+      expect.objectContaining({
+        totalCost: 0,
+        totalTokens: 175,
+        taskCount: 0,
+        averageCostPerTask: 0,
+        averageTokensPerTask: 0,
+      }),
+    ]);
+
+    const details = await getAnalyticsDetails(
+      {} as UserAuthSuccess,
+      {
+        object: 'costs',
+        viewBy: 'provider',
+        metric: 'tokens',
+        timePeriod: 'all',
+        granularity: 'day',
+        bucketKey: getBucketStart(
+          new Date('2026-07-15T12:00:00.000Z'),
+          'day',
+        ).toISOString(),
+        seriesKey: 'zero-cost-provider',
+      },
+      new Date('2026-07-16T16:00:00.000Z'),
+    );
+    expect(details).toMatchObject({
+      total: 175,
+      rows: [{ values: { cost: '0.00', tokens: '175' } }],
+    });
+  });
+
   it('uses the run environment fallback and attributes PRs by distinct task', async () => {
     const user = await userFactory.create();
     userIds.push(user.id);
@@ -158,6 +248,89 @@ describe('getCostAnalyticsRows', () => {
     });
     expect(row?.details.values.source).toBe('task_title_generation');
     expect(row?.meta?.prKeys).toEqual(['github:github.com:roomote/test#42']);
+  });
+
+  it('retains deleted-task spend without exposing task attribution', async () => {
+    const user = await userFactory.create();
+    userIds.push(user.id);
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+      title: 'Private deleted task title',
+    });
+    taskIds.push(task.id);
+    await db.insert(taskPullRequests).values({
+      taskId: task.id,
+      prUrl: 'https://github.com/roomote/private/pull/99',
+      prNumber: 99,
+      repository: 'roomote/private',
+      sourceControlProvider: 'github',
+      host: 'github.com',
+    });
+    const [usageEvent] = await db
+      .insert(llmUsageEvents)
+      .values({
+        eventKey: `deleted-task-cost-analytics-${crypto.randomUUID()}`,
+        taskId: task.id,
+        userId: user.id,
+        costSource: 'opencode_message',
+        costMicroUsd: 40_000_000,
+        totalTokens: 12_345,
+        messageCompletedAt: new Date('2026-07-15T12:00:00.000Z'),
+      })
+      .returning({ id: llmUsageEvents.id });
+    usageEventIds.push(usageEvent!.id);
+    await db
+      .update(tasks)
+      .set({ deletedAt: new Date('2026-07-16T12:00:00.000Z') })
+      .where(eq(tasks.id, task.id));
+
+    const rows = await getCostAnalyticsRows(
+      {} as UserAuthSuccess,
+      'all',
+      new Date('2026-07-17T12:00:00.000Z'),
+    );
+    const row = rows.find((candidate) => candidate.id === usageEvent!.id)!;
+    const chart = buildChartData(
+      [row],
+      'costs',
+      'taskType',
+      'cost',
+      'all',
+      'day',
+      new Date('2026-07-17T12:00:00.000Z'),
+    );
+
+    expect(row).toMatchObject({
+      value: 40,
+      tokens: 12_345,
+      dimensions: {
+        taskType: { key: 'Deleted task', label: 'Deleted task' },
+        user: { key: '—', label: '—' },
+      },
+      details: {
+        values: {
+          user: '—',
+          taskType: 'Deleted task',
+          taskTitle: 'Deleted task',
+          cost: '40.00',
+          tokens: '12345',
+        },
+      },
+      meta: {
+        canonicalTaskId: task.id,
+        prKeys: [],
+      },
+    });
+    expect(row.details.links).toBeUndefined();
+    expect(JSON.stringify(row)).not.toContain('Private deleted task title');
+    expect(JSON.stringify(row)).not.toContain('roomote/private');
+    expect(chart.total).toBe(40);
+    expect(chart.tokenTotal).toBe(12_345);
+    expect(chart.costSummary).toMatchObject({
+      totalInferenceCost: 40,
+      taskCount: 1,
+      prCount: 0,
+    });
   });
 
   it('includes Fast parent and advisor/judge usage in Costs', async () => {
@@ -407,12 +580,14 @@ describe('aggregateCostAnalyticsRowsByTask', () => {
     id,
     taskId,
     cost,
+    tokens = 0,
     model = 'gpt-5.6-sol',
     timestamp,
   }: {
     id: string;
     taskId?: string;
     cost: number;
+    tokens?: number;
     model?: string;
     timestamp: string;
   }): AnalyticsRow {
@@ -420,6 +595,7 @@ describe('aggregateCostAnalyticsRowsByTask', () => {
       id,
       timestamp: new Date(timestamp),
       value: cost,
+      tokens,
       dimensions: {},
       details: {
         id,
@@ -431,6 +607,7 @@ describe('aggregateCostAnalyticsRowsByTask', () => {
           provider: 'openai',
           model,
           cost: cost.toFixed(2),
+          tokens: String(tokens),
           taskTitle: taskId ? 'Analyze analytics costs' : 'Non-task inference',
         },
       },
@@ -444,12 +621,14 @@ describe('aggregateCostAnalyticsRowsByTask', () => {
         id: 'usage-2',
         taskId: 'task-1',
         cost: 1.25,
+        tokens: 1_000,
         timestamp: '2026-08-15T12:00:00.000Z',
       }),
       createRow({
         id: 'usage-1',
         taskId: 'task-1',
         cost: 2.5,
+        tokens: 2_000,
         model: 'gpt-5.4',
         timestamp: '2026-08-15T10:00:00.000Z',
       }),
@@ -474,12 +653,54 @@ describe('aggregateCostAnalyticsRowsByTask', () => {
         id: 'task:task-1',
         values: {
           cost: '3.75',
+          tokens: '3000',
           model: 'Multiple',
           taskTitle: 'Analyze analytics costs',
         },
       },
+      tokens: 3_000,
     });
     expect(rows[1]).toMatchObject({ id: 'task:task-2', value: 4 });
     expect(rows[2]).toMatchObject({ id: 'usage-4', value: 0.5 });
+  });
+
+  it('uses distinct tasks as the cost and token average denominator', () => {
+    const { costBreakdown } = buildCostChartAnalytics([
+      createRow({
+        id: 'usage-1',
+        taskId: 'task-1',
+        cost: 1,
+        tokens: 100,
+        timestamp: '2026-08-15T12:00:00.000Z',
+      }),
+      createRow({
+        id: 'usage-2',
+        taskId: 'task-1',
+        cost: 2,
+        tokens: 200,
+        timestamp: '2026-08-15T11:00:00.000Z',
+      }),
+      createRow({
+        id: 'usage-3',
+        taskId: 'task-2',
+        cost: 3,
+        tokens: 300,
+        timestamp: '2026-08-15T10:00:00.000Z',
+      }),
+      createRow({
+        id: 'usage-4',
+        cost: 4,
+        tokens: 1_000,
+        timestamp: '2026-08-15T09:00:00.000Z',
+      }),
+    ]);
+
+    expect(costBreakdown[0]).toMatchObject({
+      totalCost: 10,
+      totalTokens: 1_600,
+      taskCount: 2,
+      averageCostPerTask: 3,
+      averageTokensPerTask: 300,
+    });
   });
 });

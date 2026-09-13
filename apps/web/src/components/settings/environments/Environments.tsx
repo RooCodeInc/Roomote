@@ -127,8 +127,7 @@ export function Environments() {
         {!environments.data || environments.data.length === 0 ? (
           <p>
             <TriangleAlert className="inline size-4 mr-2" />
-            Roomote can only verify its work when running with an environment.
-            Add your first now.
+            Environments help Roomote verify its work. Add your first now.
           </p>
         ) : (
           <div className="space-y-4 divide-y -mb-2">

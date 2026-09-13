@@ -23,6 +23,7 @@ vi.mock('@roomote/gitlab', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  isCiFailureTriageRepositoryEnabled: vi.fn().mockResolvedValue(true),
   launchCiFailureTriageForFailedRun: (...args: unknown[]) =>
     mockLaunchCiFailureTriageForFailedRun(...args),
 }));
@@ -47,6 +48,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 import { handleGitLabPipeline } from '../handlePipeline';
+import { isCiFailureTriageRepositoryEnabled } from '@roomote/sdk/server';
 import type { GitLabPipelineWebhook } from '../types';
 
 function buildPayload(
@@ -88,6 +90,14 @@ function buildPayload(
 }
 
 describe('handleGitLabPipeline', () => {
+  it('gates excluded repositories before fetching failure evidence', async () => {
+    vi.mocked(isCiFailureTriageRepositoryEnabled).mockResolvedValueOnce(false);
+    expect((await handleGitLabPipeline(buildPayload())).message).toContain(
+      'outside',
+    );
+    expect(mockGetGitLabPipelineFailureEvidence).not.toHaveBeenCalled();
+    expect(mockLaunchCiFailureTriageForFailedRun).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mockDbFindMany.mockResolvedValue([

@@ -46,6 +46,14 @@ vi.mock('@roomote/redis', () => ({
 vi.mock('@roomote/communication', () => ({
   buildFastSessionReplyFooterText: ({ provider }: { provider: string }) =>
     `[footer:${provider}]`,
+  resolveFastSessionReplyFooterContext: async () => ({}),
+  withThreadReplyFooterLock: async ({
+    fn,
+  }: {
+    fn: (assertLock: () => Promise<void>) => Promise<unknown>;
+  }) => fn(async () => {}),
+  scheduleThreadFooterRefresh: async () => {},
+  forgetThreadFooterRefresh: async () => {},
 }));
 
 vi.mock('@roomote/github', () => ({
@@ -564,12 +572,17 @@ describe('GitHub Fast delivery', () => {
     ).resolves.toEqual({ messageId: '5003' });
     await taskTurn.postReply({ message: 'Checks are green.' });
 
-    // The stale comment was tried once, then this turn posted its own reply
-    // and kept editing that one.
-    expect(updateReviewComment).toHaveBeenCalledTimes(2);
+    // The stale comment was tried once, then this turn posted its own reply,
+    // tried to strip the footer the relocation displaced from the stale
+    // comment, and kept editing its own.
+    expect(updateReviewComment).toHaveBeenCalledTimes(3);
     expect(updateReviewComment).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ comment_id: 5002 }),
+    );
+    expect(updateReviewComment).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ comment_id: 5002, body: 'Rebasing now.' }),
     );
     expect(request).toHaveBeenCalledTimes(2);
     expect(request).toHaveBeenLastCalledWith(
@@ -579,7 +592,7 @@ describe('GitHub Fast delivery', () => {
       }),
     );
     expect(updateReviewComment).toHaveBeenNthCalledWith(
-      2,
+      3,
       expect.objectContaining({
         comment_id: 5003,
         body: 'Rebased and pushed.\n\nChecks are green.\n\n[footer:github]',

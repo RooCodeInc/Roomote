@@ -1,7 +1,12 @@
 const mocks = vi.hoisted(() => ({
   configuredServers: {} as Record<
     string,
-    { url: string; headers: Record<string, string>; disabledTools?: string[] }
+    {
+      url: string;
+      headers: Record<string, string>;
+      disabledTools?: string[];
+      cacheRevision?: string;
+    }
   >,
   createAuthToken: vi.fn(),
   listMcpTools: vi.fn(),
@@ -9,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   beginIntegrationCall: vi.fn(),
   completeIntegrationCall: vi.fn(),
   findGithubInstallation: vi.fn(),
+  isRouterMcpServerEnabled: vi.fn(),
   findGitlabRepository: vi.fn(),
   findGitlabConnection: vi.fn(),
   resolveGitLabInstanceHost: vi.fn(),
@@ -17,8 +23,11 @@ const mocks = vi.hoisted(() => ({
   },
   getBitbucketOAuthConnection: vi.fn(),
   resolveBitbucketInstanceHost: vi.fn(),
+  resolveGiteaInstanceHost: vi.fn(),
+  resolveAdoInstanceHost: vi.fn(),
   findMember: vi.fn(),
-  findRepository: vi.fn(),
+  findBitbucketRepository: vi.fn(),
+  findNativeMergeRepository: vi.fn(),
 }));
 
 vi.mock('@roomote/env', async (importOriginal) => ({
@@ -29,6 +38,14 @@ vi.mock('@roomote/env', async (importOriginal) => ({
 vi.mock('@roomote/bitbucket', () => ({
   getBitbucketOAuthConnection: mocks.getBitbucketOAuthConnection,
   resolveBitbucketInstanceHost: mocks.resolveBitbucketInstanceHost,
+}));
+
+vi.mock('@roomote/gitea', () => ({
+  resolveGiteaInstanceHost: mocks.resolveGiteaInstanceHost,
+}));
+
+vi.mock('@roomote/ado', () => ({
+  resolveAdoInstanceHost: mocks.resolveAdoInstanceHost,
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -52,7 +69,10 @@ vi.mock('@roomote/db/server', () => ({
             ([column]) => column === 'provider',
           )?.[1];
           if (provider === 'gitlab') return mocks.findGitlabRepository(options);
-          if (provider === 'bitbucket') return mocks.findRepository(options);
+          if (provider === 'bitbucket')
+            return mocks.findBitbucketRepository(options);
+          if (provider === 'gitea' || provider === 'ado')
+            return mocks.findNativeMergeRepository(options);
           throw new Error(`Unexpected repository provider: ${provider}`);
         },
       },
@@ -74,7 +94,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('../../mcp-policy', () => ({
-  isRouterMcpServerEnabled: vi.fn(() => true),
+  isRouterMcpServerEnabled: mocks.isRouterMcpServerEnabled,
 }));
 
 vi.mock('../../mcp-tool-client', () => ({
@@ -125,6 +145,7 @@ describe('fast-agent integration broker', () => {
     mocks.configuredServers = {};
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
     mocks.findGithubInstallation.mockResolvedValue(undefined);
+    mocks.isRouterMcpServerEnabled.mockReturnValue(false);
     mocks.env.R_CURATED_INTEGRATIONS_DISABLED = false;
     mocks.resolveGitLabInstanceHost.mockResolvedValue(
       'gitlab.example.com:8443',
@@ -133,8 +154,13 @@ describe('fast-agent integration broker', () => {
     mocks.findGitlabConnection.mockResolvedValue(undefined);
     mocks.getBitbucketOAuthConnection.mockResolvedValue(null);
     mocks.resolveBitbucketInstanceHost.mockResolvedValue('bitbucket.org');
+    mocks.resolveGiteaInstanceHost.mockResolvedValue('gitea.example');
+    mocks.resolveAdoInstanceHost.mockResolvedValue('dev.azure.com');
     mocks.findMember.mockResolvedValue({ role: 'member' });
-    mocks.findRepository.mockResolvedValue({ externalRepoId: 'repo-uuid' });
+    mocks.findBitbucketRepository.mockResolvedValue({
+      externalRepoId: 'repo-uuid',
+    });
+    mocks.findNativeMergeRepository.mockResolvedValue(undefined);
     mocks.beginIntegrationCall.mockResolvedValue({
       id: 'audit-1',
       startedAt: new Date('2026-08-16T00:00:00.000Z'),
@@ -359,13 +385,291 @@ describe('fast-agent integration broker', () => {
     expect(mocks.callMcpTool).toHaveBeenCalledTimes(2);
   });
 
+  it('requires an installation before discovering native GitHub tools for public reads', async () => {
+    mocks.isRouterMcpServerEnabled.mockReturnValue(true);
+    expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+    expect(mocks.listMcpTools).not.toHaveBeenCalled();
+    mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+    const tools = [
+      'get_file_contents',
+      'issue_read',
+      'pull_request_read',
+      'list_pull_requests',
+      'search_pull_requests',
+      'search_code',
+    ].map((name) => ({ name, inputSchema: { type: 'object' } }));
+    mocks.listMcpTools.mockResolvedValue(tools);
+    const integrations = await listFastAgentIntegrations(auditContext);
+    expect(integrations.map(({ id }) => id)).toEqual(['github']);
+    expect(integrations[0]?.tools).toEqual(tools);
+    expect(mocks.isRouterMcpServerEnabled).toHaveBeenCalledWith('github');
+    expect(mocks.findGithubInstallation).toHaveBeenCalledTimes(2);
+    expect(mocks.findMember).not.toHaveBeenCalled();
+    expect(mocks.listMcpTools).toHaveBeenCalledWith({
+      url: 'https://api.example.com/api/mcp-routing/github',
+      headers: { Authorization: 'Bearer control-plane-token' },
+      signal: expect.any(AbortSignal),
+    });
+    mocks.isRouterMcpServerEnabled.mockReturnValue(false);
+    expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+    expect(mocks.listMcpTools).toHaveBeenCalledOnce();
+  });
+
+  it('preserves custom GitHub configuration and disabled tools without adding a default server', async () => {
+    mocks.isRouterMcpServerEnabled.mockReturnValue(true);
+    mocks.configuredServers.github = {
+      url: 'https://github-mcp.example.com/mcp',
+      headers: { Authorization: 'Bearer custom-token' },
+      disabledTools: ['issue_read'],
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'get_file_contents', inputSchema: { type: 'object' } },
+      { name: 'issue_read', inputSchema: { type: 'object' } },
+    ]);
+    const integrations = await listFastAgentIntegrations(auditContext);
+    expect(integrations.map(({ id }) => id)).toEqual(['github']);
+    expect(integrations[0]?.tools.map(({ name }) => name)).toEqual([
+      'get_file_contents',
+    ]);
+    expect(mocks.listMcpTools).toHaveBeenCalledOnce();
+    expect(mocks.listMcpTools).toHaveBeenCalledWith({
+      url: 'https://github-mcp.example.com/mcp',
+      headers: { Authorization: 'Bearer custom-token' },
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  // Synthetic upstream contracts exercise transport, not the live Better Stack API.
+  it.each([
+    {
+      name: 'sources',
+      fields: [],
+      properties: {
+        name: { type: 'string' },
+        page: { type: 'integer' },
+        per_page: { type: 'integer' },
+      },
+      args: {},
+    },
+    {
+      name: 'source',
+      fields: ['id'],
+      properties: { id: { type: 'integer' } },
+      args: { id: 42 },
+    },
+    {
+      name: 'query',
+      fields: ['source_id', 'table', 'query'],
+      properties: {
+        source_id: { type: 'number' },
+        table: { type: 'string' },
+        host: { type: 'string' },
+        query: { type: 'string' },
+      },
+      args: {
+        source_id: 42,
+        table: 'observed_logs_7',
+        host: 'cluster.example.test',
+        query: 'SELECT count() FROM observed_logs_7',
+      },
+    },
+  ])(
+    'discovers exact Better Stack $name in integration scope and forwards without defaults',
+    async ({ name, fields, properties, args }) => {
+      mocks.configuredServers = {
+        betterstack: {
+          url: 'https://api.example.com/api/mcp/betterstack',
+          headers: {},
+        },
+        'other-server': { url: 'https://other.example.test/mcp', headers: {} },
+      };
+      const inputSchema = {
+        type: 'object',
+        additionalProperties: false,
+        properties,
+        required: fields,
+      };
+      const upstreamTool = {
+        name,
+        description: `Synthetic ${name} contract`,
+        inputSchema,
+      };
+      mocks.listMcpTools.mockResolvedValue([upstreamTool]);
+      mocks.callMcpTool.mockImplementation(async ({ args: forwarded }) => {
+        z.object(
+          Object.fromEntries(
+            Object.entries(properties).map(([field, { type }]) => {
+              const schema =
+                type === 'integer'
+                  ? z.number().int()
+                  : type === 'number'
+                    ? z.number()
+                    : z.string();
+              return [
+                field,
+                fields.some((required) => required === field)
+                  ? schema
+                  : schema.optional(),
+              ];
+            }),
+          ),
+        )
+          .strict()
+          .parse(forwarded);
+        return { result: [] };
+      });
+      const available = await listFastAgentIntegrations(auditContext);
+      const catalog = available.flatMap((integration) =>
+        integration.tools.map((tool) => ({
+          ...tool,
+          integrationId: integration.id,
+        })),
+      );
+      expect(
+        matchIntegrationTools(catalog, {
+          integrationId: 'betterstack',
+          toolName: name,
+          query: 'source table metadata',
+        }).tools,
+      ).toEqual([{ ...upstreamTool, integrationId: 'betterstack' }]);
+      const request = z
+        .object(CALL_INTEGRATION_TOOL_TOOL.inputSchema)
+        .parse({ integrationId: 'betterstack', toolName: name, args });
+      await expect(
+        callFastAgentIntegration(auditContext, available, {
+          ...request,
+          args: request.args!,
+        }),
+      ).resolves.toEqual({ result: [] });
+      expect(mocks.callMcpTool).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          url: 'https://api.example.com/api/mcp/betterstack',
+          headers: { Authorization: 'Bearer control-plane-token' },
+          toolName: name,
+          args,
+        }),
+      );
+      if (name === 'query') {
+        const withoutHost = Object.fromEntries(
+          Object.entries(args).filter(([key]) => key !== 'host'),
+        );
+        await expect(
+          callFastAgentIntegration(auditContext, available, {
+            ...request,
+            args: withoutHost,
+          }),
+        ).resolves.toEqual({ result: [] });
+        expect(mocks.callMcpTool).toHaveBeenLastCalledWith(
+          expect.objectContaining({ args: withoutHost }),
+        );
+      }
+      for (const missing of fields) {
+        const incomplete = Object.fromEntries(
+          Object.entries(args).filter(([key]) => key !== missing),
+        );
+        await expect(
+          callFastAgentIntegration(auditContext, available, {
+            ...request,
+            args: incomplete,
+          }),
+        ).rejects.toThrow();
+        expect(mocks.callMcpTool).toHaveBeenLastCalledWith(
+          expect.objectContaining({ args: incomplete }),
+        );
+      }
+      expect(mocks.callMcpTool).toHaveBeenCalledTimes(
+        1 + fields.length + (name === 'query' ? 1 : 0),
+      );
+    },
+  );
+
+  it.each(['Unauthorized', 'integration unavailable'])(
+    'fails closed when Better Stack discovery rejects with %s',
+    async (message) => {
+      mocks.configuredServers = {
+        betterstack: {
+          url: 'https://api.example.com/api/mcp/betterstack',
+          headers: {},
+        },
+      };
+      mocks.listMcpTools.mockRejectedValueOnce(new Error(message));
+      const available = await listFastAgentIntegrations(auditContext);
+      expect(available).toEqual([]);
+      await expect(
+        callFastAgentIntegration(auditContext, available, {
+          integrationId: 'betterstack',
+          toolName: 'query',
+          args: {},
+        }),
+      ).rejects.toThrow('not available');
+      expect(mocks.callMcpTool).not.toHaveBeenCalled();
+      expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an undiscovered Better Stack query even when another integration exposes it', async () => {
+    mocks.configuredServers = {
+      betterstack: {
+        url: 'https://api.example.com/api/mcp/betterstack',
+        headers: {},
+      },
+      'other-server': { url: 'https://other.example.test/mcp', headers: {} },
+    };
+    mocks.listMcpTools.mockImplementation(async ({ url }) => [
+      {
+        name: url.includes('betterstack') ? 'sources' : 'query',
+        inputSchema: { type: 'object' },
+      },
+    ]);
+    const available = await listFastAgentIntegrations(auditContext);
+    await expect(
+      callFastAgentIntegration(auditContext, available, {
+        integrationId: 'betterstack',
+        toolName: 'query',
+        args: {},
+      }),
+    ).rejects.toThrow('not available');
+    expect(mocks.callMcpTool).not.toHaveBeenCalled();
+    expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
+  });
+
+  it.each(['Unauthorized', 'tool unavailable'])(
+    'preserves Better Stack call-time rejection: %s',
+    async (message) => {
+      mocks.configuredServers = {
+        betterstack: {
+          url: 'https://api.example.com/api/mcp/betterstack',
+          headers: {},
+        },
+      };
+      mocks.listMcpTools.mockResolvedValue([
+        { name: 'query', inputSchema: { type: 'object' } },
+      ]);
+      const available = await listFastAgentIntegrations(auditContext);
+      mocks.callMcpTool.mockRejectedValueOnce(new Error(message));
+      await expect(
+        callFastAgentIntegration(auditContext, available, {
+          integrationId: 'betterstack',
+          toolName: 'query',
+          args: {},
+        }),
+      ).rejects.toThrow(message);
+      expect(mocks.callMcpTool).toHaveBeenCalledOnce();
+      expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'failed', error: message }),
+      );
+    },
+  );
+
   it('exposes GitHub reads and bounded writes through the existing router MCP', async () => {
+    mocks.isRouterMcpServerEnabled.mockReturnValue(true);
     mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
     mocks.listMcpTools.mockResolvedValue([
       { name: 'actions_get', inputSchema: { type: 'object' } },
       { name: 'actions_list', inputSchema: { type: 'object' } },
       { name: 'get_job_logs', inputSchema: { type: 'object' } },
       { name: 'update_pull_request', inputSchema: { type: 'object' } },
+      { name: 'merge_pull_request', inputSchema: { type: 'object' } },
       { name: 'add_issue_comment', inputSchema: { type: 'object' } },
       {
         name: 'add_reply_to_pull_request_comment',
@@ -386,11 +690,12 @@ describe('fast-agent integration broker', () => {
       'actions_list',
       'get_job_logs',
       'update_pull_request',
+      'merge_pull_request',
       'add_issue_comment',
       'add_reply_to_pull_request_comment',
     ]);
     expect(integrations[0]?.description).toContain(
-      'including reviewer requests, draft status, and comment reactions',
+      'including reviewer requests, draft status, merges, and comment reactions',
     );
     expect(integrations[0]?.description).toContain(
       'Follow the discovered native tool descriptions and schemas',
@@ -401,6 +706,45 @@ describe('fast-agent integration broker', () => {
       signal: expect.any(AbortSignal),
     });
   });
+
+  it.each([
+    ['gitea', 'Gitea'],
+    ['ado', 'Azure DevOps'],
+  ] as const)(
+    'exposes minimal native merge tools for %s',
+    async (provider, name) => {
+      mocks.findNativeMergeRepository.mockImplementation(
+        (options: { where: [string, unknown][] }) =>
+          options.where.some(
+            ([column, value]) => column === 'provider' && value === provider,
+          )
+            ? { externalRepoId: 'repository-id' }
+            : undefined,
+      );
+      mocks.listMcpTools.mockResolvedValue([
+        { name: 'get_pull_request', inputSchema: { type: 'object' } },
+        { name: 'merge_pull_request', inputSchema: { type: 'object' } },
+      ]);
+
+      const integrations = await listFastAgentIntegrations(auditContext);
+
+      expect(integrations).toEqual([
+        expect.objectContaining({
+          id: provider,
+          name,
+          tools: [
+            { name: 'get_pull_request', inputSchema: { type: 'object' } },
+            { name: 'merge_pull_request', inputSchema: { type: 'object' } },
+          ],
+        }),
+      ]);
+      expect(mocks.listMcpTools).toHaveBeenCalledWith({
+        url: `https://api.example.com/api/mcp/${provider}`,
+        headers: { Authorization: 'Bearer control-plane-token' },
+        signal: expect.any(AbortSignal),
+      });
+    },
+  );
 
   it('discovers GitLab from the existing connection without reading secrets and refreshes broker auth at call time', async () => {
     mocks.findGitlabRepository.mockResolvedValue({ id: 'repo-1' });
@@ -489,6 +833,7 @@ describe('fast-agent integration broker', () => {
       mocks.configuredServers = {
         roomote: { url: 'https://api.example.com/mcp', headers: {} },
       };
+      mocks.isRouterMcpServerEnabled.mockReturnValue(true);
       mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
       if (reason === 'configuration') {
         mocks.resolveGitLabInstanceHost.mockImplementationOnce(() => {
@@ -556,7 +901,7 @@ describe('fast-agent integration broker', () => {
       ],
     );
     expect(mocks.findGitlabRepository).toHaveBeenCalledOnce();
-    expect(mocks.findRepository).toHaveBeenCalledOnce();
+    expect(mocks.findBitbucketRepository).toHaveBeenCalledOnce();
 
     mocks.findGitlabRepository.mockResolvedValue(undefined);
     expect(
@@ -564,7 +909,7 @@ describe('fast-agent integration broker', () => {
     ).toEqual(['bitbucket']);
 
     mocks.findGitlabRepository.mockResolvedValue({ id: 'repo-1' });
-    mocks.findRepository.mockResolvedValue(undefined);
+    mocks.findBitbucketRepository.mockResolvedValue(undefined);
     expect(
       (await listFastAgentIntegrations(auditContext)).map(({ id }) => id),
     ).toEqual(['gitlab']);
@@ -594,10 +939,10 @@ describe('fast-agent integration broker', () => {
     'omits Bitbucket without an active connected Cloud repository: %j',
     async (repository) => {
       mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
-      mocks.findRepository.mockResolvedValue(repository);
+      mocks.findBitbucketRepository.mockResolvedValue(repository);
       expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
       expect(mocks.listMcpTools).not.toHaveBeenCalled();
-      expect(mocks.findRepository).toHaveBeenCalledWith({
+      expect(mocks.findBitbucketRepository).toHaveBeenCalledWith({
         where: [
           ['provider', 'bitbucket'],
           ['host', 'bitbucket.org'],
@@ -615,7 +960,7 @@ describe('fast-agent integration broker', () => {
     expect(available.map((integration) => integration.id)).toEqual([
       'bitbucket',
     ]);
-    expect(mocks.findRepository).toHaveBeenCalledWith({
+    expect(mocks.findBitbucketRepository).toHaveBeenCalledWith({
       where: [
         ['provider', 'bitbucket'],
         ['host', 'www.bitbucket.org'],
@@ -636,9 +981,9 @@ describe('fast-agent integration broker', () => {
   it('omits Bitbucket when no repository matches the configured www host', async () => {
     mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
     mocks.resolveBitbucketInstanceHost.mockResolvedValue('www.bitbucket.org');
-    mocks.findRepository.mockResolvedValue(undefined);
+    mocks.findBitbucketRepository.mockResolvedValue(undefined);
     expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
-    expect(mocks.findRepository).toHaveBeenCalledWith({
+    expect(mocks.findBitbucketRepository).toHaveBeenCalledWith({
       where: [
         ['provider', 'bitbucket'],
         ['host', 'www.bitbucket.org'],
@@ -655,7 +1000,7 @@ describe('fast-agent integration broker', () => {
       mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
       mocks.resolveBitbucketInstanceHost.mockResolvedValue(host);
       expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
-      expect(mocks.findRepository).not.toHaveBeenCalled();
+      expect(mocks.findBitbucketRepository).not.toHaveBeenCalled();
       expect(mocks.listMcpTools).not.toHaveBeenCalled();
     },
   );
@@ -796,6 +1141,16 @@ describe('fast-agent integration broker', () => {
       },
     },
     {
+      name: 'merge_pull_request',
+      args: {
+        owner: 'example',
+        repo: 'repo',
+        pullNumber: 42,
+        merge_method: 'squash',
+        expectedHeadSha: 'abc123',
+      },
+    },
+    {
       name: 'add_issue_comment',
       args: {
         owner: 'example',
@@ -812,6 +1167,7 @@ describe('fast-agent integration broker', () => {
   ])(
     'preserves discovered $name descriptions, schemas, and arguments',
     async ({ name, args }) => {
+      mocks.isRouterMcpServerEnabled.mockReturnValue(true);
       mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
       const nativeTool = {
         name,
@@ -1173,6 +1529,22 @@ describe('fast-agent integration broker', () => {
     });
 
     expect(mocks.listMcpTools).toHaveBeenCalledOnce();
+  });
+
+  it('rediscovers tools when the persisted integration revision changes', async () => {
+    mocks.configuredServers = {
+      notion: {
+        url: 'https://api.example.com/api/mcp/notion',
+        headers: {},
+        cacheRevision: '1',
+      },
+    };
+
+    await listFastAgentIntegrations(auditContext);
+    mocks.configuredServers.notion!.cacheRevision = '2';
+    await listFastAgentIntegrations(auditContext);
+
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
   });
 
   it('does not share cached tool catalogs across acting users', async () => {

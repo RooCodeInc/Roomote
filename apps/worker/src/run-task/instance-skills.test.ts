@@ -96,6 +96,15 @@ describe('activateSkillsFolder instance skills', () => {
     );
   }
 
+  it('removes excluded packaged skills from both sandbox skill homes', () => {
+    writeDocument(join(packagedDir, 'doctor'), 'Fast-only instructions');
+    writeDocument(join(skillsDir, 'doctor'), 'Stale sandbox instructions');
+
+    expect(activate({ excludeSkillNames: ['doctor'] })).toBe(true);
+    expect(existsSync(join(skillsDir, 'doctor'))).toBe(false);
+    expect(existsSync(join(claudeSkillsDir, 'doctor'))).toBe(false);
+  });
+
   it('materializes packaged > instance > legacy > repository precedence in both homes', () => {
     writeDocument(join(packagedDir, 'packaged'), 'Packaged instructions');
     const names = ['packaged', 'instance', 'legacy', 'repository'];

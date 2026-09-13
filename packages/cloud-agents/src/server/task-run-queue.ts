@@ -2184,6 +2184,13 @@ async function stampWorkspaceSourceControlProviders(
   payload: FreshTask['payload'],
   workspace: ReturnType<typeof resolveTaskWorkspace>,
 ): Promise<void> {
+  if (workspace.type === 'no_repositories') {
+    payload.repositoryProviders = undefined;
+    payload.sourceControlProvider = undefined;
+    payload.sourceControlHost = undefined;
+    return;
+  }
+
   const [repositoryProviders, workspaceHost] = await Promise.all([
     resolveWorkspaceRepositoryProviders(db, workspace),
     resolveWorkspaceSourceControlHost(db, workspace),
@@ -2543,7 +2550,7 @@ function inheritSnapshotResumeCommunicationContext(
     !Array.isArray(sourcePayload) &&
     (sourcePayload as Record<string, unknown>).liveTaskStream === true
   ) {
-    // The card in the Slack thread belongs to the task; every resumed run
+    // The provider-native live message belongs to the task; every resumed run
     // must keep updating it.
     payload.liveTaskStream = true;
   }

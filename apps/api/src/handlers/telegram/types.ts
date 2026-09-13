@@ -3,6 +3,7 @@ import type { QueuedCommunicationMessage } from '@roomote/types';
 export type QueuedTelegramCommunicationMessage = QueuedCommunicationMessage & {
   provider: 'telegram';
   userId: string;
+  attachmentTexts?: string[];
 };
 
 export type TelegramConversationRef = {

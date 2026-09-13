@@ -2,10 +2,51 @@ import { DEFAULT_PR_REVIEW_SETTINGS } from '@roomote/types';
 
 import type { Automation } from '../types';
 import {
+  ensureAutomationRows,
   normalizeBackgroundAgentSettings,
   normalizeReviewCodeAutomationSettings,
   resolveAutomationDestination,
 } from './automations';
+import type { DatabaseOrTransaction } from '../db';
+
+describe('ensureAutomationRows', () => {
+  it('enables weekly manager stats only when seeding a missing row', async () => {
+    const onConflictDoNothing = vi.fn(async () => undefined);
+    const values = vi.fn((_rows: unknown[]) => ({ onConflictDoNothing }));
+    const client = {
+      insert: vi.fn(() => ({ values })),
+    } as unknown as DatabaseOrTransaction;
+
+    await ensureAutomationRows(client);
+
+    const seededRows = values.mock.calls[0]?.[0];
+    expect(seededRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'manager_stats',
+          enabled: true,
+          schedule: { mode: 'weekly' },
+        }),
+      ]),
+    );
+    expect(onConflictDoNothing).toHaveBeenCalledWith({
+      target: expect.anything(),
+    });
+  });
+
+  it('preserves an explicitly disabled manager stats row when normalizing', () => {
+    const settings = normalizeBackgroundAgentSettings(null, [
+      {
+        key: 'manager_stats',
+        enabled: false,
+        schedule: { mode: 'weekly' },
+        targets: [],
+      } as unknown as Automation,
+    ]);
+
+    expect(settings.managerStatsFrequency).toBe('off');
+  });
+});
 
 function channelAutoStartAutomation(
   targets: Automation['targets'],

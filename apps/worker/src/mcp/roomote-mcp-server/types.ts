@@ -130,15 +130,6 @@ export interface SourceControlIssueResponse {
   [key: string]: unknown;
 }
 
-export interface LaunchTaskResponse {
-  success: boolean;
-  runId?: number;
-  taskId?: string;
-  /** The Session that owns the launched task. */
-  sessionId?: string;
-  error?: string;
-}
-
 export interface CreateEnvironmentResponse {
   success: boolean;
   environmentId: string;
@@ -278,22 +269,6 @@ export interface SubmitAutomationWorkItemsResponse {
 export interface StopTaskResponse {
   success: boolean;
   error?: string;
-}
-
-interface RepoInfo {
-  id: number;
-  fullName: string;
-}
-
-export interface EnvironmentInfo {
-  id: string;
-  name: string;
-  description: string | null;
-  repositories: RepoInfo[];
-}
-
-export interface ListEnvironmentsResponse {
-  environments: EnvironmentInfo[];
 }
 
 export interface ListTaskModelsResponse {

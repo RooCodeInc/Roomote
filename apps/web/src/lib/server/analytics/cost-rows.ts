@@ -61,13 +61,20 @@ export function aggregateCostAnalyticsRowsByTask(
     }
 
     const value = existingRow.value + row.value;
+    const tokens = (existingRow.tokens ?? 0) + (row.tokens ?? 0);
     const values: Record<string, string> = {
       ...existingRow.details.values,
       cost: value.toFixed(2),
+      tokens: String(tokens),
     };
 
     for (const [key, rowValue] of Object.entries(row.details.values)) {
-      if (key === 'date' || key === 'cost' || key === 'taskTitle') {
+      if (
+        key === 'date' ||
+        key === 'cost' ||
+        key === 'tokens' ||
+        key === 'taskTitle'
+      ) {
         continue;
       }
 
@@ -79,6 +86,7 @@ export function aggregateCostAnalyticsRowsByTask(
     aggregatedRows.set(taskId, {
       ...existingRow,
       value,
+      tokens,
       details: {
         ...existingRow.details,
         values,
@@ -109,6 +117,7 @@ export async function getCostAnalyticsRows(
       timestamp: llmUsageEvents.messageCompletedAt,
       createdAt: llmUsageEvents.createdAt,
       costMicroUsd: llmUsageEvents.costMicroUsd,
+      totalTokens: llmUsageEvents.totalTokens,
       taskId: llmUsageEvents.taskId,
       runId: llmUsageEvents.runId,
       harnessSessionId: llmUsageEvents.harnessSessionId,
@@ -118,6 +127,7 @@ export async function getCostAnalyticsRows(
       modelId: llmUsageEvents.modelId,
       environmentName: environments.name,
       taskTitle: tasks.title,
+      taskDeletedAt: tasks.deletedAt,
       initiatorKind: tasks.initiatorKind,
       initiatorAutomation: tasks.initiatorAutomation,
       actorDisplayName: tasks.actorDisplayName,
@@ -139,7 +149,7 @@ export async function getCostAnalyticsRows(
     )
     .leftJoin(taskRuns, eq(taskRuns.id, llmUsageEvents.runId))
     .leftJoin(environments, eq(environments.id, llmUsageEvents.environmentId))
-    .where(and(isNull(tasks.deletedAt), usageCutoffCondition));
+    .where(usageCutoffCondition);
 
   const fallbackEnvironmentIds = [
     ...new Set(
@@ -240,23 +250,30 @@ export async function getCostAnalyticsRows(
 
   return usageRows.map((row) => {
     const isTask = Boolean(row.taskId);
+    const isDeletedTask = isTask && Boolean(row.taskDeletedAt);
     const isMemory = !isTask && row.source === 'brain_synthesis';
     const isSession =
       !isTask &&
       !isMemory &&
       fastNativeSessionIds.has(row.harnessSessionId ?? '');
-    const taskType = isTask
-      ? getTaskTypeDimensionValue({
-          initiatorKind: row.initiatorKind,
-          initiatorAutomation: row.initiatorAutomation,
-          actorDisplayName: row.actorDisplayName,
-        })
-      : createLabelBackedDimensionValue(
-          isMemory ? 'Memories' : isSession ? 'Session' : 'Non-task inference',
-        );
+    const taskType = isDeletedTask
+      ? createLabelBackedDimensionValue('Deleted task')
+      : isTask
+        ? getTaskTypeDimensionValue({
+            initiatorKind: row.initiatorKind,
+            initiatorAutomation: row.initiatorAutomation,
+            actorDisplayName: row.actorDisplayName,
+          })
+        : createLabelBackedDimensionValue(
+            isMemory
+              ? 'Memories'
+              : isSession
+                ? 'Session'
+                : 'Non-task inference',
+          );
     const attributedUserId = row.userId ?? row.taskUserId;
     const userDimension =
-      isTask && row.initiatorKind === 'automation'
+      isDeletedTask || (isTask && row.initiatorKind === 'automation')
         ? createLabelBackedDimensionValue(NO_VALUE_LABEL)
         : attributedUserId
           ? getCanonicalUserDimensionValue({
@@ -267,6 +284,7 @@ export async function getCostAnalyticsRows(
           : createLabelBackedDimensionValue(NO_VALUE_LABEL);
     const timestamp = row.timestamp ?? row.createdAt;
     const cost = Number(row.costMicroUsd ?? 0) / 1_000_000;
+    const tokens = Number(row.totalTokens ?? 0);
     const provider = row.providerId ?? 'Unknown provider';
     const model = row.modelId ?? 'Unknown model';
     const project =
@@ -278,6 +296,7 @@ export async function getCostAnalyticsRows(
       id: row.id,
       timestamp,
       value: cost,
+      tokens,
       dimensions: {
         user: userDimension,
         taskType,
@@ -297,9 +316,15 @@ export async function getCostAnalyticsRows(
           provider,
           model,
           cost: cost.toFixed(2),
-          taskTitle: row.taskTitle ?? taskType.label,
+          tokens: String(tokens),
+          taskTitle: isDeletedTask
+            ? taskType.label
+            : (row.taskTitle ?? taskType.label),
         },
-        links: row.taskId ? { task: `/task/${row.taskId}` } : undefined,
+        links:
+          row.taskId && !isDeletedTask
+            ? { task: `/task/${row.taskId}` }
+            : undefined,
       },
       meta: {
         canonicalTaskId: row.taskId,

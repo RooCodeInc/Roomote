@@ -1,4 +1,5 @@
 import { useState, type ComponentType } from 'react';
+import Link from 'next/link';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   type AcpRequestUserInputPayload,
@@ -43,6 +44,7 @@ import { messageAnchorId } from '../message-anchor';
 import type { AcpUiMessage } from './types';
 import { ProviderRetryNoticeMessage } from './ProviderRetryNoticeMessage';
 import { TerminalProviderErrorMessage } from './TerminalProviderErrorMessage';
+import { AcpDataVisualizations } from './AcpDataVisualizations';
 import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 import { useMessageUiOptions } from '@/components/ai-elements/message-ui-options';
 import { SlackMessageText } from '@/components/ai-elements/slack-message-text';
@@ -286,7 +288,12 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
     setSelectedImageIndex(index);
   };
 
-  if (!msg.partial && content === '' && !msg.images?.length) {
+  if (
+    !msg.partial &&
+    content === '' &&
+    !msg.images?.length &&
+    !msg.charts?.length
+  ) {
     return;
   }
 
@@ -297,15 +304,31 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
       >
         {isUser ? (
           <BasicTooltip content={userTooltipContent}>
-            <div className="shrink-0 pt-1 mt-8">
-              <Avatar
-                imageUrl={msg.userImageUrl}
-                name={msg.userName}
-                email={msg.userEmail}
-                size="md"
-                alt={msg.userName ?? msg.userEmail ?? 'User'}
-              />
-            </div>
+            {msg.userId ? (
+              <Link
+                href={{ pathname: '/sessions', query: { user: msg.userId } }}
+                aria-label={`View sessions by ${msg.userName?.trim() || msg.userEmail?.trim() || 'user'}`}
+                className="shrink-0 pt-1 mt-8 cursor-pointer"
+              >
+                <Avatar
+                  imageUrl={msg.userImageUrl}
+                  name={msg.userName}
+                  email={msg.userEmail}
+                  size="md"
+                  alt={msg.userName ?? msg.userEmail ?? 'User'}
+                />
+              </Link>
+            ) : (
+              <div className="shrink-0 pt-1 mt-8">
+                <Avatar
+                  imageUrl={msg.userImageUrl}
+                  name={msg.userName}
+                  email={msg.userEmail}
+                  size="md"
+                  alt={msg.userName ?? msg.userEmail ?? 'User'}
+                />
+              </div>
+            )}
           </BasicTooltip>
         ) : null}
         <MessageContent id={anchorId} className={messageContentClassName}>
@@ -407,6 +430,9 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
           ) : (
             <MessageResponse>{content}</MessageResponse>
           )}
+          {!isUser && msg.charts?.length ? (
+            <AcpDataVisualizations charts={msg.charts} />
+          ) : null}
           {!hidePrReviewActions && !isUser && msg.kind === 'text' ? (
             <PrReviewNotificationActions msg={msg} />
           ) : null}

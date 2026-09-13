@@ -5,6 +5,7 @@ export const communicationProviders = [
   'teams',
   'telegram',
   'discord',
+  'agentmail',
 ] as const;
 
 export const communicationProviderSchema = z.enum(communicationProviders);
@@ -56,6 +57,7 @@ export const communicationProviderQueuePrefixes = {
   teams: 'teams:messages:',
   telegram: 'telegram:messages:',
   discord: 'discord:messages:',
+  agentmail: 'agentmail:messages:',
 } as const satisfies Record<CommunicationProvider, string>;
 
 export function getCommunicationProviderQueuePrefix(
@@ -69,6 +71,7 @@ export const communicationProviderDisplayNames = {
   teams: 'Microsoft Teams',
   telegram: 'Telegram',
   discord: 'Discord',
+  agentmail: 'Email',
 } as const satisfies Record<CommunicationProvider, string>;
 
 export function getCommunicationProviderDisplayName(
@@ -94,6 +97,8 @@ export const queuedCommunicationMessageSchema = z.object({
   channel: z.string().optional(),
   threadTs: z.string().optional(),
   images: z.array(z.string()).optional(),
+  /** Trusted provider context associated with the current message. */
+  agentContext: z.string().optional(),
   formattedPrompt: z.string().optional(),
   turnPolicy: z
     .object({
