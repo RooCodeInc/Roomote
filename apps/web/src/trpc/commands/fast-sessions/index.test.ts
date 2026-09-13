@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   startPinnedLaunch: vi.fn(),
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
-  getSessionForTask: vi.fn(),
   startSessionGoal: vi.fn(),
   getFastSessionTasks: vi.fn(),
   currentEpochSeconds: vi.fn(),
@@ -66,7 +65,6 @@ vi.mock('@roomote/db/server', () => ({
   fastAgentMessages: {},
   sessions: {},
   getSessionForFastConversation: mocks.getUnifiedSession,
-  getSessionForTask: mocks.getSessionForTask,
   ensureSessionForFastConversation: mocks.getUnifiedSession,
 }));
 
@@ -105,7 +103,6 @@ import {
   scheduleWebFastAgentTurn,
   startFastSessionCommand,
   startFastSessionGoalCommand,
-  startFastSessionGoalForTaskCommand,
   startSetupFastSessionCommand,
   updateFastSessionModelSelectionCommand,
   submitFastSessionUserInputCommand,
@@ -650,24 +647,6 @@ describe('Session Goal Mode commands', () => {
       objective: 'Ship the release',
       currentMessageId: 'message-1',
     });
-  });
-
-  it('maps a task-page goal to its owning Fast Session', async () => {
-    mocks.getSessionForTask.mockResolvedValue({
-      fastConversationId: session.id,
-    });
-
-    await startFastSessionGoalForTaskCommand(auth, {
-      taskId: 'task-1',
-      objective: 'Finish the task outcome',
-    });
-
-    expect(mocks.startSessionGoal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionId: session.id,
-        objective: 'Finish the task outcome',
-      }),
-    );
   });
 });
 

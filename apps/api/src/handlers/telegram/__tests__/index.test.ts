@@ -1641,6 +1641,55 @@ describe('Telegram webhook handler', () => {
     expect(queueFastReplyMock).not.toHaveBeenCalled();
   });
 
+  it('starts a group /goal on the Fast Session bound to the replied-to message', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    findFastReplySessionMock.mockResolvedValueOnce({
+      id: '22222222-2222-4222-8222-222222222222',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '-1007',
+        conversationId: '400:user:mapped-user-1',
+        replyTarget: { channelId: '-1007' },
+      },
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          chat: { id: -1007, type: 'group', title: 'Engineering' },
+          text: '/goal@roomote_bot ship the release',
+          entities: [{ type: 'bot_command', offset: 0, length: 17 }],
+          reply_to_message: {
+            message_id: 400,
+            date: 1,
+            text: 'Fast answer',
+            chat: { id: -1007, type: 'group' },
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      goalStarted: true,
+      sessionId: '22222222-2222-4222-8222-222222222222',
+    });
+    expect(findFastReplySessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'telegram',
+        replyToMessageId: '400',
+        userId: 'mapped-user-1',
+      }),
+    );
+    expect(getFastSessionMock).not.toHaveBeenCalled();
+    expect(startFastSessionGoalMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: '22222222-2222-4222-8222-222222222222',
+        objective: 'ship the release',
+      }),
+    );
+  });
+
   it('shows /goal usage when the objective is missing', async () => {
     mockTelegramLinkedSender();
 

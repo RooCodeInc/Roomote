@@ -651,19 +651,18 @@ telegram.post('/', async (c) => {
       reason: 'attention_notification_user_mismatch',
     });
   }
-  const fastSession =
-    !newTaskCommand && !goalCommand
-      ? await findFastAgentSessionForProviderReply({
-          provider: 'telegram',
-          workspaceId: metadata.communicationChannelId,
-          channelId: metadata.communicationChannelId,
-          ...(metadata.communicationThreadId
-            ? { threadId: metadata.communicationThreadId }
-            : {}),
-          ...(replyToMessageId ? { replyToMessageId } : {}),
-          userId: senderUserId,
-        })
-      : null;
+  const fastSession = !newTaskCommand
+    ? await findFastAgentSessionForProviderReply({
+        provider: 'telegram',
+        workspaceId: metadata.communicationChannelId,
+        channelId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
+        ...(replyToMessageId ? { replyToMessageId } : {}),
+        userId: senderUserId,
+      })
+    : null;
   if (!fastSession && replyToMessageId) {
     const isKnownFastMessage = await isFastAgentProviderMessage({
       provider: 'telegram',
@@ -679,7 +678,7 @@ telegram.post('/', async (c) => {
       });
     }
   }
-  if (fastSession) {
+  if (fastSession && !goalCommand) {
     if (fastSession.userId !== senderUserId) {
       return c.json({
         ok: true,
@@ -790,10 +789,12 @@ telegram.post('/', async (c) => {
           : {}),
       },
     };
-    const session = await getOrCreateFastAgentSession({
-      userId: senderUserId,
-      conversation: fastConversation,
-    });
+    const session =
+      fastSession ??
+      (await getOrCreateFastAgentSession({
+        userId: senderUserId,
+        conversation: fastConversation,
+      }));
     const result = await startFastSessionGoal({
       sessionId: session.id,
       userId: senderUserId,

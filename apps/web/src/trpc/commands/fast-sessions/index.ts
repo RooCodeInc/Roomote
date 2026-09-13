@@ -36,7 +36,6 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   getSessionForFastConversation,
-  getSessionForTask,
   retireCanonicalPrReviewActionsForDestinationKey,
   sessions,
   sql,
@@ -765,30 +764,6 @@ export async function startFastSessionGoalCommand(
   if (!session) throw new Error('Fast session not found');
   return startFastSessionGoal({
     sessionId: session.id,
-    userId: auth.userId,
-    senderDisplayName:
-      getUserDisplayName({ name: auth.name, email: auth.primaryEmail }) ?? null,
-    objective: input.objective,
-    currentMessageId: input.clientMessageId ?? `web-goal:${randomUUID()}`,
-  });
-}
-
-export async function startFastSessionGoalForTaskCommand(
-  auth: UserAuthSuccess,
-  input: { taskId: string; objective: string; clientMessageId?: string },
-) {
-  const session = await getSessionForTask(db, input.taskId);
-  if (!session?.fastConversationId) {
-    return {
-      success: false as const,
-      error: 'This task is not attached to a Fast Session.',
-    };
-  }
-  if (!(await findAccessibleFastSession(auth, session.fastConversationId))) {
-    return { success: false as const, error: 'Session not found' };
-  }
-  return startFastSessionGoal({
-    sessionId: session.fastConversationId,
     userId: auth.userId,
     senderDisplayName:
       getUserDisplayName({ name: auth.name, email: auth.primaryEmail }) ?? null,

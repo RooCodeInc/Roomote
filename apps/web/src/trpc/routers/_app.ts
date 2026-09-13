@@ -40,7 +40,6 @@ import {
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
   replyToFastSessionCommand,
-  startFastSessionGoalForTaskCommand,
   startFastSessionGoalCommand,
   startFastSessionCommand,
   submitFastSessionUserInputCommand,
@@ -3032,17 +3031,6 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         startFastSessionGoalCommand(auth, input),
-      ),
-    startGoalForTask: protectedProcedure
-      .input(
-        z.object({
-          taskId: z.string(),
-          objective: sessionGoalInputSchema.shape.objective,
-          clientMessageId: z.string().optional(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        startFastSessionGoalForTaskCommand(auth, input),
       ),
     reviewAction: protectedProcedure
       .input(fastSessionPrReviewActionInputSchema)
