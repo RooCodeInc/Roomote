@@ -474,6 +474,8 @@ export type McpIntegration = {
   instructions?: string;
   linkedAccountSetup?: LinkedAccountSetup;
   connectionScope?: 'user' | 'deployment';
+  /** Confidentiality of tool inputs, outputs, and derivatives. */
+  dataPolicy?: 'shared' | 'private';
   authorizationParameters?: McpIntegrationAuthorizationParameter[];
   oauthClientEnv?: McpIntegrationOAuthClientEnv;
   oauthEndpoints?: McpIntegrationOAuthEndpoints;
@@ -819,6 +821,16 @@ export function getMcpIntegrationConnectionScope(
   }
 
   return integration?.connectionScope ?? 'user';
+}
+
+export function getMcpIntegrationDataPolicy(
+  integrationOrId: McpIntegration | string | undefined,
+): 'shared' | 'private' {
+  const integration =
+    typeof integrationOrId === 'string'
+      ? getMcpIntegration(integrationOrId)
+      : integrationOrId;
+  return integration?.dataPolicy ?? 'shared';
 }
 
 export function getDefaultMcpConnectionRole(

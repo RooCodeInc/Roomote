@@ -1742,6 +1742,54 @@ describe('fast-agent integration broker', () => {
     expect(mocks.callMcpTool).toHaveBeenCalledTimes(1);
   });
 
+  it('requires a matching private Session owner for private integrations', async () => {
+    mocks.callMcpTool.mockResolvedValue({ value: 'private canary result' });
+    const integration = {
+      id: 'private-example',
+      name: 'Private example',
+      description: 'Private data',
+      dataPolicy: 'private' as const,
+      tools: [{ name: 'read_private' }],
+    };
+    const request = {
+      integrationId: integration.id,
+      toolName: 'read_private',
+      args: { query: 'private canary argument' },
+    };
+
+    for (const context of [
+      auditContext,
+      {
+        ...auditContext,
+        privacy: 'private' as const,
+        privateOwnerUserId: 'different-user',
+      },
+    ]) {
+      await expect(
+        callFastAgentIntegration(context, [integration], request),
+      ).rejects.toThrow('owned by the current user');
+    }
+
+    await expect(
+      callFastAgentIntegration(
+        {
+          ...auditContext,
+          privacy: 'private',
+          privateOwnerUserId: auditContext.userId,
+        },
+        [integration],
+        request,
+      ),
+    ).resolves.toEqual({ value: 'private canary result' });
+    expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({ arguments: {} }),
+    );
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({ resultPreview: null }),
+    );
+    expect(mocks.callMcpTool).toHaveBeenCalledTimes(1);
+  });
+
   it('does not execute a tool when its durable audit cannot be created', async () => {
     mocks.beginIntegrationCall.mockRejectedValue(new Error('database offline'));
 

@@ -1781,6 +1781,8 @@ export async function answerFastAgentQuestion({
   let mirroredMessageCount = 0;
   let canonicalConversationId: string | null = null;
   let currentSessionPrivacy: 'shared' | 'private' = 'shared';
+  let currentPrivateOwnerUserId: string | null = null;
+  let availableIntegrations: FastAgentIntegration[] = [];
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
   /** Last model OpenCode resolved for this turn, for the failure closeout. */
@@ -2648,6 +2650,11 @@ export async function answerFastAgentQuestion({
       title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
     const privateBrainRead =
       currentSessionPrivacy === 'private' && mcpServerName === BRAIN_MCP_ID;
+    const privateIntegrationCall = availableIntegrations.some(
+      (integration) =>
+        integration.id === mcpServerName &&
+        integration.dataPolicy === 'private',
+    );
     const canonicalEvent = allocateCanonicalEvent(`tool:${ordinal}`);
     await persistCanonicalMessage(
       {
@@ -2673,7 +2680,12 @@ export async function answerFastAgentQuestion({
           toolName: mcpToolName ?? title,
           command: null,
           rawInput: {
-            arguments: privatePersonalization || privateBrainRead ? {} : args,
+            arguments:
+              privatePersonalization ||
+              privateBrainRead ||
+              privateIntegrationCall
+                ? {}
+                : args,
           },
         },
         source: conversation.surface,
@@ -2709,16 +2721,25 @@ export async function answerFastAgentQuestion({
     const privateBrainRead =
       currentSessionPrivacy === 'private' &&
       event.mcpServerName === BRAIN_MCP_ID;
+    const privateIntegrationCall = availableIntegrations.some(
+      (integration) =>
+        integration.id === event.mcpServerName &&
+        integration.dataPolicy === 'private',
+    );
     const { output, truncated } =
-      privatePersonalization || privateBrainRead
+      privatePersonalization || privateBrainRead || privateIntegrationCall
         ? {
             output: failed
               ? privateBrainRead
                 ? 'Brain read failed'
-                : 'Personalization was not updated'
+                : privateIntegrationCall
+                  ? 'Private integration call failed'
+                  : 'Personalization was not updated'
               : privateBrainRead
                 ? 'Brain read completed'
-                : 'Personalization updated',
+                : privateIntegrationCall
+                  ? 'Private integration call completed'
+                  : 'Personalization updated',
             truncated: false,
           }
         : serializeFastAgentToolOutput(result);
@@ -2749,7 +2770,11 @@ export async function answerFastAgentQuestion({
           output,
           rawInput: {
             arguments:
-              privatePersonalization || privateBrainRead ? {} : event.args,
+              privatePersonalization ||
+              privateBrainRead ||
+              privateIntegrationCall
+                ? {}
+                : event.args,
           },
         },
         source: conversation.surface,
@@ -3094,11 +3119,18 @@ export async function answerFastAgentQuestion({
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
     currentSessionPrivacy = session.privacy ?? 'shared';
-    let availableIntegrations = selectFastRoomoteChannelTools({
+    currentPrivateOwnerUserId = session.privateOwnerUserId ?? null;
+    availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
       conversation,
       currentMessageReactable,
     });
+    availableIntegrations = availableIntegrations.filter(
+      (integration) =>
+        integration.dataPolicy !== 'private' ||
+        (currentSessionPrivacy === 'private' &&
+          currentPrivateOwnerUserId === userId),
+    );
     if (currentSessionPrivacy === 'private') {
       availableIntegrations = availableIntegrations
         .filter(
@@ -3811,6 +3843,7 @@ export async function answerFastAgentQuestion({
             apiBaseUrl,
             sessionId: session.id,
             privacy: currentSessionPrivacy,
+            privateOwnerUserId: currentPrivateOwnerUserId,
             conversation,
             messageId: currentMessageId ?? conversation.conversationId,
           },

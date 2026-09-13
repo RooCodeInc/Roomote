@@ -26,6 +26,7 @@ import {
   MCP_ROUTING_PROXY_PATH_PREFIX,
   ROOMOTE_MCP_ID,
   getMcpIntegration,
+  getMcpIntegrationDataPolicy,
   getMemoryMcpDisplayName,
   formatErrorForLog,
   isMemoryMcpServer,
@@ -48,6 +49,7 @@ export type FastAgentIntegration = {
   id: string;
   name: string;
   description: string;
+  dataPolicy?: 'shared' | 'private';
   instructions?: string;
   tools: McpToolDefinition[];
   endpoint?: {
@@ -73,6 +75,7 @@ type IntegrationAuditContext = BrokerContext & {
   conversation: FastAgentConversation;
   messageId: string;
   privacy?: 'shared' | 'private';
+  privateOwnerUserId?: string | null;
 };
 
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
@@ -265,7 +268,10 @@ function integrationProxyUrl(baseUrl: string, integrationId: string): string {
 
 function describeMcpServer(
   id: string,
-): Pick<FastAgentIntegration, 'name' | 'description' | 'instructions'> {
+): Pick<
+  FastAgentIntegration,
+  'name' | 'description' | 'instructions' | 'dataPolicy'
+> {
   if (id === ROOMOTE_MCP_ID) {
     return {
       name: 'Roomote',
@@ -289,6 +295,7 @@ function describeMcpServer(
       integration?.description ??
       'Use tools from this deployment-configured MCP server.',
     instructions: integration?.instructions,
+    dataPolicy: getMcpIntegrationDataPolicy(integration),
   };
 }
 
@@ -631,6 +638,16 @@ export async function callFastAgentIntegration(
   }
   const privateBrainRead =
     context.privacy === 'private' && request.integrationId === BRAIN_MCP_ID;
+  const privateIntegrationCall = integration.dataPolicy === 'private';
+  if (
+    privateIntegrationCall &&
+    (context.privacy !== 'private' ||
+      context.privateOwnerUserId !== context.userId)
+  ) {
+    throw new Error(
+      'Private integrations require a private Session owned by the current user.',
+    );
+  }
   if (
     context.privacy === 'private' &&
     isMemoryMcpServer(request.integrationId) &&
@@ -667,7 +684,7 @@ export async function callFastAgentIntegration(
     slackMessageTs: context.messageId,
     integrationId: integration.id,
     toolName: request.toolName,
-    arguments: privateBrainRead ? {} : request.args,
+    arguments: privateBrainRead || privateIntegrationCall ? {} : request.args,
   });
 
   try {
@@ -708,9 +725,10 @@ export async function callFastAgentIntegration(
       await completeSlackFastIntegrationCall({
         id: audit.id,
         status: 'succeeded',
-        resultPreview: privateBrainRead
-          ? null
-          : serializeAuditPreview(result, 30_000),
+        resultPreview:
+          privateBrainRead || privateIntegrationCall
+            ? null
+            : serializeAuditPreview(result, 30_000),
         startedAt: audit.startedAt,
       });
     } catch (error) {
@@ -725,7 +743,9 @@ export async function callFastAgentIntegration(
       await completeSlackFastIntegrationCall({
         id: audit.id,
         status: 'failed',
-        error: formatErrorForLog(error).slice(0, 10_000),
+        error: privateIntegrationCall
+          ? 'Private integration call failed'
+          : formatErrorForLog(error).slice(0, 10_000),
         startedAt: audit.startedAt,
       });
     } catch (auditError) {
