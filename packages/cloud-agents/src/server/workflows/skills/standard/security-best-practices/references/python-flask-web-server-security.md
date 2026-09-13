@@ -300,7 +300,7 @@ Severity: Critical
 Required:
 - MUST NOT render templates that contain user-controlled template syntax.
 - MUST treat `render_template_string` and `Environment.from_string(...).render(...)` as dangerous if the template string is influenced by untrusted input.
-- MUST NOT use use `.format()` on user controlled strings
+- MUST NOT use `.format()` on user controlled strings
 - If untrusted templates are absolutely required, treat it as a special high-risk design:
   - MUST use a sandboxed templating approach and restrict capabilities.
   - MUST keep Jinja updated and assume sandbox escapes are possible; isolate further.
