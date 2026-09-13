@@ -75,6 +75,7 @@ import {
 } from '@roomote/types';
 
 import { resolveUserMcpServerConfigs } from '../routers/mcp-connections';
+import { notifyFastWebSessionAttention } from './session-attention-notification';
 import {
   buildLinearFastReplyMessageId,
   createFastAgentLinearTaskLauncher,
@@ -717,6 +718,12 @@ async function createWebFastAgentParentTurn(params: {
       postReply: async () => {
         params.onReplyPosted();
       },
+      notifyUserAttention: ({ kind, eventId }) =>
+        notifyFastWebSessionAttention({
+          fastConversationId: session.id,
+          kind,
+          eventId,
+        }).then(() => undefined),
     },
   };
 }

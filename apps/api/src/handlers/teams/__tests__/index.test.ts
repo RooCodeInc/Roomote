@@ -305,6 +305,9 @@ vi.mock('@roomote/communication/teams-provider', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  findSessionAttentionNotificationReply: vi.fn(async () => null),
+  isSessionAttentionNotificationMessage: vi.fn(async () => false),
+  resolveSessionAttentionFastConversation: vi.fn(async () => null),
   continueFastAgentSurfaceReply: continueFastReplyMock,
   createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(async () =>
     envMock.R_TEAMS_BOT_APP_ID && envMock.R_TEAMS_BOT_APP_PASSWORD

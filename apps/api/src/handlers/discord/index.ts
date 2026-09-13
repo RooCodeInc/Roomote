@@ -36,8 +36,11 @@ import {
   findDiscordMappedUserId,
   findFastAgentSessionForProviderMessage,
   findFastAgentSessionForProviderReply,
+  findSessionAttentionNotificationReply,
   isFastAgentProviderMessage,
+  isSessionAttentionNotificationMessage,
   queueFastAgentSurfaceReply,
+  resolveSessionAttentionFastConversation,
   restoreDiscordLinkCode,
   upsertDiscordInstallation,
   upsertDiscordUserMapping,
@@ -602,6 +605,16 @@ async function processDiscordGatewayEvent(
       : {}),
   };
   const forceNewTask = command?.name === 'new';
+  const attentionReply =
+    !forceNewTask && senderUserId && message?.message_reference?.message_id
+      ? await findSessionAttentionNotificationReply({
+          provider: 'discord',
+          workspaceId: channel.guildId ?? 'dm',
+          channelId: metadata.communicationChannelId,
+          userId: senderUserId,
+          replyToMessageId: message.message_reference.message_id,
+        })
+      : null;
   const repliedFastSession =
     !forceNewTask && message?.message_reference?.message_id
       ? await findFastAgentSessionForProviderReply({
@@ -612,8 +625,24 @@ async function processDiscordGatewayEvent(
             ? { threadId: metadata.communicationThreadId }
             : {}),
           replyToMessageId: message.message_reference.message_id,
+          ...(senderUserId ? { userId: senderUserId } : {}),
         })
       : null;
+  if (
+    !attentionReply &&
+    message?.message_reference?.message_id &&
+    (await isSessionAttentionNotificationMessage({
+      provider: 'discord',
+      workspaceId: channel.guildId ?? 'dm',
+      channelId: metadata.communicationChannelId,
+      messageId: message.message_reference.message_id,
+    }))
+  ) {
+    return {
+      ok: true,
+      ignored: 'discord_attention_notification_user_mismatch',
+    };
+  }
   if (
     !forceNewTask &&
     !repliedFastSession &&
@@ -669,6 +698,7 @@ async function processDiscordGatewayEvent(
           : null
         : await findCompletedCommunicationTaskRunWithSnapshot(conversation);
   const isFastAgentConversation = Boolean(
+    attentionReply ??
     repliedFastSession ??
     (channel.isThread || channel.isDirectMessage
       ? await hasFastAgentSession({
@@ -879,6 +909,43 @@ async function processDiscordGatewayEvent(
   const fastAttachments = processedAttachments.images.length
     ? { images: processedAttachments.images }
     : {};
+
+  if (attentionReply && message) {
+    const replyToMessageId = message.message_reference?.message_id;
+    const deliveryConversation = {
+      surface: 'discord' as const,
+      workspaceId: channel.guildId ?? 'dm',
+      conversationId: `notification:${replyToMessageId}:user:${senderUserId}`,
+      replyTarget: {
+        channelId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
+      },
+    };
+    const fastConversationId = await resolveSessionAttentionFastConversation({
+      sessionId: attentionReply.sessionId,
+      userId: senderUserId,
+      deliveryConversation,
+    });
+    const continued = fastConversationId
+      ? await queueFastAgentSurfaceReply({
+          sessionId: fastConversationId,
+          userId: senderUserId,
+          senderDisplayName: sender.global_name ?? sender.username,
+          question: fastEntryText,
+          currentMessageId: message.id,
+          deliveryConversation,
+          ...fastAttachments,
+          ...(processedAttachments.attachmentTexts.length
+            ? { attachmentTexts: processedAttachments.attachmentTexts }
+            : {}),
+        })
+      : false;
+    return continued
+      ? { ok: true, fastAnswered: true, fastContinued: true }
+      : { ok: true, ignored: 'discord_fast_session_route_unavailable' };
+  }
 
   if (command?.name === 'new' && command.request && interaction) {
     // `/new` opens a fresh conversation. In a server it gets its own thread

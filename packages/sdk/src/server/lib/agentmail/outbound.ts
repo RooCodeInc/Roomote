@@ -270,6 +270,7 @@ export type StartAgentMailConversationResult =
         conversationId: string;
         inboxId: string;
         messageId: string | null;
+        providerThreadId: string;
       } | null;
     };
 
@@ -435,6 +436,7 @@ async function recordOutboundConversation(input: {
   conversationId: string;
   inboxId: string;
   messageId: string | null;
+  providerThreadId: string;
 } | null> {
   if (!input.providerThreadId) {
     return null;
@@ -512,6 +514,7 @@ async function recordOutboundConversation(input: {
     conversationId: conversation.id,
     inboxId: input.inboxId,
     messageId: input.messageId,
+    providerThreadId: input.providerThreadId,
   };
 }
 

@@ -441,6 +441,18 @@ export function subscribeHarnessCallbacks({
         }
 
         void forwardCallbackEvent(callbackTaskId, event);
+        if (event.type === 'request_user_input') {
+          trackPendingTaskCompletionWork(
+            (async () => {
+              await waitForPendingPersistenceWrites();
+              await sdk.taskRuns.notifyUserAttention({
+                id: taskRun.id,
+                kind: 'input_needed',
+                eventId: event.request.requestId,
+              });
+            })(),
+          );
+        }
       }
     });
 

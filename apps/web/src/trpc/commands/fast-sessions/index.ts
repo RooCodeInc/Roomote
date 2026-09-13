@@ -20,6 +20,7 @@ import {
   buildFastAgentArtifactCreator,
   buildFastAgentSurfaceReplyDelivery,
   createFastAgentSessionArtifact,
+  notifyFastWebSessionAttention,
   persistFastAgentInlineHumanTurn,
   resolveUserMcpServerConfigs,
   wakeFastAgentParentEventAt,
@@ -338,6 +339,16 @@ async function runWebFastAgentTurn({
       setupSession,
       ...(voiceMode ? { voiceMode: true } : {}),
       adapter: {
+        ...(durableSessionId
+          ? {
+              notifyUserAttention: ({ kind, eventId }) =>
+                notifyFastWebSessionAttention({
+                  fastConversationId: durableSessionId,
+                  kind,
+                  eventId,
+                }).then(() => undefined),
+            }
+          : {}),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId,

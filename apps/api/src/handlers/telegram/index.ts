@@ -45,10 +45,13 @@ import {
   consumeTelegramLinkCode,
   findFastAgentSessionForProviderMessage,
   findFastAgentSessionForProviderReply,
+  findSessionAttentionNotificationReply,
   isTelegramLinkCode,
   isFastAgentProviderMessage,
+  isSessionAttentionNotificationMessage,
   queueFastAgentSurfaceReply,
   recordFastAgentConversationMessageBestEffort,
+  resolveSessionAttentionFastConversation,
   restoreTelegramLinkCode,
 } from '@roomote/sdk/server';
 import {
@@ -564,6 +567,93 @@ telegram.post('/', async (c) => {
   const hasMedia = Boolean(
     message.photo?.length || message.document || message.audio || message.voice,
   );
+  const attentionReply = replyToMessageId
+    ? await findSessionAttentionNotificationReply({
+        provider: 'telegram',
+        workspaceId: metadata.communicationChannelId,
+        channelId: metadata.communicationChannelId,
+        userId: senderUserId,
+        replyToMessageId,
+      })
+    : null;
+  if (attentionReply && !newTaskCommand && !goalCommand) {
+    const fastMessage = hasMedia
+      ? await attachTelegramMediaToQueuedMessage({
+          message,
+          queuedMessage: queuedMessage!,
+          ...(botToken ? { botToken } : {}),
+        })
+      : queuedMessage!;
+    const question = fastMessage.text.trim();
+    if (!question) {
+      return c.json({ ok: true, queued: false, reason: 'fast_message_empty' });
+    }
+    const deliveryConversation = {
+      surface: 'telegram' as const,
+      workspaceId: metadata.communicationChannelId,
+      conversationId: `notification:${replyToMessageId}:user:${senderUserId}`,
+      replyTarget: {
+        channelId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
+      },
+    };
+    const fastConversationId = await resolveSessionAttentionFastConversation({
+      sessionId: attentionReply.sessionId,
+      userId: senderUserId,
+      deliveryConversation,
+    });
+    const continued = fastConversationId
+      ? await queueFastAgentSurfaceReply({
+          sessionId: fastConversationId,
+          userId: senderUserId,
+          senderDisplayName:
+            [message.from?.first_name, message.from?.last_name]
+              .filter(Boolean)
+              .join(' ')
+              .trim() ||
+            message.from?.username?.trim() ||
+            null,
+          question,
+          currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
+          replyToMessageId,
+          deliveryConversation,
+          ...(fastMessage.agentContext
+            ? { agentContext: fastMessage.agentContext }
+            : {}),
+          ...(fastMessage.images ? { images: fastMessage.images } : {}),
+          ...(fastMessage.attachmentTexts
+            ? { attachmentTexts: fastMessage.attachmentTexts }
+            : {}),
+        })
+      : false;
+    return c.json(
+      continued
+        ? { ok: true, fastAnswered: true, fastContinued: true }
+        : {
+            ok: true,
+            queued: false,
+            reason: 'fast_session_delivery_unavailable',
+          },
+    );
+  }
+  if (
+    replyToMessageId &&
+    !attentionReply &&
+    (await isSessionAttentionNotificationMessage({
+      provider: 'telegram',
+      workspaceId: metadata.communicationChannelId,
+      channelId: metadata.communicationChannelId,
+      messageId: replyToMessageId,
+    }))
+  ) {
+    return c.json({
+      ok: true,
+      queued: false,
+      reason: 'attention_notification_user_mismatch',
+    });
+  }
   const fastSession =
     !newTaskCommand && !goalCommand
       ? await findFastAgentSessionForProviderReply({

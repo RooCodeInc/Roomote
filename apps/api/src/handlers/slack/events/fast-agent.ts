@@ -53,6 +53,7 @@ export async function processFastAgentMessage(params: {
   launchTask: LaunchFastAgentTask;
   directedAtRoomote?: boolean;
   roomoteSlackUserId?: string;
+  originSessionId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
   onRejected?: () => void;
 }): Promise<void> {
@@ -119,6 +120,9 @@ export async function processFastAgentMessage(params: {
         return await getOrCreateFastAgentSession({
           userId,
           conversation: incomingConversation,
+          ...(params.originSessionId
+            ? { sessionId: params.originSessionId }
+            : {}),
         });
       } finally {
         await releaseRootBindingLock().catch(() => {});

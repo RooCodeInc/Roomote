@@ -14,9 +14,10 @@ import {
   type TaskRun,
 } from '@roomote/db/server';
 import { isSessionUserPresent } from '@roomote/redis';
-import { RunStatus } from '@roomote/types';
+import { getFastAgentParentFromPayload, RunStatus } from '@roomote/types';
 
 import { sendUserDirectMessageBestEffort } from '../user-direct-message';
+import { hasTaskRunAttentionNotification } from '../session-attention-notification';
 import {
   buildDeliveryClaimMarker,
   buildDeliveryClaimPredicate,
@@ -69,18 +70,29 @@ export async function notifyWebTaskInitiatorOnSettle(
       title: true,
     },
     with: {
-      runs: { columns: { id: true, status: true, startedAt: true } },
+      runs: {
+        columns: { id: true, status: true, startedAt: true, payload: true },
+      },
     },
   });
 
   const stateRun = task ? selectTaskStateRun(task.runs) : null;
+  const settledRun = task?.runs.find((candidate) => candidate.id === run.id);
   if (
     !task ||
     task.surface !== 'web' ||
     !task.initiatorUserId ||
     task.state === 'active' ||
     stateRun?.id !== run.id ||
-    stateRun.status !== status
+    stateRun.status !== status ||
+    getFastAgentParentFromPayload(settledRun?.payload)
+  ) {
+    return 'not_applicable';
+  }
+
+  if (
+    status === RunStatus.Completed &&
+    (await hasTaskRunAttentionNotification(run.id))
   ) {
     return 'not_applicable';
   }

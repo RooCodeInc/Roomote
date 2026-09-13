@@ -35,9 +35,12 @@ import {
   createTeamsCommunicationProviderFromRuntimeCredentials,
   findFastAgentSessionForProviderMessage,
   findFastAgentSessionForProviderReply,
+  findSessionAttentionNotificationReply,
   findTeamsConversationRoute,
   isFastAgentProviderMessage,
+  isSessionAttentionNotificationMessage,
   queueFastAgentSurfaceReply,
+  resolveSessionAttentionFastConversation,
 } from '@roomote/sdk/server';
 import {
   exchangeMicrosoftDelegatedGraphToken,
@@ -2217,6 +2220,77 @@ teams.post('/', async (c) => {
   const fastChannelId = getTeamsBaseConversationId(
     metadata.communicationChannelId,
   );
+  const attentionReply =
+    mappedUserId && tenantId && replyToMessageId
+      ? await findSessionAttentionNotificationReply({
+          provider: 'teams',
+          workspaceId: tenantId,
+          channelId: fastChannelId,
+          userId: mappedUserId,
+          replyToMessageId,
+        })
+      : null;
+  if (attentionReply) {
+    const deliveryConversation = resolveTeamsFastConversation({
+      activity,
+      metadata,
+      mappedUserId: mappedUserId!,
+      currentMessageId: queuedMessage.ts,
+    });
+    if (!deliveryConversation) {
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'fast_session_delivery_unavailable',
+      });
+    }
+    const fastMessage = await attachTeamsActivityMediaToQueuedMessage(
+      activity,
+      queuedMessage,
+      { userId: mappedUserId! },
+    );
+    const fastConversationId = await resolveSessionAttentionFastConversation({
+      sessionId: attentionReply.sessionId,
+      userId: mappedUserId!,
+      deliveryConversation,
+    });
+    const continued = fastConversationId
+      ? await queueFastAgentSurfaceReply({
+          sessionId: fastConversationId,
+          userId: mappedUserId!,
+          senderDisplayName: activity.from?.name?.trim() || null,
+          question: fastMessage.text.trim(),
+          currentMessageId: queuedMessage.ts,
+          deliveryConversation,
+          ...(fastMessage.images ? { images: fastMessage.images } : {}),
+        })
+      : false;
+    return c.json(
+      continued
+        ? { ok: true, fastAnswered: true, fastContinued: true }
+        : {
+            ok: true,
+            queued: false,
+            reason: 'fast_session_delivery_unavailable',
+          },
+    );
+  }
+  if (
+    replyToMessageId &&
+    !attentionReply &&
+    (await isSessionAttentionNotificationMessage({
+      provider: 'teams',
+      workspaceId: tenantId ?? '',
+      channelId: fastChannelId,
+      messageId: replyToMessageId,
+    }))
+  ) {
+    return c.json({
+      ok: true,
+      queued: false,
+      reason: 'attention_notification_user_mismatch',
+    });
+  }
   const fastSession =
     mappedUserId && tenantId
       ? await findFastAgentSessionForProviderReply({

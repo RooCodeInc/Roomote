@@ -13,7 +13,7 @@ import { SlackNotifier } from '@roomote/slack';
 
 import {
   canStartAgentMailConversationWithUser,
-  startAgentMailConversation,
+  startAgentMailConversationWithResult,
 } from './agentmail/outbound';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
@@ -31,6 +31,14 @@ export type UserDirectMessageDestination = {
   channelId: string;
   teamId?: string;
   serviceUrl?: string;
+};
+
+export type UserDirectMessageReceipt = {
+  provider: UserDirectMessageProvider;
+  workspaceId: string;
+  channelId: string;
+  messageId: string;
+  threadId?: string;
 };
 
 function formatError(error: unknown) {
@@ -216,7 +224,7 @@ async function sendSlackUserDirectMessage(
   logContext: string,
   blocks?: unknown[],
   idempotencyKey?: string,
-): Promise<boolean> {
+): Promise<UserDirectMessageReceipt | null> {
   try {
     const destination = await resolveSlackUserDirectMessage(userId);
     if (destination) {
@@ -228,7 +236,12 @@ async function sendSlackUserDirectMessage(
       });
 
       if (messageTs) {
-        return true;
+        return {
+          provider: 'slack',
+          workspaceId: destination.teamId,
+          channelId: destination.channelId,
+          messageId: messageTs,
+        };
       }
     }
   } catch (error) {
@@ -237,14 +250,14 @@ async function sendSlackUserDirectMessage(
     );
   }
 
-  return false;
+  return null;
 }
 
 async function sendTeamsUserDirectMessage(
   userId: string,
   text: string,
   logContext: string,
-): Promise<boolean> {
+): Promise<UserDirectMessageReceipt | null> {
   try {
     const mapping = await db.query.teamsUserMappings.findFirst({
       where: eq(teamsUserMappings.userId, userId),
@@ -252,7 +265,7 @@ async function sendTeamsUserDirectMessage(
     });
 
     if (!mapping) {
-      return false;
+      return null;
     }
 
     // Proactive DMs need a service URL, which lives on installations rather
@@ -260,17 +273,17 @@ async function sendTeamsUserDirectMessage(
     const conversation = await findTeamsPrimaryConversation();
 
     if (!conversation) {
-      return false;
+      return null;
     }
 
     const provider =
       await createTeamsCommunicationProviderFromRuntimeCredentials();
 
     if (!provider) {
-      return false;
+      return null;
     }
 
-    await provider.postDirectMessage({
+    const posted = await provider.postDirectMessage({
       serviceUrl: conversation.serviceUrl,
       tenantId: mapping.teamsTenantId,
       userId: mapping.teamsUserId,
@@ -278,13 +291,18 @@ async function sendTeamsUserDirectMessage(
       textFormat: 'markdown',
     });
 
-    return true;
+    return {
+      provider: 'teams',
+      workspaceId: mapping.teamsTenantId,
+      channelId: posted.channelId,
+      messageId: posted.messageId,
+    };
   } catch (error) {
     console.warn(
       `[${logContext}] Failed to send Teams DM: ${formatError(error)}`,
     );
 
-    return false;
+    return null;
   }
 }
 
@@ -293,7 +311,7 @@ async function sendTelegramUserDirectMessage(
   text: string,
   logContext: string,
   idempotencyKey?: string,
-): Promise<boolean> {
+): Promise<UserDirectMessageReceipt | null> {
   try {
     const mapping = await db.query.telegramUserMappings.findFirst({
       where: eq(telegramUserMappings.userId, userId),
@@ -301,30 +319,36 @@ async function sendTelegramUserDirectMessage(
     });
 
     if (!mapping) {
-      return false;
+      return null;
     }
 
     const provider =
       await createTelegramCommunicationProviderFromRuntimeCredentials();
 
     if (!provider) {
-      return false;
+      return null;
     }
 
-    await provider.postMessage({
+    const posted = await provider.postMessage({
       channelId: mapping.telegramChatId,
       text,
       textFormat: 'markdown',
       ...(idempotencyKey ? { idempotencyKey } : {}),
     });
 
-    return true;
+    return {
+      provider: 'telegram',
+      workspaceId: mapping.telegramChatId,
+      channelId: mapping.telegramChatId,
+      messageId: posted.lastTextMessageId ?? posted.messageId,
+      ...(posted.threadId ? { threadId: posted.threadId } : {}),
+    };
   } catch (error) {
     console.warn(
       `[${logContext}] Failed to send Telegram DM: ${formatError(error)}`,
     );
 
-    return false;
+    return null;
   }
 }
 
@@ -346,20 +370,29 @@ async function sendAgentMailUserDirectMessage(
   text: string,
   logContext: string,
   idempotencyKey?: string,
-): Promise<boolean> {
+): Promise<UserDirectMessageReceipt | null> {
   try {
-    return await startAgentMailConversation({
+    const result = await startAgentMailConversationWithResult({
       userId,
       subject: deriveEmailSubject(text),
       text,
       logContext,
       ...(idempotencyKey ? { clientSendId: idempotencyKey } : {}),
     });
+    return result.sent && result.conversation?.messageId
+      ? {
+          provider: 'agentmail',
+          workspaceId: result.conversation.inboxId,
+          channelId: result.conversation.conversationId,
+          messageId: result.conversation.messageId,
+          threadId: result.conversation.providerThreadId,
+        }
+      : null;
   } catch (error) {
     console.warn(
       `[${logContext}] Failed to send email DM: ${formatError(error)}`,
     );
-    return false;
+    return null;
   }
 }
 
@@ -368,31 +401,37 @@ async function sendDiscordUserDirectMessage(
   text: string,
   logContext: string,
   idempotencyKey?: string,
-): Promise<boolean> {
+): Promise<UserDirectMessageReceipt | null> {
   try {
     const destination = await findDiscordUserDirectMessageDestination(userId);
     if (!destination) {
-      return false;
+      return null;
     }
 
     const provider =
       await createDiscordCommunicationProviderFromRuntimeCredentials();
     if (!provider) {
-      return false;
+      return null;
     }
 
-    await provider.postMessage({
+    const posted = await provider.postMessage({
       channelId: destination.channelId,
       text,
       textFormat: 'markdown',
       ...(idempotencyKey ? { idempotencyKey } : {}),
     });
-    return true;
+    return {
+      provider: 'discord',
+      workspaceId: 'dm',
+      channelId: destination.channelId,
+      messageId: posted.lastTextMessageId ?? posted.messageId,
+      ...(posted.threadId ? { threadId: posted.threadId } : {}),
+    };
   } catch (error) {
     console.warn(
       `[${logContext}] Failed to send Discord DM: ${formatError(error)}`,
     );
-    return false;
+    return null;
   }
 }
 
@@ -413,35 +452,45 @@ export async function sendUserDirectMessage({
 }): Promise<boolean> {
   switch (provider) {
     case 'slack':
-      return sendSlackUserDirectMessage(
-        userId,
-        text,
-        logContext,
-        slackBlocks,
-        idempotencyKey,
+      return Boolean(
+        await sendSlackUserDirectMessage(
+          userId,
+          text,
+          logContext,
+          slackBlocks,
+          idempotencyKey,
+        ),
       );
     case 'teams':
-      return sendTeamsUserDirectMessage(userId, text, logContext);
+      return Boolean(
+        await sendTeamsUserDirectMessage(userId, text, logContext),
+      );
     case 'telegram':
-      return sendTelegramUserDirectMessage(
-        userId,
-        text,
-        logContext,
-        idempotencyKey,
+      return Boolean(
+        await sendTelegramUserDirectMessage(
+          userId,
+          text,
+          logContext,
+          idempotencyKey,
+        ),
       );
     case 'discord':
-      return sendDiscordUserDirectMessage(
-        userId,
-        text,
-        logContext,
-        idempotencyKey,
+      return Boolean(
+        await sendDiscordUserDirectMessage(
+          userId,
+          text,
+          logContext,
+          idempotencyKey,
+        ),
       );
     case 'agentmail':
-      return sendAgentMailUserDirectMessage(
-        userId,
-        text,
-        logContext,
-        idempotencyKey,
+      return Boolean(
+        await sendAgentMailUserDirectMessage(
+          userId,
+          text,
+          logContext,
+          idempotencyKey,
+        ),
       );
   }
 }
@@ -462,6 +511,27 @@ export async function sendUserDirectMessageBestEffort({
   logContext: string;
   idempotencyKey?: string;
 }): Promise<UserDirectMessageProvider[]> {
+  return (
+    await sendUserDirectMessageBestEffortWithReceipts({
+      userId,
+      text,
+      logContext,
+      idempotencyKey,
+    })
+  ).map((receipt) => receipt.provider);
+}
+
+export async function sendUserDirectMessageBestEffortWithReceipts({
+  userId,
+  text,
+  logContext,
+  idempotencyKey,
+}: {
+  userId: string;
+  text: string;
+  logContext: string;
+  idempotencyKey?: string;
+}): Promise<UserDirectMessageReceipt[]> {
   const [slack, teams, telegram, discord] = await Promise.all([
     sendSlackUserDirectMessage(
       userId,
@@ -475,13 +545,16 @@ export async function sendUserDirectMessageBestEffort({
     sendDiscordUserDirectMessage(userId, text, logContext, idempotencyKey),
   ]);
 
-  const chatDelivered = slack || teams || telegram || discord;
+  const chatReceipts = [slack, teams, telegram, discord].filter(
+    (receipt): receipt is UserDirectMessageReceipt => receipt !== null,
+  );
+  const chatDelivered = chatReceipts.length > 0;
 
   // Email is the fallback reach, not another parallel copy: emailing a user
   // who already got the message in chat violates the email-cadence contract
   // (email is low-frequency by design).
   const agentmail = chatDelivered
-    ? false
+    ? null
     : await sendAgentMailUserDirectMessage(
         userId,
         text,
@@ -489,11 +562,5 @@ export async function sendUserDirectMessageBestEffort({
         idempotencyKey,
       );
 
-  return [
-    ...(slack ? (['slack'] as const) : []),
-    ...(teams ? (['teams'] as const) : []),
-    ...(telegram ? (['telegram'] as const) : []),
-    ...(discord ? (['discord'] as const) : []),
-    ...(agentmail ? (['agentmail'] as const) : []),
-  ];
+  return [...chatReceipts, ...(agentmail ? [agentmail] : [])];
 }

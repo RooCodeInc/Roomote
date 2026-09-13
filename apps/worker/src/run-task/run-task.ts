@@ -1437,6 +1437,11 @@ export const runTask = async ({
       callbacks: {
         onTaskCompletionSettled: async (completionId: string) => {
           await settleMissingChatCloseoutFallback(context, completionId);
+          await sdk.taskRuns.notifyUserAttention({
+            id: taskRun.id,
+            kind: 'result_ready',
+            eventId: completionId,
+          });
         },
         onBeforeTaskCompletion: async (completionId: string) => {
           if (taskCancellation.signal.aborted) {

@@ -179,6 +179,8 @@ type FastAgentSurfaceReplyParams = {
    */
   activeTasks?: FastAgentActiveTask[];
   externalInput?: FastAgentReactionExternalInput;
+  /** Per-turn provider route for an explicit cross-surface notification reply. */
+  deliveryConversation?: FastAgentConversation;
   /**
    * Admission-time hooks for callers that must not block on the whole turn
    * (suggestion launchers finalize their claim as soon as the turn is
@@ -219,6 +221,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   currentMessageId?: string;
   replyToMessageId?: string;
   externalInput?: FastAgentReactionExternalInput;
+  deliveryConversation?: FastAgentConversation;
 }): Promise<FastAgentSurfaceReplyDelivery | null> {
   const session = await fastAgentConversationRepository.findById({
     id: params.sessionId,
@@ -233,7 +236,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   if (!canAccess) {
     return null;
   }
-  const conversation = session.conversation;
+  const conversation = params.deliveryConversation ?? session.conversation;
   const createArtifact = buildFastAgentArtifactCreator(session.id);
 
   if (conversation.surface === 'web' || conversation.surface === 'automation') {
@@ -877,7 +880,10 @@ export async function continueFastAgentSurfaceReplyWithLock(
   params: FastAgentSurfaceReplyParams,
   turnLock: FastAgentTurnLockHandle,
 ): Promise<FastAgentSurfaceReplyWithLockOutcome> {
-  const delivery = await buildFastAgentSurfaceReplyDelivery(params);
+  const builtDelivery = await buildFastAgentSurfaceReplyDelivery(params);
+  const delivery = builtDelivery
+    ? await useCanonicalConversationForDelivery(params, builtDelivery)
+    : null;
   if (!delivery) {
     return { outcome: 'unroutable' };
   }
@@ -1025,7 +1031,10 @@ async function runFastAgentSurfaceReplyWithLock(
 export async function queueFastAgentSurfaceReply(
   params: FastAgentSurfaceReplyParams,
 ): Promise<boolean> {
-  const delivery = await buildFastAgentSurfaceReplyDelivery(params);
+  const builtDelivery = await buildFastAgentSurfaceReplyDelivery(params);
+  const delivery = builtDelivery
+    ? await useCanonicalConversationForDelivery(params, builtDelivery)
+    : null;
   if (!delivery) return false;
 
   const admission = await admitFastAgentSurfaceHumanFollowUp(
@@ -1043,4 +1052,17 @@ export async function queueFastAgentSurfaceReply(
     },
   );
   return true;
+}
+
+async function useCanonicalConversationForDelivery(
+  params: FastAgentSurfaceReplyParams,
+  delivery: FastAgentSurfaceReplyDelivery,
+): Promise<FastAgentSurfaceReplyDelivery> {
+  if (!params.deliveryConversation) return delivery;
+  const session = await fastAgentConversationRepository.findById({
+    id: params.sessionId,
+  });
+  return session
+    ? { ...delivery, conversation: session.conversation }
+    : delivery;
 }

@@ -33,6 +33,10 @@ import {
   type TaskInitiator,
   isDeploymentReadOnlyError,
 } from '@roomote/types';
+import {
+  findSessionAttentionNotificationReply,
+  isSessionAttentionNotificationMessage,
+} from '@roomote/sdk/server';
 
 import { apiLogger } from '../../../logging.js';
 import {
@@ -1046,6 +1050,7 @@ export function startFastAgentResponse(params: {
    * turns pass their automation initiator so delegated work keeps automation
    * provenance instead of appearing installer-initiated. */
   delegatedTaskInitiator?: TaskInitiator;
+  originSessionId?: string;
   errorLogPrefix: string;
 }): Promise<FastAgentStartResult> {
   const { errorLogPrefix, delegatedTaskInitiator, ...fastAgentParams } = params;
@@ -1136,6 +1141,27 @@ async function handleSlackEntryEvent(params: {
   }
 
   const threadId = event.thread_ts || event.ts;
+  const attentionReply = event.thread_ts
+    ? await findSessionAttentionNotificationReply({
+        provider: 'slack',
+        workspaceId: teamId,
+        channelId: event.channel,
+        userId: userMapping.userId,
+        replyToMessageId: event.thread_ts,
+      })
+    : null;
+  if (
+    event.thread_ts &&
+    !attentionReply &&
+    (await isSessionAttentionNotificationMessage({
+      provider: 'slack',
+      workspaceId: teamId,
+      channelId: event.channel,
+      messageId: event.thread_ts,
+    }))
+  ) {
+    return;
+  }
 
   if (event.type === 'app_mention') {
     apiLogger.debug(
@@ -1207,6 +1233,7 @@ async function handleSlackEntryEvent(params: {
           activeTaskId: activeRun?.taskId,
         }),
       directedAtRoomote: mentionsSlackBot(event, slackInstallation.botUserId),
+      ...(attentionReply ? { originSessionId: attentionReply.sessionId } : {}),
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
     });
 

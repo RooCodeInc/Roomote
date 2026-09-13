@@ -89,6 +89,7 @@ vi.mock('./teams-primary-conversation', () => ({
 vi.mock('./agentmail/outbound', () => ({
   canStartAgentMailConversationWithUser: vi.fn(),
   startAgentMailConversation: mockStartAgentMailConversation,
+  startAgentMailConversationWithResult: mockStartAgentMailConversation,
 }));
 
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
@@ -199,7 +200,15 @@ describe('sendUserDirectMessage', () => {
     mockDiscordPostMessage.mockResolvedValue({
       messageId: 'discord-message-1',
     });
-    mockStartAgentMailConversation.mockResolvedValue(true);
+    mockStartAgentMailConversation.mockResolvedValue({
+      sent: true,
+      conversation: {
+        conversationId: 'email-conversation-1',
+        inboxId: 'roomote@example.com',
+        messageId: 'email-message-1',
+        providerThreadId: 'email-thread-1',
+      },
+    });
   });
 
   it('sends to a linked Discord DM', async () => {
@@ -247,6 +256,15 @@ describe('sendUserDirectMessageBestEffort', () => {
     });
     mockDiscordPostMessage.mockResolvedValue({
       messageId: 'discord-message-1',
+    });
+    mockStartAgentMailConversation.mockResolvedValue({
+      sent: true,
+      conversation: {
+        conversationId: 'email-conversation-1',
+        inboxId: 'roomote@example.com',
+        messageId: 'email-message-1',
+        providerThreadId: 'email-thread-1',
+      },
     });
   });
 

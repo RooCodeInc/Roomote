@@ -22,6 +22,7 @@ import {
 } from '@roomote/communication';
 import {
   acquireFastAgentTurnLock,
+  fastAgentConversationRepository,
   getOrCreateFastAgentSession,
   type FastAgentTurnLockHandle,
 } from '@roomote/cloud-agents/server';
@@ -61,6 +62,10 @@ import {
 } from './conversation-store';
 import { findActiveCommunicationTaskRun } from '../communication/communication-task-run-lookup';
 import { continueFastAgentSurfaceReplyWithLock } from '../fast-agent-surface-reply';
+import {
+  findSessionAttentionNotificationReply,
+  resolveSessionAttentionFastConversation,
+} from '../session-attention-notification';
 
 export const AGENTMAIL_WEBHOOK_EVENT_QUEUE_NAME = 'agentmail-webhook-events';
 
@@ -765,6 +770,43 @@ async function deliverTurn(
     return { outcome: 'delivered' };
   }
 
+  const attentionReply = await findSessionAttentionNotificationReply({
+    provider: 'agentmail',
+    workspaceId: conversation.inboxId,
+    channelId: conversation.id,
+    userId: turn.senderUserId,
+    threadId: conversation.providerThreadId,
+  });
+  if (attentionReply) {
+    const deliveryConversation = buildAgentMailFastConversation(conversation);
+    const fastConversationId = await resolveSessionAttentionFastConversation({
+      sessionId: attentionReply.sessionId,
+      userId: turn.senderUserId,
+      deliveryConversation,
+    });
+    if (!fastConversationId) {
+      throw new AgentMailDeliveryUnavailableError(conversation.id);
+    }
+    const result = await continueFastAgentSurfaceReplyWithLock(
+      {
+        sessionId: fastConversationId,
+        userId: turn.senderUserId,
+        senderDisplayName: turn.senderEmail,
+        question: buildTurnQuestionText(turn, conversation),
+        currentMessageId: turn.providerMessageId,
+        deliveryConversation,
+      },
+      turnLock,
+    );
+    if (result.outcome === 'parked') {
+      return { outcome: 'parked', retryAt: result.retryAt };
+    }
+    if (result.outcome === 'unroutable') {
+      throw new AgentMailDeliveryUnavailableError(conversation.id);
+    }
+    return { outcome: 'delivered' };
+  }
+
   const activeRun = await findActiveCommunicationTaskRun({
     provider: 'agentmail',
     channelId: conversation.inboxId,
@@ -870,8 +912,27 @@ export async function drainAgentMailInboundTurns(
     return;
   }
 
+  const attentionReply = await findSessionAttentionNotificationReply({
+    provider: 'agentmail',
+    workspaceId: conversation.inboxId,
+    channelId: conversation.id,
+    userId: conversation.ownerUserId,
+    threadId: conversation.providerThreadId,
+  });
+  const deliveryConversation = buildAgentMailFastConversation(conversation);
+  const fastConversationId = attentionReply
+    ? await resolveSessionAttentionFastConversation({
+        sessionId: attentionReply.sessionId,
+        userId: conversation.ownerUserId,
+        deliveryConversation,
+      })
+    : null;
+  const canonicalSession = fastConversationId
+    ? await fastAgentConversationRepository.findById({ id: fastConversationId })
+    : null;
+
   const turnLock = await acquireFastAgentTurnLock({
-    conversation: buildAgentMailFastConversation(conversation),
+    conversation: canonicalSession?.conversation ?? deliveryConversation,
     maxWaitMs: 0,
   });
   if (!turnLock) {

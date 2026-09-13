@@ -1009,7 +1009,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('delivers native chat replies without showing their tool event', async () => {
-    const adapter = callbacks();
+    const notifyUserAttention = vi.fn();
+    const adapter = callbacks({ notifyUserAttention });
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
@@ -1020,6 +1021,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledWith({
       purpose: 'closeout',
       message: 'It coordinates incoming requests.',
+    });
+    expect(notifyUserAttention).toHaveBeenCalledWith({
+      kind: 'result_ready',
+      eventId: expect.any(String),
     });
     expect(mocks.captureInferenceContext).toHaveBeenCalledOnce();
     expect(mocks.captureInferenceContext).toHaveBeenCalledWith(
@@ -1429,6 +1434,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         },
       ];
       const requestUserInput = vi.fn();
+      const notifyUserAttention = vi.fn();
       const resolveUserInputPreset = vi.fn(async () => questions);
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
@@ -1456,7 +1462,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         platformEventKind: 'setup',
         platformEventVisibility: 'required',
         setupSession: true,
-        adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+        adapter: callbacks({
+          requestUserInput,
+          resolveUserInputPreset,
+          notifyUserAttention,
+        }),
       });
       expect(resolveUserInputPreset.mock.calls).toEqual([
         setupIntegrationAnswers === undefined
@@ -1467,6 +1477,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         requestId: expect.any(String),
         preset: 'setup_integrations',
         questions,
+      });
+      expect(notifyUserAttention).toHaveBeenCalledWith({
+        kind: 'input_needed',
+        eventId: expect.stringMatching(/^rui:/),
       });
       expect(mocks.upsertMessage).toHaveBeenCalledWith(
         expect.objectContaining({
