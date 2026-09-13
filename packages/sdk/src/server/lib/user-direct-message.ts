@@ -10,6 +10,7 @@ import {
 } from '@roomote/db/server';
 import type { CommunicationProvider } from '@roomote/types';
 import {
+  buildFastSessionUrl,
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
   getDiscordFooterlessFinalChunk,
@@ -60,7 +61,29 @@ export type UserDirectMessageReceipt = {
 type UserDirectMessagePresentation = {
   sessionId: string;
   initialUserMessage?: { senderDisplayName: string | null; text: string };
+  continuation?: {
+    omittedMessageCount: number;
+    latestUserMessage?: { senderDisplayName: string | null; text: string };
+    linkToSession: boolean;
+  };
 };
+
+function buildContinuationText(
+  provider: UserDirectMessageProvider,
+  presentation: UserDirectMessagePresentation,
+): string | null {
+  const continuation = presentation.continuation;
+  if (!continuation) return null;
+  const label = 'Continued on web';
+  const linkedLabel = continuation.linkToSession
+    ? provider === 'slack'
+      ? `<${buildFastSessionUrl(provider, presentation.sessionId)}|${label}>`
+      : `[${label}](${buildFastSessionUrl(provider, presentation.sessionId)})`
+    : label;
+  const messageLabel =
+    continuation.omittedMessageCount === 1 ? 'message' : 'messages';
+  return `${linkedLabel} · ${continuation.omittedMessageCount} intervening ${messageLabel}`;
+}
 
 function presentDirectMessage(
   provider: UserDirectMessageProvider,
@@ -68,17 +91,27 @@ function presentDirectMessage(
   presentation?: UserDirectMessagePresentation,
 ) {
   if (!presentation) return { text, quote: null, footerText: null };
-  const quote = presentation.initialUserMessage
+  const quotedMessage =
+    presentation.continuation?.latestUserMessage ??
+    presentation.initialUserMessage;
+  const quote = quotedMessage
     ? provider === 'slack'
-      ? buildSlackReplyQuote(presentation.initialUserMessage)
-      : buildMarkdownReplyQuote(presentation.initialUserMessage)
+      ? buildSlackReplyQuote(quotedMessage)
+      : buildMarkdownReplyQuote(quotedMessage)
     : null;
-  const bodyText = [quote, text].filter(Boolean).join('\n\n');
+  const leadingText = buildContinuationText(provider, presentation);
+  const bodyText = [leadingText, quote, text].filter(Boolean).join('\n\n');
   const footerText = buildFastSessionReplyFooterText({
     provider,
     sessionId: presentation.sessionId,
   });
-  return { text: `${bodyText}\n\n${footerText}`, bodyText, quote, footerText };
+  return {
+    text: `${bodyText}\n\n${footerText}`,
+    bodyText,
+    leadingText,
+    quote,
+    footerText,
+  };
 }
 
 function formatError(error: unknown) {
@@ -309,6 +342,7 @@ async function sendSlackUserDirectMessage(
         (presentation
           ? buildFastAgentSlackReplyBodyBlocks({
               message: text,
+              leadingText: presented.leadingText,
               quote: presented.quote,
             })
           : [{ type: 'markdown', text }]);
@@ -790,6 +824,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
   idempotencyKey,
   replyAnchor,
   presentation,
+  replyPresentation,
 }: {
   userId: string;
   text: string;
@@ -798,6 +833,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
   idempotencyKey?: string;
   replyAnchor?: UserDirectMessageReceipt;
   presentation?: UserDirectMessagePresentation;
+  replyPresentation?: UserDirectMessagePresentation;
 }): Promise<{
   deliveredProviders: UserDirectMessageProvider[];
   receipts: UserDirectMessageReceipt[];
@@ -811,6 +847,9 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
 
   for (const provider of providers) {
     const anchor = provider === replyAnchor?.provider ? replyAnchor : undefined;
+    const providerPresentation = anchor
+      ? (replyPresentation ?? presentation)
+      : presentation;
     if (provider === 'agentmail') {
       const result = await sendAgentMailUserDirectMessage(
         userId,
@@ -818,7 +857,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
         logContext,
         idempotencyKey,
         anchor,
-        presentation,
+        providerPresentation,
       );
       if (result.delivered) {
         return {
@@ -837,7 +876,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
             undefined,
             idempotencyKey,
             anchor,
-            presentation,
+            providerPresentation,
           )
         : provider === 'teams'
           ? await sendTeamsUserDirectMessage(
@@ -845,7 +884,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
               teamsText ?? text,
               logContext,
               anchor,
-              presentation,
+              providerPresentation,
             )
           : provider === 'telegram'
             ? await sendTelegramUserDirectMessage(
@@ -854,7 +893,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
                 logContext,
                 idempotencyKey,
                 anchor,
-                presentation,
+                providerPresentation,
               )
             : await sendDiscordUserDirectMessage(
                 userId,
@@ -862,7 +901,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
                 logContext,
                 idempotencyKey,
                 anchor,
-                presentation,
+                providerPresentation,
               );
     if (receipt) {
       return { deliveredProviders: [receipt.provider], receipts: [receipt] };

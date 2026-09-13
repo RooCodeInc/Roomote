@@ -3732,6 +3732,10 @@ export const sessionAttentionNotificationMessages = pgTable(
     channelId: text('channel_id').notNull(),
     threadId: text('thread_id'),
     messageId: text('message_id').notNull(),
+    fastMessageId: uuid('fast_message_id').references(
+      () => fastAgentMessages.id,
+      { onDelete: 'set null' },
+    ),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [

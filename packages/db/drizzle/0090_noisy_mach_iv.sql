@@ -1,0 +1,2 @@
+ALTER TABLE "session_attention_notification_messages" ADD COLUMN "fast_message_id" uuid;--> statement-breakpoint
+ALTER TABLE "session_attention_notification_messages" ADD CONSTRAINT "session_attention_notification_messages_fast_message_id_fast_agent_messages_id_fk" FOREIGN KEY ("fast_message_id") REFERENCES "public"."fast_agent_messages"("id") ON DELETE set null ON UPDATE no action;
