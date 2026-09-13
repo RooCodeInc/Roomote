@@ -1,5 +1,8 @@
 import { NonTaskOpenCodeSessionNotFoundError } from '../../non-task-provider-usage';
-import { FastAgentOpenCodeSessionManager } from '../fast-agent-opencode-session';
+import {
+  FastAgentOpenCodeSessionManager,
+  FastAgentOpenCodeSessionRecoveryError,
+} from '../fast-agent-opencode-session';
 
 describe('FastAgentOpenCodeSessionManager', () => {
   it('bootstraps once and then sends only prompt deltas to the same session', async () => {
@@ -143,6 +146,51 @@ describe('FastAgentOpenCodeSessionManager', () => {
       }),
     ).resolves.toBe('surface context after loss');
     expect(execute).toHaveBeenCalledTimes(3);
+  });
+
+  it('bounds repeated session reconstruction before tools run', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    const execute = vi
+      .fn()
+      .mockRejectedValue(new NonTaskOpenCodeSessionNotFoundError());
+
+    const result = manager.run({
+      conversationId: 'conversation-1',
+      prompt: 'turn',
+      bootstrapPrompt: 'full turn',
+      execute,
+      maxFallbackRebuilds: 2,
+    });
+
+    await expect(result).rejects.toMatchObject({
+      name: 'FastAgentOpenCodeSessionRecoveryError',
+      attempts: 3,
+      blockedByCompletedTools: false,
+    } satisfies Partial<FastAgentOpenCodeSessionRecoveryError>);
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not rebuild a lost session after tools have completed', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    const execute = vi
+      .fn()
+      .mockRejectedValue(new NonTaskOpenCodeSessionNotFoundError());
+
+    const result = manager.run({
+      conversationId: 'conversation-1',
+      prompt: 'turn',
+      bootstrapPrompt: 'full turn',
+      execute,
+      canFallbackRebuild: () => false,
+      maxFallbackRebuilds: 2,
+    });
+
+    await expect(result).rejects.toMatchObject({
+      name: 'FastAgentOpenCodeSessionRecoveryError',
+      attempts: 1,
+      blockedByCompletedTools: true,
+    } satisfies Partial<FastAgentOpenCodeSessionRecoveryError>);
+    expect(execute).toHaveBeenCalledOnce();
   });
 
   it('rebuilds an invalidated conversation from compatibility history', async () => {

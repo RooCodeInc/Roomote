@@ -124,7 +124,10 @@ import {
   type NonTaskOpenCodeNativeSteer,
   type NonTaskOpenCodeTaskPart,
 } from '../non-task-provider-usage';
-import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
+import {
+  FastAgentOpenCodeSessionRecoveryError,
+  fastAgentOpenCodeSessionManager,
+} from './fast-agent-opencode-session';
 import {
   createFastAgentReplyStreamPublisher,
   createFastAgentReplyTextTracker,
@@ -864,6 +867,13 @@ class FastAgentInferenceError extends Error {
   }
 }
 
+class FastAgentRuntimeSetupError extends Error {
+  constructor(cause: unknown) {
+    super('Fast inference runtime setup failed.', { cause });
+    this.name = 'FastAgentRuntimeSetupError';
+  }
+}
+
 const FAST_AGENT_INFERENCE_DETAIL_MAX_CHARS = 200;
 
 /**
@@ -1021,6 +1031,34 @@ function formatFastAgentInferenceFailureSummary(
       return 'The configured model is not available from the inference provider. An administrator needs to select an available model.';
     default:
       return 'Could not complete the request because the inference provider returned an error. Please try again in a moment.';
+  }
+}
+
+function formatFastAgentUnclassifiedFailure(
+  error: unknown,
+  stage: 'setup' | 'inference' | 'post_inference' | 'settlement',
+  acceptedTaskInstructionPending: boolean,
+): string {
+  if (error instanceof FastAgentOpenCodeSessionRecoveryError) {
+    if (acceptedTaskInstructionPending) {
+      return 'Roomote lost the inference session after automatic recovery. The task instruction was accepted and can keep running; check its current status before sending another instruction.';
+    }
+    return error.blockedByCompletedTools
+      ? 'Roomote lost the inference session. Automatic recovery stopped to avoid repeating completed actions.'
+      : `Roomote could not restore the inference session after ${error.attempts} attempts.`;
+  }
+  if (error instanceof FastAgentRuntimeSetupError) {
+    return 'Roomote could not prepare the Fast inference runtime. Automatic recovery stopped because repeating local setup is not known to be safe.';
+  }
+  switch (stage) {
+    case 'setup':
+      return 'Roomote could not prepare the Fast session. Automatic recovery stopped because the failure occurred outside inference.';
+    case 'post_inference':
+      return 'Roomote generated a response but could not deliver it safely. Automatic recovery stopped to avoid posting the response twice.';
+    case 'settlement':
+      return 'Roomote could not finalize the Fast turn. Automatic recovery stopped because a response may already have been delivered.';
+    default:
+      return 'The Fast inference runtime failed outside provider retry handling. Automatic recovery stopped because the failure was not classified as safe to retry.';
   }
 }
 
@@ -1772,6 +1810,7 @@ export async function answerFastAgentQuestion({
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
   let acceptedTaskInstructionPending = false;
+  let nativeToolInvoked = false;
   let turnFailureStage:
     | 'setup'
     | 'inference'
@@ -2012,7 +2051,7 @@ export async function answerFastAgentQuestion({
     );
     return retryAt;
   };
-  const deferAcceptedTaskContinuation = async (): Promise<Date | null> => {
+  const deferLostSessionContinuation = async (): Promise<Date | null> => {
     if (
       !durableAdmission ||
       !adapter.requestDurableRetry ||
@@ -3365,7 +3404,6 @@ export async function answerFastAgentQuestion({
     );
     let visibleUpdatePosted = resumedWithDeliveredAcknowledgement;
     let substantiveWorkAcknowledged = resumedWithDeliveredAcknowledgement;
-    let nativeToolInvoked = false;
     let retriedTaskStart = false;
 
     const mirrorPendingMessages = async (strict = false) => {
@@ -4872,6 +4910,8 @@ export async function answerFastAgentQuestion({
         diagnostics.recordSessionPath(path);
         console.info(`[Fast Agent] OpenCode session path=${path}.`);
       },
+      canFallbackRebuild: () => !nativeToolInvoked,
+      maxFallbackRebuilds: 2,
       execute: async (
         openCodeSession,
         selectedPrompt,
@@ -4893,15 +4933,30 @@ export async function answerFastAgentQuestion({
           }),
           new RemoteFastAgentInstanceSkillSource(userId),
         );
-        const nativeRuntime = await getFastAgentNativeToolRuntime(
-          session.id,
-          availableIntegrations,
-          { surface: conversation.surface },
-        );
+        let nativeRuntime: Awaited<
+          ReturnType<typeof getFastAgentNativeToolRuntime>
+        >;
+        try {
+          nativeRuntime = await getFastAgentNativeToolRuntime(
+            session.id,
+            availableIntegrations,
+            { surface: conversation.surface },
+          );
+        } catch (runtimeError) {
+          throw new FastAgentRuntimeSetupError(runtimeError);
+        }
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();
         const unbindAllExecutors = () => {
-          for (const unbind of unbindExecutors) unbind();
+          for (const unbind of unbindExecutors) {
+            try {
+              unbind();
+            } catch (unbindError) {
+              console.warn(
+                `[Fast Agent] Failed to unbind a native tool executor: ${formatErrorForLog(unbindError)}`,
+              );
+            }
+          }
           unbindExecutors.clear();
           boundSubagentSessionIDs.clear();
         };
@@ -5352,8 +5407,18 @@ export async function answerFastAgentQuestion({
           return result;
         } finally {
           unbindAllExecutors();
-          unbindMcpExecutor();
-          await skillStore.dispose();
+          try {
+            unbindMcpExecutor();
+          } catch (unbindError) {
+            console.warn(
+              `[Fast Agent] Failed to unbind the MCP executor: ${formatErrorForLog(unbindError)}`,
+            );
+          }
+          await skillStore.dispose().catch((disposeError) => {
+            console.warn(
+              `[Fast Agent] Failed to dispose Fast skill sources: ${formatErrorForLog(disposeError)}`,
+            );
+          });
         }
       },
     });
@@ -5454,7 +5519,13 @@ export async function answerFastAgentQuestion({
           ? `local_storage_${storageDiagnostic?.kind ?? 'unknown'}`
           : error instanceof FastAgentInferenceError
             ? error.failure.reason
-            : 'unclassified',
+            : error instanceof FastAgentOpenCodeSessionRecoveryError
+              ? error.blockedByCompletedTools
+                ? 'session_lost_after_tools'
+                : 'session_recovery_exhausted'
+              : error instanceof FastAgentRuntimeSetupError
+                ? 'runtime_setup'
+                : `unclassified_${turnFailureStage}`,
       storageDiagnostic
         ? wrapFastAgentStorageFullError(terminalError, storageDiagnostic)
         : terminalError,
@@ -5562,8 +5633,11 @@ export async function answerFastAgentQuestion({
     }
     if (platformEvent) throw error;
 
-    if (acceptedTaskInstructionPending) {
-      const retryAt = await deferAcceptedTaskContinuation();
+    if (
+      error instanceof FastAgentOpenCodeSessionRecoveryError &&
+      acceptedTaskInstructionPending
+    ) {
+      const retryAt = await deferLostSessionContinuation();
       if (retryAt) {
         diagnostics.recordFailure(
           'accepted_task_continuation',
@@ -5582,9 +5656,11 @@ export async function answerFastAgentQuestion({
             inferenceRetryAttempted,
             { detail: error.detail, model: lastResolvedInferenceModel },
           )
-        : acceptedTaskInstructionPending
-          ? 'I sent the instruction to the task, and it can keep running, but I hit an error while finishing this response. Check the task’s current status before sending the instruction again.'
-          : 'I hit an error while handling that request. Please try again in a moment.';
+        : formatFastAgentUnclassifiedFailure(
+            error,
+            turnFailureStage,
+            acceptedTaskInstructionPending,
+          );
     // The error closeout is recorded like any other closeout: its intent
     // before the post and its reply row right after, so a run that resumes
     // this turn sees it and does not post a second one.

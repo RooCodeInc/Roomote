@@ -27,6 +27,8 @@ type FastAgentOpenCodeSessionRunInput<T> = {
     context: { path: FastAgentOpenCodeSessionPath; validateSession: boolean },
   ) => Promise<T>;
   onPathSelected?: (path: FastAgentOpenCodeSessionPath) => void;
+  canFallbackRebuild?: () => boolean;
+  maxFallbackRebuilds?: number;
 };
 
 type FastAgentOpenCodeSessionPath =
@@ -41,6 +43,17 @@ type FastAgentOpenCodeSessionManagerOptions = {
   now?: () => number;
   onConversationEnd?: (conversationId: string) => Promise<void> | void;
 };
+
+export class FastAgentOpenCodeSessionRecoveryError extends Error {
+  constructor(
+    cause: unknown,
+    public readonly attempts: number,
+    public readonly blockedByCompletedTools: boolean,
+  ) {
+    super('Fast OpenCode session recovery was exhausted.', { cause });
+    this.name = 'FastAgentOpenCodeSessionRecoveryError';
+  }
+}
 
 /**
  * Process-local ownership for warm Fast OpenCode conversations. The map is
@@ -78,6 +91,8 @@ export class FastAgentOpenCodeSessionManager {
     bootstrapPrompt,
     execute,
     onPathSelected,
+    canFallbackRebuild = () => true,
+    maxFallbackRebuilds = 1,
   }: FastAgentOpenCodeSessionRunInput<T>): Promise<T> {
     const entry = this.acquire(conversationId);
     const resolveBootstrapPrompt = () =>
@@ -129,21 +144,34 @@ export class FastAgentOpenCodeSessionManager {
         }
       };
 
-      try {
-        return await executeAndInvalidateOnFailure(
-          entry.session.id ? prompt : resolveBootstrapPrompt(),
-          { path, validateSession },
-        );
-      } catch (error) {
-        if (!isNonTaskOpenCodeSessionNotFoundError(error)) {
-          throw error;
+      let selectedPrompt = entry.session.id ? prompt : resolveBootstrapPrompt();
+      let selectedPath: FastAgentOpenCodeSessionPath = path;
+      let selectedValidateSession = validateSession;
+      let fallbackRebuilds = 0;
+      for (;;) {
+        try {
+          return await executeAndInvalidateOnFailure(selectedPrompt, {
+            path: selectedPath,
+            validateSession: selectedValidateSession,
+          });
+        } catch (error) {
+          if (!isNonTaskOpenCodeSessionNotFoundError(error)) {
+            throw error;
+          }
+          const fallbackAllowed = canFallbackRebuild();
+          if (!fallbackAllowed || fallbackRebuilds >= maxFallbackRebuilds) {
+            throw new FastAgentOpenCodeSessionRecoveryError(
+              error,
+              fallbackRebuilds + 1,
+              !fallbackAllowed,
+            );
+          }
+          fallbackRebuilds += 1;
+          selectedPrompt = resolveBootstrapPrompt();
+          selectedPath = 'fallback_rebuild';
+          selectedValidateSession = false;
+          onPathSelected?.(selectedPath);
         }
-
-        onPathSelected?.('fallback_rebuild');
-        return await executeAndInvalidateOnFailure(resolveBootstrapPrompt(), {
-          path: 'fallback_rebuild',
-          validateSession: false,
-        });
       }
     } finally {
       entry.pending -= 1;

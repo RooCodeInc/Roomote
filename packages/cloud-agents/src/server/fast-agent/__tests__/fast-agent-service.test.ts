@@ -218,6 +218,16 @@ vi.mock('../../non-task-provider-usage', () => ({
 }));
 
 vi.mock('../fast-agent-opencode-session', () => ({
+  FastAgentOpenCodeSessionRecoveryError: class extends Error {
+    constructor(
+      cause: unknown,
+      public readonly attempts: number,
+      public readonly blockedByCompletedTools: boolean,
+    ) {
+      super('Fast OpenCode session recovery was exhausted.', { cause });
+      this.name = 'FastAgentOpenCodeSessionRecoveryError';
+    }
+  },
   fastAgentOpenCodeSessionManager: {
     invalidate: mocks.invalidateSession,
     run: mocks.runSession,
@@ -336,6 +346,7 @@ import {
   FAST_AGENT_DURABLE_RETRY_MAX_PARKS,
   FAST_AGENT_MAX_INFERENCE_RETRIES_PER_TURN,
 } from '../fast-agent-service';
+import { FastAgentOpenCodeSessionRecoveryError } from '../fast-agent-opencode-session';
 import {
   buildFastAgentReactionExternalInputQuestion,
   type FastAgentReactionExternalInput,
@@ -9392,13 +9403,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.loadTurnAttempt.mockRejectedValueOnce(
       new Error('history unavailable'),
     );
+    const adapter = callbacks();
 
-    await answerFastAgentQuestion({
-      ...baseParams,
-      adapter: callbacks(),
-      durableAdmission: { eventId: 'durable-row-1' },
-      resumedAfterInterruption: true,
-    });
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        durableAdmission: { eventId: 'durable-row-1' },
+        resumedAfterInterruption: true,
+      }),
+    ).resolves.toBe(
+      'Roomote could not prepare the Fast session. Automatic recovery stopped because the failure occurred outside inference.',
+    );
 
     expect(mocks.generateText).not.toHaveBeenCalled();
     expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
@@ -9706,7 +9722,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
   });
 
-  it('does not suggest replaying an accepted task instruction after a later turn failure', async () => {
+  it('durably continues session loss after an accepted task instruction', async () => {
     mocks.getActiveTasks.mockResolvedValue([
       { taskId: 'task-1', taskRunStatus: 'running' },
     ]);
@@ -9734,7 +9750,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         path: 'warm',
         validateSession: false,
       });
-      throw new Error('Failed after the task accepted the instruction.');
+      throw new FastAgentOpenCodeSessionRecoveryError(
+        new Error('OpenCode session not found.'),
+        1,
+        true,
+      );
     });
     const requestDurableRetry = vi.fn().mockResolvedValue(undefined);
     const adapter = callbacks({ requestDurableRetry });
@@ -9760,7 +9780,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('restores accepted task instructions before a resumed turn can fail', async () => {
+  it('stops after one resumed session-loss failure without replaying the instruction', async () => {
     mocks.getActiveTasks.mockResolvedValue([
       { taskId: 'task-1', taskRunStatus: 'running' },
     ]);
@@ -9791,7 +9811,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       prompt: { ts: 100, turnSeq: 0 },
     });
     mocks.runSession.mockRejectedValueOnce(
-      new Error('Failed before the resumed instruction was replayed.'),
+      new FastAgentOpenCodeSessionRecoveryError(
+        new Error('OpenCode session not found.'),
+        1,
+        true,
+      ),
     );
     const adapter = callbacks();
 
@@ -9806,13 +9830,127 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         resumedAfterInterruption: true,
         resumedAfterInferenceRetry: true,
       }),
-    ).resolves.toContain('it can keep running');
+    ).resolves.toContain('accepted and can keep running');
     expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
     expect(adapter.postReply).toHaveBeenLastCalledWith({
       purpose: 'closeout',
       message:
-        'I sent the instruction to the task, and it can keep running, but I hit an error while finishing this response. Check the task’s current status before sending the instruction again.',
+        'Roomote lost the inference session after automatic recovery. The task instruction was accepted and can keep running; check its current status before sending another instruction.',
     });
+    expect(mocks.captureTurnSettled).toHaveBeenCalledWith(
+      expect.objectContaining({ failureReason: 'session_lost_after_tools' }),
+    );
+  });
+
+  it('does not durably continue unrelated unclassified failures after accepted work', async () => {
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', taskRunStatus: 'running' },
+    ]);
+    mocks.loadTurnAttempt.mockResolvedValueOnce({
+      events: [
+        {
+          kind: 'action',
+          tool: 'send_task_message',
+          arguments: {
+            taskId: 'task-1',
+            message: 'Continue the existing work.',
+          },
+          status: 'completed',
+          result: JSON.stringify({
+            success: true,
+            taskId: 'task-1',
+            delivery: 'accepted',
+            responsePending: true,
+          }),
+        },
+      ],
+      next: {
+        assistantOrdinal: 1,
+        toolOrdinal: 1,
+        retryNoticeOrdinal: 0,
+        turnSeq: 3,
+      },
+      prompt: { ts: 100, turnSeq: 0 },
+    });
+    mocks.runSession.mockRejectedValueOnce(
+      new Error('Unexpected orchestration failure.'),
+    );
+    const requestDurableRetry = vi.fn().mockResolvedValue(undefined);
+    const adapter = callbacks({ requestDurableRetry });
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        durableAdmission: { eventId: 'durable-row-1' },
+        resumedAfterInterruption: true,
+      }),
+    ).resolves.toBe(
+      'The Fast inference runtime failed outside provider retry handling. Automatic recovery stopped because the failure was not classified as safe to retry.',
+    );
+    expect(requestDurableRetry).not.toHaveBeenCalled();
+    expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
+  });
+
+  it('categorizes native runtime setup failures without exposing details', async () => {
+    const secret = 'sk-runtime-secret-1234567890';
+    mocks.getNativeRuntime.mockRejectedValueOnce(
+      new Error(`authorization: Bearer ${secret}`),
+    );
+    const postReply = vi.fn().mockResolvedValue(undefined);
+    const adapter = callbacks({ postReply });
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe(
+      'Roomote could not prepare the Fast inference runtime. Automatic recovery stopped because repeating local setup is not known to be safe.',
+    );
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(JSON.stringify(postReply.mock.calls)).not.toContain(secret);
+    expect(mocks.captureTurnSettled).toHaveBeenCalledWith(
+      expect.objectContaining({ failureReason: 'runtime_setup' }),
+    );
+  });
+
+  it('does not let executor cleanup replace a successful response', async () => {
+    mocks.bindExecutor.mockImplementation(
+      (_sessionID, _conversationId, executor) => {
+        mocks.nativeExecutor = executor;
+        return () => {
+          mocks.nativeExecutor = undefined;
+          throw new Error('Native executor cleanup failed.');
+        };
+      },
+    );
+    mocks.generateText.mockResolvedValueOnce('The requested work is complete.');
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe('The requested work is complete.');
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+  });
+
+  it('categorizes terminal delivery failures without rerunning inference', async () => {
+    const secret = 'sk-delivery-secret-1234567890';
+    mocks.generateText.mockResolvedValueOnce('The requested work is complete.');
+    const postReply = vi
+      .fn()
+      .mockRejectedValueOnce(new Error(`authorization: Bearer ${secret}`))
+      .mockResolvedValueOnce(undefined);
+    const adapter = callbacks({ postReply });
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe(
+      'Roomote generated a response but could not deliver it safely. Automatic recovery stopped to avoid posting the response twice.',
+    );
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    expect(postReply).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(postReply.mock.calls)).not.toContain(secret);
+    expect(mocks.captureTurnSettled).toHaveBeenCalledWith(
+      expect.objectContaining({ failureReason: 'unclassified_post_inference' }),
+    );
   });
 
   it('retries a gateway block from a clean compatibility bootstrap', async () => {
