@@ -40,6 +40,18 @@ execution count, workspace or pull-request context, aggregate cost, and unread
 state. Use the **Tasks** scope when you only want Sessions containing execution
 work. Board and list choices remain in the URL so views are shareable.
 
+If the task list fails to load, select **Retry** in the error state to fetch it
+again without leaving the page.
+
+## Web task notifications
+
+When a task started from the web dashboard completes, fails, or is canceled
+while its initiator is away from the Session, Roomote sends that person a direct
+notification with a link back to the task. It uses linked Slack, Teams,
+Telegram, and Discord accounts that the deployment can reach; verified Email is
+the fallback when no chat notification is delivered. Roomote skips the
+notification while the initiator is present in the Session.
+
 ## Recover from a failed start
 
 When a task cannot start, select **Try in a new task** to open an editable task
@@ -64,11 +76,11 @@ The task view gives you the working context for a run:
 - previews for running apps
 - task metadata and links back to the surface that started the task
 
-If a task started from Slack, Teams, Telegram, Discord, Linear, or source
-control, use the task view when the chat or provider thread does not show enough
-detail to review the work. Presentational widgets remain available in the task
-transcript; when an agent provides a text fallback, Roomote also sends that
-fallback to the originating Slack, Teams, Telegram, or Discord conversation.
+If a task started from Slack, Teams, Telegram, Discord, Email, Linear, or source
+control, use the task view when the provider thread does not show enough detail
+to review the work. Presentational widgets remain available in the task
+transcript. Supported communication surfaces receive a link to open the widget
+and include the agent's text preview when one is available.
 
 For a Markdown plan artifact, **Build this** starts a Session and delegates the
 plan to a task inside it. Roomote preserves the selected environment, branch,
