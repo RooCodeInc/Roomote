@@ -219,6 +219,11 @@ export type FastAgentTurnAdapter = {
   /** Called when the turn ends waiting on structured user input. The caller
    * persists the pending request and marks the session needs_input. */
   requestUserInput?: (request: FastAgentInputRequest) => Promise<void>;
+  /** Called after a durable visible turn settles and requires user attention. */
+  notifyUserAttention?: (attention: {
+    kind: 'result_ready' | 'input_needed';
+    eventId: string;
+  }) => Promise<void>;
   /** Resolve a trusted preset without accepting model-supplied options. */
   resolveUserInputPreset?: (
     preset: FastAgentInputPreset,

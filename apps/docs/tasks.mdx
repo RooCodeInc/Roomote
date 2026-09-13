@@ -40,14 +40,26 @@ execution count, workspace or pull-request context, aggregate cost, and unread
 state. Use the **Tasks** scope when you only want Sessions containing execution
 work. Board and list choices remain in the URL so views are shareable.
 
-## Task completion notifications
+## Attention notifications
 
-When a task started from the web completes, fails, or is canceled while its
-initiator is away from the Session, Roomote sends a personal notification with
-a link back to the task. Notifications go to the initiator's linked Slack,
-Teams, Telegram, and Discord chats where available; verified email is used only
-when no chat delivery succeeds. Roomote skips this notification while the
-initiator is present in the Session.
+When a web Session has a new response or a task needs input while its initiator
+is away, Roomote sends a personal notification with a link back to the Session.
+Notifications go to the initiator's linked Slack, Teams, Telegram, and Discord
+chats where available; verified email is used only when no chat delivery
+succeeds. Roomote skips the notification while the initiator is present in the
+Session.
+
+Reply directly to a notification in Slack, Teams, Telegram, Discord, or email
+to continue the same Session. Use the provider's reply action so Roomote can
+match the message to the Session; a separate top-level message starts or
+continues that provider's ordinary conversation instead. Direct task replies
+return to the notified task, while replies to Fast Session notifications keep
+the Session's existing context. If a Teams personal chat does not attach reply
+metadata, start the message with `continue:` to continue the most recent
+attention notification from the past seven days.
+
+Failed and canceled tasks retain a terminal notification fallback. Roomote
+deduplicates delivery across task completion, retries, and Fast parent reports.
 
 ## Recover from a failed start
 

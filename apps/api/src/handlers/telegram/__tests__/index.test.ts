@@ -284,6 +284,10 @@ vi.mock('@roomote/communication/messages', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  findSessionAttentionNotificationReply: vi.fn(async () => ({
+    status: 'none',
+  })),
+  resolveSessionAttentionFastConversation: vi.fn(async () => null),
   continueFastAgentSurfaceReply: continueFastReplyMock,
   createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(async () =>
     envMock.R_TELEGRAM_BOT_TOKEN
@@ -322,6 +326,9 @@ vi.mock('@roomote/sdk/server', () => ({
     retirePrReviewActionMessagesBestEffortMock,
   retireTelegramRequestUserInputPromptBestEffort:
     retireTelegramRequestUserInputPromptBestEffortMock,
+}));
+vi.mock('../../tasks/continue-session-attention-reply', () => ({
+  continueSessionAttentionReply: vi.fn(async () => false),
 }));
 
 vi.mock('@roomote/communication/telegram-provider', () => ({
@@ -888,6 +895,48 @@ describe('Telegram webhook handler', () => {
     expect(addReactionMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
+  });
+
+  it('continues a canonical web Session from a later Telegram reply', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    findFastReplySessionMock.mockResolvedValueOnce({
+      id: '22222222-2222-4222-8222-222222222222',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'web',
+        conversationId: 'web-session-1',
+      },
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          reply_to_message: {
+            message_id: 401,
+            date: 1,
+            text: 'Later Fast answer',
+            chat: { id: 222, type: 'private' },
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      fastAnswered: true,
+      fastContinued: true,
+    });
+    expect(queueFastReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: '22222222-2222-4222-8222-222222222222',
+        deliveryConversation: {
+          surface: 'telegram',
+          workspaceId: '222',
+          conversationId: 'notification:222:user:mapped-user-1',
+          replyTarget: { channelId: '222' },
+        },
+      }),
+    );
   });
 
   it('does not acknowledge a Telegram Fast reply when durable admission fails', async () => {

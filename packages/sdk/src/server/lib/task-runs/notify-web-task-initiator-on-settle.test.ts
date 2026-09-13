@@ -3,6 +3,7 @@ import { RunStatus } from '@roomote/types';
 const mocks = vi.hoisted(() => ({
   findTask: vi.fn(),
   getSessionForTask: vi.fn(),
+  hasAttention: vi.fn(),
   isPresent: vi.fn(),
   recordEvent: vi.fn(),
   returning: vi.fn(),
@@ -43,6 +44,9 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 vi.mock('../user-direct-message', () => ({
   sendUserDirectMessageBestEffort: mocks.sendPersonalNotification,
 }));
+vi.mock('../session-attention-notification', () => ({
+  hasTaskRunAttentionNotification: mocks.hasAttention,
+}));
 vi.mock('./fast-agent-delivery-claim', () => ({
   buildDeliveryClaimMarker: () => 'delivering:1',
   buildDeliveryClaimPredicate: () => true,
@@ -67,6 +71,7 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
     mocks.selectTaskStateRun.mockReturnValue(eligibleTask.runs[0]);
     mocks.returning.mockResolvedValue([{ id: run.id }]);
     mocks.getSessionForTask.mockResolvedValue({ id: 'session-1' });
+    mocks.hasAttention.mockResolvedValue(false);
     mocks.isPresent.mockResolvedValue(false);
     mocks.sendPersonalNotification.mockResolvedValue(['slack']);
     mocks.recordEvent.mockResolvedValue(undefined);
@@ -141,6 +146,42 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
 
     await notifyWebTaskInitiatorOnSettle(run, RunStatus.Completed);
 
+    expect(mocks.sendPersonalNotification).not.toHaveBeenCalled();
+  });
+
+  it('does not duplicate a completed attention notification at terminal settle', async () => {
+    mocks.hasAttention.mockResolvedValue(true);
+
+    await expect(
+      notifyWebTaskInitiatorOnSettle(run, RunStatus.Completed),
+    ).resolves.toBe('not_applicable');
+
+    expect(mocks.sendPersonalNotification).not.toHaveBeenCalled();
+  });
+
+  it('leaves Fast child terminal reporting to its parent Session', async () => {
+    mocks.findTask.mockResolvedValue({
+      ...eligibleTask,
+      runs: [
+        {
+          ...eligibleTask.runs[0],
+          payload: {
+            fastAgentParent: {
+              sessionId: '11111111-1111-4111-8111-111111111111',
+              conversation: {
+                surface: 'web',
+                workspaceId: 'web',
+                conversationId: '22222222-2222-4222-8222-222222222222',
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    await expect(
+      notifyWebTaskInitiatorOnSettle(run, RunStatus.Completed),
+    ).resolves.toBe('not_applicable');
     expect(mocks.sendPersonalNotification).not.toHaveBeenCalled();
   });
 
