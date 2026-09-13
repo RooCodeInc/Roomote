@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import { useMediaQuery } from 'usehooks-ts';
 import {
   Menu,
   X,
@@ -11,7 +12,7 @@ import {
 } from '@/components/system';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useResultsPage } from '@/hooks/useResultsPage';
-import { MobileSessionSwitcher } from '@/components/layout/MobileSessionSwitcher';
+import { RecentSessions } from '@/components/layout/side-nav/RecentSessions';
 
 import {
   Button,
@@ -38,6 +39,9 @@ export const NavbarDrawer = ({
   const visibleNavItems = getVisiblePrimaryNavItems({
     isAdmin,
     resultsEnabled,
+  });
+  const isMobile = useMediaQuery('(max-width: 767px)', {
+    initializeWithValue: false,
   });
 
   const [open, setOpen] = useState(false);
@@ -118,7 +122,9 @@ export const NavbarDrawer = ({
                 </Link>
               </Button>
 
-              <MobileSessionSwitcher />
+              <div className="pt-4">
+                <RecentSessions enabled={isMobile} />
+              </div>
             </div>
           </div>
         </DrawerContent>

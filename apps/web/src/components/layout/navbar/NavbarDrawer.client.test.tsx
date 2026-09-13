@@ -7,6 +7,7 @@ import { render, screen } from '@testing-library/react';
 
 const state = vi.hoisted(() => ({
   pathname: '/',
+  recentSessionsEnabled: false,
   user: {
     isAdmin: true,
   },
@@ -18,6 +19,10 @@ function Icon() {
 
 vi.mock('next/navigation', () => ({
   usePathname: () => state.pathname,
+}));
+
+vi.mock('usehooks-ts', () => ({
+  useMediaQuery: () => true,
 }));
 
 vi.mock('next/link', () => ({
@@ -40,12 +45,15 @@ vi.mock('@/hooks/useResultsPage', () => ({
   useResultsPage: () => ({ enabled: false, isLoading: false }),
 }));
 
-vi.mock('@/components/layout/MobileSessionSwitcher', () => ({
-  MobileSessionSwitcher: () => (
-    <section>
-      <h3>Recent sessions</h3>
-    </section>
-  ),
+vi.mock('@/components/layout/side-nav/RecentSessions', () => ({
+  RecentSessions: ({ enabled }: { enabled: boolean }) => {
+    state.recentSessionsEnabled = enabled;
+    return (
+      <section>
+        <h3>Recent sessions</h3>
+      </section>
+    );
+  },
 }));
 
 vi.mock('@/components/system', () => ({
@@ -97,6 +105,7 @@ import { NavbarDrawer } from './NavbarDrawer';
 describe('NavbarDrawer', () => {
   beforeEach(() => {
     state.user.isAdmin = true;
+    state.recentSessionsEnabled = false;
   });
 
   it('shows a settings link for members', () => {
@@ -133,6 +142,7 @@ describe('NavbarDrawer', () => {
     expect(settings.compareDocumentPosition(recentSessions)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
+    expect(state.recentSessionsEnabled).toBe(true);
   });
 
   it('keeps setup-gated destinations visible but disabled with an explanation', () => {

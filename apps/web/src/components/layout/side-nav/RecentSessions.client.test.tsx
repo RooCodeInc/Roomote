@@ -2,41 +2,40 @@ import { render, screen } from '@testing-library/react';
 
 import { SessionNavigationStateProvider } from '@/hooks/useSessionNavigationState';
 
-import { MobileSessionSwitcher } from './MobileSessionSwitcher';
+import { RecentSessions } from './RecentSessions';
 
-const { listInput, pathnameState, sessionsState } = vi.hoisted(() => ({
-  listInput: { value: null as unknown },
-  pathnameState: { value: '/sessions/session-b' },
-  sessionsState: {
-    value: [
-      {
-        id: 'session-a',
-        title: 'First session',
-        cachedStatus: 'needs_input',
-        unread: false,
-      },
-      {
-        id: 'session-b',
-        title: 'Current session',
-        cachedStatus: 'active',
-        unread: false,
-      },
-      {
-        id: 'session-c',
-        title: 'Unread result',
-        cachedStatus: 'ready',
-        unread: true,
-      },
-    ],
-  },
-}));
+const { listInput, listOptions, pathnameState, sessionsState } = vi.hoisted(
+  () => ({
+    listInput: { value: null as unknown },
+    listOptions: { value: null as unknown },
+    pathnameState: { value: '/sessions/session-b' },
+    sessionsState: {
+      value: [
+        {
+          id: 'session-a',
+          title: 'First session',
+          cachedStatus: 'needs_input',
+          unread: false,
+        },
+        {
+          id: 'session-b',
+          title: 'Current session',
+          cachedStatus: 'active',
+          unread: false,
+        },
+        {
+          id: 'session-c',
+          title: 'Unread result',
+          cachedStatus: 'ready',
+          unread: true,
+        },
+      ],
+    },
+  }),
+);
 
 vi.mock('next/navigation', () => ({
   usePathname: () => pathnameState.value,
-}));
-
-vi.mock('usehooks-ts', () => ({
-  useMediaQuery: () => true,
 }));
 
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
@@ -51,8 +50,9 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     sessions: {
       list: {
-        queryOptions: (input: unknown) => {
+        queryOptions: (input: unknown, options: unknown) => {
           listInput.value = input;
+          listOptions.value = options;
           return { queryKey: ['sessions', 'list'] };
         },
       },
@@ -60,7 +60,7 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
-describe('MobileSessionSwitcher', () => {
+describe('RecentSessions', () => {
   beforeEach(() => {
     pathnameState.value = '/sessions/session-b';
   });
@@ -68,11 +68,14 @@ describe('MobileSessionSwitcher', () => {
   it('keeps server order, active state, and useful attention cues', () => {
     render(
       <SessionNavigationStateProvider>
-        <MobileSessionSwitcher />
+        <RecentSessions enabled />
       </SessionNavigationStateProvider>,
     );
 
     expect(listInput.value).toEqual({ ownedOnly: true, limit: 20 });
+    expect(listOptions.value).toEqual(
+      expect.objectContaining({ enabled: true }),
+    );
     expect(
       screen.getByRole('heading', { name: 'Recent sessions' }),
     ).toBeVisible();
@@ -94,7 +97,7 @@ describe('MobileSessionSwitcher', () => {
 
     render(
       <SessionNavigationStateProvider>
-        <MobileSessionSwitcher />
+        <RecentSessions enabled />
       </SessionNavigationStateProvider>,
     );
 

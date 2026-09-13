@@ -11,13 +11,11 @@ type SideNavSessionItemProps = {
     unread?: boolean;
   };
   isActive: boolean;
-  showStatus?: boolean;
 };
 
 export function SideNavSessionItem({
   session,
   isActive,
-  showStatus = false,
 }: SideNavSessionItemProps) {
   const navigationState = useSessionNavigationState();
   const needsAttention =
@@ -47,12 +45,12 @@ export function SideNavSessionItem({
       >
         {session.title}
       </span>
-      {showStatus && needsAttention ? (
+      {needsAttention ? (
         <span
           className="mr-2 size-2 shrink-0 rounded-full bg-warning"
           aria-label="Needs attention"
         />
-      ) : showStatus && isRunning ? (
+      ) : isRunning ? (
         <span
           className="mr-2 size-2 shrink-0 rounded-full border border-current opacity-70"
           aria-label="Running"

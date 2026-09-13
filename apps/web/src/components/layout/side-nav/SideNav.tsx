@@ -40,19 +40,13 @@ import {
   SETUP_INCOMPLETE_NAV_TOOLTIP,
 } from '../navigation-items';
 import { SideNavItem } from './SideNavItem';
-import { SideNavSessionItem } from './SideNavSessionItem';
+import { RecentSessions } from './RecentSessions';
 import { SideNavTaskItem } from './SideNavTaskItem';
 
-const SIDE_NAV_MAX_VISIBLE_SESSIONS = 20;
 const SIDEBAR_LOGO_SRC = '/logos/r.svg';
 
 export function getTaskIdFromPathname(pathname: string): string | null {
   const match = pathname.match(/^\/task\/([^/]+)/);
-  return match?.[1] ?? null;
-}
-
-export function getSessionIdFromPathname(pathname: string): string | null {
-  const match = pathname.match(/^\/sessions\/([^/]+)/);
   return match?.[1] ?? null;
 }
 
@@ -89,10 +83,6 @@ export const SideNav = ({
     () => getTaskIdFromPathname(pathname),
     [pathname],
   );
-  const currentSessionId = useMemo(
-    () => getSessionIdFromPathname(pathname),
-    [pathname],
-  );
   const activeLiveTaskStatus = useLiveTaskStatus(currentTaskId);
 
   const { data: searchedTasks = [] } = useQuery(
@@ -118,19 +108,6 @@ export const SideNav = ({
     () => new Set(pinnedTaskIds),
     [pinnedTaskIds],
   );
-  const { data: recentSessionsResult } = useQuery(
-    trpc.sessions.list.queryOptions(
-      {
-        ownedOnly: true,
-        limit: SIDE_NAV_MAX_VISIBLE_SESSIONS,
-      },
-      {
-        enabled: isSideNavExpanded,
-        placeholderData: keepPreviousData,
-      },
-    ),
-  );
-  const recentSessions = recentSessionsResult?.sessions ?? [];
   const visibleNavItems = useMemo(
     () => getVisiblePrimaryNavItems({ isAdmin, resultsEnabled }),
     [isAdmin, resultsEnabled],
@@ -324,53 +301,39 @@ export const SideNav = ({
       </div>
 
       <div className="min-h-0 flex-1 overflow-clip">
-        {isSideNavExpanded &&
-          (pinnedQuickAccessTasks.length > 0 || recentSessions.length > 0) && (
-            <div className="flex h-full min-h-0 flex-col pt-4 w-(--sidebar-width)">
-              <div className="min-h-0 flex-1 overflow-x-clip overflow-y-auto scroll-thin pr-1 space-y-4">
-                {pinnedQuickAccessTasks.length > 0 && (
-                  <div className="flex flex-col gap-1">
-                    <h3 className="text-sm font-semibold pl-2 py-1">
-                      Pinned tasks
-                    </h3>
-                    {pinnedQuickAccessTasks.map((task) => (
-                      <SideNavTaskItem
-                        key={task.id}
-                        task={task}
-                        liveStatus={
-                          currentTaskId === task.id
-                            ? activeLiveTaskStatus
-                            : null
-                        }
-                        isActive={currentTaskId === task.id}
-                        isPinned={pinnedTaskIdSet.has(task.id)}
-                        isPinPending={isTaskPinMutationPending(task.id)}
-                        expanded
-                        onTogglePin={(nextPinned) =>
-                          setTaskPinned(task.id, nextPinned)
-                        }
-                      />
-                    ))}
-                  </div>
-                )}
+        {isSideNavExpanded ? (
+          <div className="flex h-full min-h-0 flex-col pt-4 w-(--sidebar-width)">
+            <div className="min-h-0 flex-1 overflow-x-clip overflow-y-auto scroll-thin pr-1 space-y-4">
+              {pinnedQuickAccessTasks.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <h3 className="text-sm font-semibold pl-2 py-1">
+                    Pinned tasks
+                  </h3>
+                  {pinnedQuickAccessTasks.map((task) => (
+                    <SideNavTaskItem
+                      key={task.id}
+                      task={task}
+                      liveStatus={
+                        currentTaskId === task.id ? activeLiveTaskStatus : null
+                      }
+                      isActive={currentTaskId === task.id}
+                      isPinned={pinnedTaskIdSet.has(task.id)}
+                      isPinPending={isTaskPinMutationPending(task.id)}
+                      expanded
+                      onTogglePin={(nextPinned) =>
+                        setTaskPinned(task.id, nextPinned)
+                      }
+                    />
+                  ))}
+                </div>
+              )}
 
-                {recentSessions.length > 0 && (
-                  <div className="flex flex-col">
-                    <h3 className="text-sm font-semibold pl-2 py-1">
-                      Recent sessions
-                    </h3>
-                    {recentSessions.map((session) => (
-                      <SideNavSessionItem
-                        key={session.id}
-                        session={session}
-                        isActive={currentSessionId === session.id}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
+              <RecentSessions enabled />
             </div>
-          )}
+          </div>
+        ) : (
+          <RecentSessions enabled={false} />
+        )}
       </div>
 
       <div className="relative z-10 w-full shrink-0 bg-card">
