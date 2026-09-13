@@ -7,6 +7,7 @@ import {
   eq,
   getSessionForTask,
   isNull,
+  inArray,
   lt,
   or,
   sessionAttentionNotificationMessages,
@@ -292,6 +293,10 @@ export async function hasTaskRunAttentionNotification(
       where: and(
         eq(sessionAttentionNotifications.runId, runId),
         eq(sessionAttentionNotifications.kind, 'result_ready'),
+        inArray(sessionAttentionNotifications.outcome, [
+          'delivered',
+          'skipped_present',
+        ]),
       ),
       columns: { id: true },
     }),

@@ -24,6 +24,7 @@ vi.mock('./user-direct-message', () => ({
 
 import {
   findSessionAttentionNotificationReply,
+  hasTaskRunAttentionNotification,
   notifyDirectWebTaskAttention,
   notifyFastWebSessionAttention,
 } from './session-attention-notification';
@@ -115,6 +116,37 @@ describe('session attention notifications', () => {
     ).resolves.toBe('already_claimed');
 
     expect(mocks.send).not.toHaveBeenCalled();
+    await expect(hasTaskRunAttentionNotification(run.id)).resolves.toBe(false);
+  });
+
+  it('suppresses terminal completion after a present user watched the result', async () => {
+    const { run } = await createDirectWebRun();
+    mocks.isPresent.mockResolvedValue(true);
+
+    await notifyDirectWebTaskAttention({
+      runId: run.id,
+      kind: 'result_ready',
+      eventId: 'completion-watched',
+    });
+
+    await expect(hasTaskRunAttentionNotification(run.id)).resolves.toBe(true);
+  });
+
+  it('does not suppress terminal fallback after attention delivery fails', async () => {
+    const { run } = await createDirectWebRun();
+    mocks.send.mockResolvedValue([]);
+
+    await expect(
+      notifyDirectWebTaskAttention(
+        {
+          runId: run.id,
+          kind: 'result_ready',
+          eventId: 'completion-failed',
+        },
+        false,
+      ),
+    ).resolves.toBe('failed');
+    await expect(hasTaskRunAttentionNotification(run.id)).resolves.toBe(false);
   });
 
   it('leaves Fast-delegated child attention to the parent Session', async () => {

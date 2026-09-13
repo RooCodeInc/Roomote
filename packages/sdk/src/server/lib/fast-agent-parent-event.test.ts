@@ -550,6 +550,42 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('restores a queued cross-surface reply route without changing the canonical Session', async () => {
+    const webParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: 'web',
+        conversationId: parent.sessionId,
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({ purpose: 'closeout', message: 'Continued.' }),
+    );
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent: webParent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'notification-reply-1',
+          currentMessageId: 'notification-reply-1',
+          userId: 'u1',
+          question: 'Continue from Slack.',
+          deliveryConversation: parent.conversation,
+        },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ conversation: webParent.conversation }),
+    );
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'C123', thread_ts: '100.001' }),
+    );
+  });
+
   it.each(['', '[View video](https://roomote.example/video)'])(
     'delivers selected videos from queued follow-ups with fallback %j',
     async (fallback) => {

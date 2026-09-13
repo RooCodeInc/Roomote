@@ -1530,6 +1530,7 @@ describe('Discord Gateway event handler', () => {
       workspaceId: 'dm',
       channelId: 'dm-1',
       replyToMessageId: 'fast-report-1',
+      userId: 'roomote-user-1',
     });
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({

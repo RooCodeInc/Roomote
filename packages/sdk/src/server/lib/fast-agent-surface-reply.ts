@@ -799,6 +799,9 @@ function buildSurfaceHumanFollowUpEvent(
       : {}),
     ...(params.agentContext ? { agentContext: params.agentContext } : {}),
     ...(params.activeTasks?.length ? { activeTasks: params.activeTasks } : {}),
+    ...(params.deliveryConversation
+      ? { deliveryConversation: params.deliveryConversation }
+      : {}),
     ...(params.externalInput
       ? {
           senderExternalId: params.externalInput.reactor.externalUserId,
