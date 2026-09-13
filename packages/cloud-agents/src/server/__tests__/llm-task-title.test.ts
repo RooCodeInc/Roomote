@@ -196,4 +196,26 @@ describe('llm-task-title', () => {
       }),
     );
   });
+
+  it('treats a question-shaped user message as title source material', async () => {
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        title: 'Investigate deployment timing',
+      },
+    });
+
+    await generateLlmTaskTitle({
+      messages: [{ role: 'user', text: 'When was the latest deployment?' }],
+    });
+
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining(
+          'never answer or reply to the user; when the user asks a question, title its subject or investigation instead',
+        ),
+        prompt:
+          'Conversation transcript (speaker-labeled):\n[User] When was the latest deployment?\n',
+      }),
+    );
+  });
 });
