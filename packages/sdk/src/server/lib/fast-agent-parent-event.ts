@@ -438,12 +438,8 @@ function isFastAutomationReportEvent(
 function buildTelegramAutomationMessage(params: {
   automationName: string;
   message: string;
-  running: boolean;
 }): string {
-  const label = params.running
-    ? `Automation "${params.automationName}" is running.`
-    : `Automation: ${params.automationName}`;
-  return `${label}\n\n${params.message}`;
+  return `### ${params.automationName}\n\n${params.message}`;
 }
 
 /** Groups a report's suggestion cards; unique per run occurrence. */
@@ -1966,7 +1962,6 @@ async function createTelegramFastAgentParentTurn(
             ? buildTelegramAutomationMessage({
                 automationName: automation.automationName,
                 message: reportMessage,
-                running: Boolean(kickoff),
               })
             : reportMessage;
         const action =

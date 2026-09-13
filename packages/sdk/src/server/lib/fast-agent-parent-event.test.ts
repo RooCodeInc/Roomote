@@ -2246,16 +2246,14 @@ describe('deliverFastAgentParentEvent', () => {
     {
       kickoff: true,
       eventType: 'automation_triggered' as const,
-      expectedPrefix: 'Automation "Weekly scan" is running.',
     },
     {
       kickoff: false,
       eventType: 'task_settled' as const,
-      expectedPrefix: 'Automation: Weekly scan',
     },
   ])(
-    'identifies a Telegram $eventType automation message',
-    async ({ kickoff, eventType, expectedPrefix }) => {
+    'renders the automation title as a Telegram heading for $eventType messages',
+    async ({ kickoff, eventType }) => {
       const message = kickoff
         ? 'Starting the repository scan.'
         : 'No issues found.';
@@ -2302,7 +2300,7 @@ describe('deliverFastAgentParentEvent', () => {
       expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           channelId: 'telegram-chat-1',
-          text: `${expectedPrefix}\n\n${message}`,
+          text: `### Weekly scan\n\n${message}`,
           footerText: `Reply anytime · [Open in Roomote](https://api.roomote.example/sessions/${parent.sessionId}?utm_source=telegram&utm_medium=link&utm_campaign=telegram.fast_reply)`,
           textFormat: 'markdown',
         }),
