@@ -33,7 +33,6 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
-import { startTaskGoal } from '../tasks/start-task-goal.js';
 import {
   findActiveTelegramTaskRun,
   findCompletedTelegramTaskRunWithSnapshot,
@@ -51,6 +50,7 @@ import {
   queueFastAgentSurfaceReply,
   recordFastAgentConversationMessageBestEffort,
   restoreTelegramLinkCode,
+  startFastSessionGoal,
 } from '@roomote/sdk/server';
 import {
   buildFastAgentReactionExternalInputQuestion,
@@ -79,7 +79,7 @@ const TELEGRAM_COMMAND_HELP = [
   '`/start` — show this welcome message.',
   '`/help` — show command help.',
   '`/new <request>` — start a fresh conversation instead of continuing the current one; when topics are available, it opens a new topic.',
-  '`/goal <objective>` — keep an active task working toward an objective.',
+  '`/goal <objective>` — keep this Session working toward an objective.',
 ].join('\n');
 
 const TELEGRAM_WELCOME_MESSAGE = [
@@ -651,19 +651,18 @@ telegram.post('/', async (c) => {
       reason: 'attention_notification_user_mismatch',
     });
   }
-  const fastSession =
-    !newTaskCommand && !goalCommand
-      ? await findFastAgentSessionForProviderReply({
-          provider: 'telegram',
-          workspaceId: metadata.communicationChannelId,
-          channelId: metadata.communicationChannelId,
-          ...(metadata.communicationThreadId
-            ? { threadId: metadata.communicationThreadId }
-            : {}),
-          ...(replyToMessageId ? { replyToMessageId } : {}),
-          userId: senderUserId,
-        })
-      : null;
+  const fastSession = !newTaskCommand
+    ? await findFastAgentSessionForProviderReply({
+        provider: 'telegram',
+        workspaceId: metadata.communicationChannelId,
+        channelId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
+        ...(replyToMessageId ? { replyToMessageId } : {}),
+        userId: senderUserId,
+      })
+    : null;
   if (!fastSession && replyToMessageId) {
     const isKnownFastMessage = await isFastAgentProviderMessage({
       provider: 'telegram',
@@ -679,7 +678,7 @@ telegram.post('/', async (c) => {
       });
     }
   }
-  if (fastSession) {
+  if (fastSession && !goalCommand) {
     if (fastSession.userId !== senderUserId) {
       return c.json({
         ok: true,
@@ -757,13 +756,16 @@ telegram.post('/', async (c) => {
     : await findActiveTelegramTaskRun(conversation);
 
   if (goalCommand) {
-    const reply = async (text: string) =>
+    const reply = async (
+      text: string,
+      textFormat: 'plain' | 'markdown' = 'markdown',
+    ) =>
       postTelegramMessageBestEffort({
         chatId: metadata.communicationChannelId,
         threadId: metadata.communicationThreadId,
         replyToMessageId: metadata.communicationMessageId,
         text,
-        textFormat: 'markdown',
+        textFormat,
       });
 
     if (!goalCommand.objective) {
@@ -776,30 +778,43 @@ telegram.post('/', async (c) => {
         reason: 'missing_objective',
       });
     }
-    if (!activeRun) {
-      await reply(
-        'Use `/goal` in an active Roomote task chat or topic. Start a task with `/new` or message me first.',
-      );
-      return c.json({
-        ok: true,
-        goalStarted: false,
-        reason: 'no_active_task',
-      });
-    }
-
-    const result = await startTaskGoal({
-      taskId: activeRun.taskId,
+    const fastConversation = {
+      surface: 'telegram' as const,
+      workspaceId: metadata.communicationChannelId,
+      conversationId: `${metadata.communicationThreadId ?? (isTelegramPrivateChat(message) ? metadata.communicationChannelId : (metadata.communicationMessageId ?? update.update_id))}:user:${senderUserId}`,
+      replyTarget: {
+        channelId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
+      },
+    };
+    const session =
+      fastSession ??
+      (await getOrCreateFastAgentSession({
+        userId: senderUserId,
+        conversation: fastConversation,
+      }));
+    const result = await startFastSessionGoal({
+      sessionId: session.id,
       userId: senderUserId,
+      senderDisplayName:
+        [message.from?.first_name, message.from?.last_name]
+          .filter(Boolean)
+          .join(' ')
+          .trim() || null,
       objective: goalCommand.objective,
-      source: 'telegram',
-      clientMessageId:
+      currentMessageId:
         metadata.communicationMessageId ?? `telegram:${update.update_id}`,
     });
-    await reply(result.success ? 'Goal Mode enabled.' : result.error);
+    await reply(
+      result.success ? `Pursuing goal: ${goalCommand.objective}` : result.error,
+      result.success ? 'plain' : 'markdown',
+    );
     return c.json({
       ok: true,
       goalStarted: result.success,
-      runId: activeRun.id,
+      sessionId: session.id,
     });
   }
 

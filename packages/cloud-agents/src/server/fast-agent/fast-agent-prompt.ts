@@ -155,6 +155,7 @@ export function buildFastAgentSystemPrompt({
   defaultTaskModelId,
   availableIntegrations = [],
   activeTasks = [],
+  sessionGoal,
   surface = 'slack',
   turnSource = 'human',
   input,
@@ -180,6 +181,7 @@ export function buildFastAgentSystemPrompt({
   defaultTaskModelId?: string;
   availableIntegrations?: FastAgentIntegration[];
   activeTasks?: FastAgentActiveTask[];
+  sessionGoal?: import('@roomote/types').SessionGoal | null;
   surface?: FastAgentSurface;
   turnSource?: FastAgentTurnSource;
   input?: FastAgentHumanInput;
@@ -321,6 +323,20 @@ ${formatTaskModelsForPrompt(availableTaskModels, defaultTaskModelId)}
 
 ## Active or Resumable Delegated Tasks
 ${formatActiveTasksForPrompt(activeTasks)}
+
+${
+  sessionGoal
+    ? `## Session Goal
+- Objective: ${sessionGoal.objective}
+- Status: ${sessionGoal.status}
+- Continuations used: ${sessionGoal.continuationsUsed}/${sessionGoal.maxContinuations}
+${sessionGoal.blockedReason ? `- Blocked reason: ${sessionGoal.blockedReason}\n` : ''}- This goal belongs to the Fast Session, not to any delegated task. Child tasks are execution units only.
+- Keep pursuing the complete objective across turns. Put the relevant objective and acceptance criteria in every delegated task brief.
+- Use \`manage_goal\` to inspect state, mark complete only after the entire objective is verified, mark blocked only after a concrete blocker persists across attempts, or mark canceled only when the user cancels or replaces it.
+- Do not treat one child task finishing, failing, or being canceled as automatic completion or cancellation of the Session goal.
+`
+    : ''
+}
 
 ## Deployment MCP Servers
 ${formatIntegrationsForPrompt(availableIntegrations)}

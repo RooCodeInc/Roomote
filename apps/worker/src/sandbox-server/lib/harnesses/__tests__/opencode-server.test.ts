@@ -432,66 +432,6 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('adds trusted goal generation context without changing the visible prompt', async () => {
-    const { client, harness } = createHarness();
-    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
-    harness.subscribeRuntimePersistedEnvelope((envelope) =>
-      persistedEnvelopes.push(envelope),
-    );
-
-    try {
-      await connectHarness(harness, client);
-
-      expect(
-        harness.sendCommand({
-          commandName: TaskCommandName.StartNewTask,
-          data: {
-            text: 'Finish the replacement goal.',
-            goalContext: {
-              objective: 'Finish the replacement goal.',
-              generation: 'goal-generation:replacement',
-              status: 'active',
-              maxContinuations: 5,
-              continuationsUsed: 0,
-              blockedReason: null,
-              completedAt: null,
-            },
-            visibleInTranscript: true,
-          },
-        }),
-      ).toBe(true);
-
-      await vi.waitFor(() => {
-        expect(client.promptAsync).toHaveBeenCalledTimes(1);
-      });
-      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
-        request: {
-          parts: [
-            {
-              type: 'text',
-              text: expect.stringContaining('<task_goal enabled="true">'),
-            },
-          ],
-        },
-      });
-      const agentPrompt = client.promptAsync.mock.calls[0]?.[0] as
-        | { request?: { parts?: Array<{ type: string; text?: string }> } }
-        | undefined;
-      const agentPromptText = agentPrompt?.request?.parts?.[0]?.text;
-      expect(agentPromptText).toContain('goal-generation:replacement');
-      expect(agentPromptText).toContain('Goal Mode is enabled for this turn');
-      expect(agentPromptText).not.toContain('/goal');
-      expect(
-        persistedEnvelopes.find(
-          (envelope) =>
-            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-        )?.payload.text,
-      ).toBe('Finish the replacement goal.');
-    } finally {
-      harness.dispose();
-    }
-  });
-
   it('persists linked child-session assistant messages and records their usage', async () => {
     const { client, harness } = createHarness();
     const inferenceUsageEvents: HarnessInferenceUsageEvent[] = [];

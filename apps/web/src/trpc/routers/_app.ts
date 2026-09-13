@@ -29,7 +29,7 @@ import {
   prActions,
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
-  taskGoalInputSchema,
+  sessionGoalInputSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
@@ -40,6 +40,7 @@ import {
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
   replyToFastSessionCommand,
+  startFastSessionGoalCommand,
   startFastSessionCommand,
   submitFastSessionUserInputCommand,
   updateFastSessionModelSelectionCommand,
@@ -155,7 +156,6 @@ import {
 import {
   cancelTaskRunCommand,
   retryFailedTaskStartCommand,
-  startTaskGoalCommand,
 } from '../commands/task-runs';
 import {
   exchangeSlackOAuthCodeCommand,
@@ -1169,19 +1169,6 @@ export const appRouter = createRouter({
   }),
 
   taskRuns: createRouter({
-    startGoal: protectedProcedure
-      .input(
-        z.object({
-          taskId: z.string(),
-          goal: taskGoalInputSchema,
-          clientMessageId: z.string().optional(),
-          userImageUrl: z.string().optional(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        startTaskGoalCommand(auth, input),
-      ),
-
     cancel: protectedProcedure
       .input(
         z.object({
@@ -3033,6 +3020,17 @@ export const appRouter = createRouter({
       .input(replyToFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
+      ),
+    startGoal: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          objective: sessionGoalInputSchema.shape.objective,
+          clientMessageId: z.string().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        startFastSessionGoalCommand(auth, input),
       ),
     reviewAction: protectedProcedure
       .input(fastSessionPrReviewActionInputSchema)

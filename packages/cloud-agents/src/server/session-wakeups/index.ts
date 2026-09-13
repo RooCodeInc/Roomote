@@ -24,8 +24,10 @@ export {
 } from './schedule';
 export {
   cancelSessionWakeupForConversation,
+  cancelSessionGoalContinuationWakeups,
   createSessionWakeup,
   ensureOwnTaskFollowThroughWakeup,
+  ensureSessionGoalContinuationWakeup,
   isFastAgentVoiceCallActive,
   getSessionWakeupForConversation,
   handleManageWakeupsToolCall,

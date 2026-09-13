@@ -32,7 +32,7 @@ const {
   redisEvalMock,
   redisSetMock,
   setLatestInboundMessageIdMock,
-  startTaskGoalMock,
+  startFastSessionGoalMock,
   setTrustedRunActingUserMock,
   setTrustedRunActingUserOnSuccessMock,
   stopTaskRunMock,
@@ -91,7 +91,7 @@ const {
   redisEvalMock: vi.fn(),
   redisSetMock: vi.fn(),
   setLatestInboundMessageIdMock: vi.fn(),
-  startTaskGoalMock: vi.fn(),
+  startFastSessionGoalMock: vi.fn(),
   setTrustedRunActingUserMock: vi.fn(),
   setTrustedRunActingUserOnSuccessMock: vi.fn(),
   stopTaskRunMock: vi.fn(),
@@ -122,10 +122,6 @@ vi.mock('@roomote/env', () => ({
 
 vi.mock('../../account-link-help.js', () => ({
   appendAccountLinkHelpText: appendAccountLinkHelpTextMock,
-}));
-
-vi.mock('../../tasks/start-task-goal.js', () => ({
-  startTaskGoal: startTaskGoalMock,
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -160,8 +156,26 @@ vi.mock('@roomote/db/server', () => ({
     result: 'result',
   },
   tasks: {
+    deletedAt: 'tasks.deletedAt',
     id: 'tasks.id',
     initiatorUserId: 'tasks.initiatorUserId',
+    state: 'tasks.state',
+  },
+  fastAgentConversations: {
+    currentReplyChannelId: 'fastAgentConversations.currentReplyChannelId',
+    currentReplyThreadId: 'fastAgentConversations.currentReplyThreadId',
+    id: 'fastAgentConversations.id',
+    surface: 'fastAgentConversations.surface',
+    userId: 'fastAgentConversations.userId',
+    workspaceId: 'fastAgentConversations.workspaceId',
+  },
+  sessions: {
+    fastConversationId: 'sessions.fastConversationId',
+    id: 'sessions.id',
+  },
+  sessionTasks: {
+    sessionId: 'sessionTasks.sessionId',
+    taskId: 'sessionTasks.taskId',
   },
   db: {
     insert: insertMock,
@@ -313,6 +327,7 @@ vi.mock('@roomote/sdk/server', () => ({
   findFastAgentSessionForProviderReply: findFastReplySessionMock,
   isFastAgentProviderMessage: isFastProviderMessageMock,
   queueFastAgentSurfaceReply: queueFastReplyMock,
+  startFastSessionGoal: startFastSessionGoalMock,
   recordFastAgentConversationMessageBestEffort:
     recordFastConversationMessageMock,
   TELEGRAM_PRIMARY_CHAT_ENV_VAR_NAME: 'TELEGRAM_PRIMARY_CHAT_ID',
@@ -487,7 +502,7 @@ describe('Telegram webhook handler', () => {
     setTrustedRunActingUserOnSuccessMock.mockImplementation(
       async ({ operation }) => operation(),
     );
-    startTaskGoalMock.mockResolvedValue({ success: true });
+    startFastSessionGoalMock.mockResolvedValue({ success: true, goal: {} });
     authUsersFindFirstMock.mockResolvedValue(null);
     usersFindFirstMock.mockResolvedValue(null);
     taskRunsFindFirstMock.mockResolvedValue(null);
@@ -1559,19 +1574,13 @@ describe('Telegram webhook handler', () => {
     expect(getFastSessionMock).not.toHaveBeenCalled();
   });
 
-  it('enables Goal Mode for an active task', async () => {
+  it('starts a Fast Session goal and acknowledges the objective literally', async () => {
     mockTelegramLinkedSender();
-    taskRunsFindFirstMock.mockResolvedValueOnce({
-      id: 77,
-      status: 'running',
-      taskId: 'task-1',
-      payload: {},
-    });
 
     const response = await postTelegramUpdate(
       createTelegramUpdate({
         message: {
-          text: '/goal ship the release',
+          text: '/goal ship_the *release*',
           entities: [{ type: 'bot_command', offset: 0, length: 5 }],
         },
       }),
@@ -1580,20 +1589,105 @@ describe('Telegram webhook handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       goalStarted: true,
-      runId: 77,
+      sessionId: 'fast-session-default',
     });
-    expect(startTaskGoalMock).toHaveBeenCalledWith({
-      taskId: 'task-1',
+    expect(startFastSessionGoalMock).toHaveBeenCalledWith({
+      sessionId: 'fast-session-default',
       userId: 'launch-owner-1',
-      objective: 'ship the release',
-      source: 'telegram',
-      clientMessageId: '456',
+      senderDisplayName: 'Ada Lovelace',
+      objective: 'ship_the *release*',
+      currentMessageId: '456',
     });
     expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({ text: 'Goal Mode enabled.' }),
+      expect.objectContaining({
+        text: 'Pursuing goal: ship_the *release*',
+        textFormat: 'plain',
+      }),
     );
     expect(queueCommunicationMessageOnceMock).not.toHaveBeenCalled();
     expect(continueFastReplyMock).not.toHaveBeenCalled();
+  });
+
+  it('starts a Fast Session goal without requiring a child task', async () => {
+    mockTelegramLinkedSender();
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/goal finish the secure flow',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      goalStarted: true,
+      sessionId: 'fast-session-default',
+    });
+    expect(startFastSessionGoalMock).toHaveBeenCalledWith({
+      sessionId: 'fast-session-default',
+      userId: 'launch-owner-1',
+      senderDisplayName: 'Ada Lovelace',
+      objective: 'finish the secure flow',
+      currentMessageId: '456',
+    });
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Pursuing goal: finish the secure flow',
+        textFormat: 'plain',
+      }),
+    );
+    expect(queueFastReplyMock).not.toHaveBeenCalled();
+  });
+
+  it('starts a group /goal on the Fast Session bound to the replied-to message', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    findFastReplySessionMock.mockResolvedValueOnce({
+      id: '22222222-2222-4222-8222-222222222222',
+      userId: 'mapped-user-1',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '-1007',
+        conversationId: '400:user:mapped-user-1',
+        replyTarget: { channelId: '-1007' },
+      },
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          chat: { id: -1007, type: 'group', title: 'Engineering' },
+          text: '/goal@roomote_bot ship the release',
+          entities: [{ type: 'bot_command', offset: 0, length: 17 }],
+          reply_to_message: {
+            message_id: 400,
+            date: 1,
+            text: 'Fast answer',
+            chat: { id: -1007, type: 'group' },
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      goalStarted: true,
+      sessionId: '22222222-2222-4222-8222-222222222222',
+    });
+    expect(findFastReplySessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'telegram',
+        replyToMessageId: '400',
+        userId: 'mapped-user-1',
+      }),
+    );
+    expect(getFastSessionMock).not.toHaveBeenCalled();
+    expect(startFastSessionGoalMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: '22222222-2222-4222-8222-222222222222',
+        objective: 'ship the release',
+      }),
+    );
   });
 
   it('shows /goal usage when the objective is missing', async () => {
@@ -1612,13 +1706,13 @@ describe('Telegram webhook handler', () => {
       goalStarted: false,
       reason: 'missing_objective',
     });
-    expect(startTaskGoalMock).not.toHaveBeenCalled();
+    expect(startFastSessionGoalMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({ text: expect.stringContaining('/goal ship') }),
     );
   });
 
-  it('requires /goal to target an active task', async () => {
+  it('does not require /goal to target an active child task', async () => {
     mockTelegramLinkedSender();
 
     const response = await postTelegramUpdate(
@@ -1631,12 +1725,14 @@ describe('Telegram webhook handler', () => {
     );
 
     await expect(response.json()).resolves.toMatchObject({
-      goalStarted: false,
-      reason: 'no_active_task',
+      goalStarted: true,
+      sessionId: 'fast-session-default',
     });
-    expect(startTaskGoalMock).not.toHaveBeenCalled();
+    expect(startFastSessionGoalMock).toHaveBeenCalledWith(
+      expect.objectContaining({ objective: 'ship the release' }),
+    );
     expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({ text: expect.stringContaining('active') }),
+      expect.objectContaining({ text: 'Pursuing goal: ship the release' }),
     );
   });
 

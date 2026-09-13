@@ -31,7 +31,6 @@ import type {
   AcpTurnCompletedEvent,
   ProviderRetryNotice,
   TaskEvent,
-  TaskGoal,
 } from '@roomote/types';
 
 import type {
@@ -48,7 +47,6 @@ import type {
   StartNewTaskCommand,
   TaskCommand,
 } from '../../harness';
-import { buildTaskGoalContext } from '../../../../run-task/task-goal';
 import {
   hasTerminalChatReplyDeliveryFailure,
   MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL,
@@ -212,7 +210,6 @@ interface PromptInput {
   userName?: string;
   userImageUrl?: string;
   clientMessageId?: string;
-  goalContext?: TaskGoal;
 }
 
 interface FinalizedAssistantTurn {
@@ -2320,9 +2317,6 @@ export class OpenCodeServerHarness
             ...(command.data.userImageUrl
               ? { userImageUrl: command.data.userImageUrl }
               : {}),
-            ...(command.data.goalContext
-              ? { goalContext: command.data.goalContext }
-              : {}),
           });
           return;
         } catch (error) {
@@ -2345,7 +2339,6 @@ export class OpenCodeServerHarness
         userName: command.data.userName,
         userImageUrl: command.data.userImageUrl,
         clientMessageId: command.data.clientMessageId,
-        goalContext: command.data.goalContext,
       });
 
       if (command.data.autoSteerWhenQueued) {
@@ -3842,9 +3835,7 @@ export class OpenCodeServerHarness
     const visiblePromptText = addVisualDelegationReminder
       ? withVisualDelegationReminder(prompt.text, visualImagePaths)
       : prompt.text;
-    const promptText = prompt.goalContext
-      ? `${visiblePromptText}\n\n${buildTaskGoalContext(prompt.goalContext)}`
-      : visiblePromptText;
+    const promptText = visiblePromptText;
 
     this.inFlight = true;
     this.finalizedAssistantTurn = null;
@@ -5570,7 +5561,6 @@ export class OpenCodeServerHarness
       userName: next.userName,
       userImageUrl: next.userImageUrl,
       clientMessageId: next.clientMessageId,
-      goalContext: next.goalContext,
     });
   }
 

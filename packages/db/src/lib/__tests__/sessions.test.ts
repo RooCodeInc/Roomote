@@ -58,7 +58,6 @@ describe('deriveSessionStatus', () => {
   ) => ({
     state: 'completed' as const,
     taskPhase: null,
-    goalStatus: null,
     ...overrides,
   });
 
@@ -75,13 +74,6 @@ describe('deriveSessionStatus', () => {
     ['a responding conversation', true, [task()], 'active'],
     ['an active task', false, [task({ state: 'active' })], 'active'],
     ['a failed task', false, [task({ state: 'failed' })], 'blocked'],
-    ['a blocked goal', false, [task({ goalStatus: 'blocked' })], 'blocked'],
-    [
-      'a budget-limited goal',
-      false,
-      [task({ goalStatus: 'budget_limited' })],
-      'blocked',
-    ],
     ['only settled work', false, [task()], 'ready'],
     ['no work', false, [], 'ready'],
   ] as const)('derives %s as %s', (_label, responding, taskRows, expected) => {
@@ -92,6 +84,19 @@ describe('deriveSessionStatus', () => {
       }),
     ).toBe(expected);
   });
+
+  it.each(['blocked', 'budget_limited'] as const)(
+    'derives a %s Session goal as blocked',
+    (goalStatus) => {
+      expect(
+        deriveSessionStatus({
+          conversationResponding: false,
+          goalStatus,
+          tasks: [task()],
+        }),
+      ).toBe('blocked');
+    },
+  );
 
   it('prioritizes active work over blocked settled work', () => {
     expect(

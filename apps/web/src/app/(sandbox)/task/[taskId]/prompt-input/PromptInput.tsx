@@ -497,10 +497,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       async (message: PromptInputMessage) => {
         const text = message.text.trim();
         const hasAttachments = (message.files?.length ?? 0) > 0;
-        const goalCommandMatch = /^\/goal(?:\s+([\s\S]*))?$/i.exec(text);
-        const goalObjective = goalCommandMatch
-          ? (goalCommandMatch[1] ?? '').trim()
-          : null;
         // Keyed off the live pending request rather than the task phase:
         // the phase can report running while the turn is still blocked on
         // the question, and a message here must answer it, not steer.
@@ -517,16 +513,8 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           return;
         }
 
-        if (
-          !shouldAnswerPendingFreeText &&
-          goalObjective !== null &&
-          (!goalObjective || hasAttachments)
-        ) {
-          toast.error(
-            hasAttachments
-              ? 'Goal Mode does not support attachments.'
-              : 'Describe the goal after /goal.',
-          );
+        if (!shouldAnswerPendingFreeText && /^\/goal(?:\s|$)/i.test(text)) {
+          toast.error('Start Goal Mode from the Session conversation.');
           return;
         }
 
@@ -552,7 +540,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           }
 
           const preparedPrompt = await preparePromptAttachments({
-            text: goalObjective ?? text,
+            text,
             attachments: message.files,
           });
 
@@ -569,32 +557,15 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           });
           optimisticClientMessageId = clientMessageId;
 
-          if (goalObjective !== null) {
-            const started = await trpcClient.taskRuns.startGoal.mutate({
-              taskId: taskRun.taskId,
-              goal: { objective: goalObjective },
-              clientMessageId,
-              userImageUrl,
-            });
-
-            if (!started.success) {
-              throw new Error(started.error);
-            }
-          } else {
-            await trpcClient.sandboxSession.sendPrompt.mutate({
-              taskId: taskRun.taskId,
-              prompt: preparedPrompt.text,
-              images: preparedPrompt.images,
-              source: 'web',
-              clientMessageId,
-              userImageUrl,
-              autoSteerWhenQueued: true,
-            });
-          }
-
-          if (goalObjective !== null) {
-            toast.success('Goal Mode enabled');
-          }
+          await trpcClient.sandboxSession.sendPrompt.mutate({
+            taskId: taskRun.taskId,
+            prompt: preparedPrompt.text,
+            images: preparedPrompt.images,
+            source: 'web',
+            clientMessageId,
+            userImageUrl,
+            autoSteerWhenQueued: true,
+          });
 
           handleMessageSent();
         } catch (err) {
