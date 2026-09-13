@@ -190,6 +190,7 @@ vi.mock('./SideNavItem', () => ({
     expanded,
     disabled,
     description,
+    'aria-label': ariaLabel,
   }: {
     href?: string;
     onClick?: () => void;
@@ -198,9 +199,12 @@ vi.mock('./SideNavItem', () => ({
     expanded?: boolean;
     disabled?: boolean;
     description?: ReactNode;
+    'aria-label'?: string;
   }) =>
     href ? (
-      <div
+      <a
+        href={href}
+        aria-label={ariaLabel}
         data-testid={`nav-${href}`}
         data-expanded={String(expanded)}
         data-disabled={String(disabled ?? false)}
@@ -210,6 +214,7 @@ vi.mock('./SideNavItem', () => ({
     ) : (
       <button
         type="button"
+        aria-label={ariaLabel}
         data-testid={`nav-action-${typeof tooltip === 'string' ? tooltip : label}`}
         data-expanded={String(expanded)}
         onClick={onClick}
@@ -431,6 +436,11 @@ describe('SideNav recent sessions', () => {
   it('preserves collapsed and expanded sidebar controls', () => {
     const view = render(<SideNav />);
 
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
+    expect(screen.getByRole('button', { name: 'Search' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));
     expect(setSideNavExpandedMock).toHaveBeenCalledWith(true);
     fireEvent.click(screen.getByTestId('nav-action-Expand sidebar'));
@@ -438,6 +448,11 @@ describe('SideNav recent sessions', () => {
 
     state.isSideNavExpanded = true;
     view.rerender(<SideNav />);
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
+    expect(screen.getByRole('button', { name: 'Search' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
     expect(setSideNavExpandedMock).toHaveBeenCalledWith(false);
     expect(

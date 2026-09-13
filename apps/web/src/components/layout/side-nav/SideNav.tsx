@@ -270,6 +270,7 @@ export const SideNav = ({
         <SideNavItem
           icon={Settings}
           href="/settings"
+          aria-label="Settings"
           tooltip="Settings"
           description="Manage your settings"
           expanded={isSideNavExpanded}
@@ -283,6 +284,7 @@ export const SideNav = ({
           description="Search and navigate"
           expanded={isSideNavExpanded}
           active={false}
+          aria-label="Search"
           onClick={() => openCommandPalette(true)}
         />
 
