@@ -28,6 +28,7 @@ assert.equal(Env.APP_ENV, 'development');
 assert.equal(Env.S3_ENDPOINT, 'http://localhost:19000');
 assert.equal(Env.S3_PRESIGN_ENDPOINT ?? Env.S3_ENDPOINT, Env.S3_ENDPOINT);
 const release = 'RELEASE.2025-10-15T17-29-55Z';
+const previousRelease = 'RELEASE.2025-09-07T16-13-09Z';
 const sourceVersion = 'v0.0.0-20251015172955-9e49d5e7a648';
 const sourceSum = 'h1:6TdolSCLSs2nwm8i0PpWDqf9iX2Ty9WQK8wmr7dCnUM=';
 const sourceGoModSum = 'h1:yCWDkwWO9IWpGsT4mreDDN/B/QVmK2zC666uInRAcqE=';
@@ -46,6 +47,7 @@ assert.ok(build, 'MinIO sandbox bootstrap supports Linux x64 and arm64');
 const directory = join(homedir(), '.cache', 'roomote-minio');
 await mkdir(directory, { recursive: true, mode: 0o700 });
 const binary = join(directory, `minio.${release}`);
+const previousBinary = join(directory, `minio.${previousRelease}`);
 const checksum = async (path: string) =>
   createHash('sha256')
     .update(await readFile(path))
@@ -138,7 +140,9 @@ const processes = JSON.parse(pm2(['jlist'])) as {
   pm2_env: { pm_exec_path: string; status: string };
 }[];
 const existing = processes.find((entry) => entry.name === processName);
-if (existing) {
+const upgrading = existing?.pm2_env.pm_exec_path === previousBinary;
+if (upgrading) pm2(['delete', processName]);
+if (existing && !upgrading) {
   assert.equal(
     existing.pm2_env.pm_exec_path,
     binary,
@@ -240,7 +244,7 @@ try {
   );
 } catch (error) {
   // Do not leave a newly created restart loop behind when setup fails.
-  if (!existing) pm2(['delete', processName]);
+  if (!existing || upgrading) pm2(['delete', processName]);
   throw error;
 } finally {
   s3.destroy();
