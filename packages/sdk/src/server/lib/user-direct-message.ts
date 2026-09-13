@@ -14,7 +14,6 @@ import {
   deliverManagedThreadReplyFooter,
   getDiscordFooterlessFinalChunk,
   postTextThreadReplyWithFooter,
-  setThreadReplyFooterRecord,
 } from '@roomote/communication';
 import {
   postSlackRootMessageWithFooterText,
@@ -433,23 +432,6 @@ async function sendTeamsUserDirectMessage(
             text,
             textFormat: 'markdown',
           });
-    if (presentation && !replyAnchor) {
-      await setThreadReplyFooterRecord(
-        'teams',
-        destination!.channelId,
-        posted.messageId,
-        {
-          messageId: posted.messageId,
-          textWithoutFooter: presented.bodyText ?? '',
-          refresh: {
-            footerText: presented.footerText!,
-            channelId: destination!.channelId,
-            serviceUrl: conversation.serviceUrl,
-          },
-        },
-      ).catch(() => undefined);
-    }
-
     return {
       provider: 'teams',
       workspaceId: replyAnchor?.workspaceId ?? mapping!.teamsTenantId,

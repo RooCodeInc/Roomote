@@ -145,6 +145,70 @@ describe('text provider current carriers', () => {
     ).toBe('2');
   });
 
+  it('Teams refresh cannot restore the initial footer after a later root reply relocates it', async () => {
+    const postMessage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        provider: 'teams',
+        channelId: 'C',
+        messageId: 'first',
+      })
+      .mockResolvedValueOnce({
+        provider: 'teams',
+        channelId: 'C',
+        messageId: 'second',
+      });
+    const updateMessage = vi.fn().mockResolvedValue(undefined);
+    const provider = {
+      provider: 'teams',
+      postMessage,
+      updateMessage,
+    } as unknown as TeamsCommunicationProvider;
+
+    await postTextThreadReplyWithFooter({
+      provider,
+      input: { channelId: 'C', text: 'Initial notification' },
+      footerText: 'standard footer',
+    });
+    await postTextThreadReplyWithFooter({
+      provider,
+      input: {
+        channelId: 'C',
+        replyToMessageId: 'first',
+        text: 'Later reply',
+      },
+      footerText: 'standard footer',
+    });
+    expect(updateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'first',
+        text: 'Initial notification',
+      }),
+    );
+
+    mocks.resolve.mockResolvedValue('refreshed footer');
+    await refreshManagedThreadReplyFooter({
+      provider: 'teams',
+      channelId: 'C',
+      threadId: 'root',
+      edit: (record, text) =>
+        editTextThreadFooterMessage(provider, record, text),
+    });
+
+    expect(updateMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messageId: 'second',
+        text: 'Later reply\n\nrefreshed footer',
+      }),
+    );
+    expect(
+      updateMessage.mock.calls.filter(([input]) => input.messageId === 'first'),
+    ).toHaveLength(1);
+    await expect(
+      getThreadReplyFooterRecord('teams', 'C', 'first'),
+    ).resolves.toBeNull();
+  });
+
   it('Telegram records the final text chunk and preserves its buttons on refresh', async () => {
     const postMessage = vi.fn().mockResolvedValue({
       provider: 'telegram',

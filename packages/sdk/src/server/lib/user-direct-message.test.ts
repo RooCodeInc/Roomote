@@ -22,7 +22,6 @@ const {
   mockBuildFooterText,
   mockPostTextWithFooter,
   mockDeliverManagedFooter,
-  mockSetFooterRecord,
 } = vi.hoisted(() => ({
   mockOpenConversation: vi.fn(),
   mockCreateDiscordDirectMessage: vi.fn(),
@@ -45,7 +44,6 @@ const {
   mockBuildFooterText: vi.fn(),
   mockPostTextWithFooter: vi.fn(),
   mockDeliverManagedFooter: vi.fn(),
-  mockSetFooterRecord: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -89,7 +87,6 @@ vi.mock('@roomote/communication', () => ({
   buildFastSessionReplyFooterText: mockBuildFooterText,
   postTextThreadReplyWithFooter: mockPostTextWithFooter,
   deliverManagedThreadReplyFooter: mockDeliverManagedFooter,
-  setThreadReplyFooterRecord: mockSetFooterRecord,
   getDiscordFooterlessFinalChunk: ({
     textWithFooter,
   }: {
@@ -355,7 +352,6 @@ describe('sendUserDirectMessageBestEffort', () => {
       channelId: 'teams-dm-1',
       messageId: 'teams-message-1',
     });
-    mockSetFooterRecord.mockResolvedValue(true);
 
     mockTeamsUserMappingsFindFirst.mockResolvedValue({
       teamsUserId: 'teams-user-1',
@@ -608,12 +604,7 @@ describe('sendUserDirectMessageBestEffort', () => {
         footerText: expect.stringContaining('Reply anytime'),
       }),
     );
-    expect(mockSetFooterRecord).toHaveBeenCalledWith(
-      'teams',
-      'teams-dm-1',
-      'teams-message-1',
-      expect.objectContaining({ messageId: 'teams-message-1' }),
-    );
+    expect(mockPostTextWithFooter).toHaveBeenCalledOnce();
   });
 
   it('continues AgentMail notifications through the stored conversation', async () => {
