@@ -11,18 +11,25 @@ import {
   isNull,
   lt,
   or,
+  sql,
   sessionAttentionNotificationMessages,
   sessionAttentionNotifications,
   sessions,
   taskRuns,
+  taskMessages,
 } from '@roomote/db/server';
 import { isSessionUserPresent } from '@roomote/redis';
-import { getFastAgentParentFromPayload } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  extractAcpMessageText,
+  getFastAgentParentFromPayload,
+} from '@roomote/types';
 
 import {
   sendUserDirectMessageBestEffortWithReceipts,
   hasAnyUserDirectMessageIdentity,
   type UserDirectMessageProvider,
+  type UserDirectMessageReceipt,
 } from './user-direct-message';
 import {
   enqueueSessionAttentionNotification,
@@ -44,11 +51,11 @@ export type SessionAttentionNotificationResult =
 type NotificationSubject = {
   sessionId: string;
   userId: string;
-  title: string;
   eventKey: string;
   kind: SessionAttentionKind;
   taskId?: string;
   runId?: number;
+  message?: string;
 };
 
 function buildIdempotencyKey(sessionId: string, eventKey: string): string {
@@ -141,22 +148,24 @@ async function deliverNotification(
     return 'skipped';
   }
 
-  const statusText =
-    subject.kind === 'input_needed'
-      ? 'needs your input.'
-      : 'has a new response.';
   const sessionUrl = new URL(`/sessions/${subject.sessionId}`, Env.R_APP_URL);
   sessionUrl.searchParams.set('utm_source', 'notification');
   sessionUrl.searchParams.set('utm_medium', 'direct_message');
   sessionUrl.searchParams.set('utm_campaign', 'session-attention');
 
-  const notificationText = `**${subject.title}** ${statusText}\n\nReply to this message to continue, or [open the Session](${sessionUrl.toString()}).`;
+  const responseText = subject.message?.trim();
+  const notificationText = `${responseText || (subject.kind === 'input_needed' ? 'Your input is needed.' : 'A new response is ready.')}\n\nReply to this message to continue, or [open the Session](${sessionUrl.toString()}).`;
+  const replyAnchor = await findLatestSessionAttentionReceipt({
+    sessionId: subject.sessionId,
+    userId: subject.userId,
+  });
   const { receipts } = await sendUserDirectMessageBestEffortWithReceipts({
     userId: subject.userId,
     text: notificationText,
     teamsText: `${notificationText}\n\nIf Teams does not attach the reply, start your message with \`continue:\`.`,
     logContext: 'sessionAttentionNotification',
     idempotencyKey: buildIdempotencyKey(subject.sessionId, subject.eventKey),
+    ...(replyAnchor ? { replyAnchor } : {}),
   });
   if (receipts.length === 0) {
     await markOutcome(claim.id, claim.leaseToken, 'failed');
@@ -187,6 +196,7 @@ export async function notifyDirectWebTaskAttention(
     runId: number;
     eventId: string;
     kind: SessionAttentionKind;
+    message?: string;
   },
   enqueueRetry = true,
 ): Promise<SessionAttentionNotificationResult> {
@@ -199,7 +209,6 @@ export async function notifyDirectWebTaskAttention(
           id: true,
           initiatorUserId: true,
           surface: true,
-          title: true,
         },
       },
     },
@@ -228,11 +237,13 @@ export async function notifyDirectWebTaskAttention(
   const result = await deliverNotification({
     sessionId: session.id,
     userId: run.task.initiatorUserId,
-    title: run.task.title,
     eventKey: `task:${run.id}:${input.kind}:${input.eventId}`,
     kind: input.kind,
     taskId: run.taskId,
     runId: run.id,
+    message:
+      input.message ??
+      (await findTaskAttentionMessage(run.id, input.kind, input.eventId)),
   });
   if (result === 'failed' && !recoveryScheduled) {
     await db
@@ -255,6 +266,7 @@ export async function notifyFastWebSessionAttention(
     fastConversationId: string;
     eventId: string;
     kind: SessionAttentionKind;
+    message?: string;
   },
   enqueueRetry = true,
 ): Promise<SessionAttentionNotificationResult> {
@@ -264,7 +276,6 @@ export async function notifyFastWebSessionAttention(
       id: true,
       ownerUserId: true,
       sourceSurface: true,
-      title: true,
     },
   });
   if (!session?.ownerUserId || session.sourceSurface !== 'web') {
@@ -282,11 +293,80 @@ export async function notifyFastWebSessionAttention(
   const result = await deliverNotification({
     sessionId: session.id,
     userId: session.ownerUserId,
-    title: session.title,
     eventKey: `fast:${input.kind}:${input.eventId}`,
     kind: input.kind,
+    message: input.message,
   });
   return result;
+}
+
+export async function findTaskAttentionMessage(
+  runId: number,
+  kind: SessionAttentionKind,
+  eventId: string,
+): Promise<string | undefined> {
+  const row = await db.query.taskMessages.findFirst({
+    where: and(
+      eq(taskMessages.runId, runId),
+      eq(
+        taskMessages.eventType,
+        kind === 'input_needed'
+          ? ACP_ENVELOPE_EVENT_TYPES.RequestUserInput
+          : ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      ),
+      ...(kind === 'input_needed'
+        ? [sql`${taskMessages.payload} ->> 'requestId' = ${eventId}`]
+        : []),
+    ),
+    columns: { contentBlocks: true, payload: true },
+    orderBy: [desc(taskMessages.ts), desc(taskMessages.createdAt)],
+  });
+  return row
+    ? extractAcpMessageText(
+        row.contentBlocks,
+        row.payload as Record<string, unknown>,
+      )
+    : undefined;
+}
+
+export async function findLatestSessionAttentionReceipt(input: {
+  sessionId: string;
+  userId: string;
+}): Promise<UserDirectMessageReceipt | null> {
+  const [receipt] = await db
+    .select({
+      provider: sessionAttentionNotificationMessages.provider,
+      workspaceId: sessionAttentionNotificationMessages.workspaceId,
+      channelId: sessionAttentionNotificationMessages.channelId,
+      messageId: sessionAttentionNotificationMessages.messageId,
+      threadId: sessionAttentionNotificationMessages.threadId,
+    })
+    .from(sessionAttentionNotificationMessages)
+    .innerJoin(
+      sessionAttentionNotifications,
+      eq(
+        sessionAttentionNotifications.id,
+        sessionAttentionNotificationMessages.notificationId,
+      ),
+    )
+    .where(
+      and(
+        eq(sessionAttentionNotifications.sessionId, input.sessionId),
+        eq(sessionAttentionNotifications.userId, input.userId),
+        eq(sessionAttentionNotifications.outcome, 'delivered'),
+      ),
+    )
+    .orderBy(desc(sessionAttentionNotificationMessages.createdAt))
+    .limit(1);
+  return receipt
+    ? {
+        provider: receipt.provider,
+        workspaceId: receipt.workspaceId,
+        channelId: receipt.channelId,
+        messageId: receipt.messageId,
+        ...(receipt.threadId ? { threadId: receipt.threadId } : {}),
+      }
+    : null;
 }
 
 export async function processSessionAttentionNotificationJob(

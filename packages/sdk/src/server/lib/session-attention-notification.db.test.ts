@@ -7,6 +7,7 @@ import {
   sessionFactory,
   sessionTasks,
   taskFactory,
+  taskMessages,
   userFactory,
 } from '@roomote/db/server';
 
@@ -117,6 +118,37 @@ describe('session attention notifications', () => {
     ).resolves.toBe('delivered');
 
     expect(mocks.send).toHaveBeenCalledTimes(2);
+  });
+
+  it('delivers the persisted task response instead of a title wrapper', async () => {
+    const { run, task } = await createDirectWebRun();
+    await db.insert(taskMessages).values({
+      runId: run.id,
+      taskId: task.id,
+      ts: Date.now(),
+      eventType: 'roomote_runtime.assistant_message',
+      role: 'assistant',
+      protocol: 'roomote_runtime',
+      contentBlocks: [
+        { type: 'text', text: 'The build completed successfully.' },
+      ],
+      payload: {},
+    });
+
+    await notifyDirectWebTaskAttention({
+      runId: run.id,
+      kind: 'result_ready',
+      eventId: 'completion-with-content',
+    });
+
+    expect(mocks.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('The build completed successfully.'),
+      }),
+    );
+    expect(mocks.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining(task.title) }),
+    );
   });
 
   it('does not claim or retry when the user has no personal destination', async () => {
@@ -250,6 +282,7 @@ describe('session attention notifications', () => {
         fastConversationId: conversation!.id,
         kind: 'result_ready',
         eventId: 'turn-1',
+        message: 'The current time is 4:15 PM.',
       }),
     ).resolves.toBe('delivered');
     await expect(
@@ -259,6 +292,34 @@ describe('session attention notifications', () => {
         eventId: 'turn-1',
       }),
     ).resolves.toBe('already_claimed');
+
+    expect(mocks.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('The current time is 4:15 PM.'),
+      }),
+    );
+    expect(mocks.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining(session.title) }),
+    );
+
+    await expect(
+      notifyFastWebSessionAttention({
+        fastConversationId: conversation!.id,
+        kind: 'result_ready',
+        eventId: 'turn-2',
+        message: 'A later response.',
+      }),
+    ).resolves.toBe('delivered');
+    expect(mocks.send).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        replyAnchor: expect.objectContaining({
+          provider: 'slack',
+          workspaceId: 'T1',
+          channelId: 'D1',
+          messageId,
+        }),
+      }),
+    );
 
     await expect(
       findSessionAttentionNotificationReply({

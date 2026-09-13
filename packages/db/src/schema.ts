@@ -3668,9 +3668,9 @@ export const fastAgentProviderMessages = pgTable(
 /**
  * session_attention_notifications
  *
- * Durable, per-attention-event delivery claims. A single user-facing event may
- * fan out to several linked chat providers, while this row owns deduplication
- * and presence suppression across retries.
+ * Durable, per-attention-event delivery claims. A single user-facing event is
+ * delivered through the first successful personal provider, while this row
+ * owns deduplication and presence suppression across retries.
  */
 export const sessionAttentionNotifications = pgTable(
   'session_attention_notifications',
