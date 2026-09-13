@@ -189,6 +189,82 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     expect(response.status).toBe(200);
   });
 
+  it('exposes Better Stack query helpers while rejecting connection mutations', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({
+      id: 'conn-betterstack',
+      userId: null,
+    });
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        id: number;
+        method: string;
+      };
+      return new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: request.id,
+          result:
+            request.method === 'tools/list'
+              ? {
+                  tools: [
+                    { name: 'query_help', inputSchema: { type: 'object' } },
+                    {
+                      name: 'errors_query_help',
+                      inputSchema: { type: 'object' },
+                    },
+                    {
+                      name: 'metrics_query_help',
+                      inputSchema: { type: 'object' },
+                    },
+                    {
+                      name: 'query_instructions',
+                      inputSchema: { type: 'object' },
+                    },
+                    {
+                      name: 'create_cloud_connection',
+                      inputSchema: { type: 'object' },
+                    },
+                  ],
+                }
+              : { content: [{ type: 'text', text: 'query guidance' }] },
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createApp('betterstack', createRunToken());
+
+    const listResponse = await postMcp(app, createToolsListRequest(1));
+    expect(listResponse.status).toBe(200);
+    const listBody = (await listResponse.json()) as {
+      result: { tools: Array<{ name: string }> };
+    };
+    expect(listBody.result.tools.map(({ name }) => name)).toEqual([
+      'query_help',
+      'errors_query_help',
+      'metrics_query_help',
+      'query_instructions',
+    ]);
+
+    const helperResponse = await postMcp(
+      app,
+      createToolCallRequest(2, 'query_help'),
+    );
+    expect(helperResponse.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const mutationResponse = await postMcp(
+      app,
+      createToolCallRequest(3, 'create_cloud_connection'),
+    );
+    expect(mutationResponse.status).toBe(403);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects a user-scoped integration on a run with no human actor', async () => {
     mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
 
