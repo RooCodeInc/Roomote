@@ -17,10 +17,12 @@ function signature(args: MessageArgs): string {
 
 export class FastAgentTaskMessageGuard {
   private readonly unresolved = new Set<string>();
+  private readonly pendingResponses = new Set<string>();
   private readonly receipts = new Map<string, Map<string, Result>>();
 
   clear(): void {
     this.unresolved.clear();
+    this.pendingResponses.clear();
     this.receipts.clear();
   }
 
@@ -69,6 +71,7 @@ export class FastAgentTaskMessageGuard {
       ) {
         if (result.delivery === 'accepted' && result.responsePending === true) {
           acceptedTaskInstructionPending = true;
+          this.pendingResponses.add(taskId);
         }
         this.remember(taskId, signature(args as MessageArgs), {
           ...result,
@@ -103,6 +106,16 @@ export class FastAgentTaskMessageGuard {
     const key = signature(args);
     const receipt = this.receipts.get(taskId)?.get(key);
     if (receipt) return receipt;
+    if (this.pendingResponses.has(taskId)) {
+      return {
+        success: false,
+        taskId,
+        delivery: 'accepted',
+        responsePending: true,
+        error:
+          'The task already accepted an instruction and has not responded yet. Do not send another message; wait for its response.',
+      };
+    }
     this.unresolved.add(taskId);
     let result: Result;
     try {
@@ -118,6 +131,9 @@ export class FastAgentTaskMessageGuard {
       this.unresolved.delete(taskId);
     } else if (result.success === true) {
       this.unresolved.delete(taskId);
+      if (result.delivery === 'accepted' && result.responsePending === true) {
+        this.pendingResponses.add(taskId);
+      }
       this.remember(taskId, key, result);
     } else {
       result = { ...result, delivery: 'unknown', guidance: unknownGuidance };

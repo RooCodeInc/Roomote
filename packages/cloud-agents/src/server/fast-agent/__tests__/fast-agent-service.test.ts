@@ -5236,7 +5236,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await answerFastAgentQuestion({
         ...baseParams,
         adapter,
-        durableAdmission,
+        durableAdmission: { eventId: 'durable-row-1' },
       });
 
       // Neither the launch nor the closeout ends replay: the turn stays
@@ -9736,31 +9736,27 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
       throw new Error('Failed after the task accepted the instruction.');
     });
-    const adapter = callbacks();
+    const requestDurableRetry = vi.fn().mockResolvedValue(undefined);
+    const adapter = callbacks({ requestDurableRetry });
 
     await expect(
-      answerFastAgentQuestion({ ...baseParams, adapter }),
-    ).resolves.toContain('it can keep running');
+      answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        durableAdmission: { eventId: 'durable-row-1' },
+      }),
+    ).rejects.toBeInstanceOf(FastAgentDurableRetryScheduledError);
     expect(mocks.sendTaskMessage).toHaveBeenCalledOnce();
-    expect(adapter.postReply).toHaveBeenLastCalledWith({
-      purpose: 'closeout',
-      message:
-        'I sent the instruction to the task, and it can keep running, but I hit an error while finishing this response. Check the task’s current status before sending the instruction again.',
-    });
-    expect(adapter.postReply).not.toHaveBeenLastCalledWith(
+    expect(mocks.scheduleDurableRetry).toHaveBeenCalledWith(
+      'durable-row-1',
       expect.objectContaining({
-        message: expect.stringContaining('try again'),
+        inferenceRetries: 1,
+        reason: expect.stringContaining('accepted task instruction'),
       }),
     );
-    expect(mocks.captureTurnSettled).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionId: 'conversation-1',
-        outcome: 'failure',
-        failureReason: 'unclassified',
-        failureStage: 'inference',
-        openCodeProviderRetryEventCount: 0,
-        roomoteInferenceRetryCount: 0,
-      }),
+    expect(requestDurableRetry).toHaveBeenCalledOnce();
+    expect(adapter.postReply).not.toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'closeout' }),
     );
   });
 
@@ -9803,7 +9799,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       answerFastAgentQuestion({
         ...baseParams,
         adapter,
+        durableAdmission: {
+          eventId: 'durable-row-1',
+          inferenceRetries: 1,
+        },
         resumedAfterInterruption: true,
+        resumedAfterInferenceRetry: true,
       }),
     ).resolves.toContain('it can keep running');
     expect(mocks.sendTaskMessage).not.toHaveBeenCalled();

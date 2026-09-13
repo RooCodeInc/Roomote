@@ -2012,6 +2012,44 @@ export async function answerFastAgentQuestion({
     );
     return retryAt;
   };
+  const deferAcceptedTaskContinuation = async (): Promise<Date | null> => {
+    if (
+      !durableAdmission ||
+      !adapter.requestDurableRetry ||
+      !canParkDurableRetry() ||
+      resumedAfterInferenceRetry
+    ) {
+      return null;
+    }
+    const retryAt = new Date(
+      Date.now() + FAST_AGENT_DURABLE_RETRY_PARK_BASE_DELAY_MS,
+    );
+    const inferenceRetries = durableRetriesConsumed + 1;
+    const scheduled = await scheduleFastAgentDurableTurnRetry(
+      durableAdmission.eventId,
+      {
+        retryAt,
+        inferenceRetries,
+        reason:
+          'Fast turn continuation scheduled after an accepted task instruction.',
+      },
+    ).catch((scheduleError) => {
+      console.warn(
+        `[Fast Agent] Failed to schedule continuation after an accepted task instruction: ${formatErrorForLog(scheduleError)}`,
+      );
+      return false;
+    });
+    if (!scheduled) return null;
+    durableTurnReplayable = false;
+    durableTurnDeferred = true;
+    durableRetriesConsumed = inferenceRetries;
+    await adapter.requestDurableRetry(retryAt).catch((wakeError) => {
+      console.warn(
+        `[Fast Agent] Failed to queue continuation after an accepted task instruction: ${formatErrorForLog(wakeError)}`,
+      );
+    });
+    return retryAt;
+  };
   let activeHumanSteerPoll = Promise.resolve();
   const injectedHumanFollowUpIds = new Set<string>();
   const deferredOversizedHumanFollowUpIds = new Set<string>();
@@ -5523,6 +5561,18 @@ export async function answerFastAgentQuestion({
       fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
     }
     if (platformEvent) throw error;
+
+    if (acceptedTaskInstructionPending) {
+      const retryAt = await deferAcceptedTaskContinuation();
+      if (retryAt) {
+        diagnostics.recordFailure(
+          'accepted_task_continuation',
+          terminalError,
+          turnFailureStage,
+        );
+        throw new FastAgentDurableRetryScheduledError(retryAt);
+      }
+    }
 
     const message = storageFull
       ? formatFastAgentStorageFullMessage(storageDiagnostic?.kind ?? 'unknown')

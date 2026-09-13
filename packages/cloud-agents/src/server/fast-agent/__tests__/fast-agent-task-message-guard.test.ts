@@ -133,6 +133,34 @@ describe('FastAgentTaskMessageGuard', () => {
     ).toEqual({ acceptedTaskInstructionPending: true });
   });
 
+  it('blocks reworded instructions while a restored task response is pending', async () => {
+    const guard = new FastAgentTaskMessageGuard();
+    guard.restore(
+      [
+        action({
+          result: JSON.stringify({
+            success: true,
+            taskId: 'task-1',
+            delivery: 'accepted',
+            responsePending: true,
+          }),
+        }),
+      ],
+      ['task-1'],
+    );
+    const deliver = vi.fn();
+
+    expect(
+      await guard.send('task-1', { message: 'Keep going' }, deliver),
+    ).toMatchObject({
+      success: false,
+      delivery: 'accepted',
+      responsePending: true,
+      error: expect.stringContaining('Do not send another message'),
+    });
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       status: 'failed',
