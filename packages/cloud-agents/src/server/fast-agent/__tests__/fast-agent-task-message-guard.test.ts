@@ -113,6 +113,26 @@ describe('FastAgentTaskMessageGuard', () => {
     expect(deliver).toHaveBeenCalledOnce();
   });
 
+  it('reports an accepted response-pending instruction when restoring receipts', () => {
+    const guard = new FastAgentTaskMessageGuard();
+
+    expect(
+      guard.restore(
+        [
+          action({
+            result: JSON.stringify({
+              success: true,
+              taskId: 'task-1',
+              delivery: 'accepted',
+              responsePending: true,
+            }),
+          }),
+        ],
+        ['task-1'],
+      ),
+    ).toEqual({ acceptedTaskInstructionPending: true });
+  });
+
   it.each([
     {
       status: 'failed',

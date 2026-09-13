@@ -9764,6 +9764,56 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('restores accepted task instructions before a resumed turn can fail', async () => {
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', taskRunStatus: 'running' },
+    ]);
+    mocks.loadTurnAttempt.mockResolvedValueOnce({
+      events: [
+        {
+          kind: 'action',
+          tool: 'send_task_message',
+          arguments: {
+            taskId: 'task-1',
+            message: 'Continue the existing work.',
+          },
+          status: 'completed',
+          result: JSON.stringify({
+            success: true,
+            taskId: 'task-1',
+            delivery: 'accepted',
+            responsePending: true,
+          }),
+        },
+      ],
+      next: {
+        assistantOrdinal: 1,
+        toolOrdinal: 1,
+        retryNoticeOrdinal: 0,
+        turnSeq: 3,
+      },
+      prompt: { ts: 100, turnSeq: 0 },
+    });
+    mocks.runSession.mockRejectedValueOnce(
+      new Error('Failed before the resumed instruction was replayed.'),
+    );
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        resumedAfterInterruption: true,
+      }),
+    ).resolves.toContain('it can keep running');
+    expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
+    expect(adapter.postReply).toHaveBeenLastCalledWith({
+      purpose: 'closeout',
+      message:
+        'I sent the instruction to the task, and it can keep running, but I hit an error while finishing this response. Check the task’s current status before sending the instruction again.',
+    });
+  });
+
   it('retries a gateway block from a clean compatibility bootstrap', async () => {
     vi.useFakeTimers();
     try {

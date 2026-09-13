@@ -24,7 +24,11 @@ export class FastAgentTaskMessageGuard {
     this.receipts.clear();
   }
 
-  restore(events: FastAgentTurnAttemptEvent[], currentTaskIds: string[]): void {
+  restore(
+    events: FastAgentTurnAttemptEvent[],
+    currentTaskIds: string[],
+  ): { acceptedTaskInstructionPending: boolean } {
+    let acceptedTaskInstructionPending = false;
     for (const event of events) {
       if (event.kind !== 'action' || event.tool !== 'send_task_message')
         continue;
@@ -63,6 +67,9 @@ export class FastAgentTaskMessageGuard {
         (args.includeAttachments === undefined ||
           typeof args.includeAttachments === 'boolean')
       ) {
+        if (result.delivery === 'accepted' && result.responsePending === true) {
+          acceptedTaskInstructionPending = true;
+        }
         this.remember(taskId, signature(args as MessageArgs), {
           ...result,
           taskId,
@@ -71,6 +78,7 @@ export class FastAgentTaskMessageGuard {
         this.unresolved.add(taskId);
       }
     }
+    return { acceptedTaskInstructionPending };
   }
 
   private remember(taskId: string, key: string, result: Result): void {

@@ -3239,9 +3239,12 @@ export async function answerFastAgentQuestion({
     const currentTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
     );
-    taskMessageGuard.restore(previousAttempt?.events ?? [], [
-      ...currentTasks.keys(),
-    ]);
+    const restoredTaskMessageState = taskMessageGuard.restore(
+      previousAttempt?.events ?? [],
+      [...currentTasks.keys()],
+    );
+    acceptedTaskInstructionPending =
+      restoredTaskMessageState.acceptedTaskInstructionPending;
     const currentMessageSender = platformEvent
       ? undefined
       : {
