@@ -2119,7 +2119,10 @@ async function createTelegramFastAgentParentTurn(
           });
         }
         if (action) {
-          const messageId = posted.lastTextMessageId ?? posted.messageId;
+          const messageId =
+            posted.messageIds?.at(-1) ??
+            posted.lastTextMessageId ??
+            posted.messageId;
           try {
             const { superseded } =
               await attachPendingPrReviewActionMessageWithRetirement(

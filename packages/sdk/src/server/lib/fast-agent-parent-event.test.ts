@@ -3635,7 +3635,7 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
-  it('delivers Telegram pull request feedback with persisted inline actions', async () => {
+  it('tracks Telegram PR-review actions on the final media carrier', async () => {
     const feedbackEvent = {
       type: 'pull_request_feedback' as const,
       feedbackId: 'feedback-telegram',
@@ -3675,6 +3675,13 @@ describe('deliverFastAgentParentEvent', () => {
           message: 'There is new PR feedback.',
         }),
     );
+    mocks.telegramPostMessage.mockResolvedValueOnce({
+      provider: 'telegram',
+      channelId: 'telegram-chat-1',
+      messageId: 'telegram-message-1',
+      lastTextMessageId: 'telegram-message-2',
+      messageIds: ['telegram-message-2', 'telegram-media-3'],
+    });
 
     await deliverFastAgentParentEvent({
       parent: telegramParent,
@@ -3722,7 +3729,7 @@ describe('deliverFastAgentParentEvent', () => {
     });
     expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenCalledWith(
       nonce,
-      'telegram-message-2',
+      'telegram-media-3',
     );
   });
 
@@ -3772,12 +3779,17 @@ describe('deliverFastAgentParentEvent', () => {
         channelId: 'telegram-chat-1',
         messageId: 'telegram-first',
         lastTextMessageId: 'telegram-first-actions',
+        messageIds: ['telegram-first-actions', 'telegram-first-media-actions'],
       })
       .mockResolvedValueOnce({
         provider: 'telegram',
         channelId: 'telegram-chat-1',
         messageId: 'telegram-second',
         lastTextMessageId: 'telegram-second-actions',
+        messageIds: [
+          'telegram-second-actions',
+          'telegram-second-media-actions',
+        ],
       });
     mocks.attachPendingPrReviewActionMessage
       .mockRejectedValueOnce(new Error('attachment failed'))
@@ -3806,12 +3818,12 @@ describe('deliverFastAgentParentEvent', () => {
         provider: 'telegram',
         channelId: 'telegram-chat-1',
         threadId: 'topic-7',
-        messageId: 'telegram-first-actions',
+        messageId: 'telegram-first-media-actions',
       },
     ]);
     expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenLastCalledWith(
       nonce,
-      'telegram-second-actions',
+      'telegram-second-media-actions',
     );
     expect(
       mocks.retirePrReviewActionMessagesBestEffort.mock.invocationCallOrder[0],
