@@ -954,6 +954,8 @@ describe('roomote MCP tool descriptions', () => {
       'Non-empty Markdown report for the parent Session.',
     );
     expect(reportTool.config.inputSchema.suggestions).toBeUndefined();
+    expect(reportTool.config.inputSchema.videoArtifactIds).toBeDefined();
+    expect(reportTool.config.inputSchema.fileArtifactIds).toBeDefined();
     expect(
       getRegisteredTool(registeredTools, 'manage_artifacts').config.description,
     ).toContain(

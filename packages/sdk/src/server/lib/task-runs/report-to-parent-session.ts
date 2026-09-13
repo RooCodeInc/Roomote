@@ -23,6 +23,8 @@ export async function reportToParentSession(input: {
   purpose: ParentSessionReportPurpose;
   message: string;
   imageArtifactIds?: string[];
+  videoArtifactIds?: string[];
+  fileArtifactIds?: string[];
   charts?: DataVisualizationInput[];
 }): Promise<{ relayed: boolean }> {
   const run = await db.query.taskRuns.findFirst({
@@ -56,6 +58,12 @@ export async function reportToParentSession(input: {
       message: input.message,
       ...(input.imageArtifactIds?.length
         ? { imageArtifactIds: [...new Set(input.imageArtifactIds)] }
+        : {}),
+      ...(input.videoArtifactIds?.length
+        ? { videoArtifactIds: [...new Set(input.videoArtifactIds)] }
+        : {}),
+      ...(input.fileArtifactIds?.length
+        ? { fileArtifactIds: [...new Set(input.fileArtifactIds)] }
         : {}),
       ...(input.charts?.length ? { charts: input.charts } : {}),
     },

@@ -22,6 +22,8 @@ export async function handleReportToParentSession(
     message: string;
     imagePaths?: string[];
     imageArtifactIds?: string[];
+    videoArtifactIds?: string[];
+    fileArtifactIds?: string[];
     charts?: DataVisualizationInput[];
   },
   artifactConfig: ArtifactConfig,
@@ -33,6 +35,8 @@ export async function handleReportToParentSession(
   const message = normalizeOptionalSlackText(input.message);
   const imagePaths = uniqueNonEmpty(input.imagePaths);
   const imageArtifactIds = uniqueNonEmpty(input.imageArtifactIds);
+  const videoArtifactIds = uniqueNonEmpty(input.videoArtifactIds);
+  const fileArtifactIds = uniqueNonEmpty(input.fileArtifactIds);
   const deliverySignature = createHash('sha256')
     .update(
       JSON.stringify({
@@ -42,6 +46,8 @@ export async function handleReportToParentSession(
         message,
         imagePaths,
         imageArtifactIds,
+        videoArtifactIds,
+        fileArtifactIds,
         charts: input.charts,
       }),
     )
@@ -85,6 +91,8 @@ export async function handleReportToParentSession(
       purpose: input.purpose,
       message: message ?? '',
       ...(allArtifactIds.length ? { imageArtifactIds: allArtifactIds } : {}),
+      ...(videoArtifactIds.length ? { videoArtifactIds } : {}),
+      ...(fileArtifactIds.length ? { fileArtifactIds } : {}),
       ...(input.charts?.length ? { charts: input.charts } : {}),
     });
 
@@ -97,6 +105,8 @@ export async function handleReportToParentSession(
       relayId: deliverySignature,
       ...(uploadedArtifactIds.length ? { uploadedArtifactIds } : {}),
       ...(imageArtifactIds.length ? { imageArtifactIds } : {}),
+      ...(videoArtifactIds.length ? { videoArtifactIds } : {}),
+      ...(fileArtifactIds.length ? { fileArtifactIds } : {}),
     });
   } catch (error) {
     if (uploadedArtifactIds.length) {

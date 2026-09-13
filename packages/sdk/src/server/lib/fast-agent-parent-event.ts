@@ -106,6 +106,7 @@ import {
   type FastAgentReplyImage,
 } from './fast-agent-session-images';
 import { deliverFastAgentSessionVideos } from './fast-agent-session-videos';
+import { prepareFastAgentSessionFiles } from './fast-agent-session-files';
 import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
@@ -217,6 +218,8 @@ export type FastAgentParentEvent =
       purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
       message: string;
       imageArtifactIds?: string[];
+      videoArtifactIds?: string[];
+      fileArtifactIds?: string[];
       charts?: DataVisualizationInput[];
     }
   | {
@@ -1945,6 +1948,8 @@ async function createTelegramFastAgentParentTurn(
       postReply: async ({
         message,
         imageArtifactIds = [],
+        videoArtifactIds = [],
+        fileArtifactIds = [],
         suggestions = [],
         kickoff,
       }) => {
@@ -1953,6 +1958,60 @@ async function createTelegramFastAgentParentTurn(
           event: params.event,
           sessionId: params.parent.sessionId,
         });
+        const selectedEvent =
+          params.event.type === 'human_follow_up'
+            ? undefined
+            : 'taskId' in params.event && 'runId' in params.event
+              ? {
+                  taskId: params.event.taskId,
+                  runId: params.event.runId,
+                  videoArtifactIds:
+                    params.event.type === 'artifact_published'
+                      ? [params.event.artifact.id]
+                      : params.event.type === 'child_message'
+                        ? (params.event.videoArtifactIds ?? [])
+                        : [],
+                  fileArtifactIds:
+                    params.event.type === 'artifact_published'
+                      ? [params.event.artifact.id]
+                      : params.event.type === 'child_message'
+                        ? (params.event.fileArtifactIds ?? [])
+                        : [],
+                }
+              : undefined;
+        const [videos, files] = await Promise.all([
+          prepareFastAgentSessionFiles({
+            artifactIds: videoArtifactIds,
+            sessionId: params.parent.sessionId,
+            kind: 'video',
+            ...(selectedEvent
+              ? {
+                  event: {
+                    artifactIds: selectedEvent.videoArtifactIds,
+                    taskId: selectedEvent.taskId,
+                    runId: selectedEvent.runId,
+                  },
+                }
+              : {}),
+          }),
+          prepareFastAgentSessionFiles({
+            artifactIds: fileArtifactIds,
+            sessionId: params.parent.sessionId,
+            kind: 'document',
+            ...(selectedEvent
+              ? {
+                  event: {
+                    artifactIds: selectedEvent.fileArtifactIds,
+                    taskId: selectedEvent.taskId,
+                    runId: selectedEvent.runId,
+                  },
+                }
+              : {}),
+          }),
+        ]);
+        message = [message, videos.fallbackText, files.fallbackText]
+          .filter(Boolean)
+          .join('\n\n');
         const reportMessage =
           isFastAutomationReportEvent(params.event) && !kickoff
             ? appendFastAutomationSuggestionInstruction(
@@ -2007,6 +2066,9 @@ async function createTelegramFastAgentParentTurn(
             text: displayedMessage,
             textFormat: 'markdown',
             images,
+            ...(videos.files.length || files.files.length
+              ? { files: [...videos.files, ...files.files] }
+              : {}),
             ...(action
               ? {
                   buttons: [
@@ -2046,13 +2108,21 @@ async function createTelegramFastAgentParentTurn(
           }),
         });
         activity.reassert();
-        await recordFastAgentConversationMessageBestEffort({
-          sessionId: session.id,
-          conversation,
-          messageId: posted.lastTextMessageId ?? posted.messageId,
-        });
+        for (const messageId of new Set([
+          posted.lastTextMessageId ?? posted.messageId,
+          ...(posted.messageIds ?? []),
+        ])) {
+          await recordFastAgentConversationMessageBestEffort({
+            sessionId: session.id,
+            conversation,
+            messageId,
+          });
+        }
         if (action) {
-          const messageId = posted.lastTextMessageId ?? posted.messageId;
+          const messageId =
+            posted.messageIds?.at(-1) ??
+            posted.lastTextMessageId ??
+            posted.messageId;
           try {
             const { superseded } =
               await attachPendingPrReviewActionMessageWithRetirement(

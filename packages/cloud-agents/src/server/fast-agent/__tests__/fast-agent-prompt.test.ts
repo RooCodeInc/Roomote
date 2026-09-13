@@ -525,7 +525,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'recover stable video artifact IDs and viewer links',
     );
-    expect(prompt).toContain('"videoArtifactIds" for native Slack delivery');
+    expect(prompt).toContain(
+      '"videoArtifactIds" for native Slack or Telegram delivery',
+    );
+    expect(prompt).toContain('"fileArtifactIds" for native document delivery');
     expect(prompt).toContain(
       'share only the artifact viewer link without an error or unavailability explanation',
     );

@@ -1141,12 +1141,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('preserves explicit video selections in delivery, canonical persistence, and reply deduplication', async () => {
+  it('preserves explicit video and file selections in delivery, persistence, and deduplication', async () => {
     const imageArtifactIds = ['11111111-1111-4111-8111-111111111111'];
     const videos = [
       '22222222-2222-4222-8222-222222222222',
       '33333333-3333-4333-8333-333333333333',
     ];
+    const fileArtifactId = '44444444-4444-4444-8444-444444444444';
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
         options.onModelResolved?.('openrouter/openai/gpt-5.4');
@@ -1157,6 +1158,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             purpose: 'progress',
             message: 'Here is the recording.',
             videoArtifactIds: [video],
+            fileArtifactIds: [fileArtifactId],
           });
         }
         await invokeTool(nativeToolNames.sendChatReply, {
@@ -1181,6 +1183,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         message: 'Here is the recording.',
         imageArtifactIds,
         videoArtifactIds: [video],
+        fileArtifactIds: [fileArtifactId],
       });
     }
     expect(adapter.postReply).toHaveBeenLastCalledWith({
@@ -1198,6 +1201,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         purpose: 'progress',
         imageArtifactIds,
         videoArtifactIds: [video],
+        fileArtifactIds: [fileArtifactId],
       })),
       { purpose: 'closeout', imageArtifactIds },
     ]);

@@ -34,6 +34,15 @@ export type CommunicationMessageButton = {
   url?: string;
 };
 
+export type CommunicationMessageFile = {
+  bytes: Uint8Array;
+  filename: string;
+  contentType: string;
+  kind: 'video' | 'document';
+  /** Safe user-facing text to send if native delivery fails. */
+  fallbackText: string;
+};
+
 export type CommunicationPostMessageInput = {
   channelId: string;
   threadId?: string;
@@ -48,6 +57,7 @@ export type CommunicationPostMessageInput = {
   footerHtmlText?: string;
   blocks?: unknown[];
   images?: Array<{ url: string; altText: string; contentType?: string }>;
+  files?: CommunicationMessageFile[];
   serviceUrl?: string;
   textFormat?: 'plain' | 'markdown' | 'xml';
   replyToMessageId?: string;
@@ -63,6 +73,8 @@ export type CommunicationPostMessageResult = {
   provider: CommunicationProvider;
   channelId: string;
   messageId: string;
+  /** All IDs when one logical post produces multiple provider messages. */
+  messageIds?: string[];
   /** The final text-bearing message when a provider splits one post. */
   lastTextMessageId?: string;
   threadId?: string;

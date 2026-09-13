@@ -29,18 +29,29 @@ export async function attachTelegramMediaToQueuedMessage(input: {
   botToken?: string;
 }): Promise<QueuedTelegramCommunicationMessage> {
   const audio = input.message.voice ?? input.message.audio;
+  const video = input.message.video ?? input.message.video_note;
   if (!input.botToken) {
-    if (!audio) return input.queuedMessage;
-    const filename = input.message.voice
-      ? 'voice-message.ogg'
-      : (input.message.audio?.file_name ?? 'audio-attachment');
+    if (!audio && !video) return input.queuedMessage;
+    const warnings = [];
+    if (audio) {
+      const filename = input.message.voice
+        ? 'voice-message.ogg'
+        : (input.message.audio?.file_name ?? 'audio-attachment');
+      warnings.push(
+        formatAudioAttachmentWarning(filename, 'could not be downloaded'),
+      );
+    }
+    if (video) {
+      const filename = input.message.video_note
+        ? 'video-note.mp4'
+        : (input.message.video?.file_name ?? 'video-attachment');
+      warnings.push(`Video attachment ${filename} could not be downloaded.`);
+    }
     return {
       ...input.queuedMessage,
       text: appendAttachmentTextsToPromptText({
         text: input.queuedMessage.text,
-        attachmentTexts: [
-          formatAudioAttachmentWarning(filename, 'could not be downloaded'),
-        ],
+        attachmentTexts: warnings,
       }),
     };
   }
@@ -134,6 +145,52 @@ export async function attachTelegramMediaToQueuedMessage(input: {
     console.warn(
       `[telegram] Failed to process inbound attachment: ${formatErrorForLog(error)}`,
     );
+  }
+
+  if (video) {
+    const filename = input.message.video_note
+      ? 'video-note.mp4'
+      : (input.message.video?.file_name ?? 'video-attachment');
+    const mimeType = input.message.video_note
+      ? 'video/mp4'
+      : input.message.video?.mime_type?.trim().toLowerCase();
+    if (!mimeType || !isVideoAgentSupportedMimeType(mimeType)) {
+      attachmentTexts.push(
+        `Video attachment ${filename} could not be described because ${mimeType ?? 'its media type'} is not supported.`,
+      );
+    } else if (
+      video.file_size &&
+      video.file_size > VIDEO_AGENT_MAX_VIDEO_SIZE_BYTES
+    ) {
+      attachmentTexts.push(
+        `Video attachment ${filename} could not be described because it exceeds the supported size limit.`,
+      );
+    } else {
+      try {
+        const downloaded = await provider.downloadFile(
+          video.file_id,
+          VIDEO_AGENT_MAX_VIDEO_SIZE_BYTES,
+        );
+        const description = await describeVideoAttachment({
+          videoBytes: Buffer.from(downloaded.bytes),
+          mimeType,
+          userId: input.queuedMessage.userId,
+          userTextContext: input.queuedMessage.text,
+        });
+        if (description) {
+          attachmentTexts.push(
+            `Video attachment description: ${filename}\n${description}`,
+          );
+        }
+      } catch (error) {
+        console.warn(
+          `[telegram] Failed to process inbound video attachment: ${formatErrorForLog(error)}`,
+        );
+        attachmentTexts.push(
+          `Video attachment ${filename} could not be downloaded.`,
+        );
+      }
+    }
   }
 
   if (audio) {

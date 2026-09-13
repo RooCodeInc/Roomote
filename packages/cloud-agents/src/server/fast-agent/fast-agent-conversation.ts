@@ -68,6 +68,7 @@ export type FastAgentReply = {
   message: string;
   imageArtifactIds?: string[];
   videoArtifactIds?: string[];
+  fileArtifactIds?: string[];
   charts?: DataVisualizationInput[];
   /** Launchable follow-ups attached to a Fast automation report. */
   suggestions?: FastAgentSuggestedTask[];

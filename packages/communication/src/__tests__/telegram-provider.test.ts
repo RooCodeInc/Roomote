@@ -848,7 +848,7 @@ describe('TelegramCommunicationProvider', () => {
     expect(result.lastTextMessageId).toBe('211');
   });
 
-  it('requires text or images for outbound Telegram messages', async () => {
+  it('requires text, images, or files for outbound Telegram messages', async () => {
     const provider = new TelegramCommunicationProvider({
       botToken: 'bot-token',
       fetch: vi.fn() as typeof fetch,
@@ -859,7 +859,7 @@ describe('TelegramCommunicationProvider', () => {
         channelId: '123',
         text: '   ',
       }),
-    ).rejects.toThrow('Telegram postMessage requires text or images');
+    ).rejects.toThrow('Telegram postMessage requires text, images, or files');
   });
 
   it('treats an unchanged edit as an idempotent success', async () => {
@@ -1011,6 +1011,135 @@ describe('TelegramCommunicationProvider', () => {
 
     expect(photoBody.photo).toBe('https://example.test/shot.png');
     expect(photoBody.caption).toBe('the shot');
+  });
+
+  it.each([
+    { kind: 'video' as const, method: 'sendVideo', field: 'video' },
+    { kind: 'document' as const, method: 'sendDocument', field: 'document' },
+  ])(
+    'uploads $kind files with multipart $method',
+    async ({ kind, method, field }) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse({ ok: true, result: { message_id: 330 } }),
+        );
+      const provider = new TelegramCommunicationProvider({
+        botToken: 'bot-token',
+        apiBaseUrl: 'https://telegram.example.test',
+        fetch: fetchMock as typeof fetch,
+      });
+
+      const result = await provider.postMessage({
+        channelId: '123',
+        threadId: '7',
+        replyToMessageId: '42',
+        files: [
+          {
+            bytes: Uint8Array.from([1, 2, 3]),
+            filename: kind === 'video' ? 'demo.mp4' : 'report.pdf',
+            contentType: kind === 'video' ? 'video/mp4' : 'application/pdf',
+            kind,
+            fallbackText: 'View file: https://roomote.test/artifact',
+          },
+        ],
+      });
+
+      expect(result.messageId).toBe('330');
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        `https://telegram.example.test/botbot-token/${method}`,
+      );
+      const body = (fetchMock.mock.calls[0]?.[1] as RequestInit)
+        .body as FormData;
+      expect(body).toBeInstanceOf(FormData);
+      expect(body.get('chat_id')).toBe('123');
+      expect(body.get('message_thread_id')).toBe('7');
+      expect(body.get(field)).toBeInstanceOf(Blob);
+      expect(body.get('reply_parameters')).toBeNull();
+      expect(body.get('supports_streaming')).toBe(
+        kind === 'video' ? 'true' : null,
+      );
+    },
+  );
+
+  it('falls back to safe text when a native file upload fails', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { ok: false, description: 'Bad Request: file is too big' },
+          400,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 331 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    const result = await provider.postMessage({
+      channelId: '123',
+      files: [
+        {
+          bytes: Uint8Array.from([1]),
+          filename: 'report.pdf',
+          contentType: 'application/pdf',
+          kind: 'document',
+          fallbackText:
+            'View file: https://roomote.test/task/1/artifacts/report.pdf',
+        },
+      ],
+    });
+
+    expect(result.messageId).toBe('331');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      'https://telegram.example.test/botbot-token/sendRichMessage',
+    );
+    expect(
+      JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string),
+    ).toMatchObject({
+      rich_message: {
+        markdown:
+          '<p>View file: https://roomote.test/task/1/artifacts/report.pdf</p>',
+      },
+    });
+  });
+
+  it('returns every message id when text and native files are sent together', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 340 } }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 341 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    const result = await provider.postMessage({
+      channelId: '123',
+      text: 'The report is ready.',
+      files: [
+        {
+          bytes: Uint8Array.from([1]),
+          filename: 'report.pdf',
+          contentType: 'application/pdf',
+          kind: 'document',
+          fallbackText: 'View file: https://roomote.test/artifact',
+        },
+      ],
+    });
+
+    expect(result.messageId).toBe('340');
+    expect(result.lastTextMessageId).toBe('340');
+    expect(result.messageIds).toEqual(['340', '341']);
   });
 
   it('omits the reply target on a private-chat image-only message', async () => {

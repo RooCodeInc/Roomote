@@ -150,7 +150,10 @@ describe('Fast native OpenCode tool bridge', () => {
       'videoArtifactIds: z.array(z.string()).optional()',
     );
     expect(replySource).toContain(
-      'explicitly selected for native Slack delivery',
+      'explicitly selected for native Slack or Telegram delivery',
+    );
+    expect(replySource).toContain(
+      'fileArtifactIds: z.array(z.string()).optional()',
     );
     expect(replySource).toContain('charts: z.array(chartInput).max(2)');
     expect(replySource).toContain(

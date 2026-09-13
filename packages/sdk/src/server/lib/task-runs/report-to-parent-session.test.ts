@@ -48,6 +48,8 @@ describe('reportToParentSession', () => {
         purpose: 'progress',
         message: 'The targeted tests are running.',
         imageArtifactIds: ['artifact-1', 'artifact-1'],
+        videoArtifactIds: ['video-1', 'video-1'],
+        fileArtifactIds: ['file-1', 'file-1'],
         charts: [
           {
             title: 'Traffic sources',
@@ -70,6 +72,8 @@ describe('reportToParentSession', () => {
         purpose: 'progress',
         message: 'The targeted tests are running.',
         imageArtifactIds: ['artifact-1'],
+        videoArtifactIds: ['video-1'],
+        fileArtifactIds: ['file-1'],
         charts: [
           {
             title: 'Traffic sources',
