@@ -4,11 +4,10 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 1.9.0 (2026-09-13)
 
-Roomote 1.9 adds secure Session-approved API keys, a native Telegram Fast experience, Session-owned Goal Mode, direct pull request merging, and more adaptive setup and workspace flows.
+Roomote 1.9 adds a native Telegram Fast experience, Session-owned Goal Mode, direct pull request merging, and more adaptive setup and workspace flows.
 
 ### Highlights
 
-- Approve narrowly scoped API keys for a Session without putting credentials in chat or agent context.
 - Work with Fast natively in Telegram, keep Goal Mode running across Session turns, and reply to personal Session notifications while away from the web app.
 - Complete deployment setup conversationally and start all-repositories work without cloning every repository up front.
 - Merge pull requests, maintain shared custom skills, and opt into memory-informed Home suggestions directly through Fast.
@@ -60,6 +59,7 @@ Roomote 1.9 adds secure Session-approved API keys, a native Telegram Fast experi
 - MinIO and the MinIO client are now pulled from quay.io instead of Docker Hub, where the images were removed. The pinned versions and digests are unchanged, so existing artifact volumes are unaffected.
 - Coding tasks now retry within the existing bounded provider-recovery flow when a provider interrupts an in-flight tool call and leaves the turn idle, instead of incorrectly settling as complete with an aborted edit or other unfinished work.
 - Session composers now keep focus when task panels expand automatically or become ready later, so users can continue typing without focus jumping into a delegated task. Deliberately selecting a task still focuses its prompt as expected.
+- Temporarily hide Session-secret tools behind a default-off user experiment while hosted credential access is unavailable. Existing configured integrations remain available.
 
 ## 1.8.2 (2026-09-14)
 
