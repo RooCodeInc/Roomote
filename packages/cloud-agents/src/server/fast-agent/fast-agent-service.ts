@@ -185,6 +185,7 @@ import {
   type FastAgentIntegration,
 } from './fast-agent-integration-broker';
 import { McpToolCallError } from '../mcp-tool-client';
+import { unwrapStringifiedIntegrationArgs } from './fast-agent-integration-args';
 import {
   cancelFastAgentTask,
   launchFastAgentPrReview,
@@ -3719,8 +3720,18 @@ export async function answerFastAgentQuestion({
           };
 
     const executeMcpTool = async (
-      call: FastAgentMcpToolCall,
+      rawCall: FastAgentMcpToolCall,
     ): Promise<unknown> => {
+      const toolDefinition = availableIntegrations
+        .find((integration) => integration.id === rawCall.integrationId)
+        ?.tools.find((tool) => tool.name === rawCall.toolName);
+      const call: FastAgentMcpToolCall = {
+        ...rawCall,
+        args: unwrapStringifiedIntegrationArgs(
+          rawCall.args,
+          toolDefinition?.inputSchema,
+        ),
+      };
       activeToolExecutions += 1;
       let canonicalToolEvent:
         | Awaited<ReturnType<typeof beginCanonicalToolEvent>>
