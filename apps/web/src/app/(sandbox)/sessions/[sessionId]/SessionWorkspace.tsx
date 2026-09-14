@@ -632,6 +632,7 @@ function SessionTasksPanel({
               size="icon"
               className="size-8"
               aria-label="Open side-by-side"
+              onPointerDown={(event) => event.preventDefault()}
               onClick={onOpenSideBySide}
             >
               <Columns3 />
@@ -1019,6 +1020,7 @@ export function SessionWorkspace({
                   aria-expanded={utilityPanel?.kind === 'tasks'}
                   disabled={taskCards.length === 0}
                   icon={Rows4}
+                  onPointerDown={(event) => event.preventDefault()}
                   onClick={() => togglePanel('tasks')}
                   onAuxClick={(event) => {
                     if (event.button !== 1) return;
