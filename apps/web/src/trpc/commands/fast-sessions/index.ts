@@ -76,7 +76,6 @@ import {
   updateFastSessionPrReviewOfferStatus,
 } from '@/lib/server/fast-sessions';
 import { handleWebPrReviewAction } from '@/lib/server/pr-review-actions';
-import { getSetupStarterTask } from '@/lib/setup-starter-tasks';
 import {
   currentEpochSeconds,
   signArtifactId,
@@ -978,10 +977,6 @@ export async function resolveFastSessionCapabilityOfferCommand(
     session.id,
   );
   const responseTurnId = `capability-response:${input.offerId}`;
-  const selectedStarterTasks = selectedStarterIds.map((id) => {
-    const task = getSetupStarterTask(id);
-    return { id: task.id, title: task.title, prompt: task.prompt };
-  });
   scheduleWebFastAgentTurn({
     userId: auth.userId,
     delivery: {
@@ -1000,7 +995,6 @@ export async function resolveFastSessionCapabilityOfferCommand(
       offerId: input.offerId,
       capability: input.capability,
       resolution: input.resolution,
-      ...(selectedStarterTasks.length > 0 ? { selectedStarterTasks } : {}),
     })}</capability_offer_response>`,
     turnSource: 'platform_event',
     platformEventKind: 'input_response',

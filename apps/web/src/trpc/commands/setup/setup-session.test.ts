@@ -1,5 +1,9 @@
 const mocks = vi.hoisted(() => ({
+  after: vi.fn(),
+  acquireTurnLock: vi.fn(),
+  answerQuestion: vi.fn(),
   getStatus: vi.fn(),
+  launchTask: vi.fn(),
   schedule: vi.fn(),
   submit: vi.fn(),
   complete: vi.fn(),
@@ -18,13 +22,17 @@ vi.mock('@/lib/server/setup-funnel-telemetry', () => ({
 vi.mock('@roomote/sdk/server', () => ({
   buildFastAgentArtifactCreator: vi.fn(),
   LINEAR_ORG_CONNECTION_ROLE: 'organization',
+  persistFastAgentInlineHumanTurn: vi.fn().mockResolvedValue(null),
+  resolveUserMcpServerConfigs: vi.fn().mockResolvedValue([]),
 }));
 vi.mock('@roomote/cloud-agents/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/cloud-agents/server')>()),
-  createFastAgentWebTaskLauncher: vi.fn(),
+  acquireFastAgentTurnLock: mocks.acquireTurnLock,
+  answerFastAgentQuestion: mocks.answerQuestion,
+  createFastAgentWebTaskLauncher: vi.fn(() => mocks.launchTask),
 }));
 vi.mock('@roomote/telemetry/server', () => ({ captureEvent: vi.fn() }));
-vi.mock('next/server', () => ({ after: vi.fn() }));
+vi.mock('next/server', () => ({ after: mocks.after }));
 
 import {
   db,
@@ -159,6 +167,20 @@ describe('optional setup integration discovery', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mocks.acquireTurnLock.mockResolvedValue(
+      Object.assign(vi.fn().mockResolvedValue(undefined), {
+        signal: new AbortController().signal,
+      }),
+    );
+    mocks.launchTask.mockResolvedValue({ taskId: 'starter-task' });
+    mocks.answerQuestion.mockImplementation(async ({ question, adapter }) => {
+      const payload = JSON.parse(
+        question.replace(/<\/?capability_offer_response>/g, ''),
+      );
+      for (const task of payload.selectedStarterTasks ?? []) {
+        await adapter.launchTask({ prompt: task.prompt });
+      }
+    });
     ts = Date.now();
     const user = await userFactory.create({ role: 'admin' });
     auth = { userId: user.id, isAdmin: true } as UserAuthSuccess;
@@ -350,6 +372,66 @@ describe('optional setup integration discovery', () => {
     expect(
       (await readState()).setupSession?.integrationDiscoveryCompletedAt,
     ).toEqual(expect.any(String));
+  });
+
+  it('launches each selected starter task once when the sandbox is ready', async () => {
+    const state = await readState();
+    state.setupSession!.integrationDiscoveryCompletedAt =
+      '2026-01-01T00:00:00.000Z';
+    await db
+      .update(deploymentSettings)
+      .set({ setupNewState: state })
+      .where(eq(deploymentSettings.id, 'default'));
+    const offerId = 'cap:starter-work';
+    await db.insert(fastAgentMessages).values({
+      conversationId,
+      eventId: 'starter-work-offer',
+      turnId: 'starter-work-offer-turn',
+      turnSeq: 1,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Choose starter work.' }],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        offerId,
+        capability: 'starter_work',
+        message: 'Choose starter work.',
+        status: 'pending',
+      },
+      source: 'web',
+    });
+    const actualFastSessions =
+      await vi.importActual<typeof import('../fast-sessions')>(
+        '../fast-sessions',
+      );
+
+    await actualFastSessions.resolveFastSessionCapabilityOfferCommand(auth, {
+      sessionId,
+      offerId,
+      capability: 'starter_work',
+      resolution: 'completed',
+      selectedIds: ['speed-up-ci', 'security-scan'],
+    });
+
+    const setupTurn = mocks.schedule.mock.calls.find(([turn]) =>
+      turn.question.includes('starter_selection'),
+    )?.[0];
+    expect(setupTurn).toBeDefined();
+    const starterSelection = JSON.parse(
+      setupTurn!.question.replace(/<\/?platform_event>/g, ''),
+    ).changes.find(
+      (change: { type: string }) => change.type === 'starter_selection',
+    );
+    for (const task of starterSelection.starterTasks) {
+      await setupTurn!.delivery.adapter.launchTask({ prompt: task.prompt });
+    }
+    await mocks.after.mock.calls[0]![0]();
+
+    expect(mocks.launchTask).toHaveBeenCalledTimes(2);
+    expect(mocks.launchTask.mock.calls.map(([input]) => input.prompt)).toEqual(
+      SETUP_STARTER_TASKS.slice(0, 2).map((task) => task.prompt),
+    );
   });
 
   it('persists source decline, renders its receipt, wakes continuation, and suppresses repository offers', async () => {

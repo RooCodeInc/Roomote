@@ -408,7 +408,6 @@ export function FastSessionTranscript({
   headerExtras,
   headerActions,
   secretSessionId,
-  timelineExtras,
   sessionGoal,
   autoStartVoice = false,
 }: {
@@ -426,7 +425,6 @@ export function FastSessionTranscript({
   headerExtras?: ReactNode;
   headerActions?: ReactNode;
   secretSessionId?: string;
-  timelineExtras?: ReactNode;
   sessionGoal?: SessionGoal | null;
   /**
    * Begin a voice conversation as soon as the page loads: set when the
