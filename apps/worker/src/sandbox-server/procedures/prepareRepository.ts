@@ -6,10 +6,16 @@ import { z } from 'zod';
 
 import { sdk } from '@roomote/sdk/client';
 import type { SandboxPrepareRepositoryResult } from '@roomote/sdk/sandbox-router';
-import { DEFAULT_SOURCE_CONTROL_PROVIDER } from '@roomote/types';
+import {
+  DEFAULT_SOURCE_CONTROL_PROVIDER,
+  resolveRepositoryProvidersFromPayload,
+  resolveSourceControlProviderFromPayload,
+  type SourceControlProvider,
+} from '@roomote/types';
 
 import { listOnDemandRepositories } from '../../commands/setup/workspace/list-on-demand-repositories';
 import { createWorkspaceManager } from '../../commands/setup/workspace/shared';
+import { isCredentialWriteBarrierEngaged } from '../../lib/credential-write-barrier';
 import {
   ON_DEMAND_REPOSITORIES_MANIFEST_FILE,
   discoverClonedRepositoryPaths,
@@ -25,6 +31,11 @@ const prepareRepositoryInputSchema = z.object({
 
 type PrepareRepositoryResult = SandboxPrepareRepositoryResult;
 
+interface RepositoryScope {
+  sourceControlProvider: SourceControlProvider;
+  repositoryProviders?: Record<string, SourceControlProvider>;
+}
+
 // One clone per repository at a time: a duplicate call while the first clone
 // is still running would `rm -rf` the half-written checkout underneath it.
 const inFlightPreparations = new Map<
@@ -32,10 +43,63 @@ const inFlightPreparations = new Map<
   Promise<PrepareRepositoryResult>
 >();
 
+/**
+ * The run's source-control scope as stamped at launch. Credentials were
+ * minted from the same stamp, so a repository outside it (or under a
+ * different provider) would fail authentication rather than clone.
+ */
+async function loadRepositoryScope(runId: number): Promise<RepositoryScope> {
+  const taskRun = await sdk.taskRuns.findFirstById(runId);
+
+  if (!taskRun) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Task run not found' });
+  }
+
+  return {
+    sourceControlProvider: resolveSourceControlProviderFromPayload(
+      taskRun.payload,
+    ),
+    repositoryProviders: resolveRepositoryProvidersFromPayload(taskRun.payload),
+  };
+}
+
+/**
+ * Resolve which provider a requested repository belongs to. With a stamped
+ * provider map the name must be in it (matched case-insensitively, since
+ * hosts treat owner/repo that way); without one, the run's primary provider
+ * applies.
+ */
+function resolveRequestedRepositoryProvider(
+  repositoryFullName: string,
+  scope: RepositoryScope,
+): { fullName: string; sourceControlProvider: SourceControlProvider } {
+  if (!scope.repositoryProviders) {
+    return {
+      fullName: repositoryFullName,
+      sourceControlProvider: scope.sourceControlProvider,
+    };
+  }
+
+  const requested = repositoryFullName.toLowerCase();
+  const match = Object.entries(scope.repositoryProviders).find(
+    ([fullName]) => fullName.toLowerCase() === requested,
+  );
+
+  if (!match) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: `Repository '${repositoryFullName}' is not part of this task's repository set. Use a full name (owner/repo) listed in ${ON_DEMAND_REPOSITORIES_MANIFEST_FILE}.`,
+    });
+  }
+
+  return { fullName: match[0], sourceControlProvider: match[1] };
+}
+
 async function refreshRepositoriesManifest(
   workspaceRoot: string,
+  scope: RepositoryScope,
 ): Promise<string> {
-  const repositories = await listOnDemandRepositories({});
+  const repositories = await listOnDemandRepositories(scope);
 
   return writeRepositoriesManifest({
     workspaceRoot,
@@ -45,16 +109,24 @@ async function refreshRepositoriesManifest(
 }
 
 async function prepareOnDemandRepository({
+  runId,
   repositoryFullName,
   branch,
   envVars,
 }: {
+  runId: number;
   repositoryFullName: string;
   branch?: string;
   envVars: Record<string, string | undefined>;
 }): Promise<PrepareRepositoryResult> {
+  const scope = await loadRepositoryScope(runId);
+  const requested = resolveRequestedRepositoryProvider(
+    repositoryFullName,
+    scope,
+  );
   const repository = await sdk.repositories.findRepository({
-    fullName: repositoryFullName,
+    fullName: requested.fullName,
+    sourceControlProvider: requested.sourceControlProvider,
   });
 
   if (!repository) {
@@ -95,11 +167,11 @@ async function prepareOnDemandRepository({
     undefined,
     false,
     false,
-    repository.sourceControlProvider === DEFAULT_SOURCE_CONTROL_PROVIDER
+    requested.sourceControlProvider === DEFAULT_SOURCE_CONTROL_PROVIDER
       ? {}
-      : { sourceControlProvider: repository.sourceControlProvider },
+      : { sourceControlProvider: requested.sourceControlProvider },
   );
-  const manifestPath = await refreshRepositoriesManifest(workspaceRoot);
+  const manifestPath = await refreshRepositoriesManifest(workspaceRoot, scope);
 
   return {
     success: true,
@@ -119,6 +191,23 @@ async function prepareOnDemandRepository({
 export const prepareRepository = publicProcedure
   .input(prepareRepositoryInputSchema)
   .mutation(async ({ ctx, input }): Promise<PrepareRepositoryResult> => {
+    if (ctx.runId === undefined) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'Repository checkout requires an active task run',
+      });
+    }
+
+    // The pre-snapshot scrub removes every source-control credential from
+    // the sandbox, so a clone started in that window can only fail.
+    if (isCredentialWriteBarrierEngaged()) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message:
+          'Repository checkout is unavailable while the sandbox prepares for a snapshot; retry shortly',
+      });
+    }
+
     const key = input.repositoryFullName.toLowerCase();
     const inFlight = inFlightPreparations.get(key);
 
@@ -127,6 +216,7 @@ export const prepareRepository = publicProcedure
     }
 
     const preparation = prepareOnDemandRepository({
+      runId: ctx.runId,
       repositoryFullName: input.repositoryFullName,
       branch: input.branch,
       envVars: ctx.taskRuntime?.runtimeEnv ?? process.env,

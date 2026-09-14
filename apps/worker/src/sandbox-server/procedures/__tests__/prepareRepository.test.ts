@@ -4,22 +4,34 @@ import * as path from 'node:path';
 
 import type { RunTokenContext } from '@roomote/types';
 
+import {
+  engageCredentialWriteBarrier,
+  resetCredentialWriteBarrierForTesting,
+} from '../../../lib/credential-write-barrier';
 import { WorkspaceManager } from '../../../workspace';
 import { appRouter } from '../../routers';
 import type { Context } from '../../trpc';
 
-const { mockFindRepository, mockListRepositories, workspaceRootRef } =
-  vi.hoisted(() => ({
-    mockFindRepository: vi.fn(),
-    mockListRepositories: vi.fn(),
-    workspaceRootRef: { current: '' },
-  }));
+const {
+  mockFindRepository,
+  mockListRepositories,
+  mockFindFirstById,
+  workspaceRootRef,
+} = vi.hoisted(() => ({
+  mockFindRepository: vi.fn(),
+  mockListRepositories: vi.fn(),
+  mockFindFirstById: vi.fn(),
+  workspaceRootRef: { current: '' },
+}));
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     repositories: {
       findRepository: mockFindRepository,
       listRepositories: mockListRepositories,
+    },
+    taskRuns: {
+      findFirstById: mockFindFirstById,
     },
   },
 }));
@@ -72,13 +84,29 @@ const apiRepository = {
   private: false,
 };
 
+const gitlabRepository = {
+  ...apiRepository,
+  id: 'repo-3',
+  fullName: 'acme/gitlab-app',
+  sourceControlProvider: 'gitlab',
+};
+
+function stubTaskRun(payload: Record<string, unknown>) {
+  mockFindFirstById.mockResolvedValue({ id: 1, taskId: 'task-1', payload });
+}
+
 describe('prepareRepository procedure', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
+    resetCredentialWriteBarrierForTesting();
     workspaceRootRef.current = fs.mkdtempSync(
       path.join(os.tmpdir(), 'prepare-repository-'),
     );
+    stubTaskRun({
+      repo: '__all_repositories__',
+      sourceControlProvider: 'github',
+    });
     mockListRepositories.mockResolvedValue([
       apiRepository,
       { ...apiRepository, id: 'repo-2', fullName: 'acme/web' },
@@ -99,7 +127,11 @@ describe('prepareRepository procedure', () => {
       HOME: '/home/testuser',
     }).commands.prepareRepository({ repositoryFullName: 'acme/api' });
 
-    expect(mockFindRepository).toHaveBeenCalledWith({ fullName: 'acme/api' });
+    expect(mockFindFirstById).toHaveBeenCalledWith(1);
+    expect(mockFindRepository).toHaveBeenCalledWith({
+      fullName: 'acme/api',
+      sourceControlProvider: 'github',
+    });
     expect(prepareSpy).toHaveBeenCalledWith(
       'acme/api',
       undefined,
@@ -115,6 +147,9 @@ describe('prepareRepository procedure', () => {
       alreadyCheckedOut: false,
       manifestPath: path.join(workspaceRootRef.current, 'REPOSITORIES.md'),
     });
+    expect(mockListRepositories).toHaveBeenCalledWith({
+      sourceControlProvider: 'github',
+    });
     const manifest = fs.readFileSync(result.manifestPath, 'utf8');
     expect(manifest).toContain(
       '2 repositories are available to this task; 1 is checked out.',
@@ -124,23 +159,34 @@ describe('prepareRepository procedure', () => {
     );
   });
 
-  it('passes the branch and a non-default provider through', async () => {
-    mockFindRepository.mockResolvedValue({
-      ...apiRepository,
-      fullName: 'acme/gitlab-app',
-      sourceControlProvider: 'gitlab',
+  it('resolves the provider from the stamped repository map and keeps mixed providers in the manifest', async () => {
+    stubTaskRun({
+      repo: '__all_repositories__',
+      sourceControlProvider: 'github',
+      repositoryProviders: {
+        'acme/api': 'github',
+        'acme/gitlab-app': 'gitlab',
+      },
     });
+    mockFindRepository.mockResolvedValue(gitlabRepository);
+    mockListRepositories.mockResolvedValue([apiRepository, gitlabRepository]);
     const prepareSpy = vi
       .spyOn(WorkspaceManager.prototype, 'prepareRepository')
-      .mockResolvedValue(
-        path.join(workspaceRootRef.current, 'acme', 'gitlab-app'),
-      );
+      .mockImplementation(async (fullName) => {
+        const repoPath = path.join(workspaceRootRef.current, fullName);
+        fs.mkdirSync(path.join(repoPath, '.git'), { recursive: true });
+        return repoPath;
+      });
 
-    await createCaller().commands.prepareRepository({
-      repositoryFullName: 'acme/gitlab-app',
+    const result = await createCaller().commands.prepareRepository({
+      repositoryFullName: 'ACME/GitLab-App',
       branch: 'release',
     });
 
+    expect(mockFindRepository).toHaveBeenCalledWith({
+      fullName: 'acme/gitlab-app',
+      sourceControlProvider: 'gitlab',
+    });
     expect(prepareSpy).toHaveBeenCalledWith(
       'acme/gitlab-app',
       'release',
@@ -149,6 +195,33 @@ describe('prepareRepository procedure', () => {
       false,
       { sourceControlProvider: 'gitlab' },
     );
+    // The refresh lists every provider so the GitHub rows survive.
+    expect(mockListRepositories).toHaveBeenCalledWith({});
+    const manifest = fs.readFileSync(result.manifestPath, 'utf8');
+    expect(manifest).toContain('| `acme/api` | no |');
+    expect(manifest).toContain('| `acme/gitlab-app` | yes (');
+  });
+
+  it('rejects repositories outside the stamped repository set before touching git', async () => {
+    stubTaskRun({
+      repo: '__all_repositories__',
+      sourceControlProvider: 'gitlab',
+      repositoryProviders: { 'acme/gitlab-app': 'gitlab' },
+    });
+    const prepareSpy = vi.spyOn(
+      WorkspaceManager.prototype,
+      'prepareRepository',
+    );
+
+    await expect(
+      createCaller().commands.prepareRepository({
+        repositoryFullName: 'acme/other',
+      }),
+    ).rejects.toThrow(
+      "Repository 'acme/other' is not part of this task's repository set",
+    );
+    expect(mockFindRepository).not.toHaveBeenCalled();
+    expect(prepareSpy).not.toHaveBeenCalled();
   });
 
   it('leaves an existing checkout untouched', async () => {
@@ -186,6 +259,24 @@ describe('prepareRepository procedure', () => {
     ).rejects.toThrow(
       "Repository 'acme/missing' is not an active repository of this deployment",
     );
+    expect(prepareSpy).not.toHaveBeenCalled();
+  });
+
+  it('refuses to clone while the pre-snapshot credential barrier is engaged', async () => {
+    await engageCredentialWriteBarrier();
+    const prepareSpy = vi.spyOn(
+      WorkspaceManager.prototype,
+      'prepareRepository',
+    );
+
+    await expect(
+      createCaller().commands.prepareRepository({
+        repositoryFullName: 'acme/api',
+      }),
+    ).rejects.toThrow(
+      'Repository checkout is unavailable while the sandbox prepares for a snapshot',
+    );
+    expect(mockFindFirstById).not.toHaveBeenCalled();
     expect(prepareSpy).not.toHaveBeenCalled();
   });
 
