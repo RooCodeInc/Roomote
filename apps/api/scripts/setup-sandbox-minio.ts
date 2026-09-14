@@ -35,11 +35,11 @@ const sourceGoModSum = 'h1:yCWDkwWO9IWpGsT4mreDDN/B/QVmK2zC666uInRAcqE=';
 const builds: Record<string, { goarch: string; sha256: string }> = {
   x64: {
     goarch: 'amd64',
-    sha256: 'fbc76569ea811e9c8602fd9993e9c854d0f543e50696ab12c11cdfc0ff8457b1',
+    sha256: '6456634c06fa937dfeb708e37db80c8a02ffc50874d211ee3fc5cc0f71f95b96',
   },
   arm64: {
     goarch: 'arm64',
-    sha256: '529f084ea73a516a680542a53883cbc92547658f8a78e35ff4a87dca630f91e6',
+    sha256: '3f9e2d92ca9fe43ebac8f069349a3fefb91500ed06b22697e9d9f3dba6e1db17',
   },
 };
 const build = builds[process.arch];
@@ -102,15 +102,27 @@ try {
       sourceGoModSum,
       'MinIO module checksum mismatch',
     );
-    execFileSync(go, ['build', '-trimpath', '-o', temporary, '.'], {
-      cwd: source.Dir,
-      stdio: 'inherit',
-      timeout: 540_000,
-      env: {
-        ...goEnvironment,
-        GOFLAGS: '-mod=readonly',
+    // Same flags as .docker/minio (the published roomote-minio image):
+    // -buildid= drops the toolchain-derived build ID and -s -w the debug
+    // info, as upstream's release builds did. The pinned checksums are for
+    // NATIVE builds only: MinIO's compiled code still differs when the Go
+    // compiler runs on a different host architecture than it targets, so a
+    // cross-compile (for example arm64 from an amd64 host) will not match
+    // and must never be used to refresh these pins. This script only ever
+    // builds natively, so that constraint holds here by construction.
+    execFileSync(
+      go,
+      ['build', '-trimpath', '-ldflags=-buildid= -s -w', '-o', temporary, '.'],
+      {
+        cwd: source.Dir,
+        stdio: 'inherit',
+        timeout: 540_000,
+        env: {
+          ...goEnvironment,
+          GOFLAGS: '-mod=readonly',
+        },
       },
-    });
+    );
     assert.equal(
       await checksum(temporary),
       build.sha256,
