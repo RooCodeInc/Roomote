@@ -61,6 +61,76 @@ function optInBoolean() {
     .transform((value) => value === 'true' || value === '1');
 }
 
+const SESSION_EGRESS_ORIGIN_HOST_PATTERN =
+  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+function sessionEgressAllowedOrigins() {
+  return z
+    .string()
+    .max(16_384)
+    .default('[]')
+    .transform((value, context) => {
+      let entries: unknown;
+      try {
+        entries = JSON.parse(value);
+      } catch {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Must be a JSON array of exact HTTPS origins',
+        });
+        return z.NEVER;
+      }
+      if (!Array.isArray(entries) || entries.length > 100) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Must be a JSON array of at most 100 exact HTTPS origins',
+        });
+        return z.NEVER;
+      }
+
+      const origins: string[] = [];
+      for (const entry of entries) {
+        let url: URL;
+        try {
+          if (typeof entry !== 'string' || /[^\x21-\x7e]|[\\%]/.test(entry)) {
+            throw new Error('invalid origin');
+          }
+          url = new URL(entry);
+        } catch {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Invalid Session egress origin: ${String(entry)}`,
+          });
+          return z.NEVER;
+        }
+        if (
+          url.protocol !== 'https:' ||
+          url.username ||
+          url.password ||
+          url.pathname !== '/' ||
+          url.search ||
+          url.hash ||
+          !SESSION_EGRESS_ORIGIN_HOST_PATTERN.test(url.hostname)
+        ) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Invalid Session egress origin: ${entry}`,
+          });
+          return z.NEVER;
+        }
+        if (origins.includes(url.origin)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Duplicate Session egress origin: ${entry}`,
+          });
+          return z.NEVER;
+        }
+        origins.push(url.origin);
+      }
+      return origins;
+    });
+}
+
 const serverSchema = {
   R_APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
@@ -427,6 +497,9 @@ const serverSchema = {
   // its own; the surface stays disabled (404) until this is set. Controllers
   // authenticate to the same surface with a signed job-auth token instead.
   R_SESSION_EGRESS_GATEWAY_TOKEN: z.string().min(32).optional(),
+  // Exact HTTPS origins whose independently bound Session grants may be used
+  // through Iron. Empty or unset is a deliberate default-deny policy.
+  R_SESSION_EGRESS_ALLOWED_ORIGINS: sessionEgressAllowedOrigins(),
   // Controller-side Session-egress provisioning. All five *_ADDR/*_FILE values
   // below must be set for the controller to register workloads; otherwise
   // every run is reported as `disabled` and receives no substitute tokens.

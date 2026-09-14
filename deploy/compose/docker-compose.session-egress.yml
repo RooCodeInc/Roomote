@@ -4,6 +4,7 @@ services:
   api:
     environment:
       R_SESSION_EGRESS_GATEWAY_TOKEN: ${R_SESSION_EGRESS_GATEWAY_TOKEN:?required for session egress}
+      R_SESSION_EGRESS_ALLOWED_ORIGINS: ${R_SESSION_EGRESS_ALLOWED_ORIGINS:?JSON array of permitted HTTPS origins required for session egress}
 
   controller:
     environment:
