@@ -460,6 +460,55 @@ describe('SessionWorkspace', () => {
     expect(artifacts.querySelector('svg')).toHaveClass('lucide-layout-grid');
   });
 
+  it('exposes the expanded state while utility panels open, switch, and close', () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: {
+        tasks: [
+          {
+            ...singleTask,
+            previews: [
+              {
+                serviceName: 'WEB_APP',
+                url: 'https://task-1-web-app.preview.test/',
+                isPrimary: true,
+                runId: 11,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const tasks = screen.getByRole('button', { name: 'Tasks' });
+    const preview = screen.getByRole('button', { name: 'Live Preview' });
+    const artifacts = screen.getByRole('button', { name: 'Artifacts' });
+    const sessionInfo = screen.getByRole('button', { name: 'Session info' });
+
+    for (const control of [tasks, preview, artifacts, sessionInfo]) {
+      expect(control).toHaveAttribute('aria-expanded', 'false');
+      expect(control).not.toHaveAttribute('aria-controls');
+    }
+
+    fireEvent.click(tasks);
+    expect(tasks).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(artifacts);
+    expect(tasks).toHaveAttribute('aria-expanded', 'false');
+    expect(artifacts).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(sessionInfo);
+    expect(artifacts).toHaveAttribute('aria-expanded', 'false');
+    expect(sessionInfo).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(preview);
+    expect(sessionInfo).toHaveAttribute('aria-expanded', 'false');
+    expect(preview).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
+    expect(preview).toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('aggregates task pull requests in the header and removes duplicates', async () => {
     const firstTask = {
       ...singleTask,
@@ -590,7 +639,10 @@ describe('SessionWorkspace', () => {
 
     expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
+    const sessionInfo = screen.getByRole('button', { name: 'Session info' });
+    expect(sessionInfo).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(sessionInfo);
+    expect(sessionInfo).toHaveAttribute('aria-expanded', 'true');
 
     const hiddenTranscriptPanel = screen
       .getByText('Session transcript')
@@ -607,6 +659,8 @@ describe('SessionWorkspace', () => {
     ).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Hide sidebar' }));
+
+    expect(screen.queryByRole('button', { name: 'Session info' })).toBeNull();
 
     expect(
       screen.getByRole('button', { name: 'Close session info' }),
