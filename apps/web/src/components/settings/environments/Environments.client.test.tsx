@@ -22,6 +22,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 const state = vi.hoisted(() => ({
   createSnapshot: vi.fn().mockResolvedValue({ success: true }),
   clearSnapshot: vi.fn(),
+  refetchEnvironments: vi.fn(),
+  environmentQuery: {
+    isPending: false,
+    isError: false,
+    isFetching: false,
+  },
   configuredProviders: ['modal'] as string[],
   repositories: [{ id: 'repo-1', fullName: 'acme/api' }],
   environments: [
@@ -104,7 +110,8 @@ vi.mock('@/hooks/source-control', () => ({
 vi.mock('@/hooks/environments', () => ({
   useEnvironments: () => ({
     data: state.environments,
-    isPending: false,
+    ...state.environmentQuery,
+    refetch: state.refetchEnvironments,
   }),
   useDeleteEnvironment: () => ({
     isPending: false,
@@ -325,6 +332,22 @@ vi.mock('@/components/system', () => ({
   Pencil: Icon,
   Plus: Icon,
   RefreshCw: Icon,
+  RetryableLoadError: ({
+    message,
+    isRetrying,
+    onRetry,
+  }: {
+    message: string;
+    isRetrying?: boolean;
+    onRetry: () => void;
+  }) => (
+    <div>
+      <p>{message}</p>
+      <button type="button" disabled={isRetrying} onClick={onRetry}>
+        Retry
+      </button>
+    </div>
+  ),
   SearchCheck: Icon,
   Popover: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   PopoverContent: ({
@@ -374,6 +397,11 @@ describe('Environments', () => {
   beforeEach(() => {
     state.configuredProviders = ['modal'];
     state.repositories = [{ id: 'repo-1', fullName: 'acme/api' }];
+    state.environmentQuery = {
+      isPending: false,
+      isError: false,
+      isFetching: false,
+    };
     state.environments = [
       {
         id: 'env-1',
@@ -417,6 +445,7 @@ describe('Environments', () => {
     ];
     state.createSnapshot.mockClear();
     state.clearSnapshot.mockClear();
+    state.refetchEnvironments.mockClear();
   });
 
   it('shows a create-environment notice when there are no environments', () => {
@@ -433,14 +462,42 @@ describe('Environments', () => {
     );
   });
 
-  it('shows the setup notice when environments data is unavailable', () => {
+  it('shows a retryable error instead of the empty state after an initial failure', () => {
     state.environments = undefined as unknown as typeof state.environments;
+    state.environmentQuery.isError = true;
 
     render(<Environments />);
 
     expect(
-      screen.getByText(/Environments help Roomote verify its work\./i),
+      screen.getByText('Failed to load environments.'),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Environments help Roomote verify its work\./i),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(state.refetchEnvironments).toHaveBeenCalledOnce();
+  });
+
+  it('disables Retry while the environments query is fetching', () => {
+    state.environments = undefined as unknown as typeof state.environments;
+    state.environmentQuery.isError = true;
+    state.environmentQuery.isFetching = true;
+
+    render(<Environments />);
+
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled();
+  });
+
+  it('preserves cached environments when a background refetch fails', () => {
+    state.environmentQuery.isError = true;
+
+    render(<Environments />);
+
+    expect(screen.getByText('Main Environment')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Failed to load environments.'),
+    ).not.toBeInTheDocument();
   });
 
   it('shows verification and repositories while keeping snapshot details collapsed until expanded', () => {
