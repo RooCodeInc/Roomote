@@ -45,6 +45,7 @@ const {
   recordVoiceTurnMutate,
   recordVoiceCallEventMutate,
   liveVoiceState,
+  authenticatedUserState,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
   startGoalMutate: vi.fn(),
@@ -60,6 +61,17 @@ const {
   voiceStatusQuery: vi.fn(),
   recordVoiceTurnMutate: vi.fn(),
   recordVoiceCallEventMutate: vi.fn(),
+  authenticatedUserState: {
+    user: null as null | {
+      userId: string;
+      name: string | null;
+      primaryEmail: string | null;
+      resource: {
+        primaryEmailAddress: { id: string; emailAddress: string } | null;
+        imageUrl: string;
+      };
+    },
+  },
   liveVoiceState: {
     active: false,
     status: 'idle' as
@@ -83,6 +95,15 @@ const {
     onHeardTurnDelta: undefined as ((text: string) => void) | undefined,
     onSpokenTurnDelta: undefined as ((text: string) => void) | undefined,
   },
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useUser: () => ({
+    user: authenticatedUserState.user,
+    isSignedIn: authenticatedUserState.user !== null,
+    authStatus:
+      authenticatedUserState.user === null ? 'signed-out' : 'signed-in',
+  }),
 }));
 
 vi.mock('@/hooks/useLiveVoice', () => ({
@@ -320,6 +341,7 @@ beforeEach(() => {
   liveVoiceState.stop.mockReset();
   liveVoiceState.speak.mockReset();
   liveVoiceState.onUtterance = undefined;
+  authenticatedUserState.user = null;
   clearPendingFastSessionLaunch('session-1');
   vi.stubGlobal('EventSource', FakeEventSource);
 });
@@ -1630,6 +1652,18 @@ describe('FastSessionTranscript', () => {
   });
 
   it('shows a staged initial prompt immediately and reconciles its canonical event', () => {
+    authenticatedUserState.user = {
+      userId: 'current-user',
+      name: 'Current User',
+      primaryEmail: 'current@example.com',
+      resource: {
+        primaryEmailAddress: {
+          id: 'current-email',
+          emailAddress: 'current@example.com',
+        },
+        imageUrl: 'https://example.com/current-user.png',
+      },
+    };
     stagePendingFastSessionLaunch('session-1', {
       fastConversationId: 'fast-session-1',
       text: 'Initial question',
@@ -1641,6 +1675,15 @@ describe('FastSessionTranscript', () => {
 
     expect(screen.getByText('Initial question')).toBeInTheDocument();
     expect(screen.getByText('Thinking')).toBeInTheDocument();
+    const optimisticAvatarLink = screen.getByRole('link', {
+      name: 'View sessions by Current User',
+    });
+    const optimisticAvatarImage = optimisticAvatarLink.querySelector('img');
+    expect(optimisticAvatarImage).toHaveAttribute(
+      'src',
+      'https://example.com/current-user.png',
+    );
+    expect(optimisticAvatarLink).not.toHaveTextContent('?');
 
     act(() => {
       FakeEventSource.instances[0]!.emit('messages', {
@@ -1651,6 +1694,10 @@ describe('FastSessionTranscript', () => {
               role: 'user',
               text: 'Initial question',
               ts: Date.now(),
+              userId: 'current-user',
+              userName: 'Current User',
+              userEmail: 'current@example.com',
+              userImageUrl: 'https://example.com/current-user.png',
             }),
             eventId: 'web-kickoff:fast-session-1:user',
             contentBlocks: [
@@ -1663,6 +1710,12 @@ describe('FastSessionTranscript', () => {
     });
 
     expect(screen.getAllByText('Initial question')).toHaveLength(1);
+    expect(
+      screen.getByRole('link', { name: 'View sessions by Current User' }),
+    ).toBe(optimisticAvatarLink);
+    expect(optimisticAvatarLink.querySelector('img')).toBe(
+      optimisticAvatarImage,
+    );
   });
 
   it('does not duplicate a staged prompt already present in initial messages', () => {
@@ -2429,6 +2482,78 @@ describe('FastSessionTranscript', () => {
       model: null,
       reasoningEffort: null,
     });
+  });
+
+  it('keeps the current-user avatar mounted while an optimistic reply reconciles', async () => {
+    authenticatedUserState.user = {
+      userId: 'current-user',
+      name: 'Current User',
+      primaryEmail: 'current@example.com',
+      resource: {
+        primaryEmailAddress: {
+          id: 'current-email',
+          emailAddress: 'current@example.com',
+        },
+        imageUrl: 'https://example.com/current-user.png',
+      },
+    };
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+        owner={{
+          userId: 'session-owner',
+          name: 'Session Owner',
+          email: 'owner@example.com',
+          imageUrl: 'https://example.com/session-owner.png',
+        }}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Follow up question' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    const optimisticAvatarLink = await screen.findByRole('link', {
+      name: 'View sessions by Current User',
+    });
+    const optimisticAvatarImage = optimisticAvatarLink.querySelector('img');
+    expect(optimisticAvatarImage).toHaveAttribute(
+      'src',
+      'https://example.com/current-user.png',
+    );
+    expect(optimisticAvatarLink).not.toHaveTextContent('?');
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'canonical-user',
+            role: 'user',
+            text: 'Follow up question',
+            ts: Date.now(),
+            userId: 'current-user',
+            userName: 'Current User',
+            userEmail: 'current@example.com',
+            userImageUrl: 'https://example.com/current-user.png',
+          }),
+        ],
+      });
+    });
+
+    expect(screen.getAllByText('Follow up question')).toHaveLength(1);
+    expect(
+      screen.getByRole('link', { name: 'View sessions by Current User' }),
+    ).toBe(optimisticAvatarLink);
+    expect(optimisticAvatarLink.querySelector('img')).toBe(
+      optimisticAvatarImage,
+    );
+    expect(
+      screen.queryByRole('link', { name: 'View sessions by Session Owner' }),
+    ).not.toBeInTheDocument();
   });
 
   it.each(['keyboard', 'button'] as const)(
