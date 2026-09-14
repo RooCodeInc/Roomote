@@ -160,6 +160,8 @@ export type SetupNewSetupSession = {
   workflowVersion: number;
   /** Missing on pre-discovery sessions; null means the optional conversation is pending. */
   integrationDiscoveryCompletedAt?: string | null;
+  /** Missing on older sessions; null means source control is still undecided. */
+  sourceControlSkippedAt?: string | null;
   /** Unified (canonical) session ID shown in routes and transcript. */
   sessionId: string;
   startedAt: string;
@@ -180,6 +182,7 @@ export function createSetupNewSetupSession(input: {
     startedAt: input.startedAt ?? new Date().toISOString(),
     starterTaskSelection: null,
     integrationDiscoveryCompletedAt: null,
+    sourceControlSkippedAt: null,
   };
 }
 
@@ -214,7 +217,7 @@ export function normalizeSetupNewSetupSession(
     const taskIds = Array.isArray(selection.taskIds)
       ? [...new Set(selection.taskIds.filter(isSetupStarterTaskId))]
       : [];
-    if (requestId && selectedAt && taskIds.length > 0) {
+    if (requestId && selectedAt) {
       starterTaskSelection = { requestId, taskIds, selectedAt };
     }
   }
@@ -237,6 +240,15 @@ export function normalizeSetupNewSetupSession(
         ? {
             integrationDiscoveryCompletedAt: asIsoTimestamp(
               record.integrationDiscoveryCompletedAt,
+            ),
+          }
+        : {}),
+    ...(record.sourceControlSkippedAt === null
+      ? { sourceControlSkippedAt: null }
+      : asIsoTimestamp(record.sourceControlSkippedAt)
+        ? {
+            sourceControlSkippedAt: asIsoTimestamp(
+              record.sourceControlSkippedAt,
             ),
           }
         : {}),

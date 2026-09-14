@@ -73,6 +73,16 @@ function SetupSessionSourceControlCardBody({
       onError: (error) => toast.error(error.message),
     }),
   );
+  const skipSourceControl = useMutation(
+    trpc.setup.skipSourceControl.mutationOptions({
+      onSuccess: async () => {
+        await queryClient.invalidateQueries({
+          queryKey: trpc.setupNew.status.queryKey(),
+        });
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
 
   const provider =
     activeProvider ??
@@ -163,6 +173,18 @@ function SetupSessionSourceControlCardBody({
           returnPath={returnPath}
         />
       )}
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        disabled={
+          saveSourceControlProviderChoice.isPending ||
+          skipSourceControl.isPending
+        }
+        onClick={() => skipSourceControl.mutate({ sessionId })}
+      >
+        Not now
+      </Button>
     </SetupSessionActionCard>
   );
 }
@@ -182,8 +204,15 @@ export function SetupSessionSourceControlCard({
   const hasSynchronizedRepository = sourceControlSetup?.providers.some(
     (provider) => provider.connected && (provider.repositoryCount ?? 0) > 0,
   );
+  const sourceControlSkipped = Boolean(
+    statusQuery.data?.setupNewState.setupSession?.sourceControlSkippedAt,
+  );
 
-  if (!sourceControlSetup || hasSynchronizedRepository) {
+  if (
+    !sourceControlSetup ||
+    hasSynchronizedRepository ||
+    sourceControlSkipped
+  ) {
     return null;
   }
 

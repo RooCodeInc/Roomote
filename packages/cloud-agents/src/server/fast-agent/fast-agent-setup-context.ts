@@ -88,6 +88,11 @@ export function buildFastAgentSetupAdapter(
     resolveUserInputPreset: async (preset, setupIntegrationAnswers) => {
       const snapshot = parseSetupSnapshot(context);
       if (preset === 'setup_integrations') {
+        if (!['ready', 'skipped'].includes(snapshot.rail?.source ?? '')) {
+          throw new Error(
+            'Connect source control or choose not to connect it before continuing with integrations.',
+          );
+        }
         if (snapshot.integrationDiscovery?.completed) {
           throw new Error('Optional tool discovery is already complete.');
         }

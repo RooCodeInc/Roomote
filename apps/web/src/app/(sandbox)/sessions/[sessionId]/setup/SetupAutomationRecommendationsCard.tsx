@@ -16,11 +16,7 @@ import { SetupSessionActionCard } from './SetupSessionActionCard';
  * Enabling the selection adds a transcript-only acknowledgement and dismisses
  * the card. Optional: never blocks activation or launched tasks.
  */
-export function SetupAutomationRecommendationsCard({
-  sessionId,
-}: {
-  sessionId: string;
-}) {
+export function SetupAutomationRecommendationsCard() {
   const trpc = useTRPC();
   const { user } = useUser();
   const [dismissed, setDismissed] = useState(false);
@@ -41,16 +37,26 @@ export function SetupAutomationRecommendationsCard({
       },
     }),
   );
-  const tasks = useQuery(trpc.fastSessions.tasks.queryOptions({ sessionId }));
   const recommendations = status.data?.setupNewState.automationRecommendations;
+  const setupSession = status.data?.setupNewState.setupSession;
+  const hasSynchronizedRepository =
+    status.data?.sourceControlSetup.providers.some(
+      (provider) => provider.connected && (provider.repositoryCount ?? 0) > 0,
+    );
+  const integrationDiscoveryComplete = Boolean(
+    setupSession && setupSession.integrationDiscoveryCompletedAt !== null,
+  );
+  const starterDecisionComplete = Boolean(setupSession?.starterTaskSelection);
 
   if (
     dismissed ||
     user?.isAdmin !== true ||
+    !hasSynchronizedRepository ||
+    !integrationDiscoveryComplete ||
+    !starterDecisionComplete ||
     recommendations?.status !== 'ready' ||
     recommendations.dismissed ||
-    (recommendations.applicationState ?? 'pending') !== 'pending' ||
-    !tasks.data?.length
+    (recommendations.applicationState ?? 'pending') !== 'pending'
   ) {
     return null;
   }

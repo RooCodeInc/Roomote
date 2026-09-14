@@ -19,6 +19,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   AUTOMATION_RECOMMENDATION_CATALOG,
   createSetupNewSetupSession,
+  formatErrorForLog,
   normalizeSetupNewState,
   normalizeSetupNewSetupSession,
   RunStatus,
@@ -35,6 +36,7 @@ import {
   type AcpRequestUserInputPayload,
   type AutomationRecommendationBatch,
   type FastAgentSetupTurnContext,
+  type SetupStarterTaskId,
 } from '@roomote/types';
 import { captureEvent } from '@roomote/telemetry/server';
 
@@ -65,6 +67,7 @@ type SetupPlatformEventKind =
   | 'session_creation'
   | 'provider_selection'
   | 'source_connection'
+  | 'source_skipped'
   | 'starter_request'
   | 'compute_readiness'
   | 'starter_selection'
@@ -214,6 +217,7 @@ function buildSetupSnapshot(input: {
   integrationDiscovery: Awaited<
     ReturnType<typeof readSetupIntegrationDiscovery>
   >;
+  attemptedStarterTaskIds: SetupStarterTaskId[];
 }): string {
   const state = normalizeSetupNewState(input.status.setupNewState);
   const setupSession = normalizeSetupNewSetupSession(state.setupSession);
@@ -221,6 +225,8 @@ function buildSetupSnapshot(input: {
     (total, provider) => total + (provider.repositoryCount ?? 0),
     0,
   );
+  const sourceControlSkipped =
+    repositoryCount === 0 && Boolean(setupSession?.sourceControlSkippedAt);
 
   return JSON.stringify({
     integrationDiscovery: input.integrationDiscovery,
@@ -231,10 +237,12 @@ function buildSetupSnapshot(input: {
         .filter((provider) => provider.connected)
         .map((provider) => provider.provider),
       repositoryCount,
+      skipped: sourceControlSkipped,
     },
     starterSelection: setupSession?.starterTaskSelection ?? null,
     starterLaunch: {
       hasSuccessfulLaunch: input.hasSuccessfulStarterLaunch,
+      attemptedTaskIds: input.attemptedStarterTaskIds,
     },
     recommendations: state.automationRecommendations
       ? {
@@ -257,6 +265,12 @@ async function resolveSetupSnapshot(
   const setupSession = normalizeSetupNewSetupSession(
     status.setupNewState.setupSession,
   );
+  const attemptedStarterTaskIds = setupSession?.starterTaskSelection
+    ? await readSetupStarterLaunchAttempts(
+        conversation ?? (await findSetupSessionConversation(auth)),
+        setupSession.starterTaskSelection.selectedAt,
+      )
+    : [];
   return buildSetupSnapshot({
     status,
     integrationDiscovery: await readSetupIntegrationDiscovery(
@@ -271,6 +285,7 @@ async function resolveSetupSnapshot(
           conversation,
         )
       : false,
+    attemptedStarterTaskIds,
   });
 }
 
@@ -417,6 +432,39 @@ async function hasSuccessfulSetupSessionTaskLaunch(
   return Boolean(run);
 }
 
+async function readSetupStarterLaunchAttempts(
+  conversation: SetupSessionConversation | null | undefined,
+  selectedAt: string,
+): Promise<SetupStarterTaskId[]> {
+  if (!conversation) return [];
+  const rows = await db
+    .select({ payload: fastAgentMessages.payload })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversation.fastConversationId),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.ToolCall),
+        gte(fastAgentMessages.ts, new Date(selectedAt).getTime()),
+      ),
+    );
+  const attempted = new Set<SetupStarterTaskId>();
+  for (const { payload } of rows) {
+    if (payload?.toolName !== 'launch_task') continue;
+    const rawInput = payload.rawInput;
+    if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput))
+      continue;
+    const args = (rawInput as Record<string, unknown>).arguments;
+    if (!args || typeof args !== 'object' || Array.isArray(args)) continue;
+    const prompt = (args as Record<string, unknown>).prompt;
+    if (typeof prompt !== 'string') continue;
+    const task = SETUP_STARTER_TASKS.find(
+      (candidate) => candidate.prompt === prompt,
+    );
+    if (task) attempted.add(task.id);
+  }
+  return [...attempted];
+}
+
 function deriveSetupRailMilestones(
   status: Awaited<ReturnType<typeof getSetupNewStatusCommand>>,
 ) {
@@ -436,6 +484,8 @@ function deriveSetupRailMilestones(
     : null;
   const computeReady = status.computeSetup.setupSatisfied;
   const sourceConnected = hasSynchronizedSourceControl(status);
+  const sourceSkipped =
+    !sourceConnected && Boolean(setupSession?.sourceControlSkippedAt);
 
   return {
     account: 'ready' as const,
@@ -447,11 +497,15 @@ function deriveSetupRailMilestones(
       : provisioning?.status === 'building'
         ? ('preparing' as const)
         : ('pending' as const),
-    source: sourceConnected ? ('ready' as const) : ('pending' as const),
+    source: sourceConnected
+      ? ('ready' as const)
+      : sourceSkipped
+        ? ('skipped' as const)
+        : ('pending' as const),
     firstWork: setupSession?.starterTaskSelection
       ? ('ready' as const)
       : ('pending' as const),
-    open: !sourceConnected,
+    open: !sourceConnected && !sourceSkipped,
   };
 }
 
@@ -489,6 +543,9 @@ async function buildSetupPlatformEventTurn(
   const setupSnapshot =
     prepared?.setupSnapshot ?? (await resolveSetupSnapshot(auth));
   const setupContext = buildSetupTurnContext(conversation, setupSnapshot);
+  const launchTask = (
+    await import('@roomote/cloud-agents/server')
+  ).createFastAgentWebTaskLauncher({ userId: auth.userId });
   const currentMessageId = buildSetupEventTurnId({
     sessionId: conversation.sessionId,
     workflowVersion: conversation.workflowVersion,
@@ -507,11 +564,22 @@ async function buildSetupPlatformEventTurn(
         createArtifact: buildFastAgentArtifactCreator(
           conversation.fastConversationId,
         ),
-        launchTask: (
-          await import('@roomote/cloud-agents/server')
-        ).createFastAgentWebTaskLauncher({
-          userId: auth.userId,
-        }),
+        launchTask: async (launchInput) => {
+          try {
+            return await launchTask(launchInput);
+          } finally {
+            try {
+              await attemptSetupCompletionAfterStarterLaunch(
+                auth,
+                conversation,
+              );
+            } catch (error) {
+              console.error(
+                `[Setup] Failed to reconcile completion after a starter launch: ${formatErrorForLog(error)}`,
+              );
+            }
+          }
+        },
         postReply: async () => {},
       },
     },
@@ -554,9 +622,6 @@ export async function reconcileSetupPlatformEvents(
   const conversation =
     options.conversation ?? (await findSetupSessionConversation(auth));
   if (!conversation) return status.setupCompletedAt != null;
-  const setupCompleted =
-    status.setupCompletedAt != null ||
-    (await completeConversationalSetupIfReady(auth, status));
   const hasSuccessfulStarterLaunch = setupSession.starterTaskSelection
     ? await hasSuccessfulSetupSessionTaskLaunch(
         auth,
@@ -564,15 +629,29 @@ export async function reconcileSetupPlatformEvents(
         conversation,
       )
     : false;
+  const attemptedStarterTaskIds = setupSession.starterTaskSelection
+    ? await readSetupStarterLaunchAttempts(
+        conversation,
+        setupSession.starterTaskSelection.selectedAt,
+      )
+    : [];
   const integrationDiscovery = await readSetupIntegrationDiscovery(
     auth,
     {},
     conversation,
   );
+  const setupCompleted =
+    status.setupCompletedAt != null ||
+    (await completeConversationalSetupIfReady(
+      auth,
+      status,
+      attemptedStarterTaskIds,
+    ));
   const setupSnapshot = buildSetupSnapshot({
     status,
     hasSuccessfulStarterLaunch,
     integrationDiscovery,
+    attemptedStarterTaskIds,
   });
 
   const connected = status.sourceControlSetup.providers.filter(
@@ -609,6 +688,21 @@ export async function reconcileSetupPlatformEvents(
             repositoryCount: provider.repositoryCount ?? 0,
           })),
         },
+      },
+      conversation,
+    );
+  } else if (setupSession.sourceControlSkippedAt) {
+    await persistSetupSessionReceipt(
+      auth,
+      {
+        kind: 'source_skipped',
+        fingerprint: setupSession.sourceControlSkippedAt,
+        presentation: {
+          label: 'Skipped source control',
+          iconKey: 'git-branch',
+        },
+        text: 'Skipped source control.',
+        payload: {},
       },
       conversation,
     );
@@ -674,11 +768,21 @@ export async function reconcileSetupPlatformEvents(
         })),
       },
     });
+  } else if (setupSession.sourceControlSkippedAt) {
+    events.push({
+      kind: 'source_skipped',
+      fingerprint: setupSession.sourceControlSkippedAt,
+      payload: { skippedAt: setupSession.sourceControlSkippedAt },
+    });
   }
   // The source-connection turn may already have closed without requesting the
   // trusted starter choices. A dedicated, stable event both owns that action
   // for new sessions and repairs existing sessions on their next reconcile.
-  if (synchronized.length > 0 && !setupSession.starterTaskSelection) {
+  if (
+    synchronized.length > 0 &&
+    integrationDiscovery.completed &&
+    !setupSession.starterTaskSelection
+  ) {
     events.push({
       kind: 'starter_request',
       fingerprint: `v${setupSession.workflowVersion}:setup_starter_tasks`,
@@ -695,7 +799,10 @@ export async function reconcileSetupPlatformEvents(
   // available without allowing a task to enter the queue with no worker
   // backend. A later compute save/provisioning completion re-runs reconciliation
   // and emits this same event once the provider is ready.
-  if (setupSession.starterTaskSelection && status.computeSetup.setupSatisfied) {
+  if (
+    setupSession.starterTaskSelection?.taskIds.length &&
+    status.computeSetup.setupSatisfied
+  ) {
     events.push({
       kind: 'starter_selection',
       fingerprint: setupSession.starterTaskSelection.requestId,
@@ -711,7 +818,9 @@ export async function reconcileSetupPlatformEvents(
     });
   }
   if (
-    hasSuccessfulStarterLaunch &&
+    synchronized.length > 0 &&
+    integrationDiscovery.completed &&
+    setupSession.starterTaskSelection &&
     state.automationRecommendations?.status === 'ready'
   ) {
     events.push({
@@ -786,6 +895,70 @@ export async function reconcileSetupPlatformEvents(
   );
   if (turn) scheduleWebFastAgentTurn(turn);
   return setupCompleted;
+}
+
+async function attemptSetupCompletionAfterStarterLaunch(
+  auth: UserAuthSuccess,
+  conversation: SetupSessionConversation,
+): Promise<void> {
+  const status = await getSetupNewStatusCommand(auth);
+  const setupSession = normalizeSetupNewSetupSession(
+    status.setupNewState.setupSession,
+  );
+  if (!setupSession?.starterTaskSelection) return;
+  const attemptedStarterTaskIds = await readSetupStarterLaunchAttempts(
+    conversation,
+    setupSession.starterTaskSelection.selectedAt,
+  );
+  await completeConversationalSetupIfReady(
+    auth,
+    status,
+    attemptedStarterTaskIds,
+  );
+}
+
+export async function skipSetupSourceControlCommand(
+  auth: UserAuthSuccess,
+  sessionId: string,
+): Promise<{ success: true }> {
+  assertAdmin(auth);
+  const conversation = await findSetupSessionConversation(auth);
+  if (!conversation || conversation.sessionId !== sessionId) {
+    throw new Error('This action does not belong to the setup Session.');
+  }
+
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${SETUP_SESSION_ADVISORY_LOCK}))`,
+    );
+    const [settings] = await tx
+      .select({ setupNewState: deploymentSettings.setupNewState })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, 'default'))
+      .limit(1);
+    const state = normalizeSetupNewState(settings?.setupNewState ?? {});
+    const setupSession = normalizeSetupNewSetupSession(state.setupSession);
+    if (!setupSession || setupSession.sessionId !== sessionId) {
+      throw new Error('This action does not belong to the setup Session.');
+    }
+    if (setupSession.sourceControlSkippedAt) return;
+    await tx
+      .update(deploymentSettings)
+      .set({
+        setupNewState: {
+          ...state,
+          setupSession: {
+            ...setupSession,
+            sourceControlSkippedAt: new Date().toISOString(),
+          },
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(deploymentSettings.id, 'default'));
+  });
+
+  await reconcileSetupPlatformEvents(auth, { conversation });
+  return { success: true };
 }
 
 export async function notifySetupSourceControlSynchronized(

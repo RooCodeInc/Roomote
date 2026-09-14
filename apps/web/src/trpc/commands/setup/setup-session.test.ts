@@ -49,6 +49,7 @@ import {
   reconcileSetupPlatformEvents,
   resolveSetupSessionTurnContext,
   scheduleSetupPlatformEvent,
+  skipSetupSourceControlCommand,
   submitSetupSessionUserInputCommand,
 } from './setup-session';
 
@@ -221,6 +222,8 @@ describe('optional setup integration discovery', () => {
       computeSetup: { setupSatisfied: false, providers: [] },
       sourceControlSetup: { setupSatisfied: false, providers: [] },
     }));
+    await skipSetupSourceControlCommand(auth, sessionId);
+    mocks.schedule.mockClear();
     const questions = await (
       await context()
     ).adapterExtensions.resolveUserInputPreset!('setup_integrations');
@@ -250,6 +253,73 @@ describe('optional setup integration discovery', () => {
         'setup_integrations',
       ),
     ).rejects.toThrow('already complete');
+  });
+
+  it('persists source decline, renders its receipt, wakes continuation, and suppresses repository offers', async () => {
+    mocks.getStatus.mockImplementation(async () => ({
+      setupNewState: await readState(),
+      setupCompletedAt: null,
+      modelSetup: { setupSatisfied: true },
+      computeSetup: { setupSatisfied: false, providers: [] },
+      sourceControlSetup: { setupSatisfied: false, providers: [] },
+    }));
+
+    await expect(
+      skipSetupSourceControlCommand(auth, sessionId),
+    ).resolves.toEqual({ success: true });
+
+    expect((await readState()).setupSession?.sourceControlSkippedAt).toEqual(
+      expect.any(String),
+    );
+    const messages = await db
+      .select({ payload: fastAgentMessages.payload })
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, conversationId));
+    expect(
+      messages.find(
+        ({ payload }) =>
+          (payload as { setupReceipt?: { kind?: string } } | null)?.setupReceipt
+            ?.kind === 'source_skipped',
+      )?.payload,
+    ).toMatchObject({
+      setupReceipt: {
+        presentation: {
+          label: 'Skipped source control',
+          iconKey: 'git-branch',
+        },
+      },
+    });
+    const event = JSON.parse(
+      mocks.schedule.mock.calls[0]![0].question.replace(
+        /<\/?platform_event>/g,
+        '',
+      ),
+    );
+    expect(event.snapshot.sourceControl.skipped).toBe(true);
+    expect(
+      event.changes.map((change: { type: string }) => change.type),
+    ).toEqual(['session_creation', 'source_skipped']);
+  });
+
+  it('treats synchronized repositories as superseding an earlier source decline', async () => {
+    await skipSetupSourceControlCommand(auth, sessionId);
+    mocks.schedule.mockClear();
+
+    await reconcileSetupPlatformEvents(auth);
+
+    const event = JSON.parse(
+      mocks.schedule.mock.calls[0]![0].question.replace(
+        /<\/?platform_event>/g,
+        '',
+      ),
+    );
+    expect(event.snapshot.sourceControl).toMatchObject({
+      repositoryCount: 1,
+      skipped: false,
+    });
+    expect(
+      event.changes.map((change: { type: string }) => change.type),
+    ).toEqual(['session_creation', 'source_connection']);
   });
 
   it('persists cancellation as an early skip and completes an empty final match server-side', async () => {
@@ -547,7 +617,7 @@ describe('optional setup integration discovery', () => {
           '',
         ),
       ).changes.map((change: { type: string }) => change.type),
-    ).toEqual(['session_creation', 'source_connection', 'starter_request']);
+    ).toEqual(['session_creation', 'source_connection']);
     await answeredCategory('documents', ['Notion']);
     mocks.schedule.mockClear();
     await reconcileSetupPlatformEvents(auth);
@@ -587,6 +657,47 @@ describe('optional setup integration discovery', () => {
         description: task.description,
       })),
     );
+  });
+
+  it('counts every selected launch call as attempted even when launches fail', async () => {
+    const state = await readState();
+    state.setupSession!.integrationDiscoveryCompletedAt =
+      '2026-01-01T00:00:00.000Z';
+    state.setupSession!.starterTaskSelection = {
+      requestId: 'starter-request',
+      taskIds: ['speed-up-ci', 'security-scan'],
+      selectedAt: new Date(Date.now() - 1_000).toISOString(),
+    };
+    await db
+      .update(deploymentSettings)
+      .set({ setupNewState: state })
+      .where(eq(deploymentSettings.id, 'default'));
+
+    await db.insert(fastAgentMessages).values(
+      SETUP_STARTER_TASKS.slice(0, 2).map((task, index) => ({
+        conversationId,
+        eventId: `launch:${index}`,
+        turnId: 'starter-launches',
+        turnSeq: index,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+        role: 'tool' as const,
+        ts: Date.now() + index,
+        source: 'web' as const,
+        payload: {
+          toolCallId: `launch:${index}`,
+          toolName: 'launch_task',
+          status: 'in_progress',
+          rawInput: { arguments: { prompt: task.prompt } },
+        },
+      })),
+    );
+
+    await reconcileSetupPlatformEvents(auth);
+
+    expect(mocks.complete).toHaveBeenCalledWith(auth, expect.anything(), [
+      'speed-up-ci',
+      'security-scan',
+    ]);
   });
 
   it('preserves old sessions without retroactively starting optional discovery', async () => {

@@ -14,6 +14,7 @@ vi.mock('@/lib/server/source-control', () => ({
 }));
 
 import type { UserAuthSuccess } from '@/types';
+import { createSetupNewSetupSession } from '@roomote/types';
 import {
   completeConversationalSetupIfReady,
   isConversationalSetupReadyForCompletion,
@@ -28,10 +29,30 @@ function buildStatus(
     computeReady?: boolean;
     sourceControlReady?: boolean;
     repositoryCount?: number;
+    sourceControlSkipped?: boolean;
+    integrationDiscoveryComplete?: boolean;
+    starterTaskIds?: Array<'speed-up-ci' | 'security-scan'> | null;
   } = {},
 ) {
+  const setupSession = createSetupNewSetupSession({ sessionId: 'session-1' });
+  setupSession.integrationDiscoveryCompletedAt =
+    overrides.integrationDiscoveryComplete === false
+      ? null
+      : '2026-01-01T00:00:00.000Z';
+  setupSession.sourceControlSkippedAt = overrides.sourceControlSkipped
+    ? '2026-01-01T00:00:00.000Z'
+    : null;
+  setupSession.starterTaskSelection =
+    overrides.starterTaskIds === null
+      ? null
+      : {
+          requestId: 'starter-request',
+          taskIds: overrides.starterTaskIds ?? [],
+          selectedAt: '2026-01-01T00:01:00.000Z',
+        };
   return {
     setupCompletedAt: overrides.setupCompletedAt ?? null,
+    setupNewState: { setupSession },
     modelSetup: { setupSatisfied: overrides.modelReady ?? true },
     computeSetup: { setupSatisfied: overrides.computeReady ?? true },
     sourceControlSetup: {
@@ -55,9 +76,12 @@ describe('completeConversationalSetupIfReady', () => {
     });
   });
 
-  it('completes setup once prerequisites and repository synchronization are ready without starter work', async () => {
+  it('completes synchronized setup after an empty starter decision without a sandbox', async () => {
     await expect(
-      completeConversationalSetupIfReady(auth, buildStatus()),
+      completeConversationalSetupIfReady(
+        auth,
+        buildStatus({ computeReady: false }),
+      ),
     ).resolves.toBe(true);
 
     expect(completeSetupCommandMock).toHaveBeenCalledOnce();
@@ -73,9 +97,8 @@ describe('completeConversationalSetupIfReady', () => {
 
   it.each([
     ['inference', { modelReady: false }],
-    ['compute', { computeReady: false }],
-    ['source-control configuration', { sourceControlReady: false }],
-    ['repository synchronization', { repositoryCount: 0 }],
+    ['integration discovery', { integrationDiscoveryComplete: false }],
+    ['starter decision', { starterTaskIds: null }],
     [
       'an already completed deployment',
       { setupCompletedAt: new Date('2026-01-01T00:00:00.000Z') },
@@ -90,4 +113,42 @@ describe('completeConversationalSetupIfReady', () => {
       expect(completeSetupCommandMock).not.toHaveBeenCalled();
     },
   );
+
+  it('completes the no-source path after source and integration skips without a sandbox', () => {
+    expect(
+      isConversationalSetupReadyForCompletion(
+        buildStatus({
+          computeReady: false,
+          sourceControlReady: false,
+          repositoryCount: 0,
+          sourceControlSkipped: true,
+          starterTaskIds: null,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('waits for sandbox readiness and every selected launch attempt', () => {
+    const status = buildStatus({
+      computeReady: false,
+      starterTaskIds: ['speed-up-ci', 'security-scan'],
+    });
+    expect(
+      isConversationalSetupReadyForCompletion(status, [
+        'speed-up-ci',
+        'security-scan',
+      ]),
+    ).toBe(false);
+
+    status.computeSetup.setupSatisfied = true;
+    expect(
+      isConversationalSetupReadyForCompletion(status, ['speed-up-ci']),
+    ).toBe(false);
+    expect(
+      isConversationalSetupReadyForCompletion(status, [
+        'speed-up-ci',
+        'security-scan',
+      ]),
+    ).toBe(true);
+  });
 });

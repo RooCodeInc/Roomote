@@ -147,7 +147,7 @@ export default async function SessionDetailPage({
       <div className="space-y-3" key="setup-timeline-extras">
         <SetupSessionSourceControlCard sessionId={unifiedSession.id} />
         <SetupSandboxCard />
-        <SetupAutomationRecommendationsCard sessionId={unifiedSession.id} />
+        <SetupAutomationRecommendationsCard />
       </div>
     ) : null;
     return (

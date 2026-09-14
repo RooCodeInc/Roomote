@@ -2,7 +2,11 @@ import { render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 const { state, fetchQueryMock } = vi.hoisted(() => ({
-  state: { computeReady: false },
+  state: {
+    computeReady: false,
+    repositoryCount: 1,
+    starterTaskIds: [] as string[],
+  },
   fetchQueryMock: vi.fn(),
 }));
 
@@ -33,7 +37,16 @@ vi.mock('@tanstack/react-query', () => ({
         setupSatisfied: state.computeReady,
         selectedProvider: null,
       },
-      setupNewState: { setupSession: { starterTaskSelection: null } },
+      setupNewState: {
+        setupSession: {
+          starterTaskSelection: { taskIds: state.starterTaskIds },
+        },
+      },
+      sourceControlSetup: {
+        providers: [
+          { connected: true, repositoryCount: state.repositoryCount },
+        ],
+      },
     },
   }),
   useQueryClient: () => ({
@@ -71,19 +84,36 @@ describe('SetupSandboxCard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.computeReady = false;
+    state.repositoryCount = 1;
+    state.starterTaskIds = [];
   });
 
-  it('offers sandbox setup before optional starter work is selected', () => {
+  it('stays hidden before starter work is selected', () => {
     render(<SetupSandboxCard />);
 
-    expect(
-      screen.getByRole('heading', { name: 'I need a sandbox to run tasks' }),
-    ).toBeInTheDocument();
+    expect(screen.queryByText('Sandbox provider picker')).toBeNull();
+  });
+
+  it('offers sandbox setup after coding work is selected', () => {
+    state.starterTaskIds = ['speed-up-ci'];
+
+    render(<SetupSandboxCard />);
+
     expect(screen.getByText('Sandbox provider picker')).toBeInTheDocument();
+  });
+
+  it('stays hidden without synchronized repositories', () => {
+    state.starterTaskIds = ['speed-up-ci'];
+    state.repositoryCount = 0;
+
+    render(<SetupSandboxCard />);
+
+    expect(screen.queryByText('Sandbox provider picker')).toBeNull();
   });
 
   it('stays hidden once compute setup is ready', () => {
     state.computeReady = true;
+    state.starterTaskIds = ['speed-up-ci'];
 
     render(<SetupSandboxCard />);
 

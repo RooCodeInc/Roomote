@@ -332,6 +332,7 @@ import {
   notifySetupSourceControlSynchronized,
   persistSetupRecommendationApplicationReceipt,
   reconcileSetupPlatformEvents,
+  skipSetupSourceControlCommand,
   submitSetupSessionUserInputCommand,
 } from '../commands/setup/setup-session';
 import { SETUP_STARTER_TASK_IDS } from '@/lib/setup-starter-tasks';
@@ -2706,6 +2707,12 @@ export const appRouter = createRouter({
     sessionStatus: protectedProcedure.query(({ ctx: { auth } }) =>
       getSetupSessionStatusCommand(auth),
     ),
+
+    skipSourceControl: protectedProcedure
+      .input(z.object({ sessionId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        skipSetupSourceControlCommand(auth, input.sessionId),
+      ),
 
     submitSessionUserInput: protectedProcedure
       .input(

@@ -41,11 +41,12 @@ sudo bash install.sh
 
 The installer brings up the full production stack from published GHCR images
 and prints a setup link like
-`https://roomote.203-0-113-7.sslip.io/setup?token=...`. Open it in a browser
-and the setup wizard walks through everything else: sign-in provider, GitHub
-App (created for you via GitHub's manifest flow), model provider and API key,
-Slack, repositories, and a first task. Nothing else needs to be edited on the
-server.
+`https://roomote.203-0-113-7.sslip.io/setup?token=...`. Open it in a browser to
+configure sign-in and inference. Roomote then continues in a persistent setup
+conversation: source control is optional, integrations are offered after that
+decision, and repository-based starter work and automations appear only after
+repositories synchronize. A sandbox provider is required only when selected
+coding work needs to launch. Nothing else needs to be edited on the server.
 
 What the script does:
 

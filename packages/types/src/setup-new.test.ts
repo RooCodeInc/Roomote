@@ -30,6 +30,9 @@ describe('setup-session metadata', () => {
     expect(
       normalizeSetupNewSetupSession(session)?.integrationDiscoveryCompletedAt,
     ).toBeNull();
+    expect(
+      normalizeSetupNewSetupSession(session)?.sourceControlSkippedAt,
+    ).toBeNull();
     const completedAt = '2026-09-09T12:00:00.000Z';
     expect(
       normalizeSetupNewSetupSession({
@@ -40,6 +43,10 @@ describe('setup-session metadata', () => {
     const { integrationDiscoveryCompletedAt: _, ...legacy } = session;
     expect(normalizeSetupNewSetupSession(legacy)).not.toHaveProperty(
       'integrationDiscoveryCompletedAt',
+    );
+    const { sourceControlSkippedAt: __, ...olderSession } = session;
+    expect(normalizeSetupNewSetupSession(olderSession)).not.toHaveProperty(
+      'sourceControlSkippedAt',
     );
   });
   it('normalizes state without setup-session metadata to null', () => {
@@ -70,6 +77,31 @@ describe('setup-session metadata', () => {
       requestId: 'request-1',
       taskIds: ['speed-up-ci', 'address-todos'],
       selectedAt: '2026-08-29T00:01:00.000Z',
+    });
+  });
+
+  it('preserves empty starter selections and source-control declines', () => {
+    const selectedAt = '2026-08-29T00:01:00.000Z';
+    const sourceControlSkippedAt = '2026-08-29T00:00:30.000Z';
+    const normalized = normalizeSetupNewSetupSession({
+      workflowVersion: 1,
+      sessionId: 'abc',
+      startedAt: '2026-08-29T00:00:00.000Z',
+      sourceControlSkippedAt,
+      starterTaskSelection: {
+        requestId: 'request-1',
+        taskIds: [],
+        selectedAt,
+      },
+    });
+
+    expect(normalized).toMatchObject({
+      sourceControlSkippedAt,
+      starterTaskSelection: {
+        requestId: 'request-1',
+        taskIds: [],
+        selectedAt,
+      },
     });
   });
 

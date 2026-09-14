@@ -15,8 +15,8 @@ import { SetupSessionActionCard } from './SetupSessionActionCard';
 /**
  * Inline sandbox setup for the conversational setup session. Runtime/env-var
  * configured providers make the compute status ready and therefore never show
- * this card. Otherwise, this trusted provider/configuration UI remains
- * available before or after the administrator optionally selects starter work.
+ * this card. Otherwise, this trusted provider/configuration UI appears only
+ * after the administrator selects coding work that needs to launch.
  */
 export function SetupSandboxCard() {
   const trpc = useTRPC();
@@ -43,6 +43,12 @@ export function SetupSandboxCard() {
 
   const computeSetup = statusQuery.data?.computeSetup;
   const computeReady = computeSetup?.setupSatisfied === true;
+  const selectedStarterTaskIds =
+    statusQuery.data?.setupNewState.setupSession?.starterTaskSelection?.taskIds;
+  const hasSynchronizedRepository =
+    statusQuery.data?.sourceControlSetup.providers.some(
+      (provider) => provider.connected && (provider.repositoryCount ?? 0) > 0,
+    );
 
   // A provisioning completion can make the card disappear on the next status
   // poll. Fetching sessionStatus here ensures that poll also reconciles and
@@ -52,7 +58,12 @@ export function SetupSandboxCard() {
     void queryClient.fetchQuery(trpc.setup.sessionStatus.queryOptions());
   }, [computeReady, queryClient, trpc.setup.sessionStatus]);
 
-  if (!computeSetup || computeReady) {
+  if (
+    !computeSetup ||
+    computeReady ||
+    !hasSynchronizedRepository ||
+    !selectedStarterTaskIds?.length
+  ) {
     return null;
   }
 
