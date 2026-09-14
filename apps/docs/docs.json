@@ -42,12 +42,7 @@
     "groups": [
       {
         "group": "Getting started",
-        "pages": [
-          "index",
-          "self-hosting",
-          "homelab",
-          "use-chatgpt-subscription"
-        ]
+        "pages": ["index", "self-hosting", "homelab"]
       },
       {
         "group": "Using Roomote",
