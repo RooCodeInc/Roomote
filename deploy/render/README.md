@@ -112,7 +112,7 @@ Both published images (`ghcr.io/roocodeinc/roomote-app` and
 `ghcr.io/roocodeinc/roomote-worker`) are public. Render pulls the app image
 anonymously, and hosted sandbox providers (Modal's remote builder,
 E2B/Daytona worker builds) pull the worker image anonymously; no registry
-credentials are needed. MinIO comes from Docker Hub.
+credentials are needed. MinIO is pulled anonymously from Quay (`quay.io/minio`).
 
 ## Image channel and versions
 
@@ -147,7 +147,7 @@ deliberately, ideally right after a disk backup.
 | -------------------- | --------- | ---------------------------- | ------------------------- | -------------------- |
 | `roomote-postgres`   | Postgres  | Render managed PostgreSQL 17 | no                        | managed              |
 | `roomote-redis`      | Key Value | Render managed (Redis API)   | no (empty `ipAllowList`)  | managed              |
-| `roomote-minio`      | web       | `minio/minio` + disk `/data` | yes (routed to port 9000) | `/minio/health/live` |
+| `roomote-minio`      | web       | `quay.io/minio/minio` + disk `/data` | yes (routed to port 9000) | `/minio/health/live` |
 | `roomote-gbrain`     | pserv     | `roomote-gbrain:main` + disk `/data` | no (private network only) | —                    |
 | `roomote-api`        | web       | `roomote-app:main`           | yes                       | `/health/liveness`   |
 | `roomote-web`        | web       | `roomote-app:main`           | yes                       | `/health`            |
