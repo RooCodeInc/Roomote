@@ -13,6 +13,7 @@ const {
   mockPullRequestFacts,
   mockReleaseFastEvents,
   mockRunBrainCollectors,
+  mockRequestHomeComposerPrecompute,
 } = vi.hoisted(() => ({
   mockResolveConnection: vi.fn(),
   mockIsBrainEmbeddingAvailable: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockPullRequestFacts: vi.fn(),
   mockReleaseFastEvents: vi.fn(),
   mockRunBrainCollectors: vi.fn(),
+  mockRequestHomeComposerPrecompute: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/server', async (importOriginal) => ({
@@ -34,6 +36,8 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
   resolveBrainConnection: mockResolveConnection,
   isBrainEmbeddingAvailable: mockIsBrainEmbeddingAvailable,
+  requestHomeComposerRecommendationPrecomputeForRun:
+    mockRequestHomeComposerPrecompute,
 }));
 
 vi.mock('@roomote/db/server', async (importOriginal) => {
@@ -100,7 +104,35 @@ import {
   postToBrain,
   redactBrainText,
   summarizePullRequestOutcome,
+  requestHomeComposerPrecomputeAfterMemorySettlement,
 } from '../brain-outbox-drain';
+
+describe('Home recommendation precompute trigger', () => {
+  it('requests work only after revision-fenced successful settlement', async () => {
+    mockRequestHomeComposerPrecompute.mockResolvedValue(undefined);
+
+    requestHomeComposerPrecomputeAfterMemorySettlement(1, 'superseded');
+    expect(mockRequestHomeComposerPrecompute).not.toHaveBeenCalled();
+
+    requestHomeComposerPrecomputeAfterMemorySettlement(2, 'settled');
+    expect(mockRequestHomeComposerPrecompute).toHaveBeenCalledWith(2);
+  });
+
+  it('does not surface precompute request failures to memory ingestion', async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => {});
+    mockRequestHomeComposerPrecompute.mockRejectedValue(
+      new Error('queue unavailable'),
+    );
+
+    expect(() =>
+      requestHomeComposerPrecomputeAfterMemorySettlement(2, 'settled'),
+    ).not.toThrow();
+    await vi.waitFor(() => expect(consoleWarnSpy).toHaveBeenCalled());
+    consoleWarnSpy.mockRestore();
+  });
+});
 
 describe('PR fact resume cursor', () => {
   const state = {

@@ -14,6 +14,7 @@ import {
   eq,
   tasks,
   taskRuns,
+  users,
   taskFactory,
   userFactory,
   automations,
@@ -40,6 +41,9 @@ import {
   listBrainCollectorItemsBefore,
   listBrainCollectorItemsBySlugPrefix,
   listRecentUserTaskMemoryRuns,
+  listEligibleUserTaskMemoryRuns,
+  findHomeComposerPrecomputeUserForRun,
+  isHomeComposerSuggestionsEnabled,
   seedBrainCollectorItems,
   upsertBrainCollectorItems,
   upsertBrainSyncState,
@@ -212,6 +216,53 @@ describe('listRecentUserTaskMemoryRuns', () => {
     await expect(
       listRecentUserTaskMemoryRuns(db, { userId: owner.id, limit: 1 }),
     ).resolves.toHaveLength(1);
+
+    await expect(
+      listEligibleUserTaskMemoryRuns(db, {
+        userId: owner.id,
+        runIds: [newerOwned.id, otherOwned.id, hiddenOwned.id],
+      }),
+    ).resolves.toEqual([
+      {
+        taskId: newerOwned.taskId,
+        runId: newerOwned.id,
+        completedAt: new Date('2026-09-12T12:00:00Z'),
+        memoryRevision: 0,
+      },
+    ]);
+
+    expect(await isHomeComposerSuggestionsEnabled(db, owner.id)).toBe(false);
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, newerOwned.id),
+    ).toBeNull();
+
+    await db
+      .update(users)
+      .set({ metadata: { home_composer_suggestions_enabled: true } })
+      .where(eq(users.id, owner.id));
+
+    expect(await isHomeComposerSuggestionsEnabled(db, owner.id)).toBe(true);
+    expect(await findHomeComposerPrecomputeUserForRun(db, newerOwned.id)).toBe(
+      owner.id,
+    );
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, automation.id),
+    ).toBeNull();
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, ownerAttributedSystem.id),
+    ).toBeNull();
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, hiddenOwned.id),
+    ).toBeNull();
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, deletedOwned.id),
+    ).toBeNull();
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, pendingOwned.id),
+    ).toBeNull();
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, otherOwned.id),
+    ).toBeNull();
   });
 });
 
