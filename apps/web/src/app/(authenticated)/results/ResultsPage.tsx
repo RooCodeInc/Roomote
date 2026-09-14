@@ -112,7 +112,7 @@ function ResultContent({ result }: { result: ResultInboxItem }) {
   }, [expanded]);
 
   return (
-    <div className="relative min-w-0">
+    <div className="min-w-0">
       <div
         ref={contentRef}
         data-testid={`result-content-${result.id}`}
@@ -129,7 +129,7 @@ function ResultContent({ result }: { result: ResultInboxItem }) {
       {truncated && !expanded ? (
         <button
           type="button"
-          className="absolute right-0 bottom-0 bg-card pl-2 text-sm font-medium text-primary underline underline-offset-2 hover:text-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className="mt-0.5 block cursor-pointer bg-transparent text-sm font-medium text-primary underline underline-offset-2 hover:text-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           onClick={(event) => {
             event.stopPropagation();
             setExpanded(true);
