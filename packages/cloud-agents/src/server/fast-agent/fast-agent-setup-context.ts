@@ -3,6 +3,7 @@ import {
   normalizeSetupNewState,
   normalizeSetupNewSetupSession,
   SETUP_INTEGRATIONS,
+  SETUP_INTEGRATION_RECOMMENDATIONS,
   SETUP_INTEGRATIONS_CONTINUE_OPTION,
   SETUP_INTEGRATIONS_QUESTION_ID,
   matchSetupIntegrationAnswers,
@@ -108,10 +109,15 @@ export function buildFastAgentSetupAdapter(
         const suppliedMatches = matchSetupIntegrationAnswers(
           setupIntegrationAnswers ?? {},
         ).matchedIntegrationIds;
-        const matchedIds = new Set([
+        const suppliedOrPersistedIds = [
           ...(snapshot.integrationDiscovery?.matchedIntegrationIds ?? []),
           ...suppliedMatches,
-        ]);
+        ];
+        const matchedIds = new Set(
+          suppliedOrPersistedIds.length > 0
+            ? suppliedOrPersistedIds
+            : SETUP_INTEGRATION_RECOMMENDATIONS,
+        );
         const options = SETUP_INTEGRATIONS.filter((integration) =>
           matchedIds.has(integration.id),
         ).map((integration) => ({

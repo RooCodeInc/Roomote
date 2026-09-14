@@ -67,6 +67,15 @@ export const SETUP_INTEGRATIONS = [
       : [];
   });
 
+/** The compact, high-signal connector list offered during first-run setup. */
+export const SETUP_INTEGRATION_RECOMMENDATIONS = [
+  'notion',
+  'sentry',
+  'linear',
+  'jira',
+  'vercel',
+] as const satisfies readonly SetupIntegrationId[];
+
 const setupIntegrationCategories = [
   {
     id: 'documents',
