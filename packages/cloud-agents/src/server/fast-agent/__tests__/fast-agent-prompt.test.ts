@@ -513,6 +513,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Existing active tasks do not block');
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain(
+      'call `roomote_get_about_me` with operation `overview` before answering',
+    );
+    expect(prompt).toContain(
+      'Do not substitute a generic software-assistant capability list',
+    );
+    expect(prompt).toContain(
       "use that task's known ID with `manage_tasks` `get_summary` to recover its stable image artifact IDs and viewer links",
     );
     expect(prompt).toContain(
