@@ -9,6 +9,7 @@ import {
   eq,
   getSessionForTask,
   gt,
+  isNotNull,
   isNull,
   lt,
   ne,
@@ -703,7 +704,6 @@ async function findLatestSessionAttentionDelivery(
       channelId: sessionAttentionNotificationMessages.channelId,
       messageId: sessionAttentionNotificationMessages.messageId,
       threadId: sessionAttentionNotificationMessages.threadId,
-      fastMessageId: sessionAttentionNotificationMessages.fastMessageId,
     })
     .from(sessionAttentionNotificationMessages)
     .innerJoin(
@@ -725,18 +725,43 @@ async function findLatestSessionAttentionDelivery(
       desc(sessionAttentionNotificationMessages.createdAt),
     )
     .limit(1);
-  return delivery
-    ? {
-        receipt: {
-          provider: delivery.provider,
-          workspaceId: delivery.workspaceId,
-          channelId: delivery.channelId,
-          messageId: delivery.messageId,
-          ...(delivery.threadId ? { threadId: delivery.threadId } : {}),
-        },
-        fastMessageId: delivery.fastMessageId,
-      }
-    : null;
+  if (!delivery) return null;
+
+  const [coverage] = await executor
+    .select({
+      fastMessageId: sessionAttentionNotificationMessages.fastMessageId,
+    })
+    .from(sessionAttentionNotificationMessages)
+    .innerJoin(
+      sessionAttentionNotifications,
+      eq(
+        sessionAttentionNotifications.id,
+        sessionAttentionNotificationMessages.notificationId,
+      ),
+    )
+    .where(
+      and(
+        eq(sessionAttentionNotifications.sessionId, input.sessionId),
+        eq(sessionAttentionNotifications.userId, input.userId),
+        eq(sessionAttentionNotifications.outcome, 'delivered'),
+        isNotNull(sessionAttentionNotificationMessages.fastMessageId),
+      ),
+    )
+    .orderBy(
+      desc(sessionAttentionNotifications.updatedAt),
+      desc(sessionAttentionNotificationMessages.createdAt),
+    )
+    .limit(1);
+  return {
+    receipt: {
+      provider: delivery.provider,
+      workspaceId: delivery.workspaceId,
+      channelId: delivery.channelId,
+      messageId: delivery.messageId,
+      ...(delivery.threadId ? { threadId: delivery.threadId } : {}),
+    },
+    fastMessageId: coverage?.fastMessageId ?? null,
+  };
 }
 
 export async function findLatestSessionAttentionReceipt(input: {

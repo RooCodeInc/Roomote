@@ -715,6 +715,102 @@ describe('session attention notifications', () => {
     );
   });
 
+  it('retains Fast coverage when a direct task notification becomes the latest thread receipt', async () => {
+    const { conversation, session, user } = await createFastWebSession();
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+      surface: 'web',
+      prompt: 'Run the direct task.',
+    });
+    const run = await runFactory.create({ taskId: task.id });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'direct_launch',
+    });
+    let receiptIndex = 0;
+    mocks.send.mockImplementation(async () => ({
+      deliveredProviders: ['slack'],
+      receipts: [
+        {
+          provider: 'slack',
+          workspaceId: 'T1',
+          channelId: 'D1',
+          messageId: `mixed-notification-${++receiptIndex}`,
+          threadId: 'thread-1',
+        },
+      ],
+    }));
+    await insertFastMessage({
+      conversationId: conversation.id,
+      eventId: 'turn-1:assistant:0',
+      turnId: 'turn-1',
+      turnSeq: 1,
+      ts: 2_000,
+      role: 'assistant',
+      text: 'First Fast response.',
+      purpose: 'closeout',
+    });
+    await notifyFastWebSessionAttention({
+      fastConversationId: conversation.id,
+      kind: 'result_ready',
+      eventId: 'turn-1',
+      message: 'First Fast response.',
+      manual: true,
+    });
+    await notifyDirectWebTaskAttention({
+      runId: run.id,
+      kind: 'result_ready',
+      eventId: 'direct-completion',
+      message: 'Direct task response.',
+    });
+    await insertFastMessage({
+      conversationId: conversation.id,
+      eventId: 'turn-2:user',
+      turnId: 'turn-2',
+      turnSeq: 0,
+      ts: 3_000,
+      role: 'user',
+      text: 'Continue on the web.',
+    });
+    await insertFastMessage({
+      conversationId: conversation.id,
+      eventId: 'turn-2:assistant:0',
+      turnId: 'turn-2',
+      turnSeq: 1,
+      ts: 4_000,
+      role: 'assistant',
+      text: 'Second Fast response.',
+      purpose: 'closeout',
+    });
+
+    await notifyFastWebSessionAttention({
+      fastConversationId: conversation.id,
+      kind: 'result_ready',
+      eventId: 'turn-2',
+      message: 'Second Fast response.',
+      manual: true,
+    });
+
+    expect(mocks.send).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        replyAnchor: expect.objectContaining({
+          messageId: 'mixed-notification-2',
+          threadId: 'thread-1',
+        }),
+        replyPresentation: {
+          sessionId: session.id,
+          continuation: expect.objectContaining({
+            omittedMessageCount: 1,
+            latestUserMessage: expect.objectContaining({
+              text: 'Continue on the web.',
+            }),
+          }),
+        },
+      }),
+    );
+  });
+
   it('bridges a web request before a structured input notification', async () => {
     const { conversation, session } = await createFastWebSession();
     await insertFastMessage({
