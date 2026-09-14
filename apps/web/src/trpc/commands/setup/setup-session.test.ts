@@ -214,7 +214,7 @@ describe('optional setup integration discovery', () => {
     await db.delete(users).where(eq(users.id, auth.userId));
   });
 
-  it('completes zero-match discovery server-side without a browser response', async () => {
+  it('offers the compact recommended integrations without a discovery questionnaire', async () => {
     mocks.getStatus.mockImplementation(async () => ({
       setupNewState: await readState(),
       setupCompletedAt: null,
@@ -227,32 +227,19 @@ describe('optional setup integration discovery', () => {
     const questions = await (
       await context()
     ).adapterExtensions.resolveUserInputPreset!('setup_integrations');
-    expect(questions).toEqual([]);
-    expect(mocks.schedule).toHaveBeenCalledOnce();
-    expect(mocks.schedule).toHaveBeenCalledWith(
-      expect.objectContaining({
-        platformEventKind: 'setup',
-        setupSession: true,
-      }),
-    );
+    expect(questions).toHaveLength(1);
+    expect(questions[0]?.options?.map((option) => option.id)).toEqual([
+      'notion',
+      'sentry',
+      'linear',
+      'jira',
+      'vercel',
+      'continue',
+    ]);
+    expect(mocks.schedule).not.toHaveBeenCalled();
     expect(
       (await readState()).setupSession?.integrationDiscoveryCompletedAt,
-    ).toEqual(expect.any(String));
-    expect((await readState()).setupSession?.starterTaskSelection).toBeNull();
-    expect(
-      JSON.parse((await context()).setupSnapshot).integrationDiscovery
-        .completed,
-    ).toBe(true);
-    const responses = await db
-      .select()
-      .from(fastAgentMessages)
-      .where(eq(fastAgentMessages.eventId, 'event:integrations:response'));
-    expect(responses).toHaveLength(0);
-    await expect(
-      (await context()).adapterExtensions.resolveUserInputPreset!(
-        'setup_integrations',
-      ),
-    ).rejects.toThrow('already complete');
+    ).toBeNull();
   });
 
   it('persists source decline, renders its receipt, wakes continuation, and suppresses repository offers', async () => {
