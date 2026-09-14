@@ -37,8 +37,9 @@ export type BudgetedCommunicationChannelMessagesPayload =
 
 /**
  * Keep the newest messages that fit the budget. The messages arrive oldest
- * first, so the oldest are dropped first; the response names the oldest
- * message that survived so the caller can page further back with `latest`.
+ * first, so the oldest are dropped first; the response names the newest
+ * message that was dropped so the caller can page further back with
+ * `latest` (inclusive on both providers) without repeating what it has.
  */
 export function applyChannelMessagesResultBudget(
   payload: CommunicationChannelMessagesPayload,
@@ -67,15 +68,15 @@ export function applyChannelMessagesResultBudget(
     subset: CommunicationLookupMessage[],
   ): BudgetedCommunicationChannelMessagesPayload => {
     const omitted = messages.length - subset.length;
-    const oldestKept = subset[0];
+    const newestOmitted = messages[omitted - 1];
     return {
       ...payload,
       messageCount: subset.length,
       messages: subset,
       truncated: true,
       omittedMessageCount: omitted,
-      ...(oldestKept ? { nextLatest: oldestKept.id } : {}),
-      note: `Result truncated to the newest ${subset.length} of ${messages.length} messages in the requested range. To read older messages, call again with latest set to nextLatest and the same oldest.`,
+      ...(newestOmitted ? { nextLatest: newestOmitted.id } : {}),
+      note: `Result truncated to the newest ${subset.length} of ${messages.length} messages in the requested range. To read the older messages, call again with latest set to nextLatest and the same oldest; that page will not repeat any message returned here.`,
     };
   };
 

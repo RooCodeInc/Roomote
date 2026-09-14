@@ -297,7 +297,9 @@ describe('lookupCommunicationChannelMessages', () => {
     expect(result.truncated).toBe(true);
     expect(result.messages.length).toBeLessThan(messages.length);
     expect(result.messages.at(-1)?.id).toBe(messages.at(-1)?.ts);
-    expect(result.nextLatest).toBe(result.messages[0]?.id);
+    expect(result.nextLatest).toBe(
+      messages[messages.length - result.messages.length - 1]?.ts,
+    );
     expect(result.omittedMessageCount).toBe(
       messages.length - result.messages.length,
     );

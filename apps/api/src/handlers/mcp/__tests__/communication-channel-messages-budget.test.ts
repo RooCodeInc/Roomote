@@ -48,7 +48,12 @@ describe('applyChannelMessagesResultBudget', () => {
       messages.length - result.messages.length,
     );
     expect(result.messages.at(-1)).toEqual(messages.at(-1));
-    expect(result.nextLatest).toBe(result.messages[0]!.id);
+    expect(result.nextLatest).toBe(
+      messages[messages.length - result.messages.length - 1]!.id,
+    );
+    expect(result.messages.map(({ id }) => id)).not.toContain(
+      result.nextLatest,
+    );
     expect(result.note).toContain('nextLatest');
     expect(JSON.stringify(result, null, 2).length).toBeLessThanOrEqual(
       CHANNEL_MESSAGES_RESULT_BUDGET_CHARS,
@@ -75,5 +80,6 @@ describe('applyChannelMessagesResultBudget', () => {
 
     expect(result.messages).toEqual([message(2, 5_000)]);
     expect(result.omittedMessageCount).toBe(1);
+    expect(result.nextLatest).toBe(message(1, 5_000).id);
   });
 });
