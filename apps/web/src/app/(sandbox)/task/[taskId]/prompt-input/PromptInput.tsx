@@ -25,6 +25,7 @@ import {
 } from '@/hooks/useGhostSuggestion';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
 import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
+import { usePromptSubmitFocus } from '@/hooks/usePromptSubmitFocus';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import {
@@ -137,6 +138,8 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const cancellingRef = useRef(false);
     const steeringQueuedMessageRef = useRef(false);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const { beginSubmit, cancelSubmit, restoreFocus } =
+      usePromptSubmitFocus(textareaRef);
     const runId = taskRun?.id;
     const taskId = taskRun?.taskId;
     const taskHistory = useTaskMessageEnvelopes(taskId, {
@@ -520,6 +523,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
 
         consumeSuggestion();
 
+        beginSubmit();
         handlePromptChange('');
         setSending(true);
         scrollToBottom?.();
@@ -534,6 +538,8 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
 
             if (answered) {
               handleMessageSent();
+            } else {
+              cancelSubmit();
             }
 
             return;
@@ -569,6 +575,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
 
           handleMessageSent();
         } catch (err) {
+          cancelSubmit();
           handlePromptChange(text);
           if (optimisticClientMessageId) {
             const failedClientMessageId = optimisticClientMessageId;
@@ -595,6 +602,8 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         pendingUserInputState,
         sending,
         consumeSuggestion,
+        beginSubmit,
+        cancelSubmit,
         handlePromptChange,
         scrollToBottom,
         handleMessageSent,
@@ -685,18 +694,15 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         );
     }, [applyPromptChange, focusTextarea]);
 
-    // Re-focus the textarea after a message is sent. We use an effect rather
-    // than focusing in handleSubmit because the inner PromptInput component
-    // calls form.reset() *after* handleSubmit's promise resolves, which would
-    // steal focus away from a synchronous .focus() call.
+    // Re-focus after the inner PromptInput has reset and this composer is
+    // enabled again. Outside interaction while sending cancels the handoff.
     const wasSendingRef = useRef(false);
     useEffect(() => {
       if (wasSendingRef.current && !sending) {
-        // Delay one frame so the inner form.reset() completes first.
-        requestAnimationFrame(() => focusTextarea());
+        restoreFocus();
       }
       wasSendingRef.current = sending;
-    }, [sending, focusTextarea]);
+    }, [sending, restoreFocus]);
 
     // Auto-focus the textarea when recording stops so the user can immediately
     // press Enter / Cmd+Enter to send the dictated text.

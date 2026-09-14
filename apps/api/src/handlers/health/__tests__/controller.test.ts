@@ -128,6 +128,24 @@ describe('controllerHealth', () => {
     expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 
+  it('returns an unhealthy response when the controller heartbeat is malformed', async () => {
+    redisGetMock.mockResolvedValue('malformed-heartbeat');
+
+    const response = await createApp(authContext).request('/health/controller');
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      server: 'controller',
+      environment: {
+        NODE_ENV: 'test',
+        APP_ENV: 'development',
+      },
+      ok: false,
+      error: 'Controller heartbeat in Redis is invalid',
+      timestamp: '2026-03-21T06:00:00.000Z',
+    });
+  });
+
   it('returns a redacted unhealthy response to unauthenticated callers', async () => {
     whereMock.mockReset();
     whereMock

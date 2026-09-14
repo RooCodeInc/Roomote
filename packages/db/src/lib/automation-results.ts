@@ -2,24 +2,76 @@ import {
   getTriggerableBackgroundAutomationDescriptorByKey,
   type AutomationResultPriority,
 } from '@roomote/types';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 
 import { type DatabaseOrTransaction, db } from '../db';
-import { automationResults, customAutomations, tasks } from '../schema';
+import {
+  automationResults,
+  customAutomations,
+  taskPullRequests,
+  tasks,
+} from '../schema';
 
-export async function recordAutomationResultForTask(
-  params: { taskId: string; content: string; dedupeKey: string },
+export async function reconcileAutomationResultAcceptance(
+  taskId: string,
   client: DatabaseOrTransaction = db,
+): Promise<boolean> {
+  const deliverablePullRequests = await client
+    .select({
+      mergedAt: taskPullRequests.mergedAt,
+      status: taskPullRequests.status,
+    })
+    .from(taskPullRequests)
+    .where(
+      and(
+        eq(taskPullRequests.taskId, taskId),
+        eq(taskPullRequests.createdByRoomote, true),
+      ),
+    )
+    .limit(2);
+  const [deliverable] = deliverablePullRequests;
+
+  if (
+    deliverablePullRequests.length !== 1 ||
+    deliverable?.status !== 'merged' ||
+    !deliverable.mergedAt
+  ) {
+    return false;
+  }
+
+  const accepted = await client
+    .update(automationResults)
+    .set({
+      acceptedAt: deliverable.mergedAt,
+      acceptanceReason: 'pull_request_merged',
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(automationResults.sourceTaskId, taskId),
+        isNull(automationResults.acceptedAt),
+        isNull(automationResults.ignoredAt),
+      ),
+    )
+    .returning({ id: automationResults.id });
+
+  return accepted.length > 0;
+}
+
+async function recordAutomationResultForTaskWithClient(
+  params: { taskId: string; content: string; dedupeKey: string },
+  client: DatabaseOrTransaction,
 ) {
-  const task = await client.query.tasks.findFirst({
-    where: eq(tasks.id, params.taskId),
-    columns: {
-      initiatorAutomation: true,
-      initiatorUserId: true,
-      actorExternalId: true,
-      actorDisplayName: true,
-    },
-  });
+  const [task] = await client
+    .select({
+      initiatorAutomation: tasks.initiatorAutomation,
+      initiatorUserId: tasks.initiatorUserId,
+      actorExternalId: tasks.actorExternalId,
+      actorDisplayName: tasks.actorDisplayName,
+    })
+    .from(tasks)
+    .where(eq(tasks.id, params.taskId))
+    .for('update');
 
   if (!task?.initiatorAutomation) return null;
 
@@ -62,19 +114,43 @@ export async function recordAutomationResultForTask(
     .onConflictDoNothing({ target: automationResults.dedupeKey })
     .returning();
 
+  await reconcileAutomationResultAcceptance(params.taskId, client);
+
   return result ?? null;
 }
 
-export async function recordCustomAutomationResult(
+export async function recordAutomationResultForTask(
+  params: { taskId: string; content: string; dedupeKey: string },
+  client: DatabaseOrTransaction = db,
+) {
+  if (client === db) {
+    return db.transaction((tx) =>
+      recordAutomationResultForTaskWithClient(params, tx),
+    );
+  }
+
+  return recordAutomationResultForTaskWithClient(params, client);
+}
+
+async function recordCustomAutomationResultWithClient(
   params: {
     automationId: string;
     userId: string;
+    sourceTaskId?: string;
     content: string;
     dedupeKey: string;
     priority?: AutomationResultPriority;
   },
-  client: DatabaseOrTransaction = db,
+  client: DatabaseOrTransaction,
 ) {
+  if (params.sourceTaskId) {
+    await client
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.id, params.sourceTaskId))
+      .for('update');
+  }
+
   const automation = await client.query.customAutomations.findFirst({
     where: eq(customAutomations.id, params.automationId),
     columns: { id: true, name: true, resultPriority: true },
@@ -86,6 +162,7 @@ export async function recordCustomAutomationResult(
     .values({
       automationKey: 'custom_automation',
       customAutomationId: automation.id,
+      sourceTaskId: params.sourceTaskId,
       userId: params.userId,
       automationName: automation.name,
       content: params.content,
@@ -94,6 +171,10 @@ export async function recordCustomAutomationResult(
     })
     .onConflictDoNothing({ target: automationResults.dedupeKey })
     .returning();
+
+  if (params.sourceTaskId) {
+    await reconcileAutomationResultAcceptance(params.sourceTaskId, client);
+  }
 
   return result ?? null;
 }
@@ -125,5 +206,26 @@ export async function recordBackgroundAutomationResult(
     })
     .onConflictDoNothing({ target: automationResults.dedupeKey })
     .returning();
+
   return result ?? null;
+}
+
+export async function recordCustomAutomationResult(
+  params: {
+    automationId: string;
+    userId: string;
+    sourceTaskId?: string;
+    content: string;
+    dedupeKey: string;
+    priority?: AutomationResultPriority;
+  },
+  client: DatabaseOrTransaction = db,
+) {
+  if (client === db && params.sourceTaskId) {
+    return db.transaction((tx) =>
+      recordCustomAutomationResultWithClient(params, tx),
+    );
+  }
+
+  return recordCustomAutomationResultWithClient(params, client);
 }

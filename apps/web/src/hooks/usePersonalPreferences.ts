@@ -186,8 +186,12 @@ export function usePersonalPreferences(
 
   return {
     preferences: preferencesQuery.data ?? DEFAULT_PERSONAL_PREFERENCES,
+    error: preferencesQuery.error,
+    hasLoadedPreferences: preferencesQuery.data !== undefined,
+    isFetching: preferencesQuery.isFetching,
     isLoading: preferencesQuery.isPending,
     isUpdating: updatePreferences.isPending,
+    refetch: preferencesQuery.refetch,
     setPreferences,
   };
 }

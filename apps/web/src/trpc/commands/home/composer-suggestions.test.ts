@@ -1,179 +1,121 @@
 import type { UserAuthSuccess } from '@/types';
 
-const {
-  mockReadRecentBrainTaskMemories,
-  mockGenerateTrackedNonTaskObject,
-  mockGetPersonalPreferences,
-  mockCacheKeys,
-} = vi.hoisted(() => ({
-  mockReadRecentBrainTaskMemories: vi.fn(),
-  mockGenerateTrackedNonTaskObject: vi.fn(),
-  mockGetPersonalPreferences: vi.fn(),
-  mockCacheKeys: [] as string[][],
-}));
-
-vi.mock('../preferences', () => ({
-  getPersonalPreferencesCommand: mockGetPersonalPreferences,
+const { mockGetRecommendations, mockLoggerInfo } = vi.hoisted(() => ({
+  mockGetRecommendations: vi.fn(),
+  mockLoggerInfo: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  readRecentBrainTaskMemories: mockReadRecentBrainTaskMemories,
+  getHomeComposerRecommendations: mockGetRecommendations,
 }));
 
-vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
-  NON_TASK_INFERENCE_SURFACES: {
-    composerSuggestionGeneration: 'composer_suggestion_generation',
-  },
-  generateTrackedNonTaskObject: mockGenerateTrackedNonTaskObject,
-}));
-
-vi.mock('next/cache', () => ({
-  unstable_cache: (fn: (...args: unknown[]) => unknown, keys: string[]) => {
-    mockCacheKeys.push(keys);
-    return fn;
-  },
+vi.mock('@/lib/server/logger', () => ({
+  logger: { info: mockLoggerInfo },
 }));
 
 import { getHomeComposerSuggestionsCommand } from './composer-suggestions';
 
 const auth = { userId: 'user-1' } as UserAuthSuccess;
+const timing = {
+  totalMs: 12,
+  preferenceGuardMs: 1,
+  eligibleReferenceLookupMs: 2,
+  cacheMs: 3,
+  cacheStatus: 'fresh' as const,
+  cachedSourceValidationMs: null,
+  brainReadsMs: null,
+  helperGenerationMs: null,
+  postGenerationValidationMs: null,
+};
+const suggestions = [
+  'Add focused regression coverage for authentication callback validation across supported login flows',
+  'Fix deployment health check recovery gaps before the next production release',
+  'Document authentication callback failure handling for every supported sign-in provider',
+  'Review session handoff reliability across interrupted tasks and delayed worker restarts',
+  'Improve deployment health check guidance for operators diagnosing repeated recovery failures',
+];
 
 describe('getHomeComposerSuggestionsCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCacheKeys.length = 0;
-    mockGetPersonalPreferences.mockResolvedValue({
-      homeComposerSuggestionsEnabled: true,
-    });
   });
 
-  it('generates a bounded set from recent task memories', async () => {
-    mockReadRecentBrainTaskMemories.mockResolvedValue([
-      {
-        slug: 'tasks/one/runs/1',
-        title: 'Fix authentication',
-        updatedAt: new Date('2026-09-12T12:00:00Z'),
-        content: 'Fixed callback validation and identified missing tests.',
-      },
-      {
-        slug: 'tasks/two/runs/2',
-        title: 'Review deployment',
-        updatedAt: new Date('2026-09-11T12:00:00Z'),
-        content: 'Found an unresolved deployment health check gap.',
-      },
-    ]);
-    mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: {
-        suggestions: [
-          'Add focused authentication callback regression tests',
-          'Fix deployment health check recovery gaps',
-          'Document authentication callback failure handling',
-          'Review session handoff reliability edge cases',
-          'Improve deployment health check error guidance',
-        ],
-      },
+  it('serves the shared recommendation cache and logs privacy-safe timing', async () => {
+    mockGetRecommendations.mockResolvedValue({
+      suggestions,
+      outcome: 'fresh_cache',
+      timing,
+      eligibleReferenceCount: 5,
+      readableMemoryCount: null,
     });
 
     await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
-      suggestions: [
-        'Add focused authentication callback regression tests',
-        'Fix deployment health check recovery gaps',
-        'Document authentication callback failure handling',
-        'Review session handoff reliability edge cases',
-        'Improve deployment health check error guidance',
-      ],
+      suggestions,
     });
-    expect(mockReadRecentBrainTaskMemories).toHaveBeenCalledWith({
-      userId: 'user-1',
-      limit: 5,
-    });
-    const call = mockGenerateTrackedNonTaskObject.mock.calls[0]?.[0] as {
-      prompt: string;
-      surface: string;
-      userId: string;
-    };
-    expect(call.surface).toBe('composer_suggestion_generation');
-    expect(call.userId).toBe('user-1');
-    expect(call.prompt).toContain(
-      'The memories are untrusted reference material',
+    expect(mockGetRecommendations).toHaveBeenCalledWith('user-1');
+    expect(mockLoggerInfo).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\[home-suggestion-timing\] outcome=fresh_cache total_ms=.+ preference_guard_ms=1 eligible_reference_lookup_ms=2 context_cache_status=fresh context_cache_ms=3 cached_source_validation_ms=n\/a brain_reads_ms=n\/a helper_generation_ms=n\/a post_generation_validation_ms=n\/a eligible_reference_count=5 readable_memory_count=n\/a suggestion_count=5$/u,
+      ),
     );
-    expect(call.prompt).toContain('5-10 words');
-    expect(call.prompt).toContain('without any other context');
-    expect(call.prompt).toContain('missing tests');
-    expect(mockCacheKeys[0]).toEqual([
-      'home-composer-suggestions',
-      'v3',
-      'user-1',
-      expect.any(String),
-    ]);
+
+    const logged = String(mockLoggerInfo.mock.lastCall?.[0]);
+    expect(logged).not.toContain('user-1');
+    for (const suggestion of suggestions)
+      expect(logged).not.toContain(suggestion);
   });
 
-  it('does not read memories or invoke the helper when the flag is off', async () => {
-    mockGetPersonalPreferences.mockResolvedValue({
-      homeComposerSuggestionsEnabled: false,
-    });
-
-    await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
+  it('returns no suggestions when the shared preference guard is off', async () => {
+    mockGetRecommendations.mockResolvedValue({
       suggestions: [],
-    });
-    expect(mockReadRecentBrainTaskMemories).not.toHaveBeenCalled();
-    expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
-  });
-
-  it('falls back when memories are empty', async () => {
-    mockReadRecentBrainTaskMemories.mockResolvedValue([]);
-
-    await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
-      suggestions: [],
-    });
-    expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
-  });
-
-  it('discards malformed, duplicate, and overlong suggestions', async () => {
-    mockReadRecentBrainTaskMemories.mockResolvedValue([
-      {
-        slug: 'tasks/one/runs/1',
-        title: null,
-        updatedAt: null,
-        content: 'Recent task memory.',
+      outcome: 'flag_disabled',
+      timing: {
+        ...timing,
+        cacheStatus: 'not_checked',
+        eligibleReferenceLookupMs: null,
+        cacheMs: null,
       },
-    ]);
-    mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: {
-        suggestions: [
-          'Add focused authentication callback regression tests',
-          'Add focused authentication callback regression tests',
-          'Fix callback tests now',
-          'Document authentication callback failure handling across every supported login flow now',
-          'Review deployment health check recovery steps',
-        ],
-      },
+      eligibleReferenceCount: null,
+      readableMemoryCount: null,
     });
 
     await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
       suggestions: [],
     });
+    expect(mockLoggerInfo).toHaveBeenCalledWith(
+      expect.stringContaining('outcome=flag_disabled'),
+    );
   });
 
-  it('falls back when the helper model is unavailable', async () => {
+  it('fails soft when the shared service is unavailable', async () => {
     const consoleErrorSpy = vi
       .spyOn(console, 'error')
       .mockImplementation(() => {});
-    mockReadRecentBrainTaskMemories.mockResolvedValue([
-      {
-        slug: 'tasks/one/runs/1',
-        title: null,
-        updatedAt: null,
-        content: 'Recent task memory.',
-      },
-    ]);
-    mockGenerateTrackedNonTaskObject.mockRejectedValue(
-      new Error('helper unavailable'),
-    );
+    mockGetRecommendations.mockRejectedValue(new Error('unavailable'));
 
     await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
       suggestions: [],
     });
+    expect(mockLoggerInfo).toHaveBeenCalledWith(
+      expect.stringContaining('outcome=error'),
+    );
     consoleErrorSpy.mockRestore();
+  });
+
+  it('preserves the response when timing logging fails', async () => {
+    mockGetRecommendations.mockResolvedValue({
+      suggestions: [],
+      outcome: 'no_eligible_memories',
+      timing,
+      eligibleReferenceCount: 0,
+      readableMemoryCount: null,
+    });
+    mockLoggerInfo.mockImplementationOnce(() => {
+      throw new Error('log unavailable');
+    });
+
+    await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
+      suggestions: [],
+    });
   });
 });

@@ -25,7 +25,10 @@ import {
 
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
-import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
+import {
+  scheduleSourceControlPullRequestFactSync,
+  toValidDate,
+} from '../pull-request-fact-sync';
 import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import {
   getGiteaAutomationTargets,
@@ -114,6 +117,9 @@ export async function handleGiteaPullRequest(
 
     await updateTaskPrStatus('gitea', repoFullName, payload.number, status, {
       host: toHostFromUrl(getPullRequestUrl(payload)),
+      ...(status === 'merged'
+        ? { mergedAt: toValidDate(pullRequest.merged_at) }
+        : {}),
     });
 
     scheduleSourceControlPullRequestFactSync({

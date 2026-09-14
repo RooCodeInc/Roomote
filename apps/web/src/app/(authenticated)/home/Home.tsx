@@ -162,7 +162,7 @@ export function Home({
       setPlaceholderIndex(
         (currentIndex) => (currentIndex + 1) % promptPlaceholders.length,
       );
-    }, 5_000);
+    }, 10_000);
 
     return () => {
       window.clearInterval(intervalId);

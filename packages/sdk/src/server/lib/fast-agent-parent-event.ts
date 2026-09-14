@@ -2757,6 +2757,9 @@ export async function deliverFastAgentParentEventWithLock(
               await recordCustomAutomationResult({
                 automationId,
                 userId: parentTurn.userId,
+                ...(reportEvent.type === 'task_settled'
+                  ? { sourceTaskId: reportEvent.taskId }
+                  : {}),
                 content: reply.message,
                 dedupeKey: `fast:${buildFastAutomationSuggestionEventId(reportEvent)}`,
               }).catch(() => undefined);

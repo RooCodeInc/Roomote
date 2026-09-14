@@ -25,7 +25,10 @@ import {
 
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
-import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
+import {
+  scheduleSourceControlPullRequestFactSync,
+  toValidDate,
+} from '../pull-request-fact-sync';
 import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import { getGitLabAutomationTargets } from './getGitLabAutomationTargets';
 import type { GitLabMergeRequestWebhook } from './types';
@@ -114,6 +117,9 @@ export async function handleGitLabMergeRequest(
 
     await updateTaskPrStatus('gitlab', repoFullName, mergeRequest.iid, status, {
       host: toHostFromUrl(mergeRequest.url),
+      ...(status === 'merged'
+        ? { mergedAt: toValidDate(mergeRequest.updated_at) }
+        : {}),
     });
 
     scheduleSourceControlPullRequestFactSync({

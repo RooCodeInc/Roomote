@@ -13,7 +13,11 @@
  */
 
 import { getRedis } from '@roomote/redis';
-import { db, listRecentUserTaskMemoryRuns } from '@roomote/db/server';
+import {
+  db,
+  listRecentUserTaskMemoryRuns,
+  type RecentUserTaskMemoryRun,
+} from '@roomote/db/server';
 import { brainNamespacePrefix } from '@roomote/types';
 
 import { resolveBrainConnection } from './brain-clients';
@@ -39,6 +43,8 @@ export type BrainCorpusSnapshot = {
 export type RecentBrainTaskMemory = BrainCorpusPage & {
   content: string;
 };
+
+export type RecentBrainTaskMemoryRef = RecentUserTaskMemoryRun;
 
 function toDate(value: unknown): Date | null {
   if (typeof value !== 'string' && typeof value !== 'number') {
@@ -714,17 +720,21 @@ async function readBrainPageWithConnection(
  * Brain credential. The upstream credential retains deployment/source scope;
  * this helper adds no broader corpus walk or authorization bypass.
  */
-export async function readRecentBrainTaskMemories(input: {
+export async function listRecentBrainTaskMemoryRefs(input: {
   userId: string;
   limit?: number;
-}): Promise<RecentBrainTaskMemory[]> {
+}): Promise<RecentBrainTaskMemoryRef[]> {
   const boundedLimit = Math.max(1, Math.min(Math.floor(input.limit ?? 5), 10));
-  const ownedRuns = await listRecentUserTaskMemoryRuns(db, {
+  return listRecentUserTaskMemoryRuns(db, {
     userId: input.userId,
     limit: boundedLimit,
   });
+}
 
-  if (ownedRuns.length === 0) {
+export async function readBrainTaskMemories(
+  refs: RecentBrainTaskMemoryRef[],
+): Promise<RecentBrainTaskMemory[]> {
+  if (refs.length === 0) {
     return [];
   }
 
@@ -735,7 +745,7 @@ export async function readRecentBrainTaskMemories(input: {
 
   try {
     const memories = await Promise.all(
-      ownedRuns.map(({ taskId, runId }) =>
+      refs.map(({ taskId, runId }) =>
         readBrainPageWithConnection(
           connection,
           `${brainNamespacePrefix('tasks')}${taskId}/runs/${runId}`,
@@ -756,4 +766,12 @@ export async function readRecentBrainTaskMemories(input: {
     );
     return [];
   }
+}
+
+export async function readRecentBrainTaskMemories(input: {
+  userId: string;
+  limit?: number;
+}): Promise<RecentBrainTaskMemory[]> {
+  const refs = await listRecentBrainTaskMemoryRefs(input);
+  return readBrainTaskMemories(refs);
 }
