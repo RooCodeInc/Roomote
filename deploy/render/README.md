@@ -147,7 +147,7 @@ deliberately, ideally right after a disk backup.
 | -------------------- | --------- | ---------------------------- | ------------------------- | -------------------- |
 | `roomote-postgres`   | Postgres  | Render managed PostgreSQL 17 | no                        | managed              |
 | `roomote-redis`      | Key Value | Render managed (Redis API)   | no (empty `ipAllowList`)  | managed              |
-| `roomote-minio`      | web       | `minio/minio` + disk `/data` | yes (routed to port 9000) | `/minio/health/live` |
+| `roomote-minio`      | web       | `quay.io/minio/minio` + disk `/data` | yes (routed to port 9000) | `/minio/health/live` |
 | `roomote-gbrain`     | pserv     | `roomote-gbrain:main` + disk `/data` | no (private network only) | —                    |
 | `roomote-api`        | web       | `roomote-app:main`           | yes                       | `/health/liveness`   |
 | `roomote-web`        | web       | `roomote-app:main`           | yes                       | `/health`            |
