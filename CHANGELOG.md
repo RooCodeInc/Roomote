@@ -52,6 +52,8 @@ Roomote 1.9 adds secure Session-approved API keys, a native Telegram Fast experi
 - Fast sessions now reject integration tool calls that pass undeclared argument keys, such as chat history bounds wrapped in a stringified `args` field, with an error naming the accepted arguments. Previously the MCP server silently dropped those keys, so the default 24-hour history window applied and the model kept repeating the malformed shape.
 - Fast Sessions now see the names and descriptions of instance skills and inline environment skills in every turn, so Roomote recognizes a matching playbook from the request and loads it without being asked. Previously skills were only discoverable after the model chose to call `list_skills`, so custom skills from Settings > Skills went unused unless a user typed `$skill-name`. Marketplace and repository skills stay on demand; the prompt names each environment's marketplace sources so the model knows when to look them up.
 - Closed agent panels now stay dismissed when users navigate away from a Session and return, while explicitly reopening or deep-linking a task still restores its panel. Thanks to @PierrunoYT for contributing this improvement.
+- Chat channel history results are now bounded to the newest messages that fit a fixed size, with a note telling the agent how to page further back, instead of being cut mid-JSON by the agent's output limit.
+- Long reasoning turns now stay connected through silent inference-provider gaps instead of resetting the stream, aborting in-flight tools, and regenerating the same work. The inference gateway sends standards-compatible SSE keepalives without changing model events or non-streaming responses.
 
 ## 1.8.2 (2026-09-14)
 
