@@ -38,15 +38,17 @@ Roomote 1.9 brings a native Telegram experience for Fast work, direct pull reque
 
 ## 1.8.1 (2026-09-14)
 
-Roomote 1.8.1 restores delegated coding tasks that use Azure OpenAI or Azure AI Foundry.
+Roomote 1.8.1 restores Azure-backed delegated coding tasks and reliable Fast skill lookups on OpenAI models.
 
 ### Highlights
 
 - Run delegated coding tasks through Azure providers without inference-gateway authentication failures.
+- List and load Fast skills reliably when OpenAI models supply optional tool arguments.
 
 ### Patch changes
 
 - Delegated coding tasks using Azure OpenAI or Azure AI Foundry now authenticate through the inference gateway instead of failing before the provider request begins.
+- Fast `list_skills` and `load_skill` now tolerate null and filler optional arguments, return useful validation errors, and keep packaged and instance skills available when an optional scoped source fails.
 
 ## 1.8.0 (2026-09-11)
 
