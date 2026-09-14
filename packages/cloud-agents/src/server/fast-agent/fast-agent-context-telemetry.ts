@@ -240,6 +240,7 @@ export function captureFastAgentTurnSettled(input: {
   integrationCount?: number;
   integrationToolCount?: number;
   activeTaskCount?: number;
+  promptSkillCount?: number;
   openCodeServerLeaseMs?: number;
   openCodeSessionValidateMs?: number;
   openCodeSessionCreateMs?: number;
@@ -285,6 +286,7 @@ export function captureFastAgentTurnSettled(input: {
       integration_count: input.integrationCount ?? null,
       integration_tool_count: input.integrationToolCount ?? null,
       active_task_count: input.activeTaskCount ?? null,
+      prompt_skill_count: input.promptSkillCount ?? null,
       opencode_server_lease_ms: input.openCodeServerLeaseMs ?? null,
       opencode_session_validate_ms: input.openCodeSessionValidateMs ?? null,
       opencode_session_create_ms: input.openCodeSessionCreateMs ?? null,

@@ -205,6 +205,8 @@ import {
   getPersonalAccountCapabilitiesCommand,
   getPersonalPreferencesCommand,
   acceptCookieConsentCommand,
+  acceptVoiceConsentCommand,
+  getVoiceConsentCommand,
   setPersonalPasswordCommand,
   updatePersonalPreferencesCommand,
   getUserPersonalizationCommand,
@@ -1598,6 +1600,12 @@ export const appRouter = createRouter({
   preferences: createRouter({
     acceptCookieConsent: protectedProcedure.mutation(({ ctx: { auth } }) =>
       acceptCookieConsentCommand(auth),
+    ),
+    getVoiceConsent: protectedProcedure.query(({ ctx: { auth } }) =>
+      getVoiceConsentCommand(auth),
+    ),
+    acceptVoiceConsent: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      acceptVoiceConsentCommand(auth),
     ),
     accountCapabilities: protectedProcedure.query(({ ctx: { auth } }) =>
       getPersonalAccountCapabilitiesCommand(auth),

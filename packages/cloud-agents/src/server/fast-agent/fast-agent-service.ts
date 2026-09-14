@@ -146,6 +146,10 @@ import {
 } from './fast-agent-reply-stream';
 import { createFastAgentSurfaceReplyStreamer } from './fast-agent-surface-reply-stream';
 import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-source';
+import {
+  createFastAgentPromptSkillCatalogSources,
+  loadFastAgentPromptSkillCatalog,
+} from './fast-agent-prompt-skill-catalog';
 import { RemoteFastAgentInstanceSkillSource } from './fast-agent-instance-skill-source';
 import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
 import {
@@ -185,6 +189,7 @@ import {
   type FastAgentIntegration,
 } from './fast-agent-integration-broker';
 import { McpToolCallError } from '../mcp-tool-client';
+import { describeUnknownIntegrationArguments } from './fast-agent-integration-args';
 import {
   cancelFastAgentTask,
   launchFastAgentPrReview,
@@ -3116,17 +3121,44 @@ export async function answerFastAgentQuestion({
           return undefined;
         }),
     ]);
-    const personalizationContext = platformEvent
-      ? null
-      : await resolveFastAgentPersonalizationContext({
-          conversationId: session.id,
+    const [personalizationContext, availableSkills] = await Promise.all([
+      platformEvent
+        ? null
+        : resolveFastAgentPersonalizationContext({
+            conversationId: session.id,
+            userId,
+          }).catch((error) => {
+            console.warn(
+              `[Fast Agent] User personalization unavailable: ${formatErrorForLog(error)}`,
+            );
+            return null;
+          }),
+      // Instance and inline environment skills go into the prompt so the
+      // model can recognize a relevant playbook without guessing that
+      // `list_skills` is worth a call. Marketplace and repository skills stay
+      // on demand: they need a git fetch.
+      loadFastAgentPromptSkillCatalog(
+        createFastAgentPromptSkillCatalogSources({
+          allowedEnvironmentIds: availableEnvironments.map(
+            (environment) => environment.id,
+          ),
           userId,
-        }).catch((error) => {
+        }),
+      )
+        .then((catalog) => {
+          for (const warning of catalog.warnings) {
+            console.warn(`[Fast Agent] Prompt skill catalog: ${warning}`);
+          }
+          return catalog;
+        })
+        .catch((error) => {
+          degradedContextComponents.add('skill_catalog');
           console.warn(
-            `[Fast Agent] User personalization unavailable: ${formatErrorForLog(error)}`,
+            `[Fast Agent] Prompt skill catalog unavailable: ${formatErrorForLog(error)}`,
           );
           return null;
-        });
+        }),
+    ]);
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
@@ -3357,6 +3389,7 @@ export async function answerFastAgentQuestion({
     );
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
+      availableSkills,
       availableTaskModels: taskModelOptions.models,
       defaultTaskModelId: taskModelOptions.defaultModelId,
       availableIntegrations,
@@ -3392,6 +3425,7 @@ export async function answerFastAgentQuestion({
         0,
       ),
       activeTaskCount: resolvedActiveTasks.length,
+      promptSkillCount: availableSkills?.skills.length,
     });
     const resumedWithDeliveredAcknowledgement = Boolean(
       previousAttempt?.events.some(
@@ -3745,6 +3779,21 @@ export async function answerFastAgentQuestion({
             error:
               'This platform event may only be presented to the user with a closeout.',
           };
+        }
+
+        // Reject undeclared top-level keys instead of letting the MCP server
+        // strip them silently: a model that wraps arguments in an `args`
+        // field would otherwise get a successful default result and repeat
+        // the shape for the rest of the session.
+        const unknownArgumentsError = describeUnknownIntegrationArguments(
+          call,
+          call.args,
+          availableIntegrations
+            .find((integration) => integration.id === call.integrationId)
+            ?.tools.find((tool) => tool.name === call.toolName)?.inputSchema,
+        );
+        if (unknownArgumentsError) {
+          return { success: false, error: unknownArgumentsError };
         }
 
         const chatLookupProvider =
