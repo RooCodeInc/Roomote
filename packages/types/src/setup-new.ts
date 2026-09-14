@@ -214,10 +214,18 @@ export function normalizeSetupNewSetupSession(
     const selection = record.starterTaskSelection as Record<string, unknown>;
     const requestId = asNonEmptyString(selection.requestId);
     const selectedAt = asIsoTimestamp(selection.selectedAt);
-    const taskIds = Array.isArray(selection.taskIds)
-      ? [...new Set(selection.taskIds.filter(isSetupStarterTaskId))]
+    const persistedTaskIds = Array.isArray(selection.taskIds)
+      ? selection.taskIds
+      : null;
+    const taskIds = persistedTaskIds
+      ? [...new Set(persistedTaskIds.filter(isSetupStarterTaskId))]
       : [];
-    if (requestId && selectedAt) {
+    if (
+      requestId &&
+      selectedAt &&
+      persistedTaskIds &&
+      (persistedTaskIds.length === 0 || taskIds.length > 0)
+    ) {
       starterTaskSelection = { requestId, taskIds, selectedAt };
     }
   }

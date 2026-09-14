@@ -103,6 +103,35 @@ describe('setup-session metadata', () => {
         selectedAt,
       },
     });
+    const session = createSetupNewSetupSession({
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      startedAt: '2026-08-29T00:00:00.000Z',
+    });
+
+    expect(
+      normalizeSetupNewSetupSession({
+        ...session,
+        starterTaskSelection: {
+          requestId: 'manual-request',
+          taskIds: [],
+          selectedAt: '2026-08-29T00:01:00.000Z',
+        },
+      })?.starterTaskSelection,
+    ).toEqual({
+      requestId: 'manual-request',
+      taskIds: [],
+      selectedAt: '2026-08-29T00:01:00.000Z',
+    });
+    expect(
+      normalizeSetupNewSetupSession({
+        ...session,
+        starterTaskSelection: {
+          requestId: 'invalid-request',
+          taskIds: ['not-real'],
+          selectedAt: '2026-08-29T00:01:00.000Z',
+        },
+      })?.starterTaskSelection,
+    ).toBeNull();
   });
 
   it('keeps a valid session with no starter selection', () => {
