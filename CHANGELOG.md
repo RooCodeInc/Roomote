@@ -4,14 +4,14 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 1.9.0 (2026-09-13)
 
-Roomote 1.9 brings a native Telegram experience for Fast work, direct pull request merging and shared-skill editing, clearer mobile navigation, and personal task-finish notifications.
+Roomote 1.9 adds secure Session-approved API keys, a native Telegram Fast experience, Session-owned Goal Mode, direct pull request merging, and more adaptive setup and workspace flows.
 
 ### Highlights
 
-- Work with Fast natively in Telegram through rich streaming replies, `/goal`, live coding progress, reliable attachments, and clearer automation and review controls.
-- Merge pull requests directly in Fast across supported source-control providers with explicit authorization and head-version safeguards.
-- Create and maintain shared custom skills conversationally without overwriting newer edits.
-- Reach recent Sessions more easily on mobile and receive a personal notification when web-started tasks finish while you are away.
+- Approve narrowly scoped API keys for a Session without putting credentials in chat or agent context.
+- Work with Fast natively in Telegram, keep Goal Mode running across Session turns, and reply to personal Session notifications while away from the web app.
+- Complete deployment setup conversationally and start all-repositories work without cloning every repository up front.
+- Merge pull requests, maintain shared custom skills, and opt into memory-informed Home suggestions directly through Fast.
 
 ### Minor changes
 
@@ -21,6 +21,13 @@ Roomote 1.9 brings a native Telegram experience for Fast work, direct pull reque
 - Telegram users can now start Goal Mode for an active task with `/goal`, keeping goal-directed work in the same chat or topic without switching to the web app.
 - Telegram now shows Fast-delegated coding work in one compact, editable live message with topic-aware routing, expandable progress, elapsed status, and a direct link to the selected task.
 - Users who leave the web app can now receive a personal notification when a web-started task completes, fails, or is canceled, with a direct link back to the task.
+- Automation Results now automatically leave the unread inbox when their sole Roomote-created deliverable pull request merges, with consistent behavior across supported source-control providers and event ordering.
+- Deployment setup is now conversational and agent-led, with trusted in-thread cards for source control, integrations, sandboxes, starter work, and automation recommendations that adapt to completed or skipped choices without blocking the conversation.
+- All-repositories coding workspaces now start from a repository index and check out only the repositories a task needs, avoiding slow or stalled startup caused by cloning every active repository in advance.
+- Users can opt into experimental Home suggestions generated from their own recent completed task memories, with privacy-filtered sources, background precomputation, resilient static fallbacks, and support across configured helper-model providers.
+- Web Session notifications now arrive when an absent user needs to review a response or provide input, carry the actual reply into one personal provider thread, and accept replies that continue the same Session or pending task without duplicate or stale notifications.
+- Goal Mode now belongs to the Fast Session instead of one child task, so Roomote can pursue an objective across turns and delegated tasks, continue automatically within a bounded budget, and preserve goal state across web, Telegram, and Discord conversations.
+- Session owners can now approve narrowly scoped API keys through a secure form without placing credentials in chat or agent context. Fast and attached Docker coding runs can use approved keys only for the selected public HTTPS origin, allowed methods, and lifetime, with revocation and expiry enforced before requests and responses.
 
 ### Patch changes
 
@@ -35,6 +42,12 @@ Roomote 1.9 brings a native Telegram experience for Fast work, direct pull reque
 - Telegram live coding progress stays stable through short and resumed Fast turns, and successful tasks keep their last useful update instead of being replaced with a generic completion message.
 - Voice conversations follow active coding tasks more consistently during calls and render transcript whitespace cleanly.
 - Automation reports use consistent default destinations across communication providers, while Fast widgets and their shareable links remain available across providers and resumed background turns.
+- Automation Results are easier to scan and act on across desktop and mobile, with clearer priority markers, accessible in-place expansion, restrained Markdown styling, and safe links for URLs and repository-backed pull request references.
+- Task prompts now reject attachments that failed to download instead of silently launching work without the requested file.
+- Results, Analytics, Environments, recent Sessions, Memory settings, and sandbox provider status now distinguish failed initial loads from empty data and offer an in-place retry while preserving already loaded content.
+- Signed-in users no longer remain on the login page, and safe local return paths now resume the requested page without allowing external, protocol-relative, or sign-in-loop redirects.
+- Custom automations can now run for discoverable Slack channels even when the local channel cache has no row, while ambiguous, inaccessible, or unverified workspace matches continue to fail closed.
+- The web app now preserves composer focus after sends, announces integration validation errors to assistive technology, stabilizes optimistic avatars, labels collapsed navigation actions, and keeps rendered text artifacts readable on wide screens.
 
 ## 1.8.2 (2026-09-14)
 
