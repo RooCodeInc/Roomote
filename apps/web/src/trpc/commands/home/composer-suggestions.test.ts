@@ -104,6 +104,24 @@ describe('getHomeComposerSuggestionsCommand', () => {
     consoleErrorSpy.mockRestore();
   });
 
+  it('logs the shared failure stage without exposing request context', async () => {
+    mockGetRecommendations.mockResolvedValue({
+      suggestions: [],
+      outcome: 'fallback',
+      timing,
+      eligibleReferenceCount: 5,
+      readableMemoryCount: 5,
+      failureReason: 'cache_write_error',
+    });
+
+    await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
+      suggestions: [],
+    });
+    const logged = String(mockLoggerInfo.mock.lastCall?.[0]);
+    expect(logged).toContain('failure_reason=cache_write_error');
+    expect(logged).not.toContain('user-1');
+  });
+
   it('preserves the response when timing logging fails', async () => {
     mockGetRecommendations.mockResolvedValue({
       suggestions: [],
