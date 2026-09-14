@@ -186,6 +186,28 @@ describe('TaskPromptInput', () => {
     expect(textarea).toHaveValue('');
   });
 
+  it('preserves normal Tab behavior when no suggestion is displayed', () => {
+    render(
+      <TaskPromptInput
+        isBusy={false}
+        promptText=""
+        onPromptTextChange={() => {}}
+        onSubmit={() => {}}
+        placeholder=""
+      />,
+    );
+    const textarea = screen.getByRole('textbox');
+    const tabEvent = createEvent.keyDown(textarea, {
+      key: 'Tab',
+      code: 'Tab',
+    });
+
+    fireEvent(textarea, tabEvent);
+
+    expect(tabEvent.defaultPrevented).toBe(false);
+    expect(textarea).toHaveValue('');
+  });
+
   it.each([
     { name: 'busy', props: { isBusy: true } },
     {
