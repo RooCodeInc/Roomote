@@ -38,11 +38,14 @@ supported chat providers. Choose an environment or repository explicitly when
 you already know where the work should run.
 
 When work needs a sandbox but no source code, ask Fast to delegate it to
-**Blank slate**. The delegated task starts with an empty workspace and does not
-clone repositories or require source-control credentials. This is useful for
-artifact generation, integration work, and other tasks that need command
-execution without a repository. Custom automations can also select Blank slate
-as their preferred environment.
+**Blank slate**. The delegated task starts with an empty workspace and clones
+nothing up front. This is useful for artifact generation, integration work, and
+other tasks that need command execution without a repository. When source
+control is connected, the sandbox still carries a `REPOSITORIES.md` index of the
+active repositories and the agent can check one out on demand, commit to it,
+and open pull requests; without connected source control, Blank slate needs no
+credentials at all. Custom automations can also select Blank slate as their
+preferred environment.
 
 Select **New Session** in the navigation to open the same launcher from any
 dashboard page.

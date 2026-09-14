@@ -483,10 +483,6 @@ export async function resolveTaskRunSourceControlProviders(
   };
   const workspace = resolveTaskWorkspace(taskRun.payload);
 
-  if (workspace.type === 'no_repositories') {
-    return [];
-  }
-
   if (
     payload.repositoryProviders &&
     Object.keys(payload.repositoryProviders).length > 0
@@ -514,6 +510,13 @@ export async function resolveTaskRunSourceControlProviders(
     payload.sourceControlProvider !== ''
   ) {
     return [resolveSourceControlProviderFromPayload(payload)];
+  }
+
+  // A Blank slate is stamped at launch only when the deployment has active
+  // repositories to check out on demand; without a stamp it needs no
+  // source-control credentials, so never fall back to a provider default.
+  if (workspace.type === 'no_repositories') {
+    return [];
   }
 
   // No explicit stamp: resolve from the workspace's synced repositories via the

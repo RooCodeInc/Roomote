@@ -44,7 +44,7 @@ function formatRepositoriesForPrompt(
   availableEnvironments: RoutableEnvironment[],
 ): string {
   const allRepositories = `- All repositories [id: ${ALL_REPOSITORIES}]: Every active repository is available; the task checks out only the ones it needs.`;
-  const blankSlate = `- Blank slate [id: ${NO_REPOSITORIES}]: Start a sandbox without repositories.`;
+  const blankSlate = `- Blank slate [id: ${NO_REPOSITORIES}]: Start a sandbox with no repositories checked out; the task can still check out any active repository on demand.`;
   if (availableEnvironments.length === 0) {
     return `${blankSlate}\n${allRepositories}\n- No configured environments were found for this deployment.`;
   }

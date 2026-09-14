@@ -2909,6 +2909,7 @@ export async function deliverFastAgentParentEventWithLock(
         launchTask: parentTurn.adapter.launchTask,
         ...(humanFollowUp?.setupContext
           ? buildFastAgentSetupAdapter(humanFollowUp.setupContext, {
+              setupSession: humanFollowUp.setupSession === true,
               ...(params.onSetupIntegrationDiscoveryCompleted
                 ? {
                     onIntegrationDiscoveryCompleted:

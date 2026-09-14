@@ -387,7 +387,9 @@ async function runWebFastAgentTurn({
             }
           : {}),
         ...delivery.adapter,
-        ...(setupContext ? buildFastAgentSetupAdapter(setupContext) : {}),
+        ...(setupContext
+          ? buildFastAgentSetupAdapter(setupContext, { setupSession })
+          : {}),
         ...adapterExtensions,
       },
     });
@@ -937,6 +939,12 @@ export async function resolveFastSessionCapabilityOfferCommand(
     const state = normalizeSetupNewState(settings?.setupNewState ?? {});
     const setupSession = normalizeSetupNewSetupSession(state.setupSession);
     if (!setupSession) return;
+    const [setupSessionRecord] = await tx
+      .select({ fastConversationId: sessions.fastConversationId })
+      .from(sessions)
+      .where(eq(sessions.id, setupSession.sessionId))
+      .limit(1);
+    if (setupSessionRecord?.fastConversationId !== session.id) return;
     const setupUpdates =
       input.capability === 'source_control' &&
       input.resolution === 'dismissed' &&
@@ -978,9 +986,11 @@ export async function resolveFastSessionCapabilityOfferCommand(
     },
   });
 
-  const { reconcileSetupPlatformEvents } =
-    await import('../setup/setup-session');
-  await reconcileSetupPlatformEvents(auth);
+  if (advancedInitialSetup) {
+    const { reconcileSetupPlatformEvents } =
+      await import('../setup/setup-session');
+    await reconcileSetupPlatformEvents(auth);
+  }
 
   const { resolveSetupSessionTurnContext } =
     await import('../setup/setup-session');

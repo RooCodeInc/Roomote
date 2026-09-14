@@ -32,4 +32,22 @@ describe('getWorkspaceInstructions', () => {
       'target `acme/api` as the repository identifier',
     );
   });
+
+  it('tells Blank slate tasks how to check out repositories when source control is connected', () => {
+    const instructions = getWorkspaceInstructions([], undefined, {
+      blankSlate: true,
+    });
+
+    expect(instructions).toContain(
+      'This workspace starts with no repositories checked out (Blank slate)',
+    );
+    expect(instructions).toContain(
+      'If `REPOSITORIES.md` exists at the workspace root',
+    );
+    expect(instructions).toContain('`clone_repository` tool');
+    expect(instructions).toContain(
+      'If there is no `REPOSITORIES.md`, the sandbox has no source-control credentials',
+    );
+    expect(instructions).not.toContain('Available repositories');
+  });
 });
