@@ -15,7 +15,10 @@ import { recordLlmUsage } from '@roomote/sdk/server';
 
 import type { Variables } from '../../types';
 import { fetchWithLongLivedStreamDispatcher } from '../long-lived-fetch';
-import { createLoggedProxyResponseBody } from '../proxy-response-stream';
+import {
+  createLoggedProxyResponseBody,
+  createSseKeepaliveProxyBody,
+} from '../proxy-response-stream';
 import {
   buildProxyResponseHeaders,
   isRunTokenContext,
@@ -138,12 +141,24 @@ function buildUpstreamRequestHeaders(
   return headers;
 }
 
+/**
+ * Silence budget before the gateway emits an SSE comment. Edge proxies on the
+ * sandbox-to-API path have reset streams that carried no bytes for well under
+ * a minute; provider reasoning gaps regularly exceed that.
+ */
+export const INFERENCE_SSE_KEEPALIVE_INTERVAL_MS = 15_000;
+
+function isEventStreamResponse(headers: Headers): boolean {
+  return (
+    headers.get('content-type')?.toLowerCase().includes('text/event-stream') ??
+    false
+  );
+}
+
 function buildInferenceResponseHeaders(upstreamHeaders: Headers): Headers {
   const headers = buildProxyResponseHeaders(upstreamHeaders);
 
-  if (
-    !headers.get('content-type')?.toLowerCase().includes('text/event-stream')
-  ) {
+  if (!isEventStreamResponse(headers)) {
     return headers;
   }
 
@@ -495,28 +510,38 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
       }
     }
 
-    return new Response(
-      createLoggedProxyResponseBody({
-        body: upstreamResponse.body,
-        logPrefix: `${logPrefix} Upstream response stream failed`,
-        getLogFields: () => ({
-          requestId,
-          method,
-          runId: auth.runId,
-          upstreamPath,
-          status: upstreamResponse.status,
-          elapsedMs: Date.now() - startedAt,
-        }),
-        trackingContext: {
-          route: `inference:${providerId}`,
-          method,
-          path: pathname,
-          requestId,
-        },
+    const responseHeaders = buildInferenceResponseHeaders(
+      upstreamResponse.headers,
+    );
+    const loggedBody = createLoggedProxyResponseBody({
+      body: upstreamResponse.body,
+      logPrefix: `${logPrefix} Upstream response stream failed`,
+      getLogFields: () => ({
+        requestId,
+        method,
+        runId: auth.runId,
+        upstreamPath,
+        status: upstreamResponse.status,
+        elapsedMs: Date.now() - startedAt,
       }),
+      trackingContext: {
+        route: `inference:${providerId}`,
+        method,
+        path: pathname,
+        requestId,
+      },
+    });
+
+    return new Response(
+      isEventStreamResponse(responseHeaders)
+        ? createSseKeepaliveProxyBody({
+            body: loggedBody,
+            intervalMs: INFERENCE_SSE_KEEPALIVE_INTERVAL_MS,
+          })
+        : loggedBody,
       {
         status: upstreamResponse.status,
-        headers: buildInferenceResponseHeaders(upstreamResponse.headers),
+        headers: responseHeaders,
       },
     );
   } catch (error) {
