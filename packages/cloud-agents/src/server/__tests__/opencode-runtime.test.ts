@@ -261,6 +261,12 @@ describe('buildOpenCodeCliEnv', () => {
         expect.stringContaining('read those images'),
       );
     }
+    expect(config.agent.judge.tools).toMatchObject({
+      '_roomote_http_integrations_*': false,
+    });
+    expect(config.agent.advisor.tools).not.toHaveProperty(
+      '_roomote_http_integrations_*',
+    );
     expect(config.agent).not.toHaveProperty('unsafe');
   });
 

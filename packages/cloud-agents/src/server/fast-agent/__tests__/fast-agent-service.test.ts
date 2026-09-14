@@ -5431,12 +5431,20 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           { name: 'manage_tasks' },
         ],
       },
+      {
+        id: '_roomote_http_integrations',
+        name: 'HTTP integrations',
+        description: 'Credential broker',
+        tools: [{ name: 'list_integrations' }, { name: 'integration_request' }],
+      },
     ]);
     mocks.callIntegration.mockImplementation(
       async (_context, _integrations, request) =>
         request.toolName === 'manage_tasks'
           ? { id: request.args.taskId, taskRunStatus: 'running' }
-          : { matches: ['fast-agent.ts'] },
+          : request.toolName === 'integration_request'
+            ? { status: 200, body: '{"ok":true}' }
+            : { matches: ['fast-agent.ts'] },
     );
 
     mocks.generateText.mockImplementation(
@@ -5520,6 +5528,81 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           success: true,
           result: { matches: ['fast-agent.ts'] },
         });
+        await expect(
+          subagentExecutor({
+            agent: 'advisor',
+            name: nativeToolNames.callIntegrationTool,
+            args: {
+              integrationId: '_roomote_http_integrations',
+              toolName: 'integration_request',
+              args: {
+                integrationId: 'status-service',
+                method: 'GET',
+                path: '/advisor-status',
+              },
+            },
+          }),
+        ).resolves.toEqual({
+          success: true,
+          result: { status: 200, body: '{"ok":true}' },
+        });
+        await expect(
+          parentExecutor({
+            name: nativeToolNames.callIntegrationTool,
+            args: {
+              integrationId: '_roomote_http_integrations',
+              toolName: 'integration_request',
+              args: {
+                integrationId: 'status-service',
+                method: 'GET',
+                path: '/parent-status',
+              },
+            },
+          }),
+        ).resolves.toEqual({
+          success: true,
+          result: { status: 200, body: '{"ok":true}' },
+        });
+        await expect(
+          subagentExecutor({
+            agent: 'judge',
+            name: nativeToolNames.findIntegrationTools,
+            args: { integrationId: '_roomote_http_integrations' },
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: expect.stringContaining(
+            'No on-demand deployment MCP server with id',
+          ),
+        });
+        const judgeDiscovery = await subagentExecutor({
+          agent: 'judge',
+          name: nativeToolNames.findIntegrationTools,
+          args: {},
+        });
+        expect(judgeDiscovery).toMatchObject({ success: true });
+        expect(JSON.stringify(judgeDiscovery)).not.toContain(
+          '_roomote_http_integrations',
+        );
+        await expect(
+          subagentExecutor({
+            agent: 'judge',
+            name: nativeToolNames.callIntegrationTool,
+            args: {
+              integrationId: '_roomote_http_integrations',
+              toolName: 'integration_request',
+              args: {
+                integrationId: 'status-service',
+                method: 'GET',
+                path: '/status',
+              },
+            },
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error:
+            'The HTTP integrations broker is unavailable to the Fast judge agent.',
+        });
         // The shared call path must not hand subagents parent-only member
         // tools that the subagent tool filter denies.
         await expect(
@@ -5550,7 +5633,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter }),
     ).resolves.toBe('Subagent review completed.');
-    expect(mocks.callIntegration).toHaveBeenCalledTimes(3);
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(5);
     expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
       'conversation-1',
       expect.arrayContaining([

@@ -10,6 +10,7 @@ import {
   collectOpenRouterVariantModelAlias,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+  HTTP_INTEGRATIONS_MCP_ID,
   isTaskModelIdDisabled,
   mergeAmazonBedrockProviderConfig,
   mergeBedrockMantleOpenAiProviderConfig,
@@ -234,7 +235,10 @@ const PROMPT_ONLY_SUBAGENTS = {
     mode: 'subagent',
     prompt: createRoomoteJudgeAgentPrompt({ contextOnly: true }),
     permission: NON_TASK_TOOL_PERMISSION_DENIALS,
-    tools: FAST_AGENT_SUBAGENT_TOOL_FILTER,
+    tools: {
+      ...FAST_AGENT_SUBAGENT_TOOL_FILTER,
+      [`${HTTP_INTEGRATIONS_MCP_ID}_*`]: false,
+    },
   },
 } as const;
 

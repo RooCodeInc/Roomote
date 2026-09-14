@@ -103,6 +103,7 @@ import {
 } from './fast-agent-constants';
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
+import { ROOMOTE_OPENCODE_JUDGE_AGENT_NAME } from '../../opencode-prompt-subagents';
 import { getTherapistModeEnabledForUser } from '../therapist-mode';
 import {
   enqueueUserPersonalizationUpdate,
@@ -3905,6 +3906,7 @@ export async function answerFastAgentQuestion({
     });
     const describeIntegrationTools = (
       args: z.infer<typeof findIntegrationToolsArgsSchema>,
+      integrations = onDemandIntegrations,
     ) => {
       if (
         args.integrationId &&
@@ -3912,7 +3914,7 @@ export async function answerFastAgentQuestion({
       ) {
         return nativeIntegrationError(args.integrationId);
       }
-      const found = findFastAgentIntegrationTools(onDemandIntegrations, args);
+      const found = findFastAgentIntegrationTools(integrations, args);
       if (found.unknownIntegration) {
         return {
           success: false as const,
@@ -3965,12 +3967,29 @@ export async function answerFastAgentQuestion({
     ): Promise<unknown> => {
       try {
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools) {
+          const integrations =
+            call.agent === ROOMOTE_OPENCODE_JUDGE_AGENT_NAME
+              ? onDemandIntegrations.filter(
+                  (integration) => integration.id !== HTTP_INTEGRATIONS_MCP_ID,
+                )
+              : onDemandIntegrations;
           return describeIntegrationTools(
             findIntegrationToolsArgsSchema.parse(call.args),
+            integrations,
           );
         }
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool) {
           const args = callIntegrationToolArgsSchema.parse(call.args);
+          if (
+            call.agent === ROOMOTE_OPENCODE_JUDGE_AGENT_NAME &&
+            args.integrationId === HTTP_INTEGRATIONS_MCP_ID
+          ) {
+            return {
+              success: false,
+              error:
+                'The HTTP integrations broker is unavailable to the Fast judge agent.',
+            };
+          }
           if (isFastAgentNativeIntegration(args.integrationId)) {
             return nativeIntegrationError(args.integrationId);
           }
