@@ -160,17 +160,18 @@ vi.mock('@/components/ai-elements', () => {
           filename?: string;
           mediaType?: string;
         }>;
-      }) => void;
+      }) => void | Promise<void>;
     }) => (
       <form
         {...props}
         onSubmit={(event) => {
           event.preventDefault();
           const textarea = event.currentTarget.querySelector('textarea');
-          onSubmit?.({
+          const result = onSubmit?.({
             text: textarea?.value ?? '',
             files: submittedFilesRef.current,
           });
+          if (result instanceof Promise) void result.catch(() => undefined);
         }}
       >
         {children}
@@ -1110,6 +1111,63 @@ describe('PromptInput', () => {
       }),
     );
     expect(queryClientSetQueryDataMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the prompt and attachment when attachment preparation fails', async () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        sendPrompt: { mutate: vi.fn() },
+        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+      },
+    });
+    submittedFilesRef.current = [
+      {
+        url: 'https://attachments.example/report.txt',
+        filename: 'report.txt',
+        mediaType: 'text/plain',
+      },
+    ];
+    preparePromptAttachmentsMock
+      .mockRejectedValueOnce(
+        new Error('Failed to download "report.txt" (HTTP 403).'),
+      )
+      .mockResolvedValueOnce({ text: 'Analyze report' });
+
+    render(
+      <PromptInput
+        taskRun={createTaskRun(42, { taskId: 'task-web-send' })}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText(/Message agent/i);
+    fireEvent.change(textarea, { target: { value: 'Analyze report' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Failed to download "report.txt" (HTTP 403).',
+      );
+    });
+    expect(textarea).toHaveValue('Analyze report');
+    expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(preparePromptAttachmentsMock).toHaveBeenLastCalledWith({
+        text: 'Analyze report',
+        attachments: submittedFilesRef.current,
+      });
+      expect(sandboxSendPromptMutateMock).toHaveBeenCalledOnce();
+    });
   });
 
   it.each(['running', 'waiting_for_user_input'] as const)(

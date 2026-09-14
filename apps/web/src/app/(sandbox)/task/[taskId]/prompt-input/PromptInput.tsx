@@ -569,6 +569,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
 
           handleMessageSent();
         } catch (err) {
+          handlePromptChange(text);
           if (optimisticClientMessageId) {
             const failedClientMessageId = optimisticClientMessageId;
 
@@ -584,6 +585,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           toast.error(
             err instanceof Error ? err.message : 'Failed to send message.',
           );
+          throw err;
         } finally {
           setSending(false);
         }
