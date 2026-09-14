@@ -39,6 +39,7 @@ export type RecentUserTaskMemoryRun = {
   taskId: string;
   runId: number;
   completedAt: Date | null;
+  memoryRevision: number;
 };
 
 /**
@@ -55,6 +56,7 @@ export async function listRecentUserTaskMemoryRuns(
       taskId: tasks.id,
       runId: taskRuns.id,
       completedAt: taskRuns.completedAt,
+      memoryRevision: brainMemoryEvents.revision,
     })
     .from(brainMemoryEvents)
     .innerJoin(taskRuns, eq(taskRuns.id, brainMemoryEvents.runId))

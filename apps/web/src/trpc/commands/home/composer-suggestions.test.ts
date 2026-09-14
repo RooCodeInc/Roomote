@@ -1,15 +1,19 @@
 import type { UserAuthSuccess } from '@/types';
 
 const {
-  mockReadRecentBrainTaskMemories,
+  mockListRecentBrainTaskMemoryRefs,
+  mockReadBrainTaskMemories,
   mockGenerateTrackedNonTaskObject,
   mockGetPersonalPreferences,
   mockCacheKeys,
+  mockCacheEntries,
 } = vi.hoisted(() => ({
-  mockReadRecentBrainTaskMemories: vi.fn(),
+  mockListRecentBrainTaskMemoryRefs: vi.fn(),
+  mockReadBrainTaskMemories: vi.fn(),
   mockGenerateTrackedNonTaskObject: vi.fn(),
   mockGetPersonalPreferences: vi.fn(),
   mockCacheKeys: [] as string[][],
+  mockCacheEntries: new Map<string, unknown>(),
 }));
 
 vi.mock('../preferences', () => ({
@@ -17,7 +21,8 @@ vi.mock('../preferences', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  readRecentBrainTaskMemories: mockReadRecentBrainTaskMemories,
+  listRecentBrainTaskMemoryRefs: mockListRecentBrainTaskMemoryRefs,
+  readBrainTaskMemories: mockReadBrainTaskMemories,
 }));
 
 vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
@@ -30,7 +35,15 @@ vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
 vi.mock('next/cache', () => ({
   unstable_cache: (fn: (...args: unknown[]) => unknown, keys: string[]) => {
     mockCacheKeys.push(keys);
-    return fn;
+    return async (...args: unknown[]) => {
+      const cacheKey = JSON.stringify([keys, args]);
+      if (mockCacheEntries.has(cacheKey)) {
+        return mockCacheEntries.get(cacheKey);
+      }
+      const result = await fn(...args);
+      mockCacheEntries.set(cacheKey, result);
+      return result;
+    };
   },
 }));
 
@@ -42,13 +55,28 @@ describe('getHomeComposerSuggestionsCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCacheKeys.length = 0;
+    mockCacheEntries.clear();
     mockGetPersonalPreferences.mockResolvedValue({
       homeComposerSuggestionsEnabled: true,
     });
   });
 
   it('generates a bounded set from recent task memories', async () => {
-    mockReadRecentBrainTaskMemories.mockResolvedValue([
+    mockListRecentBrainTaskMemoryRefs.mockResolvedValue([
+      {
+        taskId: 'one',
+        runId: 1,
+        completedAt: new Date('2026-09-12T12:00:00Z'),
+        memoryRevision: 2,
+      },
+      {
+        taskId: 'two',
+        runId: 2,
+        completedAt: new Date('2026-09-11T12:00:00Z'),
+        memoryRevision: 1,
+      },
+    ]);
+    mockReadBrainTaskMemories.mockResolvedValue([
       {
         slug: 'tasks/one/runs/1',
         title: 'Fix authentication',
@@ -83,10 +111,14 @@ describe('getHomeComposerSuggestionsCommand', () => {
         'Improve deployment health check error guidance',
       ],
     });
-    expect(mockReadRecentBrainTaskMemories).toHaveBeenCalledWith({
+    expect(mockListRecentBrainTaskMemoryRefs).toHaveBeenCalledWith({
       userId: 'user-1',
       limit: 5,
     });
+    expect(mockReadBrainTaskMemories).toHaveBeenCalledWith([
+      expect.objectContaining({ taskId: 'one', runId: 1 }),
+      expect.objectContaining({ taskId: 'two', runId: 2 }),
+    ]);
     const call = mockGenerateTrackedNonTaskObject.mock.calls[0]?.[0] as {
       prompt: string;
       surface: string;
@@ -100,11 +132,9 @@ describe('getHomeComposerSuggestionsCommand', () => {
     expect(call.prompt).toContain('5-10 words');
     expect(call.prompt).toContain('without any other context');
     expect(call.prompt).toContain('missing tests');
-    expect(mockCacheKeys[0]).toEqual([
-      'home-composer-suggestions',
-      'v3',
-      'user-1',
-      expect.any(String),
+    expect(mockCacheKeys).toEqual([
+      ['home-composer-suggestion-context', 'v3', 'user-1', expect.any(String)],
+      ['home-composer-suggestions', 'v3', 'user-1', expect.any(String)],
     ]);
   });
 
@@ -116,12 +146,13 @@ describe('getHomeComposerSuggestionsCommand', () => {
     await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
       suggestions: [],
     });
-    expect(mockReadRecentBrainTaskMemories).not.toHaveBeenCalled();
+    expect(mockListRecentBrainTaskMemoryRefs).not.toHaveBeenCalled();
+    expect(mockReadBrainTaskMemories).not.toHaveBeenCalled();
     expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
   });
 
   it('falls back when memories are empty', async () => {
-    mockReadRecentBrainTaskMemories.mockResolvedValue([]);
+    mockListRecentBrainTaskMemoryRefs.mockResolvedValue([]);
 
     await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
       suggestions: [],
@@ -130,7 +161,15 @@ describe('getHomeComposerSuggestionsCommand', () => {
   });
 
   it('discards malformed, duplicate, and overlong suggestions', async () => {
-    mockReadRecentBrainTaskMemories.mockResolvedValue([
+    mockListRecentBrainTaskMemoryRefs.mockResolvedValue([
+      {
+        taskId: 'one',
+        runId: 1,
+        completedAt: new Date('2026-09-12T12:00:00Z'),
+        memoryRevision: 1,
+      },
+    ]);
+    mockReadBrainTaskMemories.mockResolvedValue([
       {
         slug: 'tasks/one/runs/1',
         title: null,
@@ -159,7 +198,15 @@ describe('getHomeComposerSuggestionsCommand', () => {
     const consoleErrorSpy = vi
       .spyOn(console, 'error')
       .mockImplementation(() => {});
-    mockReadRecentBrainTaskMemories.mockResolvedValue([
+    mockListRecentBrainTaskMemoryRefs.mockResolvedValue([
+      {
+        taskId: 'one',
+        runId: 1,
+        completedAt: new Date('2026-09-12T12:00:00Z'),
+        memoryRevision: 1,
+      },
+    ]);
+    mockReadBrainTaskMemories.mockResolvedValue([
       {
         slug: 'tasks/one/runs/1',
         title: null,
@@ -174,6 +221,49 @@ describe('getHomeComposerSuggestionsCommand', () => {
     await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
       suggestions: [],
     });
+    await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
+      suggestions: [],
+    });
+    expect(mockReadBrainTaskMemories).toHaveBeenCalledTimes(2);
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(2);
     consoleErrorSpy.mockRestore();
+  });
+
+  it('checks the memory revision before skipping Brain reads on a cache hit', async () => {
+    mockListRecentBrainTaskMemoryRefs.mockResolvedValue([
+      {
+        taskId: 'one',
+        runId: 1,
+        completedAt: new Date('2026-09-12T12:00:00Z'),
+        memoryRevision: 1,
+      },
+    ]);
+    mockReadBrainTaskMemories.mockResolvedValue([
+      {
+        slug: 'tasks/one/runs/1',
+        title: null,
+        updatedAt: new Date('2026-09-12T12:00:00Z'),
+        content: 'Recent task memory.',
+      },
+    ]);
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        suggestions: [
+          'Add focused authentication callback regression tests',
+          'Fix deployment health check recovery gaps',
+          'Document authentication callback failure handling',
+          'Review session handoff reliability edge cases',
+          'Improve deployment health check error guidance',
+        ],
+      },
+    });
+
+    const first = await getHomeComposerSuggestionsCommand(auth);
+    const second = await getHomeComposerSuggestionsCommand(auth);
+
+    expect(second).toEqual(first);
+    expect(mockListRecentBrainTaskMemoryRefs).toHaveBeenCalledTimes(2);
+    expect(mockReadBrainTaskMemories).toHaveBeenCalledTimes(1);
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(1);
   });
 });

@@ -26,7 +26,7 @@ const MAX_SUGGESTION_WORDS = 12;
 const MAX_HOME_SUGGESTION_CHARS = 100;
 const MIN_HOME_SUGGESTION_WORDS = 5;
 const MAX_HOME_SUGGESTION_WORDS = 10;
-const HOME_SUGGESTIONS_CACHE_VERSION = 'v3';
+export const HOME_SUGGESTIONS_CACHE_VERSION = 'v3';
 
 const composerSuggestionSchema = z.object({
   suggestion: z.string().trim().min(1).max(300),
