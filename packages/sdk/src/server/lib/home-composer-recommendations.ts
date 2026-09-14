@@ -38,10 +38,6 @@ const MAX_HOME_MEMORY_CHARS = 30_000;
 export const HOME_COMPOSER_SUGGESTION_MIN_WORDS = 10;
 export const HOME_COMPOSER_SUGGESTION_MAX_WORDS = 15;
 export const HOME_COMPOSER_SUGGESTION_MAX_CHARS = 160;
-const HOME_SUGGESTION_PATTERN = new RegExp(
-  `^\\S+(?: \\S+){${HOME_COMPOSER_SUGGESTION_MIN_WORDS - 1},${HOME_COMPOSER_SUGGESTION_MAX_WORDS - 1}}$`,
-  'u',
-);
 const CACHE_FRESH_MS = 24 * 60 * 60_000;
 const CACHE_MAX_STALE_MS = 3 * 24 * 60 * 60_000;
 const CACHE_TTL_SECONDS = CACHE_MAX_STALE_MS / 1_000;
@@ -61,17 +57,18 @@ Rules:
 - Return distinct suggestions, not paraphrases of the same task.
 `;
 
-const homeComposerSuggestionsSchema = z.object({
-  suggestions: z
-    .array(
-      z
-        .string()
-        .trim()
-        .max(HOME_COMPOSER_SUGGESTION_MAX_CHARS)
-        .regex(HOME_SUGGESTION_PATTERN),
-    )
-    .length(5),
-});
+// Keep semantic constraints out of the provider-facing JSON Schema. Some
+// structured-output adapters reject keywords such as `pattern` before the
+// model runs; the prompt and normalizeSuggestion enforce the full contract.
+const homeComposerSuggestionsSchema = z
+  .object({
+    suggestions: z
+      .array(z.string().trim().describe('One Home task suggestion.'))
+      .describe(
+        `Exactly five distinct, specific task suggestions. Each has ${HOME_COMPOSER_SUGGESTION_MIN_WORDS}-${HOME_COMPOSER_SUGGESTION_MAX_WORDS} words and at most ${HOME_COMPOSER_SUGGESTION_MAX_CHARS} characters.`,
+      ),
+  })
+  .strict();
 
 const sourceRefSchema = z.object({
   taskId: z.string(),
