@@ -428,6 +428,9 @@ describe('handleFollowupAnswer', () => {
       expect.objectContaining({
         channel: 'C123',
         thread_ts: '111.222',
+        client_msg_id: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        ),
         blocks: expect.arrayContaining([
           expect.objectContaining({
             type: 'context',
@@ -453,6 +456,217 @@ describe('handleFollowupAnswer', () => {
         channel: 'C123',
         ts: 'prompt-ts',
       }),
+    );
+    expect(postMessageMock.mock.invocationCallOrder[0]!).toBeLessThan(
+      updateMessageMock.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('automatically retries next-prompt delivery without advancing state twice', async () => {
+    selectLimitMock.mockResolvedValue([{ userId: 'user-1' }]);
+    const questions = [
+      {
+        id: 'language',
+        header: 'Language',
+        question: 'Which language should I use?',
+        isOther: true,
+        isSecret: false,
+        options: [{ label: 'TypeScript', description: 'Use the app stack.' }],
+      },
+      {
+        id: 'style',
+        header: 'Style',
+        question: 'What should the UI optimize for?',
+        isOther: true,
+        isSecret: false,
+        options: [{ label: 'Dashboard', description: 'Pane-first interface.' }],
+      },
+    ];
+    getPendingSlackRequestUserInputMock.mockResolvedValue({
+      requestId: 'rui:session:turn:call',
+      runId: 42,
+      taskId: 'task-1',
+      promptMessageTs: '111.222',
+      questions,
+      currentQuestionIndex: 0,
+      answers: {},
+      status: 'pending',
+      createdAt: 123,
+    });
+    postMessageMock
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce('next-prompt-ts');
+
+    await handleFollowupAnswer(buildPayload());
+
+    expect(updateMessageMock).toHaveBeenCalledTimes(1);
+    expect(postMessageMock.mock.invocationCallOrder[1]!).toBeLessThan(
+      updateMessageMock.mock.invocationCallOrder[0]!,
+    );
+    expect(
+      advancePendingSlackRequestUserInputQuestionMock,
+    ).toHaveBeenCalledTimes(1);
+    expect(postMessageMock).toHaveBeenCalledTimes(2);
+    expect(postMessageMock.mock.calls[0]![0].client_msg_id).toBe(
+      postMessageMock.mock.calls[1]![0].client_msg_id,
+    );
+    expect(
+      setPendingSlackRequestUserInputPromptMessageTsMock,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      setPendingSlackRequestUserInputPromptMessageTsMock,
+    ).toHaveBeenCalledWith(
+      '111.222',
+      'rui:session:turn:call',
+      1,
+      'next-prompt-ts',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps one duplicate-safe delivery identity across automatic attempts', async () => {
+    selectLimitMock.mockResolvedValue([{ userId: 'user-1' }]);
+    getPendingSlackRequestUserInputMock.mockResolvedValue({
+      requestId: 'rui:session:turn:call',
+      runId: 42,
+      taskId: 'task-1',
+      promptMessageTs: '111.222',
+      questions: [
+        {
+          id: 'language',
+          header: 'Language',
+          question: 'Which language should I use?',
+          isOther: true,
+          isSecret: false,
+          options: [{ label: 'TypeScript', description: 'Use the app stack.' }],
+        },
+        {
+          id: 'style',
+          header: 'Style',
+          question: 'What should the UI optimize for?',
+          isOther: true,
+          isSecret: false,
+          options: [
+            { label: 'Dashboard', description: 'Pane-first interface.' },
+          ],
+        },
+      ],
+      currentQuestionIndex: 0,
+      answers: {},
+      status: 'pending',
+      createdAt: 123,
+    });
+    postMessageMock
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce('next-prompt-ts');
+
+    await handleFollowupAnswer(buildPayload());
+
+    expect(postMessageMock.mock.calls[0]![0]).toEqual(
+      postMessageMock.mock.calls[1]![0],
+    );
+    expect(postMessageMock.mock.calls[0]![0].client_msg_id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it('reports a concise failure after automatic delivery attempts are exhausted', async () => {
+    selectLimitMock.mockResolvedValue([{ userId: 'user-1' }]);
+    getPendingSlackRequestUserInputMock.mockResolvedValue({
+      requestId: 'rui:session:turn:call',
+      runId: 42,
+      taskId: 'task-1',
+      promptMessageTs: '111.222',
+      questions: [
+        {
+          id: 'language',
+          header: 'Language',
+          question: 'Which language should I use?',
+          isOther: true,
+          isSecret: false,
+          options: [{ label: 'TypeScript', description: 'Use the app stack.' }],
+        },
+        {
+          id: 'style',
+          header: 'Style',
+          question: 'What should the UI optimize for?',
+          isOther: true,
+          isSecret: false,
+          options: [
+            { label: 'Dashboard', description: 'Pane-first interface.' },
+          ],
+        },
+      ],
+      currentQuestionIndex: 0,
+      answers: {},
+      status: 'pending',
+      createdAt: 123,
+    });
+    postMessageMock.mockResolvedValue(undefined);
+
+    await handleFollowupAnswer(buildPayload());
+
+    expect(postMessageMock).toHaveBeenCalledTimes(2);
+    expect(
+      advancePendingSlackRequestUserInputQuestionMock,
+    ).toHaveBeenCalledTimes(1);
+    expect(updateMessageMock).not.toHaveBeenCalled();
+    expect(
+      setPendingSlackRequestUserInputPromptMessageTsMock,
+    ).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://slack.test/response',
+      expect.objectContaining({
+        body: JSON.stringify({
+          replace_original: false,
+          text: '❌ Failed to process answer: Your answer was saved, but I could not deliver the next question.',
+        }),
+      }),
+    );
+  });
+
+  it('still delivers the next prompt when updating the answered prompt fails', async () => {
+    selectLimitMock.mockResolvedValue([{ userId: 'user-1' }]);
+    getPendingSlackRequestUserInputMock.mockResolvedValue({
+      requestId: 'rui:session:turn:call',
+      runId: 42,
+      taskId: 'task-1',
+      promptMessageTs: '111.222',
+      questions: [
+        {
+          id: 'language',
+          header: 'Language',
+          question: 'Which language should I use?',
+          isOther: true,
+          isSecret: false,
+          options: [{ label: 'TypeScript', description: 'Use the app stack.' }],
+        },
+        {
+          id: 'style',
+          header: 'Style',
+          question: 'What should the UI optimize for?',
+          isOther: true,
+          isSecret: false,
+          options: [
+            { label: 'Dashboard', description: 'Pane-first interface.' },
+          ],
+        },
+      ],
+      currentQuestionIndex: 0,
+      answers: {},
+      status: 'pending',
+      createdAt: 123,
+    });
+    updateMessageMock.mockRejectedValueOnce(new Error('chat.update failed'));
+
+    await handleFollowupAnswer(buildPayload());
+
+    expect(postMessageMock).toHaveBeenCalledTimes(1);
+    expect(
+      setPendingSlackRequestUserInputPromptMessageTsMock,
+    ).toHaveBeenCalledWith('111.222', 'rui:session:turn:call', 1, 'posted-ts');
+    expect(consoleErrorMock).toHaveBeenCalledWith(
+      'Failed to update answered Slack request_user_input prompt: chat.update failed',
     );
   });
 
