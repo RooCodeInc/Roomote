@@ -515,10 +515,11 @@ export async function lookupSlackChannelMessages(options: {
       ...(oldestBoundary ? { oldest: oldestBoundary.slackTs } : {}),
       ...(latestBoundary ? { latest: latestBoundary.slackTs } : {}),
     });
-  } catch {
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
     throw new McpProxyError(
       502,
-      `Slack channel ${channelId} could not be fetched from Slack`,
+      `Slack channel ${channelId} could not be fetched from Slack: ${reason}`,
     );
   }
 

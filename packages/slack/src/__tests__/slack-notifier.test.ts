@@ -2863,6 +2863,14 @@ describe('SlackNotifier', () => {
           ok: true,
           json: async () => ({
             ok: true,
+            messages: [],
+            response_metadata: {},
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: true,
             messages: [
               {
                 user: 'U123',
@@ -2891,16 +2899,21 @@ describe('SlackNotifier', () => {
       expect(getUsersInfoSpy).toHaveBeenCalled();
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
         1,
-        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&latest=113.000',
+        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&oldest=110.000&latest=113.000',
         expect.objectContaining({ method: 'GET' }),
       );
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
         2,
-        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&latest=113.000&cursor=cursor-1',
+        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&oldest=110.000&latest=113.000&cursor=cursor-1',
         expect.objectContaining({ method: 'GET' }),
       );
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
         3,
+        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&latest=110.000',
+        expect.objectContaining({ method: 'GET' }),
+      );
+      expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
+        4,
         'https://slack.com/api/conversations.replies?channel=C123&ts=111.000&oldest=110.000&latest=113.000&inclusive=true',
         expect.objectContaining({ method: 'GET' }),
       );
@@ -2963,9 +2976,7 @@ describe('SlackNotifier', () => {
                 type: 'message',
               },
             ],
-            response_metadata: {
-              next_cursor: 'cursor-1',
-            },
+            response_metadata: {},
           }),
         })
         .mockResolvedValueOnce({
@@ -3018,12 +3029,12 @@ describe('SlackNotifier', () => {
       expect(getUsersInfoSpy).toHaveBeenCalled();
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
         1,
-        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&latest=113.000',
+        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&oldest=110.000&latest=113.000',
         expect.objectContaining({ method: 'GET' }),
       );
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
         2,
-        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&latest=113.000&cursor=cursor-1',
+        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&latest=110.000',
         expect.objectContaining({ method: 'GET' }),
       );
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
@@ -3103,6 +3114,14 @@ describe('SlackNotifier', () => {
           ok: true,
           json: async () => ({
             ok: true,
+            messages: [],
+            response_metadata: {},
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: true,
             messages: [
               {
                 user: 'U234',
@@ -3129,9 +3148,9 @@ describe('SlackNotifier', () => {
       });
 
       expect(getUsersInfoSpy).toHaveBeenCalled();
-      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(3);
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
-        2,
+        3,
         'https://slack.com/api/conversations.replies?channel=C123&ts=111.000&oldest=110.000&latest=113.000&inclusive=true',
         expect.objectContaining({ method: 'GET' }),
       );
@@ -3156,6 +3175,179 @@ describe('SlackNotifier', () => {
           text: 'latest top-level',
           ts: '113.000',
         }),
+      ]);
+    });
+
+    it('passes oldest through to Slack instead of paging the whole channel', async () => {
+      vi.spyOn(
+        SlackNotifier.prototype as unknown as {
+          getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+        },
+        'getUsersInfo',
+      ).mockResolvedValue(new Map([['U123', 'Alice']]));
+
+      getGlobalWithFetch().fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: true,
+            messages: [
+              {
+                user: 'U123',
+                text: 'in window',
+                ts: '111.000',
+                type: 'message',
+              },
+            ],
+            response_metadata: {},
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: true,
+            messages: [
+              {
+                user: 'U123',
+                text: 'ancient',
+                ts: '5.000',
+                type: 'message',
+              },
+            ],
+            response_metadata: {},
+          }),
+        });
+
+      const messages = await notifier.fetchChannelMessages({
+        channel: 'C123',
+        oldest: '110.000',
+      });
+
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+      expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
+        1,
+        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&oldest=110.000',
+        expect.objectContaining({ method: 'GET' }),
+      );
+      expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
+        2,
+        'https://slack.com/api/conversations.history?channel=C123&limit=200&inclusive=true&latest=110.000',
+        expect.objectContaining({ method: 'GET' }),
+      );
+      expect(messages).toEqual([
+        expect.objectContaining({ text: 'in window', ts: '111.000' }),
+      ]);
+    });
+
+    it('returns the bounded result when the stale thread root lookback fails', async () => {
+      vi.spyOn(
+        SlackNotifier.prototype as unknown as {
+          getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+        },
+        'getUsersInfo',
+      ).mockResolvedValue(new Map([['U123', 'Alice']]));
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      getGlobalWithFetch().fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: true,
+            messages: [
+              {
+                user: 'U123',
+                text: 'in window',
+                ts: '111.000',
+                type: 'message',
+              },
+            ],
+            response_metadata: {},
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: false,
+            error: 'ratelimited',
+          }),
+        });
+
+      const messages = await notifier.fetchChannelMessages({
+        channel: 'C123',
+        oldest: '110.000',
+      });
+
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+      expect(messages).toEqual([
+        expect.objectContaining({ text: 'in window', ts: '111.000' }),
+      ]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Skipping stale thread root lookback'),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('caps the stale thread root lookback instead of paging the whole channel', async () => {
+      vi.spyOn(
+        SlackNotifier.prototype as unknown as {
+          getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+        },
+        'getUsersInfo',
+      ).mockResolvedValue(new Map([['U123', 'Alice']]));
+
+      let requestCount = 0;
+
+      getGlobalWithFetch().fetch = vi.fn().mockImplementation(async () => {
+        requestCount += 1;
+
+        if (requestCount === 1) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              messages: [
+                {
+                  user: 'U123',
+                  text: 'in window',
+                  ts: '111.000',
+                  type: 'message',
+                },
+              ],
+              response_metadata: {},
+            }),
+          };
+        }
+
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            messages: [
+              {
+                user: 'U123',
+                text: `stale page ${requestCount}`,
+                ts: `${100 - requestCount}.000`,
+                type: 'message',
+              },
+            ],
+            response_metadata: {
+              next_cursor: `cursor-${requestCount}`,
+            },
+          }),
+        };
+      });
+
+      const messages = await notifier.fetchChannelMessages({
+        channel: 'C123',
+        oldest: '110.000',
+      });
+
+      // One bounded history page plus five lookback pages.
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(6);
+      expect(messages).toEqual([
+        expect.objectContaining({ text: 'in window', ts: '111.000' }),
       ]);
     });
 
