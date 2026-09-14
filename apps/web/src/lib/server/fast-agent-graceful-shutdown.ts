@@ -19,10 +19,6 @@ type WebShutdownOptions = FastAgentShutdownDrainDeps & {
   notifyReady?: (signal: NodeJS.Signals) => void;
 };
 
-export const WEB_FAST_AGENT_SHUTDOWN_REQUEST =
-  'roomote:web-fast-agent-shutdown';
-export const WEB_FAST_AGENT_SHUTDOWN_READY =
-  'roomote:web-fast-agent-shutdown-ready';
 const WEB_FAST_AGENT_SHUTDOWN_HANDLER = Symbol.for(
   'roomote.web-fast-agent-shutdown-handler',
 );
