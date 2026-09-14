@@ -1703,12 +1703,17 @@ export class OpenCodeServerHarness
   private lastOpenCodeRetryStatusMessage: string | null = null;
   private providerErrorRecoveryQueuedPromptId: string | null = null;
   /**
-   * Tool calls of the in-flight turn that OpenCode marked interrupted without
-   * a user abort or a session error. A turn that goes idle with any of these
-   * was cut off by the provider and is retried through the provider-error
-   * recovery instead of settling as a clean completion.
+   * Tool calls OpenCode marked interrupted while a turn was in flight, keyed
+   * by tool event key with the assistant message they belong to. Only the
+   * ones attributed to the current turn count at idle: a turn that goes idle
+   * with any of those was cut off by the provider and is retried through the
+   * provider-error recovery instead of settling as a clean completion.
    */
-  private interruptedToolCallKeys = new Set<string>();
+  private interruptedToolCalls = new Map<string, string | undefined>();
+  /** User message id of the most recently submitted prompt. */
+  private currentTurnUserMessageId: string | undefined;
+  /** Assistant message id -> the user message (parentID) it answers. */
+  private assistantParentById = new Map<string, string>();
   private providerErrorRecoveryRetryAtMs: number | null = null;
   private pendingContextOverflowError: unknown | null = null;
   private ignoreNextProviderRecoverySessionIdle = false;
@@ -2414,7 +2419,7 @@ export class OpenCodeServerHarness
       this.cancelRequestedBeforeSession = true;
       this.sessionCreateAbortController.abort();
       this.inFlight = false;
-      this.interruptedToolCallKeys.clear();
+      this.interruptedToolCalls.clear();
       this.prompts.clear();
       this.clearQueuedPromptRetryTimer();
       this.clearProviderErrorRecoveryState();
@@ -2455,7 +2460,7 @@ export class OpenCodeServerHarness
     this.suppressAssistantOutputUntilNextPrompt = true;
     this.inFlight = false;
     this.finalizedAssistantTurn = null;
-    this.interruptedToolCallKeys.clear();
+    this.interruptedToolCalls.clear();
     this.prompts.clear();
     this.clearQueuedPromptRetryTimer();
     this.clearProviderErrorRecoveryState();
@@ -3870,7 +3875,8 @@ export class OpenCodeServerHarness
 
     this.inFlight = true;
     this.finalizedAssistantTurn = null;
-    this.interruptedToolCallKeys.clear();
+    this.interruptedToolCalls.clear();
+    this.currentTurnUserMessageId = messageID;
     this.submittedUserMessageIds.add(messageID);
     this.messageRoleById.set(messageID, 'user');
     const agent = this.resolvePromptAgent();
@@ -4476,7 +4482,7 @@ export class OpenCodeServerHarness
   }
 
   private clearProviderErrorRecoveryState(): void {
-    this.interruptedToolCallKeys.clear();
+    this.interruptedToolCalls.clear();
     this.clearProviderRateLimitRetryTimer();
     this.clearProviderErrorRecoveryRetryTimer();
     this.providerRateLimitRetryCount = 0;
@@ -4512,14 +4518,15 @@ export class OpenCodeServerHarness
     source: 'session_status' | 'session_idle',
   ): Promise<boolean> {
     const sessionId = this.sessionId;
-    const interruptedCount = this.interruptedToolCallKeys.size;
+    const interruptedCount = [...this.interruptedToolCalls.values()].filter(
+      (messageId) => this.belongsToCurrentTurn(messageId),
+    ).length;
+
+    this.interruptedToolCalls.clear();
 
     if (!sessionId || !this.inFlight || interruptedCount === 0) {
-      this.interruptedToolCallKeys.clear();
       return false;
     }
-
-    this.interruptedToolCallKeys.clear();
 
     const message = `The model response ended before ${interruptedCount} tool call${
       interruptedCount === 1 ? '' : 's'
@@ -4545,6 +4552,30 @@ export class OpenCodeServerHarness
     // The session is already idle, so schedule the continue prompt now
     // rather than waiting for an idle that has already happened.
     return this.drainProviderErrorRecoveryAfterIdle(source);
+  }
+
+  /**
+   * Whether an assistant message answers the prompt that is in flight now.
+   * The parent link is authoritative when OpenCode reported it; otherwise
+   * message ids are time-ordered, so a message created after the current
+   * user message is part of its turn while one created before it belongs to
+   * a turn that a cancel or queued replay already superseded. Unknown stays
+   * unattributed so it can never trigger a retry.
+   */
+  private belongsToCurrentTurn(messageId: string | undefined): boolean {
+    const userMessageId = this.currentTurnUserMessageId;
+
+    if (!messageId || !userMessageId) {
+      return false;
+    }
+
+    const parentId = this.assistantParentById.get(messageId);
+
+    if (parentId !== undefined) {
+      return parentId === userMessageId;
+    }
+
+    return messageId > userMessageId;
   }
 
   private async drainProviderErrorRecoveryAfterIdle(
@@ -4765,17 +4796,16 @@ export class OpenCodeServerHarness
       this.trackActiveWorkflowSkill(toolPart, context.sessionId);
     }
 
-    // A user cancel or queued-replay interrupt also aborts pending tools;
-    // both arm the replay-abort suppression before aborting, so only
-    // interruptions outside that window count as provider-side cutoffs.
+    // A user cancel or queued-replay interrupt also aborts pending tools.
+    // Those belong to the superseded turn, so record every interruption with
+    // its message and attribute it to a turn when the session goes idle.
     if (
       context.sessionId === this.sessionId &&
       this.inFlight &&
-      !this.suppressNextReplayAbortError &&
       !this.persistedToolResultKeys.has(eventKey) &&
       isInterruptedOpenCodeToolPart(toolPart)
     ) {
-      this.interruptedToolCallKeys.add(eventKey);
+      this.interruptedToolCalls.set(eventKey, context.messageId);
     }
 
     if (
@@ -5132,6 +5162,10 @@ export class OpenCodeServerHarness
 
     if (role !== 'assistant') {
       return;
+    }
+
+    if (typeof info.parentID === 'string' && info.parentID) {
+      this.assistantParentById.set(info.id, info.parentID);
     }
 
     this.stallWatchdogs.noteProgress();

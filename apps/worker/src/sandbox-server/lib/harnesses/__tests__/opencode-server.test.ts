@@ -3648,6 +3648,165 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('ignores tool calls interrupted by a queued replay but still recovers the replayed turn', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    const userMessageIdOfPrompt = (callIndex: number): string =>
+      (
+        client.promptAsync.mock.calls[callIndex]?.[0] as {
+          request: { messageID: string };
+        }
+      ).request.messageID;
+    const emitToolPart = (
+      messageID: string,
+      callID: string,
+      state: Record<string, unknown>,
+    ) =>
+      client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: `prt_${callID}`,
+            sessionID: 'ses_1',
+            messageID,
+            type: 'tool',
+            tool: 'bash',
+            callID,
+            state: { input: { command: 'sleep 60' }, ...state },
+          },
+        },
+      });
+    const interrupted = {
+      status: 'error',
+      error: 'Tool execution aborted',
+      metadata: { interrupted: true },
+    };
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+      await client.emit({
+        type: 'session.status',
+        properties: { sessionID: 'ses_1', status: { type: 'busy' } },
+      });
+
+      const firstUserMessageId = userMessageIdOfPrompt(0);
+      const oldAssistantMessageId = `${firstUserMessageId}1`;
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: oldAssistantMessageId,
+            sessionID: 'ses_1',
+            role: 'assistant',
+            parentID: firstUserMessageId,
+            time: { created: 1 },
+          },
+        },
+      });
+      await emitToolPart(oldAssistantMessageId, 'call_old', {
+        status: 'running',
+      });
+
+      // Native injection fails, so the steer aborts the turn and replays.
+      client.promptAsync.mockRejectedValueOnce(new Error('injection refused'));
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: {
+          text: 'Steer to this instead.',
+          autoSteerWhenQueued: true,
+          visibleInTranscript: true,
+        },
+      });
+      await vi.waitFor(() => {
+        expect(client.abort).toHaveBeenCalledTimes(1);
+        expect(client.promptAsync).toHaveBeenCalledTimes(3);
+      });
+
+      // The superseded turn's tool is reported interrupted only after the
+      // replayed prompt is already running; it must not count against the
+      // new turn.
+      await emitToolPart(oldAssistantMessageId, 'call_old', interrupted);
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+        },
+      });
+
+      // The replayed turn then loses its own tool call to a provider cutoff.
+      const replayedUserMessageId = userMessageIdOfPrompt(2);
+      const newAssistantMessageId = `${replayedUserMessageId}1`;
+      await emitToolPart(newAssistantMessageId, 'call_new', {
+        status: 'running',
+      });
+      await emitToolPart(newAssistantMessageId, 'call_new', interrupted);
+      client.message.mockResolvedValueOnce(
+        createFinalAssistantMessage({
+          messageId: newAssistantMessageId,
+          text: '',
+        }),
+      );
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: newAssistantMessageId,
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 2 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        ),
+      ).toBe(false);
+      const notices = persistedEnvelopes.filter(
+        (envelope) =>
+          asRecord(envelope.payload.providerRetryNotice)?.kind ===
+          'provider_error',
+      );
+      expect(notices).toHaveLength(1);
+      expect(String(notices[0]?.payload.text ?? '')).toContain(
+        'before 1 tool call finished',
+      );
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(client.promptAsync).toHaveBeenCalledTimes(4);
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it('exponentially backs off repeated unknown provider errors', async () => {
     vi.useFakeTimers();
     const { client, harness } = createHarness();
