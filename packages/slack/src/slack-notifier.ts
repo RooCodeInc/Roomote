@@ -2428,29 +2428,38 @@ export class SlackNotifier {
       } while (cursor);
 
       if (oldest && oldestTs !== null) {
-        let lookbackCursor: string | undefined;
-        let lookbackPageCount = 0;
+        // Best effort: the bounded read above is the primary result. Some
+        // Slack tiers only allow one history request per minute, so a failed
+        // lookback must not turn an otherwise successful read into an error.
+        try {
+          let lookbackCursor: string | undefined;
+          let lookbackPageCount = 0;
 
-        do {
-          lookbackPageCount += 1;
+          do {
+            lookbackPageCount += 1;
 
-          const result = await this.fetchChannelHistoryPage({
-            channel,
-            latest: oldest,
-            ...(lookbackCursor ? { cursor: lookbackCursor } : {}),
-          });
+            const result = await this.fetchChannelHistoryPage({
+              channel,
+              latest: oldest,
+              ...(lookbackCursor ? { cursor: lookbackCursor } : {}),
+            });
 
-          for (const message of result.messages) {
-            if (shouldExpandThreadRoot({ message, oldestTs })) {
-              threadRootTimestamps.add(message.ts);
+            for (const message of result.messages) {
+              if (shouldExpandThreadRoot({ message, oldestTs })) {
+                threadRootTimestamps.add(message.ts);
+              }
             }
-          }
 
-          lookbackCursor = result.response_metadata?.next_cursor || undefined;
-        } while (
-          lookbackCursor &&
-          lookbackPageCount < MAX_STALE_THREAD_ROOT_LOOKBACK_PAGES
-        );
+            lookbackCursor = result.response_metadata?.next_cursor || undefined;
+          } while (
+            lookbackCursor &&
+            lookbackPageCount < MAX_STALE_THREAD_ROOT_LOOKBACK_PAGES
+          );
+        } catch (error) {
+          console.warn(
+            `[fetchChannelMessages] Skipping stale thread root lookback: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
 
       const rootMessages = await this.normalizeFetchedMessages(historyMessages);

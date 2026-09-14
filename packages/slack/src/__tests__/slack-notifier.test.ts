@@ -3240,6 +3240,55 @@ describe('SlackNotifier', () => {
       ]);
     });
 
+    it('returns the bounded result when the stale thread root lookback fails', async () => {
+      vi.spyOn(
+        SlackNotifier.prototype as unknown as {
+          getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+        },
+        'getUsersInfo',
+      ).mockResolvedValue(new Map([['U123', 'Alice']]));
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      getGlobalWithFetch().fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: true,
+            messages: [
+              {
+                user: 'U123',
+                text: 'in window',
+                ts: '111.000',
+                type: 'message',
+              },
+            ],
+            response_metadata: {},
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: false,
+            error: 'ratelimited',
+          }),
+        });
+
+      const messages = await notifier.fetchChannelMessages({
+        channel: 'C123',
+        oldest: '110.000',
+      });
+
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+      expect(messages).toEqual([
+        expect.objectContaining({ text: 'in window', ts: '111.000' }),
+      ]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Skipping stale thread root lookback'),
+      );
+      warnSpy.mockRestore();
+    });
+
     it('caps the stale thread root lookback instead of paging the whole channel', async () => {
       vi.spyOn(
         SlackNotifier.prototype as unknown as {
