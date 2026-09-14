@@ -7,8 +7,8 @@ import {
 
 const mocks = vi.hoisted(() => ({
   capture: vi.fn(),
+  integrationsProps: vi.fn(),
   mutate: vi.fn(),
-  push: vi.fn(),
   isAdmin: true,
   submitError: false,
   submitPending: false,
@@ -16,9 +16,6 @@ const mocks = vi.hoisted(() => ({
   enabled: true,
 }));
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: mocks.push }),
-}));
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({ isAdmin: mocks.isAdmin }),
 }));
@@ -43,6 +40,18 @@ vi.mock('@tanstack/react-query', () => ({
     isPending: mocks.submitPending,
     isError: mocks.submitError,
   }),
+}));
+vi.mock('@/components/settings/Integrations', () => ({
+  Integrations: (props: {
+    configurationRequest?: { integrationId: string; sequence: number } | null;
+  }) => {
+    mocks.integrationsProps(props);
+    return props.configurationRequest ? (
+      <div role="dialog">
+        Configure {props.configurationRequest.integrationId}
+      </div>
+    ) : null;
+  },
 }));
 
 import { SetupIntegrationsCard } from './SetupIntegrationsCard';
@@ -112,17 +121,24 @@ it('uses the setup action-card layout with compact catalog rows', () => {
   });
 });
 
-it('opens the shared integration settings surface instead of a setup-only modal', () => {
+it('opens shared integration configuration inside the setup session', () => {
   render(<SetupIntegrationsCard sessionId="s" request={request} />);
   fireEvent.click(screen.getByRole('button', { name: 'Connect Notion' }));
   expect(mocks.capture).toHaveBeenCalledWith(
     'setup_integration_configuration_opened',
     { integration_id: 'notion' },
   );
-  expect(mocks.push).toHaveBeenCalledWith(
-    '/settings/integrations?highlight=notion',
+  expect(screen.getByRole('dialog')).toHaveTextContent('Configure notion');
+  expect(mocks.integrationsProps).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      integrationIds: ['notion', 'jira'],
+      configurationRequest: {
+        integrationId: 'notion',
+        sequence: 1,
+      },
+      showCatalog: false,
+    }),
   );
-  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
 it('continues with the durable setup input contract', () => {

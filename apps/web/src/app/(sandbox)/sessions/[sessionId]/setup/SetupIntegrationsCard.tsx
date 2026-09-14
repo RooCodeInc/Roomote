@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -14,10 +13,10 @@ import {
 } from '@roomote/types';
 
 import { ArrowRight, Button, Plug } from '@/components/system';
+import { Integrations } from '@/components/settings/Integrations';
 import { McpIcon } from '@/components/settings/McpIcon';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useTelemetry } from '@/hooks/useTelemetry';
-import { SETTINGS_PATHS } from '@/lib/settings';
 import { useTRPC } from '@/trpc/client';
 
 import {
@@ -27,8 +26,8 @@ import {
 
 /**
  * A compact setup action card, intentionally matching the other cards in the
- * setup conversation. Detailed integration configuration belongs to the
- * shared Settings surface rather than a setup-only modal.
+ * setup conversation. Detailed integration configuration reuses the shared
+ * Settings surface without navigating away from the session.
  */
 export function SetupIntegrationsCard({
   sessionId,
@@ -41,10 +40,14 @@ export function SetupIntegrationsCard({
   >;
 }) {
   const trpc = useTRPC();
-  const router = useRouter();
   const { isAdmin } = useAuthorizedUser();
   const { enabled, capture } = useTelemetry();
   const [continued, setContinued] = useState(false);
+  const [configurationRequest, setConfigurationRequest] = useState<{
+    integrationId: string;
+    sequence: number;
+  } | null>(null);
+  const nextConfigurationSequence = useRef(0);
   const shownRequest = useRef<string | null>(null);
   const skippedRequest = useRef<string | null>(null);
 
@@ -133,54 +136,67 @@ export function SetupIntegrationsCard({
   }
 
   return (
-    <SetupSessionActionCard
-      title="Bring your team's tools along"
-      icon={<Plug />}
-      intro="Connect the tools you use so I can work with your team's context."
-    >
-      {!isAdmin ? (
-        <p className="text-sm text-muted-foreground">
-          An administrator can configure these connections.
-        </p>
-      ) : null}
-      <ul
-        className="divide-y divide-border"
-        aria-label="Available integrations"
+    <>
+      <SetupSessionActionCard
+        title="Bring your team's tools along"
+        icon={<Plug />}
+        intro="Connect the tools you use so I can work with your team's context."
       >
-        {visibleIntegrations.map((integration) => {
-          const definition = MCP_INTEGRATIONS.find(
-            (entry) => entry.id === integration.id,
-          );
-          return (
-            <li key={integration.id} className="flex items-center gap-3 py-3">
-              {definition ? (
-                <McpIcon icon={definition.icon} name={integration.name} />
-              ) : null}
-              <span className="min-w-0 flex-1 font-medium">
-                {integration.name}
-              </span>
-              <Button
-                type="button"
-                size="sm"
-                aria-label={`Connect ${integration.name}`}
-                disabled={!isAdmin || submit.isPending}
-                onClick={() => {
-                  capture('setup_integration_configuration_opened', {
-                    integration_id: integration.id,
-                  });
-                  router.push(
-                    `${SETTINGS_PATHS.integrations}?highlight=${integration.id}`,
-                  );
-                }}
-              >
-                Connect
-              </Button>
-            </li>
-          );
-        })}
-      </ul>
-      <SetupSessionActionCardActions>{keepGoing}</SetupSessionActionCardActions>
-      {continuationError}
-    </SetupSessionActionCard>
+        {!isAdmin ? (
+          <p className="text-sm text-muted-foreground">
+            An administrator can configure these connections.
+          </p>
+        ) : null}
+        <ul
+          className="divide-y divide-border"
+          aria-label="Available integrations"
+        >
+          {visibleIntegrations.map((integration) => {
+            const definition = MCP_INTEGRATIONS.find(
+              (entry) => entry.id === integration.id,
+            );
+            return (
+              <li key={integration.id} className="flex items-center gap-3 py-3">
+                {definition ? (
+                  <McpIcon icon={definition.icon} name={integration.name} />
+                ) : null}
+                <span className="min-w-0 flex-1 font-medium">
+                  {integration.name}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  aria-label={`Connect ${integration.name}`}
+                  disabled={!isAdmin || submit.isPending}
+                  onClick={() => {
+                    capture('setup_integration_configuration_opened', {
+                      integration_id: integration.id,
+                    });
+                    nextConfigurationSequence.current += 1;
+                    setConfigurationRequest({
+                      integrationId: integration.id,
+                      sequence: nextConfigurationSequence.current,
+                    });
+                  }}
+                >
+                  Connect
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+        <SetupSessionActionCardActions>
+          {keepGoing}
+        </SetupSessionActionCardActions>
+        {continuationError}
+      </SetupSessionActionCard>
+      <Integrations
+        integrationIds={visibleIntegrations.map(
+          (integration) => integration.id,
+        )}
+        configurationRequest={configurationRequest}
+        showCatalog={false}
+      />
+    </>
   );
 }

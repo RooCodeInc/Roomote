@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { FastAgentCapabilityOfferPayload } from '@roomote/types';
 
 import { CapabilityOfferCard } from './CapabilityOfferCard';
 
 const mocks = vi.hoisted(() => ({
+  integrationsProps: vi.fn(),
   mutate: vi.fn(),
   sourceControlCard: vi.fn(),
   status: {
@@ -25,10 +26,6 @@ const mocks = vi.hoisted(() => ({
       },
     },
   },
-}));
-
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn() }),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
@@ -57,6 +54,18 @@ vi.mock('@/trpc/client', () => ({
 }));
 
 vi.mock('@/components/settings/McpIcon', () => ({ McpIcon: () => null }));
+vi.mock('@/components/settings/Integrations', () => ({
+  Integrations: (props: {
+    configurationRequest?: { integrationId: string; sequence: number } | null;
+  }) => {
+    mocks.integrationsProps(props);
+    return props.configurationRequest ? (
+      <div role="dialog">
+        Configure {props.configurationRequest.integrationId}
+      </div>
+    ) : null;
+  },
+}));
 vi.mock('./setup/SetupSourceControlCard', () => ({
   SetupSessionSourceControlCardBody: (props: unknown) => {
     mocks.sourceControlCard(props);
@@ -107,6 +116,32 @@ describe('CapabilityOfferCard', () => {
 
     expect(mocks.sourceControlCard).toHaveBeenCalledWith(
       expect.objectContaining({ preferredProvider: undefined }),
+    );
+  });
+
+  it('opens integration configuration inside the session', () => {
+    render(
+      <CapabilityOfferCard
+        sessionId="session-1"
+        offer={{
+          ...offer('integrations'),
+          integrationIds: ['notion'],
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Notion' }));
+
+    expect(screen.getByRole('dialog')).toHaveTextContent('Configure notion');
+    expect(mocks.integrationsProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        integrationIds: ['notion'],
+        configurationRequest: {
+          integrationId: 'notion',
+          sequence: 1,
+        },
+        showCatalog: false,
+      }),
     );
   });
 

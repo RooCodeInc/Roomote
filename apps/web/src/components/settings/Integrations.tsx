@@ -1566,8 +1566,15 @@ function VercelConnectionFields({
 
 export function Integrations({
   integrationIds,
+  configurationRequest,
+  showCatalog = true,
 }: {
   integrationIds?: readonly string[];
+  configurationRequest?: {
+    integrationId: string;
+    sequence: number;
+  } | null;
+  showCatalog?: boolean;
 } = {}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -2546,6 +2553,55 @@ export function Integrations({
     highlightedIntegrationId,
   ]);
 
+  const handledConfigurationSequence = useRef<number | null>(null);
+  const integrationsUnavailable = effectiveIntegrations.data?.some(
+    (integration) => integration.status === 'unavailable',
+  );
+
+  useEffect(() => {
+    if (
+      configurationRequest == null ||
+      effectiveIntegrations.isPending ||
+      handledConfigurationSequence.current === configurationRequest.sequence
+    ) {
+      return;
+    }
+
+    const requestedItemId =
+      configurationRequest.integrationId === 'sentry'
+        ? 'sentry-mcp'
+        : configurationRequest.integrationId;
+    const requestedItem = items.find((item) => item.id === requestedItemId);
+
+    if (requestedItem?.isPending) {
+      return;
+    }
+
+    handledConfigurationSequence.current = configurationRequest.sequence;
+
+    if (integrationsUnavailable) {
+      toast.error('Integrations are disabled by the deployment operator.');
+      return;
+    }
+
+    if (requestedItem == null || requestedItem.onAction == null) {
+      toast.error('This integration cannot be configured here.');
+      return;
+    }
+
+    if (requestedItem.enabled) {
+      toast.success(`${requestedItem.name} is already connected.`);
+      return;
+    }
+
+    requestedItem.onAction();
+  }, [
+    configurationRequest,
+    effectiveIntegrations.isPending,
+    integrationsUnavailable,
+    items,
+  ]);
+
   const {
     isEnabled: customMcpEnabled,
     items: customMcpItems,
@@ -3226,11 +3282,7 @@ export function Integrations({
     });
   };
 
-  if (
-    effectiveIntegrations.data?.some(
-      (integration) => integration.status === 'unavailable',
-    )
-  ) {
+  if (integrationsUnavailable) {
     return (
       <div className="space-y-8">
         <Alert>
@@ -3524,7 +3576,7 @@ export function Integrations({
           deepLinkDialogItem.onAction?.();
         }}
       />
-      {integrationIds !== undefined ? (
+      {!showCatalog ? null : integrationIds !== undefined ? (
         <IntegrationSection
           id="selected-integrations"
           title="Integrations"

@@ -658,6 +658,80 @@ describe('Integrations settings', () => {
     );
   });
 
+  it('opens requested configuration directly without rendering the catalog or confirmation', async () => {
+    render(
+      <Integrations
+        integrationIds={['notion']}
+        configurationRequest={{ integrationId: 'notion', sequence: 1 }}
+        showCatalog={false}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: 'Connect Notion' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Internal integration secret'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Integrations' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Enable Notion?' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('opens requested Linear setup directly without navigating through integration settings', async () => {
+    state.pathname = '/sessions/setup-session';
+    state.linearInstallation = null;
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
+
+    render(
+      <Integrations
+        integrationIds={['linear']}
+        configurationRequest={{ integrationId: 'linear', sequence: 1 }}
+        showCatalog={false}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: 'Set up Linear' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Create the app' }),
+    ).toBeInTheDocument();
+    expect(state.linearRedirectPath).toBe('/sessions/setup-session');
+    expect(
+      screen.queryByRole('heading', { name: 'Integrations' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Enable Linear?' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('starts requested OAuth configuration from the embedded pathname', async () => {
+    state.pathname = '/sessions/setup-session';
+
+    render(
+      <Integrations
+        integrationIds={['pylon']}
+        configurationRequest={{ integrationId: 'pylon', sequence: 1 }}
+        showCatalog={false}
+      />,
+    );
+
+    expect(mutations.connectMcp).toHaveBeenCalledWith(
+      { mcpId: 'pylon', redirectTo: '/sessions/setup-session' },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(
+      screen.queryByRole('heading', { name: 'Enable Pylon?' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('uses the settings action for missing Linear OAuth setup', () => {
     state.linearInstallation = null;
     state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];

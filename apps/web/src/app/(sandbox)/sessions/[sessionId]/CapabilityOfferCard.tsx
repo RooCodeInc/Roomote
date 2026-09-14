@@ -1,8 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   MCP_INTEGRATIONS,
@@ -11,10 +10,10 @@ import {
   type FastAgentCapabilityOfferPayload,
 } from '@roomote/types';
 
-import { SETTINGS_PATHS } from '@/lib/settings';
 import { SETUP_STARTER_TASKS } from '@/lib/setup-starter-tasks';
 import { useTRPC } from '@/trpc/client';
 import { Button, Checkbox, ListChecks, Plug } from '@/components/system';
+import { Integrations } from '@/components/settings/Integrations';
 import { McpIcon } from '@/components/settings/McpIcon';
 
 import { SetupSessionActionCard } from './setup/SetupSessionActionCard';
@@ -30,10 +29,14 @@ export function CapabilityOfferCard({
   offer: FastAgentCapabilityOfferPayload;
 }) {
   const trpc = useTRPC();
-  const router = useRouter();
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>(
     SETUP_STARTER_TASKS.map((task) => task.id),
   );
+  const [configurationRequest, setConfigurationRequest] = useState<{
+    integrationId: string;
+    sequence: number;
+  } | null>(null);
+  const nextConfigurationSequence = useRef(0);
   const status = useQuery(trpc.setupNew.status.queryOptions());
   const deploymentEnablements = useQuery(
     trpc.mcpConnections.deploymentEnablements.queryOptions(),
@@ -176,48 +179,58 @@ export function CapabilityOfferCard({
       !connectedIntegrationIds.has(integration.id),
   );
   return (
-    <SetupSessionActionCard
-      title="Bring your team's tools along"
-      icon={<Plug />}
-      intro={offer.message}
-    >
-      <ul className="divide-y divide-border">
-        {integrations.map((integration) => {
-          const definition = MCP_INTEGRATIONS.find(
-            (candidate) => candidate.id === integration.id,
-          );
-          return (
-            <li key={integration.id} className="flex items-center gap-3 py-3">
-              {definition ? (
-                <McpIcon icon={definition.icon} name={integration.name} />
-              ) : null}
-              <span className="min-w-0 flex-1 font-medium">
-                {integration.name}
-              </span>
-              <Button
-                type="button"
-                size="sm"
-                onClick={() =>
-                  router.push(
-                    `${SETTINGS_PATHS.integrations}?highlight=${integration.id}`,
-                  )
-                }
-              >
-                Connect
-              </Button>
-            </li>
-          );
-        })}
-      </ul>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        disabled={resolve.isPending}
-        onClick={() => finish('dismissed')}
+    <>
+      <SetupSessionActionCard
+        title="Bring your team's tools along"
+        icon={<Plug />}
+        intro={offer.message}
       >
-        Keep going
-      </Button>
-    </SetupSessionActionCard>
+        <ul className="divide-y divide-border">
+          {integrations.map((integration) => {
+            const definition = MCP_INTEGRATIONS.find(
+              (candidate) => candidate.id === integration.id,
+            );
+            return (
+              <li key={integration.id} className="flex items-center gap-3 py-3">
+                {definition ? (
+                  <McpIcon icon={definition.icon} name={integration.name} />
+                ) : null}
+                <span className="min-w-0 flex-1 font-medium">
+                  {integration.name}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  aria-label={`Connect ${integration.name}`}
+                  onClick={() => {
+                    nextConfigurationSequence.current += 1;
+                    setConfigurationRequest({
+                      integrationId: integration.id,
+                      sequence: nextConfigurationSequence.current,
+                    });
+                  }}
+                >
+                  Connect
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={resolve.isPending}
+          onClick={() => finish('dismissed')}
+        >
+          Keep going
+        </Button>
+      </SetupSessionActionCard>
+      <Integrations
+        integrationIds={integrations.map((integration) => integration.id)}
+        configurationRequest={configurationRequest}
+        showCatalog={false}
+      />
+    </>
   );
 }
