@@ -86,6 +86,7 @@ const RAILWAY_READ_ONLY_TOOL_NAMES = [
   'whoami',
   'list-projects',
   'list-services',
+  'get-deployment-logs',
 ] as const;
 
 const PYLON_READ_ONLY_TOOL_NAMES = [

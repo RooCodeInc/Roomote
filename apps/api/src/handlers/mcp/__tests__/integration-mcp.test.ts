@@ -83,12 +83,16 @@ function createToolsListRequest(id: number) {
   };
 }
 
-function createToolCallRequest(id: number, name: string) {
+function createToolCallRequest(
+  id: number,
+  name: string,
+  args: Record<string, unknown> = {},
+) {
   return {
     jsonrpc: '2.0',
     id,
     method: 'tools/call',
-    params: { name, arguments: {} },
+    params: { name, arguments: args },
   };
 }
 
@@ -424,6 +428,208 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     expect(body.id).toBe(11);
     expect(body.result.ok).toBe(true);
     expect(cancelled).toBe(true);
+  });
+
+  it('adds a bounded read-only Railway deployment logs tool', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-railway', userId: null });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {
+              tools: [
+                { name: 'whoami', inputSchema: { type: 'object' } },
+                { name: 'list-projects', inputSchema: { type: 'object' } },
+                { name: 'list-services', inputSchema: { type: 'object' } },
+                { name: 'railway-agent', inputSchema: { type: 'object' } },
+              ],
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              deploymentLogs: [
+                {
+                  timestamp: '2026-09-02T12:00:00.000Z',
+                  message: 'started API_TOKEN=secret-value',
+                  severity: 'info',
+                },
+              ],
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createApp('railway', createRunToken());
+
+    const listResponse = await postMcp(app, createToolsListRequest(1));
+    const listBody = (await listResponse.json()) as {
+      result: { tools: Array<{ name: string }> };
+    };
+    expect(listBody.result.tools.map((tool) => tool.name)).toEqual([
+      'whoami',
+      'list-projects',
+      'list-services',
+      'get-deployment-logs',
+    ]);
+
+    const callResponse = await postMcp(
+      app,
+      createToolCallRequest(2, 'get-deployment-logs', {
+        deploymentId: 'deployment-1',
+        limit: 25,
+        filter: 'error',
+        startDate: '2026-09-02T11:00:00.000Z',
+      }),
+    );
+    const callBody = (await callResponse.json()) as {
+      result: {
+        structuredContent: {
+          logs: Array<{ message: string }>;
+          truncated: boolean;
+        };
+      };
+    };
+
+    expect(callResponse.status).toBe(200);
+    expect(callBody.result.structuredContent).toEqual({
+      deploymentId: 'deployment-1',
+      logs: [
+        {
+          timestamp: '2026-09-02T12:00:00.000Z',
+          message: 'started API_TOKEN=[redacted]',
+          severity: 'info',
+        },
+      ],
+      truncated: false,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      'https://backboard.railway.com/graphql/v2',
+    );
+    expect(
+      (fetchMock.mock.calls[1]?.[1]?.headers as Record<string, string>)
+        .authorization,
+    ).toBe('Bearer valid-access-token');
+    expect(
+      JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string).variables,
+    ).toEqual({
+      deploymentId: 'deployment-1',
+      limit: 25,
+      filter: 'error',
+      startDate: '2026-09-02T11:00:00.000Z',
+    });
+  });
+
+  it('rejects invalid Railway deployment log bounds before calling the API', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-railway', userId: null });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp('railway', createRunToken()),
+      createToolCallRequest(1, 'get-deployment-logs', {
+        deploymentId: 'deployment-1',
+        limit: 501,
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('honors deployment-disabled Railway log access', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-railway', userId: null });
+    mockFindEnablement.mockResolvedValue({
+      disabledTools: ['get-deployment-logs'],
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp('railway', createRunToken()),
+      createToolCallRequest(1, 'get-deployment-logs', {
+        deploymentId: 'deployment-1',
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('resolves the latest Railway deployment for service-scoped logs', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-railway', userId: null });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              deployments: {
+                edges: [{ node: { id: 'latest-deployment' } }],
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { deploymentLogs: [] } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp('railway', createRunToken()),
+      createToolCallRequest(1, 'get-deployment-logs', {
+        projectId: 'project-1',
+        serviceId: 'service-1',
+        environmentId: 'environment-1',
+      }),
+    );
+    const body = (await response.json()) as {
+      result: { structuredContent: Record<string, unknown> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.result.structuredContent).toEqual({
+      deploymentId: 'latest-deployment',
+      logs: [],
+      truncated: false,
+    });
+    expect(
+      JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).variables,
+    ).toEqual({
+      input: {
+        projectId: 'project-1',
+        serviceId: 'service-1',
+        environmentId: 'environment-1',
+      },
+    });
+    expect(
+      JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string).variables,
+    ).toEqual({ deploymentId: 'latest-deployment', limit: 100 });
   });
 
   it('strips Resend tool schema patterns for Azure-compatible tool calls', async () => {
