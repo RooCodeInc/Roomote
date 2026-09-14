@@ -110,16 +110,10 @@ export async function abortActiveFastAgentTurns(
 ): Promise<number> {
   turnRuntimeState.shutdownReason ??= reason;
   const activeLocks = [...activeFastAgentTurnLocks];
-  await Promise.allSettled(
-    activeLocks.map((lock) =>
-      lock.abortForShutdown(turnRuntimeState.shutdownReason!),
-    ),
-  );
-  // A turn interrupted before it reached its own abort handling (still in
-  // setup, no inference yet) never releases its durable claim, and the row
-  // would wait out the full claim lease before recovery. Release here for
-  // every bound row; the release is a guarded no-op for rows the turn
-  // already revoked or settled, so replay safety is unaffected.
+  // Release replay-safe durable rows before waiting for surface cleanup. The
+  // Redis lock still fences execution until abortForShutdown finishes, while
+  // the queue can already schedule the successor instead of risking a stale
+  // claim if the process reaches its hard shutdown deadline during cleanup.
   await Promise.allSettled(
     activeLocks
       .filter((lock) => lock.durableRowId)
@@ -140,6 +134,11 @@ export async function abortActiveFastAgentTurns(
           });
         }
       }),
+  );
+  await Promise.allSettled(
+    activeLocks.map((lock) =>
+      lock.abortForShutdown(turnRuntimeState.shutdownReason!),
+    ),
   );
   return activeLocks.length;
 }

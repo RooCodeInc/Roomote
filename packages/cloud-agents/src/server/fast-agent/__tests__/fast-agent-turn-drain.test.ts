@@ -126,6 +126,42 @@ describe('Fast turn shutdown drain', () => {
     await unboundLock!();
   });
 
+  it('hands back the durable row before waiting for surface cleanup', async () => {
+    releaseDurableClaimMock.mockResolvedValue(true);
+    const resume = vi.fn().mockResolvedValue(undefined);
+    let finishCleanup: (() => void) | undefined;
+    const boundLock = await turnLock.acquireFastAgentTurnLock({ conversation });
+    boundLock!.durableRowId = 'durable-row-before-cleanup';
+    boundLock!.durableResume = resume;
+    turnLock.registerFastAgentTurnActivity(boundLock!.signal, {
+      settle: () =>
+        new Promise<void>((resolve) => {
+          finishCleanup = resolve;
+        }),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const shutdown = turnLock.abortActiveFastAgentTurns(
+      new turnLock.FastAgentProcessShutdownError('SIGTERM'),
+    );
+    let shutdownFinished = false;
+    void shutdown.then(() => {
+      shutdownFinished = true;
+    });
+    await vi.waitFor(() => {
+      expect(releaseDurableClaimMock).toHaveBeenCalledWith(
+        'durable-row-before-cleanup',
+      );
+      expect(resume).toHaveBeenCalledOnce();
+    });
+    expect(shutdownFinished).toBe(false);
+
+    finishCleanup?.();
+    await expect(shutdown).resolves.toBe(1);
+    expect(boundLock!.signal.aborted).toBe(true);
+    await boundLock!();
+  });
+
   it('does not wake the queue when the shutdown release found no pending row', async () => {
     releaseDurableClaimMock.mockResolvedValue(false);
     const resume = vi.fn().mockResolvedValue(undefined);
