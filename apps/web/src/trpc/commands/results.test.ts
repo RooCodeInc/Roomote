@@ -2,6 +2,8 @@ import {
   automationResults,
   db,
   eq,
+  taskFactory,
+  tasks,
   userFactory,
   users,
   workItems,
@@ -16,6 +18,10 @@ describe('Results commands', () => {
       metadata: { results_page_enabled: true },
     });
     const auth = { userId: user.id } as UserAuthSuccess;
+    const sourceTask = await taskFactory.create({
+      repositoryName: 'RooCodeInc/Roomote',
+      repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
+    });
     const [report] = await db
       .insert(automationResults)
       .values({
@@ -24,6 +30,7 @@ describe('Results commands', () => {
         content: 'Report body',
         priority: 'normal',
         dedupeKey: `test:${user.id}:report`,
+        sourceTaskId: sourceTask.id,
       })
       .returning({ id: automationResults.id });
     const [suggestion] = await db
@@ -37,6 +44,8 @@ describe('Results commands', () => {
         resultAutomationName: 'Security Auditor',
         resultPriority: 'critical',
         resultUserId: user.id,
+        sourceTaskId: sourceTask.id,
+        targetRepositoryFullName: 'another/repository',
       })
       .returning({ id: workItems.id });
 
@@ -45,6 +54,13 @@ describe('Results commands', () => {
       expect(results.map((result) => result.id)).toEqual([
         suggestion!.id,
         report!.id,
+      ]);
+      expect(results).toEqual([
+        expect.objectContaining({ id: suggestion!.id, repositoryUrl: null }),
+        expect.objectContaining({
+          id: report!.id,
+          repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
+        }),
       ]);
 
       await actOnResultCommand(auth, {
@@ -60,6 +76,7 @@ describe('Results commands', () => {
       await db
         .delete(automationResults)
         .where(eq(automationResults.id, report!.id));
+      await db.delete(tasks).where(eq(tasks.id, sourceTask.id));
       await db.delete(users).where(eq(users.id, user.id));
     }
   });

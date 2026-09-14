@@ -9,6 +9,7 @@ import {
   isNull,
   or,
   sql,
+  tasks,
   workItems,
 } from '@roomote/db/server';
 import {
@@ -29,7 +30,31 @@ export type ResultInboxItem = {
   priority: AutomationResultPriority;
   createdAt: Date;
   automationKey: BackgroundAutomationKey | null;
+  repositoryUrl: string | null;
 };
+
+function githubRepositoryUrl(
+  repositoryName: string | null,
+  repositoryUrl: string | null,
+) {
+  if (!repositoryName || !repositoryUrl) return null;
+
+  try {
+    const url = new URL(repositoryUrl);
+    const path = url.pathname.replace(/^\//u, '').replace(/\/$/u, '');
+    if (
+      url.protocol !== 'https:' ||
+      url.hostname !== 'github.com' ||
+      path.toLowerCase() !== repositoryName.toLowerCase()
+    ) {
+      return null;
+    }
+
+    return `https://github.com/${path}`;
+  } catch {
+    return null;
+  }
+}
 
 async function assertResultsEnabled(auth: UserAuthSuccess) {
   if (!(await getPersonalPreferencesCommand(auth)).resultsPageEnabled) {
@@ -58,8 +83,11 @@ export async function listResultsCommand(
         content: automationResults.content,
         priority: automationResults.priority,
         createdAt: automationResults.createdAt,
+        sourceRepositoryName: tasks.repositoryName,
+        sourceRepositoryUrl: tasks.repositoryUrl,
       })
       .from(automationResults)
+      .leftJoin(tasks, eq(tasks.id, automationResults.sourceTaskId))
       .where(
         and(
           visibleReport(auth.userId),
@@ -81,8 +109,12 @@ export async function listResultsCommand(
         content: workItems.brief,
         priority: workItems.resultPriority,
         createdAt: workItems.createdAt,
+        targetRepositoryFullName: workItems.targetRepositoryFullName,
+        sourceRepositoryName: tasks.repositoryName,
+        sourceRepositoryUrl: tasks.repositoryUrl,
       })
       .from(workItems)
+      .leftJoin(tasks, eq(tasks.id, workItems.sourceTaskId))
       .where(
         and(
           visibleSuggestion(auth.userId),
@@ -98,18 +130,37 @@ export async function listResultsCommand(
   ]);
 
   return [
-    ...reports.map((result) => ({
-      ...result,
-      kind: 'report' as const,
-      title: null,
-    })),
-    ...suggestions.map((result) => ({
-      ...result,
-      kind: 'suggestion' as const,
-      automationName: result.automationName ?? 'Automation',
-      content: result.content ?? '',
-      priority: result.priority ?? 'normal',
-    })),
+    ...reports.map(
+      ({ sourceRepositoryName, sourceRepositoryUrl, ...result }) => ({
+        ...result,
+        kind: 'report' as const,
+        title: null,
+        repositoryUrl: githubRepositoryUrl(
+          sourceRepositoryName,
+          sourceRepositoryUrl,
+        ),
+      }),
+    ),
+    ...suggestions.map(
+      ({
+        sourceRepositoryName,
+        sourceRepositoryUrl,
+        targetRepositoryFullName,
+        ...result
+      }) => ({
+        ...result,
+        kind: 'suggestion' as const,
+        automationName: result.automationName ?? 'Automation',
+        content: result.content ?? '',
+        priority: result.priority ?? 'normal',
+        repositoryUrl:
+          !targetRepositoryFullName ||
+          targetRepositoryFullName.toLowerCase() ===
+            sourceRepositoryName?.toLowerCase()
+            ? githubRepositoryUrl(sourceRepositoryName, sourceRepositoryUrl)
+            : null,
+      }),
+    ),
   ]
     .toSorted(
       (left, right) =>
