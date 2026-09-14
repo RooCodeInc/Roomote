@@ -197,6 +197,19 @@ export interface SandboxApplyTaskModelSettingsResult {
   application: 'restarted' | 'deferred' | 'unavailable';
 }
 
+export interface SandboxPrepareRepositoryInput {
+  repositoryFullName: string;
+  branch?: string;
+}
+
+export interface SandboxPrepareRepositoryResult {
+  success: true;
+  repositoryFullName: string;
+  repositoryPath: string;
+  alreadyCheckedOut: boolean;
+  manifestPath: string;
+}
+
 export interface SandboxSubscriptionObserver<TData> {
   onStarted?: () => void;
   onData?: (data: TData) => void;
@@ -276,6 +289,10 @@ export interface SandboxServerRpcClient {
     restoreScrubbedCredentials: SandboxMutation<
       undefined,
       SandboxSuccessResult
+    >;
+    prepareRepository: SandboxMutation<
+      SandboxPrepareRepositoryInput,
+      SandboxPrepareRepositoryResult
     >;
   };
 }

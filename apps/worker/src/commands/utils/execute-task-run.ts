@@ -23,6 +23,7 @@ import {
   HARNESS_LOG_FILE_NAME,
 } from '../../logging';
 import type { WorkspaceConfig } from '../../workspace';
+import type { OnDemandRepository } from '../../workspace/on-demand-repositories';
 import type { RepoLocalSkill } from '../../workspace/repo-local-skills';
 import { callbackMap } from '../../callbacks';
 import { getLinearSessionActivityStreamCallbacks } from '../../callbacks/linear-agent';
@@ -91,6 +92,7 @@ interface ExecuteTaskRunConfig<TJobContext extends PreparedTaskRunBase> {
     usesSharedWorkspaceRoot: boolean;
     repoPaths?: Record<string, string>;
     repoLocalSkills?: RepoLocalSkill[];
+    onDemandRepositories?: OnDemandRepository[];
     workspaceReadinessWarnings?: string[];
     backgroundEnvironmentSetup: BackgroundEnvironmentSetupNotifier;
     cancelSignal: AbortSignal;
@@ -610,6 +612,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       preparedWorkspace?.usesSharedWorkspaceRoot ?? false;
     const repoPaths = preparedWorkspace?.repoPaths;
     const repoLocalSkills = preparedWorkspace?.repoLocalSkills;
+    const onDemandRepositories = preparedWorkspace?.onDemandRepositories;
 
     if (taskRun && preparedWorkspace?.repositoryPreparationOutcome) {
       await recordWorkerRuntimeEvent(
@@ -730,6 +733,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       usesSharedWorkspaceRoot,
       repoPaths,
       repoLocalSkills,
+      onDemandRepositories,
       workspaceReadinessWarnings:
         preparedWorkspace?.environmentSetupWarnings?.map(
           (warning) => warning.message,

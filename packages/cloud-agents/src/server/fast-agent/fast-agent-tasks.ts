@@ -139,7 +139,7 @@ function withSyntheticLaunchTargets(
         id: ALL_REPOSITORIES,
         name: 'All repositories',
         description:
-          'Use this target to run the task against all active repositories.',
+          'Use this target when the task may need any active repository; repositories are checked out on demand, not cloned up front.',
         repositories: [],
       },
       ...environments.filter(

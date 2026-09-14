@@ -104,6 +104,12 @@ import {
   handleStartSession,
 } from './sessions.js';
 import { handleGetRelayUpdates } from './relay-updates.js';
+import { handleCloneRepository } from './clone-repository.js';
+import {
+  CLONE_REPOSITORY_TOOL_NAME,
+  ON_DEMAND_REPOSITORIES_ENV_VAR,
+  ON_DEMAND_REPOSITORIES_MANIFEST_FILE,
+} from '../../workspace/on-demand-repositories.js';
 
 export {
   taskSuggestionResultHasSubmittedSuggestions,
@@ -1285,6 +1291,53 @@ roomoteMcpServer.registerTool(
   },
   async (input) => handleUpdatePersonalization(input),
 );
+
+if (process.env[ON_DEMAND_REPOSITORIES_ENV_VAR] === 'true') {
+  roomoteMcpServer.registerTool(
+    CLONE_REPOSITORY_TOOL_NAME,
+    {
+      title: 'Clone Repository',
+      description:
+        "Check out one of the deployment's repositories into the shared workspace root. " +
+        `This workspace lists its repositories in ${ON_DEMAND_REPOSITORIES_MANIFEST_FILE} at the workspace root but does not clone them up front; ` +
+        'call this before reading, searching, or changing any repository that has no directory yet, and only for the repositories the task needs. ' +
+        'Returns the checkout path. An existing checkout is returned as-is without touching its working tree. ' +
+        'Large repositories can take a minute or two. Do not run `git clone` yourself.',
+      inputSchema: {
+        repositoryFullName: z
+          .string()
+          .trim()
+          .min(1)
+          .describe(
+            `Full repository name (owner/repo) exactly as listed in ${ON_DEMAND_REPOSITORIES_MANIFEST_FILE}`,
+          ),
+        branch: z
+          .string()
+          .trim()
+          .min(1)
+          .optional()
+          .describe(
+            'Branch to check out. Omit to use the repository default branch',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (params): Promise<ToolResult> => {
+      const config = getRoomoteConfig();
+
+      if (!config) {
+        return errorResult('ROOMOTE_CLOUD_TOKEN not set');
+      }
+
+      return handleCloneRepository(params, config);
+    },
+  );
+}
 
 if (shouldRegisterEnvVarRequestTool()) {
   roomoteMcpServer.registerTool(

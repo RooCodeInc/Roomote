@@ -452,7 +452,7 @@ ${buildGitHubMessageInstructions()}`
 
   <task_context>
     <repository>${isAllRepositoriesSelection ? 'Repositories available in the workspace' : repo}</repository>
-    <workspace_context>${usesSharedWorkspaceRoot ? getWorkspaceInstructions(repoFullNames, conflictResolverLabel) : 'Single repository workspace.'}</workspace_context>
+    <workspace_context>${usesSharedWorkspaceRoot ? getWorkspaceInstructions(repoFullNames, conflictResolverLabel, { repositoriesOnDemand: isAllRepositoriesSelection }) : 'Single repository workspace.'}</workspace_context>
   </task_context>
 
   ${taskSurfaceContext}
