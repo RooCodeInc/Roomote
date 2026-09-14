@@ -3,11 +3,16 @@
 import {
   memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type MutableRefObject,
 } from 'react';
-import type { ScrollToBottom } from 'use-stick-to-bottom';
+import {
+  useStickToBottomContext,
+  type ScrollToBottom,
+} from 'use-stick-to-bottom';
 
 import {
   Conversation,
@@ -27,11 +32,12 @@ import {
 } from '@/components/ai-elements/slack-mention-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { useMindReaderMode } from '@/hooks/useMindReaderMode';
-import { Lightbulb, Skeleton } from '@/components/system';
+import { Button, Lightbulb, Skeleton } from '@/components/system';
 import { cn } from '@/lib/utils';
 
 import {
   useSandboxMessages,
+  useSandboxHistoryControls,
   useSandboxHistoryReady,
   useSandboxTaskPhase,
   type TaskSession,
@@ -104,6 +110,97 @@ function TranscriptSkeleton() {
         <Skeleton className="ml-auto h-4 w-16" />
         <Skeleton className="ml-auto h-16 w-3/4 rounded-2xl" />
       </div>
+    </div>
+  );
+}
+
+function TranscriptHistoryControls({
+  oldestMessageId,
+}: {
+  oldestMessageId: string | undefined;
+}) {
+  const {
+    isError,
+    isRetrying,
+    retry,
+    hasOlderMessages,
+    isFetchingOlderMessages,
+    olderMessagesError,
+    fetchOlderMessages,
+  } = useSandboxHistoryControls();
+  const { scrollRef, stopScroll } = useStickToBottomContext();
+  const pendingScrollAdjustmentRef = useRef<{
+    scrollHeight: number;
+    scrollTop: number;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    const pending = pendingScrollAdjustmentRef.current;
+    const scrollElement = scrollRef.current;
+    if (!pending || !scrollElement) return;
+
+    scrollElement.scrollTop =
+      pending.scrollTop + (scrollElement.scrollHeight - pending.scrollHeight);
+    pendingScrollAdjustmentRef.current = null;
+  }, [oldestMessageId, scrollRef]);
+
+  if (isError) {
+    return (
+      <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm">
+        <span>Conversation history could not be loaded.</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={isRetrying}
+          onClick={() => void retry()}
+        >
+          {isRetrying ? 'Retrying...' : 'Retry'}
+        </Button>
+      </div>
+    );
+  }
+
+  if (!hasOlderMessages && !olderMessagesError) {
+    return null;
+  }
+
+  const loadOlder = async () => {
+    const scrollElement = scrollRef.current;
+    if (scrollElement) {
+      stopScroll();
+      pendingScrollAdjustmentRef.current = {
+        scrollHeight: scrollElement.scrollHeight,
+        scrollTop: scrollElement.scrollTop,
+      };
+    }
+
+    const loaded = await fetchOlderMessages();
+    if (!loaded) {
+      pendingScrollAdjustmentRef.current = null;
+    }
+  };
+
+  return (
+    <div className="mb-4 flex flex-col items-center gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={isFetchingOlderMessages}
+        onClick={() => void loadOlder()}
+      >
+        {isFetchingOlderMessages
+          ? 'Loading older messages...'
+          : olderMessagesError
+            ? 'Retry loading older messages'
+            : 'Load older messages'}
+      </Button>
+      {olderMessagesError ? (
+        <p className="text-xs text-destructive">
+          Older messages could not be loaded.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -182,6 +279,9 @@ const MessagesBase = ({
               <AcpTextMessage msg={sessionPrompt} />
             )}
             {!historyReady && <TranscriptSkeleton />}
+            {historyReady && (
+              <TranscriptHistoryControls oldestMessageId={messages[0]?.id} />
+            )}
             <AcpTranscriptBlockList
               blocks={renderBlocks}
               showInternalMessages={showInternalMessages}

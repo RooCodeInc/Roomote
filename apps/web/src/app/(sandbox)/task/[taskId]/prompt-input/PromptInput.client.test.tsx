@@ -1680,14 +1680,17 @@ describe('PromptInput ghost suggestion', () => {
       {
         eventType: 'roomote_runtime.user_prompt',
         text: 'Fix the login redirect',
+        ts: 100,
       },
       {
         eventType: 'roomote_runtime.assistant_message',
         text: 'The redirect is fixed',
+        ts: 200,
       },
       {
         eventType: 'roomote_runtime.tool_call',
         text: 'This UI-only event must not advance the cache',
+        ts: 300,
       },
     ];
     useTaskMessageEnvelopesMock.mockImplementation(() => ({ data: history }));
@@ -1700,7 +1703,7 @@ describe('PromptInput ghost suggestion', () => {
     const { rerender } = render(<PromptInput {...props} />);
 
     expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
-      input: { historyRevision: 1 },
+      input: { historyRevision: 200 },
     });
 
     // A user message alone must not advance the revision: only a completed
@@ -1710,12 +1713,13 @@ describe('PromptInput ghost suggestion', () => {
       {
         eventType: 'roomote_runtime.user_prompt',
         text: 'Please add a regression test',
+        ts: 400,
       },
     ];
     rerender(<PromptInput {...props} />);
 
     expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
-      input: { historyRevision: 1 },
+      input: { historyRevision: 200 },
     });
 
     history = [
@@ -1723,12 +1727,13 @@ describe('PromptInput ghost suggestion', () => {
       {
         eventType: 'roomote_runtime.assistant_message',
         text: 'The regression test now passes',
+        ts: 500,
       },
     ];
     rerender(<PromptInput {...props} />);
 
     expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
-      input: { historyRevision: 2 },
+      input: { historyRevision: 500 },
     });
   });
 

@@ -8,10 +8,11 @@ import type { AcpMessage, TaskStatusEvent } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
 import { clearLiveTaskStatus, setLiveTaskStatus } from '@/hooks/tasks';
-import type { TaskMessageEnvelope } from '@/types';
+import type { TaskMessageEnvelopePage } from '@/types';
 
 import type { SandboxConnectionTarget } from './use-task-session';
 import type { createSandboxStore } from './use-sandbox-store';
+import { updateTaskMessageEnvelopePage } from './use-task-message-envelopes';
 import { replaceOptimisticPromptEnvelope } from './services/optimistic-prompt-envelope-state';
 import {
   classifySandboxConnectionFailureCategory,
@@ -104,9 +105,12 @@ export function useSandboxLiveConnection({
     const replaceOptimisticPrompt = (event: AcpMessage) => {
       const queryKey = trpc.tasks.messageEnvelopes.queryKey({ taskId });
 
-      queryClient.setQueryData<TaskMessageEnvelope[] | undefined>(
+      queryClient.setQueryData<TaskMessageEnvelopePage | undefined>(
         queryKey,
-        (current) => replaceOptimisticPromptEnvelope(current, taskId, event),
+        (current) =>
+          updateTaskMessageEnvelopePage(current, (messages) =>
+            replaceOptimisticPromptEnvelope(messages, taskId, event),
+          ),
       );
     };
     const scheduleTitleRefresh = () => {

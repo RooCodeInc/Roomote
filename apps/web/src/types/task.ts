@@ -135,3 +135,14 @@ export interface TaskMessageEnvelope {
   visibleInTranscript?: boolean;
   text?: string;
 }
+
+export interface TaskMessageEnvelopeCursor {
+  createdAt: string;
+  ts: number;
+  id: string;
+}
+
+export interface TaskMessageEnvelopePage {
+  messages: TaskMessageEnvelope[];
+  nextCursor: TaskMessageEnvelopeCursor | null;
+}

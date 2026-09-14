@@ -225,7 +225,10 @@ describe('WakeTaskInput', () => {
         queries: { retry: false },
       },
     });
-    queryClient.setQueryData(['tasks.messageEnvelopes', 'task-42'], []);
+    queryClient.setQueryData(['tasks.messageEnvelopes', 'task-42'], {
+      messages: [],
+      nextCursor: null,
+    });
 
     renderWithQueryClient(
       <WakeTaskInput
@@ -265,16 +268,19 @@ describe('WakeTaskInput', () => {
     );
     expect(
       queryClient.getQueryData(['tasks.messageEnvelopes', 'task-42']),
-    ).toEqual([
-      expect.objectContaining({
-        metadata: expect.objectContaining({
-          optimistic: true,
-          visibleInTranscript: true,
+    ).toEqual({
+      messages: [
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            optimistic: true,
+            visibleInTranscript: true,
+          }),
+          role: 'user',
+          text: 'Wake up and keep going',
         }),
-        role: 'user',
-        text: 'Wake up and keep going',
-      }),
-    ]);
+      ],
+      nextCursor: null,
+    });
     expect(toastErrorMock).not.toHaveBeenCalled();
     expect(capturedPlaceholder).toBe('Wake up Roomote with a message...');
     expect(capturedSuggestion).toBeUndefined();
@@ -365,7 +371,10 @@ describe('WakeTaskInput', () => {
         queries: { retry: false },
       },
     });
-    queryClient.setQueryData(['tasks.messageEnvelopes', 'task-42'], []);
+    queryClient.setQueryData(['tasks.messageEnvelopes', 'task-42'], {
+      messages: [],
+      nextCursor: null,
+    });
     submittedFilesRef.current = [
       {
         url: 'blob:image-1',
@@ -410,13 +419,16 @@ describe('WakeTaskInput', () => {
     );
     expect(
       queryClient.getQueryData(['tasks.messageEnvelopes', 'task-42']),
-    ).toEqual([
-      expect.objectContaining({
-        payload: expect.objectContaining({
-          images: ['data:image/png;base64,image-1'],
+    ).toEqual({
+      messages: [
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            images: ['data:image/png;base64,image-1'],
+          }),
         }),
-      }),
-    ]);
+      ],
+      nextCursor: null,
+    });
   });
 
   it('rolls back the optimistic wake-up prompt when restore returns an unsuccessful result', async () => {
@@ -425,7 +437,10 @@ describe('WakeTaskInput', () => {
         queries: { retry: false },
       },
     });
-    queryClient.setQueryData(['tasks.messageEnvelopes', 'task-42'], []);
+    queryClient.setQueryData(['tasks.messageEnvelopes', 'task-42'], {
+      messages: [],
+      nextCursor: null,
+    });
     restoreMutateAsyncMock.mockResolvedValue({
       success: false,
       error: 'Snapshot restore failed',
@@ -451,7 +466,7 @@ describe('WakeTaskInput', () => {
 
     expect(
       queryClient.getQueryData(['tasks.messageEnvelopes', 'task-42']),
-    ).toEqual([]);
+    ).toEqual({ messages: [], nextCursor: null });
     expect(toastErrorMock).not.toHaveBeenCalled();
     expect(removeOptimisticQueuedMessageMock).not.toHaveBeenCalled();
   });

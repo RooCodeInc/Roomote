@@ -155,17 +155,15 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             : count,
         0,
       ) ?? 0;
-    // The revision is the persisted assistant-message count, matching the
-    // server generation cache: each completed agent turn mints a new query
-    // key (and so a fresh suggestion), while the user's own messages and
-    // UI-only or optimistic events cannot advance it.
+    // Use the latest persisted assistant timestamp rather than a count so the
+    // revision remains monotonic when the bounded transcript window advances.
     const historyRevision =
       taskHistory?.reduce(
-        (count, message) =>
+        (latestTs, message) =>
           message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
           message.text?.trim()
-            ? count + 1
-            : count,
+            ? Math.max(latestTs, message.ts)
+            : latestTs,
         0,
       ) ?? 0;
 

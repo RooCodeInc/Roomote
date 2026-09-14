@@ -1061,7 +1061,18 @@ export const appRouter = createRouter({
       .query(({ ctx: { auth }, input }) => getTaskByIdCommand(auth, input)),
 
     messageEnvelopes: protectedProcedure
-      .input(z.object({ taskId: z.string() }))
+      .input(
+        z.object({
+          taskId: z.string(),
+          cursor: z
+            .object({
+              createdAt: z.string(),
+              ts: z.number(),
+              id: z.string().uuid(),
+            })
+            .optional(),
+        }),
+      )
       .query(({ ctx: { auth }, input }) =>
         getTaskMessageEnvelopesCommand(auth, input),
       ),

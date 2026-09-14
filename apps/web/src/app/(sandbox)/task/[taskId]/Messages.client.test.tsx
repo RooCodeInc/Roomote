@@ -28,6 +28,28 @@ const sandboxMessagesState = vi.hoisted(() => ({
   messages: [] as unknown[],
 }));
 
+const historyControlsState = vi.hoisted(() => ({
+  isError: false,
+  isRetrying: false,
+  retry: vi.fn(async () => undefined),
+  hasOlderMessages: false,
+  isFetchingOlderMessages: false,
+  olderMessagesError: null as unknown,
+  fetchOlderMessages: vi.fn(async () => false),
+}));
+
+const scrollState = vi.hoisted(() => ({
+  element: null as HTMLDivElement | null,
+  stopScroll: vi.fn(),
+}));
+
+vi.mock('use-stick-to-bottom', () => ({
+  useStickToBottomContext: () => ({
+    scrollRef: { current: scrollState.element },
+    stopScroll: scrollState.stopScroll,
+  }),
+}));
+
 vi.mock('@/components/ai-elements', () => ({
   Conversation: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
@@ -68,6 +90,7 @@ vi.mock('./hooks', () => ({
   useSandboxMessages: () => ({
     messages: sandboxMessagesState.messages,
   }),
+  useSandboxHistoryControls: () => historyControlsState,
   useSandboxHistoryReady: () => true,
   useSandboxTaskPhase: () => taskPhaseState.phase,
 }));
@@ -185,7 +208,16 @@ vi.mock('./ScrollBridge', () => ({
 }));
 
 vi.mock('@/components/system', () => ({
+  Button: ({
+    children,
+    ...props
+  }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button {...props}>{children}</button>
+  ),
   Lightbulb: () => <svg aria-hidden="true" />,
+  Skeleton: ({ className }: { className?: string }) => (
+    <div className={className} />
+  ),
 }));
 
 import { Messages } from './Messages';
@@ -198,7 +230,72 @@ describe('Messages', () => {
     narrationModeState.enabled = false;
     taskPhaseState.phase = null;
     sandboxMessagesState.messages = [];
+    historyControlsState.isError = false;
+    historyControlsState.isRetrying = false;
+    historyControlsState.hasOlderMessages = false;
+    historyControlsState.isFetchingOlderMessages = false;
+    historyControlsState.olderMessagesError = null;
+    historyControlsState.retry.mockClear();
+    historyControlsState.fetchOlderMessages.mockClear();
+    scrollState.element = null;
+    scrollState.stopScroll.mockClear();
     mockBuildAcpRenderBlocks.mockReturnValue([]);
+  });
+
+  it('offers retry when initial conversation history fails', async () => {
+    historyControlsState.isError = true;
+
+    render(<Messages session={{ taskId: 'task-1', taskRun: null } as never} />);
+
+    screen.getByText('Conversation history could not be loaded.');
+    screen.getByRole('button', { name: 'Retry' }).click();
+    expect(historyControlsState.retry).toHaveBeenCalledOnce();
+  });
+
+  it('offers access to older transcript pages', () => {
+    historyControlsState.hasOlderMessages = true;
+
+    render(<Messages session={{ taskId: 'task-1', taskRun: null } as never} />);
+
+    screen.getByRole('button', { name: 'Load older messages' }).click();
+    expect(historyControlsState.fetchOlderMessages).toHaveBeenCalledOnce();
+  });
+
+  it('preserves the visible scroll position when older messages are prepended', async () => {
+    historyControlsState.hasOlderMessages = true;
+    sandboxMessagesState.messages = [{ id: 'newer-message' }];
+    const scrollElement = document.createElement('div');
+    Object.defineProperty(scrollElement, 'scrollHeight', {
+      configurable: true,
+      value: 1_000,
+    });
+    scrollElement.scrollTop = 400;
+    scrollState.element = scrollElement;
+    historyControlsState.fetchOlderMessages.mockImplementationOnce(async () => {
+      sandboxMessagesState.messages = [
+        { id: 'older-message' },
+        { id: 'newer-message' },
+      ];
+      Object.defineProperty(scrollElement, 'scrollHeight', {
+        configurable: true,
+        value: 1_400,
+      });
+      return true;
+    });
+
+    const { rerender } = render(
+      <Messages session={{ taskId: 'task-1', taskRun: null } as never} />,
+    );
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Load older messages' }).click();
+    });
+    rerender(
+      <Messages session={{ taskId: 'task-1', taskRun: null } as never} />,
+    );
+
+    expect(scrollState.stopScroll).toHaveBeenCalledOnce();
+    expect(scrollElement.scrollTop).toBe(800);
   });
 
   afterEach(() => {
