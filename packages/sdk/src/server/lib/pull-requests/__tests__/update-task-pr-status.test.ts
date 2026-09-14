@@ -2,6 +2,7 @@ const {
   mockLinkedTasks,
   mockDbSelect,
   mockEnqueueTaskSleep,
+  mockReconcileAutomationResultAcceptance,
   mockReturning,
   mockRequeueBrainMemoryEventsForTasks,
   mockSyncTaskStateFromRuns,
@@ -10,6 +11,7 @@ const {
   const mockLinkedTasks = vi.fn();
   const mockDbSelect = vi.fn();
   const mockEnqueueTaskSleep = vi.fn();
+  const mockReconcileAutomationResultAcceptance = vi.fn();
   const mockReturning = vi.fn();
   const mockRequeueBrainMemoryEventsForTasks = vi.fn();
   const mockSyncTaskStateFromRuns = vi.fn();
@@ -39,6 +41,7 @@ const {
     mockLinkedTasks,
     mockDbSelect,
     mockEnqueueTaskSleep,
+    mockReconcileAutomationResultAcceptance,
     mockReturning,
     mockRequeueBrainMemoryEventsForTasks,
     mockSyncTaskStateFromRuns,
@@ -57,6 +60,8 @@ vi.mock('@roomote/db/server', async () => {
     db: { transaction: mockTransaction, select: mockDbSelect },
     requeueBrainMemoryEventsForTasks: (...args: unknown[]) =>
       mockRequeueBrainMemoryEventsForTasks(...args),
+    reconcileAutomationResultAcceptance: (...args: unknown[]) =>
+      mockReconcileAutomationResultAcceptance(...args),
     syncTaskStateFromRuns: (...args: unknown[]) =>
       mockSyncTaskStateFromRuns(...args),
   };
@@ -84,6 +89,7 @@ describe('updateTaskPrStatus', () => {
     mockReturning.mockResolvedValue([]);
     mockSyncTaskStateFromRuns.mockResolvedValue(undefined);
     mockEnqueueTaskSleep.mockResolvedValue(true);
+    mockReconcileAutomationResultAcceptance.mockResolvedValue(false);
     mockRequeueBrainMemoryEventsForTasks.mockResolvedValue(0);
   });
 
@@ -215,6 +221,35 @@ describe('updateTaskPrStatus', () => {
     expect(mockSyncTaskStateFromRuns).toHaveBeenCalledWith(
       expect.any(Object),
       'task-1',
+    );
+  });
+
+  it('reconciles pending automation reports for linked tasks at the provider merge time', async () => {
+    const mergedAt = new Date('2026-09-01T12:34:56.000Z');
+    mockLinkedTasks.mockResolvedValue([
+      { taskId: 'task-2', createdByRoomote: false },
+      { taskId: 'task-1', createdByRoomote: true },
+      { taskId: 'task-1', createdByRoomote: false },
+    ]);
+    mockDbSelect.mockReturnValue({
+      from: () => ({ where: () => Promise.resolve([]) }),
+    });
+
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged', {
+      host: 'github.com',
+      mergedAt,
+    });
+
+    expect(mockReconcileAutomationResultAcceptance).toHaveBeenCalledTimes(2);
+    expect(mockReconcileAutomationResultAcceptance).toHaveBeenNthCalledWith(
+      1,
+      'task-1',
+      expect.any(Object),
+    );
+    expect(mockReconcileAutomationResultAcceptance).toHaveBeenNthCalledWith(
+      2,
+      'task-2',
+      expect.any(Object),
     );
   });
 

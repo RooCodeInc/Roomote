@@ -221,8 +221,18 @@ export async function actOnResultCommand(
   const now = new Date();
   const values =
     input.action === 'accept'
-      ? { acceptedAt: now, ignoredAt: null, updatedAt: now }
-      : { acceptedAt: null, ignoredAt: now, updatedAt: now };
+      ? {
+          acceptedAt: now,
+          acceptanceReason: 'manual' as const,
+          ignoredAt: null,
+          updatedAt: now,
+        }
+      : {
+          acceptedAt: null,
+          acceptanceReason: null,
+          ignoredAt: now,
+          updatedAt: now,
+        };
 
   if (input.kind === 'report') {
     await db

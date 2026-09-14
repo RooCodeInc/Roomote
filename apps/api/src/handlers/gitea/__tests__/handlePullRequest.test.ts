@@ -59,6 +59,8 @@ vi.mock('../../github/notifyPullRequestTerminalStatus', () => ({
 vi.mock('../../pull-request-fact-sync', () => ({
   scheduleSourceControlPullRequestFactSync:
     mockScheduleSourceControlPullRequestFactSync,
+  toValidDate: (value: string | null | undefined) =>
+    value ? new Date(value) : null,
 }));
 
 vi.mock('../getGiteaAutomationTargets', async () => {
@@ -383,7 +385,10 @@ describe('handleGiteaPullRequest', () => {
       'acme/backend',
       42,
       'merged',
-      { host: 'git.example.com' },
+      {
+        host: 'git.example.com',
+        mergedAt: new Date('2026-07-10T00:00:00.000Z'),
+      },
     );
     expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
       expect.objectContaining({ targetBranch: 'main' }),
