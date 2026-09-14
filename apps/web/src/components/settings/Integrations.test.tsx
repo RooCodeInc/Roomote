@@ -1571,6 +1571,58 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
   });
 
+  it('links Snowflake validation errors to each invalid field and clears corrected state', () => {
+    render(<Integrations />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Snowflake' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Snowflake' }));
+
+    const invalidFields = [
+      ['Account identifier', 'Account identifier is required'],
+      ['Username', 'Username is required'],
+      ['Role', 'Role is required'],
+    ] as const;
+
+    for (const [label, error] of invalidFields) {
+      const field = screen.getByLabelText(label);
+      expect(field).toHaveAttribute('aria-invalid', 'true');
+      expect(field).toHaveAccessibleDescription(error);
+    }
+    expect(mutations.saveSnowflakeConnection).not.toHaveBeenCalled();
+
+    const accountInput = screen.getByLabelText('Account identifier');
+    fireEvent.change(accountInput, {
+      target: { value: 'xy12345.us-east-1' },
+    });
+
+    expect(accountInput).not.toHaveAttribute('aria-invalid');
+    expect(accountInput).not.toHaveAttribute('aria-describedby');
+    expect(
+      screen.queryByText('Account identifier is required'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Username')).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+
+    fireEvent.change(screen.getByLabelText('Username'), {
+      target: { value: 'roomote_user' },
+    });
+    fireEvent.change(screen.getByLabelText('Role'), {
+      target: { value: 'ANALYST' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Snowflake' }));
+
+    const privateKeyInput = screen.getByLabelText('Private Key (PEM)');
+    expect(privateKeyInput).toHaveAttribute('aria-invalid', 'true');
+    expect(privateKeyInput).toHaveAccessibleDescription(
+      'Private key is required',
+    );
+    expect(mutations.saveSnowflakeConnection).not.toHaveBeenCalled();
+  });
+
   it('opens the Asana credential dialog from the integrations page', () => {
     render(<Integrations />);
 
@@ -1652,9 +1704,11 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Notion' }));
 
-    expect(
-      screen.getByText('Internal integration secret is required'),
-    ).toBeInTheDocument();
+    const secretInput = screen.getByLabelText('Internal integration secret');
+    expect(secretInput).toHaveAttribute('aria-invalid', 'true');
+    expect(secretInput).toHaveAccessibleDescription(
+      'Internal integration secret is required',
+    );
     expect(mutations.saveNotionConnection).not.toHaveBeenCalled();
   });
 
