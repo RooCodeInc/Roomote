@@ -80,7 +80,16 @@ export function startWebServer({
     [require.resolve('next/dist/bin/next'), 'start', ...argv],
     {
       stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
-      env: { ...env, ROOMOTE_WEB_SHUTDOWN_COORDINATED: 'true' },
+      env: {
+        ...env,
+        ROOMOTE_WEB_SHUTDOWN_COORDINATED: 'true',
+        NODE_OPTIONS: [
+          env.NODE_OPTIONS,
+          `--import=${new URL('./shutdown-child.mjs', import.meta.url).href}`,
+        ]
+          .filter(Boolean)
+          .join(' '),
+      },
     },
   );
   let cleanupCoordination;

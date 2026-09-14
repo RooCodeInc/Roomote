@@ -2,7 +2,6 @@ import {
   gracefullyShutdownWeb,
   installWebFastAgentGracefulShutdown,
   resolveWebShutdownDrainMs,
-  WEB_FAST_AGENT_SHUTDOWN_REQUEST,
 } from './fast-agent-graceful-shutdown';
 
 describe('Fast web graceful shutdown', () => {
@@ -44,49 +43,34 @@ describe('Fast web graceful shutdown', () => {
   });
 
   it('acknowledges one coordinated shutdown only after the handoff finishes', async () => {
-    let messageHandler: ((message: unknown) => void) | undefined;
-    const on = vi.spyOn(process, 'on').mockImplementation(((event, handler) => {
-      if (event === 'message')
-        messageHandler = handler as (message: unknown) => void;
-      return process;
-    }) as typeof process.on);
-    const off = vi.spyOn(process, 'off').mockReturnValue(process);
     const beginDrain = vi.fn();
     let finishDrain: ((remaining: number) => void) | undefined;
     const notifyReady = vi.fn();
+    const key = Symbol.for('roomote.web-fast-agent-shutdown-handler');
+    const scope = globalThis as typeof globalThis & {
+      [key]?: (signal: NodeJS.Signals) => Promise<void>;
+    };
 
-    try {
-      const cleanup = installWebFastAgentGracefulShutdown({
-        beginDrain,
-        waitForTurns: vi.fn(
-          () =>
-            new Promise<number>((resolve) => {
-              finishDrain = resolve;
-            }),
-        ),
-        abortTurns: vi.fn().mockResolvedValue(1),
-        notifyReady,
-      });
+    const cleanup = installWebFastAgentGracefulShutdown({
+      beginDrain,
+      waitForTurns: vi.fn(
+        () =>
+          new Promise<number>((resolve) => {
+            finishDrain = resolve;
+          }),
+      ),
+      abortTurns: vi.fn().mockResolvedValue(1),
+      notifyReady,
+    });
 
-      messageHandler?.({
-        type: WEB_FAST_AGENT_SHUTDOWN_REQUEST,
-        signal: 'SIGTERM',
-      });
-      messageHandler?.({
-        type: WEB_FAST_AGENT_SHUTDOWN_REQUEST,
-        signal: 'SIGINT',
-      });
-      expect(beginDrain).toHaveBeenCalledOnce();
-      expect(notifyReady).not.toHaveBeenCalled();
-      finishDrain?.(1);
-      await vi.waitFor(() =>
-        expect(notifyReady).toHaveBeenCalledWith('SIGTERM'),
-      );
-      cleanup();
-      expect(off).toHaveBeenCalledOnce();
-    } finally {
-      on.mockRestore();
-      off.mockRestore();
-    }
+    const shutdown = scope[key]?.('SIGTERM');
+    void scope[key]?.('SIGINT');
+    expect(beginDrain).toHaveBeenCalledOnce();
+    expect(notifyReady).not.toHaveBeenCalled();
+    finishDrain?.(1);
+    await shutdown;
+    expect(notifyReady).toHaveBeenCalledWith('SIGTERM');
+    cleanup();
+    expect(scope[key]).toBeUndefined();
   });
 });

@@ -23,6 +23,13 @@ export const WEB_FAST_AGENT_SHUTDOWN_REQUEST =
   'roomote:web-fast-agent-shutdown';
 export const WEB_FAST_AGENT_SHUTDOWN_READY =
   'roomote:web-fast-agent-shutdown-ready';
+const WEB_FAST_AGENT_SHUTDOWN_HANDLER = Symbol.for(
+  'roomote.web-fast-agent-shutdown-handler',
+);
+
+type ShutdownGlobal = typeof globalThis & {
+  [WEB_FAST_AGENT_SHUTDOWN_HANDLER]?: (signal: NodeJS.Signals) => Promise<void>;
+};
 
 export async function gracefullyShutdownWeb(
   signal: NodeJS.Signals,
@@ -47,27 +54,18 @@ export function installWebFastAgentGracefulShutdown(
   options: WebShutdownOptions = {},
 ): () => void {
   let shuttingDown = false;
-  const handler = (message: unknown) => {
-    if (
-      shuttingDown ||
-      !message ||
-      typeof message !== 'object' ||
-      !('type' in message) ||
-      message.type !== WEB_FAST_AGENT_SHUTDOWN_REQUEST ||
-      !('signal' in message) ||
-      (message.signal !== 'SIGTERM' && message.signal !== 'SIGINT')
-    ) {
-      return;
-    }
-    const signal = message.signal;
+  const scope = globalThis as ShutdownGlobal;
+  const handler = async (signal: NodeJS.Signals) => {
+    if (shuttingDown) return;
     shuttingDown = true;
-    void gracefullyShutdownWeb(signal, options).then(() => {
-      options.notifyReady?.(signal);
-    });
+    await gracefullyShutdownWeb(signal, options);
+    options.notifyReady?.(signal);
   };
-  process.on('message', handler);
+  scope[WEB_FAST_AGENT_SHUTDOWN_HANDLER] = handler;
 
   return () => {
-    process.off('message', handler);
+    if (scope[WEB_FAST_AGENT_SHUTDOWN_HANDLER] === handler) {
+      delete scope[WEB_FAST_AGENT_SHUTDOWN_HANDLER];
+    }
   };
 }

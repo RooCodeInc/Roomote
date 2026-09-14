@@ -19,9 +19,8 @@ vi.mock('@/lib/sentry-config', () => ({
 }));
 
 vi.mock('@/lib/server/fast-agent-graceful-shutdown', () => ({
-  WEB_FAST_AGENT_SHUTDOWN_READY: 'roomote:web-fast-agent-shutdown-ready',
-  installWebFastAgentGracefulShutdown: (options: unknown) =>
-    installWebFastAgentGracefulShutdownMock(options),
+  installWebFastAgentGracefulShutdown: () =>
+    installWebFastAgentGracefulShutdownMock(),
 }));
 
 vi.mock('@sentry/nextjs', () => ({
@@ -89,9 +88,7 @@ describe('web instrumentation', () => {
     const instrumentation = await import('../instrumentation');
     await instrumentation.register();
 
-    expect(installWebFastAgentGracefulShutdownMock).toHaveBeenCalledWith({
-      notifyReady: expect.any(Function),
-    });
+    expect(installWebFastAgentGracefulShutdownMock).toHaveBeenCalledWith();
   });
 
   it('initializes edge runtime Sentry with explicit release attribution', async () => {
