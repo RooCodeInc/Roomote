@@ -464,9 +464,13 @@ async function performIntegrationRequest(
       return new Promise<T>((resolve, reject) => {
         const abort = () => {
           requestSignal.removeEventListener('abort', abort);
+          // The composite signal carries the source's reason: the deadline
+          // aborts with a TimeoutError, the caller with an AbortError.
+          const cause: unknown = requestSignal.reason;
           reject(
             new IntegrationRequestError(
-              'request_aborted',
+              (cause instanceof Error && abortReasons[cause.name]) ||
+                'request_aborted',
               'Secret request unavailable',
             ),
           );

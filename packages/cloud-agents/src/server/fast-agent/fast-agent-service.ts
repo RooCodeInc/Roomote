@@ -4697,12 +4697,15 @@ export async function answerFastAgentQuestion({
               );
               return { success: true, ...(result as Record<string, unknown>) };
             } catch (error) {
-              // Broker text is our own constant copy; anything else is logged
-              // by class name only because SDK/database messages can echo
-              // bound values.
+              // The broker's isError text is our own constant copy, so it is
+              // safe to classify (never to log); anything else is logged by
+              // class name only because SDK/database messages can echo bound
+              // values.
               return unavailable(
                 error instanceof McpToolCallError
-                  ? error.message.startsWith('Integration request rejected')
+                  ? error.upstreamText?.startsWith(
+                      'Integration request rejected',
+                    )
                     ? 'broker_rejected'
                     : 'broker_unavailable'
                   : error instanceof Error

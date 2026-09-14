@@ -685,3 +685,44 @@ it('carries the bounded reason on the generic rejection for callers that log', a
     warn.mockRestore();
   }
 });
+
+it('distinguishes the request deadline from caller cancellation in the reason', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const timeout = vi
+    .spyOn(AbortSignal, 'timeout')
+    .mockReturnValueOnce(
+      AbortSignal.abort(new DOMException('deadline', 'TimeoutError')),
+    );
+  try {
+    expect(
+      integrationFailureReason(
+        await request().catch((cause: unknown) => cause),
+      ),
+    ).toBe('request_timeout');
+    expect(
+      integrationFailureReason(
+        await integrationRequest(
+          { integrations: [] },
+          `session-test:${context.sessionId}`,
+          {
+            integrationId: `session:${secretRef}`,
+            method: 'GET',
+            path: '/v1/items',
+          },
+          ownerId,
+          AbortSignal.abort(),
+          () => resolveSessionSecretContext(fastAuth),
+        ).catch((cause: unknown) => cause),
+      ),
+    ).toBe('request_aborted');
+    expect(fetch).not.toHaveBeenCalled();
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    expect(lines.map((line) => line.split('reason=')[1])).toEqual([
+      'request_timeout)',
+      'request_aborted)',
+    ]);
+  } finally {
+    timeout.mockRestore();
+    warn.mockRestore();
+  }
+});

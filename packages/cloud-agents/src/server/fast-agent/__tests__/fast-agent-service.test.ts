@@ -2132,6 +2132,56 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   );
 
   it.each([
+    [
+      'Integration request rejected or failed. Check the allowed methods and paths; the broker never falls back to direct access.',
+      'broker_rejected',
+    ],
+    ['Secret request unavailable', 'broker_unavailable'],
+    [null, 'broker_unavailable'],
+  ] as const)(
+    'classifies broker isError text %j as %s without logging it',
+    async (upstreamText, reason) => {
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+      mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
+      mocks.callIntegration.mockRejectedValueOnce(
+        new McpToolCallError(upstreamText),
+      );
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          expect(
+            await invokeTool(nativeToolNames.requestWithSessionSecret, {
+              secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+              method: 'GET',
+              path: '/status',
+            }),
+          ).toEqual({ success: false, error: 'Secret request unavailable' });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'The approved request was unavailable.',
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: { ...baseParams.conversation, surface: 'web' },
+        adapter: callbacks(),
+      });
+      expect(mocks.callIntegration).toHaveBeenCalledOnce();
+      const lines = warn.mock.calls.map((call) => String(call[0]));
+      expect(lines).toContain(
+        `[Fast Agent] ${nativeToolNames.requestWithSessionSecret} unavailable (reason=${reason})`,
+      );
+      expect(JSON.stringify(lines)).not.toContain('allowed methods');
+      warn.mockRestore();
+    },
+  );
+
+  it.each([
     'platform-event',
     'missing-actor',
     'missing-session',
