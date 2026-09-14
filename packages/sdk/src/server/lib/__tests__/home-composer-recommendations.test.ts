@@ -96,13 +96,13 @@ const refs = [
   },
 ];
 const suggestions = [
-  'Add focused authentication callback regression tests',
-  'Fix deployment health check recovery gaps',
-  'Document authentication callback failure handling',
-  'Review session handoff reliability edge cases',
-  'Improve deployment health check error guidance',
+  'Add focused regression coverage for authentication callback validation across supported login flows',
+  'Fix deployment health check recovery gaps before the next production release',
+  'Document authentication callback failure handling for every supported sign-in provider',
+  'Review session handoff reliability across interrupted tasks and delayed worker restarts',
+  'Improve deployment health check guidance for operators diagnosing repeated recovery failures',
 ];
-const cacheKey = 'home-composer-recommendations:v3:user-1';
+const cacheKey = 'home-composer-recommendations:v4:user-1';
 
 function revision() {
   return createHash('sha256').update('task-one:1:2').digest('hex');
@@ -167,7 +167,31 @@ describe('Home composer recommendations', () => {
         ),
       }),
     );
+    expect(mockGenerate.mock.calls[0]?.[0]?.prompt).toContain('10-15 words');
     expect(redisStore.get(cacheKey)).toContain(suggestions[0]);
+  });
+
+  it('does not reuse shorter suggestions from the v3 cache namespace', async () => {
+    redisStore.set(
+      'home-composer-recommendations:v3:user-1',
+      JSON.stringify({
+        revision: revision(),
+        sourceRefs: [{ taskId: 'task-one', runId: 1, memoryRevision: 2 }],
+        suggestions: [
+          'Add focused authentication callback regression tests',
+          'Fix deployment health check recovery gaps',
+          'Document authentication callback failure handling',
+          'Review session handoff reliability edge cases',
+          'Improve deployment health check error guidance',
+        ],
+        generatedAt: Date.now(),
+      }),
+    );
+
+    await expect(
+      getHomeComposerRecommendations('user-1'),
+    ).resolves.toMatchObject({ suggestions, outcome: 'generated' });
+    expect(redis.get).toHaveBeenCalledWith(cacheKey);
   });
 
   it('rejects malformed, duplicate, and overlong generated sets', async () => {
@@ -177,7 +201,7 @@ describe('Home composer recommendations', () => {
           suggestions[0],
           suggestions[0],
           'Fix callback tests now',
-          'Document authentication callback failure handling across every supported login flow now',
+          'Document authentication callback failure handling across every supported login flow before the next major production release begins',
           suggestions[1],
         ],
       },
@@ -206,7 +230,7 @@ describe('Home composer recommendations', () => {
       getHomeComposerRecommendations('user-2'),
     ).resolves.toMatchObject({ suggestions, outcome: 'generated' });
     expect(redis.get).toHaveBeenCalledWith(
-      'home-composer-recommendations:v3:user-2',
+      'home-composer-recommendations:v4:user-2',
     );
     expect(mockGenerate).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-2' }),
@@ -253,7 +277,7 @@ describe('Home composer recommendations', () => {
       cacheKey,
       cacheRecord({
         cachedSuggestions: [
-          'Never expose this hidden task recommendation',
+          'Never expose this hidden task recommendation after its source becomes unavailable',
           ...suggestions.slice(1),
         ],
       }),

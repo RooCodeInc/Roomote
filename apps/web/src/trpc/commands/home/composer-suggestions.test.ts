@@ -28,11 +28,11 @@ const timing = {
   postGenerationValidationMs: null,
 };
 const suggestions = [
-  'Add focused authentication callback regression tests',
-  'Fix deployment health check recovery gaps',
-  'Document authentication callback failure handling',
-  'Review session handoff reliability edge cases',
-  'Improve deployment health check error guidance',
+  'Add focused regression coverage for authentication callback validation across supported login flows',
+  'Fix deployment health check recovery gaps before the next production release',
+  'Document authentication callback failure handling for every supported sign-in provider',
+  'Review session handoff reliability across interrupted tasks and delayed worker restarts',
+  'Improve deployment health check guidance for operators diagnosing repeated recovery failures',
 ];
 
 describe('getHomeComposerSuggestionsCommand', () => {
