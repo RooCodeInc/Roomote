@@ -732,6 +732,32 @@ describe('Integrations settings', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('reconnects an enabled integration that still needs authentication', () => {
+    state.pathname = '/sessions/setup-session';
+    state.deploymentEnablements = [{ mcpId: 'sentry', enabled: true }];
+    state.userConnections = [{ mcpId: 'sentry', authStatus: 'pending' }];
+
+    render(
+      <Integrations
+        integrationIds={['sentry']}
+        configurationRequest={{ integrationId: 'sentry', sequence: 1 }}
+        showCatalog={false}
+      />,
+    );
+
+    expect(mutations.connectMcp).toHaveBeenCalledWith(
+      { mcpId: 'sentry', redirectTo: '/sessions/setup-session' },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(toast.success).not.toHaveBeenCalledWith(
+      'Sentry is already connected.',
+    );
+    expect(mutations.setDeploymentEnabled).not.toHaveBeenCalled();
+  });
+
   it('uses the settings action for missing Linear OAuth setup', () => {
     state.linearInstallation = null;
     state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];

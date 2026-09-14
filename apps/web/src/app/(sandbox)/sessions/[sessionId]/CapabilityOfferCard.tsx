@@ -38,13 +38,13 @@ export function CapabilityOfferCard({
   } | null>(null);
   const nextConfigurationSequence = useRef(0);
   const status = useQuery(trpc.setupNew.status.queryOptions());
-  const deploymentEnablements = useQuery(
-    trpc.mcpConnections.deploymentEnablements.queryOptions(),
+  const effectiveIntegrations = useQuery(
+    trpc.mcpConnections.effectiveIntegrations.queryOptions(),
   );
   const connectedIntegrationIds = new Set(
-    deploymentEnablements.data
-      ?.filter((enablement) => enablement.enabled)
-      .map((enablement) => enablement.mcpId) ?? [],
+    effectiveIntegrations.data
+      ?.filter((integration) => integration.status === 'connected')
+      .map((integration) => integration.id) ?? [],
   );
   const requestedIntegrationIds = offer.integrationIds?.length
     ? offer.integrationIds

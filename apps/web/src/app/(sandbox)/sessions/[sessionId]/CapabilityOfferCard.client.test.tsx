@@ -7,6 +7,10 @@ const mocks = vi.hoisted(() => ({
   integrationsProps: vi.fn(),
   mutate: vi.fn(),
   sourceControlCard: vi.fn(),
+  effectiveIntegrations: [] as Array<{
+    id: string;
+    status: 'connected' | 'needs_connection' | 'not_enabled';
+  }>,
   status: {
     sourceControlSetup: {
       providers: [
@@ -30,7 +34,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (options: { kind: string }) => ({
-    data: options.kind === 'status' ? mocks.status : [],
+    data:
+      options.kind === 'status' ? mocks.status : mocks.effectiveIntegrations,
   }),
   useMutation: () => ({
     mutate: mocks.mutate,
@@ -43,8 +48,8 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     setupNew: { status: { queryOptions: () => ({ kind: 'status' }) } },
     mcpConnections: {
-      deploymentEnablements: {
-        queryOptions: () => ({ kind: 'enablements' }),
+      effectiveIntegrations: {
+        queryOptions: () => ({ kind: 'effective-integrations' }),
       },
     },
     fastSessions: {
@@ -91,7 +96,10 @@ function offer(
 }
 
 describe('CapabilityOfferCard', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.effectiveIntegrations = [];
+  });
 
   it.each([
     ['source_control', 'Source control card'],
@@ -142,6 +150,53 @@ describe('CapabilityOfferCard', () => {
         },
         showCatalog: false,
       }),
+    );
+  });
+
+  it('keeps an enabled integration visible until it is authenticated', () => {
+    mocks.effectiveIntegrations = [
+      { id: 'notion', status: 'needs_connection' },
+    ];
+
+    render(
+      <CapabilityOfferCard
+        sessionId="session-1"
+        offer={{
+          ...offer('integrations'),
+          integrationIds: ['notion'],
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Connect Notion' }),
+    ).toBeInTheDocument();
+    expect(mocks.mutate).not.toHaveBeenCalled();
+  });
+
+  it('resolves an integration offer only after every integration is connected', async () => {
+    mocks.effectiveIntegrations = [
+      { id: 'notion', status: 'connected' },
+      { id: 'sentry', status: 'connected' },
+    ];
+
+    render(
+      <CapabilityOfferCard
+        sessionId="session-1"
+        offer={{
+          ...offer('integrations'),
+          integrationIds: ['notion', 'sentry'],
+        }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(mocks.mutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          capability: 'integrations',
+          resolution: 'completed',
+        }),
+      ),
     );
   });
 

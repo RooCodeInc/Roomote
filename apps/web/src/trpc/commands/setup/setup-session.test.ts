@@ -53,6 +53,7 @@ import {
 } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 import { SETUP_STARTER_TASKS } from '@/lib/setup-starter-tasks';
+import { registerExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
 import {
   getOrCreateSetupSessionCommand,
   reconcileSetupPlatformEvents,
@@ -61,6 +62,8 @@ import {
   skipSetupSourceControlCommand,
   submitSetupSessionUserInputCommand,
 } from './setup-session';
+
+registerExclusiveAutomationSettingsDatabaseLock();
 
 describe('optional setup integration discovery', () => {
   let auth: UserAuthSuccess;

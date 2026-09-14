@@ -2572,6 +2572,9 @@ export function Integrations({
         ? 'sentry-mcp'
         : configurationRequest.integrationId;
     const requestedItem = items.find((item) => item.id === requestedItemId);
+    const requestedIntegration = effectiveIntegrations.data?.find(
+      (integration) => integration.id === configurationRequest.integrationId,
+    );
 
     if (requestedItem?.isPending) {
       return;
@@ -2584,19 +2587,38 @@ export function Integrations({
       return;
     }
 
-    if (requestedItem == null || requestedItem.onAction == null) {
+    if (requestedItem == null) {
       toast.error('This integration cannot be configured here.');
       return;
     }
 
-    if (requestedItem.enabled) {
+    if (requestedIntegration?.status === 'connected') {
       toast.success(`${requestedItem.name} is already connected.`);
+      return;
+    }
+
+    if (requestedIntegration?.status === 'needs_connection') {
+      const reconnectAction =
+        requestedItem.headerAction?.onAction ??
+        (requestedItem.secondaryAction?.ariaLabel.startsWith('Reconnect ')
+          ? requestedItem.secondaryAction.onAction
+          : undefined);
+
+      if (reconnectAction) {
+        reconnectAction();
+        return;
+      }
+    }
+
+    if (requestedItem.onAction == null) {
+      toast.error('This integration cannot be configured here.');
       return;
     }
 
     requestedItem.onAction();
   }, [
     configurationRequest,
+    effectiveIntegrations.data,
     effectiveIntegrations.isPending,
     integrationsUnavailable,
     items,
