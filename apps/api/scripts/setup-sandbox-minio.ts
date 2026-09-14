@@ -102,9 +102,14 @@ try {
       sourceGoModSum,
       'MinIO module checksum mismatch',
     );
-    // -buildid= strips the toolchain-derived build ID so the binary is
-    // identical whether built natively or cross-compiled from another host
-    // (and identical to the published roomote-minio image).
+    // Same flags as .docker/minio (the published roomote-minio image):
+    // -buildid= drops the toolchain-derived build ID and -s -w the debug
+    // info, as upstream's release builds did. The pinned checksums are for
+    // NATIVE builds only: MinIO's compiled code still differs when the Go
+    // compiler runs on a different host architecture than it targets, so a
+    // cross-compile (for example arm64 from an amd64 host) will not match
+    // and must never be used to refresh these pins. This script only ever
+    // builds natively, so that constraint holds here by construction.
     execFileSync(
       go,
       ['build', '-trimpath', '-ldflags=-buildid= -s -w', '-o', temporary, '.'],

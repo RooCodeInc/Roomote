@@ -9,10 +9,12 @@
 # is compiled, and the compiled binary must match the pinned SHA-256 for the
 # target architecture. Any mismatch fails the build.
 #
-# `-ldflags=-buildid=` strips Go's build ID, which hashes the toolchain's own
-# binaries and therefore differs between the linux-amd64 and linux-arm64
-# toolchains: without it a cross-compiled binary is a few bytes different from
-# a natively compiled one and no single checksum could describe both.
+# `-ldflags="-buildid= -s -w"` drops the toolchain-derived build ID and the
+# debug info, as upstream's release builds did. That makes mc reproducible from
+# any host, but MinIO's compiled code still differs when the Go compiler runs
+# on a different host architecture than it targets, so the pinned checksums
+# are for NATIVE builds: the per-arch CI runners, or a Docker build for the
+# stated --platform (emulated is fine, a host cross-compile is not).
 #
 # VERIFY_SHA256=0 (build arg) reports the checksums instead of enforcing them;
 # use it once when bumping pins, never in a published build.
