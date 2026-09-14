@@ -15,7 +15,7 @@ import {
   listSessionSecretApprovals,
   prepareSessionSecret,
 } from '@roomote/sdk/server/session-secrets';
-import { sessionSecretPrepareSchema } from '@roomote/types';
+import { sessionSecretPrepareToolSchema } from '@roomote/types';
 import type { Variables } from '../../../types';
 import { resolveDeploymentMcpAuth } from '../deployment-mcp-auth';
 import {
@@ -154,8 +154,8 @@ export function createHttpIntegrationsMcp() {
         'prepare_session_secret',
         {
           description:
-            'Request owner approval for an exact HTTPS origin. Supply only nonsecret policy. The owner enters the key outside chat in the Session UI; saving resumes the same Session.',
-          inputSchema: sessionSecretPrepareSchema,
+            'Request owner approval for an exact HTTPS origin. Supply only nonsecret policy and omit headerPrefix when the key needs no prefix. The owner enters the key outside chat in the Session UI; saving resumes the same Session.',
+          inputSchema: sessionSecretPrepareToolSchema,
         },
         async (args) => {
           try {

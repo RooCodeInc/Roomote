@@ -32,6 +32,7 @@ import {
   manageWakeupsInputSchema,
   sessionSecretRequestSchema,
   sessionSecretPrepareSchema,
+  sessionSecretPrepareToolSchema,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
   truncateAcpOutputText,
@@ -4543,7 +4544,7 @@ export async function answerFastAgentQuestion({
             try {
               const schema =
                 call.name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret
-                  ? sessionSecretPrepareSchema
+                  ? sessionSecretPrepareToolSchema
                   : call.name ===
                       FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets
                     ? z.object({}).strict()
