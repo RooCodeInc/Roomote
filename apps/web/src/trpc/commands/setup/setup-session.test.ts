@@ -510,7 +510,7 @@ describe('optional setup integration discovery', () => {
     ]);
   });
 
-  it('coalesces setup changes into one deterministic turn without discovery-first dropping', async () => {
+  it('coalesces setup changes while holding starter work until discovery finishes', async () => {
     expect(await reconcileSetupPlatformEvents(auth)).toBe(true);
     expect(mocks.complete).toHaveBeenCalled();
     expect(
@@ -526,7 +526,12 @@ describe('optional setup integration discovery', () => {
           '',
         ),
       ).changes.map((change: { type: string }) => change.type),
-    ).toEqual(['session_creation', 'source_connection', 'starter_request']);
+    ).toEqual(['session_creation', 'source_connection']);
+    await expect(
+      (await context()).adapterExtensions.resolveUserInputPreset!(
+        'setup_starter_tasks',
+      ),
+    ).rejects.toThrow('Finish or skip optional tool discovery');
     await answeredCategory('documents', ['Notion']);
     mocks.schedule.mockClear();
     await reconcileSetupPlatformEvents(auth);
@@ -546,10 +551,6 @@ describe('optional setup integration discovery', () => {
       ).toEqual({ scheduled: true });
     }
     expect(mocks.schedule).toHaveBeenCalledTimes(6);
-    const starterQuestions = await (
-      await context()
-    ).adapterExtensions.resolveUserInputPreset!('setup_starter_tasks');
-    expect(starterQuestions).toHaveLength(1);
     await continueDiscovery();
     expect(
       mocks.schedule.mock.calls.some(([turn]) =>

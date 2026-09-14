@@ -764,10 +764,19 @@ export async function reconcileSetupPlatformEvents(
     { allowAfterSetupCompletion: true },
   );
 
-  const changes = events.map((event) => ({
-    type: event.kind,
-    ...event.payload,
-  }));
+  // A state-change turn represents every currently relevant setup fact. Until
+  // optional tool discovery is explicitly finished, do not also hand the
+  // model a starter-work action in that turn: that made the model skip the
+  // discovery conversation entirely when source control became ready.
+  const changes = events
+    .filter(
+      (event) =>
+        integrationDiscovery.completed || event.kind !== 'starter_request',
+    )
+    .map((event) => ({
+      type: event.kind,
+      ...event.payload,
+    }));
   const fingerprint = createHash('sha256')
     .update(JSON.stringify({ setupSnapshot, changes }))
     .digest('hex')

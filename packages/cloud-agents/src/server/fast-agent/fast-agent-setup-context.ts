@@ -125,6 +125,11 @@ export function buildFastAgentSetupAdapter(
       if (preset !== 'setup_starter_tasks') {
         throw new Error('Unsupported setup input preset.');
       }
+      if (!snapshot.integrationDiscovery?.completed) {
+        throw new Error(
+          'Finish or skip optional tool discovery before choosing starter work.',
+        );
+      }
       const rail = snapshot.rail;
       if (rail?.source !== 'ready') {
         throw new Error(
