@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import removeMd from 'remove-markdown';
@@ -29,7 +29,7 @@ import {
   TriangleAlert,
   X,
 } from '@/components/system';
-import { MessageResponse } from '@/components/ai-elements';
+import { CustomLink, MessageResponse } from '@/components/ai-elements';
 import { NewTaskForm } from '@/components/tasks/NewTaskForm';
 import { TaskAutomationIcon } from '@/components/tasks/TaskAutomationIcon';
 import { formatDistanceToNowCompact } from '@/lib/formatters';
@@ -59,6 +59,34 @@ function ignoredResultToastTitle(result: ResultInboxItem) {
   const title = result.title ?? resultPreview(result);
   return title.length > 30 ? `${title.slice(0, 30)}...` : title;
 }
+
+function ResultTextBlock({ children }: { children?: ReactNode }) {
+  return <div>{children}</div>;
+}
+
+function ResultTextInline({ children }: { children?: ReactNode }) {
+  return <span>{children}</span>;
+}
+
+const resultMarkdownComponents = {
+  a: CustomLink,
+  blockquote: ResultTextBlock,
+  code: ResultTextInline,
+  del: ResultTextInline,
+  em: ResultTextInline,
+  h1: ResultTextBlock,
+  h2: ResultTextBlock,
+  h3: ResultTextBlock,
+  h4: ResultTextBlock,
+  h5: ResultTextBlock,
+  h6: ResultTextBlock,
+  li: ResultTextBlock,
+  ol: ResultTextBlock,
+  p: ResultTextBlock,
+  pre: ResultTextBlock,
+  strong: ResultTextInline,
+  ul: ResultTextBlock,
+};
 
 function AutomationAvatar({ result }: { result: ResultInboxItem }) {
   return (
@@ -122,7 +150,10 @@ function ResultContent({ result }: { result: ResultInboxItem }) {
             : 'line-clamp-3 text-sm leading-normal text-foreground'
         }
       >
-        <MessageResponse pullRequestRepositoryUrl={result.repositoryUrl}>
+        <MessageResponse
+          components={resultMarkdownComponents}
+          pullRequestRepositoryUrl={result.repositoryUrl}
+        >
           {result.title ?? result.content.replaceAll('\\n', ' ')}
         </MessageResponse>
       </div>
