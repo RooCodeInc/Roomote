@@ -36,6 +36,27 @@ describe('buildFastAgentSlackReplyBodyBlocks', () => {
     ]);
   });
 
+  it('orders continuation context before the quoted request and response', () => {
+    expect(
+      buildFastAgentSlackReplyBodyBlocks({
+        leadingText: 'Continued on web · 2 intervening messages',
+        quote: '>*You:* Check it again.',
+        message: 'The new response.',
+      }),
+    ).toEqual([
+      {
+        type: 'markdown',
+        text: 'Continued on web · 2 intervening messages',
+      },
+      {
+        type: 'section',
+        block_id: 'roomote_thread_reply_quote',
+        text: { type: 'mrkdwn', text: '>*You:* Check it again.' },
+      },
+      { type: 'markdown', text: 'The new response.' },
+    ]);
+  });
+
   it('reserves one of Slack message limits for the sticky footer', () => {
     const blocks = buildFastAgentSlackReplyBodyBlocks({
       message: 'Report',

@@ -22,6 +22,7 @@ const {
   mockBuildFooterText,
   mockPostTextWithFooter,
   mockDeliverManagedFooter,
+  mockBuildSessionUrl,
 } = vi.hoisted(() => ({
   mockOpenConversation: vi.fn(),
   mockCreateDiscordDirectMessage: vi.fn(),
@@ -44,6 +45,7 @@ const {
   mockBuildFooterText: vi.fn(),
   mockPostTextWithFooter: vi.fn(),
   mockDeliverManagedFooter: vi.fn(),
+  mockBuildSessionUrl: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -85,6 +87,7 @@ vi.mock('@roomote/slack', () => ({
 
 vi.mock('@roomote/communication', () => ({
   buildFastSessionReplyFooterText: mockBuildFooterText,
+  buildFastSessionUrl: mockBuildSessionUrl,
   postTextThreadReplyWithFooter: mockPostTextWithFooter,
   deliverManagedThreadReplyFooter: mockDeliverManagedFooter,
   getDiscordFooterlessFinalChunk: ({
@@ -97,11 +100,14 @@ vi.mock('@roomote/communication', () => ({
 vi.mock('./fast-agent-slack-reply-blocks', () => ({
   buildFastAgentSlackReplyBodyBlocks: ({
     message,
+    leadingText,
     quote,
   }: {
     message: string;
+    leadingText?: string | null;
     quote?: string | null;
   }) => [
+    ...(leadingText ? [{ type: 'markdown', text: leadingText }] : []),
     ...(quote
       ? [{ type: 'section', text: { type: 'mrkdwn', text: quote } }]
       : []),
@@ -348,6 +354,10 @@ describe('sendUserDirectMessageBestEffort', () => {
       ({ provider, sessionId }) =>
         `Reply anytime · [Open in Roomote](https://roomote.test/sessions/${sessionId}?provider=${provider})`,
     );
+    mockBuildSessionUrl.mockImplementation(
+      (provider, sessionId) =>
+        `https://roomote.test/sessions/${sessionId}?provider=${provider}`,
+    );
     mockPostTextWithFooter.mockResolvedValue({
       channelId: 'teams-dm-1',
       messageId: 'teams-message-1',
@@ -578,6 +588,102 @@ describe('sendUserDirectMessageBestEffort', () => {
         threadTs: '1720000000.000100',
         text: 'A later response.',
         footerText: expect.stringContaining('Reply anytime'),
+      }),
+    );
+  });
+
+  it('orders a short web continuation before its latest request and response', async () => {
+    await sendUserDirectMessageBestEffortWithReceipts({
+      userId: 'user-1',
+      text: 'The new response.',
+      logContext: 'test',
+      presentation: { sessionId: 'session-1' },
+      replyPresentation: {
+        sessionId: 'session-1',
+        continuation: {
+          omittedMessageCount: 3,
+          latestUserMessage: {
+            senderDisplayName: 'You',
+            text: 'Please check it again.',
+          },
+          linkToSession: false,
+        },
+      },
+      replyAnchor: {
+        provider: 'slack',
+        workspaceId: 'T123',
+        channelId: 'D123',
+        messageId: '1720000000.000100',
+        threadId: '1720000000.000100',
+      },
+    });
+
+    expect(mockPostSlackThreadWithFooter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringMatching(
+          /^Continued on web · 3 intervening messages\n\n>\*You:\* Please check it again\.\n\nThe new response\.$/,
+        ),
+        bodyBlocks: [
+          {
+            type: 'markdown',
+            text: 'Continued on web · 3 intervening messages',
+          },
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: '>*You:* Please check it again.' },
+          },
+          { type: 'markdown', text: 'The new response.' },
+        ],
+      }),
+    );
+  });
+
+  it('uses the initial presentation when an anchored provider fails over', async () => {
+    mockPostSlackThreadWithFooter.mockRejectedValueOnce(
+      new Error('slack unavailable'),
+    );
+    mockCreateTeamsDirectMessage.mockResolvedValue({ channelId: 'teams-dm-1' });
+
+    await expect(
+      sendUserDirectMessageBestEffortWithReceipts({
+        userId: 'user-1',
+        text: 'The new response.',
+        logContext: 'test',
+        presentation: {
+          sessionId: 'session-1',
+          initialUserMessage: {
+            senderDisplayName: 'Taylor',
+            text: 'Original request',
+          },
+        },
+        replyPresentation: {
+          sessionId: 'session-1',
+          continuation: {
+            omittedMessageCount: 2,
+            linkToSession: false,
+          },
+        },
+        replyAnchor: {
+          provider: 'slack',
+          workspaceId: 'T123',
+          channelId: 'D123',
+          messageId: '1720000000.000100',
+        },
+      }),
+    ).resolves.toMatchObject({ deliveredProviders: ['teams'] });
+
+    expect(mockPostTextWithFooter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          text: expect.stringContaining('> **Taylor:** Original request'),
+        }),
+      }),
+    );
+    expect(mockPostTextWithFooter).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          text: expect.stringContaining('Continued on web'),
+        }),
       }),
     );
   });

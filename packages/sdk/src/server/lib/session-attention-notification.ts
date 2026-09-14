@@ -3,13 +3,16 @@ import { randomUUID } from 'node:crypto';
 import {
   and,
   asc,
+  count,
   db,
   desc,
   eq,
   getSessionForTask,
   gt,
+  isNotNull,
   isNull,
   lt,
+  ne,
   or,
   sql,
   sessionAttentionNotificationMessages,
@@ -43,6 +46,9 @@ import { buildDeterministicMessageId } from './deterministic-message-id';
 
 const DELIVERY_LEASE_MS = 2 * 60 * 1_000;
 const RECOVERY_DELAY_MS = DELIVERY_LEASE_MS + 5_000;
+const SHORT_WEB_GAP_MAX_MESSAGES = 4;
+
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export type SessionAttentionKind = 'result_ready' | 'input_needed';
 export type SessionAttentionNotificationResult =
@@ -61,7 +67,14 @@ type NotificationSubject = {
   runId?: number;
   message?: string;
   fastConversationId?: string;
+  fastEventId?: string;
   initialPrompt?: string | null;
+};
+
+type SessionAttentionContinuation = {
+  omittedMessageCount: number;
+  latestUserMessage?: { senderDisplayName: string | null; text: string };
+  linkToSession: boolean;
 };
 
 function buildIdempotencyKey(sessionId: string, eventKey: string): string {
@@ -70,10 +83,13 @@ function buildIdempotencyKey(sessionId: string, eventKey: string): string {
   );
 }
 
-async function claimNotification(subject: NotificationSubject) {
+async function claimNotification(
+  subject: NotificationSubject,
+  executor: Pick<DbTransaction, 'insert' | 'update'>,
+) {
   const leaseToken = randomUUID();
   const leaseExpiresAt = new Date(Date.now() + DELIVERY_LEASE_MS);
-  const [inserted] = await db
+  const [inserted] = await executor
     .insert(sessionAttentionNotifications)
     .values({
       sessionId: subject.sessionId,
@@ -89,7 +105,7 @@ async function claimNotification(subject: NotificationSubject) {
     .returning({ id: sessionAttentionNotifications.id });
   if (inserted) return { id: inserted.id, leaseToken };
 
-  const [reclaimed] = await db
+  const [reclaimed] = await executor
     .update(sessionAttentionNotifications)
     .set({ leaseToken, leaseExpiresAt, outcome: null, updatedAt: new Date() })
     .where(
@@ -116,7 +132,7 @@ async function markOutcome(
   id: string,
   leaseToken: string,
   outcome: 'delivered' | 'skipped_present' | 'failed',
-  executor: Pick<typeof db, 'update'> = db,
+  executor: Pick<DbTransaction, 'update'>,
 ) {
   await executor
     .update(sessionAttentionNotifications)
@@ -137,59 +153,102 @@ async function markOutcome(
 async function deliverNotification(
   subject: NotificationSubject,
 ): Promise<SessionAttentionNotificationResult> {
-  const claim = await claimNotification(subject);
-  if (!claim) return 'already_claimed';
-
-  const present = await isSessionUserPresent({
-    sessionId: subject.sessionId,
-    userId: subject.userId,
-  }).catch((error) => {
-    console.warn(
-      `[sessionAttentionNotification] Presence lookup failed for ${subject.eventKey}; notifying defensively: ${error instanceof Error ? error.message : String(error)}`,
+  return db.transaction(async (tx) => {
+    // Different attention events can settle concurrently. Serialize the
+    // Session/recipient chain so each delivery observes the last successful
+    // provider receipt and advances transcript coverage monotonically.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`session-attention:${subject.sessionId}:${subject.userId}`}, 0))`,
     );
-    return false;
-  });
-  if (present) {
-    await markOutcome(claim.id, claim.leaseToken, 'skipped_present');
-    return 'skipped';
-  }
+    const claim = await claimNotification(subject, tx);
+    if (!claim) return 'already_claimed';
 
-  const responseText = subject.message?.trim();
-  const notificationText =
-    responseText ||
-    (subject.kind === 'input_needed'
-      ? 'Your input is needed.'
-      : 'A new response is ready.');
-  const replyAnchor = await findLatestSessionAttentionReceipt({
-    sessionId: subject.sessionId,
-    userId: subject.userId,
-  });
-  const presentation = await resolveSessionAttentionPresentation({
-    sessionId: subject.sessionId,
-    userId: subject.userId,
-    ...(subject.initialPrompt !== undefined
-      ? { taskPrompt: subject.initialPrompt }
-      : {}),
-    ...(subject.fastConversationId
-      ? { fastConversationId: subject.fastConversationId }
-      : {}),
-    includeInitialMessage: !replyAnchor,
-  });
-  const { receipts } = await sendUserDirectMessageBestEffortWithReceipts({
-    userId: subject.userId,
-    text: notificationText,
-    teamsText: `${notificationText}\n\nIf Teams does not attach the reply, start your message with \`continue:\`.`,
-    logContext: 'sessionAttentionNotification',
-    idempotencyKey: buildIdempotencyKey(subject.sessionId, subject.eventKey),
-    ...(replyAnchor ? { replyAnchor } : {}),
-    presentation,
-  });
-  if (receipts.length === 0) {
-    await markOutcome(claim.id, claim.leaseToken, 'failed');
-    return 'failed';
-  }
+    const present = await isSessionUserPresent({
+      sessionId: subject.sessionId,
+      userId: subject.userId,
+    }).catch((error) => {
+      console.warn(
+        `[sessionAttentionNotification] Presence lookup failed for ${subject.eventKey}; notifying defensively: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    });
+    if (present) {
+      await markOutcome(claim.id, claim.leaseToken, 'skipped_present', tx);
+      return 'skipped';
+    }
 
-  await db.transaction(async (tx) => {
+    const responseText = subject.message?.trim();
+    const notificationText =
+      responseText ||
+      (subject.kind === 'input_needed'
+        ? 'Your input is needed.'
+        : 'A new response is ready.');
+    const previousDelivery = await findLatestSessionAttentionDelivery(
+      {
+        sessionId: subject.sessionId,
+        userId: subject.userId,
+      },
+      tx,
+    );
+    const currentFastMessageId =
+      subject.fastConversationId && subject.fastEventId
+        ? await findCurrentFastAttentionMessageId(
+            {
+              conversationId: subject.fastConversationId,
+              eventId: subject.fastEventId,
+              kind: subject.kind,
+            },
+            tx,
+          )
+        : null;
+    const webGap =
+      subject.fastConversationId &&
+      previousDelivery?.fastMessageId &&
+      currentFastMessageId
+        ? await findOmittedWebConversation(
+            {
+              conversationId: subject.fastConversationId,
+              previousFastMessageId: previousDelivery.fastMessageId,
+              currentFastMessageId,
+            },
+            tx,
+          )
+        : null;
+    const continuation = webGap?.continuation ?? null;
+    const deliveredFastMessageId =
+      webGap?.deliveredFastMessageId ?? currentFastMessageId;
+    const initialPresentation = await resolveSessionAttentionPresentation({
+      sessionId: subject.sessionId,
+      userId: subject.userId,
+      ...(subject.initialPrompt !== undefined
+        ? { taskPrompt: subject.initialPrompt }
+        : {}),
+      ...(subject.fastConversationId
+        ? { fastConversationId: subject.fastConversationId }
+        : {}),
+      includeInitialMessage: true,
+    });
+    const replyPresentation = await resolveSessionAttentionPresentation({
+      sessionId: subject.sessionId,
+      userId: subject.userId,
+      includeInitialMessage: false,
+      ...(continuation ? { continuation } : {}),
+    });
+    const { receipts } = await sendUserDirectMessageBestEffortWithReceipts({
+      userId: subject.userId,
+      text: notificationText,
+      teamsText: `${notificationText}\n\nIf Teams does not attach the reply, start your message with \`continue:\`.`,
+      logContext: 'sessionAttentionNotification',
+      idempotencyKey: buildIdempotencyKey(subject.sessionId, subject.eventKey),
+      ...(previousDelivery ? { replyAnchor: previousDelivery.receipt } : {}),
+      presentation: initialPresentation,
+      replyPresentation,
+    });
+    if (receipts.length === 0) {
+      await markOutcome(claim.id, claim.leaseToken, 'failed', tx);
+      return 'failed';
+    }
+
     await tx
       .insert(sessionAttentionNotificationMessages)
       .values(
@@ -200,12 +259,13 @@ async function deliverNotification(
           channelId: receipt.channelId,
           threadId: receipt.threadId ?? null,
           messageId: receipt.messageId,
+          fastMessageId: deliveredFastMessageId,
         })),
       )
       .onConflictDoNothing();
     await markOutcome(claim.id, claim.leaseToken, 'delivered', tx);
+    return 'delivered';
   });
-  return 'delivered';
 }
 
 export async function notifyDirectWebTaskAttention(
@@ -325,6 +385,7 @@ export async function notifyFastWebSessionAttention(
     kind: input.kind,
     message: input.message,
     fastConversationId: input.fastConversationId,
+    fastEventId: input.eventId,
   });
   return result;
 }
@@ -335,7 +396,14 @@ export async function resolveSessionAttentionPresentation(input: {
   taskPrompt?: string | null;
   fastConversationId?: string;
   includeInitialMessage: boolean;
+  continuation?: SessionAttentionContinuation;
 }) {
+  if (input.continuation) {
+    return {
+      sessionId: input.sessionId,
+      continuation: input.continuation,
+    };
+  }
   if (!input.includeInitialMessage) return { sessionId: input.sessionId };
   const user = await db.query.users.findFirst({
     where: eq(users.id, input.userId),
@@ -399,11 +467,237 @@ export async function findTaskAttentionMessage(
     : undefined;
 }
 
-export async function findLatestSessionAttentionReceipt(input: {
-  sessionId: string;
-  userId: string;
-}): Promise<UserDirectMessageReceipt | null> {
-  const [receipt] = await db
+async function findCurrentFastAttentionMessageId(
+  input: {
+    conversationId: string;
+    eventId: string;
+    kind: SessionAttentionKind;
+  },
+  executor: Pick<DbTransaction, 'select'>,
+): Promise<string | null> {
+  const [message] = await executor
+    .select({ id: fastAgentMessages.id })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, input.conversationId),
+        eq(fastAgentMessages.source, 'web'),
+        sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+        or(
+          and(
+            eq(fastAgentMessages.turnId, input.eventId),
+            eq(
+              fastAgentMessages.eventType,
+              ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+            ),
+            sql`coalesce(${fastAgentMessages.payload} ->> 'purpose', ${fastAgentMessages.metadata} ->> 'purpose') in ('closeout', 'clarification')`,
+          ),
+          ...(input.kind === 'input_needed'
+            ? [
+                and(
+                  eq(
+                    fastAgentMessages.eventType,
+                    ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+                  ),
+                  sql`${fastAgentMessages.payload} ->> 'requestId' = ${input.eventId}`,
+                ),
+              ]
+            : []),
+        ),
+      ),
+    )
+    .orderBy(
+      desc(fastAgentMessages.ts),
+      desc(fastAgentMessages.turnSeq),
+      desc(fastAgentMessages.createdAt),
+      desc(fastAgentMessages.id),
+    )
+    .limit(1);
+  return message?.id ?? null;
+}
+
+async function findOmittedWebConversation(
+  input: {
+    conversationId: string;
+    previousFastMessageId: string;
+    currentFastMessageId: string;
+  },
+  executor: Pick<DbTransaction, 'select'>,
+): Promise<{
+  continuation: SessionAttentionContinuation | null;
+  deliveredFastMessageId: string;
+}> {
+  const loadPosition = async (id: string) => {
+    const [row] = await executor
+      .select({
+        id: fastAgentMessages.id,
+        ts: fastAgentMessages.ts,
+        turnSeq: fastAgentMessages.turnSeq,
+        createdAt: fastAgentMessages.createdAt,
+      })
+      .from(fastAgentMessages)
+      .where(
+        and(
+          eq(fastAgentMessages.id, id),
+          eq(fastAgentMessages.conversationId, input.conversationId),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  };
+  const previous = await loadPosition(input.previousFastMessageId);
+  const current = await loadPosition(input.currentFastMessageId);
+  if (!previous || !current) {
+    return {
+      continuation: null,
+      deliveredFastMessageId: input.currentFastMessageId,
+    };
+  }
+
+  const comparePosition = (
+    left: typeof previous,
+    right: typeof previous,
+  ): number =>
+    left.ts - right.ts ||
+    left.turnSeq - right.turnSeq ||
+    left.createdAt.getTime() - right.createdAt.getTime() ||
+    left.id.localeCompare(right.id);
+  if (comparePosition(current, previous) <= 0) {
+    return {
+      continuation: null,
+      deliveredFastMessageId: previous.id,
+    };
+  }
+
+  const afterPrevious = or(
+    gt(fastAgentMessages.ts, previous.ts),
+    and(
+      eq(fastAgentMessages.ts, previous.ts),
+      gt(fastAgentMessages.turnSeq, previous.turnSeq),
+    ),
+    and(
+      eq(fastAgentMessages.ts, previous.ts),
+      eq(fastAgentMessages.turnSeq, previous.turnSeq),
+      gt(fastAgentMessages.createdAt, previous.createdAt),
+    ),
+    and(
+      eq(fastAgentMessages.ts, previous.ts),
+      eq(fastAgentMessages.turnSeq, previous.turnSeq),
+      eq(fastAgentMessages.createdAt, previous.createdAt),
+      gt(fastAgentMessages.id, previous.id),
+    ),
+  );
+  const beforeCurrent = or(
+    lt(fastAgentMessages.ts, current.ts),
+    and(
+      eq(fastAgentMessages.ts, current.ts),
+      lt(fastAgentMessages.turnSeq, current.turnSeq),
+    ),
+    and(
+      eq(fastAgentMessages.ts, current.ts),
+      eq(fastAgentMessages.turnSeq, current.turnSeq),
+      lt(fastAgentMessages.createdAt, current.createdAt),
+    ),
+    and(
+      eq(fastAgentMessages.ts, current.ts),
+      eq(fastAgentMessages.turnSeq, current.turnSeq),
+      eq(fastAgentMessages.createdAt, current.createdAt),
+      lt(fastAgentMessages.id, current.id),
+    ),
+  );
+  const isRealWebConversationMessage = and(
+    eq(fastAgentMessages.conversationId, input.conversationId),
+    eq(fastAgentMessages.source, 'web'),
+    sql`coalesce(${fastAgentMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
+    sql`${fastAgentMessages.metadata} ->> 'inferenceRetryNotice' is distinct from 'true'`,
+    sql`${fastAgentMessages.metadata} ->> 'interruptionReason' is null`,
+    or(
+      and(
+        eq(fastAgentMessages.role, 'user'),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+      ),
+      and(
+        eq(fastAgentMessages.role, 'assistant'),
+        or(
+          eq(
+            fastAgentMessages.eventType,
+            ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+          ),
+          eq(
+            fastAgentMessages.eventType,
+            ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+          ),
+        ),
+      ),
+    ),
+    afterPrevious,
+    beforeCurrent,
+    ne(fastAgentMessages.id, previous.id),
+    ne(fastAgentMessages.id, current.id),
+  );
+  const [countRow] = await executor
+    .select({ value: count() })
+    .from(fastAgentMessages)
+    .where(isRealWebConversationMessage);
+  const omittedMessageCount = Number(countRow?.value ?? 0);
+  if (omittedMessageCount === 0) {
+    return {
+      continuation: null,
+      deliveredFastMessageId: current.id,
+    };
+  }
+
+  let latestUserMessage:
+    | { senderDisplayName: string | null; text: string }
+    | undefined;
+  if (omittedMessageCount <= SHORT_WEB_GAP_MAX_MESSAGES) {
+    const [latestUser] = await executor
+      .select({
+        contentBlocks: fastAgentMessages.contentBlocks,
+        payload: fastAgentMessages.payload,
+      })
+      .from(fastAgentMessages)
+      .where(
+        and(
+          isRealWebConversationMessage,
+          eq(fastAgentMessages.role, 'user'),
+          eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.UserPrompt),
+        ),
+      )
+      .orderBy(
+        desc(fastAgentMessages.ts),
+        desc(fastAgentMessages.turnSeq),
+        desc(fastAgentMessages.createdAt),
+        desc(fastAgentMessages.id),
+      )
+      .limit(1);
+    const text = latestUser
+      ? extractAcpMessageText(
+          latestUser.contentBlocks,
+          latestUser.payload as Record<string, unknown>,
+        )?.trim()
+      : undefined;
+    if (text) latestUserMessage = { senderDisplayName: 'You', text };
+  }
+
+  return {
+    continuation: {
+      omittedMessageCount,
+      linkToSession: omittedMessageCount > SHORT_WEB_GAP_MAX_MESSAGES,
+      ...(latestUserMessage ? { latestUserMessage } : {}),
+    },
+    deliveredFastMessageId: current.id,
+  };
+}
+
+async function findLatestSessionAttentionDelivery(
+  input: { sessionId: string; userId: string },
+  executor: Pick<DbTransaction, 'select'>,
+): Promise<{
+  receipt: UserDirectMessageReceipt;
+  fastMessageId: string | null;
+} | null> {
+  const [delivery] = await executor
     .select({
       provider: sessionAttentionNotificationMessages.provider,
       workspaceId: sessionAttentionNotificationMessages.workspaceId,
@@ -426,17 +720,55 @@ export async function findLatestSessionAttentionReceipt(input: {
         eq(sessionAttentionNotifications.outcome, 'delivered'),
       ),
     )
-    .orderBy(desc(sessionAttentionNotificationMessages.createdAt))
+    .orderBy(
+      desc(sessionAttentionNotifications.updatedAt),
+      desc(sessionAttentionNotificationMessages.createdAt),
+    )
     .limit(1);
-  return receipt
-    ? {
-        provider: receipt.provider,
-        workspaceId: receipt.workspaceId,
-        channelId: receipt.channelId,
-        messageId: receipt.messageId,
-        ...(receipt.threadId ? { threadId: receipt.threadId } : {}),
-      }
-    : null;
+  if (!delivery) return null;
+
+  const [coverage] = await executor
+    .select({
+      fastMessageId: sessionAttentionNotificationMessages.fastMessageId,
+    })
+    .from(sessionAttentionNotificationMessages)
+    .innerJoin(
+      sessionAttentionNotifications,
+      eq(
+        sessionAttentionNotifications.id,
+        sessionAttentionNotificationMessages.notificationId,
+      ),
+    )
+    .where(
+      and(
+        eq(sessionAttentionNotifications.sessionId, input.sessionId),
+        eq(sessionAttentionNotifications.userId, input.userId),
+        eq(sessionAttentionNotifications.outcome, 'delivered'),
+        isNotNull(sessionAttentionNotificationMessages.fastMessageId),
+      ),
+    )
+    .orderBy(
+      desc(sessionAttentionNotifications.updatedAt),
+      desc(sessionAttentionNotificationMessages.createdAt),
+    )
+    .limit(1);
+  return {
+    receipt: {
+      provider: delivery.provider,
+      workspaceId: delivery.workspaceId,
+      channelId: delivery.channelId,
+      messageId: delivery.messageId,
+      ...(delivery.threadId ? { threadId: delivery.threadId } : {}),
+    },
+    fastMessageId: coverage?.fastMessageId ?? null,
+  };
+}
+
+export async function findLatestSessionAttentionReceipt(input: {
+  sessionId: string;
+  userId: string;
+}): Promise<UserDirectMessageReceipt | null> {
+  return (await findLatestSessionAttentionDelivery(input, db))?.receipt ?? null;
 }
 
 export async function processSessionAttentionNotificationJob(
