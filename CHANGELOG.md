@@ -2,6 +2,18 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.8.2 (2026-09-14)
+
+Roomote 1.8.2 restores reliable Slack channel history reads in busy channels.
+
+### Highlights
+
+- Read recent Slack channel history without scanning the channel's entire backlog or reporting misleading permission errors.
+
+### Patch changes
+
+- Fix Slack channel history reads failing in busy channels. Time-bounded reads now pass the bound to Slack instead of paging through the whole channel, and the error returned to the agent names the underlying Slack failure.
+
 ## 1.8.1 (2026-09-14)
 
 Roomote 1.8.1 restores Azure-backed delegated coding tasks and reliable Fast skill lookups on OpenAI models.
