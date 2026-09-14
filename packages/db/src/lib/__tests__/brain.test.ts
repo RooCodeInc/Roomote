@@ -200,11 +200,13 @@ describe('listRecentUserTaskMemoryRuns', () => {
         taskId: newerOwned.taskId,
         runId: newerOwned.id,
         completedAt: new Date('2026-09-12T12:00:00Z'),
+        memoryRevision: 0,
       },
       {
         taskId: olderOwned.taskId,
         runId: olderOwned.id,
         completedAt: new Date('2026-09-10T12:00:00Z'),
+        memoryRevision: 0,
       },
     ]);
     await expect(

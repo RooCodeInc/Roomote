@@ -621,7 +621,7 @@ describe('Home', () => {
     }
   });
 
-  it('cycles prompt placeholders every 5 seconds from a random starting point', async () => {
+  it('cycles prompt placeholders every 10 seconds from a random starting point', async () => {
     vi.useFakeTimers();
 
     try {
@@ -632,7 +632,15 @@ describe('Home', () => {
       );
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(5_000);
+        await vi.advanceTimersByTimeAsync(9_999);
+      });
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        'Review this pull request and address the feedback',
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
       });
 
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
@@ -640,7 +648,7 @@ describe('Home', () => {
       );
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(10_000);
+        await vi.advanceTimersByTimeAsync(20_000);
       });
 
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
@@ -672,7 +680,7 @@ describe('Home', () => {
       );
       fireEvent.focus(textarea);
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(5_000);
+        await vi.advanceTimersByTimeAsync(10_000);
       });
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
         'Try a different design for our home page',
@@ -755,7 +763,7 @@ describe('Home', () => {
       );
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(5_000);
+        await vi.advanceTimersByTimeAsync(10_000);
       });
 
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
@@ -763,7 +771,7 @@ describe('Home', () => {
       );
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(15_000);
+        await vi.advanceTimersByTimeAsync(30_000);
       });
 
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
@@ -862,7 +870,7 @@ describe('Home', () => {
 
       fireEvent.focus(textarea);
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(15_000);
+        await vi.advanceTimersByTimeAsync(30_000);
       });
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
         currentHomeSuggestions[0]!,
@@ -870,7 +878,7 @@ describe('Home', () => {
 
       fireEvent.blur(textarea);
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(5_000);
+        await vi.advanceTimersByTimeAsync(10_000);
       });
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
         currentHomeSuggestions[1]!,
