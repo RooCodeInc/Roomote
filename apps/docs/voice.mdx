@@ -28,6 +28,14 @@ When the voice key is not configured the voice button does not appear. The key
 stays on the control plane. The browser sends its WebRTC connection offer to Roomote
 and receives only the negotiated session answer; it never receives the API key.
 
+On Roomote Cloud, each user must accept the experimental Voice data flow before
+their first call. The confirmation explains that microphone audio, Voice
+transcripts, and workspace context such as repository and integration names are
+sent to OpenAI. Roomote saves acceptance for that user across browsers and
+Sessions. Canceling or dismissing the confirmation does not start microphone
+capture or contact OpenAI. Self-hosted deployments keep their existing Voice
+flow and do not show this Cloud consent step.
+
 ## Using voice
 
 1. Select the voice button in a composer: in an open Session, or on the home
