@@ -36,6 +36,18 @@ Roomote 1.9 brings a native Telegram experience for Fast work, direct pull reque
 - Voice conversations follow active coding tasks more consistently during calls and render transcript whitespace cleanly.
 - Automation reports use consistent default destinations across communication providers, while Fast widgets and their shareable links remain available across providers and resumed background turns.
 
+## 1.8.1 (2026-09-14)
+
+Roomote 1.8.1 restores delegated coding tasks that use Azure OpenAI or Azure AI Foundry.
+
+### Highlights
+
+- Run delegated coding tasks through Azure providers without inference-gateway authentication failures.
+
+### Patch changes
+
+- Delegated coding tasks using Azure OpenAI or Azure AI Foundry now authenticate through the inference gateway instead of failing before the provider request begins.
+
 ## 1.8.0 (2026-09-11)
 
 Roomote 1.8 adds a durable automation results inbox, private personalization, more flexible setup and environments, and faster independent delegated work.
