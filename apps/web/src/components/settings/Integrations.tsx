@@ -755,7 +755,11 @@ function FieldError({
   }
 
   return (
-    <p id={`${fieldId}-error`} className="text-sm text-destructive">
+    <p
+      id={`${fieldId}-error`}
+      className="text-sm text-destructive"
+      role="alert"
+    >
       {errors[0]}
     </p>
   );

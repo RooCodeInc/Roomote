@@ -1577,7 +1577,13 @@ describe('Integrations settings', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Configure Snowflake' }),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Connect Snowflake' }));
+    const submitButton = screen.getByRole('button', {
+      name: 'Connect Snowflake',
+    });
+    submitButton.focus();
+    fireEvent.click(submitButton);
+
+    expect(submitButton).toHaveFocus();
 
     const invalidFields = [
       ['Account identifier', 'Account identifier is required'],
@@ -1589,6 +1595,7 @@ describe('Integrations settings', () => {
       const field = screen.getByLabelText(label);
       expect(field).toHaveAttribute('aria-invalid', 'true');
       expect(field).toHaveAccessibleDescription(error);
+      expect(screen.getByText(error)).toHaveAttribute('role', 'alert');
     }
     expect(mutations.saveSnowflakeConnection).not.toHaveBeenCalled();
 
@@ -1619,6 +1626,10 @@ describe('Integrations settings', () => {
     expect(privateKeyInput).toHaveAttribute('aria-invalid', 'true');
     expect(privateKeyInput).toHaveAccessibleDescription(
       'Private key is required',
+    );
+    expect(screen.getByText('Private key is required')).toHaveAttribute(
+      'role',
+      'alert',
     );
     expect(mutations.saveSnowflakeConnection).not.toHaveBeenCalled();
   });
@@ -1709,6 +1720,9 @@ describe('Integrations settings', () => {
     expect(secretInput).toHaveAccessibleDescription(
       'Internal integration secret is required',
     );
+    expect(
+      screen.getByText('Internal integration secret is required'),
+    ).toHaveAttribute('role', 'alert');
     expect(mutations.saveNotionConnection).not.toHaveBeenCalled();
   });
 
