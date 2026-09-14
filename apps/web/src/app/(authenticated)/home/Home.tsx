@@ -78,8 +78,10 @@ export function Home({
   >(undefined);
 
   const { brainConfigured } = useAuthorizedUser();
-  const { enabled: homeComposerSuggestionsEnabled } =
-    useHomeComposerSuggestions();
+  const {
+    enabled: homeComposerSuggestionsEnabled,
+    isLoading: homeComposerSuggestionsFlagLoading,
+  } = useHomeComposerSuggestions();
   const trpc = useTRPC();
   const suggestionsQuery = useQuery(
     trpc.home.composerSuggestions.queryOptions(undefined, {
@@ -111,6 +113,32 @@ export function Home({
 
   const contentColumnRef = useRef<HTMLDivElement>(null);
   const promptCardRef = useRef<HTMLDivElement>(null);
+  const hasResolvedPromptAutoFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (
+      homeComposerSuggestionsFlagLoading ||
+      hasResolvedPromptAutoFocusRef.current
+    ) {
+      return;
+    }
+
+    hasResolvedPromptAutoFocusRef.current = true;
+    if (homeComposerSuggestionsEnabled) {
+      return;
+    }
+
+    const textarea = promptCardRef.current?.querySelector('textarea');
+    if (
+      !textarea ||
+      (document.activeElement !== document.body &&
+        document.activeElement !== textarea)
+    ) {
+      return;
+    }
+
+    textarea.focus({ preventScroll: true });
+  }, [homeComposerSuggestionsEnabled, homeComposerSuggestionsFlagLoading]);
 
   useEffect(() => {
     setIsFeedbackPromptVisible(!isFeedbackPromptDismissed());

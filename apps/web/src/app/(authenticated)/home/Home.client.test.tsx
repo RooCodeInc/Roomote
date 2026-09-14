@@ -22,6 +22,7 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
 let currentEnvironmentsPending = false;
 let currentBrainConfigured = false;
 let currentHomeComposerSuggestionsEnabled = false;
+let currentHomeComposerSuggestionsFlagLoading = false;
 let currentHomeSuggestions: string[] = [];
 let currentHomeSuggestionsHasData = true;
 let currentHomeSuggestionsPending = false;
@@ -102,7 +103,7 @@ vi.mock('@/trpc/client', () => ({
 vi.mock('@/hooks/useHomeComposerSuggestions', () => ({
   useHomeComposerSuggestions: () => ({
     enabled: currentHomeComposerSuggestionsEnabled,
-    isLoading: false,
+    isLoading: currentHomeComposerSuggestionsFlagLoading,
     isUpdating: false,
     setEnabled: vi.fn(),
   }),
@@ -340,6 +341,7 @@ describe('Home', () => {
     currentEnvironmentsPending = false;
     currentBrainConfigured = false;
     currentHomeComposerSuggestionsEnabled = false;
+    currentHomeComposerSuggestionsFlagLoading = false;
     currentHomeSuggestions = [];
     currentHomeSuggestionsHasData = true;
     currentHomeSuggestionsPending = false;
@@ -689,10 +691,48 @@ describe('Home', () => {
     expect(capturedHomeSuggestionsQueryEnabled).toBe(true);
   });
 
-  it('does not autofocus the Home textarea', () => {
+  it('autofocuses Home when the experiment is off', () => {
     render(<Home initialPlaceholderIndex={0} />);
 
+    expect(screen.getByRole('textbox', { name: 'Task prompt' })).toHaveFocus();
     expect(capturedAutoFocus).toBe(false);
+  });
+
+  it('does not autofocus Home when the experiment is on', () => {
+    currentHomeComposerSuggestionsEnabled = true;
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(
+      screen.getByRole('textbox', { name: 'Task prompt' }),
+    ).not.toHaveFocus();
+  });
+
+  it('waits for a disabled experiment to load before focusing once', () => {
+    currentHomeComposerSuggestionsFlagLoading = true;
+    const { rerender } = render(<Home initialPlaceholderIndex={0} />);
+    const textarea = screen.getByRole('textbox', { name: 'Task prompt' });
+
+    expect(textarea).not.toHaveFocus();
+    currentHomeComposerSuggestionsFlagLoading = false;
+    rerender(<Home initialPlaceholderIndex={0} />);
+    expect(textarea).toHaveFocus();
+
+    act(() => textarea.blur());
+    rerender(<Home initialPlaceholderIndex={0} />);
+    expect(textarea).not.toHaveFocus();
+  });
+
+  it('never autofocuses after an enabled experiment finishes loading', () => {
+    currentHomeComposerSuggestionsEnabled = true;
+    currentHomeComposerSuggestionsFlagLoading = true;
+    const { rerender } = render(<Home initialPlaceholderIndex={0} />);
+    const textarea = screen.getByRole('textbox', { name: 'Task prompt' });
+
+    currentHomeComposerSuggestionsFlagLoading = false;
+    rerender(<Home initialPlaceholderIndex={0} />);
+
+    expect(textarea).not.toHaveFocus();
   });
 
   it('cycles generated memory suggestions using the existing timing', async () => {
