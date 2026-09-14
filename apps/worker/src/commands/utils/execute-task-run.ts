@@ -17,6 +17,9 @@ import { type TaskRun, sdk } from '@roomote/sdk/client';
 import { WorkerEnv } from '../../env';
 import { waitForSessionEgressDelivery } from '../../env/session-egress-bootstrap';
 import { verifySessionProxyConnection } from '../../env/session-proxy';
+import { startSessionProxySync } from '../../env/session-proxy-sync';
+import { sessionProxyEnvFilePath } from '../../env/session-proxy-file';
+import { COMMON_ENV_FILE_PATH } from '../../lib/github-token';
 import {
   type HarnessLogger,
   createStartupLogger,
@@ -332,6 +335,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
   let callbacks: RunTaskCallbacks = {};
   let startupLogger = createStartupLogger();
   let workerEnv: WorkerEnv | undefined = undefined;
+  let stopSessionProxySync: (() => Promise<void>) | undefined;
   let backgroundEnvironmentSetupController =
     new BackgroundEnvironmentSetupController({
       recordWorkerRuntimeEvent: async () => undefined,
@@ -661,6 +665,11 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       );
       workerEnv.acceptSessionEgressDelivery(delivery);
       await verifySessionProxyConnection(workerEnv);
+      stopSessionProxySync = await startSessionProxySync(
+        workerEnv,
+        sessionProxyEnvFilePath(COMMON_ENV_FILE_PATH),
+        backgroundEnvironmentSetupController.cancelSignal,
+      );
       Object.assign(envVars, workerEnv.buildSessionEgressClientEnv());
       workerEnv.setRuntimeEnv(envVars);
       await injectEnvVars(envVars, taskRun, {
@@ -800,6 +809,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
 
     return outcome !== 'failed';
   } finally {
+    await stopSessionProxySync?.();
     try {
       if (workerHeartbeatInterval) {
         clearInterval(workerHeartbeatInterval);

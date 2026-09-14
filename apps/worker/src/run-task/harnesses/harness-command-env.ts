@@ -1,4 +1,5 @@
 import { getSourceControlTokenEnvVars } from '@roomote/types';
+import { isManagedSessionProxyEnv } from '../../env/session-proxy-file';
 
 /**
  * Long-lived harness processes and runtime sessions should not inherit a
@@ -13,6 +14,10 @@ export function buildHarnessCommandEnv(
 
   for (const envVar of getSourceControlTokenEnvVars()) {
     delete commandEnv[envVar];
+  }
+  if (commandEnv.ROOMOTE_SESSION_PROXY_ENV_FILE) {
+    for (const name of Object.keys(commandEnv))
+      if (isManagedSessionProxyEnv(name)) delete commandEnv[name];
   }
 
   return commandEnv;

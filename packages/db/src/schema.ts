@@ -4392,6 +4392,14 @@ export const sessionEgressWorkloads = pgTable(
       .$type<'external_mtls' | 'authenticated_proxy'>(),
     proxyCapabilityHash: text('proxy_capability_hash'),
     proxyCapabilityExpiresAt: timestamp('proxy_capability_expires_at'),
+    proxyLastSyncAt: timestamp('proxy_last_sync_at'),
+    proxyDeliveryRevision: integer('proxy_delivery_revision')
+      .notNull()
+      .default(0),
+    proxyAppliedRevision: integer('proxy_applied_revision')
+      .notNull()
+      .default(0),
+    proxyAppliedAt: timestamp('proxy_applied_at'),
     // Bumped on re-registration (resume, actor change, connector rotation).
     // Substitutes are bound to the generation they were minted in.
     generation: integer('generation').notNull().default(1),

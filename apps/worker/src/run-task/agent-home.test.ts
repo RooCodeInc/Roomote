@@ -668,12 +668,16 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(clientEnv.no_proxy).toBe(clientEnv.NO_PROXY);
     expect(endpoint.port).toBe('3001');
     expect(clientEnv.NODE_USE_ENV_PROXY).toBe('1');
-    expect(config.instructions.join('\n')).toContain(
+    const sessionInstructions = readFileSync(
+      config.instructions.find((value: string) =>
+        value.endsWith('roomote-session-services.md'),
+      ),
+      'utf8',
+    );
+    expect(sessionInstructions).toContain(
       'Use only the matching manifest entry',
     );
-    expect(config.instructions.join('\n')).toContain(
-      'never use generic SECRET',
-    );
+    expect(sessionInstructions).toContain('never use generic SECRET');
   });
 
   it('reports missing hosted admission without treating saved approval or generic env as usable credentials', () => {
@@ -687,11 +691,14 @@ describe('generateOpenCodeConfig provider support', () => {
       homeDir: createHomeDir(),
       runtimeEnv,
     });
-    const instructions = JSON.parse(result.configContent).instructions.join(
-      '\n',
+    const instructions = readFileSync(
+      JSON.parse(result.configContent).instructions.find((value: string) =>
+        value.endsWith('roomote-session-services.md'),
+      ),
+      'utf8',
     );
     expect(instructions).toContain(
-      'provider "roomote" has not completed verified external connector and egress admission',
+      'provider "roomote" has no usable Session configuration for this run',
     );
     expect(instructions).toContain(
       'successful approval/autoresume does not make ordinary credential-backed requests ready',

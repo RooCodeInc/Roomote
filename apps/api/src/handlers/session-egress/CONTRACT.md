@@ -293,6 +293,47 @@ The expiry delivered in worker configuration is its initial lease snapshot,
 not an authority to extend access. Live API checks remain authoritative.
 These internal endpoints do not by themselves make a hosted worker proxy-ready.
 
+### Mid-run private worker synchronization
+
+Eligible user-owned tasks enroll even with zero current grants. This gives the
+worker a logical proxy capability, not permission to access any service. No
+resource CONNECT probe is invented when the manifest is empty.
+
+The worker-only SDK synchronization mutation requires a current signed user-run
+token. It derives run/owner from that token and checks the live canonical
+Session/attachment, proxy mode, generation and expiry. A proxy capability alone
+cannot use this mutation. The client supplies only its generation and held
+substitute receipt IDs, not identities, origins, methods or real keys.
+
+Under a workload/binding transaction lock, synchronization removes unheld token
+slots before minting fresh handles for already-approved live grants. This
+respects the one-slot-per-workload/grant/generation constraint and recovers lost
+responses without storing recoverable substitute plaintext server-side. Held
+receipts keep existing tokens stable; receipt IDs themselves are not authority.
+The server returns the complete current manifest and only newly issued tokens.
+Polling is rate-limited; synchronization cannot create grants or extend leases.
+
+The worker verifies usable proxy configuration, atomically replaces each complete
+0600 shell/JSON snapshot, and only then acknowledges its generation/revision.
+Acknowledgement is advisory application telemetry, never physical-origin proof
+or additional permission. A lost acknowledgement response does not roll back an
+applied file. Snapshot scrubbing quiesces writers and removes both representations.
+
+The default poll interval is15seconds. Saved approval is not yet usable access:
+the next ordinary command **after apply/ack** receives the new configuration.
+The existing generated OpenCode `tool.execute.before` hook explicitly sources
+the managed file before bash execution, including piped-stdin launches where
+BASH_ENV may be skipped. No resource tool is added. Long-lived harness processes
+do not retain a frozen copy of managed service credentials.
+
+Persistent SDK objects are not silently mutated. Applications may privately read
+`ROOMOTE_SESSION_PROXY_CONFIG_FILE` and recreate/reconfigure their standard proxy
+transport and explicit service credential, or use a supported credential callback.
+Check that the requested origin has a manifest entry and nonempty named substitute
+before constructing the client, so an SDK cannot fall back to ambient credentials.
+The JSON contains scoped credentials and must not be printed into chat or logs.
+Unrelated environment variables and unrelated network routing remain unchanged.
+
 `session_egress_audit` records the initial **evaluation attempt** for each
 schema-valid `/authorize` call, not its final outcome or proof of released
 credentials/bytes. An `allowed` attempt can subsequently be denied by the

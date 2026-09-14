@@ -652,6 +652,13 @@
       "when": 1789412133498,
       "tag": "0092_session_proxy_capabilities",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1789421425883,
+      "tag": "0093_session_proxy_runtime_sync",
+      "breakpoints": true
     }
   ]
 }

@@ -14,3 +14,16 @@ export const markSessionEgressBootstrapReady = (nonce: string) =>
 
 export const getCustomStdioMcpServers = () =>
   client.mcpConnections.getCustomStdioMcpServers.query();
+export const syncSessionProxyServices = (
+  input: import('@roomote/types').SessionProxySync,
+  signal?: AbortSignal,
+) => client.mcpConnections.syncSessionProxyServices.mutate(input, { signal });
+export const acknowledgeSessionProxyServices = (
+  generation: number,
+  revision: number,
+  signal?: AbortSignal,
+) =>
+  client.mcpConnections.acknowledgeSessionProxyServices.mutate(
+    { generation, revision },
+    { signal },
+  );

@@ -1,6 +1,18 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 
-import { and, asc, eq, gt, inArray, isNull, ne, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  isNotNull,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 
 import { getEncryptionKey } from '@roomote/env';
 import {
@@ -20,6 +32,9 @@ import {
   type SessionProxyRegistration,
   type SessionProxyConnect,
   type SessionProxyPrincipal,
+  type SessionProxySync,
+  type SessionProxyServices,
+  sessionProxyServiceEnvName,
 } from '@roomote/types';
 
 import { db, type DatabaseOrTransaction } from '../db';
@@ -35,19 +50,199 @@ import {
   users,
 } from '../schema';
 import { decrypt } from './encryption';
+import { recordTaskRunLifecycleEvent } from './task-run-events';
+
+/** Private worker synchronization; cannot create grants, choose identities or renew authority. */
+export async function syncSessionProxyServices(
+  actor: { runId: number; userId: string },
+  input: SessionProxySync,
+  options: { isOriginAllowed: (origin: string) => boolean },
+): Promise<SessionProxyServices | { retryAfterMs: number } | null> {
+  return db.transaction(async (tx) => {
+    await tx
+      .select({ id: taskRuns.id })
+      .from(taskRuns)
+      .where(eq(taskRuns.id, actor.runId))
+      .for('update');
+    const [found] = await tx
+      .select({ id: sessionEgressWorkloads.id })
+      .from(sessionEgressWorkloads)
+      .where(
+        and(
+          eq(sessionEgressWorkloads.taskRunId, actor.runId),
+          eq(sessionEgressWorkloads.status, 'active'),
+        ),
+      );
+    if (!found) return null;
+    const workload = await liveWorkload(tx, found.id, true);
+    if (
+      !workload ||
+      workload.ownerUserId !== actor.userId ||
+      workload.admissionMode !== 'authenticated_proxy' ||
+      workload.generation !== input.generation
+    )
+      return null;
+    if (
+      workload.proxyLastSyncAt &&
+      Date.now() - workload.proxyLastSyncAt.getTime() < 1_000
+    )
+      return { retryAfterMs: 1_000 };
+    // A lost response leaves the worker without its receipt. Retire only those
+    // unheld token records, then remint under the same workload lock. Hash-only
+    // storage stays intact, and a stale receipt cannot strand a new grant.
+    // The schema permits one token slot per workload/grant/generation. Remove
+    // an unheld slot before replacing it; its old hash immediately stops authorizing.
+    const retired = await tx
+      .delete(sessionEgressSubstitutes)
+      .where(
+        and(
+          eq(sessionEgressSubstitutes.workloadId, workload.id),
+          eq(sessionEgressSubstitutes.generation, workload.generation),
+          input.heldSubstituteIds.length
+            ? or(
+                isNotNull(sessionEgressSubstitutes.revokedAt),
+                notInArray(
+                  sessionEgressSubstitutes.id,
+                  input.heldSubstituteIds,
+                ),
+              )
+            : undefined,
+        ),
+      )
+      .returning({ id: sessionEgressSubstitutes.id });
+    const issued = await mintMissingSubstitutes(
+      tx,
+      workload,
+      options.isOriginAllowed,
+    );
+    const policies = await tx
+      .select({
+        ...grantPolicyColumns,
+        substituteId: sessionEgressSubstitutes.id,
+      })
+      .from(sessionEgressSubstitutes)
+      .innerJoin(
+        sessionSecrets,
+        eq(sessionSecrets.id, sessionEgressSubstitutes.secretId),
+      )
+      .where(
+        and(
+          eq(sessionEgressSubstitutes.workloadId, workload.id),
+          eq(sessionEgressSubstitutes.generation, workload.generation),
+          isNull(sessionEgressSubstitutes.revokedAt),
+          isNull(sessionSecrets.revokedAt),
+          gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
+          eq(sessionSecrets.sessionId, workload.sessionId),
+          eq(sessionSecrets.ownerUserId, actor.userId),
+        ),
+      )
+      .orderBy(asc(sessionSecrets.createdAt));
+    const services = policies
+      .filter((policy) => options.isOriginAllowed(policy.origin))
+      .map((policy) => ({
+        ...policy,
+        expiresAt: policy.expiresAt.toISOString(),
+        envName: sessionProxyServiceEnvName(policy.label, policy.secretRef),
+      }));
+    const revision = workload.proxyDeliveryRevision + 1;
+    await tx
+      .update(sessionEgressWorkloads)
+      .set({
+        proxyLastSyncAt: sql`clock_timestamp()`,
+        proxyDeliveryRevision: revision,
+      })
+      .where(eq(sessionEgressWorkloads.id, workload.id));
+    if (issued.length || retired.length) {
+      const [run] = await tx
+        .select({ taskId: taskRuns.taskId })
+        .from(taskRuns)
+        .where(eq(taskRuns.id, actor.runId));
+      if (run)
+        await recordTaskRunLifecycleEvent(tx, {
+          runId: actor.runId,
+          taskId: run.taskId,
+          eventType: 'decision',
+          message:
+            'Scoped Session service configuration prepared for worker delivery.',
+          details: {
+            admissionMode: 'authenticated_proxy',
+            generation: workload.generation,
+            revision,
+            issuedCount: issued.length,
+            retiredCount: retired.length,
+          },
+        });
+    }
+    return {
+      workloadId: workload.id,
+      generation: workload.generation,
+      revision,
+      services,
+      issued,
+      proxyCapabilityExpiresAt:
+        workload.proxyCapabilityExpiresAt!.toISOString(),
+    };
+  });
+}
+
+/** Advisory apply receipt, never proof of physical identity or extra permission. */
+export async function acknowledgeSessionProxyServices(
+  actor: { runId: number; userId: string },
+  generation: number,
+  revision: number,
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    await tx
+      .select({ id: taskRuns.id })
+      .from(taskRuns)
+      .where(eq(taskRuns.id, actor.runId))
+      .for('update');
+    const [found] = await tx
+      .select({ id: sessionEgressWorkloads.id })
+      .from(sessionEgressWorkloads)
+      .where(
+        and(
+          eq(sessionEgressWorkloads.taskRunId, actor.runId),
+          eq(sessionEgressWorkloads.status, 'active'),
+        ),
+      );
+    if (!found) return false;
+    const workload = await liveWorkload(tx, found.id, true);
+    if (
+      !workload ||
+      workload.admissionMode !== 'authenticated_proxy' ||
+      workload.ownerUserId !== actor.userId ||
+      workload.generation !== generation ||
+      revision < 1 ||
+      revision > workload.proxyDeliveryRevision
+    )
+      return false;
+    if (revision <= workload.proxyAppliedRevision) return true;
+    await tx
+      .update(sessionEgressWorkloads)
+      .set({
+        proxyAppliedRevision: revision,
+        proxyAppliedAt: sql`clock_timestamp()`,
+      })
+      .where(eq(sessionEgressWorkloads.id, workload.id));
+    return true;
+  });
+}
 
 /**
  * Session egress control plane persistence.
  *
- * Trust model: every input here arrives from an authenticated controller or
- * gateway service principal, never from a sandbox, a Fast tool argument, or a
- * request header the workload could set. Even so, nothing below treats a
+ * Grant administration arrives from a controller, and authorization from the
+ * gateway. Private proxy synchronization uses verified run-token context and
+ * can only reconcile already-approved grants for that same live owner/run.
+ * Nothing below treats a
  * caller-supplied ID as authority on its own: each decision re-joins the live
  * owner, Session, attached run, grant, workload, and generation rows.
  *
  * Substitute tokens are random capabilities. Only a deployment-keyed hash is
- * stored; the plaintext is returned exactly once to the registering
- * controller and is otherwise unrecoverable.
+ * stored; plaintext is returned once per issuance. Lost deliveries are recovered
+ * by retiring unheld receipts and issuing fresh scoped substitutes, not by
+ * recovering plaintext from storage.
  */
 
 const ELIGIBLE_RUN_STATUSES = activeRunStatuses as readonly RunStatus[];
@@ -243,7 +438,11 @@ export async function findSessionEgressCandidateForRun(
 }
 
 /** An active workload whose run, Session, owner, and attachment are all still live. */
-async function liveWorkload(tx: DatabaseOrTransaction, workloadId: string) {
+async function liveWorkload(
+  tx: DatabaseOrTransaction,
+  workloadId: string,
+  lockBinding = false,
+) {
   const [row] = await tx
     .select({ workload: sessionEgressWorkloads })
     .from(sessionEgressWorkloads)
@@ -271,7 +470,11 @@ async function liveWorkload(tx: DatabaseOrTransaction, workloadId: string) {
         isNull(sessions.archivedAt),
       ),
     )
-    .for('update', { of: sessionEgressWorkloads });
+    .for('update', {
+      of: lockBinding
+        ? [sessionEgressWorkloads, taskRuns, sessions, users, sessionTasks]
+        : sessionEgressWorkloads,
+    });
   return row?.workload ?? null;
 }
 
@@ -346,12 +549,15 @@ async function mintMissingSubstitutes(
     // Withheld plaintext is unrecoverable, so denied grants must remain mintable.
     if (!isOriginAllowed(grant.origin)) continue;
     const substitute = mintSubstitute();
-    await tx.insert(sessionEgressSubstitutes).values({
-      workloadId: workload.id,
-      secretId: grant.secretRef,
-      generation: workload.generation,
-      tokenHash: hashSessionEgressSubstitute(substitute),
-    });
+    const [receipt] = await tx
+      .insert(sessionEgressSubstitutes)
+      .values({
+        workloadId: workload.id,
+        secretId: grant.secretRef,
+        generation: workload.generation,
+        tokenHash: hashSessionEgressSubstitute(substitute),
+      })
+      .returning({ id: sessionEgressSubstitutes.id });
     issued.push({
       secretRef: grant.secretRef,
       label: grant.label,
@@ -361,6 +567,9 @@ async function mintMissingSubstitutes(
       allowedMethods: [...grant.allowedMethods],
       expiresAt: grant.expiresAt.toISOString(),
       substitute,
+      ...(workload.admissionMode === 'authenticated_proxy'
+        ? { substituteId: receipt!.id }
+        : {}),
     });
   }
   return issued;
@@ -428,6 +637,10 @@ export async function registerSessionEgressWorkload(
 
     const expiresAt = sql`clock_timestamp() + ${input.leaseSeconds} * interval '1 second'`;
     const admission = {
+      proxyLastSyncAt: null,
+      proxyDeliveryRevision: 0,
+      proxyAppliedRevision: 0,
+      proxyAppliedAt: null,
       admissionMode: options.proxy
         ? ('authenticated_proxy' as const)
         : ('external_mtls' as const),

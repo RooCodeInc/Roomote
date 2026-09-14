@@ -24,6 +24,7 @@ import {
   ADO_TOKEN_ENV_FILE_PATH,
 } from '../../lib';
 import { GH_CLI_WRAPPER_BIN_DIR } from '../../lib/github-token';
+import { isManagedSessionProxyEnv } from '../../env/session-proxy-file';
 
 const ENV_VARS_START = `# BEGIN ${PRODUCT_NAME} environment variables`;
 const ENV_VARS_END = `# END ${PRODUCT_NAME} environment variables`;
@@ -79,6 +80,8 @@ function buildExportLines(envVars: Record<string, string>): string[] {
   );
 
   for (const [key, value] of Object.entries(envVars)) {
+    if (envVars.ROOMOTE_SESSION_PROXY_ENV_FILE && isManagedSessionProxyEnv(key))
+      continue;
     if (sourceControlTokenEnvVars.has(key) || key === 'PATH') {
       continue;
     }
@@ -128,6 +131,12 @@ export function writeCommonEnvFile(envVars: Record<string, string>): void {
     `source '${ADO_TOKEN_ENV_FILE_PATH}'`,
   );
   lines.push('', 'unset __ROOMOTE_ENV_LOADED', '');
+  if (envVars.ROOMOTE_SESSION_PROXY_ENV_FILE) {
+    lines.push(
+      `source '${envVars.ROOMOTE_SESSION_PROXY_ENV_FILE.replaceAll("'", "'\\''")}'`,
+      '',
+    );
+  }
 
   writeFileSync(COMMON_ENV_FILE_PATH, lines.join('\n'), { mode: 0o600 });
   chmodSync(COMMON_ENV_FILE_PATH, 0o600);

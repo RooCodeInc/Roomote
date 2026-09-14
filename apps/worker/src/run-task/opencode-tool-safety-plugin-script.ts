@@ -42,6 +42,16 @@ async function resolvesToUnsupportedImage(filePath) {
 
 export const RoomoteOpenCodeToolSafety = async () => ({
   'tool.execute.before': async (input, context) => {
+    if (input?.tool === 'bash' && typeof context?.args?.command === 'string') {
+      const file = process.env.ROOMOTE_SESSION_PROXY_ENV_FILE;
+      if (file) {
+        // Explicit loading is required: Bash may skip BASH_ENV with piped stdin.
+        const quoted = "'" + file.replaceAll("'", "'\\\\''") + "'";
+        const prefix = 'if ! . ' + quoted + '; then printf "%s\\n" "Session configuration unavailable" >&2; exit 1; fi\\n';
+        if (!context.args.command.startsWith(prefix)) context.args.command = prefix + context.args.command;
+      }
+      return;
+    }
     if (input?.tool !== 'read') {
       return;
     }

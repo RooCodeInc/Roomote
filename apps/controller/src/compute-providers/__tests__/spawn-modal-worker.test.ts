@@ -171,9 +171,14 @@ describe('spawnModalWorker', () => {
     );
   });
 
-  it.each([false, true])(
+  it.each([false, true, 'zero-grants'])(
     'preserves the right-sized nested-Docker VM with shared proxy configured=%s',
     async (proxyEnabled) => {
+      if (proxyEnabled === 'zero-grants')
+        mockProxyCandidate.mockResolvedValue({
+          sessionId: 'session-fixture',
+          grantCount: 0,
+        });
       mockGetNamedPortsForTaskRun.mockResolvedValue({
         namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
         environmentSnapshotId: undefined,

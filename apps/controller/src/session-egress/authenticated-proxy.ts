@@ -125,8 +125,6 @@ export async function deliverSessionProxy(input: {
       leaseSeconds: 900,
       capabilitySeconds: 900,
     });
-    if (!registration.substitutes.length)
-      throw new Error('No currently usable Session service grants');
     const caFile = `/tmp/roomote-session-proxy-${input.runId}.pem`;
     await input.computeClient.writeFiles({
       instanceId: input.machineId,
@@ -141,6 +139,10 @@ export async function deliverSessionProxy(input: {
       registration,
       {
         [SESSION_EGRESS_WORKLOAD_ENV.ADMISSION_MODE]: 'authenticated_proxy',
+        [SESSION_EGRESS_WORKLOAD_ENV.WORKLOAD_ID]: registration.workloadId,
+        [SESSION_EGRESS_WORKLOAD_ENV.GENERATION]: String(
+          registration.generation,
+        ),
         [SESSION_EGRESS_WORKLOAD_ENV.PROXY_URL]: input.config.endpoint,
         [SESSION_EGRESS_WORKLOAD_ENV.CA_FILE]: caFile,
         [SESSION_EGRESS_WORKLOAD_ENV.SERVICES]: JSON.stringify(manifest),

@@ -5,10 +5,12 @@ import { engageCredentialWriteBarrier } from '../../lib/credential-write-barrier
 import {
   ensureSourceControlTokenEnvFiles,
   removeSourceControlCredentialFiles,
+  COMMON_ENV_FILE_PATH,
 } from '../../lib/github-token';
 import { resolveOpenCodeCredentialFilePaths } from '../../run-task/agent-home';
 
 import { writeCommonEnvFile } from './env-vars';
+import { sessionProxyEnvFilePath } from '../../env/session-proxy-file';
 
 interface ScrubLogger {
   info(message: string): void;
@@ -88,6 +90,14 @@ export async function scrubSandboxSecretsBeforeSnapshot(
 
   trackScrubStep('remove source-control credential files', () =>
     removeSourceControlCredentialFiles(),
+  );
+  trackScrubStep('remove Session proxy credentials', () =>
+    rmSync(sessionProxyEnvFilePath(COMMON_ENV_FILE_PATH), { force: true }),
+  );
+  trackScrubStep('remove Session proxy client configuration', () =>
+    rmSync(`${sessionProxyEnvFilePath(COMMON_ENV_FILE_PATH)}.json`, {
+      force: true,
+    }),
   );
 
   trackScrubStep('remove OpenCode credential files', () => {

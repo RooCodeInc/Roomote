@@ -11,6 +11,7 @@ import {
   sessionProxyCapabilitySchema,
   SESSION_EGRESS_WORKLOAD_ENV,
   type SessionEgressWorkloadServiceManifestEntry,
+  type SessionProxyServices,
 } from '@roomote/types';
 
 /**
@@ -20,6 +21,7 @@ import {
  */
 interface WorkerSessionEgressConfig {
   mode: 'external_mtls' | 'authenticated_proxy';
+  generation?: number;
   proxyCapability?: string;
   proxyCapabilityExpiresAt?: string;
   proxyUrl: string;
@@ -146,6 +148,10 @@ function buildLauncherOpenCodeEnv(
  * only the variables it needs.
  */
 export class WorkerEnv {
+  private sessionProxyEnvFile?: string;
+  setSessionProxyEnvFile(path: string): void {
+    this.sessionProxyEnvFile = path;
+  }
   /**
    * Minimal OS-level vars every child process needs.
    * Safe to include everywhere - these never conflict with user projects.
@@ -474,6 +480,44 @@ export class WorkerEnv {
     return this.workerConfig.sessionEgress?.mode;
   }
 
+  get sessionProxyGeneration(): number | undefined {
+    return this.workerConfig.sessionEgress?.generation;
+  }
+
+  applySessionProxyServices(update: SessionProxyServices): void {
+    const config = this.workerConfig.sessionEgress;
+    if (
+      !config ||
+      config.mode !== 'authenticated_proxy' ||
+      config.generation !== update.generation
+    )
+      throw new Error(
+        'Session proxy generation changed; fresh admission required',
+      );
+    const services = sessionEgressWorkloadServiceManifestSchema.parse(
+      update.services,
+    );
+    const held = new Map(
+      config.services
+        .filter((entry) => entry.substituteId)
+        .map((entry) => [entry.substituteId!, config.tokens[entry.envName]]),
+    );
+    for (const issued of update.issued)
+      if (issued.substituteId) held.set(issued.substituteId, issued.substitute);
+    const tokens: Record<string, string> = {};
+    for (const service of services) {
+      const value = service.substituteId
+        ? held.get(service.substituteId)
+        : undefined;
+      if (!value || !/^rses_[A-Za-z0-9_-]+$/.test(value))
+        throw new Error('Session service delivery is incomplete');
+      tokens[service.envName] = value;
+    }
+    config.services = services;
+    config.tokens = tokens;
+    config.proxyCapabilityExpiresAt = update.proxyCapabilityExpiresAt;
+  }
+
   get sessionEgressBootstrapNonce(): string {
     if (!this.workerConfig.sessionEgressBootstrapNonce)
       throw new Error('Session egress bootstrap identity missing');
@@ -505,6 +549,12 @@ export class WorkerEnv {
       return {
         ROOMOTE_SESSION_PROXY_URL: proxy.toString(),
         ROOMOTE_SESSION_PROXY_CA_FILE: config.caFile,
+        ...(this.sessionProxyEnvFile
+          ? {
+              ROOMOTE_SESSION_PROXY_ENV_FILE: this.sessionProxyEnvFile,
+              ROOMOTE_SESSION_PROXY_CONFIG_FILE: `${this.sessionProxyEnvFile}.json`,
+            }
+          : {}),
         [SESSION_EGRESS_WORKLOAD_ENV.ADMISSION_MODE]: 'authenticated_proxy',
         [SESSION_EGRESS_WORKLOAD_ENV.PROXY_CAPABILITY_EXPIRES_AT]:
           config.proxyCapabilityExpiresAt!,
@@ -593,6 +643,9 @@ function captureSessionEgressConfig(
 
   return {
     mode,
+    generation: processEnv[SESSION_EGRESS_WORKLOAD_ENV.GENERATION]
+      ? Number(processEnv[SESSION_EGRESS_WORKLOAD_ENV.GENERATION])
+      : undefined,
     proxyCapability,
     proxyCapabilityExpiresAt,
     proxyUrl,

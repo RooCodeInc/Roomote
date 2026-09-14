@@ -303,6 +303,43 @@ export const mcpConnectionsRouter = router({
       }
     }),
 
+  // Worker-runtime SDK only. These are not registered as model-facing MCP tools.
+  syncSessionProxyServices: authenticatedProcedure
+    .input(sessionProxySyncSchema)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await syncProxyServicesForWorker(ctx.auth, input);
+      } catch {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Session proxy configuration unavailable',
+        });
+      }
+    }),
+  acknowledgeSessionProxyServices: authenticatedProcedure
+    .input(
+      z
+        .object({
+          generation: z.number().int().positive(),
+          revision: z.number().int().positive(),
+        })
+        .strict(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await acknowledgeProxyServicesForWorker(
+          ctx.auth,
+          input.generation,
+          input.revision,
+        );
+      } catch {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Session proxy configuration unavailable',
+        });
+      }
+    }),
+
   getCustomStdioMcpServers: authenticatedProcedure.query(async ({ ctx }) => {
     if (!isRunToken(ctx.auth)) {
       throw new TRPCError({
@@ -672,3 +709,8 @@ async function buildCuratedMcpServerConfigs(ctx: {
 
   return servers;
 }
+import { sessionProxySyncSchema } from '@roomote/types';
+import {
+  syncProxyServicesForWorker,
+  acknowledgeProxyServicesForWorker,
+} from '../lib/session-egress';

@@ -10,7 +10,9 @@ export async function verifySessionProxyConnection(
   const settings = workerEnv.buildSessionEgressClientEnv();
   const proxy = new URL(settings.ROOMOTE_SESSION_PROXY_URL!);
   const service = workerEnv.sessionEgressServices[0];
-  if (!service) throw new Error('Session proxy has no usable service mapping');
+  // No grant means no resource is usable yet. First approval is applied by
+  // the runtime synchronizer; never invent a destination just to probe it.
+  if (!service) return;
   const destination = new URL(service.origin);
   const ca = readFileSync(settings.ROOMOTE_SESSION_PROXY_CA_FILE!, 'utf8');
   await new Promise<void>((resolve, reject) => {

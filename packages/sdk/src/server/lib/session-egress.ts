@@ -12,6 +12,8 @@ import {
   registerSessionProxyWorkload,
   authenticateSessionProxyConnect,
   renewSessionProxyLease,
+  syncSessionProxyServices,
+  acknowledgeSessionProxyServices,
   renewSessionEgressWorkloadLease,
   SessionEgressRegistrationError,
   terminateSessionEgressWorkload,
@@ -35,10 +37,49 @@ import {
   type SessionEgressWorkloadTerminate,
   type SessionProxyRegister,
   type SessionProxyRegistration,
+  type SessionProxySync,
+  type AuthTokenContext,
+  type RunTokenContext,
 } from '@roomote/types';
 import { z } from 'zod';
 
 import { assertEgressUrlAllowed } from './safe-fetch';
+import { isRunToken } from '../trpc';
+
+export async function syncProxyServicesForWorker(
+  auth: AuthTokenContext | RunTokenContext | null,
+  input: SessionProxySync,
+) {
+  if (!isRunToken(auth) || auth.principal !== 'user' || !auth.userId)
+    throw new Error('Session proxy configuration unavailable');
+  const result = await syncSessionProxyServices(
+    { runId: auth.runId, userId: auth.userId },
+    input,
+    { isOriginAllowed },
+  );
+  if (!result) throw new Error('Session proxy configuration unavailable');
+  return result;
+}
+
+export async function acknowledgeProxyServicesForWorker(
+  auth: AuthTokenContext | RunTokenContext | null,
+  generation: number,
+  revision: number,
+) {
+  if (
+    !isRunToken(auth) ||
+    auth.principal !== 'user' ||
+    !auth.userId ||
+    !(await acknowledgeSessionProxyServices(
+      { runId: auth.runId, userId: auth.userId },
+      generation,
+      revision,
+    ))
+  ) {
+    throw new Error('Session proxy configuration unavailable');
+  }
+  return { applied: true };
+}
 
 /**
  * Session egress control plane service layer.

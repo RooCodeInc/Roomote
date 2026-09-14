@@ -207,6 +207,24 @@ export interface SessionEgressGrantPolicy {
 /** Returned exactly once to the trusted controller; the API stores only a hash. */
 export interface SessionEgressSubstituteIssue extends SessionEgressGrantPolicy {
   substitute: string;
+  /** Nonsecret receipt identifying exactly which issued token the worker holds. */
+  substituteId?: string;
+}
+
+export const sessionProxySyncSchema = z
+  .object({
+    generation: z.number().int().positive(),
+    heldSubstituteIds: z.array(z.string().uuid()).max(256),
+  })
+  .strict();
+export type SessionProxySync = z.infer<typeof sessionProxySyncSchema>;
+export interface SessionProxyServices {
+  workloadId: string;
+  generation: number;
+  revision: number;
+  services: SessionEgressWorkloadServiceManifestEntry[];
+  issued: SessionEgressSubstituteIssue[];
+  proxyCapabilityExpiresAt: string;
 }
 
 export interface SessionEgressWorkloadRegistration {
@@ -311,6 +329,8 @@ export const SESSION_EGRESS_WORKLOAD_ENV = {
   ADMISSION_MODE: 'ROOMOTE_SESSION_EGRESS_ADMISSION_MODE',
   PROXY_CAPABILITY: 'ROOMOTE_SESSION_PROXY_CAPABILITY',
   PROXY_CAPABILITY_EXPIRES_AT: 'ROOMOTE_SESSION_PROXY_CAPABILITY_EXPIRES_AT',
+  WORKLOAD_ID: 'ROOMOTE_SESSION_EGRESS_WORKLOAD_ID',
+  GENERATION: 'ROOMOTE_SESSION_EGRESS_GENERATION',
 } as const;
 
 /** Substitute tokens are delivered as `ROOMOTE_SERVICE_TOKEN_<LABEL_SLUG>`. */
@@ -322,6 +342,7 @@ export const SESSION_EGRESS_CONNECTOR_PORT = 3128;
 export interface SessionEgressWorkloadServiceManifestEntry extends SessionEgressGrantPolicy {
   /** The env var that carries this service's substitute token. */
   envName: string;
+  substituteId?: string;
 }
 
 export const sessionEgressWorkloadServiceManifestSchema = z
@@ -347,6 +368,7 @@ export const sessionEgressWorkloadServiceManifestSchema = z
         allowedMethods: sessionEgressAllowedMethodsSchema,
         expiresAt: z.string().datetime(),
         envName: z.string().regex(/^ROOMOTE_SERVICE_TOKEN_[A-Z0-9_]+$/),
+        substituteId: z.string().uuid().optional(),
       })
       .strict(),
   )
@@ -370,6 +392,13 @@ export function sessionEgressServiceTokenEnvName(label: string): string {
   return `${SESSION_EGRESS_SERVICE_TOKEN_ENV_PREFIX}${safe.slice(0, 96)}`;
 }
 
+export function sessionProxyServiceEnvName(
+  label: string,
+  secretRef: string,
+): string {
+  return `${sessionEgressServiceTokenEnvName(label)}_${secretRef.replaceAll('-', '').toUpperCase()}`;
+}
+
 /**
  * Split issued substitutes into the secret env map and the nonsecret
  * manifest. Label collisions get a numeric suffix so no token silently
@@ -384,7 +413,9 @@ export function buildSessionEgressServiceTokenEnv(
   const tokens: Record<string, string> = {};
   const manifest: SessionEgressWorkloadServiceManifestEntry[] = [];
   for (const issue of substitutes) {
-    const base = sessionEgressServiceTokenEnvName(issue.label);
+    const base = issue.substituteId
+      ? sessionProxyServiceEnvName(issue.label, issue.secretRef)
+      : sessionEgressServiceTokenEnvName(issue.label);
     let envName = base;
     for (let n = 2; envName in tokens; n += 1) envName = `${base}_${n}`;
     tokens[envName] = issue.substitute;

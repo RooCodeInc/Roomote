@@ -280,8 +280,7 @@ export async function spawnModalWorker(
   const proxyCandidate = config.sessionProxy
     ? await findSessionEgressCandidateForRun(taskRun.id)
     : null;
-  const proxyNonce =
-    proxyCandidate && proxyCandidate.grantCount > 0 ? randomUUID() : null;
+  const proxyNonce = proxyCandidate ? randomUUID() : null;
   const environmentId = taskRun.payload.environmentId;
 
   const { namedPorts, environmentSnapshotId, environmentConfig } =

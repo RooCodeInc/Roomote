@@ -875,6 +875,8 @@ export const runTask = async ({
     delete runtimeEnv.ROOMOTE_SESSION_PROXY_CA_FILE;
     delete runtimeEnv.ROOMOTE_SESSION_PROXY_CAPABILITY;
     delete runtimeEnv.ROOMOTE_SESSION_PROXY_CAPABILITY_EXPIRES_AT;
+    delete runtimeEnv.ROOMOTE_SESSION_PROXY_ENV_FILE;
+    delete runtimeEnv.ROOMOTE_SESSION_PROXY_CONFIG_FILE;
     for (const key of Object.keys(runtimeEnv)) {
       if (key.startsWith('ROOMOTE_SERVICE_TOKEN_')) delete runtimeEnv[key];
     }

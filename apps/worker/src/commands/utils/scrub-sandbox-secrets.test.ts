@@ -38,6 +38,8 @@ const TOKEN_ENV_PATHS = [
 ];
 
 const EXPECTED_REMOVED_PATHS = [
+  '/home/testuser/.roomote/session-services.env',
+  '/home/testuser/.roomote/session-services.env.json',
   '/home/testuser/.roomote/gh-token',
   '/home/testuser/.roomote/source-control-repository-credentials.tsv',
   '/home/testuser/.roomote/gitlab-token',
