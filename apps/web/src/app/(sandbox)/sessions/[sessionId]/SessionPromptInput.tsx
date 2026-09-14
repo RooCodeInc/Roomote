@@ -9,7 +9,6 @@ import type { ReasoningEffort } from '@roomote/types';
 import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
 import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
-import { usePromptSubmitFocus } from '@/hooks/usePromptSubmitFocus';
 import {
   useSessionDraft,
   useSessionNavigationState,
@@ -163,15 +162,12 @@ export function SessionPromptInput({
     () => !navigationState?.consumeSessionSwitch(sessionId),
   );
   const [isTextareaFocused, setIsTextareaFocused] = useState(false);
-  const [resetKey, setResetKey] = useState(0);
   const [model, setModel] = useState(initialModel ?? '');
   const [reasoningEffort, setReasoningEffort] =
     useState<ReasoningEffort | null>(initialReasoningEffort);
   const [isUpdatingModelSelection, setIsUpdatingModelSelection] =
     useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const { beginSubmit, cancelSubmit, restoreFocus } =
-    usePromptSubmitFocus(textareaRef);
   useAutoFocusOnce(textareaRef, !isBusy && shouldAutoFocus);
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => setPrompt(text),
@@ -214,10 +210,9 @@ export function SessionPromptInput({
 
   const handleSubmit = async (message: PromptInputMessage) => {
     if (isBusy || isUpdatingModelSelection) {
-      return;
+      return false;
     }
 
-    beginSubmit();
     consumeSuggestion();
 
     const goalMatch = /^\/goal(?:\s+([\s\S]*))?$/i.exec(message.text.trim());
@@ -225,23 +220,20 @@ export function SessionPromptInput({
     if (goalMatch) {
       const objective = goalMatch[1]?.trim();
       if (!objective) {
-        cancelSubmit();
         toast.error('Describe the goal after /goal.');
-        return;
+        return false;
       }
       if (message.files.length > 0) {
-        cancelSubmit();
         toast.error('Goal Mode does not support attachments.');
-        return;
+        return false;
       }
       const result = await trpcClient.fastSessions.startGoal.mutate({
         sessionId,
         objective,
       });
       if (!result.success) {
-        cancelSubmit();
         toast.error(result.error);
-        return;
+        return false;
       }
       toast.success(`Pursuing goal: ${objective}`);
       sent = true;
@@ -256,17 +248,9 @@ export function SessionPromptInput({
     }
     if (sent) {
       setPrompt('');
-      setIsTextareaFocused(false);
-      // Remount the root to clear held attachments.
-      setResetKey((previous) => previous + 1);
-    } else {
-      cancelSubmit();
     }
+    return sent;
   };
-
-  useEffect(() => {
-    if (resetKey > 0 && !isBusy) restoreFocus();
-  }, [isBusy, resetKey, restoreFocus]);
 
   const updateModelSelection = async (
     next: { model?: string | null; reasoningEffort?: ReasoningEffort | null },
@@ -327,10 +311,9 @@ export function SessionPromptInput({
     <div className="mx-auto w-full max-w-4xl">
       <SessionWakeups key={sessionId} sessionId={sessionId} />
       <PromptInputRoot
-        key={`composer-${resetKey}`}
         onSubmit={handleSubmit}
         accept={ROOMOTE_FILE_ATTACHMENT_ACCEPT}
-        clearOnSubmit={false}
+        keepFocusOnSubmit
         multiple
       >
         <AttachmentsDisplay />

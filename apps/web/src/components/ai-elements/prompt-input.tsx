@@ -261,9 +261,11 @@ type PromptInputProps = Omit<ComponentProps<'form'>, 'onSubmit' | 'onError'> & {
   onSubmit: (
     message: PromptInputMessage,
     event: FormEvent<HTMLFormElement>,
-  ) => void | Promise<void>;
+  ) => boolean | void | Promise<boolean | void>;
   /** When false, the text input and attachments are NOT cleared after a successful submit. Default true. */
   clearOnSubmit?: boolean;
+  /** Restore focus to the composer after a successful submit unless the user interacts outside it. */
+  keepFocusOnSubmit?: boolean;
 };
 
 export const PromptInput = ({
@@ -281,6 +283,7 @@ export const PromptInput = ({
   onError,
   onSubmit,
   clearOnSubmit = true,
+  keepFocusOnSubmit = false,
   children,
   ...props
 }: PromptInputProps) => {
@@ -293,6 +296,7 @@ export const PromptInput = ({
   // Refs.
   const inputRef = useRef<HTMLInputElement | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
+  const submitFocusCleanupRef = useRef<(() => void) | null>(null);
 
   // Local attachments (only used when no provider).
   const [items, setItems] = useState<(FileUIPart & { id: string })[]>([]);
@@ -591,6 +595,8 @@ export const PromptInput = ({
 
   useEffect(
     () => () => {
+      submitFocusCleanupRef.current?.();
+
       if (!usingProvider) {
         for (const f of filesRef.current) {
           if (f.url) {
@@ -662,6 +668,71 @@ export const PromptInput = ({
     event.preventDefault();
 
     const form = event.currentTarget;
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    let shouldRestoreFocus =
+      keepFocusOnSubmit &&
+      (form.contains(document.activeElement) ||
+        (submitter != null && form.contains(submitter)));
+    let focusFrame: number | null = null;
+
+    submitFocusCleanupRef.current?.();
+
+    const cancelFocusForOutsideInteraction = (interactionEvent: Event) => {
+      if (
+        shouldRestoreFocus &&
+        interactionEvent.target instanceof Node &&
+        !form.contains(interactionEvent.target)
+      ) {
+        shouldRestoreFocus = false;
+      }
+    };
+
+    const cleanupSubmitFocus = () => {
+      document.removeEventListener(
+        'pointerdown',
+        cancelFocusForOutsideInteraction,
+        true,
+      );
+      document.removeEventListener(
+        'focusin',
+        cancelFocusForOutsideInteraction,
+        true,
+      );
+      if (focusFrame !== null) cancelAnimationFrame(focusFrame);
+      shouldRestoreFocus = false;
+      if (submitFocusCleanupRef.current === cleanupSubmitFocus) {
+        submitFocusCleanupRef.current = null;
+      }
+    };
+
+    if (shouldRestoreFocus) {
+      document.addEventListener(
+        'pointerdown',
+        cancelFocusForOutsideInteraction,
+        true,
+      );
+      document.addEventListener(
+        'focusin',
+        cancelFocusForOutsideInteraction,
+        true,
+      );
+      submitFocusCleanupRef.current = cleanupSubmitFocus;
+    }
+
+    const finishSubmit = (succeeded: boolean) => {
+      if (!succeeded || !shouldRestoreFocus) {
+        cleanupSubmitFocus();
+        return;
+      }
+
+      focusFrame = requestAnimationFrame(() => {
+        focusFrame = null;
+        if (shouldRestoreFocus) {
+          form.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+        }
+        cleanupSubmitFocus();
+      });
+    };
 
     const text = usingProvider
       ? controller.textInput.value
@@ -699,22 +770,26 @@ export const PromptInput = ({
           // Handle both sync and async onSubmit.
           if (result instanceof Promise) {
             result
-              .then(() => {
-                if (clearOnSubmit) clearAll();
+              .then((succeeded) => {
+                if (succeeded !== false && clearOnSubmit) clearAll();
+                finishSubmit(succeeded !== false);
               })
               .catch(() => {
                 // Don't clear on error - user may want to retry.
+                finishSubmit(false);
               });
-          } else if (clearOnSubmit) {
-            // Sync function completed without throwing, clear inputs.
-            clearAll();
+          } else {
+            if (result !== false && clearOnSubmit) clearAll();
+            finishSubmit(result !== false);
           }
         } catch {
           // Don't clear on error - user may want to retry.
+          finishSubmit(false);
         }
       })
       .catch(() => {
         // Don't clear on error - user may want to retry.
+        finishSubmit(false);
       });
   };
 
