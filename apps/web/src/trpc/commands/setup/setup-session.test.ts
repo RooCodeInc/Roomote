@@ -70,6 +70,11 @@ describe('optional setup integration discovery', () => {
   let sessionId: string;
   let conversationId: string;
   let ts: number;
+  let actualFastSessions: typeof import('../fast-sessions');
+
+  beforeAll(async () => {
+    actualFastSessions = await vi.importActual('../fast-sessions');
+  });
 
   async function readState() {
     const [row] = await db
@@ -339,11 +344,6 @@ describe('optional setup integration discovery', () => {
       },
       source: 'web',
     });
-    const actualFastSessions =
-      await vi.importActual<typeof import('../fast-sessions')>(
-        '../fast-sessions',
-      );
-
     await actualFastSessions.resolveFastSessionCapabilityOfferCommand(auth, {
       sessionId,
       offerId,
@@ -404,11 +404,6 @@ describe('optional setup integration discovery', () => {
       },
       source: 'web',
     });
-    const actualFastSessions =
-      await vi.importActual<typeof import('../fast-sessions')>(
-        '../fast-sessions',
-      );
-
     await actualFastSessions.resolveFastSessionCapabilityOfferCommand(auth, {
       sessionId,
       offerId,
