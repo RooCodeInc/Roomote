@@ -9,6 +9,7 @@ import type { ReasoningEffort } from '@roomote/types';
 import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
 import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
+import { usePromptSubmitFocus } from '@/hooks/usePromptSubmitFocus';
 import {
   useSessionDraft,
   useSessionNavigationState,
@@ -169,6 +170,8 @@ export function SessionPromptInput({
   const [isUpdatingModelSelection, setIsUpdatingModelSelection] =
     useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const { beginSubmit, cancelSubmit, restoreFocus } =
+    usePromptSubmitFocus(textareaRef);
   useAutoFocusOnce(textareaRef, !isBusy && shouldAutoFocus);
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => setPrompt(text),
@@ -214,6 +217,7 @@ export function SessionPromptInput({
       return;
     }
 
+    beginSubmit();
     consumeSuggestion();
 
     const goalMatch = /^\/goal(?:\s+([\s\S]*))?$/i.exec(message.text.trim());
@@ -221,10 +225,12 @@ export function SessionPromptInput({
     if (goalMatch) {
       const objective = goalMatch[1]?.trim();
       if (!objective) {
+        cancelSubmit();
         toast.error('Describe the goal after /goal.');
         return;
       }
       if (message.files.length > 0) {
+        cancelSubmit();
         toast.error('Goal Mode does not support attachments.');
         return;
       }
@@ -233,6 +239,7 @@ export function SessionPromptInput({
         objective,
       });
       if (!result.success) {
+        cancelSubmit();
         toast.error(result.error);
         return;
       }
@@ -252,8 +259,14 @@ export function SessionPromptInput({
       setIsTextareaFocused(false);
       // Remount the root to clear held attachments.
       setResetKey((previous) => previous + 1);
+    } else {
+      cancelSubmit();
     }
   };
+
+  useEffect(() => {
+    if (resetKey > 0 && !isBusy) restoreFocus();
+  }, [isBusy, resetKey, restoreFocus]);
 
   const updateModelSelection = async (
     next: { model?: string | null; reasoningEffort?: ReasoningEffort | null },

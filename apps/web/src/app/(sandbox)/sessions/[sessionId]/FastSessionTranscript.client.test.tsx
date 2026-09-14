@@ -2431,6 +2431,80 @@ describe('FastSessionTranscript', () => {
     });
   });
 
+  it.each(['keyboard', 'button'] as const)(
+    'keeps focus in the Session composer after %s submission completes',
+    async (submissionMethod) => {
+      let resolveReply: (() => void) | undefined;
+      replyMutate.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveReply = resolve;
+        }),
+      );
+
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      const input = screen.getByPlaceholderText('Message agent');
+      fireEvent.change(input, { target: { value: 'Follow up question' } });
+      if (submissionMethod === 'keyboard') {
+        fireEvent.keyDown(input, {
+          key: 'Enter',
+          code: 'Enter',
+          charCode: 13,
+        });
+      } else {
+        fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+      }
+
+      await waitFor(() => expect(input).toBeDisabled());
+      await act(async () => resolveReply?.());
+
+      await waitFor(() =>
+        expect(screen.getByPlaceholderText('Message agent')).toHaveFocus(),
+      );
+    },
+  );
+
+  it('does not restore Session composer focus after focus moves elsewhere while sending', async () => {
+    let resolveReply: (() => void) | undefined;
+    replyMutate.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveReply = resolve;
+      }),
+    );
+
+    render(
+      <>
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />
+        <button type="button">Other control</button>
+      </>,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Follow up question' } });
+    fireEvent.keyDown(input, {
+      key: 'Enter',
+      code: 'Enter',
+      charCode: 13,
+    });
+    await waitFor(() => expect(input).toBeDisabled());
+
+    const otherControl = screen.getByRole('button', { name: 'Other control' });
+    otherControl.focus();
+    await act(async () => resolveReply?.());
+
+    await waitFor(() => expect(otherControl).toHaveFocus());
+  });
+
   it.each(['Tab', 'Escape', 'mouse', 'touch'])(
     'preserves focus-only hints and %s interaction for a long suggestion',
     (action) => {
@@ -2498,7 +2572,7 @@ describe('FastSessionTranscript', () => {
     },
   );
 
-  it('keeps a later suggestion hint hidden after a successful send remounts the composer', async () => {
+  it('shows a later suggestion hint on the focused composer after a successful send', async () => {
     composerSuggestionState.data = {
       suggestion: 'Accept the first suggestion',
       messageCount: 2,
@@ -2551,10 +2625,10 @@ describe('FastSessionTranscript', () => {
 
     expect(
       screen.getByPlaceholderText('Accept the next suggestion'),
-    ).not.toHaveFocus();
+    ).toHaveFocus();
     expect(
-      screen.queryByRole('button', { name: 'Insert suggested message' }),
-    ).not.toBeInTheDocument();
+      screen.getByRole('button', { name: 'Insert suggested message' }),
+    ).toBeInTheDocument();
   });
 
   it('persists model selections immediately and uses them for the next reply', async () => {
