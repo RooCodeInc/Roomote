@@ -159,7 +159,7 @@ async function resolveDestination(
       typeof target.metadata?.slackTeamId === 'string'
         ? target.metadata.slackTeamId
         : null;
-    const channel = await db.query.slackInstallationChannels.findFirst({
+    const channels = await db.query.slackInstallationChannels.findMany({
       where: eq(slackInstallationChannels.channelId, target.externalRef),
       columns: { id: true },
       with: {
@@ -167,7 +167,10 @@ async function resolveDestination(
           columns: { botAccessToken: true, isActive: true, teamId: true },
         },
       },
+      limit: 2,
     });
+    if (channels.length > 1) return null;
+    const channel = channels[0];
     if (channel) {
       const installation = channel.slackInstallation;
       return installation.isActive &&

@@ -85,7 +85,7 @@ vi.mock('@roomote/db/server', () => ({
       discordInstallationChannels: { findFirst: vi.fn() },
       environments: { findFirst: vi.fn() },
       fastAgentConversations: { findFirst: fastMocks.findFastConversation },
-      slackInstallationChannels: { findFirst: vi.fn() },
+      slackInstallationChannels: { findMany: vi.fn() },
       slackInstallations: { findFirst: vi.fn(), findMany: vi.fn() },
     },
   },
@@ -206,10 +206,12 @@ describe('customAutomationsJob', () => {
         installation: { guildId: 'guild-1', isActive: true },
       } as never,
     );
-    vi.mocked(db.query.slackInstallationChannels.findFirst).mockResolvedValue({
-      id: 'slack-installation-channel-1',
-      slackInstallation: { isActive: true, teamId: 'T123' },
-    } as never);
+    vi.mocked(db.query.slackInstallationChannels.findMany).mockResolvedValue([
+      {
+        id: 'slack-installation-channel-1',
+        slackInstallation: { isActive: true, teamId: 'T123' },
+      },
+    ] as never);
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
       teamId: 'T123',
@@ -345,7 +347,7 @@ describe('customAutomationsJob', () => {
 
     await customAutomationsJob();
 
-    expect(db.query.slackInstallationChannels.findFirst).toHaveBeenCalled();
+    expect(db.query.slackInstallationChannels.findMany).toHaveBeenCalled();
     expect(fastMocks.slackPostMessage).not.toHaveBeenCalled();
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
@@ -366,8 +368,8 @@ describe('customAutomationsJob', () => {
   });
 
   it('resolves an uncached Slack channel from its unique live workspace membership', async () => {
-    vi.mocked(db.query.slackInstallationChannels.findFirst).mockResolvedValue(
-      undefined,
+    vi.mocked(db.query.slackInstallationChannels.findMany).mockResolvedValue(
+      [],
     );
     vi.mocked(db.query.slackInstallations.findMany).mockResolvedValue([
       { botAccessToken: 'xoxb-other', teamId: 'T_OTHER' },
@@ -397,6 +399,36 @@ describe('customAutomationsJob', () => {
         error: 'Report destination could not be resolved.',
       }),
     );
+  });
+
+  it('fails closed when cached Slack channel ownership is ambiguous', async () => {
+    vi.mocked(db.query.slackInstallationChannels.findMany).mockResolvedValue([
+      {
+        id: 'slack-installation-channel-other',
+        slackInstallation: {
+          botAccessToken: 'xoxb-other',
+          isActive: true,
+          teamId: 'T_OTHER',
+        },
+      },
+      {
+        id: 'slack-installation-channel-1',
+        slackInstallation: {
+          botAccessToken: 'xoxb-test',
+          isActive: true,
+          teamId: 'T123',
+        },
+      },
+    ] as never);
+
+    const result = await customAutomationsJob();
+
+    expect(result).toMatchObject({
+      queued: false,
+      errors: ['Flaky tests: Report destination could not be resolved.'],
+    });
+    expect(fastMocks.slackIsAppInChannel).not.toHaveBeenCalled();
+    expect(fastMocks.getSession).not.toHaveBeenCalled();
   });
 
   it('posts a Fast Slack startup failure to the destination', async () => {
@@ -1167,8 +1199,8 @@ describe('customAutomationsJob', () => {
   });
 
   it('fails closed when the Slack report channel is no longer connected', async () => {
-    vi.mocked(db.query.slackInstallationChannels.findFirst).mockResolvedValue(
-      undefined,
+    vi.mocked(db.query.slackInstallationChannels.findMany).mockResolvedValue(
+      [],
     );
     fastMocks.slackIsAppInChannel.mockResolvedValue(false);
 
@@ -1512,10 +1544,12 @@ describe('runCustomAutomationNow', () => {
     vi.mocked(db.query.environments.findFirst).mockResolvedValue({
       id: automation.environmentId,
     } as never);
-    vi.mocked(db.query.slackInstallationChannels.findFirst).mockResolvedValue({
-      id: 'slack-installation-channel-1',
-      slackInstallation: { isActive: true, teamId: 'T123' },
-    } as never);
+    vi.mocked(db.query.slackInstallationChannels.findMany).mockResolvedValue([
+      {
+        id: 'slack-installation-channel-1',
+        slackInstallation: { isActive: true, teamId: 'T123' },
+      },
+    ] as never);
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
       teamId: 'T123',
@@ -1572,8 +1606,8 @@ describe('runCustomAutomationNow', () => {
   });
 
   it('uses live Slack membership to run an uncached channel target now', async () => {
-    vi.mocked(db.query.slackInstallationChannels.findFirst).mockResolvedValue(
-      undefined,
+    vi.mocked(db.query.slackInstallationChannels.findMany).mockResolvedValue(
+      [],
     );
     vi.mocked(db.query.slackInstallations.findMany).mockResolvedValue([
       { botAccessToken: 'xoxb-test', teamId: 'T123' },
