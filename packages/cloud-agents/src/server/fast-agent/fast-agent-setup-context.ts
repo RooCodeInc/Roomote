@@ -87,6 +87,15 @@ export function buildFastAgentSetupAdapter(
   return {
     resolveUserInputPreset: async (preset, setupIntegrationAnswers) => {
       const snapshot = parseSetupSnapshot(context);
+      if (preset === 'setup_source_control') {
+        if (!['pending', ''].includes(snapshot.rail?.source ?? '')) {
+          throw new Error('Source control has already been decided.');
+        }
+        // The source-control controls are rendered directly in the setup
+        // timeline. This preset acknowledges that trusted UI without creating
+        // a duplicate structured-input request.
+        return [];
+      }
       if (preset === 'setup_integrations') {
         if (!['ready', 'skipped'].includes(snapshot.rail?.source ?? '')) {
           throw new Error(

@@ -536,6 +536,29 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     });
   });
 
+  it('defaults omitted display metadata on structured questions', async () => {
+    const inputTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
+    )!;
+    const parsed = zod.z.object(inputTool.args as Record<string, never>).parse({
+      questions: [
+        {
+          id: 'team-knowledge',
+          question: 'Where do you keep team documents and knowledge?',
+          options: [{ label: 'Notion' }],
+        },
+      ],
+    });
+    expect(parsed).toMatchObject({
+      questions: [
+        {
+          header: 'Question',
+          options: [{ label: 'Notion', description: 'Select this option.' }],
+        },
+      ],
+    });
+  });
+
   it('rejects a bare union or object as args, the shape that broke OpenAI models', () => {
     const { z } = zod;
     const question = z.object({ id: z.string() });

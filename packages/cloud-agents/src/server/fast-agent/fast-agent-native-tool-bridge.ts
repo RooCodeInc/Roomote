@@ -628,17 +628,17 @@ export default {
   args: {
     questions: z.array(z.object({
       id: z.string().min(1).max(80),
-      header: z.string().min(1).max(60),
+      header: z.string().min(1).max(60).optional().default("Question"),
       question: z.string().min(1).max(500),
       isOther: z.boolean().optional().describe("Allow a free-text Other answer"),
       isSecret: z.boolean().optional().describe("Mask the answer in user-visible history"),
       options: z.array(z.object({
         label: z.string().min(1).max(140),
-        description: z.string().min(1).max(500),
+        description: z.string().min(1).max(500).optional().default("Select this option."),
       })).min(1).max(12).optional().describe("Present options as choices; omit for free-text"),
       multiple: z.boolean().optional().describe("Allow more than one option; defaults to false"),
     })).min(1).max(4).optional().describe("Structured questions to ask; omit when using a preset"),
-    preset: z.enum(["setup_starter_tasks", "setup_integrations"]).optional().describe("Use a trusted setup preset instead of questions"),
+    preset: z.enum(["setup_source_control", "setup_starter_tasks", "setup_integrations"]).optional().describe("Use a trusted setup preset instead of questions"),
     setupIntegrationAnswers: z.record(z.string(), z.object({ answers: z.array(z.string()) })).optional().describe("Only for setup_integrations: tools already named by the user, keyed by category ID from the setup snapshot"),
   },
   execute: (args, context) => invoke("request_user_input", args, context),

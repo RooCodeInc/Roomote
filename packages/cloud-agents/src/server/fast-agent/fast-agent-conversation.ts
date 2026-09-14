@@ -181,7 +181,10 @@ export type FastAgentInputRequest = {
   }>;
 };
 
-export type FastAgentInputPreset = 'setup_starter_tasks' | 'setup_integrations';
+export type FastAgentInputPreset =
+  | 'setup_source_control'
+  | 'setup_starter_tasks'
+  | 'setup_integrations';
 
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {

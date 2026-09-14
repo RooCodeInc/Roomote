@@ -67,6 +67,7 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(prompt).toContain('<setup_snapshot>');
     expect(prompt).toContain('request_user_input');
     expect(prompt).toContain('setup_starter_tasks');
+    expect(prompt).toContain('setup_source_control');
     expect(prompt).toContain('launch_task');
     expect(prompt).toContain('The renderer owns trusted controls');
     expect(prompt).toContain(

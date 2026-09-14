@@ -544,7 +544,7 @@ const saveMemoryArgsSchema = z.object({
 });
 const requestUserInputQuestionSchema = z.object({
   id: z.string().trim().min(1).max(80),
-  header: z.string().trim().min(1).max(60),
+  header: z.string().trim().min(1).max(60).optional().default('Question'),
   question: z.string().trim().min(1).max(500),
   isOther: z.boolean().optional().default(false),
   isSecret: z.boolean().optional().default(false),
@@ -552,7 +552,13 @@ const requestUserInputQuestionSchema = z.object({
     .array(
       z.object({
         label: z.string().trim().min(1).max(140),
-        description: z.string().trim().min(1).max(500),
+        description: z
+          .string()
+          .trim()
+          .min(1)
+          .max(500)
+          .optional()
+          .default('Select this option.'),
       }),
     )
     .min(1)
@@ -561,6 +567,7 @@ const requestUserInputQuestionSchema = z.object({
   multiple: z.boolean().optional(),
 });
 const fastAgentInputPresetSchema = z.enum([
+  'setup_source_control',
   'setup_starter_tasks',
   'setup_integrations',
 ]);
@@ -576,7 +583,10 @@ const requestUserInputArgsSchema = z.preprocess(
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
 
     const input = raw as Record<string, unknown>;
-    if (input.preset === 'setup_starter_tasks') {
+    if (
+      input.preset === 'setup_source_control' ||
+      input.preset === 'setup_starter_tasks'
+    ) {
       // A trusted preset owns its questions. Models sometimes serialize
       // optional fields as placeholders or null; discard them before schema
       // validation so those fields cannot make the preset call fail.
