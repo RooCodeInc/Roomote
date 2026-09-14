@@ -331,6 +331,23 @@ it('publishes optional nullable body fields without defaults and accepts native 
   }
 });
 
+it('publishes a provider-safe optional header prefix schema', async () => {
+  const actor = await member();
+  const token = await createAuthToken({ userId: actor.id, timeoutMs: 60_000 });
+  const listing = await (await post(token)).json();
+  const schema = listing.result.tools.find(
+    (tool: { name: string }) => tool.name === 'prepare_session_secret',
+  ).inputSchema;
+
+  expect(schema.required).not.toContain('headerPrefix');
+  expect(schema.properties.headerPrefix.enum).toEqual([
+    'Bearer ',
+    'Basic ',
+    'Token ',
+  ]);
+  expect(JSON.stringify(schema)).not.toContain('"enum":[""');
+});
+
 it.each([path, `${path}/`])(
   'rejects missing authentication at %s',
   async (route) => {
@@ -1028,12 +1045,15 @@ it.each(['broker', 'run'] as const)(
       `session:${fixture.grant.secretRef}`,
     ]);
     vi.mocked(loadHttpIntegrationsConfig).mockReturnValue({ integrations: [] });
+    const { headerPrefix: _headerPrefix, ...noPrefixPolicy } = sessionPolicy;
     const prepared = await tool(token, 'prepare_session_secret', {
-      ...sessionPolicy,
+      ...noPrefixPolicy,
       label: 'Second API key',
+      origin: 'https://second-api.example.com',
     });
     expect(prepared.isError).not.toBe(true);
     const { pending, sessionUrl } = JSON.parse(prepared.content[0].text);
+    expect(pending.headerPrefix).toBe('');
     expect(sessionUrl).toContain(
       `/sessions/${fixture.context.sessionId}#session-secrets`,
     );

@@ -1063,6 +1063,9 @@ export const taskPullRequests = pgTable(
 
     // Status
     status: text('status').$type<import('@roomote/types').PullRequestStatus>(),
+    // Provider-reported merge time. Kept on the association so report
+    // publication can reconcile merges that arrived before the report.
+    mergedAt: timestamp('merged_at'),
     mergeabilityStatus: text('mergeability_status')
       .notNull()
       .default('unknown')
@@ -4794,6 +4797,9 @@ export const automationResults = pgTable(
       .$type<AutomationResultPriority>(),
     dedupeKey: text('dedupe_key').notNull(),
     acceptedAt: timestamp('accepted_at'),
+    acceptanceReason: text('acceptance_reason').$type<
+      'manual' | 'pull_request_merged'
+    >(),
     ignoredAt: timestamp('ignored_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),

@@ -33,6 +33,7 @@ import {
 import { CustomLink, remarkArtifactLinks } from '@/components/ai-elements';
 import { useMessageUiOptions } from '@/components/ai-elements/message-ui-options';
 import { remarkAutolinkUrls } from '@/components/ai-elements/remark-autolink-urls';
+import { remarkPullRequestLinks } from '@/components/ai-elements/remark-pull-request-links';
 import { streamdownPlugins } from '@/components/ai-elements/streamdown-plugins';
 
 type MessageProps = HTMLAttributes<HTMLDivElement> & {
@@ -476,7 +477,12 @@ export const MessageBranchPage = ({
   );
 };
 
-type MessageResponseProps = ComponentProps<typeof Streamdown>;
+type MessageResponseProps = Omit<
+  ComponentProps<typeof Streamdown>,
+  'remarkPlugins'
+> & {
+  pullRequestRepositoryUrl?: string | null;
+};
 
 type MessagePlainTextProps = ComponentProps<'div'>;
 
@@ -517,8 +523,9 @@ export const MessagePlainText = ({
 );
 
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
+  ({ className, pullRequestRepositoryUrl, ...props }: MessageResponseProps) => (
     <Streamdown
+      key={pullRequestRepositoryUrl ?? 'no-pull-request-repository'}
       className={cn(
         'size-full min-w-0 [overflow-wrap:anywhere] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>*]:min-w-0 leading-relaxed',
         className,
@@ -528,13 +535,18 @@ export const MessageResponse = memo(
         remarkBreaks,
         remarkAutolinkUrls,
         remarkArtifactLinks,
+        ...(pullRequestRepositoryUrl
+          ? [remarkPullRequestLinks(pullRequestRepositoryUrl)]
+          : []),
       ]}
       plugins={streamdownPlugins}
       components={{ a: CustomLink, p: CustomParagraph }}
       {...props}
     />
   ),
-  (prevProps, nextProps) => prevProps.children === nextProps.children,
+  (previous, next) =>
+    previous.children === next.children &&
+    previous.pullRequestRepositoryUrl === next.pullRequestRepositoryUrl,
 );
 
 MessageResponse.displayName = 'MessageResponse';

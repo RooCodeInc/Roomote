@@ -6,22 +6,37 @@ import {
   type SessionEgressMethod,
 } from './session-egress';
 
-// Deliberately concrete schemas: these also become provider tool schemas.
+const sessionSecretPrepareFields = {
+  label: z.string().trim().min(1).max(80),
+  origin: z.string().min(1).max(2048),
+  headerName: z.enum(['authorization', 'x-api-key', 'api-key']),
+  ttlHours: z.number().int().min(1).max(720).default(24),
+  /**
+   * Methods ordinary clients may use through the egress gateway. Omitting
+   * this keeps the grant read-only; anything beyond GET/HEAD must be
+   * acknowledged again by the owner when the key is entered.
+   */
+  allowedMethods: sessionEgressAllowedMethodsSchema.default([
+    ...SESSION_EGRESS_READ_METHODS,
+  ]),
+};
+
 export const sessionSecretPrepareSchema = z
   .object({
-    label: z.string().trim().min(1).max(80),
-    origin: z.string().min(1).max(2048),
-    headerName: z.enum(['authorization', 'x-api-key', 'api-key']),
+    ...sessionSecretPrepareFields,
     headerPrefix: z.enum(['', 'Bearer ', 'Basic ', 'Token ']),
-    ttlHours: z.number().int().min(1).max(720).default(24),
-    /**
-     * Methods ordinary clients may use through the egress gateway. Omitting
-     * this keeps the grant read-only; anything beyond GET/HEAD must be
-     * acknowledged again by the owner when the key is entered.
-     */
-    allowedMethods: sessionEgressAllowedMethodsSchema.default([
-      ...SESSION_EGRESS_READ_METHODS,
-    ]),
+  })
+  .strict();
+
+// Provider schemas cannot contain empty enum members. Omission maps to the
+// persisted empty-string representation before entering the shared runtime.
+export const sessionSecretPrepareToolSchema = z
+  .object({
+    ...sessionSecretPrepareFields,
+    headerPrefix: z
+      .enum(['Bearer ', 'Basic ', 'Token '])
+      .optional()
+      .transform((prefix) => prefix ?? ''),
   })
   .strict();
 

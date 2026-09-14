@@ -1020,6 +1020,94 @@ describe('PromptInput', () => {
     expect(directSandboxSendPromptMock).not.toHaveBeenCalled();
   });
 
+  it.each(['keyboard', 'button'] as const)(
+    'keeps focus in the task composer after %s submission completes',
+    async (submissionMethod) => {
+      let resolveSend: (() => void) | undefined;
+      sandboxSendPromptMutateMock.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        }),
+      );
+      useSandboxConnectedMock.mockReturnValue(true);
+      useSandboxConnectionStatusMock.mockReturnValue({
+        connected: true,
+        connectionError: false,
+        reconnect: vi.fn(),
+      });
+      useSandboxClientMock.mockReturnValue({
+        commands: {
+          touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+        },
+      });
+
+      render(
+        <PromptInput
+          taskRun={createTaskRun(42, { taskId: 'task-focus' })}
+          onFileSearchOpen={() => {}}
+          onCommandSearchOpen={() => {}}
+        />,
+      );
+
+      const textarea = screen.getByPlaceholderText(/Message agent/i);
+      textarea.focus();
+      fireEvent.change(textarea, { target: { value: 'keep going' } });
+      if (submissionMethod === 'keyboard') {
+        fireEvent.submit(textarea.closest('form')!);
+      } else {
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      }
+
+      await waitFor(() => expect(textarea).toBeDisabled());
+      await act(async () => resolveSend?.());
+
+      await waitFor(() => expect(textarea).toHaveFocus());
+    },
+  );
+
+  it('does not restore task composer focus after focus moves elsewhere while sending', async () => {
+    let resolveSend: (() => void) | undefined;
+    sandboxSendPromptMutateMock.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveSend = resolve;
+      }),
+    );
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+      },
+    });
+
+    render(
+      <>
+        <PromptInput
+          taskRun={createTaskRun(42, { taskId: 'task-focus' })}
+          onFileSearchOpen={() => {}}
+          onCommandSearchOpen={() => {}}
+        />
+        <button type="button">Other control</button>
+      </>,
+    );
+
+    const textarea = screen.getByPlaceholderText(/Message agent/i);
+    textarea.focus();
+    fireEvent.change(textarea, { target: { value: 'keep going' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(textarea).toBeDisabled());
+
+    const otherControl = screen.getByRole('button', { name: 'Other control' });
+    otherControl.focus();
+    await act(async () => resolveSend?.());
+
+    await waitFor(() => expect(otherControl).toHaveFocus());
+  });
+
   it('directs /goal users to the owning Session instead of the task', () => {
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({

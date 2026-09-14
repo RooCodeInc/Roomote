@@ -28,9 +28,9 @@ const INFERENCE_GATEWAY_PATH_PREFIX = '/api/inference';
 /**
  * Provider SDKs pointed at the inference gateway send their "API key" (the
  * run token) through provider-specific headers: `x-api-key` for Anthropic,
- * `x-goog-api-key` for Gemini. Accept the token from those headers on the
- * inference gateway surface only; everywhere else the Authorization bearer
- * header remains the single token transport.
+ * `api-key` for Azure, and `x-goog-api-key` for Gemini. Accept the token from
+ * those headers on the inference gateway surface only; everywhere else the
+ * Authorization bearer header remains the single token transport.
  */
 function extractBearerToken(
   c: Context<{ Variables: Variables }>,
@@ -47,7 +47,11 @@ function extractBearerToken(
     path === INFERENCE_GATEWAY_PATH_PREFIX ||
     path.startsWith(`${INFERENCE_GATEWAY_PATH_PREFIX}/`)
   ) {
-    return c.req.header('x-api-key') ?? c.req.header('x-goog-api-key');
+    return (
+      c.req.header('x-api-key') ??
+      c.req.header('api-key') ??
+      c.req.header('x-goog-api-key')
+    );
   }
 
   return undefined;
