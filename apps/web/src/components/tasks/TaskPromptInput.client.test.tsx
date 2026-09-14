@@ -46,6 +46,21 @@ function KeyboardPrompt({
   );
 }
 
+function SuggestedPrompt() {
+  const [promptText, setPromptText] = useState('');
+
+  return (
+    <TaskPromptInput
+      isBusy={false}
+      promptText={promptText}
+      onPromptTextChange={setPromptText}
+      onSubmit={() => {}}
+      placeholder="Describe a task"
+      promptSuggestion="Add regression tests for authentication callback validation across every supported login flow"
+    />
+  );
+}
+
 describe('TaskPromptInput', () => {
   it('explains why the send button is disabled when hovering it', async () => {
     const reason = 'Create an environment before starting a task.';
@@ -120,6 +135,55 @@ describe('TaskPromptInput', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
 
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('shows an accessible focus hint and accepts an empty suggestion with Tab', () => {
+    render(<SuggestedPrompt />);
+    const suggestion =
+      'Add regression tests for authentication callback validation across every supported login flow';
+    const textarea = screen.getByPlaceholderText(suggestion);
+
+    expect(
+      screen.queryByRole('button', { name: 'Insert suggested task' }),
+    ).not.toBeInTheDocument();
+    fireEvent.focus(textarea);
+    expect(
+      screen.getByRole('button', { name: 'Insert suggested task' }),
+    ).toHaveTextContent('Tab to accept');
+    expect(textarea).toHaveAccessibleDescription(
+      `Suggested task: ${suggestion}. Press Tab to accept or Escape to dismiss.`,
+    );
+
+    const tabEvent = createEvent.keyDown(textarea, { key: 'Tab', code: 'Tab' });
+    fireEvent(textarea, tabEvent);
+
+    expect(tabEvent.defaultPrevented).toBe(true);
+    expect(textarea).toHaveValue(suggestion);
+    expect(
+      screen.queryByRole('button', { name: 'Insert suggested task' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('preserves normal Tab behavior after typing and during IME composition', () => {
+    render(<SuggestedPrompt />);
+    const textarea = screen.getByRole('textbox');
+
+    fireEvent.change(textarea, { target: { value: 'Write my own task' } });
+    const typedTab = createEvent.keyDown(textarea, { key: 'Tab', code: 'Tab' });
+    fireEvent(textarea, typedTab);
+    expect(typedTab.defaultPrevented).toBe(false);
+    expect(textarea).toHaveValue('Write my own task');
+
+    fireEvent.change(textarea, { target: { value: '' } });
+    fireEvent.compositionStart(textarea);
+    const composingTab = createEvent.keyDown(textarea, {
+      key: 'Tab',
+      code: 'Tab',
+      isComposing: true,
+    });
+    fireEvent(textarea, composingTab);
+    expect(composingTab.defaultPrevented).toBe(false);
+    expect(textarea).toHaveValue('');
   });
 
   it.each([
