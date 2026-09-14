@@ -13,7 +13,6 @@ import {
   CardContent,
   Check,
   CircleAlert,
-  CircleX,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -21,10 +20,9 @@ import {
   DialogHeader,
   DialogTitle,
   Empty,
-  EmptyDescription,
   EmptyHeader,
-  EmptyMedia,
   EmptyTitle,
+  RetryableLoadError,
   Skeleton,
   TriangleAlert,
   X,
@@ -291,24 +289,12 @@ export function ResultsPage() {
         </header>
 
         {listQuery.isError && listQuery.data === undefined ? (
-          <Empty className="border">
-            <EmptyHeader>
-              <EmptyMedia variant="icon" className="text-destructive">
-                <CircleX />
-              </EmptyMedia>
-              <EmptyDescription className="text-sm">
-                Failed to load results.
-              </EmptyDescription>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void listQuery.refetch()}
-              >
-                Retry
-              </Button>
-            </EmptyHeader>
-          </Empty>
+          <RetryableLoadError
+            className="border"
+            message="Failed to load results."
+            isRetrying={listQuery.isFetching}
+            onRetry={() => void listQuery.refetch()}
+          />
         ) : results.length === 0 ? (
           <Empty className="border">
             <EmptyHeader>

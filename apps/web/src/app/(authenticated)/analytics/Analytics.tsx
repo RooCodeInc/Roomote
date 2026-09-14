@@ -414,7 +414,10 @@ export function Analytics({
             <PullRequestSummaryCards
               summary={pullRequestOverviewQuery.data?.summary}
               isLoading={shouldShowPullRequestSummaryLoading}
-              isError={pullRequestOverviewQuery.isError}
+              isError={
+                pullRequestOverviewQuery.isError &&
+                !pullRequestOverviewQuery.data
+              }
               granularity={granularity}
             />
           ) : null}
@@ -431,7 +434,9 @@ export function Analytics({
               chart={chart}
               granularity={granularity}
               isLoading={shouldShowChartLoading}
-              isError={activeChartQuery.isError}
+              isError={activeChartQuery.isError && !activeChartQuery.data}
+              isRetrying={activeChartQuery.isFetching}
+              onRetry={() => void activeChartQuery.refetch()}
               onResetFilters={handleResetFilters}
               onSelectSegment={setSelectedSegment}
             />
