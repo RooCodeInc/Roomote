@@ -27,6 +27,7 @@ import {
   brainSyncState,
   taskRuns,
   tasks,
+  users,
 } from '../schema';
 import { runInTransactionIfAvailable } from './transaction-utils';
 import { createMemoryOutboxLifecycle } from './memory-outbox-lifecycle';
@@ -42,6 +43,23 @@ export type RecentUserTaskMemoryRun = {
   memoryRevision: number;
 };
 
+function eligibleUserTaskMemoryConditions() {
+  return [
+    eq(brainMemoryEvents.status, 'done'),
+    eq(taskRuns.status, RunStatus.Completed),
+    eq(tasks.initiatorKind, 'user'),
+    ne(tasks.surface, 'system'),
+    isVisibleTask(),
+  ];
+}
+
+const recentUserTaskMemorySelection = {
+  taskId: tasks.id,
+  runId: taskRuns.id,
+  completedAt: taskRuns.completedAt,
+  memoryRevision: brainMemoryEvents.revision,
+};
+
 /**
  * Recent task-memory pages known to have landed for one user-initiated task.
  * Selecting ownership and origin here avoids reading another member's or a
@@ -52,27 +70,82 @@ export async function listRecentUserTaskMemoryRuns(
   input: { userId: string; limit: number },
 ): Promise<RecentUserTaskMemoryRun[]> {
   return database
-    .select({
-      taskId: tasks.id,
-      runId: taskRuns.id,
-      completedAt: taskRuns.completedAt,
-      memoryRevision: brainMemoryEvents.revision,
-    })
+    .select(recentUserTaskMemorySelection)
     .from(brainMemoryEvents)
     .innerJoin(taskRuns, eq(taskRuns.id, brainMemoryEvents.runId))
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
       and(
-        eq(brainMemoryEvents.status, 'done'),
-        eq(taskRuns.status, RunStatus.Completed),
-        eq(tasks.initiatorKind, 'user'),
+        ...eligibleUserTaskMemoryConditions(),
         eq(tasks.initiatorUserId, input.userId),
-        ne(tasks.surface, 'system'),
-        isVisibleTask(),
       ),
     )
     .orderBy(desc(taskRuns.completedAt), desc(taskRuns.id))
     .limit(input.limit);
+}
+
+/** Revalidate exact cached sources before showing their derived suggestions. */
+export async function listEligibleUserTaskMemoryRuns(
+  database: DatabaseOrTransaction,
+  input: { userId: string; runIds: number[] },
+): Promise<RecentUserTaskMemoryRun[]> {
+  if (input.runIds.length === 0) {
+    return [];
+  }
+
+  return database
+    .select(recentUserTaskMemorySelection)
+    .from(brainMemoryEvents)
+    .innerJoin(taskRuns, eq(taskRuns.id, brainMemoryEvents.runId))
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        ...eligibleUserTaskMemoryConditions(),
+        eq(tasks.initiatorUserId, input.userId),
+        inArray(taskRuns.id, input.runIds),
+      ),
+    );
+}
+
+/** Resolve a successfully ingested eligible run to its opted-in owner. */
+export async function findHomeComposerPrecomputeUserForRun(
+  database: DatabaseOrTransaction,
+  runId: number,
+): Promise<string | null> {
+  const [row] = await database
+    .select({ userId: tasks.initiatorUserId })
+    .from(brainMemoryEvents)
+    .innerJoin(taskRuns, eq(taskRuns.id, brainMemoryEvents.runId))
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .innerJoin(users, eq(users.id, tasks.initiatorUserId))
+    .where(
+      and(
+        ...eligibleUserTaskMemoryConditions(),
+        eq(taskRuns.id, runId),
+        sql`${users.metadata} @> '{"home_composer_suggestions_enabled": true}'::jsonb`,
+      ),
+    )
+    .limit(1);
+
+  return row?.userId ?? null;
+}
+
+export async function isHomeComposerSuggestionsEnabled(
+  database: DatabaseOrTransaction,
+  userId: string,
+): Promise<boolean> {
+  const [row] = await database
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      and(
+        eq(users.id, userId),
+        sql`${users.metadata} @> '{"home_composer_suggestions_enabled": true}'::jsonb`,
+      ),
+    )
+    .limit(1);
+
+  return Boolean(row);
 }
 
 export async function upsertBrainCollectorItems(
