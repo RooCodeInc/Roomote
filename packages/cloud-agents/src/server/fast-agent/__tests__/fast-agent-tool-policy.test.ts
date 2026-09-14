@@ -16,10 +16,12 @@ describe('getFastAgentNativeAcpKind', () => {
     ],
     [FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret, ACP_TOOL_KINDS.tool],
     [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets, ACP_TOOL_KINDS.list],
-  ])('exposes %s only to the Fast parent', (name, kind) => {
-    expect(FAST_AGENT_NATIVE_TOOL_FILTER[name]).toBe(true);
-    expect(buildFastAgentToolFilter([], { surface: 'web' })[name]).toBe(true);
-    expect(buildFastAgentToolFilter([], { surface: 'slack' })[name]).toBe(true);
+  ])('temporarily hides %s from every Fast surface', (name, kind) => {
+    expect(FAST_AGENT_NATIVE_TOOL_FILTER[name]).toBe(false);
+    expect(buildFastAgentToolFilter([], { surface: 'web' })[name]).toBe(false);
+    expect(buildFastAgentToolFilter([], { surface: 'slack' })[name]).toBe(
+      false,
+    );
     expect(FAST_AGENT_SUBAGENT_TOOL_FILTER[name]).toBe(false);
     expect(getFastAgentNativeAcpKind(name)).toBe(kind);
   });

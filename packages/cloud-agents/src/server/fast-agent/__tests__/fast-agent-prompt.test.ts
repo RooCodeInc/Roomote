@@ -638,15 +638,15 @@ describe('buildFastAgentSystemPrompt', () => {
       'Tool arguments, results, and reasoning are retained natively',
     );
     expect(prompt).toContain('native JSON schema');
-    expect(prompt).toContain('`prepare_session_secret`');
-    expect(prompt).toContain('`list_session_secrets`');
-    expect(prompt).toContain('read the service documentation');
-    expect(prompt).toContain('share its secure Session link');
+    for (const name of [
+      'prepare_session_secret',
+      'list_session_secrets',
+      'request_with_session_secret',
+    ]) {
+      expect(prompt).not.toContain(name);
+    }
     expect(prompt).toContain(
-      'Do not ask the human to configure injection details or copy an opaque reference',
-    );
-    expect(prompt).toContain(
-      'In web Sessions these tools do not require an opening',
+      'Session-secret tools are temporarily unavailable',
     );
     expect(prompt).toContain(
       'The runtime rejects those actions until a visible text reply has been delivered',

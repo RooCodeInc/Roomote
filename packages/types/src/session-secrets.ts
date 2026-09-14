@@ -6,6 +6,9 @@ import {
   type SessionEgressMethod,
 } from './session-egress';
 
+// Temporary rollout pause: keep Session-secret tools hidden until hosted access works.
+export const SESSION_SECRET_TOOLS_ENABLED = false;
+
 const sessionSecretPrepareFields = {
   label: z.string().trim().min(1).max(80),
   origin: z.string().min(1).max(2048),

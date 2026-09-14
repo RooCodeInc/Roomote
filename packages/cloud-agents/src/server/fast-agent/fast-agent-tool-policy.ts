@@ -4,6 +4,7 @@ import {
   type FastAgentSurface,
   isMemoryMcpServer,
   ROOMOTE_MCP_ID,
+  SESSION_SECRET_TOOLS_ENABLED,
   type FastAgentNativeToolName,
 } from '@roomote/types';
 
@@ -19,6 +20,12 @@ export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
   ...Object.fromEntries(
     Object.values(FAST_AGENT_NATIVE_TOOL_NAMES).map((name) => [name, true]),
   ),
+  [FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret]:
+    SESSION_SECRET_TOOLS_ENABLED,
+  [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets]:
+    SESSION_SECRET_TOOLS_ENABLED,
+  [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret]:
+    SESSION_SECRET_TOOLS_ENABLED,
 };
 
 export const FAST_AGENT_SUBAGENT_TOOL_FILTER: Record<string, boolean> = {

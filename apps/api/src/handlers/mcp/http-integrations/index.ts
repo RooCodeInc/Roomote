@@ -15,7 +15,10 @@ import {
   listSessionSecretApprovals,
   prepareSessionSecret,
 } from '@roomote/sdk/server/session-secrets';
-import { sessionSecretPrepareToolSchema } from '@roomote/types';
+import {
+  SESSION_SECRET_TOOLS_ENABLED,
+  sessionSecretPrepareToolSchema,
+} from '@roomote/types';
 import type { Variables } from '../../../types';
 import { resolveDeploymentMcpAuth } from '../deployment-mcp-auth';
 import {
@@ -101,7 +104,7 @@ export function createHttpIntegrationsMcp() {
         'list_integrations',
         {
           description:
-            'List allowed operator integrations and live owner-approved Session grants with their methods/paths. Credentials are never returned. Session grants do not require an operator manifest. Session grant entries here are a deprecated read-only compatibility listing; the supported way to use a Session grant is an ordinary HTTP client at the real service URL inside an attached run, through the session egress gateway.',
+            'List allowed operator integrations with their methods and paths. Credentials are never returned.',
           inputSchema: {},
           annotations: {
             readOnlyHint: true,
@@ -111,11 +114,12 @@ export function createHttpIntegrationsMcp() {
           },
         },
         async () => {
-          const grants = resolveContext
-            ? await resolveContext()
-                .then(listOwnedSessionSecrets)
-                .catch(() => [])
-            : [];
+          const grants =
+            SESSION_SECRET_TOOLS_ENABLED && resolveContext
+              ? await resolveContext()
+                  .then(listOwnedSessionSecrets)
+                  .catch(() => [])
+              : [];
           return toMcpToolResult({
             integrations: [
               ...config.integrations
@@ -150,7 +154,7 @@ export function createHttpIntegrationsMcp() {
           });
         },
       );
-      server.registerTool(
+      const prepareSecretTool = server.registerTool(
         'prepare_session_secret',
         {
           description:
@@ -176,7 +180,7 @@ export function createHttpIntegrationsMcp() {
           }
         },
       );
-      server.registerTool(
+      const listSecretsTool = server.registerTool(
         'list_session_secrets',
         {
           description:
@@ -199,11 +203,15 @@ export function createHttpIntegrationsMcp() {
           }
         },
       );
+      if (!SESSION_SECRET_TOOLS_ENABLED) {
+        prepareSecretTool.disable();
+        listSecretsTool.disable();
+      }
       server.registerTool(
         'integration_request',
         {
           description:
-            'Make a credential-broker request using an ID from list_integrations. Operator manifest integrations are the supported use. Session-prefixed IDs are a deprecated GET/HEAD-only compatibility path that never widens, is not required for Session resources, and will be removed once ordinary clients through the session egress gateway reach parity. Supply only integrationId, method, relative path (optional query), optional body/contentType and Session accept preference; never supply credentials, arbitrary headers, or a Session/user ID.',
+            'Make a credential-broker request using an operator integration ID from list_integrations. Supply only integrationId, method, relative path (optional query), optional body/contentType and accept preference; never supply credentials, arbitrary headers, or a Session/user ID.',
           inputSchema: integrationRequestSchema,
           annotations: {
             readOnlyHint: false,

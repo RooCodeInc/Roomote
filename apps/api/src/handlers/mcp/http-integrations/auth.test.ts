@@ -42,10 +42,21 @@ import {
 } from './broker';
 import { createHttpIntegrationsMcp } from './index';
 
-const { enabled, destroy } = vi.hoisted(() => ({
+const { enabled, secretToolsEnabled, destroy } = vi.hoisted(() => ({
   enabled: { value: true },
+  secretToolsEnabled: { value: true },
   destroy: vi.fn(async () => {}),
 }));
+// Retain coverage of the dormant implementation while testing the rollout pause below.
+vi.mock('@roomote/types', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/types')>();
+  return {
+    ...actual,
+    get SESSION_SECRET_TOOLS_ENABLED() {
+      return secretToolsEnabled.value;
+    },
+  };
+});
 vi.mock('@roomote/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/env')>();
   return {
@@ -125,6 +136,7 @@ afterAll(() => configureAuthClientEnv(null));
 beforeEach(() => {
   observedAuth.mockClear();
   enabled.value = true;
+  secretToolsEnabled.value = true;
   vi.mocked(integrationRequest).mockClear();
   vi.mocked(loadHttpIntegrationsConfig)
     .mockReset()
@@ -1172,3 +1184,34 @@ it('denies a still-valid signed run token after its live bound actor drifts', as
   ).toBe(true);
   expect(fetch).toHaveBeenCalledOnce();
 });
+
+it.each(['broker', 'run'] as const)(
+  'hides paused Session-secret tools and grants for %s clients',
+  async (kind) => {
+    const actual =
+      await vi.importActual<typeof import('@roomote/types')>('@roomote/types');
+    expect(actual.SESSION_SECRET_TOOLS_ENABLED).toBe(false);
+    secretToolsEnabled.value = actual.SESSION_SECRET_TOOLS_ENABLED;
+    const fixture = await sessionGrant();
+    const token = kind === 'broker' ? fixture.brokerToken : fixture.runToken;
+    const response = await post(token);
+    const listed = (await response.json()).result.tools;
+    expect(listed.map((entry: { name: string }) => entry.name).sort()).toEqual([
+      'integration_request',
+      'list_integrations',
+    ]);
+    expect(JSON.stringify(listed)).not.toContain('session-prefixed');
+    const integrations = await tool(token, 'list_integrations');
+    const entries = JSON.parse(integrations.content[0].text).integrations;
+    expect(
+      entries.some((entry: { id: string }) => entry.id.startsWith('session:')),
+    ).toBe(false);
+    for (const name of ['prepare_session_secret', 'list_session_secrets']) {
+      const denied = await post(token, 'tools/call', { name, arguments: {} });
+      const payload = await denied.json();
+      expect(
+        payload.error ?? (payload.result?.isError ? payload.result : undefined),
+      ).toBeDefined();
+    }
+  },
+);
