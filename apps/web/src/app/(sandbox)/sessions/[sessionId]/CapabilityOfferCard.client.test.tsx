@@ -5,6 +5,7 @@ import { CapabilityOfferCard } from './CapabilityOfferCard';
 
 const mocks = vi.hoisted(() => ({
   mutate: vi.fn(),
+  sourceControlCard: vi.fn(),
   status: {
     sourceControlSetup: {
       providers: [
@@ -57,7 +58,10 @@ vi.mock('@/trpc/client', () => ({
 
 vi.mock('@/components/settings/McpIcon', () => ({ McpIcon: () => null }));
 vi.mock('./setup/SetupSourceControlCard', () => ({
-  SetupSessionSourceControlCardBody: () => <div>Source control card</div>,
+  SetupSessionSourceControlCardBody: (props: unknown) => {
+    mocks.sourceControlCard(props);
+    return <div>Source control card</div>;
+  },
 }));
 vi.mock('./setup/SetupSandboxCard', () => ({
   SetupSandboxCard: () => <div>Sandbox card</div>,
@@ -91,6 +95,19 @@ describe('CapabilityOfferCard', () => {
       <CapabilityOfferCard sessionId="session-1" offer={offer(capability)} />,
     );
     expect(screen.getByText(expectedText)).toBeInTheDocument();
+  });
+
+  it('leaves source-control provider selection open when no provider was requested', () => {
+    render(
+      <CapabilityOfferCard
+        sessionId="session-1"
+        offer={offer('source_control')}
+      />,
+    );
+
+    expect(mocks.sourceControlCard).toHaveBeenCalledWith(
+      expect.objectContaining({ preferredProvider: undefined }),
+    );
   });
 
   it('resolves a pending offer when its global configuration becomes ready', async () => {

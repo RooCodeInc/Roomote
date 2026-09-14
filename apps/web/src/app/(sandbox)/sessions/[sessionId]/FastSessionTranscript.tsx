@@ -86,6 +86,7 @@ import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/s
 import { CapabilityOfferCard } from './CapabilityOfferCard';
 
 import {
+  AcpMessageItem,
   AcpTranscriptBlockList,
   useAcpTranscriptBlocks,
 } from '../../task/[taskId]/messages/acp';
@@ -121,9 +122,10 @@ function getTranscriptMessageText(message: TranscriptMessage) {
     : text;
 }
 
-function shouldSuppressRequestUserInputToolMessage(
+function shouldSuppressTrustedInputToolMessage(
   message: TranscriptMessage,
   requestTurnIds: ReadonlySet<string>,
+  capabilityOfferTurnIds: ReadonlySet<string>,
 ) {
   if (
     message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolCall &&
@@ -142,13 +144,18 @@ function shouldSuppressRequestUserInputToolMessage(
   const isRequestUserInput =
     payload?.toolName === 'request_user_input' ||
     payload?.title === 'request_user_input';
+  const isRepresentedCapabilityOffer =
+    (payload?.toolName === 'offer_capability' ||
+      payload?.title === 'offer_capability') &&
+    capabilityOfferTurnIds.has(message.turnId);
   const isCompletedSourceControlSetup =
     payload?.status === 'completed' &&
     payload?.rawInput?.arguments?.preset === 'setup_source_control';
   return (
-    isRequestUserInput &&
-    (isCompletedSourceControlSetup ||
-      (payload?.status !== 'failed' && requestTurnIds.has(message.turnId)))
+    isRepresentedCapabilityOffer ||
+    (isRequestUserInput &&
+      (isCompletedSourceControlSetup ||
+        (payload?.status !== 'failed' && requestTurnIds.has(message.turnId))))
   );
 }
 
@@ -778,14 +785,37 @@ export function FastSessionTranscript({
       ),
     [messages, resolvedCapabilityOfferIds],
   );
+  const capabilityOfferTurnIds = useMemo(
+    () =>
+      new Set(
+        messages.flatMap((message) =>
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer
+            ? [message.turnId]
+            : [],
+        ),
+      ),
+    [messages],
+  );
   const renderCapabilityOfferMessage = useCallback(
     (message: AcpUiMessage) => {
       const offer = capabilityOffersByMessageId.get(message.id);
-      return offer ? (
-        <div className="mt-3">
-          <CapabilityOfferCard sessionId={sessionId} offer={offer} />
-        </div>
-      ) : undefined;
+      if (!offer) return undefined;
+      const introMessage: AcpUiMessage = {
+        ...message,
+        updateType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        kind: 'text',
+        text: offer.message,
+        data: {},
+      };
+      return (
+        <>
+          <AcpMessageItem msg={introMessage} />
+          <div className="mt-3">
+            <CapabilityOfferCard sessionId={sessionId} offer={offer} />
+          </div>
+        </>
+      );
     },
     [capabilityOffersByMessageId, sessionId],
   );
@@ -825,9 +855,10 @@ export function FastSessionTranscript({
             parseFastAgentCapabilityOfferPayload(message.payload)?.offerId ??
               '',
           )) ||
-        shouldSuppressRequestUserInputToolMessage(
+        shouldSuppressTrustedInputToolMessage(
           message,
           requestUserInputTurnIds,
+          capabilityOfferTurnIds,
         )
       ) {
         continue;
@@ -971,6 +1002,7 @@ export function FastSessionTranscript({
     };
   }, [
     messages,
+    capabilityOfferTurnIds,
     owner,
     pendingInputRequestOrder,
     requestUserInputById,

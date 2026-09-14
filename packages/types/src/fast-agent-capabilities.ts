@@ -13,12 +13,30 @@ export const FAST_AGENT_CAPABILITY_IDS = [
 export const fastAgentCapabilityIdSchema = z.enum(FAST_AGENT_CAPABILITY_IDS);
 export type FastAgentCapabilityId = z.infer<typeof fastAgentCapabilityIdSchema>;
 
-export const fastAgentCapabilityOfferInputSchema = z.object({
-  capability: fastAgentCapabilityIdSchema,
-  message: z.string().trim().min(1).max(500),
-  provider: sourceControlProviderSchema.optional(),
-  integrationIds: z.array(z.string().trim().min(1)).max(20).optional(),
-});
+export const fastAgentCapabilityOfferInputSchema = z.preprocess(
+  (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return value;
+    }
+    const { provider, integrationIds, ...input } = value as Record<
+      string,
+      unknown
+    >;
+    return {
+      ...input,
+      ...(provider !== null && provider !== undefined ? { provider } : {}),
+      ...(integrationIds !== null && integrationIds !== undefined
+        ? { integrationIds }
+        : {}),
+    };
+  },
+  z.object({
+    capability: fastAgentCapabilityIdSchema,
+    message: z.string().trim().min(1).max(500),
+    provider: sourceControlProviderSchema.optional(),
+    integrationIds: z.array(z.string().trim().min(1)).max(20).optional(),
+  }),
+);
 
 export type FastAgentCapabilityOfferInput = z.infer<
   typeof fastAgentCapabilityOfferInputSchema

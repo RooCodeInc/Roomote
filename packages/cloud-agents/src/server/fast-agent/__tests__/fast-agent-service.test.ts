@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+
 const mocks = vi.hoisted(() => ({
   appendVisibleMessages: vi.fn(),
   publishReplyStream: vi.fn(),
@@ -1430,7 +1432,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.stringContaining('reason="local_storage_'),
       );
       expect(consoleError).toHaveBeenCalledWith(
-        expect.stringContaining('filesystemPath=/tmp'),
+        expect.stringContaining(`filesystemPath=${tmpdir()}`),
       );
       expect(mocks.generateText).not.toHaveBeenCalled();
     } finally {
@@ -1545,6 +1547,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }),
       }),
     );
+  });
+
+  it('treats null optional capability arguments as omitted', async () => {
+    let toolResult: unknown;
+    const offerCapability = vi.fn(async (input) => input);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        toolResult = await invokeTool(nativeToolNames.offerCapability, {
+          capability: 'source_control',
+          message: 'Connect source control so I can work with your code.',
+          provider: null,
+          integrationIds: null,
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'session-1',
+      },
+      adapter: callbacks({ offerCapability }),
+    });
+
+    expect(toolResult).toEqual({
+      success: true,
+      offerId: expect.any(String),
+      closed: true,
+    });
+    expect(offerCapability).toHaveBeenCalledWith({
+      capability: 'source_control',
+      message: 'Connect source control so I can work with your code.',
+    });
   });
 
   it('deduplicates an unresolved offer for the same capability', async () => {

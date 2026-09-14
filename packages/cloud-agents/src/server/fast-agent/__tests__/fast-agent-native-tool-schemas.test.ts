@@ -949,6 +949,28 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     });
   });
 
+  it('tolerates null placeholders for optional capability offer arguments', async () => {
+    const offerTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability,
+    )!;
+    const parsed = zod.z.object(offerTool.args as Record<string, never>).parse({
+      capability: 'source_control',
+      message: 'Connect source control so I can work with your code.',
+      provider: null,
+      integrationIds: null,
+    });
+    const execute = offerTool.execute as (
+      args: unknown,
+      context: unknown,
+    ) => Promise<{ name: string; args: Record<string, unknown> }>;
+
+    const forwarded = await execute(parsed, {});
+
+    expect(forwarded.name).toBe('offer_capability');
+    expect(forwarded.args.provider).toBeUndefined();
+    expect(forwarded.args.integrationIds).toBeUndefined();
+  });
+
   it('defaults omitted display metadata on structured questions', async () => {
     const inputTool = tools.find(
       (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,

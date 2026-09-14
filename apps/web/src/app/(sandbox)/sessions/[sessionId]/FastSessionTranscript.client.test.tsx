@@ -1819,7 +1819,69 @@ describe('FastSessionTranscript', () => {
     expect(
       screen.getByText('Capability offer: source_control'),
     ).toBeInTheDocument();
+    expect(screen.getByText('Connect your code.')).toBeInTheDocument();
     expect(screen.getByRole('textbox')).toBeInTheDocument();
+  });
+
+  it('hides capability tool activity when the offer is represented by its message and card', () => {
+    const toolResult = (
+      id: string,
+      status: 'failed' | 'completed',
+      ts: number,
+    ) => ({
+      ...textMessage({
+        id,
+        role: 'assistant',
+        text: `${status} offer capability`,
+        ts,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool' as const,
+      turnId: 'turn-1',
+      payload: {
+        toolCallId: id,
+        title: 'offer_capability',
+        toolName: 'offer_capability',
+        kind: 'communication',
+        status,
+        rawInput: { arguments: { capability: 'source_control' } },
+      },
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          toolResult('failed-offer', 'failed', 1),
+          {
+            ...textMessage({
+              id: 'source-control-offer',
+              role: 'assistant',
+              text: 'Hi, I can help with your code.',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+            turnId: 'turn-1',
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              message: 'Hi, I can help with your code.',
+              status: 'pending',
+            },
+          },
+          toolResult('completed-offer', 'completed', 3),
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByText('Hi, I can help with your code.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Capability offer: source_control'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('failed offer capability')).toBeNull();
+    expect(screen.queryByText('completed offer capability')).toBeNull();
   });
 
   it('keeps a capability response in history and removes the resolved card', () => {
@@ -2820,12 +2882,16 @@ describe('FastSessionTranscript', () => {
       });
     });
 
-    expect(
-      screen.getByPlaceholderText('Accept the next suggestion'),
-    ).toHaveFocus();
-    expect(
-      screen.getByRole('button', { name: 'Insert suggested message' }),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByPlaceholderText('Accept the next suggestion'),
+      ).toHaveFocus(),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Insert suggested message' }),
+      ).toBeInTheDocument(),
+    );
   });
 
   it('persists model selections immediately and uses them for the next reply', async () => {
