@@ -459,7 +459,7 @@ describe('slack channel messages MCP endpoint', () => {
 
     expect(response.status).toBe(502);
     expect(body.error).toBe(
-      'Slack channel CENG could not be fetched from Slack',
+      'Slack channel CENG could not be fetched from Slack: rate_limited',
     );
   });
 });
