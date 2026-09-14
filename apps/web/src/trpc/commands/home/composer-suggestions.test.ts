@@ -47,6 +47,7 @@ describe('getHomeComposerSuggestionsCommand', () => {
       timing,
       eligibleReferenceCount: 5,
       readableMemoryCount: null,
+      failureReason: null,
     });
 
     await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
@@ -55,7 +56,7 @@ describe('getHomeComposerSuggestionsCommand', () => {
     expect(mockGetRecommendations).toHaveBeenCalledWith('user-1');
     expect(mockLoggerInfo).toHaveBeenCalledWith(
       expect.stringMatching(
-        /^\[home-suggestion-timing\] outcome=fresh_cache total_ms=.+ preference_guard_ms=1 eligible_reference_lookup_ms=2 context_cache_status=fresh context_cache_ms=3 cached_source_validation_ms=n\/a brain_reads_ms=n\/a helper_generation_ms=n\/a post_generation_validation_ms=n\/a eligible_reference_count=5 readable_memory_count=n\/a suggestion_count=5$/u,
+        /^\[home-suggestion-timing\] outcome=fresh_cache total_ms=.+ preference_guard_ms=1 eligible_reference_lookup_ms=2 context_cache_status=fresh context_cache_ms=3 cached_source_validation_ms=n\/a brain_reads_ms=n\/a helper_generation_ms=n\/a post_generation_validation_ms=n\/a failure_reason=n\/a eligible_reference_count=5 readable_memory_count=n\/a suggestion_count=5$/u,
       ),
     );
 
@@ -77,6 +78,7 @@ describe('getHomeComposerSuggestionsCommand', () => {
       },
       eligibleReferenceCount: null,
       readableMemoryCount: null,
+      failureReason: null,
     });
 
     await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
@@ -102,6 +104,24 @@ describe('getHomeComposerSuggestionsCommand', () => {
     consoleErrorSpy.mockRestore();
   });
 
+  it('logs the shared failure stage without exposing request context', async () => {
+    mockGetRecommendations.mockResolvedValue({
+      suggestions: [],
+      outcome: 'fallback',
+      timing,
+      eligibleReferenceCount: 5,
+      readableMemoryCount: 5,
+      failureReason: 'cache_write_error',
+    });
+
+    await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
+      suggestions: [],
+    });
+    const logged = String(mockLoggerInfo.mock.lastCall?.[0]);
+    expect(logged).toContain('failure_reason=cache_write_error');
+    expect(logged).not.toContain('user-1');
+  });
+
   it('preserves the response when timing logging fails', async () => {
     mockGetRecommendations.mockResolvedValue({
       suggestions: [],
@@ -109,6 +129,7 @@ describe('getHomeComposerSuggestionsCommand', () => {
       timing,
       eligibleReferenceCount: 0,
       readableMemoryCount: null,
+      failureReason: null,
     });
     mockLoggerInfo.mockImplementationOnce(() => {
       throw new Error('log unavailable');

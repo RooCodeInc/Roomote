@@ -82,6 +82,9 @@ import {
   getHomeComposerRecommendations,
   HOME_COMPOSER_RECOMMENDATION_DEBOUNCE_MS,
   HOME_COMPOSER_RECOMMENDATION_DEDUPLICATION_TTL_MS,
+  HOME_COMPOSER_SUGGESTION_MAX_CHARS,
+  HOME_COMPOSER_SUGGESTION_MAX_WORDS,
+  HOME_COMPOSER_SUGGESTION_MIN_WORDS,
   processHomeComposerRecommendationPrecompute,
   requestHomeComposerRecommendationPrecomputeForRun,
   resetHomeComposerRecommendationQueueForTests,
@@ -103,6 +106,11 @@ const suggestions = [
   'Improve deployment health check guidance for operators diagnosing repeated recovery failures',
 ];
 const cacheKey = 'home-composer-recommendations:v4:user-1';
+
+function suggestionAtLength(length: number): string {
+  const remainingWords = ' two three four five six seven eight nine ten';
+  return `${'x'.repeat(length - remainingWords.length)}${remainingWords}`;
+}
 
 function revision() {
   return createHash('sha256').update('task-one:1:2').digest('hex');
@@ -168,7 +176,60 @@ describe('Home composer recommendations', () => {
       }),
     );
     expect(mockGenerate.mock.calls[0]?.[0]?.prompt).toContain('10-15 words');
+    expect(mockGenerate.mock.calls[0]?.[0]?.prompt).toContain(
+      'Prefer concise wording',
+    );
+    expect(mockGenerate.mock.calls[0]?.[0]?.prompt).toContain(
+      '160 characters or fewer',
+    );
+    const schema = mockGenerate.mock.calls[0]?.[0]?.schema as {
+      safeParse: (value: unknown) => { success: boolean };
+    };
+    expect(schema.safeParse({ suggestions }).success).toBe(true);
+    expect(
+      schema.safeParse({
+        suggestions: Array.from({ length: 5 }, () => suggestionAtLength(160)),
+      }).success,
+    ).toBe(true);
+    expect(
+      schema.safeParse({
+        suggestions: Array.from({ length: 5 }, () => suggestionAtLength(161)),
+      }).success,
+    ).toBe(false);
     expect(redisStore.get(cacheKey)).toContain(suggestions[0]);
+  });
+
+  it('accepts 10-15-word suggestions through 160 characters and rejects longer output', async () => {
+    expect(HOME_COMPOSER_SUGGESTION_MIN_WORDS).toBe(10);
+    expect(HOME_COMPOSER_SUGGESTION_MAX_WORDS).toBe(15);
+    expect(HOME_COMPOSER_SUGGESTION_MAX_CHARS).toBe(160);
+    const boundarySuggestions = [101, 120, 140, 150, 160].map(
+      suggestionAtLength,
+    );
+    mockGenerate.mockResolvedValueOnce({
+      object: { suggestions: boundarySuggestions },
+    });
+
+    await expect(
+      getHomeComposerRecommendations('user-1'),
+    ).resolves.toMatchObject({
+      suggestions: boundarySuggestions,
+      outcome: 'generated',
+    });
+
+    redisStore.clear();
+    mockGenerate.mockResolvedValueOnce({
+      object: {
+        suggestions: [suggestionAtLength(161), ...boundarySuggestions.slice(1)],
+      },
+    });
+    await expect(
+      getHomeComposerRecommendations('user-1'),
+    ).resolves.toMatchObject({
+      suggestions: [],
+      outcome: 'fallback',
+      failureReason: 'invalid_output',
+    });
   });
 
   it('does not reuse shorter suggestions from the v3 cache namespace', async () => {
@@ -209,7 +270,11 @@ describe('Home composer recommendations', () => {
 
     await expect(
       getHomeComposerRecommendations('user-1'),
-    ).resolves.toMatchObject({ suggestions: [], outcome: 'fallback' });
+    ).resolves.toMatchObject({
+      suggestions: [],
+      outcome: 'fallback',
+      failureReason: 'invalid_output',
+    });
     expect(redisStore.has(cacheKey)).toBe(false);
   });
 
@@ -305,7 +370,11 @@ describe('Home composer recommendations', () => {
     mockReadMemories.mockResolvedValue([]);
 
     const result = await getHomeComposerRecommendations('user-1');
-    expect(result).toMatchObject({ suggestions: [], outcome: 'fallback' });
+    expect(result).toMatchObject({
+      suggestions: [],
+      outcome: 'fallback',
+      failureReason: 'brain_unavailable',
+    });
     expect(redisStore.has(cacheKey)).toBe(false);
   });
 
@@ -334,11 +403,51 @@ describe('Home composer recommendations', () => {
     mockGenerate.mockRejectedValue(new Error('helper unavailable'));
 
     const result = await getHomeComposerRecommendations('user-1');
-    expect(result).toMatchObject({ suggestions: [], outcome: 'fallback' });
+    expect(result).toMatchObject({
+      suggestions: [],
+      outcome: 'fallback',
+      failureReason: 'helper_error',
+    });
     expect(result.timing.helperGenerationMs).not.toBeNull();
     await expect(
       processHomeComposerRecommendationPrecompute({ userId: 'user-1' }),
     ).resolves.toMatchObject({ outcome: 'fallback' });
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('classifies post-generation validation failures separately from helper failures', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => {});
+    mockIsEnabled
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(new Error('database unavailable'));
+
+    const result = await getHomeComposerRecommendations('user-1');
+    expect(result).toMatchObject({
+      suggestions: [],
+      outcome: 'fallback',
+      failureReason: 'post_generation_validation_error',
+    });
+    expect(result.timing.postGenerationValidationMs).not.toBeNull();
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('classifies cache publication failures separately from helper failures', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => {});
+    redis.eval.mockRejectedValueOnce(new Error('redis unavailable'));
+
+    await expect(
+      getHomeComposerRecommendations('user-1'),
+    ).resolves.toMatchObject({
+      suggestions: [],
+      outcome: 'fallback',
+      failureReason: 'cache_write_error',
+    });
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
     consoleErrorSpy.mockRestore();
   });
 
