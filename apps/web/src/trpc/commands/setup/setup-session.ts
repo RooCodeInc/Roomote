@@ -1038,9 +1038,6 @@ async function persistSetupPresetResponse(input: {
         }) ?? [],
       ),
     ];
-    if (preset === 'setup_starter_tasks' && taskIds.length === 0) {
-      throw new Error('Select at least one starter task.');
-    }
     const selectedAt = new Date();
     const nextState = {
       ...state,
@@ -1119,12 +1116,16 @@ async function persistSetupPresetResponse(input: {
               label: 'Suggested initial tasks',
               iconKey: 'list-checks',
             },
-            text: formatStarterSelectionReceipt(
-              taskIds.map(
-                (taskId) =>
-                  SETUP_STARTER_TASKS.find((task) => task.id === taskId)!.title,
-              ),
-            ),
+            text:
+              taskIds.length > 0
+                ? formatStarterSelectionReceipt(
+                    taskIds.map(
+                      (taskId) =>
+                        SETUP_STARTER_TASKS.find((task) => task.id === taskId)!
+                          .title,
+                    ),
+                  )
+                : "I'll type it myself.",
             payload: { taskIds },
             ts: now.getTime(),
           }),

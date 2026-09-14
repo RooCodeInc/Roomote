@@ -863,6 +863,12 @@ export async function submitFastSessionUserInputCommand(
     parsedAnswers,
   );
   const resolution = input.resolution ?? 'submitted';
+  // Starter work is optional: an explicitly empty submitted response means the
+  // administrator will begin the conversation in their own words.
+  const skippedOptionalStarterTasks =
+    requestPayload.preset === 'setup_starter_tasks' &&
+    resolution === 'submitted' &&
+    Object.keys(submitted).length === 0;
   if (requestPayload.preset && resolution === 'cancelled') {
     throw new Error('This required setup choice cannot be cancelled.');
   }
@@ -871,7 +877,7 @@ export async function submitFastSessionUserInputCommand(
     submitted,
     resolution,
   );
-  if (validationError) {
+  if (validationError && !skippedOptionalStarterTasks) {
     throw new Error(validationError);
   }
   if (requestPayload.preset && existingResponse) {
