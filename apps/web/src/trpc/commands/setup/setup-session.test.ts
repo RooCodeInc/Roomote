@@ -589,6 +589,48 @@ describe('optional setup integration discovery', () => {
     );
   });
 
+  it('preserves a manual starter-task continuation across reconciliation', async () => {
+    const questions = await (
+      await context()
+    ).adapterExtensions.resolveUserInputPreset!('setup_starter_tasks');
+    const pendingRequest = await request({
+      requestId: 'manual-starter-request',
+      sessionId: conversationId,
+      turnId: 'manual-starter-request',
+      callId: 'manual-starter-request',
+      status: 'pending',
+      preset: 'setup_starter_tasks',
+      questions,
+    });
+    mocks.submit.mockImplementationOnce(async (_auth, input, options) => {
+      await options.persistSetupPresetResponse({
+        fastConversationId: conversationId,
+        request: pendingRequest,
+        answers: input.answers,
+      });
+      return { success: true };
+    });
+
+    await submitSetupSessionUserInputCommand(auth, {
+      sessionId,
+      requestId: 'manual-starter-request',
+      answers: {},
+    });
+
+    expect((await readState()).setupSession?.starterTaskSelection).toEqual({
+      requestId: 'manual-starter-request',
+      taskIds: [],
+      selectedAt: expect.any(String),
+    });
+    mocks.schedule.mockClear();
+    await reconcileSetupPlatformEvents(auth);
+    expect(
+      mocks.schedule.mock.calls.some(([turn]) =>
+        turn.question.includes('starter_request'),
+      ),
+    ).toBe(false);
+  });
+
   it('preserves old sessions without retroactively starting optional discovery', async () => {
     const state = await readState();
     delete state.setupSession!.integrationDiscoveryCompletedAt;
