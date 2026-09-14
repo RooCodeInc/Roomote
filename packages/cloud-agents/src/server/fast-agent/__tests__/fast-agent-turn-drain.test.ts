@@ -159,3 +159,31 @@ describe('Fast turn shutdown drain', () => {
     await straggler!();
   });
 });
+
+it('shares active turn ownership across production server bundles', async () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const stateKey = Symbol.for('roomote.fast-agent-turn-runtime-state');
+  const scope = globalThis as typeof globalThis & { [stateKey]?: unknown };
+  try {
+    process.env.NODE_ENV = 'production';
+    delete scope[stateKey];
+    vi.resetModules();
+    const turnOwner = await import('../fast-agent-turn-lock');
+    const activeLock = await turnOwner.acquireFastAgentTurnLock({
+      conversation,
+    });
+
+    vi.resetModules();
+    const shutdownOwner = await import('../fast-agent-turn-lock');
+    await expect(
+      shutdownOwner.abortActiveFastAgentTurns(
+        new shutdownOwner.FastAgentProcessShutdownError('SIGTERM'),
+      ),
+    ).resolves.toBe(1);
+    expect(activeLock!.signal.aborted).toBe(true);
+    await activeLock!();
+  } finally {
+    delete scope[stateKey];
+    process.env.NODE_ENV = originalNodeEnv;
+  }
+});
