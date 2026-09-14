@@ -265,10 +265,19 @@ async function resolveTaskRunRepositoryScope(
     }
   }
 
-  // All-repositories and Blank slate runs check repositories out on demand,
-  // so any active deployment repository is in scope for them.
   const repo = typeof payload.repo === 'string' ? payload.repo.trim() : '';
-  if (repo && repo !== ALL_REPOSITORIES && repo !== NO_REPOSITORIES) {
+
+  // A Blank slate run checks repositories out on demand only when its launch
+  // stamped the deployment's provider map. An unstamped run started with no
+  // source-control credentials and must not gain access to repositories
+  // through the server-side operations, so nothing is in scope for it.
+  if (repo === NO_REPOSITORIES) {
+    return resolveRepositoryProvidersFromPayload(payload) ? null : [];
+  }
+
+  // All-repositories runs check repositories out on demand, so any active
+  // deployment repository is in scope for them.
+  if (repo && repo !== ALL_REPOSITORIES) {
     return [repo];
   }
 

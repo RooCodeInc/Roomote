@@ -181,6 +181,25 @@ describe('on-demand workspace repository scope', () => {
       ).resolves.toBeUndefined();
     },
   );
+
+  it('keeps an unstamped Blank slate run out of every repository', async () => {
+    const user = await userFactory.create();
+    const installation = await githubInstallationFactory.create({
+      installedByUserId: user.id,
+    });
+    const target = await repositoryFactory.create({
+      linkedByUserId: user.id,
+      installationId: installation.id,
+    });
+    // Launched with no active repositories: no provider stamp, no credentials.
+    const run = await runFactory.create({
+      payload: { repo: NO_REPOSITORIES },
+    });
+
+    await expect(
+      assertRepositoryInTaskRunScope(run, target.fullName),
+    ).rejects.toThrow('outside this task');
+  });
 });
 
 describe('resolveSourceControlProviderForRepositoryFromPayload', () => {
