@@ -51,6 +51,7 @@ describe('Home composer recommendations queue', () => {
       outcome: 'generated',
       eligibleReferenceCount: 5,
       readableMemoryCount: 5,
+      failureReason: null,
       timing: {
         totalMs: 120,
         preferenceGuardMs: 2,
@@ -93,6 +94,7 @@ describe('Home composer recommendations queue', () => {
       outcome: 'fallback',
       eligibleReferenceCount: 1,
       readableMemoryCount: 1,
+      failureReason: 'helper_error',
       timing: {
         totalMs: 120_000,
         preferenceGuardMs: 2,
@@ -116,6 +118,9 @@ describe('Home composer recommendations queue', () => {
     ).rejects.toThrow('Home composer recommendation precompute failed');
     expect(String(infoSpy.mock.lastCall?.[0])).toContain(
       'outcome=fallback total_ms=120000',
+    );
+    expect(String(infoSpy.mock.lastCall?.[0])).toContain(
+      'failure_reason=helper_error',
     );
     infoSpy.mockRestore();
   });

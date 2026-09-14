@@ -18,6 +18,7 @@ export async function getHomeComposerSuggestionsCommand(
   let eligibleReferenceCount: number | null = null;
   let readableMemoryCount: number | null = null;
   let suggestionCount = 0;
+  let failureReason: string | null = null;
   let outcome = 'error';
 
   try {
@@ -26,6 +27,7 @@ export async function getHomeComposerSuggestionsCommand(
     eligibleReferenceCount = result.eligibleReferenceCount;
     readableMemoryCount = result.readableMemoryCount;
     suggestionCount = result.suggestions.length;
+    failureReason = result.failureReason;
     outcome = result.outcome;
     return { suggestions: result.suggestions };
   } catch (error) {
@@ -50,7 +52,7 @@ export async function getHomeComposerSuggestionsCommand(
           timing?.helperGenerationMs ?? null,
         )} post_generation_validation_ms=${formatMetric(
           timing?.postGenerationValidationMs ?? null,
-        )} eligible_reference_count=${formatMetric(
+        )} failure_reason=${failureReason ?? 'n/a'} eligible_reference_count=${formatMetric(
           eligibleReferenceCount,
         )} readable_memory_count=${formatMetric(
           readableMemoryCount,

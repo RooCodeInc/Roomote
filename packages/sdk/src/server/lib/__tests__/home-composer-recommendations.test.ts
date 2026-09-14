@@ -168,6 +168,22 @@ describe('Home composer recommendations', () => {
       }),
     );
     expect(mockGenerate.mock.calls[0]?.[0]?.prompt).toContain('10-15 words');
+    expect(mockGenerate.mock.calls[0]?.[0]?.prompt).toContain(
+      '100 characters or fewer',
+    );
+    const schema = mockGenerate.mock.calls[0]?.[0]?.schema as {
+      safeParse: (value: unknown) => { success: boolean };
+    };
+    expect(schema.safeParse({ suggestions }).success).toBe(true);
+    expect(
+      schema.safeParse({
+        suggestions: Array.from(
+          { length: 5 },
+          () =>
+            'Investigate authentication callback validation failures across enterprise identity providers before deployment now',
+        ),
+      }).success,
+    ).toBe(false);
     expect(redisStore.get(cacheKey)).toContain(suggestions[0]);
   });
 
@@ -209,7 +225,11 @@ describe('Home composer recommendations', () => {
 
     await expect(
       getHomeComposerRecommendations('user-1'),
-    ).resolves.toMatchObject({ suggestions: [], outcome: 'fallback' });
+    ).resolves.toMatchObject({
+      suggestions: [],
+      outcome: 'fallback',
+      failureReason: 'invalid_output',
+    });
     expect(redisStore.has(cacheKey)).toBe(false);
   });
 
@@ -305,7 +325,11 @@ describe('Home composer recommendations', () => {
     mockReadMemories.mockResolvedValue([]);
 
     const result = await getHomeComposerRecommendations('user-1');
-    expect(result).toMatchObject({ suggestions: [], outcome: 'fallback' });
+    expect(result).toMatchObject({
+      suggestions: [],
+      outcome: 'fallback',
+      failureReason: 'brain_unavailable',
+    });
     expect(redisStore.has(cacheKey)).toBe(false);
   });
 
@@ -334,7 +358,11 @@ describe('Home composer recommendations', () => {
     mockGenerate.mockRejectedValue(new Error('helper unavailable'));
 
     const result = await getHomeComposerRecommendations('user-1');
-    expect(result).toMatchObject({ suggestions: [], outcome: 'fallback' });
+    expect(result).toMatchObject({
+      suggestions: [],
+      outcome: 'fallback',
+      failureReason: 'helper_error',
+    });
     expect(result.timing.helperGenerationMs).not.toBeNull();
     await expect(
       processHomeComposerRecommendationPrecompute({ userId: 'user-1' }),
