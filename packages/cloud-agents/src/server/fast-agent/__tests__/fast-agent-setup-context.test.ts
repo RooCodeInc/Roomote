@@ -114,3 +114,40 @@ describe('setup capability offers', () => {
     ).rejects.toThrow('An offered integration was not found.');
   });
 });
+
+describe('setup adapter scope', () => {
+  const launchSnapshot = {
+    ...allOfferable,
+    rail: { source: 'ready', firstWork: 'pending', compute: 'ready' },
+  };
+
+  it('keeps capability offers without setup-only controls in ordinary Sessions', async () => {
+    const adapter = buildFastAgentSetupAdapter(setupContext(launchSnapshot), {
+      setupSession: false,
+    });
+
+    expect(adapter.assertTaskLaunch).toBeUndefined();
+    expect(adapter.resolveUserInputPreset).toBeUndefined();
+    await expect(
+      adapter.offerCapability!({
+        capability: 'integrations',
+        message: 'Connect Notion.',
+        integrationIds: ['notion'],
+      }),
+    ).resolves.toMatchObject({
+      capability: 'integrations',
+      integrationIds: ['notion'],
+    });
+  });
+
+  it('retains task launch gates in the setup Session', async () => {
+    const adapter = buildFastAgentSetupAdapter(setupContext(launchSnapshot), {
+      setupSession: true,
+    });
+
+    expect(adapter.resolveUserInputPreset).toEqual(expect.any(Function));
+    await expect(adapter.assertTaskLaunch!()).rejects.toThrow(
+      'Choose your first work before starting a task.',
+    );
+  });
+});

@@ -1662,6 +1662,10 @@ export async function resolveSetupSessionTurnContext(
     )
     .limit(1);
   if (!linkedSession?.fastConversationId) return null;
+  const isActiveSetupSession =
+    auth.isAdmin &&
+    settings?.setupCompletedAt == null &&
+    setupSession?.sessionId === linkedSession.id;
   if (
     settings?.setupCompletedAt == null &&
     setupSession?.sessionId === linkedSession.id &&
@@ -1671,14 +1675,30 @@ export async function resolveSetupSessionTurnContext(
   }
   const adminSetupSnapshot = await resolveSetupSnapshot(auth);
   const parsedAdminSetupSnapshot = JSON.parse(adminSetupSnapshot) as {
+    recommendedNextCapability: FastAgentCapabilityId | null;
     capabilities: Record<string, Record<string, unknown>>;
   };
-  const setupSnapshot = auth.isAdmin
-    ? adminSetupSnapshot
-    : JSON.stringify({
+  const sessionSetupSnapshot = isActiveSetupSession
+    ? parsedAdminSetupSnapshot
+    : {
         ...parsedAdminSetupSnapshot,
+        recommendedNextCapability: null,
+        capabilities: {
+          ...parsedAdminSetupSnapshot.capabilities,
+          starter_work: {
+            ...parsedAdminSetupSnapshot.capabilities.starter_work,
+            canOffer: false,
+            unavailableReason:
+              'Starter work is only available in the setup Session.',
+          },
+        },
+      };
+  const setupSnapshot = auth.isAdmin
+    ? JSON.stringify(sessionSetupSnapshot)
+    : JSON.stringify({
+        ...sessionSetupSnapshot,
         capabilities: Object.fromEntries(
-          Object.entries(parsedAdminSetupSnapshot.capabilities).map(
+          Object.entries(sessionSetupSnapshot.capabilities).map(
             ([capability, state]) => [
               capability,
               {
@@ -1701,10 +1721,6 @@ export async function resolveSetupSessionTurnContext(
       description: task.description,
     })),
   };
-  const isActiveSetupSession =
-    auth.isAdmin &&
-    settings?.setupCompletedAt == null &&
-    setupSession?.sessionId === linkedSession.id;
   if (!auth.isAdmin) {
     return {
       setupSnapshot,
@@ -1714,6 +1730,7 @@ export async function resolveSetupSessionTurnContext(
   }
   return {
     adapterExtensions: buildFastAgentSetupAdapter(setupContext, {
+      setupSession: isActiveSetupSession,
       onIntegrationDiscoveryCompleted: async () => {
         await reconcileSetupPlatformEvents(auth);
       },

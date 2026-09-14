@@ -39,6 +39,16 @@ type SetupSnapshot = {
   };
 };
 
+type FastAgentSetupAdapter = Partial<
+  Pick<
+    FastAgentTurnAdapter,
+    | 'assertTaskLaunch'
+    | 'resolveUserInputPreset'
+    | 'offerCapability'
+    | 'onTurnSettled'
+  >
+>;
+
 function parseSetupSnapshot(context: FastAgentSetupTurnContext): SetupSnapshot {
   try {
     return JSON.parse(context.setupSnapshot) as SetupSnapshot;
@@ -113,15 +123,10 @@ export function buildFastAgentSetupAdapter(
   lifecycle: {
     onIntegrationDiscoveryCompleted?: () => Promise<void>;
     onTurnSettled?: () => Promise<void>;
+    setupSession?: boolean;
   } = {},
-): Pick<
-  FastAgentTurnAdapter,
-  | 'assertTaskLaunch'
-  | 'resolveUserInputPreset'
-  | 'offerCapability'
-  | 'onTurnSettled'
-> {
-  return {
+): FastAgentSetupAdapter {
+  const adapter: FastAgentSetupAdapter = {
     ...(lifecycle.onTurnSettled
       ? { onTurnSettled: lifecycle.onTurnSettled }
       : {}),
@@ -279,4 +284,10 @@ export function buildFastAgentSetupAdapter(
       }
     },
   };
+
+  if (lifecycle.setupSession === false) {
+    delete adapter.resolveUserInputPreset;
+    delete adapter.assertTaskLaunch;
+  }
+  return adapter;
 }
