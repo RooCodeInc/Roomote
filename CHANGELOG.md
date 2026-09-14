@@ -54,6 +54,7 @@ Roomote 1.9 adds secure Session-approved API keys, a native Telegram Fast experi
 - Closed agent panels now stay dismissed when users navigate away from a Session and return, while explicitly reopening or deep-linking a task still restores its panel. Thanks to @PierrunoYT for contributing this improvement.
 - Chat channel history results are now bounded to the newest messages that fit a fixed size, with a note telling the agent how to page further back, instead of being cut mid-JSON by the agent's output limit.
 - Long reasoning turns now stay connected through silent inference-provider gaps instead of resetting the stream, aborting in-flight tools, and regenerating the same work. The inference gateway sends standards-compatible SSE keepalives without changing model events or non-streaming responses.
+- Conversational setup no longer stalls when a model carries a qualifier from the previous capability into the next offer. Roomote now ignores qualifiers that do not apply while continuing to validate source-control providers and integration choices when they do apply.
 
 ## 1.8.2 (2026-09-14)
 
