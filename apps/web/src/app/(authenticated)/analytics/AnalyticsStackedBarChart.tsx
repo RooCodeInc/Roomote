@@ -30,6 +30,7 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
+  RetryableLoadError,
   Skeleton,
 } from '@/components/system';
 
@@ -452,21 +453,12 @@ export function AnalyticsStackedBarChart({
 
   if (isError) {
     return (
-      <Empty className="min-h-[320px] rounded-[24px] bg-background/20 md:min-h-[420px]">
-        <EmptyHeader>
-          <EmptyTitle>Unable to load analytics</EmptyTitle>
-          <EmptyDescription>Please try again.</EmptyDescription>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={isRetrying}
-            onClick={onRetry}
-          >
-            {isRetrying ? 'Retrying...' : 'Retry'}
-          </Button>
-        </EmptyHeader>
-      </Empty>
+      <RetryableLoadError
+        className="min-h-[320px] border md:min-h-[420px]"
+        message="Failed to load analytics."
+        isRetrying={isRetrying}
+        onRetry={onRetry}
+      />
     );
   }
 

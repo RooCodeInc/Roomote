@@ -233,7 +233,7 @@ describe('AnalyticsStackedBarChart', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Retrying...' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled();
 
     rerender(
       <AnalyticsStackedBarChart
