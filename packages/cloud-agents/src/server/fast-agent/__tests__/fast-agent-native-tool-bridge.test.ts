@@ -256,7 +256,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(requestUserInputSource).not.toContain('z.union');
     expect(requestUserInputSource).toContain('questions: z.array');
     expect(requestUserInputSource).toContain('.max(4).optional()');
-    expect(requestUserInputSource).toContain('preset: z.enum');
+    expect(requestUserInputSource).toContain(
+      'z.enum(["setup_source_control", "setup_starter_tasks", "setup_integrations"])',
+    );
     expect(requestUserInputSource).toContain(
       'questions are ignored when a preset is set',
     );

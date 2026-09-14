@@ -31,6 +31,8 @@ export const ACP_ENVELOPE_EVENT_TYPES = {
   QueuedMessagesUpdate: 'roomote_runtime.queued_messages_update',
   RequestUserInput: 'roomote_runtime.request_user_input',
   RequestUserInputResponse: 'roomote_runtime.request_user_input_response',
+  CapabilityOffer: 'roomote_runtime.capability_offer',
+  CapabilityOfferResponse: 'roomote_runtime.capability_offer_response',
   TaskCancelled: 'roomote_runtime.task_cancelled',
   /** Voice call lifecycle marker persisted in a Fast Session transcript. */
   VoiceCall: 'roomote_runtime.voice_call',
@@ -279,7 +281,10 @@ export interface AcpRequestUserInputRequestParams {
 export interface AcpRequestUserInputPayload extends AcpRequestUserInputRequestParams {
   requestId: string;
   status: 'pending';
-  preset?: 'setup_starter_tasks' | 'setup_integrations';
+  preset?:
+    | 'setup_source_control'
+    | 'setup_starter_tasks'
+    | 'setup_integrations';
 }
 
 export interface AcpRequestUserInputResponsePayload {
@@ -478,6 +483,7 @@ export function parseAcpRequestUserInputPayload(
   const requestId = asStringOrNull(payload?.requestId);
   const request = parseAcpRequestUserInputRequestParams(payload);
   const preset =
+    payload?.preset === 'setup_source_control' ||
     payload?.preset === 'setup_starter_tasks' ||
     payload?.preset === 'setup_integrations'
       ? payload.preset

@@ -51,6 +51,7 @@ export const ACTIVATION_SETUP_MILESTONES = [
   'comms_authed',
   'source_control_configured',
   'source_control_authed',
+  'integrations_decided',
   'inference_configured',
   'sandbox_configured',
 ] as const;

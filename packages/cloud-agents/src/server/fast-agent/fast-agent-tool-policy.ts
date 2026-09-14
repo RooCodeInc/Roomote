@@ -56,7 +56,10 @@ export function buildFastAgentToolFilter(
   return {
     ...FAST_AGENT_NATIVE_TOOL_FILTER,
     ...(options.surface && options.surface !== 'web'
-      ? { [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: false }
+      ? {
+          [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: false,
+          [FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability]: false,
+        }
       : {}),
     ...Object.fromEntries(integrationIds.map((id) => [`${id}_*`, true])),
   };

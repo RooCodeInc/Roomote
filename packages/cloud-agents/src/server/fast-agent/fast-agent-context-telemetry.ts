@@ -8,8 +8,24 @@ import type {
   FastAgentSurface,
   FastAgentTurnSource,
 } from './fast-agent-conversation';
+import type { FastAgentCapabilityId } from '@roomote/types';
 
 const FAST_AGENT_CONTEXT_MANIFEST_VERSION = 1;
+
+export function captureFastAgentCapabilityOffer(input: {
+  userId: string;
+  capability: FastAgentCapabilityId;
+  outcome: 'requested' | 'shown' | 'deduplicated' | 'unavailable';
+  advancedInitialSetup: boolean;
+}): void {
+  void captureEvent(`capability_offer_${input.outcome}`, {
+    userId: input.userId,
+    properties: {
+      capability: input.capability,
+      advanced_initial_setup: input.advancedInitialSetup,
+    },
+  });
+}
 
 export type FastAgentSessionPath =
   | 'warm'

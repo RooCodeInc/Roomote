@@ -27,6 +27,7 @@ import {
   buildDataVisualizationBlocks,
   dataVisualizationInputsSchema,
   fastAgentHumanFollowUpEventSchema,
+  fastAgentCapabilityOfferInputSchema,
   formatErrorForLog,
   formatSingleLineLog,
   manageWakeupsInputSchema,
@@ -203,6 +204,7 @@ import {
 import {
   captureFastAgentInferenceAttemptOutcome,
   captureFastAgentInferenceContext,
+  captureFastAgentCapabilityOffer,
   type FastAgentPromptKind,
 } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
@@ -571,7 +573,7 @@ const saveMemoryArgsSchema = z.object({
 });
 const requestUserInputQuestionSchema = z.object({
   id: z.string().trim().min(1).max(80),
-  header: z.string().trim().min(1).max(60),
+  header: z.string().trim().min(1).max(60).optional().default('Question'),
   question: z.string().trim().min(1).max(500),
   isOther: z.boolean().optional().default(false),
   isSecret: z.boolean().optional().default(false),
@@ -579,7 +581,13 @@ const requestUserInputQuestionSchema = z.object({
     .array(
       z.object({
         label: z.string().trim().min(1).max(140),
-        description: z.string().trim().min(1).max(500),
+        description: z
+          .string()
+          .trim()
+          .min(1)
+          .max(500)
+          .optional()
+          .default('Select this option.'),
       }),
     )
     .min(1)
@@ -588,6 +596,7 @@ const requestUserInputQuestionSchema = z.object({
   multiple: z.boolean().optional(),
 });
 const fastAgentInputPresetSchema = z.enum([
+  'setup_source_control',
   'setup_starter_tasks',
   'setup_integrations',
 ]);
@@ -603,7 +612,10 @@ const requestUserInputArgsSchema = z.preprocess(
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
 
     const input = raw as Record<string, unknown>;
-    if (input.preset === 'setup_starter_tasks') {
+    if (
+      input.preset === 'setup_source_control' ||
+      input.preset === 'setup_starter_tasks'
+    ) {
       // A trusted preset owns its questions. Models sometimes serialize
       // optional fields as placeholders or null; discard them before schema
       // validation so those fields cannot make the preset call fail.
@@ -611,16 +623,28 @@ const requestUserInputArgsSchema = z.preprocess(
     }
     if (input.preset === 'setup_integrations') {
       // Integration answers are meaningful for this preset, but questions
-      // are still server-owned. Treat a model-emitted null as omitted.
+      // are still server-owned. Treat model-emitted placeholders as omitted.
       return {
         preset: input.preset,
         ...(input.setupIntegrationAnswers !== undefined &&
-        input.setupIntegrationAnswers !== null
+        input.setupIntegrationAnswers !== null &&
+        !Array.isArray(input.setupIntegrationAnswers)
           ? { setupIntegrationAnswers: input.setupIntegrationAnswers }
           : {}),
       };
     }
-    return raw;
+    // Models can serialize unused optional arguments as null or an empty
+    // array. Generic questions do not accept integration answers, so discard
+    // those placeholders instead of rejecting an otherwise usable question.
+    const {
+      preset,
+      setupIntegrationAnswers: _setupIntegrationAnswers,
+      ...rest
+    } = input;
+    return {
+      ...rest,
+      ...(preset !== null && preset !== undefined ? { preset } : {}),
+    };
   },
   z
     .object({
@@ -3659,6 +3683,7 @@ export async function answerFastAgentQuestion({
     // ones allowed to precede that communication.
     const acknowledgementExemptToolIds = new Set<string>([
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
+      FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
       FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
       // Scheduling or cancelling a wakeup is instant and its own confirmation
@@ -4753,6 +4778,98 @@ export async function answerFastAgentQuestion({
                 };
           }
 
+          case FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability: {
+            if (conversation.surface !== 'web' || !adapter.offerCapability) {
+              return {
+                success: false,
+                error:
+                  'Trusted capability cards are available only to administrators in web Sessions.',
+              };
+            }
+            const requestedArgs = fastAgentCapabilityOfferInputSchema.parse(
+              call.args,
+            );
+            captureFastAgentCapabilityOffer({
+              userId,
+              capability: requestedArgs.capability,
+              outcome: 'requested',
+              advancedInitialSetup: setupSession,
+            });
+            let args;
+            try {
+              args = await adapter.offerCapability(requestedArgs);
+            } catch (error) {
+              captureFastAgentCapabilityOffer({
+                userId,
+                capability: requestedArgs.capability,
+                outcome: 'unavailable',
+                advancedInitialSetup: setupSession,
+              });
+              throw error;
+            }
+            const [pending] = canonicalConversationId
+              ? await db.execute<{ offer_id: string }>(sql`
+                  select offer.payload ->> 'offerId' as offer_id
+                  from fast_agent_messages offer
+                  where offer.conversation_id = ${canonicalConversationId}
+                    and offer.event_type = ${ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer}
+                    and offer.payload ->> 'capability' = ${args.capability}
+                    and not exists (
+                      select 1 from fast_agent_messages response
+                      where response.conversation_id = offer.conversation_id
+                        and response.event_type = ${ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse}
+                        and response.payload ->> 'offerId' = offer.payload ->> 'offerId'
+                    )
+                  order by offer.ts desc
+                  limit 1
+                `)
+              : [];
+            if (pending?.offer_id) {
+              captureFastAgentCapabilityOffer({
+                userId,
+                capability: args.capability,
+                outcome: 'deduplicated',
+                advancedInitialSetup: setupSession,
+              });
+              visibleUpdatePosted = true;
+              closedInstructionVersions.add(instructionVersion);
+              return {
+                success: true,
+                duplicate: true,
+                offerId: pending.offer_id,
+                closed: true,
+              };
+            }
+            const offerEvent = allocateCanonicalEvent(
+              `capability_offer:${nextTurnSeq++}`,
+            );
+            const offerId = `cap:${offerEvent.eventId}`;
+            await persistCanonicalMessage(
+              {
+                ...offerEvent,
+                turnId,
+                ts: Date.now(),
+                eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+                role: 'assistant',
+                contentBlocks: [{ type: 'text', text: args.message }],
+                metadata: { visibleInTranscript: true },
+                payload: { offerId, status: 'pending', ...args },
+                source: conversation.surface,
+                nativeSessionId: activeOpenCodeSessionId,
+              },
+              true,
+            );
+            captureFastAgentCapabilityOffer({
+              userId,
+              capability: args.capability,
+              outcome: 'shown',
+              advancedInitialSetup: setupSession,
+            });
+            visibleUpdatePosted = true;
+            closedInstructionVersions.add(instructionVersion);
+            return { success: true, offerId, closed: true };
+          }
+
           case FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput: {
             if (conversation.surface !== 'web') {
               return {
@@ -4767,7 +4884,21 @@ export async function answerFastAgentQuestion({
                 error: 'Pass either questions to ask or a trusted preset name.',
               };
             }
-            const preset = 'preset' in args ? args.preset : undefined;
+            const genericQuestions =
+              'questions' in args ? args.questions : undefined;
+            let preset = 'preset' in args ? args.preset : undefined;
+            // Older setup guidance asked the model to create category questions.
+            // Keep an in-flight model call from reviving that UI: route it to
+            // the trusted compact integration offer instead.
+            if (
+              !preset &&
+              setupSession &&
+              genericQuestions?.some((question) =>
+                question.id.startsWith('setup-tools-'),
+              )
+            ) {
+              preset = 'setup_integrations';
+            }
             if (preset && (!setupSession || !adapter.resolveUserInputPreset)) {
               return {
                 success: false,
@@ -4775,15 +4906,18 @@ export async function answerFastAgentQuestion({
                   'That trusted input preset is unavailable in this session.',
               };
             }
-            const questions =
-              'questions' in args
-                ? args.questions
-                : args.setupIntegrationAnswers !== undefined
-                  ? await adapter.resolveUserInputPreset!(
-                      args.preset,
-                      args.setupIntegrationAnswers,
-                    )
-                  : await adapter.resolveUserInputPreset!(args.preset);
+            const setupIntegrationAnswers =
+              'setupIntegrationAnswers' in args
+                ? args.setupIntegrationAnswers
+                : undefined;
+            const questions = preset
+              ? setupIntegrationAnswers !== undefined
+                ? await adapter.resolveUserInputPreset!(
+                    preset,
+                    setupIntegrationAnswers,
+                  )
+                : await adapter.resolveUserInputPreset!(preset)
+              : genericQuestions!;
             // Trusted setup presets may complete entirely server-side. In
             // that case no pending request or browser response is needed.
             if (preset && questions.length === 0) {

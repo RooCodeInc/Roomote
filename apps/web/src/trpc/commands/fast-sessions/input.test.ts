@@ -1,4 +1,5 @@
 import {
+  fastSessionCapabilityOfferResponseInputSchema,
   replyToFastSessionInputSchema,
   startFastSessionInputSchema,
   updateFastSessionModelSelectionInputSchema,
@@ -99,5 +100,28 @@ describe('Fast session input schemas', () => {
       model: 'openrouter/z-ai/glm-5.2',
       reasoningEffort: 'high',
     });
+  });
+
+  it('validates capability offer responses and bounds selected intent', () => {
+    expect(
+      fastSessionCapabilityOfferResponseInputSchema.parse({
+        sessionId: '00000000-0000-4000-8000-000000000000',
+        offerId: 'cap:offer-1',
+        capability: 'starter_work',
+        resolution: 'completed',
+        selectedIds: ['speed-up-ci'],
+      }),
+    ).toMatchObject({
+      capability: 'starter_work',
+      selectedIds: ['speed-up-ci'],
+    });
+    expect(() =>
+      fastSessionCapabilityOfferResponseInputSchema.parse({
+        sessionId: '00000000-0000-4000-8000-000000000000',
+        offerId: 'cap:offer-1',
+        capability: 'credentials',
+        resolution: 'completed',
+      }),
+    ).toThrow();
   });
 });

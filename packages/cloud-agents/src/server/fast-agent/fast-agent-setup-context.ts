@@ -3,8 +3,11 @@ import {
   normalizeSetupNewState,
   normalizeSetupNewSetupSession,
   SETUP_INTEGRATIONS,
+  SETUP_INTEGRATION_RECOMMENDATIONS,
   SETUP_INTEGRATIONS_CONTINUE_OPTION,
   SETUP_INTEGRATIONS_QUESTION_ID,
+  type FastAgentCapabilityOfferInput,
+  type FastAgentCapabilitySnapshot,
   matchSetupIntegrationAnswers,
   type FastAgentSetupTurnContext,
 } from '@roomote/types';
@@ -12,9 +15,22 @@ import {
 import type { FastAgentTurnAdapter } from './fast-agent-conversation';
 
 type SetupSnapshot = {
+  capabilities?: FastAgentCapabilitySnapshot['capabilities'];
   integrationDiscovery?: {
     completed?: boolean;
+    skipped?: boolean;
     matchedIntegrationIds?: string[];
+  };
+  integrationAvailability?: {
+    connectedIntegrationIds?: string[];
+    offerableIntegrationIds?: string[];
+  };
+  sourceControl?: {
+    providers?: Array<{
+      provider: string;
+      connected: boolean;
+      repositoryCount: number;
+    }>;
   };
   rail?: {
     compute?: string;
@@ -82,22 +98,115 @@ export function buildFastAgentSetupAdapter(
   context: FastAgentSetupTurnContext,
   lifecycle: {
     onIntegrationDiscoveryCompleted?: () => Promise<void>;
+    onTurnSettled?: () => Promise<void>;
   } = {},
-): Pick<FastAgentTurnAdapter, 'assertTaskLaunch' | 'resolveUserInputPreset'> {
+): Pick<
+  FastAgentTurnAdapter,
+  | 'assertTaskLaunch'
+  | 'resolveUserInputPreset'
+  | 'offerCapability'
+  | 'onTurnSettled'
+> {
   return {
+    ...(lifecycle.onTurnSettled
+      ? { onTurnSettled: lifecycle.onTurnSettled }
+      : {}),
+    offerCapability: async (input: FastAgentCapabilityOfferInput) => {
+      const snapshot = parseSetupSnapshot(context);
+      const capability = snapshot.capabilities?.[input.capability];
+      if (!capability?.canOffer) {
+        throw new Error(
+          capability?.unavailableReason ??
+            'That capability is not currently available to offer.',
+        );
+      }
+      if (input.capability !== 'source_control' && input.provider) {
+        throw new Error('A provider is only valid for source-control offers.');
+      }
+      if (input.provider && snapshot.sourceControl?.providers) {
+        const provider = snapshot.sourceControl.providers.find(
+          (candidate) => candidate.provider === input.provider,
+        );
+        if (!provider) {
+          throw new Error('That source-control provider is not available.');
+        }
+        if (provider.connected && provider.repositoryCount > 0) {
+          throw new Error(
+            'That source-control provider already has repositories ready.',
+          );
+        }
+      }
+      if (input.capability !== 'integrations' && input.integrationIds?.length) {
+        throw new Error(
+          'Integration IDs are only valid for integration offers.',
+        );
+      }
+      if (
+        input.integrationIds?.some(
+          (id) =>
+            !SETUP_INTEGRATIONS.some((integration) => integration.id === id),
+        )
+      ) {
+        throw new Error('An offered integration was not found.');
+      }
+      if (input.capability === 'integrations') {
+        const offerableIds = new Set(
+          snapshot.integrationAvailability?.offerableIntegrationIds ??
+            SETUP_INTEGRATIONS.map((integration) => integration.id),
+        );
+        const requestedIds = input.integrationIds?.length
+          ? input.integrationIds
+          : SETUP_INTEGRATION_RECOMMENDATIONS.some((id) => offerableIds.has(id))
+            ? SETUP_INTEGRATION_RECOMMENDATIONS
+            : [...offerableIds];
+        const disconnectedIds = requestedIds.filter((id) =>
+          offerableIds.has(id),
+        );
+        if (disconnectedIds.length === 0) {
+          throw new Error('All requested integrations are already connected.');
+        }
+        return { ...input, integrationIds: disconnectedIds };
+      }
+      return input;
+    },
     resolveUserInputPreset: async (preset, setupIntegrationAnswers) => {
       const snapshot = parseSetupSnapshot(context);
+      if (preset === 'setup_source_control') {
+        if (!['pending', ''].includes(snapshot.rail?.source ?? '')) {
+          throw new Error('Source control has already been decided.');
+        }
+        // The source-control controls are rendered directly in the setup
+        // timeline. This preset acknowledges that trusted UI without creating
+        // a duplicate structured-input request.
+        return [];
+      }
       if (preset === 'setup_integrations') {
+        if (!['ready', 'skipped'].includes(snapshot.rail?.source ?? '')) {
+          throw new Error(
+            'Connect source control or choose not to connect it before continuing with integrations.',
+          );
+        }
         if (snapshot.integrationDiscovery?.completed) {
-          throw new Error('Optional tool discovery is already complete.');
+          // A coalesced setup-state event can still mention the source-control
+          // decision after the administrator has resolved this offer. Treat a
+          // replayed preset as an already-closed action rather than exposing a
+          // tool error or recreating the card.
+          return [];
         }
         const suppliedMatches = matchSetupIntegrationAnswers(
           setupIntegrationAnswers ?? {},
         ).matchedIntegrationIds;
-        const matchedIds = new Set([
+        const suppliedOrPersistedIds = [
           ...(snapshot.integrationDiscovery?.matchedIntegrationIds ?? []),
           ...suppliedMatches,
-        ]);
+        ];
+        const matchedIds = new Set(
+          suppliedOrPersistedIds.length > 0
+            ? suppliedOrPersistedIds
+            : snapshot.integrationDiscovery?.skipped
+              ? []
+              : SETUP_INTEGRATION_RECOMMENDATIONS,
+        );
         const options = SETUP_INTEGRATIONS.filter((integration) =>
           matchedIds.has(integration.id),
         ).map((integration) => ({

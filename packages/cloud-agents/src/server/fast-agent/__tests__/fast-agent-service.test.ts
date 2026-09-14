@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+
 const mocks = vi.hoisted(() => ({
   appendVisibleMessages: vi.fn(),
   publishReplyStream: vi.fn(),
@@ -35,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   captureInferenceContext: vi.fn(),
   captureInferenceAttemptOutcome: vi.fn(),
   captureTurnSettled: vi.fn(),
+  captureCapabilityOffer: vi.fn(),
   captureEvent: vi.fn(),
   markShutdownCloseoutPending: vi.fn(),
   markShutdownCloseoutSettled: vi.fn(),
@@ -66,6 +69,7 @@ const mocks = vi.hoisted(() => ({
   inArray: vi.fn((...values: unknown[]) => values),
   updateParentEventWhere: vi.fn(),
   nativeSteer: vi.fn(),
+  executeDb: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
@@ -105,6 +109,7 @@ const nativeToolNames = vi.hoisted(
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
       requestUserInput: 'request_user_input',
+      offerCapability: 'offer_capability',
       requestWithSessionSecret: 'request_with_session_secret',
       prepareSessionSecret: 'prepare_session_secret',
       listSessionSecrets: 'list_session_secrets',
@@ -193,6 +198,7 @@ vi.mock('@roomote/db/server', () => ({
   getUserPersonalizationRuntimeContext: mocks.getPersonalization,
   isBrainEnabled: mocks.isBrainEnabled,
   db: {
+    execute: mocks.executeDb,
     query: {
       deploymentSettings: { findFirst: mocks.getDeploymentSettings },
       fastAgentParentEvents: { findMany: mocks.getPendingHumanFollowUp },
@@ -276,6 +282,7 @@ vi.mock('../fast-agent-integration-broker', () => ({
 }));
 
 vi.mock('../fast-agent-context-telemetry', () => ({
+  captureFastAgentCapabilityOffer: mocks.captureCapabilityOffer,
   captureFastAgentInferenceContext: mocks.captureInferenceContext,
   captureFastAgentInferenceAttemptOutcome: mocks.captureInferenceAttemptOutcome,
   captureFastAgentTurnSettled: mocks.captureTurnSettled,
@@ -544,6 +551,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.markRetryNoticeInterruption.mockResolvedValue(undefined);
     mocks.renewRespondingLease.mockResolvedValue(true);
     mocks.findUnresolvedRequest.mockResolvedValue(null);
+    mocks.executeDb.mockResolvedValue([]);
     mocks.markDurableDelivered.mockResolvedValue(true);
     mocks.releaseDurableClaim.mockResolvedValue(true);
     mocks.renewDurableClaim.mockResolvedValue(true);
@@ -1425,7 +1433,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.stringContaining('reason="local_storage_'),
       );
       expect(consoleError).toHaveBeenCalledWith(
-        expect.stringContaining('filesystemPath=/tmp'),
+        expect.stringContaining(`filesystemPath=${tmpdir()}`),
       );
       expect(mocks.generateText).not.toHaveBeenCalled();
     } finally {
@@ -1494,6 +1502,142 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       preset: 'setup_starter_tasks',
       questions: presetQuestions,
     });
+  });
+
+  it('persists a validated capability offer as the visible terminal response', async () => {
+    let toolResult: unknown;
+    const offerCapability = vi.fn(async (input) => input);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        toolResult = await invokeTool(nativeToolNames.offerCapability, {
+          capability: 'source_control',
+          message: 'Connect GitHub so I can retrieve the event from your code.',
+          provider: 'github',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'session-1',
+      },
+      setupSession: true,
+      adapter: callbacks({ offerCapability }),
+    });
+
+    expect(toolResult).toEqual({
+      success: true,
+      offerId: expect.any(String),
+      closed: true,
+    });
+    expect(offerCapability).toHaveBeenCalledWith({
+      capability: 'source_control',
+      message: 'Connect GitHub so I can retrieve the event from your code.',
+      provider: 'github',
+    });
+    expect(mocks.captureCapabilityOffer).toHaveBeenCalledWith({
+      userId: 'user-1',
+      capability: 'source_control',
+      outcome: 'requested',
+      advancedInitialSetup: true,
+    });
+    expect(mocks.captureCapabilityOffer).toHaveBeenCalledWith({
+      userId: 'user-1',
+      capability: 'source_control',
+      outcome: 'shown',
+      advancedInitialSetup: true,
+    });
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+          payload: expect.objectContaining({ capability: 'source_control' }),
+        }),
+      }),
+    );
+  });
+
+  it('treats null optional capability arguments as omitted', async () => {
+    let toolResult: unknown;
+    const offerCapability = vi.fn(async (input) => input);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        toolResult = await invokeTool(nativeToolNames.offerCapability, {
+          capability: 'source_control',
+          message: 'Connect source control so I can work with your code.',
+          provider: null,
+          integrationIds: null,
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'session-1',
+      },
+      adapter: callbacks({ offerCapability }),
+    });
+
+    expect(toolResult).toEqual({
+      success: true,
+      offerId: expect.any(String),
+      closed: true,
+    });
+    expect(offerCapability).toHaveBeenCalledWith({
+      capability: 'source_control',
+      message: 'Connect source control so I can work with your code.',
+    });
+  });
+
+  it('deduplicates an unresolved offer for the same capability', async () => {
+    mocks.executeDb.mockResolvedValueOnce([{ offer_id: 'cap:existing' }]);
+    let toolResult: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        toolResult = await invokeTool(nativeToolNames.offerCapability, {
+          capability: 'sandbox',
+          message: 'Set up a workspace so I can run this work.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'session-1',
+      },
+      adapter: callbacks({ offerCapability: vi.fn(async (input) => input) }),
+    });
+
+    expect(toolResult).toEqual({
+      success: true,
+      duplicate: true,
+      offerId: 'cap:existing',
+      closed: true,
+    });
+    expect(
+      mocks.upsertMessage.mock.calls.some(
+        ([input]) =>
+          input.message.eventType === ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+      ),
+    ).toBe(false);
   });
 
   it.each(['web', 'slack'] as const)(
@@ -2052,7 +2196,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.listSessionSecretApprovals).not.toHaveBeenCalled();
     },
   );
-
   it.each([undefined, { documents: { answers: ['Notion'] } }])(
     'resolves integration discovery with optional prose preferences: %j',
     async (setupIntegrationAnswers) => {
@@ -2129,6 +2272,60 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
+  it('upgrades a legacy setup category question to the trusted integration card', async () => {
+    const questions = [
+      {
+        id: 'setup-integrations',
+        header: 'Your tools',
+        question: 'Connect useful tools, or continue.',
+        isOther: false,
+        isSecret: false,
+        options: [{ id: 'notion', label: 'Notion', description: 'Documents' }],
+      },
+    ];
+    const requestUserInput = vi.fn();
+    const resolveUserInputPreset = vi.fn(async () => questions);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.requestUserInput, {
+          questions: [
+            {
+              id: 'setup-tools-documents',
+              header: 'Your tools',
+              question: 'Where do you keep team documents?',
+              options: [{ label: 'Notion', description: 'Documents' }],
+            },
+          ],
+          preset: null,
+          setupIntegrationAnswers: [],
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'setup-session-1',
+      },
+      turnSource: 'platform_event',
+      platformEventKind: 'setup',
+      platformEventVisibility: 'required',
+      setupSession: true,
+      adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+    });
+
+    expect(resolveUserInputPreset).toHaveBeenCalledWith('setup_integrations');
+    expect(requestUserInput).toHaveBeenCalledWith({
+      requestId: expect.any(String),
+      preset: 'setup_integrations',
+      questions,
+    });
+  });
+
   it('closes a server-completed setup preset without persisting a pending request', async () => {
     let toolResult: unknown;
     const requestUserInput = vi.fn();
@@ -2170,6 +2367,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }),
       }),
     );
+  });
+
+  it('accepts the source-control preset with model-emitted placeholder questions', async () => {
+    let toolResult: unknown;
+    const requestUserInput = vi.fn();
+    const resolveUserInputPreset = vi.fn(async () => []);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        toolResult = await invokeTool(nativeToolNames.requestUserInput, {
+          preset: 'setup_source_control',
+          questions: [],
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'setup-session-1',
+      },
+      turnSource: 'platform_event',
+      platformEventKind: 'setup',
+      platformEventVisibility: 'required',
+      setupSession: true,
+      adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+    });
+
+    expect(toolResult).toEqual({
+      success: true,
+      completed: true,
+      closed: true,
+    });
+    expect(resolveUserInputPreset).toHaveBeenCalledWith('setup_source_control');
+    expect(requestUserInput).not.toHaveBeenCalled();
   });
 
   it.each(['setup_starter_tasks', undefined])(

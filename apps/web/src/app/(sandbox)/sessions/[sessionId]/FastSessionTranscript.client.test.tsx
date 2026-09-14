@@ -31,6 +31,12 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/sessions/session-1',
 }));
 
+vi.mock('./CapabilityOfferCard', () => ({
+  CapabilityOfferCard: ({ offer }: { offer: { capability: string } }) => (
+    <div>Capability offer: {offer.capability}</div>
+  ),
+}));
+
 const {
   replyMutate,
   startGoalMutate,
@@ -1400,6 +1406,42 @@ describe('FastSessionTranscript', () => {
     expect(document.querySelector('.lucide-git-branch')).toBeInTheDocument();
   });
 
+  it('renders integration discovery with the requested status copy and plug icon', () => {
+    const receipt = textMessage({
+      id: 'integration-receipt',
+      role: 'user',
+      text: 'Asked about integrations.',
+      ts: 1,
+      inputKind: SETUP_RECEIPT_INPUT_KIND,
+      userId: 'user-1',
+    });
+    receipt.payload = {
+      setupReceipt: {
+        kind: 'integration_discovery',
+        presentation: {
+          label: 'Asked about integrations',
+          iconKey: 'plug',
+        },
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[receipt]}
+        owner={{
+          userId: 'user-1',
+          name: 'Test User',
+          email: 'test@example.com',
+          imageUrl: 'https://example.com/avatar.png',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Asked about integrations')).toBeInTheDocument();
+    expect(document.querySelector('.lucide-plug')).toBeInTheDocument();
+  });
+
   it('removes the running task indicator when the count returns to zero', () => {
     const { rerender } = render(
       <SessionRunningTaskCountContext.Provider value={1}>
@@ -1743,53 +1785,145 @@ describe('FastSessionTranscript', () => {
     expect(screen.getAllByText('Already persisted')).toHaveLength(1);
   });
 
-  it('waits for the first visible assistant message before showing timeline extras', () => {
+  it('renders a trusted capability offer without waiting for another message', () => {
     render(
       <FastSessionTranscript
         sessionId="session-1"
-        initialMessages={[]}
-        timelineExtras={<div>Connect source control</div>}
+        canReply
+        initialMessages={[
+          {
+            id: 'source-control-offer',
+            eventId: 'turn-1:capability-offer:0',
+            turnId: 'turn-1',
+            turnSeq: 1,
+            ts: 1,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+            role: 'assistant',
+            contentBlocks: [{ type: 'text', text: 'Connect your code.' }],
+            metadata: { visibleInTranscript: true },
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              message: 'Connect your code.',
+              status: 'pending',
+            },
+            source: 'web',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          },
+        ]}
       />,
     );
 
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
-    expect(screen.queryByText('Connect source control')).toBeNull();
+    expect(
+      screen.getByText('Capability offer: source_control'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Connect your code.')).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toBeInTheDocument();
+  });
 
-    act(() => {
-      FakeEventSource.instances[0]!.emit('messages', {
-        messages: [
-          textMessage({
-            id: 'hidden-assistant-activity',
-            role: 'assistant',
-            text: 'Internal setup activity',
-            ts: 1,
-            visible: false,
-          }),
-        ],
-      });
+  it('hides capability tool activity when the offer is represented by its message and card', () => {
+    const toolResult = (
+      id: string,
+      status: 'failed' | 'completed',
+      ts: number,
+    ) => ({
+      ...textMessage({
+        id,
+        role: 'assistant',
+        text: `${status} offer capability`,
+        ts,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool' as const,
+      turnId: 'turn-1',
+      payload: {
+        toolCallId: id,
+        title: 'offer_capability',
+        toolName: 'offer_capability',
+        kind: 'communication',
+        status,
+        rawInput: { arguments: { capability: 'source_control' } },
+      },
     });
 
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
-    expect(screen.queryByText('Connect source control')).toBeNull();
-
-    act(() => {
-      FakeEventSource.instances[0]!.emit('messages', {
-        messages: [
-          textMessage({
-            id: 'assistant-introduction',
-            role: 'assistant',
-            text: 'First, let’s connect your source code.',
-            ts: 2,
-          }),
-        ],
-      });
-    });
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          toolResult('failed-offer', 'failed', 1),
+          {
+            ...textMessage({
+              id: 'source-control-offer',
+              role: 'assistant',
+              text: 'Hi, I can help with your code.',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+            turnId: 'turn-1',
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              message: 'Hi, I can help with your code.',
+              status: 'pending',
+            },
+          },
+          toolResult('completed-offer', 'completed', 3),
+        ]}
+      />,
+    );
 
     expect(
-      screen.getByText('First, let’s connect your source code.'),
+      screen.getByText('Hi, I can help with your code.'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Connect source control')).toBeInTheDocument();
-    expect(screen.queryByText('Thinking')).toBeNull();
+    expect(
+      screen.getByText('Capability offer: source_control'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('failed offer capability')).toBeNull();
+    expect(screen.queryByText('completed offer capability')).toBeNull();
+  });
+
+  it('keeps a capability response in history and removes the resolved card', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...textMessage({
+              id: 'source-control-offer',
+              role: 'assistant',
+              text: 'Connect your code.',
+              ts: 1,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              message: 'Connect your code.',
+              status: 'pending',
+            },
+          },
+          {
+            ...textMessage({
+              id: 'source-control-response',
+              role: 'user',
+              text: 'Not now: source control.',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse,
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              resolution: 'dismissed',
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByText('Capability offer: source_control')).toBeNull();
+    expect(screen.getByText('Not now: source control.')).toBeInTheDocument();
   });
 
   it('shows Thinking after a follow-up until streamed output arrives', async () => {
@@ -2748,12 +2882,16 @@ describe('FastSessionTranscript', () => {
       });
     });
 
-    expect(
-      screen.getByPlaceholderText('Accept the next suggestion'),
-    ).toHaveFocus();
-    expect(
-      screen.getByRole('button', { name: 'Insert suggested message' }),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByPlaceholderText('Accept the next suggestion'),
+      ).toHaveFocus(),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Insert suggested message' }),
+      ).toBeInTheDocument(),
+    );
   });
 
   it('persists model selections immediately and uses them for the next reply', async () => {

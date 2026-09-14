@@ -954,6 +954,79 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     });
   });
 
+  it('preserves bounded trusted capability offer arguments', async () => {
+    const offerTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability,
+    )!;
+    const request = {
+      capability: 'source_control',
+      message: 'Connect GitHub so I can retrieve the event from your code.',
+      provider: 'github',
+    };
+    const parsed = zod.z
+      .object(offerTool.args as Record<string, never>)
+      .parse(request);
+    const execute = offerTool.execute as (
+      args: unknown,
+      context: unknown,
+    ) => Promise<{ name: string; args: unknown }>;
+    expect(await execute(parsed, {})).toEqual({
+      name: 'offer_capability',
+      args: request,
+    });
+  });
+
+  it('tolerates null placeholders for optional capability offer arguments', async () => {
+    const offerTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability,
+    )!;
+    const parsed = zod.z.object(offerTool.args as Record<string, never>).parse({
+      capability: 'source_control',
+      message: 'Connect source control so I can work with your code.',
+      provider: null,
+      integrationIds: null,
+    });
+    const execute = offerTool.execute as (
+      args: unknown,
+      context: unknown,
+    ) => Promise<{ name: string; args: Record<string, unknown> }>;
+
+    const forwarded = await execute(parsed, {});
+
+    expect(forwarded.name).toBe('offer_capability');
+    expect(forwarded.args.provider).toBeUndefined();
+    expect(forwarded.args.integrationIds).toBeUndefined();
+  });
+
+  it('defaults omitted display metadata on structured questions', async () => {
+    const inputTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
+    )!;
+    const parsed = zod.z.object(inputTool.args as Record<string, never>).parse({
+      // Models sometimes send unused optional values as placeholders. This
+      // mirrors the setup payload from the regression report.
+      preset: null,
+      setupIntegrationAnswers: [],
+      questions: [
+        {
+          id: 'team-knowledge',
+          question: 'Where do you keep team documents and knowledge?',
+          options: [{ label: 'Notion' }],
+        },
+      ],
+    });
+    expect(parsed).toMatchObject({
+      questions: [
+        {
+          header: 'Question',
+          options: [{ label: 'Notion', description: 'Select this option.' }],
+        },
+      ],
+    });
+    expect(parsed.preset).toBeUndefined();
+    expect(parsed.setupIntegrationAnswers).toBeUndefined();
+  });
+
   it('rejects a bare union or object as args, the shape that broke OpenAI models', () => {
     const { z } = zod;
     const question = z.object({ id: z.string() });

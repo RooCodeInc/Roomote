@@ -39,6 +39,7 @@ import {
   getFastSessionComposerSuggestionCommand,
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
+  resolveFastSessionCapabilityOfferCommand,
   replyToFastSessionCommand,
   startFastSessionGoalCommand,
   startFastSessionCommand,
@@ -48,6 +49,7 @@ import {
 import {
   replyToFastSessionInputSchema,
   fastSessionPrReviewActionInputSchema,
+  fastSessionCapabilityOfferResponseInputSchema,
   startFastSessionInputSchema,
   updateFastSessionModelSelectionInputSchema,
 } from '../commands/fast-sessions/input';
@@ -334,6 +336,7 @@ import {
   notifySetupSourceControlSynchronized,
   persistSetupRecommendationApplicationReceipt,
   reconcileSetupPlatformEvents,
+  skipSetupSourceControlCommand,
   submitSetupSessionUserInputCommand,
 } from '../commands/setup/setup-session';
 import { SETUP_STARTER_TASK_IDS } from '@/lib/setup-starter-tasks';
@@ -2714,6 +2717,12 @@ export const appRouter = createRouter({
       getSetupSessionStatusCommand(auth),
     ),
 
+    skipSourceControl: protectedProcedure
+      .input(z.object({ sessionId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        skipSetupSourceControlCommand(auth, input.sessionId),
+      ),
+
     submitSessionUserInput: protectedProcedure
       .input(
         z.object({
@@ -3045,6 +3054,11 @@ export const appRouter = createRouter({
       .input(fastSessionPrReviewActionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         handleFastSessionPrReviewActionCommand(auth, input),
+      ),
+    resolveCapabilityOffer: protectedProcedure
+      .input(fastSessionCapabilityOfferResponseInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        resolveFastSessionCapabilityOfferCommand(auth, input),
       ),
     updateModelSelection: protectedProcedure
       .input(updateFastSessionModelSelectionInputSchema)

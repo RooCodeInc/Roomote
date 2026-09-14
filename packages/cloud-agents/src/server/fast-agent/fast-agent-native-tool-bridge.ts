@@ -35,6 +35,7 @@ import {
   SESSION_WAKEUP_SCHEDULE_MAX_LENGTH,
   type FastAgentSurface,
   FAST_EXECUTION,
+  FAST_AGENT_CAPABILITY_IDS,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -702,20 +703,35 @@ export default {
   args: {
     questions: z.array(z.object({
       id: z.string().min(1).max(80),
-      header: z.string().min(1).max(60),
+      header: z.string().min(1).max(60).optional().default("Question"),
       question: z.string().min(1).max(500),
       isOther: z.boolean().optional().describe("Allow a free-text Other answer"),
       isSecret: z.boolean().optional().describe("Mask the answer in user-visible history"),
       options: z.array(z.object({
         label: z.string().min(1).max(140),
-        description: z.string().min(1).max(500),
+        description: z.string().min(1).max(500).optional().default("Select this option."),
       })).min(1).max(12).optional().describe("Present options as choices; omit for free-text"),
       multiple: z.boolean().optional().describe("Allow more than one option; defaults to false"),
     })).min(1).max(4).optional().describe("Structured questions to ask; omit when using a preset"),
-    preset: z.enum(["setup_starter_tasks", "setup_integrations"]).optional().describe("Use a trusted setup preset instead of questions"),
-    setupIntegrationAnswers: z.record(z.string(), z.object({ answers: z.array(z.string()) })).optional().describe("Only for setup_integrations: tools already named by the user, keyed by category ID from the setup snapshot"),
+    preset: z.preprocess((value) => value === null ? undefined : value, z.enum(["setup_source_control", "setup_starter_tasks", "setup_integrations"]).optional()).describe("Use a trusted setup preset instead of questions"),
+    setupIntegrationAnswers: z.preprocess((value) => value === null || Array.isArray(value) ? undefined : value, z.record(z.string(), z.object({ answers: z.array(z.string()) })).optional()).describe("Only for setup_integrations: tools already named by the user, keyed by category ID from the setup snapshot"),
   },
   execute: (args, context) => invoke("request_user_input", args, context),
+}
+`,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Present a trusted, non-blocking Roomote capability card in a web Session. Use it when the user's current goal needs an unavailable capability or when the setup guidance recommends the next capability. A previous Not now choice does not prevent a later relevant offer.",
+  args: {
+    capability: z.enum(${JSON.stringify(FAST_AGENT_CAPABILITY_IDS)}),
+    message: z.string().min(1).max(500).describe("Concise user-facing reason this capability is useful now"),
+    provider: z.preprocess((value) => value === null ? undefined : value, z.enum(["github", "gitlab", "gitea", "bitbucket", "ado"]).optional()).describe("Optional source-control provider explicitly implied by the request"),
+    integrationIds: z.preprocess((value) => value === null ? undefined : value, z.array(z.string().min(1)).max(20).optional()).describe("Optional integration IDs from the capability snapshot"),
+  },
+  execute: (args, context) => invoke("offer_capability", args, context),
 }
 `,
   };

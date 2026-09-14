@@ -27,6 +27,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   spillRead: 'spill_read',
   stopTask: 'stop_task',
   requestUserInput: 'request_user_input',
+  offerCapability: 'offer_capability',
   requestWithSessionSecret: 'request_with_session_secret',
   prepareSessionSecret: 'prepare_session_secret',
   listSessionSecrets: 'list_session_secrets',
@@ -118,6 +119,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
+    kind: ACP_TOOL_KINDS.communication,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability,
     kind: ACP_TOOL_KINDS.communication,
   },
 ] as const satisfies readonly {
