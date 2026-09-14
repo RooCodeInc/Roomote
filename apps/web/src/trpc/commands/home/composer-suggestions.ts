@@ -21,8 +21,8 @@ class HomeComposerSuggestionsUnavailableError extends Error {}
 
 type CacheStatus = 'not_checked' | 'hit' | 'miss';
 
-function roundMs(value: number | null): number | null {
-  return value === null ? null : Math.round(value * 10) / 10;
+function formatMetric(value: number | null): string {
+  return value === null ? 'n/a' : String(Math.round(value * 10) / 10);
 }
 
 /** Build home placeholders from recent task memories, failing soft to none. */
@@ -133,23 +133,25 @@ export async function getHomeComposerSuggestionsCommand(
   } finally {
     try {
       logger.info(
-        {
-          event: 'home_composer_suggestions_timing',
-          outcome,
-          total_ms: roundMs(performance.now() - requestStartedAt),
-          preference_guard_ms: roundMs(preferenceGuardMs),
-          eligible_reference_lookup_ms: roundMs(eligibleReferenceLookupMs),
-          context_cache_ms: roundMs(contextCacheMs),
-          context_cache_status: contextCacheStatus,
-          brain_reads_ms: roundMs(brainReadsMs),
-          generation_cache_ms: roundMs(generationCacheMs),
-          generation_cache_status: generationCacheStatus,
-          helper_generation_ms: roundMs(helperGenerationMs),
-          eligible_reference_count: eligibleReferenceCount,
-          readable_memory_count: readableMemoryCount,
-          suggestion_count: suggestionCount,
-        },
-        'Home composer suggestions timing',
+        `[home-suggestion-timing] outcome=${outcome} total_ms=${formatMetric(
+          performance.now() - requestStartedAt,
+        )} preference_guard_ms=${formatMetric(
+          preferenceGuardMs,
+        )} eligible_reference_lookup_ms=${formatMetric(
+          eligibleReferenceLookupMs,
+        )} context_cache_status=${contextCacheStatus} context_cache_ms=${formatMetric(
+          contextCacheMs,
+        )} brain_reads_ms=${formatMetric(
+          brainReadsMs,
+        )} generation_cache_status=${generationCacheStatus} generation_cache_ms=${formatMetric(
+          generationCacheMs,
+        )} helper_generation_ms=${formatMetric(
+          helperGenerationMs,
+        )} eligible_reference_count=${formatMetric(
+          eligibleReferenceCount,
+        )} readable_memory_count=${formatMetric(
+          readableMemoryCount,
+        )} suggestion_count=${suggestionCount}`,
       );
     } catch {
       // Timing instrumentation must never change the suggestion response.

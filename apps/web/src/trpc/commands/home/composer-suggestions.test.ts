@@ -156,11 +156,7 @@ describe('getHomeComposerSuggestionsCommand', () => {
     expect(mockReadBrainTaskMemories).not.toHaveBeenCalled();
     expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
     expect(mockLoggerInfo).toHaveBeenCalledWith(
-      expect.objectContaining({
-        outcome: 'flag_disabled',
-        context_cache_status: 'not_checked',
-      }),
-      'Home composer suggestions timing',
+      expect.stringContaining('outcome=flag_disabled total_ms='),
     );
   });
 
@@ -185,8 +181,7 @@ describe('getHomeComposerSuggestionsCommand', () => {
     });
     expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
     expect(mockLoggerInfo).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: 'no_eligible_memories' }),
-      'Home composer suggestions timing',
+      expect.stringContaining('outcome=no_eligible_memories'),
     );
   });
 
@@ -257,12 +252,9 @@ describe('getHomeComposerSuggestionsCommand', () => {
     expect(mockReadBrainTaskMemories).toHaveBeenCalledTimes(2);
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(2);
     expect(mockLoggerInfo).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        outcome: 'fallback',
-        context_cache_status: 'miss',
-        generation_cache_status: 'miss',
-      }),
-      'Home composer suggestions timing',
+      expect.stringMatching(
+        /outcome=fallback .*context_cache_status=miss .*generation_cache_status=miss/u,
+      ),
     );
     consoleErrorSpy.mockRestore();
   });
@@ -304,15 +296,9 @@ describe('getHomeComposerSuggestionsCommand', () => {
     expect(mockReadBrainTaskMemories).toHaveBeenCalledTimes(1);
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(1);
     expect(mockLoggerInfo).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        outcome: 'success',
-        context_cache_status: 'hit',
-        brain_reads_ms: null,
-        generation_cache_status: 'not_checked',
-        helper_generation_ms: null,
-        readable_memory_count: null,
-      }),
-      'Home composer suggestions timing',
+      expect.stringMatching(
+        /outcome=success .*context_cache_status=hit .*brain_reads_ms=n\/a .*generation_cache_status=not_checked .*helper_generation_ms=n\/a .*readable_memory_count=n\/a/u,
+      ),
     );
 
     for (const cacheKey of mockCacheEntries.keys()) {
@@ -326,13 +312,9 @@ describe('getHomeComposerSuggestionsCommand', () => {
     expect(mockReadBrainTaskMemories).toHaveBeenCalledTimes(2);
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(1);
     expect(mockLoggerInfo).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        outcome: 'success',
-        context_cache_status: 'miss',
-        generation_cache_status: 'hit',
-        helper_generation_ms: null,
-      }),
-      'Home composer suggestions timing',
+      expect.stringMatching(
+        /outcome=success .*context_cache_status=miss .*generation_cache_status=hit .*helper_generation_ms=n\/a/u,
+      ),
     );
   });
 
@@ -383,23 +365,7 @@ describe('getHomeComposerSuggestionsCommand', () => {
     await getHomeComposerSuggestionsCommand(auth);
 
     expect(mockLoggerInfo).toHaveBeenLastCalledWith(
-      {
-        event: 'home_composer_suggestions_timing',
-        outcome: 'success',
-        total_ms: 17,
-        preference_guard_ms: 2,
-        eligible_reference_lookup_ms: 3,
-        context_cache_ms: 12,
-        context_cache_status: 'miss',
-        brain_reads_ms: 5,
-        generation_cache_ms: 7,
-        generation_cache_status: 'miss',
-        helper_generation_ms: 7,
-        eligible_reference_count: 1,
-        readable_memory_count: 1,
-        suggestion_count: 5,
-      },
-      'Home composer suggestions timing',
+      '[home-suggestion-timing] outcome=success total_ms=17 preference_guard_ms=2 eligible_reference_lookup_ms=3 context_cache_status=miss context_cache_ms=12 brain_reads_ms=5 generation_cache_status=miss generation_cache_ms=7 helper_generation_ms=7 eligible_reference_count=1 readable_memory_count=1 suggestion_count=5',
     );
     const serializedLog = JSON.stringify(mockLoggerInfo.mock.lastCall);
     expect(serializedLog).not.toContain('user-1');
