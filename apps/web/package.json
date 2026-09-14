@@ -19,7 +19,7 @@
     "dev:preview": "pnpm docs:assets && pnpm automation:icons && dotenvx run -f ../../.env.local -- node ./scripts/dev-preview.mjs",
     "build": "pnpm docs:assets && pnpm automation:icons && NODE_OPTIONS='--max-old-space-size=4096' node ./scripts/run-with-app-env.mjs --default-env production -- next build",
     "build:debug": "pnpm docs:assets && NODE_OPTIONS='--max-old-space-size=4096' node ./scripts/run-with-app-env.mjs --default-env production -- next build --experimental-debug-memory-usage",
-    "start": "node ./scripts/run-with-app-env.mjs --default-env production -- next start",
+    "start": "node ./scripts/start-server.mjs",
     "clean": "rimraf .next .turbo out",
     "trigger-task-suggestions": "tsx scripts/trigger-task-suggestions.ts",
     "storybook": "storybook dev -p 6006 --host ${STORYBOOK_HOST:-localhost}",

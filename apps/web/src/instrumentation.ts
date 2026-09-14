@@ -25,9 +25,17 @@ export async function register() {
 
     await bootstrapWebRuntimeEnv();
 
-    const { installWebFastAgentGracefulShutdown } =
-      await import('@/lib/server/fast-agent-graceful-shutdown');
-    installWebFastAgentGracefulShutdown();
+    const {
+      installWebFastAgentGracefulShutdown,
+      WEB_FAST_AGENT_SHUTDOWN_READY,
+    } = await import('@/lib/server/fast-agent-graceful-shutdown');
+    if (process.env.ROOMOTE_WEB_SHUTDOWN_COORDINATED === 'true') {
+      installWebFastAgentGracefulShutdown({
+        notifyReady: (signal) => {
+          process.send?.({ type: WEB_FAST_AGENT_SHUTDOWN_READY, signal });
+        },
+      });
+    }
 
     // Non-fatal, detached reconciliation of E2B/Daytona/Blaxel artifacts.
     // A release image or worker-runtime schema change creates a replacement

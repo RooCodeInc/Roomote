@@ -19,8 +19,9 @@ vi.mock('@/lib/sentry-config', () => ({
 }));
 
 vi.mock('@/lib/server/fast-agent-graceful-shutdown', () => ({
-  installWebFastAgentGracefulShutdown: () =>
-    installWebFastAgentGracefulShutdownMock(),
+  WEB_FAST_AGENT_SHUTDOWN_READY: 'roomote:web-fast-agent-shutdown-ready',
+  installWebFastAgentGracefulShutdown: (options: unknown) =>
+    installWebFastAgentGracefulShutdownMock(options),
 }));
 
 vi.mock('@sentry/nextjs', () => ({
@@ -30,10 +31,13 @@ vi.mock('@sentry/nextjs', () => ({
 
 describe('web instrumentation', () => {
   const originalNextRuntime = process.env.NEXT_RUNTIME;
+  const originalCoordinatedShutdown =
+    process.env.ROOMOTE_WEB_SHUTDOWN_COORDINATED;
 
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    delete process.env.ROOMOTE_WEB_SHUTDOWN_COORDINATED;
   });
 
   afterAll(() => {
@@ -41,6 +45,12 @@ describe('web instrumentation', () => {
       delete process.env.NEXT_RUNTIME;
     } else {
       process.env.NEXT_RUNTIME = originalNextRuntime;
+    }
+    if (originalCoordinatedShutdown === undefined) {
+      delete process.env.ROOMOTE_WEB_SHUTDOWN_COORDINATED;
+    } else {
+      process.env.ROOMOTE_WEB_SHUTDOWN_COORDINATED =
+        originalCoordinatedShutdown;
     }
   });
 
@@ -72,13 +82,16 @@ describe('web instrumentation', () => {
     );
   });
 
-  it('installs Fast turn handoff in the Node runtime', async () => {
+  it('installs Fast handoff only in the coordinated Next child', async () => {
     process.env.NEXT_RUNTIME = 'nodejs';
+    process.env.ROOMOTE_WEB_SHUTDOWN_COORDINATED = 'true';
 
     const instrumentation = await import('../instrumentation');
     await instrumentation.register();
 
-    expect(installWebFastAgentGracefulShutdownMock).toHaveBeenCalledOnce();
+    expect(installWebFastAgentGracefulShutdownMock).toHaveBeenCalledWith({
+      notifyReady: expect.any(Function),
+    });
   });
 
   it('initializes edge runtime Sentry with explicit release attribution', async () => {

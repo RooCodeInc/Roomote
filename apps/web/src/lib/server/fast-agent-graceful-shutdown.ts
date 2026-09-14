@@ -16,7 +16,13 @@ export function resolveWebShutdownDrainMs(
 
 type WebShutdownOptions = FastAgentShutdownDrainDeps & {
   drainMs?: number;
+  notifyReady?: (signal: NodeJS.Signals) => void;
 };
+
+export const WEB_FAST_AGENT_SHUTDOWN_REQUEST =
+  'roomote:web-fast-agent-shutdown';
+export const WEB_FAST_AGENT_SHUTDOWN_READY =
+  'roomote:web-fast-agent-shutdown-ready';
 
 export async function gracefullyShutdownWeb(
   signal: NodeJS.Signals,
@@ -41,21 +47,27 @@ export function installWebFastAgentGracefulShutdown(
   options: WebShutdownOptions = {},
 ): () => void {
   let shuttingDown = false;
-  const handlers = new Map<NodeJS.Signals, () => void>();
-
-  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-    const handler = () => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      void gracefullyShutdownWeb(signal, options);
-    };
-    handlers.set(signal, handler);
-    process.on(signal, handler);
-  }
+  const handler = (message: unknown) => {
+    if (
+      shuttingDown ||
+      !message ||
+      typeof message !== 'object' ||
+      !('type' in message) ||
+      message.type !== WEB_FAST_AGENT_SHUTDOWN_REQUEST ||
+      !('signal' in message) ||
+      (message.signal !== 'SIGTERM' && message.signal !== 'SIGINT')
+    ) {
+      return;
+    }
+    const signal = message.signal;
+    shuttingDown = true;
+    void gracefullyShutdownWeb(signal, options).then(() => {
+      options.notifyReady?.(signal);
+    });
+  };
+  process.on('message', handler);
 
   return () => {
-    for (const [signal, handler] of handlers) {
-      process.off(signal, handler);
-    }
+    process.off('message', handler);
   };
 }
