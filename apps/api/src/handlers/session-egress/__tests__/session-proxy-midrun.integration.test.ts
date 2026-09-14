@@ -7,6 +7,7 @@ import {
   rmSync,
   statSync,
   writeFileSync,
+  existsSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -453,30 +454,63 @@ it('denies ownerless/user-only or stale-generation synchronization and future ac
   ).rejects.toThrow('unavailable');
 });
 
-it.skipIf(process.env.SESSION_PROXY_REAL_HARNESS_TEST !== '1')(
-  'runs first and second approvals through an actual persistent OpenCode harness and piped client commands',
-  async () => {
+const shellCases = [
+  { name: 'platform default', shell: undefined, configShell: undefined },
+  { name: 'SHELL sh', shell: '/bin/sh', configShell: undefined },
+  { name: 'SHELL bash', shell: '/bin/bash', configShell: undefined },
+  ...(existsSync('/bin/zsh')
+    ? [{ name: 'SHELL zsh', shell: '/bin/zsh', configShell: undefined }]
+    : []),
+  {
+    name: 'config shell overrides SHELL',
+    shell: '/bin/bash',
+    configShell: '/bin/sh',
+  },
+];
+it.skipIf(process.env.SESSION_PROXY_REAL_HARNESS_TEST !== '1').each(shellCases)(
+  'runs first and second approvals through an actual persistent OpenCode harness: $name',
+  async ({ shell, configShell }) => {
     const expression =
-      'JSON.stringify({stdin:require("node:fs").readlinkSync("/proc/self/fd/0"),services:JSON.parse(process.env.ROOMOTE_SESSION_EGRESS_SERVICES||"[]").map(s=>({origin:s.origin,configured:Boolean(process.env[s.envName])}))})';
+      'JSON.stringify({stdin:(s=>s.isFIFO()?"pipe":s.isSocket()?"socket":"other")(require("node:fs").fstatSync(0)),shell:process.env.ROOMOTE_TEST_SHELL,stale:process.env.ROOMOTE_SERVICE_TOKEN_STALE??null,keep:process.env.KEEP_ME,services:JSON.parse(process.env.ROOMOTE_SESSION_EGRESS_SERVICES||"[]").map(s=>({origin:s.origin,configured:Boolean(process.env[s.envName])}))})';
     const program = `const r=require('node:child_process').spawnSync(process.execPath,['-p',${JSON.stringify(expression)}],{env:process.env,stdio:['pipe','pipe','pipe'],encoding:'utf8'});if(r.status!==0)throw new Error('client failed');process.stdout.write(r.stdout)`;
     const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
     const fixture = await startOpenCodeCommandFixture(
       home,
-      modelEnv,
-      `${quote(process.execPath)} -e ${quote(program)}`,
+      {
+        ...modelEnv,
+        ...(shell ? { SHELL: shell } : {}),
+        ROOMOTE_SERVICE_TOKEN_STALE: 'rses_stale',
+        KEEP_ME: 'unrelated',
+      },
+      `ROOMOTE_TEST_SHELL="$0" ${quote(process.execPath)} -e ${quote(program)}`,
+      { shell: configShell },
     );
     try {
       const initial = JSON.parse((await fixture.run()).trim());
-      expect(initial.stdin).toMatch(/^(socket|pipe):/);
+      expect(initial.stdin).toMatch(/^(socket|pipe)$/);
+      expect(initial.stale).toBeNull();
+      expect(initial.keep).toBe('unrelated');
+      if (configShell || shell)
+        expect(String(initial.shell).split('/').at(-1)).toBe(
+          (configShell ?? shell)!.split('/').at(-1),
+        );
       expect(initial.services).toEqual([]);
       await approve('First');
       await sync();
-      expect(JSON.parse((await fixture.run()).trim()).services).toEqual([
+      const first = JSON.parse((await fixture.run()).trim());
+      expect(first.stale).toBeNull();
+      expect(first.keep).toBe('unrelated');
+      expect(first.shell).toBe(initial.shell);
+      expect(first.services).toEqual([
         { origin: 'https://first.example.com', configured: true },
       ]);
       await approve('Second');
       await sync();
-      expect(JSON.parse((await fixture.run()).trim()).services).toEqual([
+      const second = JSON.parse((await fixture.run()).trim());
+      expect(second.stale).toBeNull();
+      expect(second.keep).toBe('unrelated');
+      expect(second.shell).toBe(initial.shell);
+      expect(second.services).toEqual([
         { origin: 'https://first.example.com', configured: true },
         { origin: 'https://second.example.com', configured: true },
       ]);

@@ -29,7 +29,14 @@ export function writeSessionProxyEnvFile(
   const selected: Record<string, string> = {};
   const lines = [
     '# Worker-managed Session proxy configuration. Contains scoped credentials.',
-    'for __roomote_service in "${!ROOMOTE_SERVICE_TOKEN_@}"; do unset "$__roomote_service"; done',
+    'command -p -v env >/dev/null && command -p -v sed >/dev/null || return 1',
+    // A here-document keeps the loop in the selected shell and avoids both
+    // Bash-only expansion and shell-specific word splitting (including custom IFS).
+    'while IFS= read -r __roomote_service; do',
+    '  if [ -n "$__roomote_service" ]; then unset "$__roomote_service" || return 1; fi',
+    'done <<__ROOMOTE_SERVICE_NAMES__',
+    "$(command -p env | command -p sed -n 's/^\\(ROOMOTE_SERVICE_TOKEN_[A-Z0-9_]*\\)=.*$/\\1/p')",
+    '__ROOMOTE_SERVICE_NAMES__',
     'unset __roomote_service ROOMOTE_SESSION_PROXY_URL ROOMOTE_SESSION_PROXY_CA_FILE ROOMOTE_SESSION_EGRESS_SERVICES ROOMOTE_SESSION_EGRESS_ADMISSION_MODE ROOMOTE_SESSION_PROXY_CAPABILITY_EXPIRES_AT',
   ];
   for (const [name, value] of Object.entries(environment)) {

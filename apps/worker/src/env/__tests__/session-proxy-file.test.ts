@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeSessionProxyEnvFile } from '../session-proxy-file';
@@ -68,3 +68,38 @@ it('adds a second grant and removes stale scoped values without changing the par
   writeSessionProxyEnvFile(path, { ROOMOTE_SERVICE_TOKEN_B: 'rses_second' });
   expect(read()).toEqual({ b: 'rses_second', keep: 'unrelated' });
 });
+
+it.each([
+  '/bin/sh',
+  '/bin/bash',
+  ...(existsSync('/bin/zsh') ? ['/bin/zsh'] : []),
+])(
+  'loads portably in %s without changing shell semantics or unrelated env',
+  (shell) => {
+    const { path } = fixture();
+    writeSessionProxyEnvFile(path, { ROOMOTE_SERVICE_TOKEN_A: 'rses_current' });
+    const result = JSON.parse(
+      execFileSync(
+        shell,
+        [
+          '-c',
+          'IFS=:; . "$1" || exit 1; export TEST_IFS="$IFS"; "$2" -p \'JSON.stringify({a:process.env.ROOMOTE_SERVICE_TOKEN_A,old:process.env.ROOMOTE_SERVICE_TOKEN_OLD,old2:process.env.ROOMOTE_SERVICE_TOKEN_OLD_TWO,keep:process.env.KEEP_ME,ifs:process.env.TEST_IFS})\'',
+          'loader-test',
+          path,
+          process.execPath,
+        ],
+        {
+          env: {
+            PATH: process.env.PATH,
+            KEEP_ME: 'unrelated',
+            ROOMOTE_SERVICE_TOKEN_OLD: 'rses_old',
+            ROOMOTE_SERVICE_TOKEN_OLD_TWO: 'rses_old_two',
+          },
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        },
+      ),
+    );
+    expect(result).toEqual({ a: 'rses_current', keep: 'unrelated', ifs: ':' });
+  },
+);

@@ -10,6 +10,7 @@ export async function startOpenCodeCommandFixture(
   home: string,
   environment: NodeJS.ProcessEnv,
   command: string,
+  options: { shell?: string } = {},
 ) {
   let sequence = 0;
   const received: Record<string, unknown>[] = [];
@@ -157,6 +158,7 @@ export async function startOpenCodeCommandFixture(
         OPENCODE_DISABLE_MODELS_FETCH: '1',
         OPENCODE_DISABLE_DEFAULT_PLUGINS: '1',
         OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          ...(options.shell ? { shell: options.shell } : {}),
           share: 'disabled',
           enabled_providers: ['anthropic'],
           model: 'anthropic/claude-sonnet-4-5',
