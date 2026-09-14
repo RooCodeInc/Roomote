@@ -150,7 +150,7 @@ type HomeComposerSuggestionsResult = {
   suggestions: string[];
 };
 
-export type HomeComposerSuggestionGenerationTiming = {
+type HomeComposerSuggestionGenerationTiming = {
   cacheStatus: 'hit' | 'miss';
   cacheMs: number;
   helperMs: number | null;
