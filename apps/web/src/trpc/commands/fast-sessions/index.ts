@@ -63,6 +63,7 @@ import {
   type ReasoningEffort,
 } from '@roomote/types';
 import type { FastAgentTurnAdapter } from '@roomote/cloud-agents/server';
+import { refreshSessionPresence } from '@roomote/redis';
 import { captureEvent } from '@roomote/telemetry/server';
 
 import type { UserAuthSuccess } from '@/types';
@@ -489,6 +490,17 @@ export async function startFastSessionCommand(
   }
 
   if (scheduleKickoff) {
+    if (input.conversationId) {
+      await refreshSessionPresence({
+        sessionId: unifiedSession.id,
+        userId: auth.userId,
+        clientId: input.conversationId,
+      }).catch((error) => {
+        console.warn(
+          `[Fast Web] Failed to seed Session presence before kickoff: ${formatErrorForLog(error)}`,
+        );
+      });
+    }
     const launchTask = createFastAgentWebTaskLauncher({
       userId: auth.userId,
     });
