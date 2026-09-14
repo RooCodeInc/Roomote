@@ -272,6 +272,38 @@ describe('lookupCommunicationChannelMessages', () => {
     },
   );
 
+  it('truncates oversized results to the newest messages', async () => {
+    const messages = Array.from({ length: 150 }, (_, index) => ({
+      ts: `${1_700_000_000 + index}.000000`,
+      user: `U${index}`,
+      text: 'x'.repeat(800),
+      fileCount: 0,
+    }));
+    lookupSlackChannelMessagesMock.mockResolvedValueOnce({
+      channelId: 'C123',
+      messageCount: messages.length,
+      messages,
+    });
+    const taskRun = {
+      payload: {
+        communicationProvider: 'slack',
+        communicationChannelId: 'C123',
+      },
+      actingUserId: 'user-1',
+    };
+
+    const result = await lookupCommunicationChannelMessages({ taskRun });
+
+    expect(result.truncated).toBe(true);
+    expect(result.messages.length).toBeLessThan(messages.length);
+    expect(result.messages.at(-1)?.id).toBe(messages.at(-1)?.ts);
+    expect(result.nextLatest).toBe(result.messages[0]?.id);
+    expect(result.omittedMessageCount).toBe(
+      messages.length - result.messages.length,
+    );
+    expect(JSON.stringify(result, null, 2).length).toBeLessThanOrEqual(36_000);
+  });
+
   it('does not guess a provider from a raw channel when the task has none', async () => {
     await expect(
       lookupCommunicationChannelMessages({

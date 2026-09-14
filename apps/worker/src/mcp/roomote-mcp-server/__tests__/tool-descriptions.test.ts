@@ -906,7 +906,7 @@ describe('roomote MCP tool descriptions', () => {
     const latestField = getInputSchemaField(lookupTool, 'latest');
 
     expect(lookupTool.config.description).toBe(
-      'Fetch readable history from the task communication channel. When the task has no communication channel, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply.',
+      'Fetch readable history from the task communication channel. When the task has no communication channel, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply. Large results are cut to the newest messages: when the response has truncated set, call again with latest set to nextLatest (and the same oldest) to read older messages.',
     );
     expect(channelField.description).toBe(
       'Optional channel ID, name, mention, or Slack/Discord channel/message link. Omit it to use the task communication channel.',
