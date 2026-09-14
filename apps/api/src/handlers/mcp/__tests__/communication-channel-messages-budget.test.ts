@@ -6,7 +6,10 @@ import {
 } from '../communication-channel-messages-budget';
 import type { CommunicationLookupMessage } from '../communication-message-lookup-types';
 
-function message(index: number, textLength: number): CommunicationLookupMessage {
+function message(
+  index: number,
+  textLength: number,
+): CommunicationLookupMessage {
   return {
     provider: 'slack',
     id: `${1_700_000_000 + index}.000000`,
