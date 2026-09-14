@@ -125,16 +125,7 @@ const ROOMOTE_OPENCODE_VISUAL_AGENT_NAME = 'visual';
 const ROOMOTE_OPENCODE_EXPLORE_AGENT_NAME = 'explore';
 const OPENCODE_GENERAL_AGENT_NAME = 'general';
 
-const MCP_AGENT_TOOL_EXCLUSION_POLICIES = [
-  {
-    agentName: ROOMOTE_OPENCODE_VISUAL_AGENT_NAME,
-    shouldExclude: () => true,
-  },
-  {
-    agentName: ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
-    shouldExclude: isHttpIntegrationsBroker,
-  },
-] as const;
+const MCP_ISOLATED_AGENT_NAMES = [ROOMOTE_OPENCODE_VISUAL_AGENT_NAME] as const;
 
 const ROOMOTE_MCP_SERVER_NAME = 'roomote';
 // OpenCode otherwise applies its 30s MCP request default, while Roomote's
@@ -2064,14 +2055,12 @@ export function generateOpenCodeConfig({
     onDemandMcpServers,
     runtimeEnv,
   );
-  for (const {
-    agentName,
-    shouldExclude,
-  } of MCP_AGENT_TOOL_EXCLUSION_POLICIES) {
+  const mcpToolExclusions = createMcpToolExclusions(mcpServers);
+  for (const agentName of MCP_ISOLATED_AGENT_NAMES) {
     if (operatorAgent[agentName]) {
       operatorAgent[agentName] = mergeAgentToolExclusions(
         operatorAgent[agentName],
-        createMcpToolExclusions(mcpServers, shouldExclude),
+        mcpToolExclusions,
       );
     }
   }
