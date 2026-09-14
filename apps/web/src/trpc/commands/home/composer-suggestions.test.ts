@@ -7,6 +7,7 @@ const {
   mockGetPersonalPreferences,
   mockCacheKeys,
   mockCacheEntries,
+  mockLoggerInfo,
 } = vi.hoisted(() => ({
   mockListRecentBrainTaskMemoryRefs: vi.fn(),
   mockReadBrainTaskMemories: vi.fn(),
@@ -14,6 +15,11 @@ const {
   mockGetPersonalPreferences: vi.fn(),
   mockCacheKeys: [] as string[][],
   mockCacheEntries: new Map<string, unknown>(),
+  mockLoggerInfo: vi.fn(),
+}));
+
+vi.mock('@/lib/server/logger', () => ({
+  logger: { info: mockLoggerInfo },
 }));
 
 vi.mock('../preferences', () => ({
@@ -149,6 +155,26 @@ describe('getHomeComposerSuggestionsCommand', () => {
     expect(mockListRecentBrainTaskMemoryRefs).not.toHaveBeenCalled();
     expect(mockReadBrainTaskMemories).not.toHaveBeenCalled();
     expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+    expect(mockLoggerInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'flag_disabled',
+        context_cache_status: 'not_checked',
+      }),
+      'Home composer suggestions timing',
+    );
+  });
+
+  it('preserves the response when timing logging fails', async () => {
+    mockGetPersonalPreferences.mockResolvedValue({
+      homeComposerSuggestionsEnabled: false,
+    });
+    mockLoggerInfo.mockImplementationOnce(() => {
+      throw new Error('log unavailable');
+    });
+
+    await expect(getHomeComposerSuggestionsCommand(auth)).resolves.toEqual({
+      suggestions: [],
+    });
   });
 
   it('falls back when memories are empty', async () => {
@@ -158,6 +184,10 @@ describe('getHomeComposerSuggestionsCommand', () => {
       suggestions: [],
     });
     expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+    expect(mockLoggerInfo).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'no_eligible_memories' }),
+      'Home composer suggestions timing',
+    );
   });
 
   it('discards malformed, duplicate, and overlong suggestions', async () => {
@@ -226,6 +256,14 @@ describe('getHomeComposerSuggestionsCommand', () => {
     });
     expect(mockReadBrainTaskMemories).toHaveBeenCalledTimes(2);
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(2);
+    expect(mockLoggerInfo).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        outcome: 'fallback',
+        context_cache_status: 'miss',
+        generation_cache_status: 'miss',
+      }),
+      'Home composer suggestions timing',
+    );
     consoleErrorSpy.mockRestore();
   });
 
@@ -265,5 +303,111 @@ describe('getHomeComposerSuggestionsCommand', () => {
     expect(mockListRecentBrainTaskMemoryRefs).toHaveBeenCalledTimes(2);
     expect(mockReadBrainTaskMemories).toHaveBeenCalledTimes(1);
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(1);
+    expect(mockLoggerInfo).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        outcome: 'success',
+        context_cache_status: 'hit',
+        brain_reads_ms: null,
+        generation_cache_status: 'not_checked',
+        helper_generation_ms: null,
+        readable_memory_count: null,
+      }),
+      'Home composer suggestions timing',
+    );
+
+    for (const cacheKey of mockCacheEntries.keys()) {
+      if (cacheKey.includes('home-composer-suggestion-context')) {
+        mockCacheEntries.delete(cacheKey);
+      }
+    }
+
+    await getHomeComposerSuggestionsCommand(auth);
+
+    expect(mockReadBrainTaskMemories).toHaveBeenCalledTimes(2);
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(1);
+    expect(mockLoggerInfo).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        outcome: 'success',
+        context_cache_status: 'miss',
+        generation_cache_status: 'hit',
+        helper_generation_ms: null,
+      }),
+      'Home composer suggestions timing',
+    );
+  });
+
+  it('logs phase timings and cache status without request content or user identifiers', async () => {
+    let clock = 0;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    mockGetPersonalPreferences.mockImplementation(async () => {
+      clock += 2;
+      return { homeComposerSuggestionsEnabled: true };
+    });
+    mockListRecentBrainTaskMemoryRefs.mockImplementation(async () => {
+      clock += 3;
+      return [
+        {
+          taskId: 'one',
+          runId: 1,
+          completedAt: new Date('2026-09-12T12:00:00Z'),
+          memoryRevision: 1,
+        },
+      ];
+    });
+    mockReadBrainTaskMemories.mockImplementation(async () => {
+      clock += 5;
+      return [
+        {
+          slug: 'tasks/one/runs/1',
+          title: null,
+          updatedAt: null,
+          content: 'Sensitive memory text.',
+        },
+      ];
+    });
+    mockGenerateTrackedNonTaskObject.mockImplementation(async () => {
+      clock += 7;
+      return {
+        object: {
+          suggestions: [
+            'Add focused authentication callback regression tests',
+            'Fix deployment health check recovery gaps',
+            'Document authentication callback failure handling',
+            'Review session handoff reliability edge cases',
+            'Improve deployment health check error guidance',
+          ],
+        },
+      };
+    });
+
+    await getHomeComposerSuggestionsCommand(auth);
+
+    expect(mockLoggerInfo).toHaveBeenLastCalledWith(
+      {
+        event: 'home_composer_suggestions_timing',
+        outcome: 'success',
+        total_ms: 17,
+        preference_guard_ms: 2,
+        eligible_reference_lookup_ms: 3,
+        context_cache_ms: 12,
+        context_cache_status: 'miss',
+        brain_reads_ms: 5,
+        generation_cache_ms: 7,
+        generation_cache_status: 'miss',
+        helper_generation_ms: 7,
+        eligible_reference_count: 1,
+        readable_memory_count: 1,
+        suggestion_count: 5,
+      },
+      'Home composer suggestions timing',
+    );
+    const serializedLog = JSON.stringify(mockLoggerInfo.mock.lastCall);
+    expect(serializedLog).not.toContain('user-1');
+    expect(serializedLog).not.toContain('Sensitive memory text');
+    expect(serializedLog).not.toContain(
+      'Add focused authentication callback regression tests',
+    );
+
+    nowSpy.mockRestore();
   });
 });

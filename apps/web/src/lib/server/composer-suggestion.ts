@@ -150,15 +150,23 @@ type HomeComposerSuggestionsResult = {
   suggestions: string[];
 };
 
+export type HomeComposerSuggestionGenerationTiming = {
+  cacheStatus: 'hit' | 'miss';
+  cacheMs: number;
+  helperMs: number | null;
+};
+
 /** Generate one cached home suggestion set from a bounded memory snapshot. */
 export async function suggestHomeComposerMessages({
   memories,
   revision,
   userId,
+  onTiming,
 }: {
   memories: string[];
   revision: string;
   userId: string | null;
+  onTiming?: (timing: HomeComposerSuggestionGenerationTiming) => void;
 }): Promise<HomeComposerSuggestionsResult> {
   try {
     let memoryChars = 0;
@@ -177,16 +185,26 @@ export async function suggestHomeComposerMessages({
       return { suggestions: [] };
     }
 
+    let cacheStatus: HomeComposerSuggestionGenerationTiming['cacheStatus'] =
+      'hit';
+    let helperMs: number | null = null;
     const generator = unstable_cache(
       async (prompt: string) => {
-        const { object } = await generateTrackedNonTaskObject({
-          userId,
-          surface: NON_TASK_INFERENCE_SURFACES.composerSuggestionGeneration,
-          maxOutputTokens: 256,
-          prompt,
-          schema: homeComposerSuggestionsSchema,
-        });
-        return object.suggestions;
+        cacheStatus = 'miss';
+        const helperStartedAt = performance.now();
+
+        try {
+          const { object } = await generateTrackedNonTaskObject({
+            userId,
+            surface: NON_TASK_INFERENCE_SURFACES.composerSuggestionGeneration,
+            maxOutputTokens: 256,
+            prompt,
+            schema: homeComposerSuggestionsSchema,
+          });
+          return object.suggestions;
+        } finally {
+          helperMs = performance.now() - helperStartedAt;
+        }
       },
       [
         'home-composer-suggestions',
@@ -196,9 +214,20 @@ export async function suggestHomeComposerMessages({
       ],
       { revalidate: CACHE_TTL_SECONDS },
     );
-    const generated = await generator(
-      `${HOME_SUGGESTIONS_PROMPT}\nRecent task memories follow between data markers:\n<task_memories>\n${boundedMemories.join('\n\n---\n\n')}\n</task_memories>`,
-    );
+    const cacheStartedAt = performance.now();
+    let generated: string[];
+
+    try {
+      generated = await generator(
+        `${HOME_SUGGESTIONS_PROMPT}\nRecent task memories follow between data markers:\n<task_memories>\n${boundedMemories.join('\n\n---\n\n')}\n</task_memories>`,
+      );
+    } finally {
+      onTiming?.({
+        cacheStatus,
+        cacheMs: performance.now() - cacheStartedAt,
+        helperMs,
+      });
+    }
     const suggestions = generated
       .map((suggestion) =>
         normalizeSuggestion(suggestion, {
