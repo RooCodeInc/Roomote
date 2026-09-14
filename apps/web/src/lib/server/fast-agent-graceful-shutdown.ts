@@ -8,10 +8,14 @@ import {
 export function resolveWebShutdownDrainMs(
   env: Record<string, string | undefined> = process.env,
 ): number {
-  return resolveFastAgentShutdownDrainMs(
+  const configured = resolveFastAgentShutdownDrainMs(
     ['R_WEB_SHUTDOWN_DRAIN_MS', 'R_API_SHUTDOWN_DRAIN_MS'],
     env as NodeJS.ProcessEnv,
   );
+  const maxDrainMs = Number(env.ROOMOTE_WEB_SHUTDOWN_MAX_DRAIN_MS);
+  return Number.isFinite(maxDrainMs) && maxDrainMs >= 0
+    ? Math.min(configured, maxDrainMs)
+    : configured;
 }
 
 type WebShutdownOptions = FastAgentShutdownDrainDeps & {

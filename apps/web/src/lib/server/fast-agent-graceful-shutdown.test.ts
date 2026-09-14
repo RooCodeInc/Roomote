@@ -18,6 +18,12 @@ describe('Fast web graceful shutdown', () => {
         R_API_SHUTDOWN_DRAIN_MS: '9000',
       }),
     ).toBe(9_000);
+    expect(
+      resolveWebShutdownDrainMs({
+        R_WEB_SHUTDOWN_DRAIN_MS: '24000',
+        ROOMOTE_WEB_SHUTDOWN_MAX_DRAIN_MS: '22000',
+      }),
+    ).toBe(22_000);
   });
 
   it('hands active Fast turns back during the Next shutdown drain', async () => {

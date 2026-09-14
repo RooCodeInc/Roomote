@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   coordinateWebShutdown,
   resolveWebShutdownHardTimeoutMs,
+  startWebServer,
   WEB_FAST_AGENT_SHUTDOWN_READY,
   WEB_FAST_AGENT_SHUTDOWN_REQUEST,
 } from './start-server.mjs';
@@ -66,4 +67,27 @@ test('validates the hard timeout override', () => {
     resolveWebShutdownHardTimeoutMs({ R_WEB_SHUTDOWN_HARD_TIMEOUT_MS: '10' }),
     28_000,
   );
+});
+
+test('caps the child drain before the handoff and Next cleanup reserves', () => {
+  const child = new FakeChild();
+  let spawnOptions;
+  const env = {
+    R_APP_ENV: 'production',
+    R_WEB_SHUTDOWN_DRAIN_MS: '24000',
+    R_WEB_SHUTDOWN_HARD_TIMEOUT_MS: '28000',
+  };
+  startWebServer({
+    env,
+    nextBin: '/next',
+    loadEnv: () => undefined,
+    spawnProcess: (_command, _args, options) => {
+      spawnOptions = options;
+      return child;
+    },
+  });
+
+  assert.equal(spawnOptions.env.ROOMOTE_WEB_SHUTDOWN_MAX_DRAIN_MS, '22000');
+  child.exitCode = 0;
+  child.emit('close', 0, null);
 });

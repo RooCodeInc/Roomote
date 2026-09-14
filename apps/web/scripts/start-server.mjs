@@ -12,6 +12,7 @@ export const WEB_FAST_AGENT_SHUTDOWN_READY =
   'roomote:web-fast-agent-shutdown-ready';
 const DEFAULT_HARD_TIMEOUT_MS = 28_000;
 const NEXT_CLEANUP_RESERVE_MS = 5_000;
+const FAST_HANDOFF_RESERVE_MS = 1_000;
 
 export function resolveWebShutdownHardTimeoutMs(env = process.env) {
   const parsed = Number(env.R_WEB_SHUTDOWN_HARD_TIMEOUT_MS);
@@ -77,6 +78,9 @@ export function coordinateWebShutdown(child, signal, options = {}) {
 export function startWebServer({
   env = process.env,
   argv = process.argv.slice(2),
+  spawnProcess = spawn,
+  loadEnv = config,
+  nextBin,
 } = {}) {
   const appEnv = ['development', 'preview', 'production'].includes(
     env.R_APP_ENV?.trim().toLowerCase(),
@@ -87,17 +91,23 @@ export function startWebServer({
   const envFiles = [`.env.${appEnv}`, `../../.env.${appEnv}`].filter(
     existsSync,
   );
-  config({ path: envFiles, quiet: true });
+  loadEnv({ path: envFiles, quiet: true });
+  const hardTimeoutMs = resolveWebShutdownHardTimeoutMs(env);
+  const maxDrainMs = Math.max(
+    0,
+    hardTimeoutMs - NEXT_CLEANUP_RESERVE_MS - FAST_HANDOFF_RESERVE_MS,
+  );
 
   const require = createRequire(import.meta.url);
-  const child = spawn(
+  const child = spawnProcess(
     process.execPath,
-    [require.resolve('next/dist/bin/next'), 'start', ...argv],
+    [nextBin ?? require.resolve('next/dist/bin/next'), 'start', ...argv],
     {
       stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
       env: {
         ...env,
         ROOMOTE_WEB_SHUTDOWN_COORDINATED: 'true',
+        ROOMOTE_WEB_SHUTDOWN_MAX_DRAIN_MS: String(maxDrainMs),
         NODE_OPTIONS: [
           env.NODE_OPTIONS,
           `--import=${new URL('./shutdown-child.mjs', import.meta.url).href}`,
@@ -117,7 +127,9 @@ export function startWebServer({
         return;
       }
       shuttingDown = true;
-      cleanupCoordination = coordinateWebShutdown(child, signal);
+      cleanupCoordination = coordinateWebShutdown(child, signal, {
+        hardTimeoutMs,
+      });
     };
     handlers.set(signal, handler);
     process.on(signal, handler);
