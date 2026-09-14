@@ -24,7 +24,7 @@ const results: ResultInboxItem[] = [
     automationName: 'Security Auditor',
     title: null,
     content:
-      '# Important report\n\nReview https://example.com/details and PR #2343 before release. Add enough supporting detail for the result to overflow at narrow widths.',
+      '# Important report\n\n**Review** https://example.com/details and PR #2343 before release. ![Architecture diagram](https://example.com/image.png) Add enough supporting detail for the result to overflow at narrow widths.',
     priority: 'critical',
     createdAt: new Date('2026-09-11T10:00:00Z'),
     repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
@@ -232,6 +232,21 @@ describe('ResultsPage', () => {
     fireEvent.keyDown(pullRequest, { key: 'Enter' });
     fireEvent.click(url);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('renders result Markdown as uniform text while preserving links', async () => {
+    const { container } = renderPage();
+
+    expect((await screen.findByText('Important report')).tagName).toBe('DIV');
+    expect(
+      screen.queryByRole('heading', { name: 'Important report' }),
+    ).toBeNull();
+    expect(container.querySelector('strong')).toBeNull();
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByText('Architecture diagram')).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'https://example.com/details' }),
+    ).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
   it('shows More only for measured overflow and expands without opening the row', async () => {
