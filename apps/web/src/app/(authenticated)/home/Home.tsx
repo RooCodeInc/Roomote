@@ -87,15 +87,21 @@ export function Home({
       refetchOnWindowFocus: false,
     }),
   );
+  const isInitialSuggestionsLoading =
+    brainConfigured === true &&
+    suggestionsQuery.isPending &&
+    suggestionsQuery.data === undefined;
   const generatedSuggestions = suggestionsQuery.data?.suggestions ?? [];
   const promptPlaceholders =
     generatedSuggestions.length > 0
       ? generatedSuggestions
-      : HOME_PROMPT_PLACEHOLDERS;
+      : isInitialSuggestionsLoading
+        ? []
+        : HOME_PROMPT_PLACEHOLDERS;
 
-  const activePromptPlaceholder =
-    promptPlaceholders[placeholderIndex % promptPlaceholders.length] ??
-    FALLBACK_PROMPT_PLACEHOLDER;
+  const activePromptPlaceholder = promptPlaceholders.length
+    ? promptPlaceholders[placeholderIndex % promptPlaceholders.length]
+    : undefined;
 
   const contentColumnRef = useRef<HTMLDivElement>(null);
   const promptCardRef = useRef<HTMLDivElement>(null);
@@ -225,6 +231,9 @@ export function Home({
 
             <NewTaskForm
               onTaskStarted={handleTaskStarted}
+              placeholder={
+                isInitialSuggestionsLoading ? '' : FALLBACK_PROMPT_PLACEHOLDER
+              }
               promptSuggestion={activePromptPlaceholder}
               onPromptFocusChange={setIsPromptFocused}
               textareaMaxHeight={textareaMaxHeight}

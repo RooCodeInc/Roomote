@@ -22,6 +22,10 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
 let currentEnvironmentsPending = false;
 let currentBrainConfigured = false;
 let currentHomeSuggestions: string[] = [];
+let currentHomeSuggestionsHasData = true;
+let currentHomeSuggestionsPending = false;
+let currentHomeSuggestionsFetching = false;
+let currentHomeSuggestionsError = false;
 let capturedSubmitWithMetaKey: boolean | undefined;
 let capturedDefaultReasoningEffort: string | null | undefined;
 let submittedPromptText = 'Test prompt';
@@ -67,7 +71,14 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: () => ({ data: { suggestions: currentHomeSuggestions } }),
+  useQuery: () => ({
+    data: currentHomeSuggestionsHasData
+      ? { suggestions: currentHomeSuggestions }
+      : undefined,
+    isPending: currentHomeSuggestionsPending,
+    isFetching: currentHomeSuggestionsFetching,
+    isError: currentHomeSuggestionsError,
+  }),
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -240,6 +251,9 @@ vi.mock('@/components/tasks', async () => {
           </div>
           <textarea
             aria-label="Task prompt"
+            placeholder={
+              promptText ? placeholder : (promptSuggestion ?? placeholder)
+            }
             value={promptText ?? ''}
             onChange={(event) => onPromptTextChange?.(event.target.value)}
             onFocus={() => onPromptFocusChange?.(true)}
@@ -306,6 +320,10 @@ describe('Home', () => {
     currentEnvironmentsPending = false;
     currentBrainConfigured = false;
     currentHomeSuggestions = [];
+    currentHomeSuggestionsHasData = true;
+    currentHomeSuggestionsPending = false;
+    currentHomeSuggestionsFetching = false;
+    currentHomeSuggestionsError = false;
     capturedSubmitWithMetaKey = undefined;
     capturedDefaultReasoningEffort = undefined;
     submittedPromptText = 'Test prompt';
@@ -644,6 +662,72 @@ describe('Home', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('keeps the suggestion area empty during the initial request', () => {
+    currentBrainConfigured = true;
+    currentHomeSuggestionsHasData = false;
+    currentHomeSuggestionsPending = true;
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.getByTestId('prompt-placeholder')).toBeEmptyDOMElement();
+    expect(
+      screen.getByRole('textbox', { name: 'Task prompt' }),
+    ).toHaveAttribute('placeholder', '');
+  });
+
+  it('shows generated suggestions after the initial request succeeds', () => {
+    currentBrainConfigured = true;
+    currentHomeSuggestions = [
+      'Add focused regression tests for authentication callback validation across supported login flows',
+      'Resolve deployment health check gaps before the next production release begins',
+      'Document session handoff behavior for developers troubleshooting interrupted task execution',
+      'Investigate flaky integration failures affecting automated pull request delivery checks',
+      'Improve accessibility guidance for keyboard users accepting Home composer suggestions',
+    ];
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+      currentHomeSuggestions[0]!,
+    );
+  });
+
+  it.each([
+    { state: 'empty', hasData: true, isError: false },
+    { state: 'error', hasData: false, isError: true },
+  ])(
+    'shows fallback placeholders after a settled $state result',
+    ({ hasData, isError }) => {
+      currentBrainConfigured = true;
+      currentHomeSuggestionsHasData = hasData;
+      currentHomeSuggestionsError = isError;
+
+      render(<Home initialPlaceholderIndex={0} />);
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        'Find a TODO in the code and fix it',
+      );
+    },
+  );
+
+  it('keeps cached suggestions visible during a background refresh', () => {
+    currentBrainConfigured = true;
+    currentHomeSuggestionsFetching = true;
+    currentHomeSuggestions = [
+      'Add focused regression tests for authentication callback validation across supported login flows',
+      'Resolve deployment health check gaps before the next production release begins',
+      'Document session handoff behavior for developers troubleshooting interrupted task execution',
+      'Investigate flaky integration failures affecting automated pull request delivery checks',
+      'Improve accessibility guidance for keyboard users accepting Home composer suggestions',
+    ];
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+      currentHomeSuggestions[0]!,
+    );
   });
 
   it('pauses suggestion rotation while focused and resumes after blur', async () => {
