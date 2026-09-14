@@ -251,6 +251,43 @@ the gateway received) alone.
 
 ## Audit and logging
 
+### Separate authenticated-proxy admission
+
+The shared gateway may expose a separate TLS CONNECT listener using a
+short-lived, worker-held proxy capability. This mode authenticates possession
+of transferable logical-workload credentials, not an external connector
+certificate or physical sandbox origin. It does not force unrelated egress.
+The external-mTLS listener and its connector-plus-substitute contract remain
+separate; neither listener accepts the other's credential as a replacement.
+
+- Controller-only `POST /proxy-workloads`: accepts `runId`, `provider`, optional
+  `leaseSeconds`, and `capabilitySeconds` (60-900, default900). Derives the live
+  canonical Session/owner from the run. Returns ordinary workload registration
+  plus `admissionMode: authenticated_proxy`, a one-time `proxyCapability`, and
+  `proxyCapabilityExpiresAt`. Only a domain-separated keyed hash is stored.
+- Gateway-only `POST /proxy-connect`: accepts `proxyCapability` and exact
+  `destination: {host, port}`. Requires a live eligible workload and a currently
+  issued live service grant for that destination. Returns logical workload,
+  Session, generation and expiry, never a service credential. CONNECT success
+  alone authorizes no inner HTTP exchange.
+- Gateway-only `POST /proxy-authorize`: same per-phase request as `/authorize`,
+  except `connectorIdentity` is forbidden and `admissionMode:
+  authenticated_proxy` plus `proxyCapability` is required. Requires that
+  capability AND the service substitute to match the same workload/generation.
+  All owner/Session/run, exact HTTPS origin/method, expiry, revocation and
+  response/stream checks still apply. Expiry is capped by capability expiry.
+
+The new mode is persisted explicitly. Its `connector_identity` legacy storage
+column is a unique logical reference, not a certificate claim. External-mTLS
+authorization rejects proxy-mode rows even if a caller supplies that reference.
+Capabilities cannot authenticate as controllers or gateways or mint substitutes.
+A stolen valid matching capability/substitute pair can be replayed elsewhere;
+audit attribution identifies the logical credential, not physical origin.
+
+Proxy capabilities currently expire at their issued deadline. Hosted delivery
+and controlled refresh are separate lifecycle work; these internal endpoints
+do not by themselves make a hosted worker proxy-ready.
+
 `session_egress_audit` records the initial **evaluation attempt** for each
 schema-valid `/authorize` call, not its final outcome or proof of released
 credentials/bytes. An `allowed` attempt can subsequently be denied by the

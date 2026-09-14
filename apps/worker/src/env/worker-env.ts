@@ -7,7 +7,8 @@ import {
   isSessionEgressWorkloadEnvKey,
   parseModelProviderEnvKeys,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
-  SESSION_EGRESS_SERVICE_TOKEN_ENV_PREFIX,
+  sessionEgressWorkloadServiceManifestSchema,
+  sessionProxyCapabilitySchema,
   SESSION_EGRESS_WORKLOAD_ENV,
   type SessionEgressWorkloadServiceManifestEntry,
 } from '@roomote/types';
@@ -18,6 +19,9 @@ import {
  * nonsecret service manifest: never a real credential or a private key.
  */
 interface WorkerSessionEgressConfig {
+  mode: 'external_mtls' | 'authenticated_proxy';
+  proxyCapability?: string;
+  proxyCapabilityExpiresAt?: string;
   proxyUrl: string;
   caFile: string;
   noProxy: string;
@@ -463,6 +467,13 @@ export class WorkerEnv {
     return this.workerConfig.sessionEgressBootstrapRequired === true;
   }
 
+  get sessionEgressAdmissionMode():
+    | 'external_mtls'
+    | 'authenticated_proxy'
+    | undefined {
+    return this.workerConfig.sessionEgress?.mode;
+  }
+
   get sessionEgressBootstrapNonce(): string {
     if (!this.workerConfig.sessionEgressBootstrapNonce)
       throw new Error('Session egress bootstrap identity missing');
@@ -487,6 +498,20 @@ export class WorkerEnv {
     if (!config) {
       return {};
     }
+    if (config.mode === 'authenticated_proxy') {
+      const proxy = new URL(config.proxyUrl);
+      proxy.username = 'workload';
+      proxy.password = config.proxyCapability!;
+      return {
+        ROOMOTE_SESSION_PROXY_URL: proxy.toString(),
+        ROOMOTE_SESSION_PROXY_CA_FILE: config.caFile,
+        [SESSION_EGRESS_WORKLOAD_ENV.ADMISSION_MODE]: 'authenticated_proxy',
+        [SESSION_EGRESS_WORKLOAD_ENV.PROXY_CAPABILITY_EXPIRES_AT]:
+          config.proxyCapabilityExpiresAt!,
+        [SESSION_EGRESS_WORKLOAD_ENV.SERVICES]: JSON.stringify(config.services),
+        ...config.tokens,
+      };
+    }
     return {
       ...buildSessionEgressClientEnv({
         proxyUrl: config.proxyUrl,
@@ -507,31 +532,69 @@ function captureSessionEgressConfig(
   if (!proxyUrl || !caFile) {
     return undefined;
   }
-
-  const tokens: Record<string, string> = {};
-  for (const [key, value] of Object.entries(processEnv)) {
-    if (!key.startsWith(SESSION_EGRESS_SERVICE_TOKEN_ENV_PREFIX)) continue;
-    // Only substitutes are ever accepted from the launcher; anything else
-    // in this slot is a wiring bug and must not reach task processes.
-    if (typeof value === 'string' && /^rses_[A-Za-z0-9_-]+$/.test(value)) {
-      tokens[key] = value;
+  const mode =
+    processEnv[SESSION_EGRESS_WORKLOAD_ENV.ADMISSION_MODE] ?? 'external_mtls';
+  if (mode !== 'external_mtls' && mode !== 'authenticated_proxy')
+    throw new Error('Unknown Session admission mode');
+  let proxyCapability: string | undefined;
+  let proxyCapabilityExpiresAt: string | undefined;
+  if (mode === 'authenticated_proxy') {
+    const endpoint = new URL(proxyUrl);
+    if (
+      endpoint.protocol !== 'https:' ||
+      endpoint.username ||
+      endpoint.password ||
+      endpoint.pathname !== '/' ||
+      endpoint.search ||
+      endpoint.hash
+    ) {
+      throw new Error(
+        'Authenticated Session proxy requires a trusted HTTPS endpoint',
+      );
+    }
+    const capability = sessionProxyCapabilitySchema.safeParse(
+      processEnv[SESSION_EGRESS_WORKLOAD_ENV.PROXY_CAPABILITY],
+    );
+    if (!capability.success)
+      throw new Error('Session proxy capability is missing or invalid');
+    proxyCapability = capability.data;
+    proxyCapabilityExpiresAt =
+      processEnv[SESSION_EGRESS_WORKLOAD_ENV.PROXY_CAPABILITY_EXPIRES_AT];
+    if (
+      !proxyCapabilityExpiresAt ||
+      !Number.isFinite(Date.parse(proxyCapabilityExpiresAt)) ||
+      Date.parse(proxyCapabilityExpiresAt) <= Date.now()
+    ) {
+      throw new Error('Session proxy capability has expired');
     }
   }
 
-  let services: SessionEgressWorkloadServiceManifestEntry[] = [];
+  let services: SessionEgressWorkloadServiceManifestEntry[];
   const manifest = processEnv[SESSION_EGRESS_WORKLOAD_ENV.SERVICES];
-  if (manifest) {
-    try {
-      const parsed: unknown = JSON.parse(manifest);
-      if (Array.isArray(parsed)) {
-        services = parsed as SessionEgressWorkloadServiceManifestEntry[];
-      }
-    } catch {
-      // A malformed manifest only loses the nonsecret listing.
+  try {
+    services = sessionEgressWorkloadServiceManifestSchema.parse(
+      JSON.parse(manifest ?? 'null'),
+    );
+  } catch {
+    throw new Error(
+      'Session service manifest unavailable or invalid; no credential fallback is permitted',
+    );
+  }
+  const tokens: Record<string, string> = {};
+  for (const service of services) {
+    const value = processEnv[service.envName];
+    if (typeof value !== 'string' || !/^rses_[A-Za-z0-9_-]+$/.test(value)) {
+      throw new Error(
+        'Session service substitute missing or invalid; no credential fallback is permitted',
+      );
     }
+    tokens[service.envName] = value;
   }
 
   return {
+    mode,
+    proxyCapability,
+    proxyCapabilityExpiresAt,
     proxyUrl,
     caFile,
     noProxy: processEnv[SESSION_EGRESS_WORKLOAD_ENV.NO_PROXY]?.trim() ?? '',

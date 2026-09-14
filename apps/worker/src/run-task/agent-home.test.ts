@@ -668,6 +668,41 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(clientEnv.no_proxy).toBe(clientEnv.NO_PROXY);
     expect(endpoint.port).toBe('3001');
     expect(clientEnv.NODE_USE_ENV_PROXY).toBe('1');
+    expect(config.instructions.join('\n')).toContain(
+      'Use only the matching manifest entry',
+    );
+    expect(config.instructions.join('\n')).toContain(
+      'never use generic SECRET',
+    );
+  });
+
+  it('reports missing hosted admission without treating saved approval or generic env as usable credentials', () => {
+    const runtimeEnv = {
+      R_MODEL: 'openrouter/openai/gpt-4.1-mini',
+      ROOMOTE_SESSION_EGRESS_PROVIDER: 'roomote',
+      SECRET: 'unrelated-fixture',
+      APP_MODE: 'fixture',
+    };
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+    });
+    const instructions = JSON.parse(result.configContent).instructions.join(
+      '\n',
+    );
+    expect(instructions).toContain(
+      'provider "roomote" has not completed verified external connector and egress admission',
+    );
+    expect(instructions).toContain(
+      'successful approval/autoresume does not make ordinary credential-backed requests ready',
+    );
+    expect(instructions).toContain(
+      'do not issue the credential-dependent request',
+    );
+    expect(instructions).toContain('Never search generic SECRET');
+    expect(instructions).not.toContain('unrelated-fixture');
+    expect(runtimeEnv.SECRET).toBe('unrelated-fixture');
+    expect(runtimeEnv.APP_MODE).toBe('fixture');
   });
 
   it('rejects protected direct/custom inference without a served gateway provider', () => {

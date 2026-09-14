@@ -98,13 +98,39 @@ func runGateway(ctx context.Context) error {
 	if err != nil {
 		return errDenied
 	}
-	p := proxy.New(proxy.Options{HTTPAddr: env("SESSION_EGRESS_LISTEN_ADDR", ":8443"), CertCache: cache, Pipeline: transform.NewPipelineHolder(pipeline), Guard: guard, UpstreamDialContext: safeDial, Logger: quiet,
-		ExchangeRejected: func() {
-			logger.Info("session_egress_final", "authorizationId", "", "workloadId", "", "outcome", "rejected")
-		},
-		ConnectorTLS: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{server}, ClientCAs: pool, ClientAuth: tls.RequireAndVerifyClientCert},
-	})
-	stopped := make(chan error, 1)
+	newProxy := func(addr string, connectorTLS *tls.Config) *proxy.Proxy {
+		return proxy.New(proxy.Options{HTTPAddr: addr, CertCache: cache, Pipeline: transform.NewPipelineHolder(pipeline), Guard: guard, UpstreamDialContext: safeDial, Logger: quiet,
+			ExchangeRejected: func() {
+				logger.Info("session_egress_final", "authorizationId", "", "workloadId", "", "outcome", "rejected")
+			},
+			ConnectorTLS: connectorTLS,
+		})
+	}
+	p := newProxy(env("SESSION_EGRESS_LISTEN_ADDR", ":8443"), &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{server}, ClientCAs: pool, ClientAuth: tls.RequireAndVerifyClientCert})
+	stopped := make(chan error, 2)
+	var direct *proxy.Proxy
+	if addr := os.Getenv("SESSION_EGRESS_AUTHENTICATED_PROXY_LISTEN_ADDR"); addr != "" {
+		proxyCert, err := tls.LoadX509KeyPair(os.Getenv("SESSION_EGRESS_PROXY_SERVER_CERT_FILE"), os.Getenv("SESSION_EGRESS_PROXY_SERVER_KEY_FILE"))
+		if err != nil {
+			return errDenied
+		}
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return errDenied
+		}
+		direct = newProxy(addr, nil)
+		go func() {
+			stopped <- direct.ServeAuthenticatedProxy(ln, &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{proxyCert}}, client.authenticateProxyConnect)
+		}()
+	}
+	defer func() {
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		p.Shutdown(shutdown)
+		if direct != nil {
+			direct.Shutdown(shutdown)
+		}
+	}()
 	go func() { stopped <- p.ListenAndServe() }()
 	select {
 	case <-ctx.Done():

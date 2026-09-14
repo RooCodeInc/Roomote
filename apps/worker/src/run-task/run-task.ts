@@ -866,14 +866,31 @@ export const runTask = async ({
       delete runtimeEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME];
     }
 
+    // Reserved Session credential mapping cannot come from deployment/user env.
+    // Preserve unrelated variables, including legitimate service-specific keys.
+    delete runtimeEnv.ROOMOTE_SESSION_EGRESS_ENFORCED;
+    delete runtimeEnv.ROOMOTE_SESSION_EGRESS_SERVICES;
+    delete runtimeEnv.ROOMOTE_SESSION_EGRESS_ADMISSION_MODE;
+    delete runtimeEnv.ROOMOTE_SESSION_PROXY_URL;
+    delete runtimeEnv.ROOMOTE_SESSION_PROXY_CA_FILE;
+    delete runtimeEnv.ROOMOTE_SESSION_PROXY_CAPABILITY;
+    delete runtimeEnv.ROOMOTE_SESSION_PROXY_CAPABILITY_EXPIRES_AT;
+    for (const key of Object.keys(runtimeEnv)) {
+      if (key.startsWith('ROOMOTE_SERVICE_TOKEN_')) delete runtimeEnv[key];
+    }
+    runtimeEnv.ROOMOTE_SESSION_EGRESS_PROVIDER = taskRun.vendor ?? 'unknown';
     if (workerEnv.sessionEgressBootstrapRequired) {
       Object.assign(runtimeEnv, workerEnv.buildSessionEgressClientEnv());
-      if (!runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME]) {
+      if (
+        workerEnv.sessionEgressAdmissionMode === 'external_mtls' &&
+        !runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME]
+      ) {
         throw new Error(
           'Protected execution requires a configured Roomote inference gateway; direct-provider inference is unavailable',
         );
       }
-      runtimeEnv.ROOMOTE_SESSION_EGRESS_ENFORCED = '1';
+      if (workerEnv.sessionEgressAdmissionMode === 'external_mtls')
+        runtimeEnv.ROOMOTE_SESSION_EGRESS_ENFORCED = '1';
     }
 
     const workerHomeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';

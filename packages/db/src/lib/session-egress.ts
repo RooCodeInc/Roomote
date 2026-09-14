@@ -15,6 +15,11 @@ import {
   type SessionEgressWorkloadRegister,
   type SessionEgressWorkloadRegistration,
   type SessionEgressWorkloadTerminate,
+  type SessionProxyAuthorize,
+  type SessionProxyRegister,
+  type SessionProxyRegistration,
+  type SessionProxyConnect,
+  type SessionProxyPrincipal,
 } from '@roomote/types';
 
 import { db, type DatabaseOrTransaction } from '../db';
@@ -57,6 +62,81 @@ export class SessionEgressRegistrationError extends Error {
 /** Keyed so a database read alone cannot verify guessed tokens offline. */
 export function hashSessionEgressSubstitute(token: string): string {
   return createHmac('sha256', getEncryptionKey()).update(token).digest('hex');
+}
+
+function hashProxyCapability(token: string): string {
+  return createHmac('sha256', getEncryptionKey())
+    .update('session-proxy-capability\0')
+    .update(token)
+    .digest('hex');
+}
+
+/** CONNECT admission gives no service credential and permits no HTTP exchange by itself. */
+export async function authenticateSessionProxyConnect(
+  input: SessionProxyConnect,
+  options: { isOriginAllowed?: (origin: string) => boolean } = {},
+): Promise<SessionProxyPrincipal | null> {
+  return db.transaction(async (tx) => {
+    const [found] = await tx
+      .select({ id: sessionEgressWorkloads.id })
+      .from(sessionEgressWorkloads)
+      .where(
+        eq(
+          sessionEgressWorkloads.proxyCapabilityHash,
+          hashProxyCapability(input.proxyCapability),
+        ),
+      );
+    if (!found) return null;
+    const workload = await liveWorkload(tx, found.id);
+    if (
+      !workload ||
+      workload.admissionMode !== 'authenticated_proxy' ||
+      workload.proxyCapabilityHash !==
+        hashProxyCapability(input.proxyCapability)
+    )
+      return null;
+    const policies = await tx
+      .select(grantPolicyColumns)
+      .from(sessionEgressSubstitutes)
+      .innerJoin(
+        sessionSecrets,
+        eq(sessionSecrets.id, sessionEgressSubstitutes.secretId),
+      )
+      .where(
+        and(
+          eq(sessionEgressSubstitutes.workloadId, workload.id),
+          eq(sessionEgressSubstitutes.generation, workload.generation),
+          isNull(sessionEgressSubstitutes.revokedAt),
+          isNull(sessionSecrets.revokedAt),
+          eq(sessionSecrets.sessionId, workload.sessionId),
+          eq(sessionSecrets.ownerUserId, workload.ownerUserId),
+          gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
+          sql`${workload.proxyCapabilityExpiresAt?.toISOString() ?? null}::timestamp > clock_timestamp()`,
+        ),
+      );
+    if (
+      !policies.some((policy) => {
+        const expected = approvedDestination(policy.origin);
+        return (
+          expected.host === input.destination.host.toLowerCase() &&
+          expected.port === input.destination.port &&
+          (options.isOriginAllowed?.(policy.origin) ?? true)
+        );
+      })
+    )
+      return null;
+    return {
+      workloadId: workload.id,
+      sessionId: workload.sessionId,
+      generation: workload.generation,
+      expiresAt: new Date(
+        Math.min(
+          workload.expiresAt.getTime(),
+          workload.proxyCapabilityExpiresAt!.getTime(),
+        ),
+      ).toISOString(),
+    };
+  });
 }
 
 function mintSubstitute(): string {
@@ -268,7 +348,10 @@ function registration(
  */
 export async function registerSessionEgressWorkload(
   input: SessionEgressWorkloadRegister,
-  options: { isOriginAllowed?: (origin: string) => boolean } = {},
+  options: {
+    isOriginAllowed?: (origin: string) => boolean;
+    proxy?: { hash: string; seconds: number };
+  } = {},
 ): Promise<SessionEgressWorkloadRegistration> {
   return db.transaction(async (tx) => {
     // Serialize concurrent registrations of the same run.
@@ -305,6 +388,15 @@ export async function registerSessionEgressWorkload(
       throw new SessionEgressRegistrationError('connector_identity_in_use');
 
     const expiresAt = sql`clock_timestamp() + ${input.leaseSeconds} * interval '1 second'`;
+    const admission = {
+      admissionMode: options.proxy
+        ? ('authenticated_proxy' as const)
+        : ('external_mtls' as const),
+      proxyCapabilityHash: options.proxy?.hash ?? null,
+      proxyCapabilityExpiresAt: options.proxy
+        ? sql`clock_timestamp() + ${options.proxy.seconds} * interval '1 second'`
+        : null,
+    };
     let workload: typeof sessionEgressWorkloads.$inferSelect | undefined;
     if (
       existing &&
@@ -314,6 +406,7 @@ export async function registerSessionEgressWorkload(
       [workload] = await tx
         .update(sessionEgressWorkloads)
         .set({
+          ...admission,
           generation: existing.generation + 1,
           provider: input.provider,
           connectorIdentity: input.connectorIdentity,
@@ -335,6 +428,7 @@ export async function registerSessionEgressWorkload(
       [workload] = await tx
         .insert(sessionEgressWorkloads)
         .values({
+          ...admission,
           sessionId: eligible.sessionId,
           ownerUserId: eligible.ownerUserId,
           taskRunId: input.runId,
@@ -355,6 +449,49 @@ export async function registerSessionEgressWorkload(
       ),
     );
   });
+}
+
+/** Trusted controller entry; no caller-supplied Session/owner identity. */
+export async function registerSessionProxyWorkload(
+  input: SessionProxyRegister,
+  options: { isOriginAllowed?: (origin: string) => boolean } = {},
+): Promise<SessionProxyRegistration> {
+  const proxyCapability = `rproxy_${randomBytes(32).toString('base64url')}`;
+  const result = await registerSessionEgressWorkload(
+    {
+      runId: input.runId,
+      provider: input.provider,
+      leaseSeconds: input.leaseSeconds,
+      connectorIdentity: `logical-proxy:${randomUUID()}`,
+    },
+    {
+      ...options,
+      proxy: {
+        hash: hashProxyCapability(proxyCapability),
+        seconds: input.capabilitySeconds,
+      },
+    },
+  );
+  const [row] = await db
+    .select({ expiresAt: sessionEgressWorkloads.proxyCapabilityExpiresAt })
+    .from(sessionEgressWorkloads)
+    .where(
+      and(
+        eq(sessionEgressWorkloads.id, result.workloadId),
+        eq(
+          sessionEgressWorkloads.proxyCapabilityHash,
+          hashProxyCapability(proxyCapability),
+        ),
+      ),
+    );
+  if (!row?.expiresAt)
+    throw new SessionEgressRegistrationError('run_not_eligible');
+  return {
+    ...result,
+    admissionMode: 'authenticated_proxy',
+    proxyCapability,
+    proxyCapabilityExpiresAt: row.expiresAt.toISOString(),
+  };
 }
 
 /** Substitutes for grants approved after registration, without rotating. */
@@ -505,7 +642,7 @@ function approvedDestination(origin: string): { host: string; port: number } {
  * whole decision is `allowed`, and only for the `request` phase.
  */
 export async function authorizeSessionEgress(
-  input: SessionEgressAuthorize,
+  input: SessionEgressAuthorize | SessionProxyAuthorize,
   options: {
     /**
      * Current deployment egress policy for the approved origin (public
@@ -535,6 +672,7 @@ export async function authorizeSessionEgress(
           and ${sessionTasks.taskId} = ${taskRuns.taskId}
       )`,
         workloadExpired: sql<boolean>`${sessionEgressWorkloads.expiresAt} <= clock_timestamp()`,
+        proxyExpired: sql<boolean>`(${sessionEgressWorkloads.proxyCapabilityExpiresAt} IS NULL OR ${sessionEgressWorkloads.proxyCapabilityExpiresAt} <= clock_timestamp())`,
         grantExpired: sql<boolean>`${sessionSecrets.expiresAt} <= clock_timestamp()`,
       })
       .from(sessionEgressSubstitutes)
@@ -561,9 +699,16 @@ export async function authorizeSessionEgress(
   ): SessionEgressDenialReason | null => {
     if (!row) return 'unknown_substitute';
     const { substitute, workload, secret, session, run } = row;
+    const proxy = 'proxyCapability' in input;
     if (
       workload.id !== input.workloadId ||
-      workload.connectorIdentity !== input.connectorIdentity
+      (proxy
+        ? workload.admissionMode !== 'authenticated_proxy' ||
+          row.proxyExpired ||
+          workload.proxyCapabilityHash !==
+            hashProxyCapability(input.proxyCapability)
+        : workload.admissionMode !== 'external_mtls' ||
+          workload.connectorIdentity !== input.connectorIdentity)
     )
       return 'workload_mismatch';
     if (workload.status !== 'active' || row.workloadExpired)
@@ -638,6 +783,9 @@ export async function authorizeSessionEgress(
       Math.min(
         finalRow.secret.expiresAt.getTime(),
         finalRow.workload.expiresAt.getTime(),
+        'proxyCapability' in input
+          ? finalRow.workload.proxyCapabilityExpiresAt!.getTime()
+          : Infinity,
       ),
     ).toISOString(),
     ...(input.phase === 'request'

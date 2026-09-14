@@ -16,11 +16,13 @@ patch('internal/transform/transform.go', [
   ['type TransformContext struct {', `type TransformContext struct {
   // Optional exchange hooks; installed by a policy that owns response release.
   Finalize func(*PipelineResult)
+  ProxyPrincipal *ProxyPrincipal
   BeforeWrite func() error
   WriteContext context.Context`],
   ['type TunnelInfo struct {', `type TunnelInfo struct {
   // Verified outer connector certificate; never taken from inner TLS or headers.
-  ClientCert *x509.Certificate`],
+  ClientCert *x509.Certificate
+  ProxyPrincipal *ProxyPrincipal`],
   ['type PipelineResult struct {', 'type PipelineResult struct {\n PolicyManaged bool'],
 ]);
 patch('internal/proxy/proxy.go', [
@@ -47,7 +49,7 @@ patch('internal/proxy/proxy.go', [
   ['pl, finish := p.beginPipelineRun(result)\n\tdefer finish()\n\n\tif !p.isReady()', `pl, finish := p.beginPipelineRun(result)
   defer finish()
   defer func() { if tctx.Finalize != nil { finalized = true; tctx.Finalize(result) } }()
-  if tunnelInfo != nil { tctx.ClientCert = tunnelInfo.ClientCert }
+  if tunnelInfo != nil { tctx.ClientCert = tunnelInfo.ClientCert; tctx.ProxyPrincipal = tunnelInfo.ProxyPrincipal }
 
   if !p.isReady()`],
   ['r.Body = transform.NewBufferedBody(r.Body, bodyLimits.MaxRequestBodyBytes)', 'requestHasNoBody := r.Body == nil || r.Body == http.NoBody\n r.Body = transform.NewBufferedBody(r.Body, bodyLimits.MaxRequestBodyBytes)'],
@@ -73,24 +75,25 @@ patch('internal/proxy/proxy.go', [
 ]);
 patch('internal/proxy/tunnel.go', [
   ['"context"', '"context"\n "crypto/x509"'],
-  ['p.tunnelTransformCheck(req.RemoteAddr, host, req.Header)', 'p.tunnelTransformCheck(req.RemoteAddr, host, req.Header, verifiedConnectorCert(req))'],
+  ['p.tunnelTransformCheck(req.RemoteAddr, host, req.Header)', 'p.tunnelTransformCheck(req.RemoteAddr, host, req.Header, verifiedConnectorCert(req), verifiedProxyPrincipal(req))'],
   ['defer conn.Close()\n\n\t// Send 200', 'defer conn.Close()\n stopShutdown := context.AfterFunc(p.shutdownCtx, func(){ _ = conn.Close() })\n defer stopShutdown()\n\n\t// Send 200'],
   ['if err := tlsConn.HandshakeContext(context.Background()); err != nil {', 'handshakeCtx, cancel := context.WithTimeout(p.shutdownCtx, 10*time.Second)\n defer cancel()\n if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {'],
-  ['connectHeaders http.Header) (bool, *http.Response, *transform.TunnelInfo)', 'connectHeaders http.Header, certificates ...*x509.Certificate) (bool, *http.Response, *transform.TunnelInfo)'],
-  ['result := &transform.PipelineResult{\n\t\tHost:       target,', `if len(certificates) == 1 { tctx.ClientCert = certificates[0] }
+  ['connectHeaders http.Header) (bool, *http.Response, *transform.TunnelInfo)', 'connectHeaders http.Header, credentials ...any) (bool, *http.Response, *transform.TunnelInfo)'],
+  ['result := &transform.PipelineResult{\n\t\tHost:       target,', `if len(credentials) > 0 { tctx.ClientCert, _ = credentials[0].(*x509.Certificate) }
+  if len(credentials) > 1 { tctx.ProxyPrincipal, _ = credentials[1].(*transform.ProxyPrincipal) }
   result := &transform.PipelineResult{
     Host:       target,`],
-  ['Target:            target,\n\t\tRequestTransforms:', 'Target:            target,\n ClientCert: tctx.ClientCert,\n\t\tRequestTransforms:'],
-  ['Target:            info.Target,', 'Target:            info.Target,\n ClientCert: info.ClientCert,'],
+  ['Target:            target,\n\t\tRequestTransforms:', 'Target:            target,\n ClientCert: tctx.ClientCert,\n ProxyPrincipal: tctx.ProxyPrincipal,\n\t\tRequestTransforms:'],
+  ['Target:            info.Target,', 'Target:            info.Target,\n ClientCert: info.ClientCert,\n ProxyPrincipal: info.ProxyPrincipal,'],
   ['GetCertificate: p.getCertificate,\n\t\tNextProtos:     []string{"h2", "http/1.1"}, // offer HTTP/2 to tunnelled clients', `GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-      if tunnelInfo != nil && tunnelInfo.ClientCert != nil {
+      if tunnelInfo != nil && (tunnelInfo.ClientCert != nil || tunnelInfo.ProxyPrincipal != nil) {
         host, _, err := net.SplitHostPort(target)
         if err != nil || hello.ServerName != host { return nil, fmt.Errorf("tunnel authority mismatch") }
       }
       return p.getCertificate(hello)
     },
     NextProtos: func() []string {
-      if tunnelInfo != nil && tunnelInfo.ClientCert != nil { return []string{"http/1.1"} }
+      if tunnelInfo != nil && (tunnelInfo.ClientCert != nil || tunnelInfo.ProxyPrincipal != nil) { return []string{"http/1.1"} }
       return []string{"h2", "http/1.1"}
     }(),`],
 ]);

@@ -21,7 +21,9 @@ type destination struct {
 }
 type authorizationRequest struct {
 	WorkloadID        string      `json:"workloadId"`
-	ConnectorIdentity string      `json:"connectorIdentity"`
+	ConnectorIdentity string      `json:"connectorIdentity,omitempty"`
+	AdmissionMode     string      `json:"admissionMode,omitempty"`
+	ProxyCapability   string      `json:"proxyCapability,omitempty"`
 	Substitute        string      `json:"substitute"`
 	Destination       destination `json:"destination"`
 	Method            string      `json:"method"`
@@ -71,7 +73,13 @@ func (c *secretClient) authorize(ctx context.Context, input authorizationRequest
 	if err != nil {
 		return out, errDenied
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(data))
+	endpoint := c.url
+	if input.AdmissionMode == "authenticated_proxy" {
+		endpoint = strings.TrimSuffix(endpoint, "/authorize") + "/proxy-authorize"
+	} else if input.AdmissionMode != "" || input.ProxyCapability != "" {
+		return out, errDenied
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
 		return out, errDenied
 	}

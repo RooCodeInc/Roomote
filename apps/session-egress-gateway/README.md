@@ -188,3 +188,34 @@ revocation, identity changes and expiry. New requests can use the renewed lease;
 existing requests and streams still end at their original deadline. Connector certificate
 revocation requires removing its workload binding or trust plus connection
 cleanup; the certificate is not itself a live grant.
+## Authenticated Shared Proxy Mode
+
+The same actual-Iron gateway can optionally expose an additional HTTPS CONNECT
+listener. Set `SESSION_EGRESS_AUTHENTICATED_PROXY_LISTEN_ADDR` (for example
+`:8444`), `SESSION_EGRESS_PROXY_SERVER_CERT_FILE`, and
+`SESSION_EGRESS_PROXY_SERVER_KEY_FILE` on the gateway. This requires a reachable
+TLS forward-proxy endpoint whose ingress supports HTTP/1.1 CONNECT and long-lived
+tunnels; a normal web route or reverse-proxy path is not equivalent. Existing
+gateway/API/MITM CA configuration and the stronger external-mTLS listener are
+unchanged. Do not put gateway API credentials or private signing keys in workers.
+
+Clients use standard Basic proxy authentication with username `workload` and the
+scoped opaque proxy capability as password. The gateway validates it server-side,
+then requires the independently issued service substitute inside the MITM TLS
+tunnel. Proxy authorization and reserved internal headers are removed before
+upstream forwarding. Bare CONNECT tunnels and active/idle HTTP streams are
+revalidated and closed on denial, expiry or authorization-service failure.
+
+This is credential containment with transferable logical identity, not forced
+egress or nontransferable physical-workload identity. A valid stolen capability
+plus its matching substitute can be replayed until invalidated. It cannot replace
+a connector certificate on the external-mTLS listener, and a connector certificate
+cannot replace proxy authentication on the new listener.
+
+Use the public CA bundle for both proxy-server TLS (when privately signed) and
+the inner service certificate. Curl supports standard proxy authentication and
+`--proxy-cacert`/`--cacert`; SDK proxy and trust support depends on the exact
+transport/runtime. Do not assume every SDK consumes `HTTPS_PROXY`. Client-specific
+configuration leaves bootstrap, inference and unrelated traffic on their existing
+routes. There are no new model-facing request tools. Hosted worker delivery and
+refresh remain required integration steps, not claims established by this listener.

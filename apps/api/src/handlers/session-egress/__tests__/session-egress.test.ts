@@ -339,6 +339,13 @@ it('accepts only the controller and gateway service principals on their own rout
   ]) {
     expect((await call('/workloads', { token, body })).status).toBe(401);
     expect((await call('/authorize', { token, body: {} })).status).toBe(401);
+    for (const route of [
+      '/proxy-workloads',
+      '/proxy-connect',
+      '/proxy-authorize',
+    ]) {
+      expect((await call(route, { token, body: {} })).status).toBe(401);
+    }
     expect((await call('/revocations', { method: 'GET', token })).status).toBe(
       401,
     );
@@ -346,6 +353,14 @@ it('accepts only the controller and gateway service principals on their own rout
   // The gateway may not register workloads; the controller may not resolve credentials.
   expect((await call('/workloads', { token: GATEWAY, body })).status).toBe(403);
   const controller = await createSessionEgressControllerToken();
+  expect(
+    (await call('/proxy-workloads', { token: GATEWAY, body: {} })).status,
+  ).toBe(403);
+  for (const route of ['/proxy-connect', '/proxy-authorize']) {
+    expect((await call(route, { token: controller, body: {} })).status).toBe(
+      403,
+    );
+  }
   expect(
     (await call('/authorize', { token: controller, body: {} })).status,
   ).toBe(403);
@@ -361,6 +376,77 @@ it('accepts only the controller and gateway service principals on their own rout
       )
     )[0],
   ).toEqual({ n: 0 });
+});
+
+it('separates proxy CONNECT admission from service authorization and rejects revoked capability use', async () => {
+  const issued = await call('/proxy-workloads', {
+    token: await createSessionEgressControllerToken(),
+    body: { runId, provider: 'roomote' },
+  });
+  expect(issued.status).toBe(201);
+  const registration = issued.json;
+  minted.push(
+    registration.proxyCapability,
+    registration.substitutes[0].substitute,
+  );
+  const connect = {
+    proxyCapability: registration.proxyCapability,
+    destination: { host: 'api.example.com', port: 443 },
+  };
+  const admitted = await call('/proxy-connect', { body: connect });
+  expect(admitted.json).toMatchObject({
+    allowed: true,
+    workloadId: registration.workloadId,
+    generation: registration.generation,
+  });
+  expect(admitted.json).not.toHaveProperty('credential');
+  expect(
+    (
+      await call('/proxy-workloads', {
+        token: registration.proxyCapability,
+        body: { runId, provider: 'roomote' },
+      })
+    ).status,
+  ).toBe(401);
+  expect(
+    (
+      await call('/proxy-connect', {
+        body: { ...connect, destination: { host: 'other.example', port: 443 } },
+      })
+    ).json,
+  ).toEqual({ allowed: false });
+  expect(
+    (
+      await call('/proxy-authorize', {
+        body: {
+          admissionMode: 'authenticated_proxy',
+          workloadId: registration.workloadId,
+          ...connect,
+          method: 'GET',
+          path: '/',
+        },
+      })
+    ).json,
+  ).toMatchObject({ allowed: false });
+  const request = {
+    admissionMode: 'authenticated_proxy',
+    workloadId: registration.workloadId,
+    ...connect,
+    substitute: registration.substitutes[0].substitute,
+    method: 'GET',
+    path: '/',
+  };
+  expect(
+    (await call('/proxy-authorize', { body: request })).json,
+  ).toMatchObject({ allowed: true, credential: { value: secret } });
+  await revokeSessionSecret(context, { secretRef });
+  expect((await call('/proxy-connect', { body: connect })).json).toEqual({
+    allowed: false,
+  });
+  for (const phase of ['request', 'response', 'stream'])
+    expect(
+      (await call('/proxy-authorize', { body: { ...request, phase } })).json,
+    ).toMatchObject({ allowed: false });
 });
 
 it('registers an attached run, returns substitutes once, and stores only a keyed hash', async () => {

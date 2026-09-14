@@ -74,9 +74,23 @@ func (p *policy) TransformRequest(ctx context.Context, tc *transform.TransformCo
 			})
 		}
 	}
-	principal, err := identity.FromCertificate(tc.ClientCert)
-	if err != nil || tc.Mode != transform.ModeMITM || !tc.ClientCert.NotAfter.After(time.Now()) {
+	var workloadID, connectorIdentity string
+	var identityExpiry time.Time
+	if tc.Mode != transform.ModeMITM {
 		return reject()
+	}
+	if tc.ProxyPrincipal != nil {
+		principal := tc.ProxyPrincipal
+		if tc.ClientCert != nil || !identity.IsUUID(principal.WorkloadID) || !principal.ExpiresAt.After(time.Now()) {
+			return reject()
+		}
+		workloadID, identityExpiry = principal.WorkloadID, principal.ExpiresAt
+	} else {
+		principal, err := identity.FromCertificate(tc.ClientCert)
+		if err != nil || !tc.ClientCert.NotAfter.After(time.Now()) {
+			return reject()
+		}
+		workloadID, connectorIdentity, identityExpiry = principal.WorkloadID, principal.ConnectorIdentity, tc.ClientCert.NotAfter
 	}
 	if req.Method == http.MethodConnect {
 		// Admission authenticates the connector and validates authority, not a grant.
@@ -93,7 +107,7 @@ func (p *policy) TransformRequest(ctx context.Context, tc *transform.TransformCo
 	if tc.Tunnel == nil || req.TLS == nil {
 		return reject()
 	}
-	input.WorkloadID = principal.WorkloadID
+	input.WorkloadID = workloadID
 	host, port, ok := authority.Parse(tc.Tunnel.Target, tc.Tunnel.Target)
 	if !ok || tc.SNI != host || !authority.HostMatches(req.Host, host, port) || (req.URL.IsAbs() && (req.URL.Scheme != "https" || !authority.HostMatches(req.URL.Host, host, port))) {
 		return reject()
@@ -133,9 +147,15 @@ func (p *policy) TransformRequest(ctx context.Context, tc *transform.TransformCo
 	}
 	// Never discover or substitute a token in a path, query, arbitrary header or body.
 	// Other fields do not contribute authority; bodies pass through byte-exact.
-	input = authorizationRequest{WorkloadID: principal.WorkloadID, ConnectorIdentity: principal.ConnectorIdentity, Substitute: token, Destination: destination{host, port}, Method: req.Method, Path: req.URL.RequestURI(), Phase: "request"}
+	input = authorizationRequest{WorkloadID: workloadID, ConnectorIdentity: connectorIdentity, Substitute: token, Destination: destination{host, port}, Method: req.Method, Path: req.URL.RequestURI(), Phase: "request"}
+	if tc.ProxyPrincipal != nil {
+		input.AdmissionMode, input.ProxyCapability = "authenticated_proxy", tc.ProxyPrincipal.Capability
+	}
 	grant, err := p.client.authorize(ctx, input)
 	if err != nil {
+		return reject()
+	}
+	if tc.ProxyPrincipal != nil && (grant.Generation != tc.ProxyPrincipal.Generation || grant.SessionID != tc.ProxyPrincipal.SessionID) {
 		return reject()
 	}
 	input.AuthorizationID = grant.AuthorizationID
@@ -144,8 +164,8 @@ func (p *policy) TransformRequest(ctx context.Context, tc *transform.TransformCo
 		return reject()
 	}
 	deadline := grant.ExpiresAt
-	if tc.ClientCert.NotAfter.Before(deadline) {
-		deadline = tc.ClientCert.NotAfter
+	if identityExpiry.Before(deadline) {
+		deadline = identityExpiry
 	}
 	live, cancel := context.WithDeadline(ctx, deadline)
 	s = &exchange{policy: p, request: input, grant: grant, ctx: live, cancel: cancel, done: make(chan struct{}), scanner: echo.New(c.Value)}
@@ -154,7 +174,7 @@ func (p *policy) TransformRequest(ctx context.Context, tc *transform.TransformCo
 	go s.watch()
 	for name := range req.Header {
 		lower := strings.ToLower(name)
-		if strings.HasPrefix(lower, "proxy-") || strings.HasPrefix(lower, "x-forwarded-") || lower == "forwarded" || lower == "via" || lower == "x-real-ip" || lower == "connection" {
+		if strings.HasPrefix(lower, "proxy-") || strings.HasPrefix(lower, "x-forwarded-") || strings.HasPrefix(lower, "x-roomote-") || strings.HasPrefix(lower, "x-session-egress-") || lower == "forwarded" || lower == "via" || lower == "x-real-ip" || lower == "connection" {
 			req.Header.Del(name)
 		}
 	}

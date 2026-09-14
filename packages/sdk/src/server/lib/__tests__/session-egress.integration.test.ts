@@ -28,6 +28,8 @@ import {
   authorize,
   issueSubstitutes,
   registerWorkload,
+  registerProxyWorkload,
+  authorizeProxy,
 } from '../session-egress';
 import {
   createSessionSecret,
@@ -106,6 +108,268 @@ it('registers exact prepared GET+POST consent and authorizes both methods withou
         : { allowed: true },
     );
   }
+});
+
+it('requires matching proxy capability and substitute, without claiming physical-origin binding', async () => {
+  const pending = await prepareSessionSecret(context, policy);
+  await createSessionSecret(context, {
+    pendingRef: pending.pendingRef,
+    secret,
+    allowedMethods: pending.allowedMethods,
+  });
+  const first = await registerProxyWorkload({ runId, provider: 'roomote' });
+  const other = await runFactory.create({
+    actingUserId: context.userId!,
+    status: RunStatus.Running,
+  });
+  try {
+    await db.insert(sessionTasks).values({
+      sessionId: context.sessionId,
+      taskId: other.taskId,
+      origin: 'direct_launch',
+    });
+    const second = await registerProxyWorkload({
+      runId: other.id,
+      provider: 'roomote',
+    });
+    const request = {
+      admissionMode: 'authenticated_proxy',
+      workloadId: first.workloadId,
+      proxyCapability: first.proxyCapability,
+      substitute: first.substitutes[0]!.substitute,
+      destination: { host: 'api.example.com', port: 443 },
+      method: 'POST',
+      path: '/records',
+    };
+    expect(await authorizeProxy(request)).toMatchObject({ allowed: true });
+    // Copying both credentials replays logical identity A; no physical-origin claim.
+    expect(
+      await authorizeProxy(JSON.parse(JSON.stringify(request))),
+    ).toMatchObject({ allowed: true });
+    expect(
+      await authorizeProxy({
+        ...request,
+        proxyCapability: second.proxyCapability,
+      }),
+    ).toMatchObject({ allowed: false });
+    expect(
+      await authorizeProxy({
+        ...request,
+        substitute: second.substitutes[0]!.substitute,
+      }),
+    ).toMatchObject({ allowed: false });
+    expect(
+      await authorizeProxy({ ...request, method: 'DELETE' }),
+    ).toMatchObject({ allowed: false, reason: 'method_not_allowed' });
+    expect(
+      await authorizeProxy({
+        ...request,
+        destination: { host: 'elsewhere.example', port: 443 },
+      }),
+    ).toMatchObject({ allowed: false, reason: 'destination_mismatch' });
+    const [stored] = await db
+      .select()
+      .from(sessionEgressWorkloads)
+      .where(eq(sessionEgressWorkloads.id, first.workloadId));
+    expect(JSON.stringify(stored)).not.toContain(first.proxyCapability);
+    expect(
+      await authorize({
+        workloadId: first.workloadId,
+        connectorIdentity: stored!.connectorIdentity,
+        substitute: first.substitutes[0]!.substitute,
+        destination: request.destination,
+        method: 'POST',
+        path: '/records',
+      }),
+    ).toMatchObject({ allowed: false });
+  } finally {
+    await db.delete(tasks).where(eq(tasks.id, other.taskId));
+  }
+});
+
+it.each(['expiry', 'rotation', 'detach', 'owner', 'terminal'])(
+  'invalidates proxy authorization at response/stream time after %s',
+  async (mode) => {
+    const pending = await prepareSessionSecret(context, policy);
+    await createSessionSecret(context, {
+      pendingRef: pending.pendingRef,
+      secret,
+      allowedMethods: pending.allowedMethods,
+    });
+    const registered = await registerProxyWorkload({
+      runId,
+      provider: 'roomote',
+      capabilitySeconds: 60,
+    });
+    const request = {
+      admissionMode: 'authenticated_proxy',
+      workloadId: registered.workloadId,
+      proxyCapability: registered.proxyCapability,
+      substitute: registered.substitutes[0]!.substitute,
+      destination: { host: 'api.example.com', port: 443 },
+      method: 'GET',
+      path: '/records',
+    };
+    expect(await authorizeProxy(request)).toMatchObject({
+      allowed: true,
+      expiresAt: registered.proxyCapabilityExpiresAt,
+    });
+    if (mode === 'expiry')
+      await db
+        .update(sessionEgressWorkloads)
+        .set({ proxyCapabilityExpiresAt: new Date(0) })
+        .where(eq(sessionEgressWorkloads.id, registered.workloadId));
+    if (mode === 'rotation')
+      await registerProxyWorkload({ runId, provider: 'roomote' });
+    if (mode === 'detach')
+      await db.delete(sessionTasks).where(eq(sessionTasks.taskId, taskId));
+    if (mode === 'owner')
+      await db
+        .update(sessions)
+        .set({ archivedAt: new Date() })
+        .where(eq(sessions.id, context.sessionId));
+    if (mode === 'terminal')
+      await db
+        .update(taskRuns)
+        .set({ status: RunStatus.Completed })
+        .where(eq(taskRuns.id, runId));
+    for (const phase of ['response', 'stream'])
+      expect(await authorizeProxy({ ...request, phase })).toMatchObject({
+        allowed: false,
+      });
+  },
+);
+
+it('requires a matching proxy capability AND substitute, and preserves the distinct connector contract', async () => {
+  const pending = await prepareSessionSecret(context, policy);
+  await createSessionSecret(context, {
+    pendingRef: pending.pendingRef,
+    secret,
+    allowedMethods: pending.allowedMethods,
+  });
+  const a = await registerProxyWorkload({
+    runId,
+    provider: 'roomote',
+    capabilitySeconds: 60,
+  });
+  const request = {
+    admissionMode: 'authenticated_proxy' as const,
+    workloadId: a.workloadId,
+    proxyCapability: a.proxyCapability,
+    substitute: a.substitutes[0]!.substitute,
+    destination: { host: 'api.example.com', port: 443 },
+    method: 'POST',
+    path: '/fixture',
+  };
+  expect(await authorizeProxy(request)).toMatchObject({ allowed: true });
+  // Possession is the accepted identity proof: copying this pair is replayable.
+  expect(
+    await authorizeProxy(JSON.parse(JSON.stringify(request))),
+  ).toMatchObject({ allowed: true });
+  const [stored] = await db
+    .select()
+    .from(sessionEgressWorkloads)
+    .where(eq(sessionEgressWorkloads.id, a.workloadId));
+  expect(JSON.stringify(stored)).not.toContain(a.proxyCapability);
+  expect(
+    await authorize({
+      ...request,
+      admissionMode: undefined,
+      proxyCapability: undefined,
+      connectorIdentity: stored!.connectorIdentity,
+    }),
+  ).toMatchObject({ allowed: false });
+  const second = await runFactory.create({
+    actingUserId: context.userId!,
+    status: RunStatus.Running,
+  });
+  try {
+    await db.insert(sessionTasks).values({
+      sessionId: context.sessionId,
+      taskId: second.taskId,
+      origin: 'direct_launch',
+    });
+    const b = await registerProxyWorkload({
+      runId: second.id,
+      provider: 'roomote',
+    });
+    expect(
+      await authorizeProxy({ ...request, proxyCapability: b.proxyCapability }),
+    ).toMatchObject({ allowed: false });
+    expect(
+      await authorizeProxy({
+        ...request,
+        substitute: b.substitutes[0]!.substitute,
+      }),
+    ).toMatchObject({ allowed: false });
+    expect(
+      await authorizeProxy({
+        ...request,
+        workloadId: b.workloadId,
+        substitute: b.substitutes[0]!.substitute,
+      }),
+    ).toMatchObject({ allowed: false });
+    await db
+      .update(sessionEgressWorkloads)
+      .set({ proxyCapabilityExpiresAt: new Date(0) })
+      .where(eq(sessionEgressWorkloads.id, a.workloadId));
+    for (const phase of ['request', 'response', 'stream'])
+      expect(await authorizeProxy({ ...request, phase })).toMatchObject({
+        allowed: false,
+      });
+  } finally {
+    await db.delete(tasks).where(eq(tasks.id, second.taskId));
+  }
+});
+
+it('rotates proxy capabilities and substitutes together without widening grants', async () => {
+  const pending = await prepareSessionSecret(context, policy);
+  await createSessionSecret(context, {
+    pendingRef: pending.pendingRef,
+    secret,
+    allowedMethods: pending.allowedMethods,
+  });
+  const a = await registerProxyWorkload({ runId, provider: 'roomote' });
+  const b = await registerProxyWorkload({ runId, provider: 'roomote' });
+  const request = {
+    admissionMode: 'authenticated_proxy',
+    workloadId: a.workloadId,
+    proxyCapability: a.proxyCapability,
+    substitute: a.substitutes[0]!.substitute,
+    destination: { host: 'api.example.com', port: 443 },
+    method: 'GET',
+    path: '/fixture',
+  };
+  expect(b.generation).toBe(a.generation + 1);
+  expect(await authorizeProxy(request)).toMatchObject({ allowed: false });
+  const fresh = {
+    ...request,
+    workloadId: b.workloadId,
+    proxyCapability: b.proxyCapability,
+    substitute: b.substitutes[0]!.substitute,
+  };
+  expect(await authorizeProxy(fresh)).toMatchObject({
+    allowed: true,
+    expiresAt: b.proxyCapabilityExpiresAt,
+  });
+  expect(await authorizeProxy({ ...fresh, method: 'DELETE' })).toMatchObject({
+    allowed: false,
+    reason: 'method_not_allowed',
+  });
+  expect(
+    await authorizeProxy({
+      ...fresh,
+      destination: { host: 'elsewhere.example', port: 443 },
+    }),
+  ).toMatchObject({ allowed: false, reason: 'destination_mismatch' });
+  await db
+    .update(sessions)
+    .set({ archivedAt: new Date() })
+    .where(eq(sessions.id, context.sessionId));
+  expect(await authorizeProxy(fresh)).toMatchObject({
+    allowed: false,
+    reason: 'session_unavailable',
+  });
 });
 
 it('retires the run workload and substitutes together on terminal cleanup', async () => {

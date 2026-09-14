@@ -122,10 +122,6 @@ export async function destroyDockerInstance(
   runDocker: DockerCommand = docker,
 ): Promise<DestroyInstanceResult> {
   const sourceRunId = getSourceRunId(input.instanceId);
-  await runDocker(['rm', '-f', `${input.instanceId}-egress-policy`], {
-    signal: input.signal,
-    allowFailure: true,
-  });
   await runDocker(['rm', '-f', getTaskDaemonContainerName(input.instanceId)], {
     signal: input.signal,
     allowFailure: true,
@@ -135,6 +131,31 @@ export async function destroyDockerInstance(
     { signal: input.signal, allowFailure: true },
   );
   await runDocker(['rm', '-f', input.instanceId], {
+    signal: input.signal,
+    allowFailure: true,
+  });
+  // Best-effort removal also swallows daemon and timeout failures. Keep the
+  // network boundary until the daemon confirms the workload is absent.
+  let removed = false;
+  try {
+    await runDocker(['container', 'inspect', input.instanceId], {
+      signal: input.signal,
+    });
+  } catch (error) {
+    input.signal?.throwIfAborted();
+    const failure = error as { code?: unknown; stderr?: unknown };
+    if (
+      failure.code !== 1 ||
+      typeof failure.stderr !== 'string' ||
+      !/(?:^|\n)(?:Error response from daemon: |Error: )?No such (?:container|object): /i.test(
+        failure.stderr,
+      )
+    )
+      throw error;
+    removed = true;
+  }
+  if (!removed) throw new Error('Docker workload removal is not confirmed');
+  await runDocker(['rm', '-f', `${input.instanceId}-egress-policy`], {
     signal: input.signal,
     allowFailure: true,
   });

@@ -9,6 +9,8 @@ import {
   issueSessionEgressSubstitutes,
   listSessionEgressRevocations,
   registerSessionEgressWorkload,
+  registerSessionProxyWorkload,
+  authenticateSessionProxyConnect,
   renewSessionEgressWorkloadLease,
   SessionEgressRegistrationError,
   terminateSessionEgressWorkload,
@@ -21,6 +23,9 @@ import {
   sessionEgressWorkloadLeaseSchema,
   sessionEgressWorkloadRegisterSchema,
   sessionEgressWorkloadTerminateSchema,
+  sessionProxyRegisterSchema,
+  sessionProxyAuthorizeSchema,
+  sessionProxyConnectSchema,
   type SessionEgressAuthorization,
   type SessionEgressRevocationFeed,
   type SessionEgressWorkloadLease,
@@ -129,6 +134,36 @@ export async function registerWorkload(
       throw new SessionEgressRequestError(409, error.code);
     throw error;
   }
+}
+
+export async function registerProxyWorkload(input: unknown) {
+  const parsed = parse(sessionProxyRegisterSchema, input);
+  try {
+    return await registerSessionProxyWorkload(parsed, { isOriginAllowed });
+  } catch (error) {
+    if (error instanceof SessionEgressRegistrationError)
+      throw new SessionEgressRequestError(409, error.code);
+    throw error;
+  }
+}
+
+export async function authorizeProxy(
+  input: unknown,
+): Promise<SessionEgressAuthorization> {
+  const parsed = sessionProxyAuthorizeSchema.safeParse(input);
+  if (!parsed.success) return { allowed: false, reason: 'malformed' };
+  return authorizeSessionEgress(parsed.data, { isOriginAllowed });
+}
+
+export async function authenticateProxyConnect(input: unknown) {
+  const parsed = sessionProxyConnectSchema.safeParse(input);
+  if (!parsed.success) return { allowed: false as const };
+  const principal = await authenticateSessionProxyConnect(parsed.data, {
+    isOriginAllowed,
+  });
+  return principal
+    ? { allowed: true as const, ...principal }
+    : { allowed: false as const };
 }
 
 export async function issueSubstitutes(

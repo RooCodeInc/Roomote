@@ -137,6 +137,39 @@ export const sessionEgressAuthorizeSchema = z
   })
   .strict();
 
+/** Transferable logical-workload capability, never an external connector proof. */
+export const sessionProxyCapabilitySchema = z
+  .string()
+  .regex(/^rproxy_[A-Za-z0-9_-]{43}$/);
+export const sessionProxyRegisterSchema = sessionEgressWorkloadRegisterSchema
+  .omit({ connectorIdentity: true })
+  .extend({ capabilitySeconds: z.number().int().min(60).max(900).default(900) })
+  .strict();
+export const sessionProxyAuthorizeSchema = sessionEgressAuthorizeSchema
+  .omit({ connectorIdentity: true })
+  .extend({
+    admissionMode: z.literal('authenticated_proxy'),
+    proxyCapability: sessionProxyCapabilitySchema,
+  })
+  .strict();
+export const sessionProxyConnectSchema = sessionProxyAuthorizeSchema
+  .pick({ proxyCapability: true, destination: true })
+  .strict();
+export type SessionProxyConnect = z.infer<typeof sessionProxyConnectSchema>;
+export interface SessionProxyPrincipal {
+  workloadId: string;
+  sessionId: string;
+  generation: number;
+  expiresAt: string;
+}
+export type SessionProxyRegister = z.infer<typeof sessionProxyRegisterSchema>;
+export type SessionProxyAuthorize = z.infer<typeof sessionProxyAuthorizeSchema>;
+export interface SessionProxyRegistration extends SessionEgressWorkloadRegistration {
+  admissionMode: 'authenticated_proxy';
+  proxyCapability: string;
+  proxyCapabilityExpiresAt: string;
+}
+
 export const sessionEgressRevocationsQuerySchema = z
   .object({
     after: z.coerce.number().int().min(0).default(0),
@@ -275,6 +308,9 @@ export const SESSION_EGRESS_WORKLOAD_ENV = {
   NO_PROXY: 'ROOMOTE_SESSION_EGRESS_NO_PROXY',
   /** JSON `SessionEgressWorkloadServiceManifestEntry[]`; never contains token values. */
   SERVICES: 'ROOMOTE_SESSION_EGRESS_SERVICES',
+  ADMISSION_MODE: 'ROOMOTE_SESSION_EGRESS_ADMISSION_MODE',
+  PROXY_CAPABILITY: 'ROOMOTE_SESSION_PROXY_CAPABILITY',
+  PROXY_CAPABILITY_EXPIRES_AT: 'ROOMOTE_SESSION_PROXY_CAPABILITY_EXPIRES_AT',
 } as const;
 
 /** Substitute tokens are delivered as `ROOMOTE_SERVICE_TOKEN_<LABEL_SLUG>`. */
@@ -287,6 +323,37 @@ export interface SessionEgressWorkloadServiceManifestEntry extends SessionEgress
   /** The env var that carries this service's substitute token. */
   envName: string;
 }
+
+export const sessionEgressWorkloadServiceManifestSchema = z
+  .array(
+    z
+      .object({
+        secretRef: z.string().uuid(),
+        label: z.string().min(1),
+        origin: z
+          .string()
+          .url()
+          .refine((value) => {
+            const url = new URL(value);
+            return (
+              url.protocol === 'https:' &&
+              !url.username &&
+              !url.password &&
+              url.origin === value
+            );
+          }),
+        headerName: z.enum(['authorization', 'x-api-key', 'api-key']),
+        headerPrefix: z.enum(['', 'Bearer ', 'Basic ', 'Token ']),
+        allowedMethods: sessionEgressAllowedMethodsSchema,
+        expiresAt: z.string().datetime(),
+        envName: z.string().regex(/^ROOMOTE_SERVICE_TOKEN_[A-Z0-9_]+$/),
+      })
+      .strict(),
+  )
+  .refine(
+    (entries) =>
+      new Set(entries.map((entry) => entry.envName)).size === entries.length,
+  );
 
 export function sessionEgressServiceTokenEnvName(label: string): string {
   const normalized = label

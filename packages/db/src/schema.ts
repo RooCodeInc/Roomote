@@ -4384,6 +4384,14 @@ export const sessionEgressWorkloads = pgTable(
       .references(() => taskRuns.id, { onDelete: 'cascade' }),
     provider: text('provider').notNull(),
     connectorIdentity: text('connector_identity').notNull(),
+    // Additive N-1 compatibility. In proxy mode connector_identity is only a
+    // unique legacy storage reference, never asserted as certificate identity.
+    admissionMode: text('admission_mode')
+      .notNull()
+      .default('external_mtls')
+      .$type<'external_mtls' | 'authenticated_proxy'>(),
+    proxyCapabilityHash: text('proxy_capability_hash'),
+    proxyCapabilityExpiresAt: timestamp('proxy_capability_expires_at'),
     // Bumped on re-registration (resume, actor change, connector rotation).
     // Substitutes are bound to the generation they were minted in.
     generation: integer('generation').notNull().default(1),
@@ -4406,6 +4414,13 @@ export const sessionEgressWorkloads = pgTable(
       .on(table.connectorIdentity)
       .where(sql`${table.status} = 'active'`),
     index('session_egress_workloads_session_idx').on(table.sessionId),
+    uniqueIndex('session_egress_workloads_proxy_capability_unique').on(
+      table.proxyCapabilityHash,
+    ),
+    check(
+      'session_egress_workloads_admission_mode_check',
+      sql`${table.admissionMode} in ('external_mtls', 'authenticated_proxy')`,
+    ),
     check(
       'session_egress_workloads_status_check',
       sql`${table.status} in ('active', 'terminated')`,

@@ -5,9 +5,12 @@ import { createMiddleware } from 'hono/factory';
 import {
   authenticateSessionEgressPrincipal,
   authorize,
+  authorizeProxy,
+  authenticateProxyConnect,
   getSessionEgressGatewayToken,
   issueSubstitutes,
   registerWorkload,
+  registerProxyWorkload,
   renewLease,
   revocations,
   SessionEgressRequestError,
@@ -103,6 +106,20 @@ export function createSessionEgressControlPlane(
   // Controller: bind an attached run to the gateway (or rotate its generation).
   app.post('/workloads', controllerOnly, async (c) =>
     c.json(await registerWorkload(await json(c)), 201),
+  );
+  // Distinct transferable-capability mode; never a connector-certificate proof.
+  app.post('/proxy-workloads', controllerOnly, async (c) =>
+    c.json(await registerProxyWorkload(await json(c)), 201),
+  );
+  app.post('/proxy-authorize', gatewayOnly, async (c) =>
+    c.json(await authorizeProxy(await json(c)), 200, {
+      'cache-control': 'no-store',
+    }),
+  );
+  app.post('/proxy-connect', gatewayOnly, async (c) =>
+    c.json(await authenticateProxyConnect(await json(c)), 200, {
+      'cache-control': 'no-store',
+    }),
   );
   // Controller: substitutes for grants approved after registration.
   app.post('/workloads/:workloadId/substitutes', controllerOnly, async (c) =>

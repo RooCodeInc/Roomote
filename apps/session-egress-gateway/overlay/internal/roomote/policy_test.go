@@ -43,6 +43,7 @@ const connectorID = "spiffe://roomote/connector/local-fixture"
 const substitute = "rses_0123456789abcdefghijklmnopqrstuvwxyz0123456789"
 const realKey = "FixtureSecret_ABC123+/%xy987654321"
 const authID = "33333333-3333-4333-8333-333333333333"
+const capability = "rproxy_0123456789abcdefghijklmnopqrstuvwxyz0123456"
 
 type pki struct {
 	cert              *x509.Certificate
@@ -133,12 +134,16 @@ func (f *fixture) assertFinal(outcome, authorizationID string) {
 	require.Equal(f.t, authorizationID, event["authorizationId"])
 	require.Equal(f.t, workload, event["workloadId"])
 	require.Len(f.t, event, 6, "only time, level, message and three bounded outcome fields")
-	for _, sensitive := range []string{substitute, realKey, "private-path", "private-query", "private-body", strings.Repeat("g", 32), "upstreamerr"} {
+	for _, sensitive := range []string{substitute, realKey, capability, "private-path", "private-query", "private-body", strings.Repeat("g", 32), "upstreamerr"} {
 		require.NotContains(f.t, f.logs.snapshot(), sensitive)
 	}
 }
 
 func newFixture(t *testing.T, handler http.HandlerFunc) *fixture {
+	return newFixtureMode(t, handler, false)
+}
+
+func newFixtureMode(t *testing.T, handler http.HandlerFunc, direct bool) *fixture {
 	t.Helper()
 	f := &fixture{t: t, pki: newPKI(t), grantPrefix: "Bearer "}
 	f.expiry.Store(time.Now().Add(time.Minute).Truncate(time.Second).UnixNano())
@@ -155,7 +160,27 @@ func newFixture(t *testing.T, handler http.HandlerFunc) *fixture {
 			http.Error(w, "unavailable", 503)
 			return
 		}
-		if r.URL.Path != "/api/internal/session-egress/authorize" || r.Header.Get("Authorization") != "Bearer "+strings.Repeat("g", 32) {
+		if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("g", 32) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		if direct && r.URL.Path == "/api/internal/session-egress/proxy-connect" {
+			var input struct {
+				ProxyCapability string      `json:"proxyCapability"`
+				Destination     destination `json:"destination"`
+			}
+			if json.NewDecoder(r.Body).Decode(&input) != nil || input.ProxyCapability != capability || f.revoked.Load() || hostPort(input.Destination.Host, input.Destination.Port) != f.target {
+				json.NewEncoder(w).Encode(map[string]any{"allowed": false})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"allowed": true, "workloadId": workload, "sessionId": otherWorkload, "generation": 1, "expiresAt": time.Unix(0, f.expiry.Load())})
+			return
+		}
+		expectedPath := "/api/internal/session-egress/authorize"
+		if direct {
+			expectedPath = "/api/internal/session-egress/proxy-authorize"
+		}
+		if r.URL.Path != expectedPath {
 			http.Error(w, "unauthorized", 401)
 			return
 		}
@@ -167,7 +192,11 @@ func newFixture(t *testing.T, handler http.HandlerFunc) *fixture {
 		f.phaseMu.Lock()
 		f.phases = append(f.phases, input.Phase)
 		f.phaseMu.Unlock()
-		if f.revoked.Load() || (f.denyResponse.Load() && input.Phase == "response") || input.WorkloadID != workload || input.ConnectorIdentity != connectorID || input.Substitute != substitute || hostPort(input.Destination.Host, input.Destination.Port) != f.target {
+		validIdentity := input.ConnectorIdentity == connectorID && input.AdmissionMode == "" && input.ProxyCapability == ""
+		if direct {
+			validIdentity = input.ConnectorIdentity == "" && input.AdmissionMode == "authenticated_proxy" && input.ProxyCapability == capability
+		}
+		if f.revoked.Load() || (f.denyResponse.Load() && input.Phase == "response") || input.WorkloadID != workload || !validIdentity || input.Substitute != substitute || hostPort(input.Destination.Host, input.Destination.Port) != f.target {
 			_ = json.NewEncoder(w).Encode(map[string]any{"allowed": false, "reason": "workload_mismatch"})
 			return // Fixture writer errors are client disconnects.
 		}
@@ -200,8 +229,18 @@ func newFixture(t *testing.T, handler http.HandlerFunc) *fixture {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	f.addr = ln.Addr().String()
-	go func() { _ = f.p.ServeConnector(ln) }() // Shutdown is asserted by cleanup.
-	f.client = f.httpClient(f.connectorCert)
+	if direct {
+		go func() {
+			_ = f.p.ServeAuthenticatedProxy(ln, &tls.Config{Certificates: []tls.Certificate{f.pki.leaf(t, nil)}}, secret.authenticateProxyConnect)
+		}()
+		proxyURL, err := url.Parse("https://" + f.addr)
+		require.NoError(t, err)
+		proxyURL.User = url.UserPassword("workload", capability)
+		f.client = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL), TLSClientConfig: &tls.Config{RootCAs: f.pki.pool}, DisableCompression: true}, Timeout: 4 * time.Second}
+	} else {
+		go func() { _ = f.p.ServeConnector(ln) }() // Shutdown is asserted by cleanup.
+		f.client = f.httpClient(f.connectorCert)
+	}
 	t.Cleanup(func() {
 		f.client.CloseIdleConnections()
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
