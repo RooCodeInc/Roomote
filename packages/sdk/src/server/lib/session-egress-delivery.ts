@@ -46,7 +46,7 @@ export async function isSessionEgressBootstrapReady(
   return (await getRedis().get(`${prefix}bootstrap:${runId}:${nonce}`)) === '1';
 }
 
-/** Only controller code calls this after externally applying and verifying the policy. */
+/** Controller-only configuration handoff; the explicit admission mode determines its guarantees. */
 export async function publishSessionEgressDelivery(
   runId: number,
   registration: SessionEgressWorkloadRegistration,

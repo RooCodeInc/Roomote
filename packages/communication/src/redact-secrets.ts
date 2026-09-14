@@ -1,4 +1,6 @@
 const SECRET_PATTERNS: RegExp[] = [
+  /\brproxy_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g,
+  /\brses_[A-Za-z0-9_-]{32,123}(?![A-Za-z0-9_-])/g,
   /\b(?:sk|rk)-[A-Za-z0-9_-]{8,}/g,
   /\bgh[pousr]_[A-Za-z0-9]{8,}/g,
   /\bgithub_pat_[A-Za-z0-9_]{8,}/g,

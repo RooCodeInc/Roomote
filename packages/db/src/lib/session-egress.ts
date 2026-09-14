@@ -71,6 +71,44 @@ function hashProxyCapability(token: string): string {
     .digest('hex');
 }
 
+/** Rolling short lease, renewable only by the trusted controller while still live. */
+export async function renewSessionProxyLease(
+  workloadId: string,
+  generation: number,
+) {
+  return db.transaction(async (tx) => {
+    const workload = await liveWorkload(tx, workloadId);
+    if (
+      !workload ||
+      workload.admissionMode !== 'authenticated_proxy' ||
+      workload.generation !== generation
+    )
+      return null;
+    const [updated] = await tx
+      .update(sessionEgressWorkloads)
+      .set({
+        expiresAt: sql`clock_timestamp() + interval '900 seconds'`,
+        proxyCapabilityExpiresAt: sql`clock_timestamp() + interval '900 seconds'`,
+        updatedAt: sql`clock_timestamp()`,
+      })
+      .where(
+        and(
+          eq(sessionEgressWorkloads.id, workloadId),
+          gt(
+            sessionEgressWorkloads.proxyCapabilityExpiresAt,
+            sql`clock_timestamp()`,
+          ),
+        ),
+      )
+      .returning({
+        expiresAt: sessionEgressWorkloads.proxyCapabilityExpiresAt,
+      });
+    return updated?.expiresAt
+      ? { workloadId, generation, expiresAt: updated.expiresAt.toISOString() }
+      : null;
+  });
+}
+
 /** CONNECT admission gives no service credential and permits no HTTP exchange by itself. */
 export async function authenticateSessionProxyConnect(
   input: SessionProxyConnect,
@@ -223,6 +261,7 @@ async function liveWorkload(tx: DatabaseOrTransaction, workloadId: string) {
       and(
         eq(sessionEgressWorkloads.id, workloadId),
         eq(sessionEgressWorkloads.status, 'active'),
+        sql`(${sessionEgressWorkloads.admissionMode} = 'external_mtls' OR ${sessionEgressWorkloads.proxyCapabilityExpiresAt} > clock_timestamp())`,
         gt(sessionEgressWorkloads.expiresAt, sql`clock_timestamp()`),
         inArray(taskRuns.status, [...ELIGIBLE_RUN_STATUSES]),
         eq(taskRuns.actingUserId, sessionEgressWorkloads.ownerUserId),
@@ -546,6 +585,7 @@ async function terminate(
   tx: DatabaseOrTransaction,
   workloadId: string,
   reason: SessionEgressWorkloadTerminate['reason'],
+  expectedGeneration?: number,
 ): Promise<boolean> {
   const [row] = await tx
     .update(sessionEgressWorkloads)
@@ -559,6 +599,9 @@ async function terminate(
       and(
         eq(sessionEgressWorkloads.id, workloadId),
         eq(sessionEgressWorkloads.status, 'active'),
+        expectedGeneration === undefined
+          ? undefined
+          : eq(sessionEgressWorkloads.generation, expectedGeneration),
       ),
     )
     .returning({ id: sessionEgressWorkloads.id });
@@ -573,8 +616,11 @@ async function terminate(
 export async function terminateSessionEgressWorkload(
   workloadId: string,
   reason: SessionEgressWorkloadTerminate['reason'],
+  expectedGeneration?: number,
 ): Promise<boolean> {
-  return db.transaction((tx) => terminate(tx, workloadId, reason));
+  return db.transaction((tx) =>
+    terminate(tx, workloadId, reason, expectedGeneration),
+  );
 }
 
 /**

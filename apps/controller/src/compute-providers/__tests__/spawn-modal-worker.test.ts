@@ -33,6 +33,11 @@ const mockShouldEnableAuthBypassForTaskRun = vi.fn(
   (..._args: unknown[]) => true,
 );
 const mockPrimeEnvironmentOidcForMachine = vi.fn();
+const mockProxyCandidate = vi.fn();
+const mockDeliverSessionProxy = vi.fn();
+const mockBuildModalWorkerEnv = vi.fn((_input: unknown) => ({
+  AUTH_TOKEN: 'auth_token',
+}));
 
 function mockTaskRun(
   overrides: Partial<TaskRun> & Pick<TaskRun, 'payloadKind'>,
@@ -65,6 +70,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     createComputeProviderMutationEventRecorder:
       mockCreateComputeProviderMutationEventRecorder,
     sql: mockSql,
+    findSessionEgressCandidateForRun: mockProxyCandidate,
   };
 });
 
@@ -80,7 +86,7 @@ vi.mock('@roomote/compute-providers', async (importOriginal) => {
     buildComputeProviderMutationDetails: vi.fn(
       (_context: unknown, details: Record<string, unknown> = {}) => details,
     ),
-    buildModalWorkerEnv: vi.fn(() => ({ AUTH_TOKEN: 'auth_token' })),
+    buildModalWorkerEnv: mockBuildModalWorkerEnv,
     cleanupModalInstance: (...args: unknown[]) =>
       mockCleanupModalInstance(...args),
     resolveAuthBypassHeaderName: vi.fn(() => undefined),
@@ -101,12 +107,20 @@ vi.mock('../../sandbox-oidc', () => ({
   primeEnvironmentOidcForMachine: (...args: unknown[]) =>
     mockPrimeEnvironmentOidcForMachine(...args),
 }));
+vi.mock('../../session-egress/authenticated-proxy', () => ({
+  deliverSessionProxy: (...args: unknown[]) => mockDeliverSessionProxy(...args),
+}));
 
 const { spawnModalWorker } = await import('../spawn-modal-worker');
 
 describe('spawnModalWorker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockProxyCandidate.mockResolvedValue({
+      sessionId: 'session-fixture',
+      grantCount: 1,
+    });
+    mockDeliverSessionProxy.mockResolvedValue(undefined);
     mockShouldEnableAuthBypassForTaskRun.mockReturnValue(true);
     mockFindTask.mockResolvedValue({ workflow: 'standard' });
     delete process.env.PREVIEW_PROXY_BASE_URL;
@@ -157,51 +171,89 @@ describe('spawnModalWorker', () => {
     );
   });
 
-  it('uses a right-sized Modal VM sandbox for environments with Docker projects', async () => {
-    mockGetNamedPortsForTaskRun.mockResolvedValue({
-      namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
-      environmentSnapshotId: undefined,
-      environmentConfig: {
-        docker_projects: [
-          {
-            name: 'app',
-            type: 'compose',
-            repository: 'test/repo',
-            files: ['compose.yaml'],
-          },
-        ],
-      },
-    });
+  it.each([false, true])(
+    'preserves the right-sized nested-Docker VM with shared proxy configured=%s',
+    async (proxyEnabled) => {
+      mockGetNamedPortsForTaskRun.mockResolvedValue({
+        namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
+        environmentSnapshotId: undefined,
+        environmentConfig: {
+          docker_projects: [
+            {
+              name: 'app',
+              type: 'compose',
+              repository: 'test/repo',
+              files: ['compose.yaml'],
+            },
+          ],
+        },
+      });
 
-    await spawnModalWorker(
-      mockTaskRun({
-        payloadKind: TaskPayloadKind.StandardTask,
-        payload: { repo: 'test/repo', environmentId: 'env_123' },
-      }),
-      'auth_token',
-      {
-        deploymentSlug: 'roomote',
-        modalTokenId: 'token-id',
-        modalTokenSecret: 'token-secret',
-        modalBaseImageRef: 'image-ref',
-        modalVmMemoryMiB: 12_288,
-        modalTimeoutMs: 60_000,
-      },
-    );
-
-    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: 'modal',
-        config: expect.objectContaining({
-          vmRuntime: true,
-          cpu: 2,
-          memoryMiB: 12_288,
+      await spawnModalWorker(
+        mockTaskRun({
+          payloadKind: TaskPayloadKind.StandardTask,
+          payload: { repo: 'test/repo', environmentId: 'env_123' },
         }),
-      }),
-    );
-    expect(mockCreateModalMachine).toHaveBeenCalled();
-    expect(mockFindTask).not.toHaveBeenCalled();
-  });
+        'auth_token',
+        {
+          deploymentSlug: 'roomote',
+          modalTokenId: 'token-id',
+          modalTokenSecret: 'token-secret',
+          modalBaseImageRef: 'image-ref',
+          modalVmMemoryMiB: 12_288,
+          modalTimeoutMs: 60_000,
+          ...(proxyEnabled
+            ? {
+                sessionProxy: {
+                  endpoint: 'https://proxy.example.com',
+                  caBundle: 'public-ca-fixture',
+                  apiBaseUrl: 'https://api.example.com',
+                },
+              }
+            : {}),
+        },
+      );
+
+      expect(mockCreateComputeProviderClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'modal',
+          config: expect.objectContaining({
+            vmRuntime: true,
+            cpu: 2,
+            memoryMiB: 12_288,
+          }),
+        }),
+      );
+      expect(mockCreateModalMachine).toHaveBeenCalled();
+      expect(mockFindTask).not.toHaveBeenCalled();
+      if (proxyEnabled) {
+        expect(mockDeliverSessionProxy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            runId: 123,
+            machineId: 'modal-machine-123',
+            nonce: expect.any(String),
+          }),
+        );
+        expect(mockRunCommand.mock.invocationCallOrder[0]).toBeLessThan(
+          mockDeliverSessionProxy.mock.invocationCallOrder[0]!,
+        );
+        expect(mockBuildModalWorkerEnv).toHaveBeenCalledWith(
+          expect.objectContaining({
+            extraEnv: expect.objectContaining({
+              ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
+              ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: expect.any(String),
+            }),
+          }),
+        );
+        expect(
+          JSON.stringify(mockBuildModalWorkerEnv.mock.calls),
+        ).not.toContain('public-ca-fixture');
+        expect(
+          JSON.stringify(mockBuildModalWorkerEnv.mock.calls),
+        ).not.toContain('rproxy_');
+      } else expect(mockDeliverSessionProxy).not.toHaveBeenCalled();
+    },
+  );
 
   it('uses a Modal VM sandbox for setup onboarding before an environment config exists', async () => {
     mockFindTask.mockResolvedValue({ workflow: 'setup_onboarding' });

@@ -16,6 +16,7 @@ import { type TaskRun, sdk } from '@roomote/sdk/client';
 
 import { WorkerEnv } from '../../env';
 import { waitForSessionEgressDelivery } from '../../env/session-egress-bootstrap';
+import { verifySessionProxyConnection } from '../../env/session-proxy';
 import {
   type HarnessLogger,
   createStartupLogger,
@@ -659,6 +660,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
         backgroundEnvironmentSetupController.cancelSignal,
       );
       workerEnv.acceptSessionEgressDelivery(delivery);
+      await verifySessionProxyConnection(workerEnv);
       Object.assign(envVars, workerEnv.buildSessionEgressClientEnv());
       workerEnv.setRuntimeEnv(envVars);
       await injectEnvVars(envVars, taskRun, {

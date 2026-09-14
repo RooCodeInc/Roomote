@@ -36,8 +36,9 @@ import {
  * Session shows why no service token is available.
  */
 
-export type SessionEgressControllerClient = ReturnType<
-  typeof createSessionEgressControllerClient
+export type SessionEgressControllerClient = Pick<
+  ReturnType<typeof createSessionEgressControllerClient>,
+  'register' | 'issueSubstitutes' | 'renewLease' | 'terminate'
 >;
 
 /** Setup is untrusted; only a successful infrastructure verification permits delivery. */

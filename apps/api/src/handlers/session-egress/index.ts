@@ -12,6 +12,7 @@ import {
   registerWorkload,
   registerProxyWorkload,
   renewLease,
+  renewProxyLease,
   revocations,
   SessionEgressRequestError,
   terminateWorkload,
@@ -120,6 +121,9 @@ export function createSessionEgressControlPlane(
     c.json(await authenticateProxyConnect(await json(c)), 200, {
       'cache-control': 'no-store',
     }),
+  );
+  app.post('/proxy-workloads/:workloadId/lease', controllerOnly, async (c) =>
+    c.json(await renewProxyLease(c.req.param('workloadId'), await json(c))),
   );
   // Controller: substitutes for grants approved after registration.
   app.post('/workloads/:workloadId/substitutes', controllerOnly, async (c) =>

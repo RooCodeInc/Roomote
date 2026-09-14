@@ -284,9 +284,14 @@ Capabilities cannot authenticate as controllers or gateways or mint substitutes.
 A stolen valid matching capability/substitute pair can be replayed elsewhere;
 audit attribution identifies the logical credential, not physical origin.
 
-Proxy capabilities currently expire at their issued deadline. Hosted delivery
-and controlled refresh are separate lifecycle work; these internal endpoints
-do not by themselves make a hosted worker proxy-ready.
+Controller-only `POST /proxy-workloads/:workloadId/lease` accepts the expected
+generation and renews an unexpired, still-live matching proxy workload to a
+900-second rolling lease. It does not revive an expired capability or rotate
+the opaque credential; a stolen matching pair remains replayable while that
+lease is renewed. Existing tunnels/exchanges retain their original deadlines.
+The expiry delivered in worker configuration is its initial lease snapshot,
+not an authority to extend access. Live API checks remain authoritative.
+These internal endpoints do not by themselves make a hosted worker proxy-ready.
 
 `session_egress_audit` records the initial **evaluation attempt** for each
 schema-valid `/authorize` call, not its final outcome or proof of released

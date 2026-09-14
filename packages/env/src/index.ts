@@ -427,6 +427,9 @@ const serverSchema = {
   // its own; the surface stays disabled (404) until this is set. Controllers
   // authenticate to the same surface with a signed job-auth token instead.
   R_SESSION_EGRESS_GATEWAY_TOKEN: z.string().min(32).optional(),
+  // Separate, transferable-capability client mode; does not assert forced egress.
+  SESSION_EGRESS_AUTHENTICATED_PROXY_URL: z.string().url().optional(),
+  SESSION_EGRESS_AUTHENTICATED_PROXY_CA_CERT_FILE: z.string().min(1).optional(),
   // Controller-side Session-egress provisioning. All five *_ADDR/*_FILE values
   // below must be set for the controller to register workloads; otherwise
   // every run is reported as `disabled` and receives no substitute tokens.

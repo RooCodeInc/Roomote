@@ -3,6 +3,8 @@
  * list; keep the two in sync when adding a credential shape.
  */
 const SECRET_PATTERNS: RegExp[] = [
+  /\brproxy_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g,
+  /\brses_[A-Za-z0-9_-]{32,123}(?![A-Za-z0-9_-])/g,
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/g,
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
   /\bsk-[A-Za-z0-9_-]{20,}\b/g,

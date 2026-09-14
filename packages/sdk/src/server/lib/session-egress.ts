@@ -11,6 +11,7 @@ import {
   registerSessionEgressWorkload,
   registerSessionProxyWorkload,
   authenticateSessionProxyConnect,
+  renewSessionProxyLease,
   renewSessionEgressWorkloadLease,
   SessionEgressRegistrationError,
   terminateSessionEgressWorkload,
@@ -32,6 +33,8 @@ import {
   type SessionEgressWorkloadRegister,
   type SessionEgressWorkloadRegistration,
   type SessionEgressWorkloadTerminate,
+  type SessionProxyRegister,
+  type SessionProxyRegistration,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -166,6 +169,17 @@ export async function authenticateProxyConnect(input: unknown) {
     : { allowed: false as const };
 }
 
+export async function renewProxyLease(workloadId: unknown, input: unknown) {
+  const id = parse(workloadIdSchema, workloadId);
+  const { generation } = parse(
+    z.object({ generation: z.number().int().positive() }).strict(),
+    input,
+  );
+  const result = await renewSessionProxyLease(id, generation);
+  if (!result) throw new SessionEgressRequestError(404, 'workload_not_found');
+  return result;
+}
+
 export async function issueSubstitutes(
   workloadId: unknown,
 ): Promise<SessionEgressWorkloadRegistration> {
@@ -255,6 +269,14 @@ export function createSessionEgressControllerClient(options: {
     return payload as T;
   }
   return {
+    registerProxy: (input: SessionProxyRegister) =>
+      call<SessionProxyRegistration>('POST', '/proxy-workloads', input),
+    renewProxyLease: (workloadId: string, generation: number) =>
+      call<{ workloadId: string; generation: number; expiresAt: string }>(
+        'POST',
+        `/proxy-workloads/${encodeURIComponent(workloadId)}/lease`,
+        { generation },
+      ),
     register: (input: SessionEgressWorkloadRegister) =>
       call<SessionEgressWorkloadRegistration>('POST', '/workloads', input),
     issueSubstitutes: (workloadId: string) =>

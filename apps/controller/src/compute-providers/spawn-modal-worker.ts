@@ -4,6 +4,7 @@ import {
   resolveConfiguredComputeProviderResources,
   getPrimaryPortFromConfig,
   getComputeProviderCommandOutputSource,
+  SESSION_EGRESS_WORKLOAD_ENV,
 } from '@roomote/types';
 import {
   type TaskRun,
@@ -12,6 +13,7 @@ import {
   taskRuns,
   eq,
   sql,
+  findSessionEgressCandidateForRun,
 } from '@roomote/db/server';
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
@@ -27,6 +29,11 @@ import {
   resolveAuthBypassHeaderName,
   resolveAuthBypassValue,
 } from '@roomote/compute-providers';
+import { randomUUID } from 'node:crypto';
+import {
+  deliverSessionProxy,
+  type SessionProxyConfig,
+} from '../session-egress/authenticated-proxy';
 
 import { primeEnvironmentOidcForMachine } from '../sandbox-oidc';
 import {
@@ -202,6 +209,7 @@ export async function spawnModalWorker(
      * spawn path with deployment-managed credentials. Defaults to `modal`.
      */
     vendor?: 'modal' | 'roomote';
+    sessionProxy?: SessionProxyConfig | null;
     /**
      * Engine backing a `roomote` spawn. With `broker`, modalTokenId /
      * modalTokenSecret carry the tenant id + derived broker credential and
@@ -269,6 +277,11 @@ export async function spawnModalWorker(
     onWorkerRestart,
   } = config;
   const parsedModalRegions = parseModalRegions(modalRegions);
+  const proxyCandidate = config.sessionProxy
+    ? await findSessionEgressCandidateForRun(taskRun.id)
+    : null;
+  const proxyNonce =
+    proxyCandidate && proxyCandidate.grantCount > 0 ? randomUUID() : null;
   const environmentId = taskRun.payload.environmentId;
 
   const { namedPorts, environmentSnapshotId, environmentConfig } =
@@ -555,6 +568,12 @@ export async function spawnModalWorker(
         baseImageRef: modalBaseImageRef,
         extraEnv: {
           SANDBOX_TIMEOUT_MS: String(modalTimeoutMs),
+          ...(proxyNonce
+            ? {
+                [SESSION_EGRESS_WORKLOAD_ENV.BOOTSTRAP_REQUIRED]: '1',
+                [SESSION_EGRESS_WORKLOAD_ENV.BOOTSTRAP_NONCE]: proxyNonce,
+              }
+            : {}),
         },
       }),
       detached: true,
@@ -693,6 +712,17 @@ export async function spawnModalWorker(
         .where(eq(taskRuns.id, taskRun.id));
     }
 
+    if (proxyNonce && config.sessionProxy) {
+      await deliverSessionProxy({
+        config: config.sessionProxy,
+        runId: taskRun.id,
+        taskId: taskRun.taskId,
+        provider: vendor,
+        nonce: proxyNonce,
+        machineId: machine.machineId,
+        computeClient,
+      });
+    }
     return {
       machineId: machine.machineId,
       ...(result.commandId ? { sandboxCmdId: result.commandId } : {}),

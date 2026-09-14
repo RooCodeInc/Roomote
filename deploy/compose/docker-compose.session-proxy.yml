@@ -1,0 +1,21 @@
+# Optional addition to prod + docker-compose.session-egress.yml.
+# One shared gateway; no per-workload connector is created for proxy mode.
+# Keep the listener local unless a deliberate CONNECT-capable TLS ingress exists.
+services:
+  controller:
+    environment:
+      SESSION_EGRESS_AUTHENTICATED_PROXY_URL: ${SESSION_EGRESS_AUTHENTICATED_PROXY_URL:?reachable HTTPS forward-proxy origin required}
+      SESSION_EGRESS_AUTHENTICATED_PROXY_CA_CERT_FILE: /session-egress/proxy-trust.crt
+    volumes:
+      - ${SESSION_EGRESS_INFRA_DIR:?operator-owned infrastructure directory}/proxy-trust.crt:/session-egress/proxy-trust.crt:ro
+
+  session-egress-gateway:
+    environment:
+      SESSION_EGRESS_AUTHENTICATED_PROXY_LISTEN_ADDR: :8444
+      SESSION_EGRESS_PROXY_SERVER_CERT_FILE: /session-egress/proxy-server.crt
+      SESSION_EGRESS_PROXY_SERVER_KEY_FILE: /session-egress/proxy-server.key
+    volumes:
+      - ${SESSION_EGRESS_INFRA_DIR:?operator-owned infrastructure directory}/proxy-server.crt:/session-egress/proxy-server.crt:ro
+      - ${SESSION_EGRESS_INFRA_DIR:?operator-owned infrastructure directory}/proxy-server.key:/session-egress/proxy-server.key:ro
+    ports:
+      - '${SESSION_EGRESS_PROXY_BIND_ADDR:-127.0.0.1}:8444:8444'

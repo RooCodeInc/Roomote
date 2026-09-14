@@ -14,6 +14,11 @@ import {
 } from '@roomote/db/server';
 
 import { DEFAULT_BOX_TIMEOUT_MS } from '@roomote/compute-providers';
+import {
+  resolveSessionProxyConfig,
+  renewActiveSessionProxyLeases,
+  type SessionProxyConfig,
+} from './session-egress/authenticated-proxy';
 
 import { BaseController } from './BaseController';
 import {
@@ -34,6 +39,9 @@ import {
 
 export class RoomoteController extends BaseController {
   private dockerCleanupInterval?: NodeJS.Timeout;
+  private proxyRenewalInterval?: NodeJS.Timeout;
+  private proxyRenewing = false;
+  private readonly sessionProxy: SessionProxyConfig | null;
   /** Session-egress workload registration; fails closed for every provider but Docker. */
   private readonly sessionEgress: SessionEgressLifecycle;
 
@@ -42,6 +50,7 @@ export class RoomoteController extends BaseController {
     options: { sessionEgress?: SessionEgressLifecycle } = {},
   ) {
     super(appEnv);
+    this.sessionProxy = resolveSessionProxyConfig(Env);
     // Misconfiguration (partial SESSION_EGRESS_* values, unusable CA) is a
     // startup error: never silently run without the enforcement it implies.
     this.sessionEgress =
@@ -101,7 +110,10 @@ export class RoomoteController extends BaseController {
     // spawned normally, receives no substitute tokens, and the Session sees
     // a nonsecret status explaining why. `register` returns `skipped` here
     // without contacting the control plane.
-    if (provider !== 'docker') {
+    if (
+      provider !== 'docker' &&
+      !((provider === 'roomote' || provider === 'modal') && this.sessionProxy)
+    ) {
       await this.sessionEgress.register({
         taskRun: { id: taskRun.id, taskId: taskRun.taskId },
         provider,
@@ -158,6 +170,7 @@ export class RoomoteController extends BaseController {
 
         await spawnModalWorker(taskRun, authToken, {
           vendor: provider,
+          sessionProxy: this.sessionProxy,
           backend,
           ...(brokerUrl ? { brokerUrl } : {}),
           deploymentSlug: deploymentSlug,
@@ -451,6 +464,26 @@ export class RoomoteController extends BaseController {
   }
 
   protected override async setup(): Promise<void> {
+    if (this.sessionProxy) {
+      const renew = async () => {
+        if (this.proxyRenewing) return;
+        this.proxyRenewing = true;
+        try {
+          await renewActiveSessionProxyLeases(this.sessionProxy!);
+        } catch {
+          console.warn(
+            '[sessionProxy] Lease reconciliation unavailable; existing expiry remains authoritative',
+          );
+        } finally {
+          this.proxyRenewing = false;
+        }
+      };
+      await renew();
+      this.proxyRenewalInterval = setInterval(() => {
+        void renew();
+      }, 60_000);
+      this.proxyRenewalInterval.unref();
+    }
     await this.cleanStaleDockerSandboxes();
     this.dockerCleanupInterval = setInterval(() => {
       void this.cleanStaleDockerSandboxes();
@@ -459,6 +492,7 @@ export class RoomoteController extends BaseController {
   }
 
   protected override async teardown(): Promise<void> {
+    if (this.proxyRenewalInterval) clearInterval(this.proxyRenewalInterval);
     if (this.dockerCleanupInterval) {
       clearInterval(this.dockerCleanupInterval);
       this.dockerCleanupInterval = undefined;

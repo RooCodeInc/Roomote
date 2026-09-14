@@ -8,6 +8,7 @@ import {
   sessionEgressSubstitutes,
   sessionEgressWorkloads,
   terminateSessionEgressWorkloadsForRun,
+  terminateSessionEgressWorkload,
   taskRuns,
   sessionFactory,
   sessionTasks,
@@ -30,6 +31,7 @@ import {
   registerWorkload,
   registerProxyWorkload,
   authorizeProxy,
+  renewProxyLease,
 } from '../session-egress';
 import {
   createSessionSecret,
@@ -370,6 +372,83 @@ it('rotates proxy capabilities and substitutes together without widening grants'
     allowed: false,
     reason: 'session_unavailable',
   });
+});
+
+it('renews only a still-live matching proxy generation and cannot revive an expired capability', async () => {
+  const pending = await prepareSessionSecret(context, policy);
+  await createSessionSecret(context, {
+    pendingRef: pending.pendingRef,
+    secret,
+    allowedMethods: pending.allowedMethods,
+  });
+  const registration = await registerProxyWorkload({
+    runId,
+    provider: 'roomote',
+    capabilitySeconds: 60,
+  });
+  const renewed = await renewProxyLease(registration.workloadId, {
+    generation: registration.generation,
+  });
+  expect(Date.parse(renewed.expiresAt)).toBeGreaterThan(
+    Date.parse(registration.proxyCapabilityExpiresAt),
+  );
+  await expect(
+    renewProxyLease(registration.workloadId, {
+      generation: registration.generation + 1,
+    }),
+  ).rejects.toThrow('workload_not_found');
+  const request = {
+    admissionMode: 'authenticated_proxy',
+    workloadId: registration.workloadId,
+    proxyCapability: registration.proxyCapability,
+    substitute: registration.substitutes[0]!.substitute,
+    destination: { host: 'api.example.com', port: 443 },
+    method: 'GET',
+    path: '/fixture',
+  };
+  expect(await authorizeProxy(request)).toMatchObject({
+    allowed: true,
+    expiresAt: renewed.expiresAt,
+  });
+  await db
+    .update(sessionEgressWorkloads)
+    .set({ proxyCapabilityExpiresAt: new Date(0) })
+    .where(eq(sessionEgressWorkloads.id, registration.workloadId));
+  await expect(
+    renewProxyLease(registration.workloadId, {
+      generation: registration.generation,
+    }),
+  ).rejects.toThrow('workload_not_found');
+  expect(await authorizeProxy(request)).toMatchObject({ allowed: false });
+});
+
+it('does not let failed stale delivery terminate a newer proxy generation', async () => {
+  const pending = await prepareSessionSecret(context, policy);
+  await createSessionSecret(context, {
+    pendingRef: pending.pendingRef,
+    secret,
+    allowedMethods: pending.allowedMethods,
+  });
+  const older = await registerProxyWorkload({ runId, provider: 'roomote' });
+  const current = await registerProxyWorkload({ runId, provider: 'roomote' });
+  expect(
+    await terminateSessionEgressWorkload(
+      older.workloadId,
+      'provision_failed',
+      older.generation,
+    ),
+  ).toBe(false);
+  expect(
+    await authorizeProxy({
+      admissionMode: 'authenticated_proxy',
+      workloadId: current.workloadId,
+      proxyCapability: current.proxyCapability,
+      substitute: current.substitutes[0]!.substitute,
+      destination: { host: 'api.example.com', port: 443 },
+      method: 'GET',
+      path: '/fixture',
+    }),
+  ).toMatchObject({ allowed: true });
 });
 
 it('retires the run workload and substitutes together on terminal cleanup', async () => {
