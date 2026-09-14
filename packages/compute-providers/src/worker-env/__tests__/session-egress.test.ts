@@ -36,43 +36,42 @@ describe.each([
     process.env = originalEnv;
   });
 
-  it.each(['R_SESSION_EGRESS_GATEWAY_TOKEN', 'SESSION_EGRESS_GATEWAY_TOKEN'])(
-    'hard-denies %s through either forwarding path',
-    (key) => {
-      const sentinel = `service-only-sentinel-${key}`;
-      const allowedEnv = {
-        CUSTOM_PROVIDER_API_KEY: 'custom-provider-sentinel',
-        GH_TOKEN: 'rses_0123456789abcdefghijklmnopqrstuvwxyz0123456789',
-      };
-      const options = {
-        authToken: 'run-scoped-auth-sentinel',
-        baseImageRef: 'test-image',
-        diskImage: 'test-image',
-        image: 'test-image',
-        snapshotName: 'test-snapshot',
-        templateId: 'test-template',
-      };
+  it.each([
+    'R_SESSION_EGRESS_GATEWAY_TOKEN',
+    'R_SESSION_EGRESS_ALLOWED_ORIGINS',
+    'SESSION_EGRESS_GATEWAY_TOKEN',
+  ])('hard-denies %s through either forwarding path', (key) => {
+    const sentinel = `service-only-sentinel-${key}`;
+    const allowedEnv = {
+      CUSTOM_PROVIDER_API_KEY: 'custom-provider-sentinel',
+      GH_TOKEN: 'rses_0123456789abcdefghijklmnopqrstuvwxyz0123456789',
+    };
+    const options = {
+      authToken: 'run-scoped-auth-sentinel',
+      baseImageRef: 'test-image',
+      diskImage: 'test-image',
+      image: 'test-image',
+      snapshotName: 'test-snapshot',
+      templateId: 'test-template',
+    };
 
-      process.env.R_MODEL_ENV_KEYS = [key, ...Object.keys(allowedEnv)].join(
-        ',',
-      );
-      Object.assign(process.env, allowedEnv, { [key]: sentinel });
-      const operatorEnv = buildWorkerEnv(options);
+    process.env.R_MODEL_ENV_KEYS = [key, ...Object.keys(allowedEnv)].join(',');
+    Object.assign(process.env, allowedEnv, { [key]: sentinel });
+    const operatorEnv = buildWorkerEnv(options);
 
-      process.env = {};
-      const extraEnv = buildWorkerEnv({
-        ...options,
-        extraEnv: { ...allowedEnv, [key]: sentinel },
+    process.env = {};
+    const extraEnv = buildWorkerEnv({
+      ...options,
+      extraEnv: { ...allowedEnv, [key]: sentinel },
+    });
+
+    for (const env of [operatorEnv, extraEnv]) {
+      expect.soft(env).not.toHaveProperty(key);
+      expect.soft(JSON.stringify(env)).not.toContain(sentinel);
+      expect.soft(env).toMatchObject({
+        ...allowedEnv,
+        AUTH_TOKEN: options.authToken,
       });
-
-      for (const env of [operatorEnv, extraEnv]) {
-        expect.soft(env).not.toHaveProperty(key);
-        expect.soft(JSON.stringify(env)).not.toContain(sentinel);
-        expect.soft(env).toMatchObject({
-          ...allowedEnv,
-          AUTH_TOKEN: options.authToken,
-        });
-      }
-    },
-  );
+    }
+  });
 });

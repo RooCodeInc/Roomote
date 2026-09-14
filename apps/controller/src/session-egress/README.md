@@ -51,6 +51,10 @@ an operator-owned `SESSION_EGRESS_INFRA_DIR`, outside repositories/workspaces, w
 The overlay mounts private material only into the controller/gateway. The worker
 receives no issuing key or connector private key. `R_SESSION_EGRESS_GATEWAY_TOKEN`
 is dedicated infrastructure authentication and is hard-denied by worker env builders.
+Set `R_SESSION_EGRESS_ALLOWED_ORIGINS` on the API to a JSON array of exact HTTPS
+origins, for example `["https://api.example.com","https://uploads.example.com:8443"]`.
+Empty or unset denies every destination. The list restricts independently approved,
+origin-bound substitutes; it never makes one credential valid for several origins.
 `SESSION_EGRESS_API_URL` must be a verified HTTPS origin routing the internal API;
 the API and controller retain their normal database/Redis/signing/encryption config.
 

@@ -7,6 +7,7 @@ import {
   createSessionBrokerToken,
   createSessionEgressControllerToken,
 } from '@roomote/auth';
+import { rehydrateEnv } from '@roomote/env';
 import {
   db,
   eq,
@@ -22,6 +23,7 @@ import {
   sessionSecretAudit,
   sessionEgressAudit,
   sessionEgressRevocations,
+  sessionEgressSubstitutes,
   sessionEgressWorkloads,
   fastAgentConversations,
   userFactory,
@@ -70,6 +72,21 @@ let sessionIds: string[];
 let taskIds: string[];
 const minted: string[] = [];
 const consoleOutput: string[] = [];
+const allowedOrigins = [
+  origin,
+  'https://second.example.com:8443',
+  'https://write.example.com',
+];
+
+function setAllowedOrigins(origins: string[]) {
+  const skipValidation = process.env.SKIP_ENV_VALIDATION;
+  delete process.env.SKIP_ENV_VALIDATION;
+  process.env.R_SESSION_EGRESS_ALLOWED_ORIGINS = JSON.stringify(origins);
+  rehydrateEnv(process.env);
+  if (skipValidation !== undefined) {
+    process.env.SKIP_ENV_VALIDATION = skipValidation;
+  }
+}
 
 function connector() {
   return `spiffe://roomote/connector/${randomBytes(12).toString('hex')}`;
@@ -213,6 +230,7 @@ async function tableDump() {
 }
 
 beforeAll(() => {
+  setAllowedOrigins(allowedOrigins);
   const { privateKey, publicKey } = generateKeyPairSync('ec', {
     namedCurve: 'prime256v1',
     privateKeyEncoding: { format: 'pem', type: 'pkcs8' },
@@ -224,9 +242,19 @@ beforeAll(() => {
   });
 });
 
-afterAll(() => configureAuthClientEnv(null));
+afterAll(() => {
+  const skipValidation = process.env.SKIP_ENV_VALIDATION;
+  delete process.env.SKIP_ENV_VALIDATION;
+  delete process.env.R_SESSION_EGRESS_ALLOWED_ORIGINS;
+  rehydrateEnv(process.env);
+  if (skipValidation !== undefined) {
+    process.env.SKIP_ENV_VALIDATION = skipValidation;
+  }
+  configureAuthClientEnv(null);
+});
 
 beforeEach(async () => {
+  setAllowedOrigins(allowedOrigins);
   consoleOutput.length = 0;
   for (const level of ['log', 'error', 'warn', 'info', 'debug'] as const)
     vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
@@ -889,6 +917,16 @@ it('issues substitutes for grants approved after registration without rotating',
     pendingRef: pending.pendingRef,
     secret: 'second-real-key-value-9876',
   });
+  setAllowedOrigins([origin]);
+  const withheld = await call(
+    `/workloads/${base.registration.workloadId}/substitutes`,
+    { token: controller },
+  );
+  expect(withheld).toMatchObject({
+    status: 200,
+    json: { generation: 1, substitutes: [] },
+  });
+  setAllowedOrigins([origin, 'https://second.example.com:8443']);
   const issued = await call(
     `/workloads/${base.registration.workloadId}/substitutes`,
     {
@@ -932,11 +970,34 @@ it('issues substitutes for grants approved after registration without rotating',
       value: 'second-real-key-value-9876',
     },
   });
+  setAllowedOrigins([origin]);
+  expect(
+    await authorize(
+      authorizeBody(bound, {
+        destination: { host: 'second.example.com', port: 8443 },
+      }),
+    ),
+  ).toEqual({ allowed: false, reason: 'destination_mismatch' });
   // The first substitute still resolves only its own grant.
   expect(await authorize(authorizeBody(base))).toMatchObject({
     allowed: true,
     secretRef,
   });
+});
+
+it('defaults to issuing no substitutes when the destination list is empty', async () => {
+  setAllowedOrigins([]);
+  const result = await register();
+  expect(result).toMatchObject({
+    status: 201,
+    json: { substitutes: [] },
+  });
+  expect(
+    await db
+      .select()
+      .from(sessionEgressSubstitutes)
+      .where(eq(sessionEgressSubstitutes.workloadId, result.json.workloadId)),
+  ).toEqual([]);
 });
 
 it('binds authorization to the exact approved origin and method policy', async () => {

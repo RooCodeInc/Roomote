@@ -516,6 +516,33 @@ func TestIronAuthorizeOutageBeforeDial(t *testing.T) {
 	f.assertFinal("rejected", "")
 }
 
+func TestIronAuthorizationDenialBeforeCredentialInjectionOrDial(t *testing.T) {
+	f := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("denied destination reached upstream")
+	})
+	f.revoked.Store(true)
+	resp, err := f.client.Do(f.request("GET", "/denied", nil))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, 403, resp.StatusCode)
+	require.Zero(t, f.hits.Load(), "authorization denial must precede credential injection and upstream dial")
+	f.assertFinal("rejected", "")
+}
+
+func TestIronDoesNotFollowOrExposeRedirectDestinations(t *testing.T) {
+	f := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://denied.example/private")
+		w.WriteHeader(http.StatusFound)
+	})
+	resp, err := f.client.Do(f.request("GET", "/redirect", nil))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusFound, resp.StatusCode)
+	require.Empty(t, resp.Header.Get("Location"))
+	require.EqualValues(t, 1, f.hits.Load(), "the client must not follow the stripped redirect")
+	f.assertFinal("forwarded", authID)
+}
+
 func TestIronFinalOutcomes(t *testing.T) {
 	for _, mode := range []string{"success", "postdenied", "reflection", "initial rejection"} {
 		t.Run(mode, func(t *testing.T) {

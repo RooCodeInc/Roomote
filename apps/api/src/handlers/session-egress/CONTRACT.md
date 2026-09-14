@@ -28,6 +28,10 @@ re-joined on every call.
 
 The surface is disabled (every route returns `404 {"error":"not_found"}`)
 until `R_SESSION_EGRESS_GATEWAY_TOKEN` (>= 32 chars) is configured on the API.
+`R_SESSION_EGRESS_ALLOWED_ORIGINS` is a JSON array of exact HTTPS origins that
+may use the surface. Empty or unset denies every destination. Each listed
+origin only enables an independently owner-approved grant and substitute for
+that same origin; it never shares one real credential across entries.
 
 | Principal    | Credential                                                                                                                  | Routes                                              |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
@@ -93,7 +97,8 @@ Responses:
   }
   ```
 
-  One entry per live grant (unrevoked, unexpired) of the bound Session.
+  One entry per live grant (unrevoked, unexpired) of the bound Session whose
+  exact origin is currently in `R_SESSION_EGRESS_ALLOWED_ORIGINS`.
   `substitute` plaintext is returned **once**; the API stores only an
   HMAC-SHA256 (keyed with the deployment encryption key) of it. Deliver it
   only into the workload's client configuration.
@@ -207,8 +212,8 @@ match → grant not revoked → grant not expired → owner not deleted, Session
 unarchived and still owned by the same user, grant belongs to that
 Session/owner, run still active with `actingUserId = owner`, run still
 attached to the Session → exact `host:port` equals the approved origin
-(default port 443) and that origin still passes the deployment public-egress
-policy (`assertEgressUrlAllowed`, HTTPS) → method in the grant's
+(default port 443), that exact origin remains in the deployment allowlist, and
+it still passes the public-egress policy (`assertEgressUrlAllowed`, HTTPS) → method in the grant's
 `allowedMethods`.
 
 Method policy is literal: `HEAD` is not implied by `GET`. A grant prepared

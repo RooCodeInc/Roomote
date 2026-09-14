@@ -21,6 +21,7 @@ const BLOCKED_WORKER_ENV_KEYS = new Set([
   'MODAL_TOKEN_SECRET',
   // Gateway-to-API credentials are service-only, never workload substitutes.
   'R_SESSION_EGRESS_GATEWAY_TOKEN',
+  'R_SESSION_EGRESS_ALLOWED_ORIGINS',
   'SESSION_EGRESS_GATEWAY_TOKEN',
   // The hosting-managed Roomote inference key is gateway-served. Block it so
   // no env passthrough can ever ship it into a sandbox.

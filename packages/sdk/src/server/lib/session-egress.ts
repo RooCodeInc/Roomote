@@ -123,7 +123,9 @@ export async function registerWorkload(
 ): Promise<SessionEgressWorkloadRegistration> {
   const parsed = parse(sessionEgressWorkloadRegisterSchema, input);
   try {
-    return await registerSessionEgressWorkload(parsed, { isOriginAllowed });
+    return await registerSessionEgressWorkload(parsed, {
+      isOriginAllowed: isSessionEgressOriginAllowed,
+    });
   } catch (error) {
     if (error instanceof SessionEgressRegistrationError)
       throw new SessionEgressRequestError(409, error.code);
@@ -135,7 +137,9 @@ export async function issueSubstitutes(
   workloadId: unknown,
 ): Promise<SessionEgressWorkloadRegistration> {
   const id = parse(workloadIdSchema, workloadId);
-  const result = await issueSessionEgressSubstitutes(id, { isOriginAllowed });
+  const result = await issueSessionEgressSubstitutes(id, {
+    isOriginAllowed: isSessionEgressOriginAllowed,
+  });
   if (!result) throw new SessionEgressRequestError(404, 'workload_not_found');
   return result;
 }
@@ -162,12 +166,20 @@ export async function authorize(
   // Malformed gateway input is a denial, not an exception: the gateway must
   // treat it exactly like any other refusal.
   if (!parsed.success) return { allowed: false, reason: 'malformed' };
-  return authorizeSessionEgress(parsed.data, { isOriginAllowed });
+  return authorizeSessionEgress(parsed.data, {
+    isOriginAllowed: isSessionEgressOriginAllowed,
+  });
 }
 
-function isOriginAllowed(origin: string): boolean {
+export function isSessionEgressOriginAllowed(origin: string): boolean {
   try {
-    return assertEgressUrlAllowed(origin).protocol === 'https:';
+    const url = assertEgressUrlAllowed(origin);
+    const configured = Env.R_SESSION_EGRESS_ALLOWED_ORIGINS;
+    return (
+      url.protocol === 'https:' &&
+      Array.isArray(configured) &&
+      configured.includes(url.origin)
+    );
   } catch {
     return false;
   }

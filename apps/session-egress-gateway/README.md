@@ -51,6 +51,10 @@ Apache-2.0 LICENSE and `iron.lock` provenance.
 The gateway uses the existing Roomote
 [`/authorize` contract](../api/src/handlers/session-egress/CONTRACT.md):
 
+- The API intersects owner-approved, origin-bound grants with its
+  `R_SESSION_EGRESS_ALLOWED_ORIGINS` exact HTTPS-origin list before minting a
+  substitute and on every authorization. One connector may carry several
+  substitutes, but each substitute and real credential remain bound to one origin.
 - Outer connector TLS requires a verified client certificate from the configured
   client CA, exactly one SPIFFE connector URI and one
   `roomote://workload/<uuid>` URI. No subject-CN fallback or identity header.

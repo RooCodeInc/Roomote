@@ -49,6 +49,44 @@ const productionCoreEnv: NodeJS.ProcessEnv = {
 };
 
 describe('Env', () => {
+  it('parses an exact default-deny Session egress origin allowlist', () => {
+    expect(
+      createRoomoteEnv(productionCoreEnv).R_SESSION_EGRESS_ALLOWED_ORIGINS,
+    ).toEqual([]);
+    expect(
+      createRoomoteEnv({
+        ...productionCoreEnv,
+        R_SESSION_EGRESS_ALLOWED_ORIGINS:
+          '["https://API.example.com:443","https://api.example.com:8443"]',
+      }).R_SESSION_EGRESS_ALLOWED_ORIGINS,
+    ).toEqual(['https://api.example.com', 'https://api.example.com:8443']);
+  });
+
+  it.each([
+    'not-json',
+    '{}',
+    '["http://api.example.com"]',
+    '["https://user:pass@api.example.com"]',
+    '["https://api.example.com/path"]',
+    '["https://api.example.com?query=1"]',
+    '["https://api.example.com#fragment"]',
+    '["https://127.0.0.1"]',
+    '["https://api.example.com:0"]',
+    '["https://api.example.com."]',
+    '["https://*.example.com"]',
+    '["https://ｅxample.com"]',
+    '["https://%65xample.com"]',
+    '["https://api.example.com\\\\@evil.example"]',
+    '["https://api.example.com","https://API.EXAMPLE.COM:443"]',
+  ])('rejects unsafe Session egress allowlist syntax: %s', (value) => {
+    expect(() =>
+      createRoomoteEnv({
+        ...productionCoreEnv,
+        R_SESSION_EGRESS_ALLOWED_ORIGINS: value,
+      }),
+    ).toThrow();
+  });
+
   it('defaults HTTP integrations off and parses explicit opt-in values', () => {
     expect(
       createRoomoteEnv(productionCoreEnv).R_HTTP_INTEGRATIONS_ENABLED,
