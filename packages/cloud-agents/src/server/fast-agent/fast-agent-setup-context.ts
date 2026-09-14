@@ -105,7 +105,11 @@ export function buildFastAgentSetupAdapter(
           );
         }
         if (snapshot.integrationDiscovery?.completed) {
-          throw new Error('Optional tool discovery is already complete.');
+          // A coalesced setup-state event can still mention the source-control
+          // decision after the administrator has resolved this offer. Treat a
+          // replayed preset as an already-closed action rather than exposing a
+          // tool error or recreating the card.
+          return [];
         }
         const suppliedMatches = matchSetupIntegrationAnswers(
           setupIntegrationAnswers ?? {},

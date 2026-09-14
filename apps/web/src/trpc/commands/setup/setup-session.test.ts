@@ -412,6 +412,16 @@ describe('optional setup integration discovery', () => {
     });
   });
 
+  it('silently closes a replayed integration preset after the offer is resolved', async () => {
+    await continueDiscovery();
+
+    await expect(
+      (await context()).adapterExtensions.resolveUserInputPreset!(
+        'setup_integrations',
+      ),
+    ).resolves.toEqual([]);
+  });
+
   it('rejects setup replies from a collaborator instead of dropping setup guards', async () => {
     const collaborator = await userFactory.create({ role: 'admin' });
     const collaboratorAuth = {
