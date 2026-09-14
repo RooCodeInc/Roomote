@@ -4,6 +4,7 @@ import { readRecentBrainTaskMemories } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { suggestHomeComposerMessages } from '@/lib/server/composer-suggestion';
+import { getPersonalPreferencesCommand } from '../preferences';
 
 const RECENT_MEMORY_LIMIT = 5;
 
@@ -12,6 +13,11 @@ export async function getHomeComposerSuggestionsCommand(
   auth: UserAuthSuccess,
 ): Promise<{ suggestions: string[] }> {
   try {
+    const preferences = await getPersonalPreferencesCommand(auth);
+    if (!preferences.homeComposerSuggestionsEnabled) {
+      return { suggestions: [] };
+    }
+
     const memories = await readRecentBrainTaskMemories({
       userId: auth.userId,
       limit: RECENT_MEMORY_LIMIT,

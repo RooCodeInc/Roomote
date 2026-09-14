@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { cn } from '@/lib/utils';
 import { useAuthorizedUser } from '@/hooks/useUser';
+import { useHomeComposerSuggestions } from '@/hooks/useHomeComposerSuggestions';
 import { useTRPC } from '@/trpc/client';
 import {
   Button,
@@ -77,10 +78,12 @@ export function Home({
   >(undefined);
 
   const { brainConfigured } = useAuthorizedUser();
+  const { enabled: homeComposerSuggestionsEnabled } =
+    useHomeComposerSuggestions();
   const trpc = useTRPC();
   const suggestionsQuery = useQuery(
     trpc.home.composerSuggestions.queryOptions(undefined, {
-      enabled: brainConfigured === true,
+      enabled: homeComposerSuggestionsEnabled && brainConfigured === true,
       // Recheck for newly completed memories on a later Home visit without
       // repeatedly invoking the helper model for an unchanged memory revision.
       staleTime: 5 * 60_000,
@@ -88,10 +91,13 @@ export function Home({
     }),
   );
   const isInitialSuggestionsLoading =
+    homeComposerSuggestionsEnabled &&
     brainConfigured === true &&
     suggestionsQuery.isPending &&
     suggestionsQuery.data === undefined;
-  const generatedSuggestions = suggestionsQuery.data?.suggestions ?? [];
+  const generatedSuggestions = homeComposerSuggestionsEnabled
+    ? (suggestionsQuery.data?.suggestions ?? [])
+    : [];
   const promptPlaceholders =
     generatedSuggestions.length > 0
       ? generatedSuggestions
@@ -117,7 +123,10 @@ export function Home({
   }, [initialPlaceholderIndex]);
 
   useEffect(() => {
-    if (isPromptFocused || promptPlaceholders.length <= 1) {
+    if (
+      (homeComposerSuggestionsEnabled && isPromptFocused) ||
+      promptPlaceholders.length <= 1
+    ) {
       return;
     }
 
@@ -130,7 +139,11 @@ export function Home({
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [isPromptFocused, promptPlaceholders.length]);
+  }, [
+    homeComposerSuggestionsEnabled,
+    isPromptFocused,
+    promptPlaceholders.length,
+  ]);
 
   // Dynamically compute the max textarea height so it can grow to fill the
   // available space without pushing the bottom-sheet tabs off screen.
@@ -232,10 +245,21 @@ export function Home({
             <NewTaskForm
               onTaskStarted={handleTaskStarted}
               placeholder={
-                isInitialSuggestionsLoading ? '' : FALLBACK_PROMPT_PLACEHOLDER
+                isInitialSuggestionsLoading
+                  ? ''
+                  : homeComposerSuggestionsEnabled
+                    ? FALLBACK_PROMPT_PLACEHOLDER
+                    : activePromptPlaceholder
               }
-              promptSuggestion={activePromptPlaceholder}
-              onPromptFocusChange={setIsPromptFocused}
+              promptSuggestion={
+                homeComposerSuggestionsEnabled
+                  ? activePromptPlaceholder
+                  : undefined
+              }
+              onPromptFocusChange={
+                homeComposerSuggestionsEnabled ? setIsPromptFocused : undefined
+              }
+              autoFocus={false}
               textareaMaxHeight={textareaMaxHeight}
               promptContainerRef={promptCardRef}
             />

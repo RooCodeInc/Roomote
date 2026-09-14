@@ -55,6 +55,10 @@ function normalizePersonalPreferences(
       typeof metadata.results_page_enabled === 'boolean'
         ? metadata.results_page_enabled
         : DEFAULT_PERSONAL_PREFERENCES.resultsPageEnabled,
+    homeComposerSuggestionsEnabled:
+      typeof metadata.home_composer_suggestions_enabled === 'boolean'
+        ? metadata.home_composer_suggestions_enabled
+        : DEFAULT_PERSONAL_PREFERENCES.homeComposerSuggestionsEnabled,
   };
 }
 
@@ -149,6 +153,10 @@ export async function updatePersonalPreferencesCommand(
   }
   if (input.resultsPageEnabled !== undefined) {
     nextMetadataRecord.results_page_enabled = input.resultsPageEnabled;
+  }
+  if (input.homeComposerSuggestionsEnabled !== undefined) {
+    nextMetadataRecord.home_composer_suggestions_enabled =
+      input.homeComposerSuggestionsEnabled;
   }
 
   if (Object.keys(nextMetadataRecord).length === 0) {
