@@ -4558,7 +4558,21 @@ export async function answerFastAgentQuestion({
                 error: 'Pass either questions to ask or a trusted preset name.',
               };
             }
-            const preset = 'preset' in args ? args.preset : undefined;
+            const genericQuestions =
+              'questions' in args ? args.questions : undefined;
+            let preset = 'preset' in args ? args.preset : undefined;
+            // Older setup guidance asked the model to create category questions.
+            // Keep an in-flight model call from reviving that UI: route it to
+            // the trusted compact integration offer instead.
+            if (
+              !preset &&
+              setupSession &&
+              genericQuestions?.some((question) =>
+                question.id.startsWith('setup-tools-'),
+              )
+            ) {
+              preset = 'setup_integrations';
+            }
             if (preset && (!setupSession || !adapter.resolveUserInputPreset)) {
               return {
                 success: false,
@@ -4566,15 +4580,18 @@ export async function answerFastAgentQuestion({
                   'That trusted input preset is unavailable in this session.',
               };
             }
-            const questions =
-              'questions' in args
-                ? args.questions
-                : args.setupIntegrationAnswers !== undefined
-                  ? await adapter.resolveUserInputPreset!(
-                      args.preset,
-                      args.setupIntegrationAnswers,
-                    )
-                  : await adapter.resolveUserInputPreset!(args.preset);
+            const setupIntegrationAnswers =
+              'setupIntegrationAnswers' in args
+                ? args.setupIntegrationAnswers
+                : undefined;
+            const questions = preset
+              ? setupIntegrationAnswers !== undefined
+                ? await adapter.resolveUserInputPreset!(
+                    preset,
+                    setupIntegrationAnswers,
+                  )
+                : await adapter.resolveUserInputPreset!(preset)
+              : genericQuestions!;
             // Trusted setup presets may complete entirely server-side. In
             // that case no pending request or browser response is needed.
             if (preset && questions.length === 0) {

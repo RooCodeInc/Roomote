@@ -1460,6 +1460,60 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
+  it('upgrades a legacy setup category question to the trusted integration card', async () => {
+    const questions = [
+      {
+        id: 'setup-integrations',
+        header: 'Your tools',
+        question: 'Connect useful tools, or continue.',
+        isOther: false,
+        isSecret: false,
+        options: [{ id: 'notion', label: 'Notion', description: 'Documents' }],
+      },
+    ];
+    const requestUserInput = vi.fn();
+    const resolveUserInputPreset = vi.fn(async () => questions);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.requestUserInput, {
+          questions: [
+            {
+              id: 'setup-tools-documents',
+              header: 'Your tools',
+              question: 'Where do you keep team documents?',
+              options: [{ label: 'Notion', description: 'Documents' }],
+            },
+          ],
+          preset: null,
+          setupIntegrationAnswers: [],
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'setup-session-1',
+      },
+      turnSource: 'platform_event',
+      platformEventKind: 'setup',
+      platformEventVisibility: 'required',
+      setupSession: true,
+      adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+    });
+
+    expect(resolveUserInputPreset).toHaveBeenCalledWith('setup_integrations');
+    expect(requestUserInput).toHaveBeenCalledWith({
+      requestId: expect.any(String),
+      preset: 'setup_integrations',
+      questions,
+    });
+  });
+
   it('closes a server-completed setup preset without persisting a pending request', async () => {
     let toolResult: unknown;
     const requestUserInput = vi.fn();

@@ -15,6 +15,7 @@ import type { FastAgentTurnAdapter } from './fast-agent-conversation';
 type SetupSnapshot = {
   integrationDiscovery?: {
     completed?: boolean;
+    skipped?: boolean;
     matchedIntegrationIds?: string[];
   };
   rail?: {
@@ -116,7 +117,9 @@ export function buildFastAgentSetupAdapter(
         const matchedIds = new Set(
           suppliedOrPersistedIds.length > 0
             ? suppliedOrPersistedIds
-            : SETUP_INTEGRATION_RECOMMENDATIONS,
+            : snapshot.integrationDiscovery?.skipped
+              ? []
+              : SETUP_INTEGRATION_RECOMMENDATIONS,
         );
         const options = SETUP_INTEGRATIONS.filter((integration) =>
           matchedIds.has(integration.id),
