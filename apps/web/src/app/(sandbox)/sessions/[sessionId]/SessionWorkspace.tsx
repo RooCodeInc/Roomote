@@ -1016,6 +1016,7 @@ export function SessionWorkspace({
                   tooltip="Tasks"
                   description="Middle-click to open side-by-side"
                   active={utilityPanel?.kind === 'tasks'}
+                  aria-expanded={utilityPanel?.kind === 'tasks'}
                   disabled={taskCards.length === 0}
                   icon={Rows4}
                   onClick={() => togglePanel('tasks')}
@@ -1030,6 +1031,7 @@ export function SessionWorkspace({
                   label="Live Preview"
                   tooltip="Live Preview"
                   active={utilityPanel?.kind === 'previews'}
+                  aria-expanded={utilityPanel?.kind === 'previews'}
                   disabled={sessionPreviewCount === 0}
                   icon={AppWindow}
                   onClick={() => togglePanel('previews')}
@@ -1039,6 +1041,7 @@ export function SessionWorkspace({
                   label="Artifacts"
                   tooltip="Artifacts"
                   active={utilityPanel?.kind === 'artifacts'}
+                  aria-expanded={utilityPanel?.kind === 'artifacts'}
                   icon={LayoutGrid}
                   onClick={() => togglePanel('artifacts')}
                 />
@@ -1047,6 +1050,7 @@ export function SessionWorkspace({
                   label="Session info"
                   tooltip="Session info"
                   active={utilityPanel?.kind === 'info'}
+                  aria-expanded={utilityPanel?.kind === 'info'}
                   icon={Info}
                   onClick={() => togglePanel('info')}
                 />
