@@ -462,7 +462,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Roomote/example-app');
     expect(prompt).toContain('Roomote/example-app [id: repo-1]');
     expect(prompt).toContain(
-      `All repositories [id: ${ALL_REPOSITORIES}]: Run against all active repositories.`,
+      `All repositories [id: ${ALL_REPOSITORIES}]: Every active repository is available; the task checks out only the ones it needs.`,
     );
     expect(prompt).toContain(
       `Blank slate [id: ${NO_REPOSITORIES}]: Start a sandbox without repositories.`,

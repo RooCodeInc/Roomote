@@ -42,7 +42,7 @@ When the current input begins with the platform-generated \`<voice_mode active="
 function formatRepositoriesForPrompt(
   availableEnvironments: RoutableEnvironment[],
 ): string {
-  const allRepositories = `- All repositories [id: ${ALL_REPOSITORIES}]: Run against all active repositories.`;
+  const allRepositories = `- All repositories [id: ${ALL_REPOSITORIES}]: Every active repository is available; the task checks out only the ones it needs.`;
   const blankSlate = `- Blank slate [id: ${NO_REPOSITORIES}]: Start a sandbox without repositories.`;
   if (availableEnvironments.length === 0) {
     return `${blankSlate}\n${allRepositories}\n- No configured environments were found for this deployment.`;

@@ -106,6 +106,7 @@ import {
 } from '../workspace/repo-local-skills';
 import { resolveWorkerCodingHarness } from '../lib/resolve-worker-coding-harness';
 import { writeSharedWorkspaceAgentsFile } from './shared-workspace-agents';
+import { ON_DEMAND_REPOSITORIES_ENV_VAR } from '../workspace/on-demand-repositories';
 import {
   getFollowUpWorkflowPhase,
   getInitialWorkflowPhase,
@@ -666,6 +667,7 @@ export const runTask = async ({
   usesSharedWorkspaceRoot,
   repoPaths,
   repoLocalSkills,
+  onDemandRepositories,
   workspaceReadinessWarnings,
   backgroundEnvironmentSetup,
   prompt,
@@ -768,6 +770,11 @@ export const runTask = async ({
         isSilentChannelAutomationLaunch(taskRun)
           ? 'true'
           : 'false',
+      // Exposes `clone_repository` in the Roomote MCP server; the manifest at
+      // the workspace root carries the repository list itself.
+      ...(onDemandRepositories
+        ? { [ON_DEMAND_REPOSITORIES_ENV_VAR]: 'true' }
+        : {}),
       ...(unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE && {
         ROOMOTE_AUTH_BYPASS_VALUE: unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE,
       }),
@@ -1097,6 +1104,7 @@ export const runTask = async ({
       workspacePath,
       usesSharedWorkspaceRoot,
       repoPaths,
+      onDemandRepositories,
     });
 
     const taskCancellation = new TaskCancellationController({
