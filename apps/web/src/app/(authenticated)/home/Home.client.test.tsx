@@ -187,6 +187,8 @@ vi.mock('@/components/tasks', async () => {
       onPromptTextChange,
       promptText,
       placeholder,
+      promptSuggestion,
+      onPromptFocusChange,
       submitDisabledReason,
       submitWithMetaKey,
       tools,
@@ -196,6 +198,8 @@ vi.mock('@/components/tasks', async () => {
       onPromptTextChange?: (value: string) => void;
       promptText?: string;
       placeholder?: string;
+      promptSuggestion?: string;
+      onPromptFocusChange?: (focused: boolean) => void;
       submitDisabledReason?: string;
       submitWithMetaKey?: boolean;
       tools?: import('react').ReactNode;
@@ -231,11 +235,15 @@ vi.mock('@/components/tasks', async () => {
               Voice
             </button>
           ) : null}
-          <div data-testid="prompt-placeholder">{placeholder}</div>
+          <div data-testid="prompt-placeholder">
+            {promptText ? placeholder : (promptSuggestion ?? placeholder)}
+          </div>
           <textarea
             aria-label="Task prompt"
             value={promptText ?? ''}
             onChange={(event) => onPromptTextChange?.(event.target.value)}
+            onFocus={() => onPromptFocusChange?.(true)}
+            onBlur={() => onPromptFocusChange?.(false)}
           />
           <button type="submit" disabled={Boolean(submitDisabledReason)}>
             Submit prompt
@@ -632,6 +640,41 @@ describe('Home', () => {
 
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
         currentHomeSuggestions[4]!,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('pauses suggestion rotation while focused and resumes after blur', async () => {
+    vi.useFakeTimers();
+    currentBrainConfigured = true;
+    currentHomeSuggestions = [
+      'Add focused regression tests for authentication callback validation across supported login flows',
+      'Resolve deployment health check gaps before the next production release begins',
+      'Document session handoff behavior for developers troubleshooting interrupted task execution',
+      'Investigate flaky integration failures affecting automated pull request delivery checks',
+      'Improve accessibility guidance for keyboard users accepting Home composer suggestions',
+    ];
+
+    try {
+      render(<Home initialPlaceholderIndex={0} />);
+      const textarea = screen.getByRole('textbox', { name: 'Task prompt' });
+
+      fireEvent.focus(textarea);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[0]!,
+      );
+
+      fireEvent.blur(textarea);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[1]!,
       );
     } finally {
       vi.useRealTimers();

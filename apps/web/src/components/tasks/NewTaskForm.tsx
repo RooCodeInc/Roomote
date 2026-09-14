@@ -48,6 +48,8 @@ type NewTaskFormProps = {
   onTaskStarted?: () => void;
   initialPrompt?: string;
   placeholder?: string;
+  promptSuggestion?: string;
+  onPromptFocusChange?: (focused: boolean) => void;
   textareaMaxHeight?: number;
   promptContainerRef?: Ref<HTMLDivElement>;
 };
@@ -57,6 +59,8 @@ export function NewTaskForm({
   onTaskStarted,
   initialPrompt = '',
   placeholder = DEFAULT_PROMPT_PLACEHOLDER,
+  promptSuggestion,
+  onPromptFocusChange,
   textareaMaxHeight,
   promptContainerRef,
 }: NewTaskFormProps) {
@@ -308,6 +312,8 @@ export function NewTaskForm({
         onPromptTextChange={setPromptText}
         onSubmit={handleSubmit}
         placeholder={placeholder}
+        promptSuggestion={promptSuggestion}
+        onPromptFocusChange={onPromptFocusChange}
         autoFocus
         textareaMaxHeight={textareaMaxHeight}
         animateContainer={false}

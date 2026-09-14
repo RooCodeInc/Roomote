@@ -68,6 +68,7 @@ export function Home({
   const [isFeedbackPromptVisible, setIsFeedbackPromptVisible] = useState(false);
   const [isFeedbackDialogOpen, setIsFeedbackDialogOpen] = useState(false);
   const [isShortViewport, setIsShortViewport] = useState(false);
+  const [isPromptFocused, setIsPromptFocused] = useState(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(() =>
     normalizeHomePromptPlaceholderIndex(initialPlaceholderIndex),
   );
@@ -110,7 +111,7 @@ export function Home({
   }, [initialPlaceholderIndex]);
 
   useEffect(() => {
-    if (promptPlaceholders.length <= 1) {
+    if (isPromptFocused || promptPlaceholders.length <= 1) {
       return;
     }
 
@@ -123,7 +124,7 @@ export function Home({
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [promptPlaceholders.length]);
+  }, [isPromptFocused, promptPlaceholders.length]);
 
   // Dynamically compute the max textarea height so it can grow to fill the
   // available space without pushing the bottom-sheet tabs off screen.
@@ -224,7 +225,8 @@ export function Home({
 
             <NewTaskForm
               onTaskStarted={handleTaskStarted}
-              placeholder={activePromptPlaceholder}
+              promptSuggestion={activePromptPlaceholder}
+              onPromptFocusChange={setIsPromptFocused}
               textareaMaxHeight={textareaMaxHeight}
               promptContainerRef={promptCardRef}
             />
