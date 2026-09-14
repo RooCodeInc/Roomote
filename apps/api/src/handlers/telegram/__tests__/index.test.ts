@@ -1641,6 +1641,40 @@ describe('Telegram webhook handler', () => {
     expect(queueFastReplyMock).not.toHaveBeenCalled();
   });
 
+  it('marks an implicit topic as managed before starting its Session goal', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    redisGetdelMock.mockResolvedValueOnce('1');
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/goal investigate the deployment',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+          message_thread_id: 77,
+          is_topic_message: true,
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      goalStarted: true,
+      sessionId: 'fast-session-default',
+    });
+    expect(recordFastConversationMessageMock).toHaveBeenCalledWith({
+      sessionId: 'fast-session-default',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '222',
+        conversationId: '77:user:mapped-user-1',
+        replyTarget: { channelId: '222', threadId: '77' },
+      },
+      messageId: '77',
+    });
+    expect(
+      recordFastConversationMessageMock.mock.invocationCallOrder[0],
+    ).toBeLessThan(startFastSessionGoalMock.mock.invocationCallOrder[0]!);
+  });
+
   it('starts a group /goal on the Fast Session bound to the replied-to message', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     findFastReplySessionMock.mockResolvedValueOnce({

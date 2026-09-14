@@ -510,6 +510,7 @@ export function FastSessionTranscript({
   );
   const [replyError, setReplyError] = useState<string | null>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
+  const [goal, setGoal] = useState<SessionGoal | null>(sessionGoal ?? null);
   const [conversationResponding, setConversationResponding] = useState<
     boolean | null
   >(null);
@@ -626,9 +627,13 @@ export function FastSessionTranscript({
         const update = JSON.parse(event.data) as {
           title?: string;
           conversationResponding?: boolean | null;
+          goal?: SessionGoal | null;
         };
         if (update.title !== undefined) {
           setTitle(update.title);
+        }
+        if (update.goal !== undefined) {
+          setGoal(update.goal);
         }
         const isInitialSessionState =
           !hasReceivedInitialSessionStateRef.current;
@@ -1632,20 +1637,17 @@ export function FastSessionTranscript({
             )}
           </div>
         </WorkspaceHeader>
-        {sessionGoal ? (
+        {goal ? (
           <div className="mx-auto w-full max-w-4xl px-4 pb-3">
             <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2">
               <span className="mt-0.5 shrink-0 text-xs font-medium text-muted-foreground">
                 Goal
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-sm text-foreground">
-                  {sessionGoal.objective}
-                </p>
+                <p className="text-sm text-foreground">{goal.objective}</p>
                 <p className="mt-0.5 text-xs capitalize text-muted-foreground">
-                  {sessionGoal.status.replace('_', ' ')} -{' '}
-                  {sessionGoal.continuationsUsed}/{sessionGoal.maxContinuations}{' '}
-                  continuations
+                  {goal.status.replace('_', ' ')} - {goal.continuationsUsed}/
+                  {goal.maxContinuations} continuations
                 </p>
               </div>
             </div>

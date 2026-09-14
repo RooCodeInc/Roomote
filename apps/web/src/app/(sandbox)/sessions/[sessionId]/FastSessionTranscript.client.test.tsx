@@ -4054,6 +4054,50 @@ describe('FastSessionTranscript', () => {
     ).toBeInTheDocument();
   });
 
+  it('updates the Session-owned goal from the live Session stream', () => {
+    render(
+      <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
+    );
+
+    expect(screen.queryByText('Initial objective')).not.toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        goal: {
+          objective: 'Initial objective',
+          generation: 'goal-generation:one',
+          status: 'active',
+          maxContinuations: 5,
+          continuationsUsed: 0,
+          blockedReason: null,
+          completedAt: null,
+        },
+      });
+    });
+
+    expect(screen.getByText('Initial objective')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        goal: {
+          objective: 'Replacement objective',
+          generation: 'goal-generation:two',
+          status: 'active',
+          maxContinuations: 5,
+          continuationsUsed: 0,
+          blockedReason: null,
+          completedAt: null,
+        },
+      });
+    });
+
+    expect(screen.queryByText('Initial objective')).not.toBeInTheDocument();
+    expect(screen.getByText('Replacement objective')).toBeInTheDocument();
+    expect(
+      screen.getByText(/active - 0\/5 continuations/i),
+    ).toBeInTheDocument();
+  });
+
   it('starts /goal from the Session composer without sending a normal reply', async () => {
     render(
       <FastSessionTranscript
