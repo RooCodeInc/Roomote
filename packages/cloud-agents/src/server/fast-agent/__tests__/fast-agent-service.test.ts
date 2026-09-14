@@ -9036,6 +9036,79 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
+  it('rejects Slack history reads that wrap bounds in a stringified args field', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [
+          {
+            name: 'get_chat_channel_messages',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                channel: { type: 'string' },
+                oldest: { type: 'string' },
+                latest: { type: 'string' },
+              },
+              additionalProperties: false,
+            },
+          },
+        ],
+      },
+    ]);
+    let wrappedResult: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll inspect that.',
+        });
+        wrappedResult = await invokeMcpTool(
+          'roomote',
+          'get_chat_channel_messages',
+          {
+            args: '{"oldest": "2026-08-01T00:00:00Z", "latest": "2026-08-07T23:59:59Z"}',
+          },
+        );
+        await invokeMcpTool('roomote', 'get_chat_channel_messages', {
+          oldest: '2026-08-01T00:00:00Z',
+          latest: '2026-08-07T23:59:59Z',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I found the history.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(wrappedResult).toEqual({
+      success: false,
+      error:
+        'Unknown argument key "args" for roomote tool get_chat_channel_messages. This tool accepts: channel, oldest, latest. Do not wrap arguments in an "args" field; that convention is only for call_integration_tool. Pass each argument at the top level.',
+    });
+    expect(mocks.callIntegration).toHaveBeenCalledOnce();
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      {
+        integrationId: 'roomote',
+        toolName: 'get_chat_channel_messages',
+        args: {
+          channel: 'channel-1',
+          oldest: '2026-08-01T00:00:00Z',
+          latest: '2026-08-07T23:59:59Z',
+          provider: 'slack',
+        },
+      },
+    );
+  });
+
   it('defaults Discord Roomote MCP lookups to the current thread', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {

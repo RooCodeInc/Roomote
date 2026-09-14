@@ -185,6 +185,7 @@ import {
   type FastAgentIntegration,
 } from './fast-agent-integration-broker';
 import { McpToolCallError } from '../mcp-tool-client';
+import { describeUnknownIntegrationArguments } from './fast-agent-integration-args';
 import {
   cancelFastAgentTask,
   launchFastAgentPrReview,
@@ -3745,6 +3746,21 @@ export async function answerFastAgentQuestion({
             error:
               'This platform event may only be presented to the user with a closeout.',
           };
+        }
+
+        // Reject undeclared top-level keys instead of letting the MCP server
+        // strip them silently: a model that wraps arguments in an `args`
+        // field would otherwise get a successful default result and repeat
+        // the shape for the rest of the session.
+        const unknownArgumentsError = describeUnknownIntegrationArguments(
+          call,
+          call.args,
+          availableIntegrations
+            .find((integration) => integration.id === call.integrationId)
+            ?.tools.find((tool) => tool.name === call.toolName)?.inputSchema,
+        );
+        if (unknownArgumentsError) {
+          return { success: false, error: unknownArgumentsError };
         }
 
         const chatLookupProvider =
