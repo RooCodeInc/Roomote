@@ -224,6 +224,42 @@ describe('prepareRepository procedure', () => {
     expect(prepareSpy).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      'single-repository',
+      { repo: 'acme/api', sourceControlProvider: 'github' },
+    ],
+    [
+      'repository-set',
+      {
+        repo: '__all_repositories__',
+        selectedRepositories: ['acme/api'],
+        sourceControlProvider: 'github',
+      },
+    ],
+    ['environment', { environmentId: 'env-1', repo: 'acme/api' }],
+    ['blank-slate', { repo: '__no_repositories__' }],
+  ])(
+    'refuses to widen a %s workspace with another deployment repository',
+    async (_label, payload) => {
+      stubTaskRun(payload);
+      const prepareSpy = vi.spyOn(
+        WorkspaceManager.prototype,
+        'prepareRepository',
+      );
+
+      await expect(
+        createCaller().commands.prepareRepository({
+          repositoryFullName: 'acme/web',
+        }),
+      ).rejects.toThrow(
+        'Repository checkout on demand is only available in all-repositories workspaces',
+      );
+      expect(mockFindRepository).not.toHaveBeenCalled();
+      expect(prepareSpy).not.toHaveBeenCalled();
+    },
+  );
+
   it('leaves an existing checkout untouched', async () => {
     mockFindRepository.mockResolvedValue(apiRepository);
     const repoPath = path.join(workspaceRootRef.current, 'acme', 'api');

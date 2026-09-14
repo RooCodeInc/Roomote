@@ -80,8 +80,11 @@ export function discoverClonedRepositoryPaths(
 }
 
 function formatDescription(description: string | null): string {
+  // Backslashes first: a raw `\|` would otherwise become `\\|`, which
+  // Markdown reads as an escaped backslash followed by a live column break.
   const singleLine = (description ?? '')
     .replace(/\s+/g, ' ')
+    .replace(/\\/g, '\\\\')
     .replace(/\|/g, '\\|')
     .trim();
 

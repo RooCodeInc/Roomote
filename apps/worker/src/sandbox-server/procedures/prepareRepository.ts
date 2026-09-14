@@ -10,6 +10,7 @@ import {
   DEFAULT_SOURCE_CONTROL_PROVIDER,
   resolveRepositoryProvidersFromPayload,
   resolveSourceControlProviderFromPayload,
+  resolveTaskWorkspace,
   type SourceControlProvider,
 } from '@roomote/types';
 
@@ -47,12 +48,26 @@ const inFlightPreparations = new Map<
  * The run's source-control scope as stamped at launch. Credentials were
  * minted from the same stamp, so a repository outside it (or under a
  * different provider) would fail authentication rather than clone.
+ *
+ * Only all-repositories workspaces check repositories out on demand. The
+ * MCP tool is hidden elsewhere, but any holder of the run token can call
+ * this mutation directly, so the persisted workspace scope is the gate:
+ * a single-repository, repository-set, or environment run must not be able
+ * to widen its workspace to other deployment repositories.
  */
 async function loadRepositoryScope(runId: number): Promise<RepositoryScope> {
   const taskRun = await sdk.taskRuns.findFirstById(runId);
 
   if (!taskRun) {
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Task run not found' });
+  }
+
+  if (resolveTaskWorkspace(taskRun.payload).type !== 'all_repositories') {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message:
+        'Repository checkout on demand is only available in all-repositories workspaces; this run is scoped to its prepared repositories.',
+    });
   }
 
   return {

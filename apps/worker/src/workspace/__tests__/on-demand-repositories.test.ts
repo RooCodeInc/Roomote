@@ -15,7 +15,7 @@ const repositories: OnDemandRepository[] = [
     fullName: 'acme/web',
     sourceControlProvider: 'github',
     defaultBranch: 'main',
-    description: 'Marketing site | with a pipe\nand a newline',
+    description: 'Marketing site | with a pipe \\| and slash\nand a newline',
     private: false,
   },
   {
@@ -79,7 +79,7 @@ describe('buildRepositoriesManifest', () => {
     );
     expect(manifest).toContain('`clone_repository`');
     expect(rows).toEqual([
-      '| `acme/web` | yes (`/repos/acme/web`) | `main` | public | Marketing site \\| with a pipe and a newline |',
+      '| `acme/web` | yes (`/repos/acme/web`) | `main` | public | Marketing site \\| with a pipe \\\\\\| and slash and a newline |',
       '| `acme/api` | no | `develop` | private |  |',
       `| \`acme/long\` | no | \`main\` | public | ${'x'.repeat(159)}… |`,
     ]);
