@@ -172,6 +172,10 @@ function raceKeepaliveTimer<T>(
  * The client sees the reset as a provider error, aborts every in-flight tool
  * call, and regenerates the whole turn. Comment lines keep the connection
  * busy without changing the event stream the client parses.
+ *
+ * Upstream reads are driven by downstream `pull`, so a slow client bounds the
+ * buffering to the stream's own queue plus one in-flight upstream chunk. A
+ * keepalive is only written while the client is waiting on a read.
  */
 export function createSseKeepaliveProxyBody(options: {
   body: ReadableStream<Uint8Array> | null;
@@ -184,49 +188,53 @@ export function createSseKeepaliveProxyBody(options: {
   }
 
   const reader = body.getReader();
+  let pendingRead: Promise<ReadableStreamReadResult<Uint8Array>> | null = null;
   let closed = false;
 
+  function releaseReader(): void {
+    try {
+      reader.releaseLock();
+    } catch {
+      // Ignore release failures from already-closed readers.
+    }
+  }
+
   return new ReadableStream<Uint8Array>({
-    async start(controller) {
+    async pull(controller) {
       try {
-        while (!closed) {
-          // Only one upstream read is ever pending. While it waits, wake up
-          // every interval to enqueue a comment, then keep waiting on the same
-          // read so no upstream bytes are lost or reordered.
-          const next = reader.read();
-          let result = await raceKeepaliveTimer(next, intervalMs);
+        // Keep one upstream read pending across pulls: a keepalive wake-up
+        // returns before the read settles, and the next pull resumes waiting
+        // on the same read so no upstream bytes are lost or reordered.
+        pendingRead ??= reader.read();
+        const result = await raceKeepaliveTimer(pendingRead, intervalMs);
 
-          while (result === KEEPALIVE_DUE) {
-            if (closed) {
-              return;
-            }
-
-            controller.enqueue(SSE_KEEPALIVE_CHUNK);
-            result = await raceKeepaliveTimer(next, intervalMs);
-          }
-
-          if (result.done) {
-            break;
-          }
-
-          controller.enqueue(result.value);
+        if (closed) {
+          return;
         }
 
-        if (!closed) {
+        if (result === KEEPALIVE_DUE) {
+          controller.enqueue(SSE_KEEPALIVE_CHUNK);
+          return;
+        }
+
+        pendingRead = null;
+
+        if (result.done) {
           closed = true;
+          releaseReader();
           controller.close();
+          return;
         }
+
+        controller.enqueue(result.value);
       } catch (error) {
-        if (!closed) {
-          closed = true;
-          controller.error(error);
+        if (closed) {
+          return;
         }
-      } finally {
-        try {
-          reader.releaseLock();
-        } catch {
-          // Ignore release failures from already-closed readers.
-        }
+
+        closed = true;
+        releaseReader();
+        controller.error(error);
       }
     },
     async cancel(reason) {
@@ -237,6 +245,8 @@ export function createSseKeepaliveProxyBody(options: {
       } catch {
         // Ignore cancellation failures when the upstream stream is already gone.
       }
+
+      releaseReader();
     },
   });
 }

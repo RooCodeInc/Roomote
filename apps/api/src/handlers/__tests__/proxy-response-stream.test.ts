@@ -183,6 +183,51 @@ describe('createSseKeepaliveProxyBody', () => {
     expect(await readChunk(reader)).toBe('<done>');
   });
 
+  it('does not read ahead of a slow downstream consumer', async () => {
+    const reads: string[] = [];
+    const encoder = new TextEncoder();
+    const observed = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const text of ['1', '2', '3', '4', '5']) {
+          controller.enqueue(encoder.encode(text));
+        }
+        controller.close();
+      },
+    });
+    const observedReader = observed.getReader();
+    const spyingUpstream = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        const { done, value } = await observedReader.read();
+        if (done) {
+          controller.close();
+          return;
+        }
+        reads.push(new TextDecoder().decode(value));
+        controller.enqueue(value);
+      },
+    });
+    const stream = createSseKeepaliveProxyBody({
+      body: spyingUpstream,
+      intervalMs: 1_000,
+    })!;
+    const reader = stream.getReader();
+
+    // Nobody has read yet: the wrapper only fills its own queue (one chunk)
+    // plus at most one in-flight upstream read.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(reads.length).toBeLessThanOrEqual(2);
+
+    expect(await readChunk(reader)).toBe('1');
+    expect(await readChunk(reader)).toBe('2');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(reads.length).toBeLessThanOrEqual(4);
+
+    expect(await readChunk(reader)).toBe('3');
+    expect(await readChunk(reader)).toBe('4');
+    expect(await readChunk(reader)).toBe('5');
+    expect(await readChunk(reader)).toBe('<done>');
+  });
+
   it('propagates upstream failures', async () => {
     const upstream = createControlledBodyStream();
     const reader = createSseKeepaliveProxyBody({
