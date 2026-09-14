@@ -5420,7 +5420,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         id: 'github',
         name: 'GitHub',
         description: 'Repository access',
-        tools: [{ name: 'search_code' }],
+        tools: [
+          { name: 'search_code', annotations: { readOnlyHint: true } },
+          { name: 'create_issue', annotations: { readOnlyHint: false } },
+        ],
       },
       {
         id: 'roomote',
@@ -5435,7 +5438,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         id: '_roomote_http_integrations',
         name: 'HTTP integrations',
         description: 'Credential broker',
-        tools: [{ name: 'list_integrations' }, { name: 'integration_request' }],
+        tools: [
+          { name: 'list_integrations', annotations: { readOnlyHint: true } },
+          { name: 'list_session_secrets' },
+          { name: 'prepare_session_secret' },
+          { name: 'integration_request', annotations: { readOnlyHint: false } },
+        ],
       },
     ]);
     mocks.callIntegration.mockImplementation(
@@ -5506,7 +5514,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           }),
         ).resolves.toEqual({
           success: true,
-          availableToolCount: 1,
+          availableToolCount: 2,
           tools: [
             expect.objectContaining({
               integrationId: 'github',
@@ -5537,7 +5545,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
               toolName: 'integration_request',
               args: {
                 integrationId: 'status-service',
-                method: 'GET',
+                method: 'POST',
                 path: '/advisor-status',
               },
             },
@@ -5569,11 +5577,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             name: nativeToolNames.findIntegrationTools,
             args: { integrationId: '_roomote_http_integrations' },
           }),
-        ).resolves.toEqual({
-          success: false,
-          error: expect.stringContaining(
-            'No on-demand deployment MCP server with id',
-          ),
+        ).resolves.toMatchObject({
+          success: true,
+          tools: [
+            { name: 'list_integrations' },
+            { name: 'list_session_secrets' },
+            { name: 'integration_request' },
+          ],
         });
         const judgeDiscovery = await subagentExecutor({
           agent: 'judge',
@@ -5582,7 +5592,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         });
         expect(judgeDiscovery).toMatchObject({ success: true });
         expect(JSON.stringify(judgeDiscovery)).not.toContain(
-          '_roomote_http_integrations',
+          'prepare_session_secret',
         );
         await expect(
           subagentExecutor({
@@ -5594,14 +5604,56 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
               args: {
                 integrationId: 'status-service',
                 method: 'GET',
-                path: '/status',
+                path: '/judge-status',
               },
             },
           }),
         ).resolves.toEqual({
-          success: false,
-          error:
-            'The HTTP integrations broker is unavailable to the Fast judge agent.',
+          success: true,
+          result: { status: 200, body: '{"ok":true}' },
+        });
+        for (const [toolName, args] of [
+          [
+            'integration_request',
+            {
+              integrationId: 'status-service',
+              method: 'POST',
+              path: '/judge-write',
+            },
+          ],
+          [
+            'prepare_session_secret',
+            {
+              label: 'API',
+              origin: 'https://api.example.com',
+              headerName: 'authorization',
+            },
+          ],
+        ] as const) {
+          await expect(
+            subagentExecutor({
+              agent: 'judge',
+              name: nativeToolNames.callIntegrationTool,
+              args: {
+                integrationId: '_roomote_http_integrations',
+                toolName,
+                args,
+              },
+            }),
+          ).resolves.toEqual({
+            success: false,
+            error: 'That integration action is unavailable to judge.',
+          });
+        }
+        await expect(
+          subagentExecutor({
+            agent: 'judge',
+            name: nativeToolNames.findIntegrationTools,
+            args: { integrationId: 'github' },
+          }),
+        ).resolves.toMatchObject({
+          success: true,
+          tools: [expect.objectContaining({ name: 'search_code' })],
         });
         // The shared call path must not hand subagents parent-only member
         // tools that the subagent tool filter denies.
@@ -5633,7 +5685,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter }),
     ).resolves.toBe('Subagent review completed.');
-    expect(mocks.callIntegration).toHaveBeenCalledTimes(5);
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(6);
     expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
       'conversation-1',
       expect.arrayContaining([

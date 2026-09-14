@@ -9,6 +9,8 @@ import {
   INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_PARTIALLY_UNAVAILABLE_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
+  isJudgeToolCallAllowed,
+  isJudgeToolVisible,
   matchIntegrationTools,
   parseMcpToolResult,
 } from '@roomote/types';
@@ -46,6 +48,7 @@ type OnDemandMcpTool = {
   name: string;
   description?: string;
   inputSchema?: unknown;
+  annotations?: { readOnlyHint?: boolean };
 };
 
 // A tool call may legitimately run long; discovery must not. Lookups fan out
@@ -99,6 +102,9 @@ function listOnDemandMcpTools(
       name: tool.name,
       ...(tool.description ? { description: tool.description } : {}),
       ...(tool.inputSchema ? { inputSchema: tool.inputSchema } : {}),
+      ...(typeof tool.annotations?.readOnlyHint === 'boolean'
+        ? { annotations: { readOnlyHint: tool.annotations.readOnlyHint } }
+        : {}),
     }));
   }).catch((error: unknown) => {
     toolListCache.delete(server.name);
@@ -120,11 +126,15 @@ export async function findOnDemandIntegrationTools(
     toolName?: string;
     query?: string;
     limit?: number;
+    _callerAgent?: string;
   },
   listTools: (
     server: OnDemandMcpServer,
   ) => Promise<OnDemandMcpTool[]> = listOnDemandMcpTools,
 ): Promise<ToolResult> {
+  if (params._callerAgent === 'unknown') {
+    return errorResult('Integration caller role is unavailable.');
+  }
   const scoped = params.integrationId
     ? catalog.servers.filter((server) => server.name === params.integrationId)
     : catalog.servers;
@@ -153,10 +163,17 @@ export async function findOnDemandIntegrationTools(
       );
       return [];
     }
-    return listing.value.map((tool) => ({
-      integrationId: server.name,
-      ...tool,
-    }));
+    return listing.value.flatMap((tool) => {
+      const candidate = { integrationId: server.name, ...tool };
+      return params._callerAgent === 'judge' &&
+        !isJudgeToolVisible({
+          integrationId: candidate.integrationId,
+          toolName: candidate.name,
+          annotations: candidate.annotations,
+        })
+        ? []
+        : [candidate];
+    });
   });
   const { tools, truncated, availableToolCount } = matchIntegrationTools(
     candidates,
@@ -216,13 +233,20 @@ export async function callOnDemandIntegrationTool(
     integrationId: string;
     toolName: string;
     args?: Record<string, unknown>;
+    _callerAgent?: string;
   },
   callTool: (
     server: OnDemandMcpServer,
     toolName: string,
     args: Record<string, unknown>,
   ) => Promise<ToolResult> = callOnDemandMcpTool,
+  listTools: (
+    server: OnDemandMcpServer,
+  ) => Promise<OnDemandMcpTool[]> = listOnDemandMcpTools,
 ): Promise<ToolResult> {
+  if (params._callerAgent === 'unknown') {
+    return errorResult('Integration caller role is unavailable.');
+  }
   const server = catalog.servers.find(
     (candidate) => candidate.name === params.integrationId,
   );
@@ -233,6 +257,22 @@ export async function callOnDemandIntegrationTool(
     );
   }
   try {
+    if (params._callerAgent === 'judge') {
+      const tool = (await listTools(server)).find(
+        (candidate) => candidate.name === params.toolName,
+      );
+      if (
+        !tool ||
+        !isJudgeToolCallAllowed({
+          integrationId: server.name,
+          toolName: params.toolName,
+          args: params.args,
+          annotations: tool.annotations,
+        })
+      ) {
+        return errorResult('That integration action is unavailable to judge.');
+      }
+    }
     return await callTool(server, params.toolName, params.args ?? {});
   } catch (error) {
     return errorResult(

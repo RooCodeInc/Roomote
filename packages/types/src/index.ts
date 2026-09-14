@@ -66,6 +66,7 @@ export * from './mcp-oauth';
 export * from './mcp-response-parsing';
 export * from './mcp-tool-result';
 export * from './mcp-tool-policy';
+export * from './judge-tool-policy';
 export * from './managed-access';
 export * from './manage-custom-automations-tool';
 export * from './create-custom-skill-tool';

@@ -36,6 +36,8 @@ import {
   sessionSecretPrepareToolSchema,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
+  isJudgeToolCallAllowed,
+  isJudgeToolVisible,
   truncateAcpOutputText,
   type ReasoningEffort,
   type RunStatus,
@@ -3969,9 +3971,16 @@ export async function answerFastAgentQuestion({
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools) {
           const integrations =
             call.agent === ROOMOTE_OPENCODE_JUDGE_AGENT_NAME
-              ? onDemandIntegrations.filter(
-                  (integration) => integration.id !== HTTP_INTEGRATIONS_MCP_ID,
-                )
+              ? onDemandIntegrations.flatMap((integration) => {
+                  const tools = integration.tools.filter((tool) =>
+                    isJudgeToolVisible({
+                      integrationId: integration.id,
+                      toolName: tool.name,
+                      annotations: tool.annotations,
+                    }),
+                  );
+                  return tools.length > 0 ? [{ ...integration, tools }] : [];
+                })
               : onDemandIntegrations;
           return describeIntegrationTools(
             findIntegrationToolsArgsSchema.parse(call.args),
@@ -3980,18 +3989,30 @@ export async function answerFastAgentQuestion({
         }
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool) {
           const args = callIntegrationToolArgsSchema.parse(call.args);
-          if (
-            call.agent === ROOMOTE_OPENCODE_JUDGE_AGENT_NAME &&
-            args.integrationId === HTTP_INTEGRATIONS_MCP_ID
-          ) {
-            return {
-              success: false,
-              error:
-                'The HTTP integrations broker is unavailable to the Fast judge agent.',
-            };
-          }
           if (isFastAgentNativeIntegration(args.integrationId)) {
             return nativeIntegrationError(args.integrationId);
+          }
+          if (call.agent === ROOMOTE_OPENCODE_JUDGE_AGENT_NAME) {
+            const integration = onDemandIntegrations.find(
+              (candidate) => candidate.id === args.integrationId,
+            );
+            const tool = integration?.tools.find(
+              (candidate) => candidate.name === args.toolName,
+            );
+            if (
+              !tool ||
+              !isJudgeToolCallAllowed({
+                integrationId: args.integrationId,
+                toolName: args.toolName,
+                args: args.args ?? {},
+                annotations: tool.annotations,
+              })
+            ) {
+              return {
+                success: false,
+                error: 'That integration action is unavailable to judge.',
+              };
+            }
           }
           return await executeMcpTool({
             integrationId: args.integrationId,

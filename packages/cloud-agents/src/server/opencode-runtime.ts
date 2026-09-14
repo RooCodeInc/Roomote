@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 
 import {
   collectOpenRouterVariantModelAlias,
+  buildJudgeMcpToolFilter,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   HTTP_INTEGRATIONS_MCP_ID,
@@ -35,6 +36,7 @@ import {
   ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
 } from '../opencode-prompt-subagents';
+import { createOpenCodeJudgeToolPolicyPluginScript } from '../opencode-judge-tool-policy-plugin';
 import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '../opencode-identity-plugin';
 import { FAST_AGENT_SUBAGENT_TOOL_FILTER } from './fast-agent/fast-agent-tool-policy';
 import { seedOpenCodePluginDependenciesForEnv } from './opencode-plugin-seed';
@@ -237,7 +239,9 @@ const PROMPT_ONLY_SUBAGENTS = {
     permission: NON_TASK_TOOL_PERMISSION_DENIALS,
     tools: {
       ...FAST_AGENT_SUBAGENT_TOOL_FILTER,
-      [`${HTTP_INTEGRATIONS_MCP_ID}_*`]: false,
+      ...buildJudgeMcpToolFilter('roomote'),
+      ...buildJudgeMcpToolFilter(HTTP_INTEGRATIONS_MCP_ID),
+      ...buildJudgeMcpToolFilter('supermemory'),
     },
   },
 } as const;
@@ -249,6 +253,7 @@ type NonTaskOpenCodeRuntimeOptions = {
 };
 
 let openCodeIdentityPluginUrl: string | undefined;
+let openCodeJudgeToolPolicyPluginUrl: string | undefined;
 
 function getOpenCodeIdentityPluginUrl(): string {
   if (openCodeIdentityPluginUrl) {
@@ -265,6 +270,22 @@ function getOpenCodeIdentityPluginUrl(): string {
   return openCodeIdentityPluginUrl;
 }
 
+function getOpenCodeJudgeToolPolicyPluginUrl(): string {
+  if (openCodeJudgeToolPolicyPluginUrl) {
+    return openCodeJudgeToolPolicyPluginUrl;
+  }
+  const directory = mkdtempSync(
+    join(tmpdir(), 'roomote-opencode-judge-policy-'),
+  );
+  const pluginPath = join(directory, 'roomote-judge-tool-policy.mjs');
+  writeFileSync(pluginPath, createOpenCodeJudgeToolPolicyPluginScript(), {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  openCodeJudgeToolPolicyPluginUrl = pathToFileURL(pluginPath).href;
+  return openCodeJudgeToolPolicyPluginUrl;
+}
+
 function buildRestrictedNonTaskConfig(
   options: NonTaskOpenCodeRuntimeOptions,
 ): Record<string, unknown> {
@@ -275,7 +296,10 @@ function buildRestrictedNonTaskConfig(
   return {
     subagent_depth: 2,
     agent: PROMPT_ONLY_SUBAGENTS,
-    plugin: [getOpenCodeIdentityPluginUrl()],
+    plugin: [
+      getOpenCodeIdentityPluginUrl(),
+      getOpenCodeJudgeToolPolicyPluginUrl(),
+    ],
     permission: { ...NON_TASK_TOOL_PERMISSION_DENIALS, task: 'allow' },
   };
 }

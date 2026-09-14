@@ -15,7 +15,10 @@ import {
   generateOpenCodeConfig,
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
-import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '@roomote/cloud-agents';
+import {
+  createOpenCodeJudgeToolPolicyPluginScript,
+  OPENCODE_IDENTITY_PLUGIN_SCRIPT,
+} from '@roomote/cloud-agents';
 import { HTTP_INTEGRATIONS_INSTRUCTIONS } from '@roomote/sdk/client';
 import {
   buildInferenceGatewayUrl,
@@ -378,6 +381,22 @@ describe('generateOpenCodeConfig provider support', () => {
         'utf8',
       ),
     ).toBe(OPENCODE_IDENTITY_PLUGIN_SCRIPT);
+    expect(
+      readFileSync(
+        join(
+          result.openCodeConfigDir,
+          'plugins',
+          'roomote-judge-tool-policy.js',
+        ),
+        'utf8',
+      ),
+    ).toBe(
+      createOpenCodeJudgeToolPolicyPluginScript({
+        brokerNames: [],
+        memoryNames: [],
+        otherMcpNames: [],
+      }),
+    );
   });
 
   it('applies the per-task reasoning effort to a launch-time model override', () => {
@@ -1209,7 +1228,7 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(config.agent.judge?.model).toBe('openrouter/openai/gpt-5.6-terra');
   });
 
-  it('isolates visual from MCPs and the judge from only the HTTP broker', () => {
+  it('limits the judge to evidence-capable MCP tools', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
@@ -1258,11 +1277,18 @@ describe('generateOpenCodeConfig provider support', () => {
     });
 
     expect(config.agent.judge?.tools).toMatchObject({
+      'roomote_*': false,
+      roomote_manage_tasks: true,
+      roomote_manage_source_control: true,
+      roomote_find_integration_tools: true,
+      roomote_call_integration_tool: true,
+      'pylon_*': false,
+      'custom-tools_*': false,
       'runtime-broker_*': false,
+      'runtime-broker_list_integrations': true,
+      'runtime-broker_list_session_secrets': true,
+      'runtime-broker_integration_request': true,
     });
-    for (const evidenceTool of ['roomote_*', 'pylon_*', 'custom-tools_*']) {
-      expect(config.agent.judge?.tools).not.toHaveProperty(evidenceTool);
-    }
     for (const tool of [
       'roomote_*',
       'pylon_*',
