@@ -2,14 +2,22 @@ import { act, renderHook } from '@testing-library/react';
 
 import { useLiveVoice } from './useLiveVoice';
 
-const { createLiveSessionMutate, cleanTranscriptMutate, playVoiceCue } =
-  vi.hoisted(() => ({
-    createLiveSessionMutate: vi.fn(),
-    cleanTranscriptMutate: vi.fn(),
-    playVoiceCue: vi.fn(),
-  }));
+const {
+  createLiveSessionMutate,
+  cleanTranscriptMutate,
+  playVoiceCue,
+  requestVoiceConsent,
+} = vi.hoisted(() => ({
+  createLiveSessionMutate: vi.fn(),
+  cleanTranscriptMutate: vi.fn(),
+  playVoiceCue: vi.fn(),
+  requestVoiceConsent: vi.fn(),
+}));
 
 vi.mock('@/lib/voice-cues', () => ({ playVoiceCue }));
+vi.mock('@/components/layout/VoiceConsentProvider', () => ({
+  useVoiceConsent: () => requestVoiceConsent,
+}));
 
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
@@ -86,6 +94,7 @@ describe('useLiveVoice', () => {
       sessionId: 'live_123',
       sdp: 'answer-sdp',
     });
+    requestVoiceConsent.mockResolvedValue(true);
     cleanTranscriptMutate.mockImplementation(
       async ({ text }: { text: string }) => ({ text: `${text}.` }),
     );
@@ -103,6 +112,42 @@ describe('useLiveVoice', () => {
       configurable: true,
       value: { getUserMedia: vi.fn().mockResolvedValue(fakeStream) },
     });
+  });
+
+  it('does not capture audio or connect when voice consent is declined', async () => {
+    requestVoiceConsent.mockResolvedValueOnce(false);
+    const { result } = renderHook(() => useLiveVoice({ onUtterance: vi.fn() }));
+
+    await act(async () => result.current.start());
+
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+    expect(createLiveSessionMutate).not.toHaveBeenCalled();
+    expect(result.current.status).toBe('idle');
+  });
+
+  it('waits for voice consent before capturing audio', async () => {
+    let resolveConsent!: (accepted: boolean) => void;
+    requestVoiceConsent.mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        resolveConsent = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useLiveVoice({ onUtterance: vi.fn() }));
+
+    let starting!: Promise<void>;
+    act(() => {
+      starting = result.current.start();
+    });
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+    expect(createLiveSessionMutate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveConsent(true);
+      await starting;
+    });
+
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(createLiveSessionMutate).toHaveBeenCalledTimes(1);
   });
 
   afterEach(() => {
