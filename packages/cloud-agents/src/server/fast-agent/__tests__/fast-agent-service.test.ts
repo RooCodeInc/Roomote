@@ -9036,9 +9036,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
-  it('honors Slack history bounds the model wrapped in a stringified args field', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-08-24T12:00:00.000Z'));
+  it('rejects Slack history reads that wrap bounds in a stringified args field', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
         id: 'roomote',
@@ -9059,6 +9057,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ],
       },
     ]);
+    let wrappedResult: unknown;
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -9066,8 +9065,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           purpose: 'ack',
           message: 'I’ll inspect that.',
         });
+        wrappedResult = await invokeMcpTool(
+          'roomote',
+          'get_chat_channel_messages',
+          {
+            args: '{"oldest": "2026-08-01T00:00:00Z", "latest": "2026-08-07T23:59:59Z"}',
+          },
+        );
         await invokeMcpTool('roomote', 'get_chat_channel_messages', {
-          args: '{"oldest": "2026-08-01T00:00:00Z", "latest": "2026-08-07T23:59:59Z"}',
+          oldest: '2026-08-01T00:00:00Z',
+          latest: '2026-08-07T23:59:59Z',
         });
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -9077,12 +9084,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     );
 
-    try {
-      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
-    } finally {
-      vi.useRealTimers();
-    }
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
+    expect(wrappedResult).toEqual({
+      success: false,
+      error:
+        'Unknown argument key "args" for roomote tool get_chat_channel_messages. This tool accepts: channel, oldest, latest. Do not wrap arguments in an "args" field; that convention is only for call_integration_tool. Pass each argument at the top level.',
+    });
+    expect(mocks.callIntegration).toHaveBeenCalledOnce();
     expect(mocks.callIntegration).toHaveBeenCalledWith(
       expect.any(Object),
       expect.any(Array),
