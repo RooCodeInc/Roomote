@@ -589,8 +589,9 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
                 label: { type: 'string' },
                 origin: { type: 'string' },
                 headerName: { enum: ['authorization', 'x-api-key', 'api-key'] },
-                headerPrefix: { enum: ['', 'Bearer ', 'Basic ', 'Token '] },
+                headerPrefix: { enum: ['Bearer ', 'Basic ', 'Token '] },
                 ttlHours: { type: 'integer' },
+                allowedMethods: { type: 'array' },
               },
             ],
             [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets, {}],
@@ -611,6 +612,11 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
                 ? tool!.input_schema
                 : tool!.parameters;
             expect(schema).toMatchObject({ type: 'object', properties });
+            if (name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret) {
+              expect(
+                (schema as { required?: string[] }).required,
+              ).not.toContain('headerPrefix');
+            }
             expect(
               Object.keys((schema as { properties: object }).properties).sort(),
             ).toEqual(Object.keys(properties).sort());
