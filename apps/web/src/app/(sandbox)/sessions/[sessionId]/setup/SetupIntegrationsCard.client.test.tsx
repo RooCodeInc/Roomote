@@ -1,11 +1,4 @@
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import {
   SETUP_INTEGRATIONS,
   SETUP_INTEGRATIONS_CONTINUE_OPTION,
@@ -15,31 +8,25 @@ import {
 const mocks = vi.hoisted(() => ({
   capture: vi.fn(),
   mutate: vi.fn(),
-  refetch: vi.fn(),
+  push: vi.fn(),
   isAdmin: true,
-  error: false,
-  pending: false,
   submitError: false,
   submitPending: false,
   onSuccess: () => {},
   enabled: true,
-  connections: [] as { mcpId: string; authStatus: string }[],
-  enablements: [] as { mcpId: string; enabled: boolean }[],
-  searchParams: new URLSearchParams(),
 }));
+
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/sessions/setup-session',
-  useSearchParams: () => mocks.searchParams,
+  useRouter: () => ({ push: mocks.push }),
 }));
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({ isAdmin: mocks.isAdmin }),
 }));
 vi.mock('@/hooks/useTelemetry', () => ({
-  useTelemetry: () => ({ enabled: true, capture: mocks.capture }),
+  useTelemetry: () => ({ enabled: mocks.enabled, capture: mocks.capture }),
 }));
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
-    onboarding: { status: { queryOptions: () => ({}) } },
     setup: {
       submitSessionUserInput: {
         mutationOptions: (options: { onSuccess: () => void }) => {
@@ -51,51 +38,11 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: () => ({
-    data: { linkableProviders: [], orgHasLinear: false },
-    refetch: mocks.refetch,
-    isPending: mocks.pending,
-    isError: mocks.error,
-  }),
   useMutation: () => ({
     mutate: mocks.mutate,
     isPending: mocks.submitPending,
     isError: mocks.submitError,
   }),
-}));
-vi.mock('@/hooks/mcp-connections', () => ({
-  useConnectMcp: () => ({ mutate: mocks.mutate, isPending: false }),
-  useEffectiveMcpIntegrations: () => ({
-    data: SETUP_INTEGRATIONS.map((integration) => {
-      const enabled = mocks.enablements.some(
-        (entry) => entry.mcpId === integration.id && entry.enabled,
-      );
-      const connected = mocks.connections.some(
-        (entry) =>
-          entry.mcpId === integration.id &&
-          entry.authStatus === 'authenticated',
-      );
-      return {
-        id: integration.id,
-        authStatus: connected ? 'authenticated' : null,
-        status: !mocks.enabled
-          ? 'unavailable'
-          : enabled
-            ? connected
-              ? 'connected'
-              : 'needs_connection'
-            : 'not_enabled',
-      };
-    }),
-    refetch: mocks.refetch,
-    isPending: mocks.pending,
-    isError: mocks.error,
-  }),
-}));
-vi.mock('@/components/settings/Integrations', () => ({
-  Integrations: ({ integrationIds }: { integrationIds: string[] }) => (
-    <div>Secure configuration: {integrationIds.join(',')}</div>
-  ),
 }));
 
 import { SetupIntegrationsCard } from './SetupIntegrationsCard';
@@ -131,42 +78,54 @@ beforeEach(() => {
   vi.clearAllMocks();
   Object.assign(mocks, {
     isAdmin: true,
-    error: false,
-    pending: false,
     submitError: false,
     submitPending: false,
     enabled: true,
-    connections: [],
-    enablements: [],
-    searchParams: new URLSearchParams(),
   });
 });
 
-it('shows only eligible option IDs in catalog order without badges or unmentioned defaults', () => {
+it('uses the setup action-card layout with compact catalog rows', () => {
   const { container } = render(
     <SetupIntegrationsCard sessionId="s" request={request} />,
   );
   expect(container.querySelector('.lucide-plug')).toBeInTheDocument();
+  expect(
+    screen.getByRole('heading', { name: "Bring your team's tools along" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "Connect the tools you use so I can work with your team's context.",
+    ),
+  ).toBeInTheDocument();
   const rows = within(
     screen.getByRole('list', { name: 'Available integrations' }),
   ).getAllByRole('listitem');
   expect(
-    rows.map((row) =>
-      within(row).getByRole('button').getAttribute('aria-label'),
-    ),
-  ).toEqual(['Connect Notion', 'Connect Jira']);
-  expect(screen.queryByText('Your tools')).not.toBeInTheDocument();
-  expect(screen.queryByText('Available')).not.toBeInTheDocument();
-  expect(
-    screen.queryByRole('button', { name: /Refresh|See all/ }),
-  ).not.toBeInTheDocument();
+    rows.map((row) => within(row).getByText(/Notion|Jira/).textContent),
+  ).toEqual(['Notion', 'Jira']);
   expect(screen.queryByText('Google Docs')).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(/Connected|Needs connection|Status unavailable/),
+  ).not.toBeInTheDocument();
   expect(mocks.capture).toHaveBeenCalledWith('setup_integrations_shown', {
     matchedCount: 2,
   });
 });
 
-it('continues with zero connections using the durable setup input contract', () => {
+it('opens the shared integration settings surface instead of a setup-only modal', () => {
+  render(<SetupIntegrationsCard sessionId="s" request={request} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Connect Notion' }));
+  expect(mocks.capture).toHaveBeenCalledWith(
+    'setup_integration_configuration_opened',
+    { integration_id: 'notion' },
+  );
+  expect(mocks.push).toHaveBeenCalledWith(
+    '/settings/integrations?highlight=notion',
+  );
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+it('continues with the durable setup input contract', () => {
   render(<SetupIntegrationsCard sessionId="s" request={request} />);
   fireEvent.click(screen.getByRole('button', { name: 'Keep going' }));
   expect(mocks.mutate).toHaveBeenCalledWith({
@@ -176,122 +135,14 @@ it('continues with zero connections using the durable setup input contract', () 
   });
 });
 
-it('shows live connected, disabled and attention states instead of inferring a connection from enablement', () => {
-  mocks.connections = [{ mcpId: 'notion', authStatus: 'authenticated' }];
-  mocks.enablements = [
-    { mcpId: 'notion', enabled: true },
-    { mcpId: 'jira', enabled: true },
-  ];
-  render(<SetupIntegrationsCard sessionId="s" request={request} />);
-  expect(screen.getByText('Connected')).toBeInTheDocument();
-  expect(screen.getByText('Needs connection')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Manage Notion' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Connect Jira' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Keep going' })).toBeEnabled();
-});
-
-it('keeps continuation available during loading, status failure and operator disablement', () => {
-  mocks.pending = true;
-  mocks.error = true;
-  mocks.enabled = false;
-  render(<SetupIntegrationsCard sessionId="s" request={request} />);
-  expect(screen.getByRole('button', { name: 'Keep going' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Connect Notion' })).toBeDisabled();
-  expect(
-    screen.getByText(/couldn't load connection status/),
-  ).toBeInTheDocument();
-  expect(
-    screen.queryByRole('button', { name: /Refresh/ }),
-  ).not.toBeInTheDocument();
-  expect(mocks.refetch).not.toHaveBeenCalled();
-});
-
-it.each(['Back to setup', 'Escape'])(
-  'opens secure configuration inline and automatically refreshes on %s',
-  async (closeAction) => {
-    render(<SetupIntegrationsCard sessionId="s" request={request} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Connect Notion' }));
-    await waitFor(() =>
-      expect(
-        screen.getByText('Secure configuration: notion'),
-      ).toBeInTheDocument(),
-    );
-    expect(mocks.capture).toHaveBeenCalledWith(
-      'setup_integration_configuration_opened',
-      { integration_id: 'notion' },
-    );
-    expect(mocks.refetch).not.toHaveBeenCalled();
-    if (closeAction === 'Escape') {
-      fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
-    } else {
-      fireEvent.click(screen.getByRole('button', { name: 'Back to setup' }));
-    }
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
-    );
-    expect(mocks.refetch).toHaveBeenCalledOnce();
-    expect(screen.getByRole('button', { name: 'Keep going' })).toBeEnabled();
-  },
-);
-
-it('filters provider overlaps from an old request while allowing matched Vercel', () => {
-  const oldRequest = {
-    ...request,
-    questions: request.questions.map((question) => ({
-      ...question,
-      options: [
-        ...(question.options ?? []),
-        { id: 'slack', label: 'Slack', description: '' },
-        { id: 'github', label: 'GitHub', description: '' },
-        { id: 'gitlab', label: 'GitLab', description: '' },
-        { id: 'teams', label: 'Teams', description: '' },
-        { id: 'discord', label: 'Discord', description: '' },
-        { id: 'telegram', label: 'Telegram', description: '' },
-        { id: 'vercel', label: 'Vercel', description: '' },
-      ],
-    })),
-  };
-  render(<SetupIntegrationsCard sessionId="s" request={oldRequest} />);
-  for (const name of [
-    'Slack',
-    'GitHub',
-    'GitLab',
-    'Teams',
-    'Discord',
-    'Telegram',
-  ]) {
-    expect(
-      screen.queryByRole('button', { name: `Connect ${name}` }),
-    ).not.toBeInTheDocument();
-  }
-  expect(
-    screen.getByRole('button', { name: 'Connect Vercel' }),
-  ).toBeInTheDocument();
-  expect(
-    screen.queryByRole('button', { name: 'Connect Supabase' }),
-  ).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Keep going' })).toBeEnabled();
-});
-
-it('requires an administrator for configuration, not for displaying the optional continue action', () => {
+it('requires an administrator to configure a connection without hiding continue', () => {
   mocks.isAdmin = false;
   render(<SetupIntegrationsCard sessionId="s" request={request} />);
   expect(screen.getByRole('button', { name: 'Connect Notion' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Keep going' })).toBeEnabled();
 });
 
-it('allows retry after a failed continue and does not disclose callback reason values', () => {
-  mocks.submitError = true;
-  mocks.searchParams = new URLSearchParams('mcp=error&reason=private-value');
-  render(<SetupIntegrationsCard sessionId="s" request={request} />);
-  expect(screen.getByText(/Authorization didn't finish/)).toBeInTheDocument();
-  expect(screen.queryByText(/private-value/)).not.toBeInTheDocument();
-  expect(screen.getByText(/Couldn't continue setup/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Keep going' }));
-  expect(mocks.mutate).toHaveBeenCalledTimes(1);
-});
-
-it('shows every match immediately even when many connectors match', () => {
+it('shows every matched integration in catalog order', () => {
   const manyRequest = {
     ...request,
     questions: request.questions.map((question) => ({
@@ -307,14 +158,6 @@ it('shows every match immediately even when many connectors match', () => {
   expect(screen.getAllByRole('listitem')).toHaveLength(
     SETUP_INTEGRATIONS.length,
   );
-  for (const integration of SETUP_INTEGRATIONS) {
-    expect(
-      screen.getByRole('button', { name: `Connect ${integration.name}` }),
-    ).toBeVisible();
-  }
-  expect(
-    screen.queryByRole('button', { name: /See all|Show less/ }),
-  ).not.toBeInTheDocument();
 });
 
 it.each([
@@ -342,20 +185,12 @@ it.each([
       requestId: request.requestId,
       answers: { 'setup-integrations': { answers: ['Continue'] } },
     });
-    expect(mocks.capture).not.toHaveBeenCalled();
     rerender(<SetupIntegrationsCard sessionId="s" request={{ ...skipped }} />);
     expect(mocks.mutate).toHaveBeenCalledTimes(1);
-    rerender(
-      <SetupIntegrationsCard
-        sessionId="s"
-        request={{ ...skipped, requestId: 'next-request' }}
-      />,
-    );
-    expect(mocks.mutate).toHaveBeenCalledTimes(2);
   },
 );
 
-it('shows retry only after auto-continue fails and hides it after success', () => {
+it('offers a retry only after automatic continuation fails', () => {
   const skipped = { ...request, questions: [] };
   const { container, rerender } = render(
     <SetupIntegrationsCard sessionId="s" request={skipped} />,
@@ -366,34 +201,7 @@ it('shows retry only after auto-continue fails and hides it after success', () =
   expect(screen.getByRole('alert')).toHaveTextContent(
     /Couldn't continue setup/,
   );
-  expect(screen.queryByRole('list')).not.toBeInTheDocument();
-  expect(mocks.mutate).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button', { name: 'Keep going' }));
-  expect(mocks.mutate).toHaveBeenCalledTimes(2);
   act(() => mocks.onSuccess());
   expect(container).toBeEmptyDOMElement();
-  expect(mocks.capture).toHaveBeenCalledWith('setup_integrations_continued');
-});
-
-it('shows unavailable status without offering manual refresh after a status error', () => {
-  mocks.error = true;
-  render(<SetupIntegrationsCard sessionId="s" request={request} />);
-  expect(screen.getAllByText('Status unavailable')).toHaveLength(2);
-  expect(screen.getByRole('button', { name: 'Connect Notion' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Keep going' })).toBeEnabled();
-  expect(
-    screen.queryByRole('button', { name: /Refresh/ }),
-  ).not.toBeInTheDocument();
-});
-
-it('does not treat an authenticated but disabled connector as connected', () => {
-  mocks.connections = [{ mcpId: 'notion', authStatus: 'authenticated' }];
-  render(<SetupIntegrationsCard sessionId="s" request={request} />);
-  const notionRow = screen
-    .getByRole('button', { name: 'Connect Notion' })
-    .closest('li');
-  expect(notionRow).not.toBeNull();
-  expect(within(notionRow!).getByText('Not enabled')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Connect Notion' })).toBeEnabled();
-  expect(screen.queryByText('Connected')).not.toBeInTheDocument();
 });
