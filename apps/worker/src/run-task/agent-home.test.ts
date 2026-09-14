@@ -1209,7 +1209,7 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(config.agent.judge?.model).toBe('openrouter/openai/gpt-5.6-terra');
   });
 
-  it('isolates the visual agent from unrelated MCP tool schemas', () => {
+  it('keeps evidence tools available to the judge while excluding the credential broker', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
@@ -1233,10 +1233,19 @@ describe('generateOpenCodeConfig provider support', () => {
           name: 'custom-tools',
           command: 'custom-mcp',
         },
+        {
+          type: 'remote',
+          name: 'runtime-broker',
+          url: 'https://api.example.com/api/mcp/http-integrations',
+          roomoteManaged: 'http-integrations-broker',
+        },
       ],
     });
     const config = JSON.parse(result.configContent) as {
-      agent: Record<string, { tools?: Record<string, boolean> }>;
+      agent: Record<
+        string,
+        { prompt?: string; tools?: Record<string, boolean> }
+      >;
       mcp: Record<string, { timeout?: number }>;
     };
 
@@ -1248,14 +1257,25 @@ describe('generateOpenCodeConfig provider support', () => {
       'roomote_*': false,
       'pylon_*': false,
       'custom-tools_*': false,
+      'runtime-broker_*': false,
     });
 
-    for (const agentName of ['judge', 'advisor']) {
-      expect(config.agent[agentName]?.tools).not.toHaveProperty('roomote_*');
-      expect(config.agent[agentName]?.tools).not.toHaveProperty('pylon_*');
-      expect(config.agent[agentName]?.tools).not.toHaveProperty(
-        'custom-tools_*',
-      );
+    expect(config.agent.judge?.tools).toMatchObject({
+      'runtime-broker_*': false,
+    });
+    expect(config.agent.judge?.prompt).toContain(
+      'Never request credentials or Session secrets.',
+    );
+    for (const evidenceTool of ['roomote_*', 'pylon_*', 'custom-tools_*']) {
+      expect(config.agent.judge?.tools).not.toHaveProperty(evidenceTool);
+    }
+    for (const tool of [
+      'roomote_*',
+      'pylon_*',
+      'custom-tools_*',
+      'runtime-broker_*',
+    ]) {
+      expect(config.agent.advisor?.tools).not.toHaveProperty(tool);
     }
 
     expect(config.agent.general?.tools).not.toHaveProperty('pylon_*');
