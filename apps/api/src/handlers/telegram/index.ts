@@ -795,6 +795,19 @@ telegram.post('/', async (c) => {
         userId: senderUserId,
         conversation: fastConversation,
       }));
+    if (
+      metadata.communicationThreadId &&
+      (await consumeTelegramImplicitTopic({
+        chatId: metadata.communicationChannelId,
+        threadId: metadata.communicationThreadId,
+      }))
+    ) {
+      await recordFastAgentConversationMessageBestEffort({
+        sessionId: session.id,
+        conversation: fastConversation,
+        messageId: metadata.communicationThreadId,
+      });
+    }
     const result = await startFastSessionGoal({
       sessionId: session.id,
       userId: senderUserId,
