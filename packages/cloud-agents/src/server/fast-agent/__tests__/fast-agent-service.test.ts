@@ -9052,6 +9052,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
                 oldest: { type: 'string' },
                 latest: { type: 'string' },
               },
+              additionalProperties: false,
             },
           },
         ],

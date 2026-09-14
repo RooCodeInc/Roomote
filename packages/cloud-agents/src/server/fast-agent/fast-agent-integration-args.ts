@@ -10,10 +10,10 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Top-level keys a tool's JSON schema accepts, or `null` when the schema is
- * not a closed object schema (missing, no `properties`, or open through
- * `additionalProperties` / `patternProperties`) and unknown keys cannot be
- * judged.
+ * Top-level keys a tool's JSON schema accepts, or `null` when the schema does
+ * not explicitly close the object. JSON Schema allows extra keys unless
+ * `additionalProperties` is `false`, so an omitted value or any pattern
+ * properties leave the tool open and unknown keys cannot be judged.
  */
 function declaredArgumentKeys(toolInputSchema: unknown): string[] | null {
   if (!isPlainRecord(toolInputSchema)) return null;
@@ -22,8 +22,7 @@ function declaredArgumentKeys(toolInputSchema: unknown): string[] | null {
   }
   const properties = toolInputSchema.properties;
   if (!isPlainRecord(properties)) return null;
-  const additional = toolInputSchema.additionalProperties;
-  if (additional === true || isPlainRecord(additional)) return null;
+  if (toolInputSchema.additionalProperties !== false) return null;
   if (isPlainRecord(toolInputSchema.patternProperties)) return null;
   return Object.keys(properties);
 }
@@ -39,7 +38,7 @@ function declaredArgumentKeys(toolInputSchema: unknown): string[] | null {
  * Instead of guessing what was meant, reject the call with an error that
  * names the unknown keys and the accepted ones so the model corrects itself
  * on the next attempt. Returns `null` when every key is declared or the
- * schema is too open to judge.
+ * schema does not close the object with `additionalProperties: false`.
  */
 export function describeUnknownIntegrationArguments(
   call: { integrationId: string; toolName: string },

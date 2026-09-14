@@ -13,6 +13,7 @@ const schema = {
     oldest: { type: 'string' },
     latest: { type: 'string' },
   },
+  additionalProperties: false,
 };
 
 describe('describeUnknownIntegrationArguments', () => {
@@ -64,7 +65,7 @@ describe('describeUnknownIntegrationArguments', () => {
       describeUnknownIntegrationArguments(
         { integrationId: 'roomote', toolName: 'get_about_me' },
         { args: '{}' },
-        { type: 'object', properties: {} },
+        { type: 'object', properties: {}, additionalProperties: false },
       ),
     ).toBe(
       'Unknown argument key "args" for roomote tool get_about_me. This tool takes no arguments. Do not wrap arguments in an "args" field; that convention is only for call_integration_tool. Pass each argument at the top level.',
@@ -79,28 +80,31 @@ describe('describeUnknownIntegrationArguments', () => {
         {
           type: 'object',
           properties: { command: { type: 'string' }, args: { type: 'array' } },
+          additionalProperties: false,
         },
       ),
     ).toBeNull();
   });
 
-  it('cannot judge open or missing schemas', () => {
+  it('only judges schemas that explicitly close the object', () => {
     const args = { anything: 1 };
+    const { additionalProperties: _closed, ...open } = schema;
     expect(
       describeUnknownIntegrationArguments(call, args, undefined),
     ).toBeNull();
     expect(
       describeUnknownIntegrationArguments(call, args, { type: 'object' }),
     ).toBeNull();
+    expect(describeUnknownIntegrationArguments(call, args, open)).toBeNull();
     expect(
       describeUnknownIntegrationArguments(call, args, {
-        ...schema,
+        ...open,
         additionalProperties: true,
       }),
     ).toBeNull();
     expect(
       describeUnknownIntegrationArguments(call, args, {
-        ...schema,
+        ...open,
         additionalProperties: { type: 'string' },
       }),
     ).toBeNull();
@@ -111,10 +115,7 @@ describe('describeUnknownIntegrationArguments', () => {
       }),
     ).toBeNull();
     expect(
-      describeUnknownIntegrationArguments(call, args, {
-        ...schema,
-        additionalProperties: false,
-      }),
+      describeUnknownIntegrationArguments(call, args, schema),
     ).not.toBeNull();
   });
 });
