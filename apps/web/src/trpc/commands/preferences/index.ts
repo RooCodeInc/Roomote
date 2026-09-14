@@ -32,6 +32,8 @@ function normalizeMetadata(value: unknown): UserMetadataRecord {
   return { ...(value as UserMetadataRecord) };
 }
 
+const VOICE_CONSENT_METADATA_KEY = 'voice_consent_accepted';
+
 function normalizePersonalPreferences(
   metadata: UserMetadataRecord,
 ): PersonalPreferences {
@@ -128,6 +130,45 @@ export async function acceptCookieConsentCommand(
   }
 
   return existingUser.cookieConsentedAt;
+}
+
+export async function getVoiceConsentCommand(
+  auth: UserAuthSuccess,
+): Promise<boolean> {
+  const storedUser = await db.query.users.findFirst({
+    where: eq(users.id, auth.userId),
+    columns: { metadata: true },
+  });
+
+  return (
+    normalizeMetadata(storedUser?.metadata)[VOICE_CONSENT_METADATA_KEY] === true
+  );
+}
+
+export async function acceptVoiceConsentCommand(
+  auth: UserAuthSuccess,
+): Promise<boolean> {
+  if (!auth.cloudEnabled) {
+    throw new Error('Voice consent is only available on Roomote Cloud.');
+  }
+
+  const [updatedUser] = await db
+    .update(users)
+    .set({
+      metadata: sql`${users.metadata} || ${JSON.stringify({ [VOICE_CONSENT_METADATA_KEY]: true })}::jsonb`,
+      lastSyncAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, auth.userId))
+    .returning({ metadata: users.metadata });
+
+  if (!updatedUser) {
+    throw new Error('Unable to record voice consent for the active user.');
+  }
+
+  return (
+    normalizeMetadata(updatedUser.metadata)[VOICE_CONSENT_METADATA_KEY] === true
+  );
 }
 
 export async function updatePersonalPreferencesCommand(
