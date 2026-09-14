@@ -107,7 +107,7 @@ const TELEGRAM_LINK_NUDGE_CHAT_TTL_SECONDS = 15 * 60;
  * Rate-limits the group "link your account" nudge so it cannot be used to
  * make the bot spam: at most one nudge per sender per chat every 6 hours,
  * and at most one nudge per chat every 15 minutes regardless of sender.
- * Fails quiet — if Redis is unavailable, no nudge is sent.
+ * Fails quietly — if Redis is unavailable, no nudge is sent.
  */
 export async function claimTelegramLinkNudge(input: {
   chatId: string;
