@@ -1985,6 +1985,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ],
     [nativeToolNames.listSessionSecrets, 'listSessionSecretApprovals', {}],
   ] as const)('sanitizes %s SDK failures', async (name, method, args) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
     mocks[method].mockRejectedValueOnce(
       new Error('sensitive SDK failure canary'),
@@ -2013,6 +2014,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(JSON.stringify(mocks.upsertMessage.mock.calls)).not.toContain(
       'sensitive SDK failure canary',
     );
+    // Operators get a class name for the reason, never the SDK message.
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    expect(lines).toContain(`[Fast Agent] ${name} unavailable (reason=Error)`);
+    expect(JSON.stringify(lines)).not.toContain('canary');
+    warn.mockRestore();
   });
 
   it.each(['openai/gpt-5.6', 'anthropic/claude-sonnet-5'])(

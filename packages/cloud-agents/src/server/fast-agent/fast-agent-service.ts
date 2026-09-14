@@ -4622,9 +4622,18 @@ export async function answerFastAgentQuestion({
           case FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret:
           case FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets:
           case FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret: {
+            // The model only ever sees the generic message; the bounded reason
+            // goes to server logs so operators can tell a disabled experiment
+            // from a missing Session binding or a broker denial.
+            const unavailable = (reason: string) => {
+              console.warn(
+                `[Fast Agent] ${call.name} unavailable (reason=${reason})`,
+              );
+              return { success: false, error: 'Secret request unavailable' };
+            };
             try {
               if (!currentUser.sessionSecretToolsEnabled) {
-                return { success: false, error: 'Secret request unavailable' };
+                return unavailable('experiment_disabled');
               }
               const schema =
                 call.name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret
@@ -4634,17 +4643,15 @@ export async function answerFastAgentQuestion({
                     ? z.object({}).strict()
                     : sessionSecretRequestSchema;
               const args = schema.safeParse(call.args);
+              if (!args.success) return unavailable('invalid_arguments');
               // Platform events carry an owner for routing, not a human actor.
-              if (!args.success || platformEvent || !userId) {
-                return { success: false, error: 'Secret request unavailable' };
-              }
+              if (platformEvent) return unavailable('platform_event');
+              if (!userId) return unavailable('actor_missing');
               const canonicalSession = await getSessionForFastConversation(
                 db,
                 session.id,
               );
-              if (!canonicalSession) {
-                return { success: false, error: 'Secret request unavailable' };
-              }
+              if (!canonicalSession) return unavailable('session_not_bound');
               throwIfTurnCancelled();
               const context = { sessionId: canonicalSession.id, userId };
               if (
@@ -4689,8 +4696,19 @@ export async function answerFastAgentQuestion({
                 },
               );
               return { success: true, ...(result as Record<string, unknown>) };
-            } catch {
-              return { success: false, error: 'Secret request unavailable' };
+            } catch (error) {
+              // Broker text is our own constant copy; anything else is logged
+              // by class name only because SDK/database messages can echo
+              // bound values.
+              return unavailable(
+                error instanceof McpToolCallError
+                  ? error.message.startsWith('Integration request rejected')
+                    ? 'broker_rejected'
+                    : 'broker_unavailable'
+                  : error instanceof Error
+                    ? error.name || 'Error'
+                    : 'unknown',
+              );
             }
           }
 
