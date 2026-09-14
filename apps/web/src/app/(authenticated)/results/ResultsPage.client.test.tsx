@@ -197,19 +197,14 @@ describe('ResultsPage', () => {
       screen.getAllByRole('columnheader').map((header) => header.textContent),
     ).toEqual(['Produced', 'Automation', 'Result', 'Actions']);
     expect(screen.getByLabelText('Critical priority')).toBeInTheDocument();
-    expect(
-      screen.getByLabelText('Critical priority').querySelector('svg'),
-    ).toHaveClass('lucide-triangle-alert');
     expect(screen.getByLabelText('Critical priority')).toHaveClass(
-      'rounded-full',
-      'bg-destructive',
-      'text-white',
+      'lucide-triangle-alert',
+      'text-destructive',
     );
     expect(screen.getByLabelText('High priority')).toBeInTheDocument();
     expect(screen.getByLabelText('High priority')).toHaveClass(
-      'rounded-full',
-      'bg-warning',
-      'text-white',
+      'lucide-circle-alert',
+      'text-warning',
     );
     expect(
       screen.getByRole('button', { name: 'Clear all' }),

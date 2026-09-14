@@ -82,14 +82,13 @@ function PriorityMarker({
   const label = priority === 'critical' ? 'Critical priority' : 'High priority';
 
   return (
-    <span
+    <Icon
       aria-label={label}
-      className={`flex size-6 items-center justify-center rounded-full text-white ${
-        priority === 'critical' ? 'bg-destructive' : 'bg-warning'
+      className={`size-5 ${
+        priority === 'critical' ? 'text-destructive' : 'text-warning'
       }`}
-    >
-      <Icon aria-hidden="true" className="size-4" strokeWidth={2} />
-    </span>
+      strokeWidth={2}
+    />
   );
 }
 
@@ -285,7 +284,7 @@ export function ResultsPage() {
             <CardContent className="p-0!">
               <div
                 role="row"
-                className="mb-0 hidden grid-cols-[3rem_5.5rem_minmax(0,2fr)_minmax(0,8fr)_5rem] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
+                className="mb-0 hidden grid-cols-[3rem_5.5rem_minmax(0,2fr)_minmax(0,8fr)_5rem] gap-4 border-b border-background px-6 py-2 text-xs font-medium text-muted-foreground md:grid"
               >
                 <span aria-hidden="true" />
                 <span role="columnheader">Produced</span>
@@ -300,7 +299,7 @@ export function ResultsPage() {
                   <div
                     key={`${result.kind}:${result.id}`}
                     role="row"
-                    className="group grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 px-2 py-1.5 transition-colors hover:bg-accent-foreground/20 md:grid-cols-[3rem_5.5rem_minmax(0,2fr)_minmax(0,8fr)_5rem] md:gap-4 md:px-6 md:py-3"
+                    className="group grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 px-4 py-3 transition-colors hover:bg-accent-foreground/20 md:grid-cols-[3rem_5.5rem_minmax(0,2fr)_minmax(0,8fr)_5rem] md:gap-4 md:px-6"
                     tabIndex={0}
                     onClick={(event) => {
                       if (
@@ -355,7 +354,7 @@ export function ResultsPage() {
                     </div>
                     <div
                       role="cell"
-                      className="col-span-2 col-start-1 row-start-4 flex items-start gap-1 pl-7 md:col-span-1 md:col-start-5 md:row-start-1 md:justify-end md:pl-0"
+                      className="col-span-2 col-start-1 row-start-4 -ml-2 flex items-start gap-1 pl-7 md:col-span-1 md:col-start-5 md:row-start-1 md:ml-0 md:justify-end md:pl-0"
                     >
                       <BasicTooltip content="Accept">
                         <Button
