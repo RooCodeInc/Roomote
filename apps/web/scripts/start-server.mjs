@@ -16,7 +16,8 @@ const FAST_HANDOFF_RESERVE_MS = 1_000;
 
 export function resolveWebShutdownHardTimeoutMs(env = process.env) {
   const parsed = Number(env.R_WEB_SHUTDOWN_HARD_TIMEOUT_MS);
-  return Number.isFinite(parsed) && parsed >= NEXT_CLEANUP_RESERVE_MS
+  return Number.isFinite(parsed) &&
+    parsed >= NEXT_CLEANUP_RESERVE_MS + FAST_HANDOFF_RESERVE_MS
     ? parsed
     : DEFAULT_HARD_TIMEOUT_MS;
 }

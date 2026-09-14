@@ -64,8 +64,12 @@ test('validates the hard timeout override', () => {
     9_000,
   );
   assert.equal(
-    resolveWebShutdownHardTimeoutMs({ R_WEB_SHUTDOWN_HARD_TIMEOUT_MS: '10' }),
+    resolveWebShutdownHardTimeoutMs({ R_WEB_SHUTDOWN_HARD_TIMEOUT_MS: '5000' }),
     28_000,
+  );
+  assert.equal(
+    resolveWebShutdownHardTimeoutMs({ R_WEB_SHUTDOWN_HARD_TIMEOUT_MS: '6000' }),
+    6_000,
   );
 });
 
