@@ -87,7 +87,13 @@ export async function listResultsCommand(
         sourceRepositoryUrl: tasks.repositoryUrl,
       })
       .from(automationResults)
-      .leftJoin(tasks, eq(tasks.id, automationResults.sourceTaskId))
+      .leftJoin(
+        tasks,
+        and(
+          eq(tasks.id, automationResults.sourceTaskId),
+          isNull(tasks.deletedAt),
+        ),
+      )
       .where(
         and(
           visibleReport(auth.userId),
@@ -114,7 +120,10 @@ export async function listResultsCommand(
         sourceRepositoryUrl: tasks.repositoryUrl,
       })
       .from(workItems)
-      .leftJoin(tasks, eq(tasks.id, workItems.sourceTaskId))
+      .leftJoin(
+        tasks,
+        and(eq(tasks.id, workItems.sourceTaskId), isNull(tasks.deletedAt)),
+      )
       .where(
         and(
           visibleSuggestion(auth.userId),

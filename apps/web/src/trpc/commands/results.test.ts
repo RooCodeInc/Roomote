@@ -45,7 +45,7 @@ describe('Results commands', () => {
         resultPriority: 'critical',
         resultUserId: user.id,
         sourceTaskId: sourceTask.id,
-        targetRepositoryFullName: 'another/repository',
+        targetRepositoryFullName: 'RooCodeInc/Roomote',
       })
       .returning({ id: workItems.id });
 
@@ -56,11 +56,23 @@ describe('Results commands', () => {
         report!.id,
       ]);
       expect(results).toEqual([
-        expect.objectContaining({ id: suggestion!.id, repositoryUrl: null }),
+        expect.objectContaining({
+          id: suggestion!.id,
+          repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
+        }),
         expect.objectContaining({
           id: report!.id,
           repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
         }),
+      ]);
+
+      await db
+        .update(tasks)
+        .set({ deletedAt: new Date() })
+        .where(eq(tasks.id, sourceTask.id));
+      await expect(listResultsCommand(auth)).resolves.toEqual([
+        expect.objectContaining({ id: suggestion!.id, repositoryUrl: null }),
+        expect.objectContaining({ id: report!.id, repositoryUrl: null }),
       ]);
 
       await actOnResultCommand(auth, {
