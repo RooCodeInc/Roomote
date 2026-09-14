@@ -47,6 +47,8 @@ export type CommunicationPostMessageInput = {
   /** Provider-native footer HTML with `footerText` retained as source text. */
   footerHtmlText?: string;
   blocks?: unknown[];
+  /** Alternate blocks a provider may use after a recoverable content rejection. */
+  fallbackBlocks?: unknown[];
   images?: Array<{ url: string; altText: string; contentType?: string }>;
   serviceUrl?: string;
   textFormat?: 'plain' | 'markdown' | 'xml';

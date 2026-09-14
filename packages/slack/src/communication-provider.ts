@@ -105,19 +105,31 @@ export class SlackCommunicationProvider implements CommunicationProviderAdapter 
       (actionsBlock && input.text
         ? [{ type: 'section', text: { type: 'mrkdwn', text: input.text } }]
         : []);
-    const blocks = [
-      ...bodyBlocks,
+    const buildBlocks = (contentBlocks: unknown[]) => [
+      ...contentBlocks,
       ...imageBlocks,
       ...(actionsBlock ? [actionsBlock] : []),
     ];
-    const result = await this.slack.postMessageDetailed({
-      channel: input.channelId,
-      ...(input.threadId ? { thread_ts: input.threadId } : {}),
-      ...(input.text ? { text: input.text } : {}),
-      ...(blocks.length > 0 ? { blocks } : {}),
-      unfurl_links: false,
-      unfurl_media: false,
-    });
+    const post = (contentBlocks: unknown[]) => {
+      const blocks = buildBlocks(contentBlocks);
+      return this.slack.postMessageDetailed({
+        channel: input.channelId,
+        ...(input.threadId ? { thread_ts: input.threadId } : {}),
+        ...(input.text ? { text: input.text } : {}),
+        ...(blocks.length > 0 ? { blocks } : {}),
+        unfurl_links: false,
+        unfurl_media: false,
+      });
+    };
+
+    let result = await post(bodyBlocks);
+    if (
+      !result.ts &&
+      result.slackErrorCode === 'invalid_blocks' &&
+      input.fallbackBlocks
+    ) {
+      result = await post(input.fallbackBlocks);
+    }
 
     if (!result.ts) {
       throw new SlackPostDeliveryError(result);
