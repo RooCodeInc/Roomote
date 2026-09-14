@@ -601,6 +601,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       displayName: 'Matt Rubens',
       githubLogin: 'mrubens',
       isAdmin: true,
+      sessionSecretToolsEnabled: true,
     });
     mocks.getTherapistMode.mockResolvedValue(false);
     mocks.getPersonalization.mockResolvedValue(null);
@@ -2129,10 +2130,19 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     'missing-actor',
     'missing-session',
     'subagent',
+    'experiment-disabled',
   ] as const)(
     'fails closed for Session-secret requests from %s',
     async (scenario) => {
       let toolResult: unknown;
+      if (scenario === 'experiment-disabled') {
+        mocks.getUserIdentity.mockResolvedValue({
+          displayName: 'Matt Rubens',
+          githubLogin: 'mrubens',
+          isAdmin: true,
+          sessionSecretToolsEnabled: false,
+        });
+      }
       if (scenario !== 'missing-session') {
         mocks.getUnifiedSession.mockResolvedValue({
           id: 'canonical-session-1',
@@ -5565,7 +5575,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ id: 'github' }),
         expect.objectContaining({ id: 'roomote' }),
       ]),
-      { surface: 'slack' },
+      { surface: 'slack', sessionSecretToolsEnabled: true },
     );
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.any(Object),

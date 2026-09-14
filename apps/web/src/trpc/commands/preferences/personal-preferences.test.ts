@@ -24,6 +24,32 @@ describe('personal preferences', () => {
         mindReaderMode: false,
         therapistMode: false,
         homeComposerSuggestionsEnabled: false,
+        sessionSecretToolsEnabled: false,
+      }),
+    );
+  });
+
+  it('persists the Session secret tools experiment per user', async () => {
+    const user = await userFactory.create({
+      metadata: { existing_value: 'preserved' },
+    });
+
+    await expect(
+      updatePersonalPreferencesCommand(buildAuth(user.id), {
+        sessionSecretToolsEnabled: true,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({ sessionSecretToolsEnabled: true }),
+    );
+
+    const storedUser = await db.query.users.findFirst({
+      where: eq(users.id, user.id),
+      columns: { metadata: true },
+    });
+    expect(storedUser?.metadata).toEqual(
+      expect.objectContaining({
+        existing_value: 'preserved',
+        session_secret_tools_enabled: true,
       }),
     );
   });

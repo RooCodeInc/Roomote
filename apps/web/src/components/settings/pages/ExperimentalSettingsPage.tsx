@@ -3,6 +3,7 @@
 import { SettingsShell } from '@/components/settings/SettingsShell';
 import { ResultsExperimentalSetting } from '@/components/settings/ResultsExperimentalSetting';
 import { HomeComposerSuggestionsExperimentalSetting } from '@/components/settings/HomeComposerSuggestionsExperimentalSetting';
+import { SessionSecretToolsExperimentalSetting } from '@/components/settings/SessionSecretToolsExperimentalSetting';
 import { RetryableLoadError } from '@/components/system';
 import { usePersonalPreferences } from '@/hooks/usePersonalPreferences';
 
@@ -23,6 +24,7 @@ export function ExperimentalSettingsPage() {
         <>
           <HomeComposerSuggestionsExperimentalSetting />
           <ResultsExperimentalSetting />
+          <SessionSecretToolsExperimentalSetting />
         </>
       )}
     </SettingsShell>

@@ -159,6 +159,7 @@ describe('usePersonalPreferences', () => {
       therapistMode: false,
       resultsPageEnabled: false,
       homeComposerSuggestionsEnabled: false,
+      sessionSecretToolsEnabled: false,
     });
   });
 

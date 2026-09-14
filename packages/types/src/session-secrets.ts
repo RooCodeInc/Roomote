@@ -6,6 +6,22 @@ import {
   type SessionEgressMethod,
 } from './session-egress';
 
+export const SESSION_SECRET_TOOLS_EXPERIMENT_KEY =
+  'session_secret_tools_enabled' as const;
+
+export function isSessionSecretToolsExperimentEnabled(
+  metadata: unknown,
+): boolean {
+  return (
+    Boolean(metadata) &&
+    typeof metadata === 'object' &&
+    !Array.isArray(metadata) &&
+    (metadata as Record<string, unknown>)[
+      SESSION_SECRET_TOOLS_EXPERIMENT_KEY
+    ] === true
+  );
+}
+
 const sessionSecretPrepareFields = {
   label: z.string().trim().min(1).max(80),
   origin: z.string().min(1).max(2048),

@@ -33,6 +33,12 @@ vi.mock('@/components/settings/ResultsExperimentalSetting', () => ({
   ResultsExperimentalSetting: () => <div>Results setting</div>,
 }));
 
+vi.mock('@/components/settings/SessionSecretToolsExperimentalSetting', () => ({
+  SessionSecretToolsExperimentalSetting: () => (
+    <div>Session secret tools setting</div>
+  ),
+}));
+
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 
 describe('ExperimentalSettingsPage', () => {
@@ -68,6 +74,9 @@ describe('ExperimentalSettingsPage', () => {
     expect(screen.getByText('Home suggestions setting')).toBeInTheDocument();
     expect(screen.getByText('Results setting')).toBeInTheDocument();
     expect(
+      screen.getByText('Session secret tools setting'),
+    ).toBeInTheDocument();
+    expect(
       screen.queryByText('Failed to load experimental preferences.'),
     ).not.toBeInTheDocument();
   });
@@ -94,6 +103,9 @@ describe('ExperimentalSettingsPage', () => {
 
     expect(screen.getByText('Home suggestions setting')).toBeInTheDocument();
     expect(screen.getByText('Results setting')).toBeInTheDocument();
+    expect(
+      screen.getByText('Session secret tools setting'),
+    ).toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental preferences.'),
     ).not.toBeInTheDocument();

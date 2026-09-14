@@ -3092,13 +3092,19 @@ export async function answerFastAgentQuestion({
             displayName: null,
             githubLogin: null,
             isAdmin: false,
+            sessionSecretToolsEnabled: false,
           })
         : getFastAgentUserIdentity(userId).catch((error) => {
             degradedContextComponents.add('user_identity');
             console.warn(
               `[Fast Agent] User identity unavailable: ${formatErrorForLog(error)}`,
             );
-            return { displayName: null, githubLogin: null, isAdmin: false };
+            return {
+              displayName: null,
+              githubLogin: null,
+              isAdmin: false,
+              sessionSecretToolsEnabled: false,
+            };
           }),
       getTherapistModeEnabledForUser(userId).catch((error) => {
         console.warn(
@@ -3411,6 +3417,7 @@ export async function answerFastAgentQuestion({
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
       therapistModeEnabled,
+      sessionSecretToolsEnabled: currentUser.sessionSecretToolsEnabled,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
@@ -4616,6 +4623,9 @@ export async function answerFastAgentQuestion({
           case FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets:
           case FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret: {
             try {
+              if (!currentUser.sessionSecretToolsEnabled) {
+                return { success: false, error: 'Secret request unavailable' };
+              }
               const schema =
                 call.name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret
                   ? sessionSecretPrepareToolSchema
@@ -5226,7 +5236,10 @@ export async function answerFastAgentQuestion({
         const nativeRuntime = await getFastAgentNativeToolRuntime(
           session.id,
           availableIntegrations,
-          { surface: conversation.surface },
+          {
+            surface: conversation.surface,
+            sessionSecretToolsEnabled: currentUser.sessionSecretToolsEnabled,
+          },
         );
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();

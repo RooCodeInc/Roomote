@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { db, eq, sessions } from '@roomote/db/server';
+import { db, eq, sessions, users } from '@roomote/db/server';
 import { replyToFastSessionCommand } from '@/trpc/commands/fast-sessions';
 
 import {
@@ -9,6 +9,7 @@ import {
   revokeSessionSecret,
 } from '@roomote/sdk/server/session-secrets';
 import {
+  isSessionSecretToolsExperimentEnabled,
   sessionSecretCreateSchema,
   sessionSecretRevokeSchema,
 } from '@roomote/types';
@@ -114,15 +115,21 @@ async function handle(
       const secret = await createSessionSecret(context, args.data);
       let resumed = false;
       try {
-        const session = await db.query.sessions.findFirst({
-          where: eq(sessions.id, context.sessionId),
-          columns: {
-            fastConversationId: true,
-            ownerKind: true,
-            ownerUserId: true,
-            archivedAt: true,
-          },
-        });
+        const [session, user] = await Promise.all([
+          db.query.sessions.findFirst({
+            where: eq(sessions.id, context.sessionId),
+            columns: {
+              fastConversationId: true,
+              ownerKind: true,
+              ownerUserId: true,
+              archivedAt: true,
+            },
+          }),
+          db.query.users.findFirst({
+            where: eq(users.id, auth.userId),
+            columns: { metadata: true },
+          }),
+        ]);
         if (
           session?.fastConversationId &&
           session.ownerKind === 'user' &&
@@ -131,7 +138,9 @@ async function handle(
         ) {
           await replyToFastSessionCommand(auth, {
             sessionId: session.fastConversationId,
-            text: 'I saved an API key approval securely for this Session. Check list_session_secrets for ready approvals and continue the requested work using only the approved methods and destination. Attached coding runs may use this same approval. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.',
+            text: isSessionSecretToolsExperimentEnabled(user?.metadata)
+              ? 'I saved an API key approval securely for this Session. Check list_session_secrets for ready approvals and continue the requested work using only the approved methods and destination. Attached coding runs may use this same approval. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.'
+              : 'I saved an API key approval securely for this Session. Credential-backed Session access is temporarily unavailable. Explain that the approval was saved but cannot currently be used; do not attempt a credential-backed request or ask me to paste credentials into chat.',
           });
           resumed = true;
         }
