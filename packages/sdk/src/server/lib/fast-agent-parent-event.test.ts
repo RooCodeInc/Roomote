@@ -1590,6 +1590,9 @@ describe('deliverFastAgentParentEvent', () => {
       createdByUserId: 'u1',
       suggestions,
     });
+    expect(mocks.recordCustomAutomationResult).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceTaskId: 'child-task-1' }),
+    );
   });
 
   it('posts Discord suggestions when an automation task settles', async () => {

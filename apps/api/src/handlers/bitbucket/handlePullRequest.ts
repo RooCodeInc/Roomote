@@ -25,7 +25,10 @@ import {
 
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
-import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
+import {
+  scheduleSourceControlPullRequestFactSync,
+  toValidDate,
+} from '../pull-request-fact-sync';
 import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import {
   getBitbucketAutomationTargets,
@@ -121,6 +124,7 @@ export async function handleBitbucketPullRequest(
 
     await updateTaskPrStatus('bitbucket', repoFullName, prNumber, status, {
       host,
+      ...(merged ? { mergedAt: toValidDate(pullRequest.updated_on) } : {}),
     });
 
     scheduleSourceControlPullRequestFactSync({

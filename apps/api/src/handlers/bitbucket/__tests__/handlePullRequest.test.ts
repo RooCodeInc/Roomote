@@ -58,6 +58,8 @@ vi.mock('../../github/notifyPullRequestTerminalStatus', () => ({
 vi.mock('../../pull-request-fact-sync', () => ({
   scheduleSourceControlPullRequestFactSync:
     mockScheduleSourceControlPullRequestFactSync,
+  toValidDate: (value: string | null | undefined) =>
+    value ? new Date(value) : null,
 }));
 
 vi.mock('../getBitbucketAutomationTargets', () => ({
@@ -180,7 +182,10 @@ describe('handleBitbucketPullRequest', () => {
       'acme/backend',
       42,
       'merged',
-      { host },
+      {
+        host,
+        mergedAt: new Date('2026-07-10T00:00:00.000Z'),
+      },
     );
   });
 
@@ -282,7 +287,10 @@ describe('handleBitbucketPullRequest', () => {
       'acme/backend',
       42,
       'merged',
-      { host: 'bitbucket.org' },
+      {
+        host: 'bitbucket.org',
+        mergedAt: new Date('2026-07-10T00:00:00.000Z'),
+      },
     );
     expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
       expect.objectContaining({ targetBranch: 'main' }),

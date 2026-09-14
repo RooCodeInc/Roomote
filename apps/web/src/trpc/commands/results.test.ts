@@ -83,6 +83,19 @@ describe('Results commands', () => {
       await expect(listResultsCommand(auth)).resolves.toEqual([
         expect.objectContaining({ id: report!.id }),
       ]);
+
+      await actOnResultCommand(auth, {
+        id: report!.id,
+        kind: 'report',
+        action: 'accept',
+      });
+      const acceptedReport = await db.query.automationResults.findFirst({
+        where: eq(automationResults.id, report!.id),
+      });
+      expect(acceptedReport).toMatchObject({
+        acceptanceReason: 'manual',
+        ignoredAt: null,
+      });
     } finally {
       await db.delete(workItems).where(eq(workItems.id, suggestion!.id));
       await db
