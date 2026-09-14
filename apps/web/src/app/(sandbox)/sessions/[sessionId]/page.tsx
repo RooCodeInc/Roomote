@@ -21,7 +21,6 @@ import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
 import { SessionViewers } from '@/components/sessions/SessionViewers';
 
-import { findDeploymentSetupSessionId } from '@/trpc/commands/setup/setup-session';
 import { hasVoiceAutostartFlag } from '@/lib/voice-autostart';
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionTaskTimeline } from './SessionTaskTimeline';
@@ -31,9 +30,6 @@ import {
   type SessionInfo,
 } from './SessionWorkspace';
 import { SessionReadTracker } from './SessionReadTracker';
-import { SetupAutomationRecommendationsCard } from './setup/SetupAutomationRecommendationsCard';
-import { SetupSandboxCard } from './setup/SetupSandboxCard';
-import { SetupSessionSourceControlCard } from './setup/SetupSourceControlCard';
 import {
   SESSION_HEADER_CONTENT_CLASS_NAME,
   SESSION_HEADER_TITLE_CLASS_NAME,
@@ -137,19 +133,6 @@ export default async function SessionDetailPage({
       tasks: unifiedSession.tasks,
       artifacts: unifiedSession.artifacts,
     };
-    // The setup session keeps its inline automation-recommendations card on
-    // its normal route after activation: recommendations are optional and
-    // must not interrupt activation, so they surface here once ready.
-    const isSetupSession =
-      authorizedUser.isAdmin &&
-      unifiedSession.id === (await findDeploymentSetupSessionId());
-    const setupTimelineExtras = isSetupSession ? (
-      <div className="space-y-3" key="setup-timeline-extras">
-        <SetupSessionSourceControlCard sessionId={unifiedSession.id} />
-        <SetupSandboxCard />
-        <SetupAutomationRecommendationsCard />
-      </div>
-    ) : null;
     return (
       <SessionWorkspace session={sessionInfo}>
         <SessionReadTracker sessionId={unifiedSession.id} />
@@ -185,9 +168,6 @@ export default async function SessionDetailPage({
                   headerActions={
                     <SessionViewers sessionId={unifiedSession.id} />
                   }
-                  {...(isSetupSession
-                    ? { timelineExtras: setupTimelineExtras }
-                    : {})}
                 />
               </div>
             </div>

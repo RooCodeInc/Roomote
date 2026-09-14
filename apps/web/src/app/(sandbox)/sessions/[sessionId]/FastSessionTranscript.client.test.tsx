@@ -26,6 +26,12 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/sessions/session-1',
 }));
 
+vi.mock('./CapabilityOfferCard', () => ({
+  CapabilityOfferCard: ({ offer }: { offer: { capability: string } }) => (
+    <div>Capability offer: {offer.capability}</div>
+  ),
+}));
+
 const {
   replyMutate,
   reviewActionMutate,
@@ -1549,89 +1555,27 @@ describe('FastSessionTranscript', () => {
     expect(screen.getAllByText('Already persisted')).toHaveLength(1);
   });
 
-  it('waits for the first visible assistant message before showing timeline extras', () => {
+  it('renders a trusted capability offer without waiting for another message', () => {
     render(
       <FastSessionTranscript
         sessionId="session-1"
-        initialMessages={[]}
-        timelineExtras={<div>Connect source control</div>}
-      />,
-    );
-
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
-    expect(screen.queryByText('Connect source control')).toBeNull();
-
-    act(() => {
-      FakeEventSource.instances[0]!.emit('messages', {
-        messages: [
-          textMessage({
-            id: 'hidden-assistant-activity',
-            role: 'assistant',
-            text: 'Internal setup activity',
-            ts: 1,
-            visible: false,
-          }),
-        ],
-      });
-    });
-
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
-    expect(screen.queryByText('Connect source control')).toBeNull();
-
-    act(() => {
-      FakeEventSource.instances[0]!.emit('messages', {
-        messages: [
-          textMessage({
-            id: 'assistant-introduction',
-            role: 'assistant',
-            text: 'First, let’s connect your source code.',
-            ts: 2,
-          }),
-        ],
-      });
-    });
-
-    expect(
-      screen.getByText('First, let’s connect your source code.'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Connect source control')).toBeInTheDocument();
-    expect(screen.queryByText('Thinking')).toBeNull();
-  });
-
-  it('shows source-control setup controls after their trusted action without narration', () => {
-    render(
-      <FastSessionTranscript
-        sessionId="session-1"
+        canReply
         initialMessages={[
           {
-            id: 'source-control-setup-result',
-            eventId: 'turn-1:tool-result:0',
+            id: 'source-control-offer',
+            eventId: 'turn-1:capability-offer:0',
             turnId: 'turn-1',
             turnSeq: 1,
             ts: 1,
-            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
-            role: 'tool',
-            contentBlocks: [
-              {
-                type: 'text',
-                text: JSON.stringify({ success: true, completed: true }),
-              },
-            ],
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+            role: 'assistant',
+            contentBlocks: [{ type: 'text', text: 'Connect your code.' }],
             metadata: { visibleInTranscript: true },
             payload: {
-              toolCallId: 'turn-1:tool:0',
-              title: 'request_user_input',
-              kind: 'communication',
-              status: 'completed',
-              isExecute: false,
-              isRead: false,
-              isMcp: false,
-              mcpServerName: null,
-              mcpToolName: null,
-              toolName: 'request_user_input',
-              command: null,
-              output: JSON.stringify({ success: true, completed: true }),
-              rawInput: { arguments: { preset: 'setup_source_control' } },
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              message: 'Connect your code.',
+              status: 'pending',
             },
             source: 'web',
             nativeSessionId: 'opencode-1',
@@ -1639,13 +1583,55 @@ describe('FastSessionTranscript', () => {
             createdAt: new Date('2026-01-01T00:00:00.000Z'),
           },
         ]}
-        timelineExtras={<div>Connect source control</div>}
       />,
     );
 
-    expect(screen.getByText('Connect source control')).toBeInTheDocument();
-    expect(screen.queryByText('Asked for')).toBeNull();
-    expect(screen.queryByText('human guidance')).toBeNull();
+    expect(
+      screen.getByText('Capability offer: source_control'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toBeInTheDocument();
+  });
+
+  it('keeps a capability response in history and removes the resolved card', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...textMessage({
+              id: 'source-control-offer',
+              role: 'assistant',
+              text: 'Connect your code.',
+              ts: 1,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              message: 'Connect your code.',
+              status: 'pending',
+            },
+          },
+          {
+            ...textMessage({
+              id: 'source-control-response',
+              role: 'user',
+              text: 'Not now: source control.',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse,
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              resolution: 'dismissed',
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByText('Capability offer: source_control')).toBeNull();
+    expect(screen.getByText('Not now: source control.')).toBeInTheDocument();
   });
 
   it('shows Thinking after a follow-up until streamed output arrives', async () => {

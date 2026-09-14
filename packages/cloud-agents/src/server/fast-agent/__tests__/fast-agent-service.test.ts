@@ -57,6 +57,7 @@ const mocks = vi.hoisted(() => ({
   inArray: vi.fn((...values: unknown[]) => values),
   updateParentEventWhere: vi.fn(),
   nativeSteer: vi.fn(),
+  executeDb: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
@@ -93,6 +94,7 @@ const nativeToolNames = vi.hoisted(
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
       requestUserInput: 'request_user_input',
+      offerCapability: 'offer_capability',
       listSkills: 'list_skills',
       loadSkill: 'load_skill',
       showWidget: 'show_widget',
@@ -165,6 +167,7 @@ vi.mock('@roomote/db/server', () => ({
   getUserPersonalizationRuntimeContext: mocks.getPersonalization,
   isBrainEnabled: mocks.isBrainEnabled,
   db: {
+    execute: mocks.executeDb,
     query: {
       deploymentSettings: { findFirst: mocks.getDeploymentSettings },
       fastAgentParentEvents: { findMany: mocks.getPendingHumanFollowUp },
@@ -244,6 +247,7 @@ vi.mock('../fast-agent-integration-broker', () => ({
 }));
 
 vi.mock('../fast-agent-context-telemetry', () => ({
+  captureFastAgentCapabilityOffer: vi.fn(),
   captureFastAgentInferenceContext: mocks.captureInferenceContext,
   captureFastAgentInferenceAttemptOutcome: mocks.captureInferenceAttemptOutcome,
   captureFastAgentTurnSettled: mocks.captureTurnSettled,
@@ -497,6 +501,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.markRetryNoticeInterruption.mockResolvedValue(undefined);
     mocks.renewRespondingLease.mockResolvedValue(true);
     mocks.findUnresolvedRequest.mockResolvedValue(null);
+    mocks.executeDb.mockResolvedValue([]);
     mocks.markDurableDelivered.mockResolvedValue(true);
     mocks.releaseDurableClaim.mockResolvedValue(true);
     mocks.renewDurableClaim.mockResolvedValue(true);
@@ -1393,6 +1398,91 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       preset: 'setup_starter_tasks',
       questions: presetQuestions,
     });
+  });
+
+  it('persists a validated capability offer as the visible terminal response', async () => {
+    let toolResult: unknown;
+    const offerCapability = vi.fn(async (input) => input);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        toolResult = await invokeTool(nativeToolNames.offerCapability, {
+          capability: 'source_control',
+          message: 'Connect GitHub so I can retrieve the event from your code.',
+          provider: 'github',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'session-1',
+      },
+      adapter: callbacks({ offerCapability }),
+    });
+
+    expect(toolResult).toEqual({
+      success: true,
+      offerId: expect.any(String),
+      closed: true,
+    });
+    expect(offerCapability).toHaveBeenCalledWith({
+      capability: 'source_control',
+      message: 'Connect GitHub so I can retrieve the event from your code.',
+      provider: 'github',
+    });
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+          payload: expect.objectContaining({ capability: 'source_control' }),
+        }),
+      }),
+    );
+  });
+
+  it('deduplicates an unresolved offer for the same capability', async () => {
+    mocks.executeDb.mockResolvedValueOnce([{ offer_id: 'cap:existing' }]);
+    let toolResult: unknown;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        toolResult = await invokeTool(nativeToolNames.offerCapability, {
+          capability: 'sandbox',
+          message: 'Set up a workspace so I can run this work.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'session-1',
+      },
+      adapter: callbacks({ offerCapability: vi.fn(async (input) => input) }),
+    });
+
+    expect(toolResult).toEqual({
+      success: true,
+      duplicate: true,
+      offerId: 'cap:existing',
+      closed: true,
+    });
+    expect(
+      mocks.upsertMessage.mock.calls.some(
+        ([input]) =>
+          input.message.eventType === ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+      ),
+    ).toBe(false);
   });
 
   it.each([undefined, { documents: { answers: ['Notion'] } }])(

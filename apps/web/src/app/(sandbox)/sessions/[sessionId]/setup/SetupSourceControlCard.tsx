@@ -38,14 +38,18 @@ import {
  * instructions and credentials live in a dialog so they do not overwhelm the
  * conversation card.
  */
-function SetupSessionSourceControlCardBody({
+export function SetupSessionSourceControlCardBody({
   sourceControlSetup,
   explicitlySelectedProvider,
   sessionId,
+  preferredProvider,
+  onDismiss,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   explicitlySelectedProvider: SourceControlProvider | null;
   sessionId: string;
+  preferredProvider?: SourceControlProvider;
+  onDismiss?: () => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -53,7 +57,7 @@ function SetupSessionSourceControlCardBody({
   const [stage, setStage] = useState<SourceControlCardStage>(() =>
     getInitialSourceControlCardStage(
       sourceControlSetup,
-      explicitlySelectedProvider,
+      preferredProvider ?? explicitlySelectedProvider,
       searchParams,
     ),
   );
@@ -86,6 +90,7 @@ function SetupSessionSourceControlCardBody({
 
   const provider =
     activeProvider ??
+    preferredProvider ??
     explicitlySelectedProvider ??
     sourceControlSetup.runtimeConfiguredProvider ??
     sourceControlSetup.preselectedProvider;
@@ -181,7 +186,9 @@ function SetupSessionSourceControlCardBody({
           saveSourceControlProviderChoice.isPending ||
           skipSourceControl.isPending
         }
-        onClick={() => skipSourceControl.mutate({ sessionId })}
+        onClick={() =>
+          onDismiss ? onDismiss() : skipSourceControl.mutate({ sessionId })
+        }
       >
         Not now
       </Button>

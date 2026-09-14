@@ -18,6 +18,8 @@ import {
   inferAcpMessageKind,
   parseAcpRequestUserInputPayload,
   parseAcpRequestUserInputResponsePayload,
+  parseFastAgentCapabilityOfferPayload,
+  parseFastAgentCapabilityOfferResponsePayload,
   parsePrReviewActionOffer,
   getTaskModelDisplayName,
   type AcpMessage,
@@ -74,6 +76,7 @@ import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
 import { SetupIntegrationsCard } from './setup/SetupIntegrationsCard';
 import { SESSION_HEADER_CONTENT_CLASS_NAME } from './session-header-layout';
 import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/setup-receipt-transcript';
+import { CapabilityOfferCard } from './CapabilityOfferCard';
 
 import {
   AcpTranscriptBlockList,
@@ -364,7 +367,6 @@ export function FastSessionTranscript({
   owner,
   headerExtras,
   headerActions,
-  timelineExtras,
   autoStartVoice = false,
 }: {
   sessionId: string;
@@ -380,7 +382,6 @@ export function FastSessionTranscript({
   owner?: TranscriptOwner;
   headerExtras?: ReactNode;
   headerActions?: ReactNode;
-  timelineExtras?: ReactNode;
   /**
    * Begin a voice conversation as soon as the page loads: set when the
    * session was opened from a voice utterance in the new-session composer,
@@ -663,6 +664,48 @@ export function FastSessionTranscript({
       }) ?? null
     );
   }, [messages, pendingInputRequest]);
+  const resolvedCapabilityOfferIds = useMemo(
+    () =>
+      new Set(
+        messages.flatMap((message) => {
+          if (
+            message.eventType !==
+            ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse
+          )
+            return [];
+          const response = parseFastAgentCapabilityOfferResponsePayload(
+            message.payload,
+          );
+          return response ? [response.offerId] : [];
+        }),
+      ),
+    [messages],
+  );
+  const capabilityOffersByMessageId = useMemo(
+    () =>
+      new Map(
+        messages.flatMap((message) => {
+          if (message.eventType !== ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer)
+            return [];
+          const offer = parseFastAgentCapabilityOfferPayload(message.payload);
+          return offer && !resolvedCapabilityOfferIds.has(offer.offerId)
+            ? ([[message.id, offer]] as const)
+            : [];
+        }),
+      ),
+    [messages, resolvedCapabilityOfferIds],
+  );
+  const renderCapabilityOfferMessage = useCallback(
+    (message: AcpUiMessage) => {
+      const offer = capabilityOffersByMessageId.get(message.id);
+      return offer ? (
+        <div className="mt-3">
+          <CapabilityOfferCard sessionId={sessionId} offer={offer} />
+        </div>
+      ) : undefined;
+    },
+    [capabilityOffersByMessageId, sessionId],
+  );
   const { requestUserInputById, requestUserInputTurnIds } = useMemo(() => {
     const requests = new Map<
       string,
@@ -694,6 +737,11 @@ export function FastSessionTranscript({
           (message.payload as { taskNavigation?: unknown } | null)
             ?.taskNavigation === true) ||
         message.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput ||
+        (message.eventType === ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer &&
+          resolvedCapabilityOfferIds.has(
+            parseFastAgentCapabilityOfferPayload(message.payload)?.offerId ??
+              '',
+          )) ||
         shouldSuppressRequestUserInputToolMessage(
           message,
           requestUserInputTurnIds,
@@ -798,6 +846,22 @@ export function FastSessionTranscript({
           userImageUrl: uiMessage.userImageUrl ?? owner?.imageUrl,
         };
       } else if (
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse
+      ) {
+        uiMessage = {
+          ...uiMessage,
+          role: 'user',
+          kind: 'text',
+          text:
+            getTranscriptMessageText(message) ??
+            'Resolved capability suggestion.',
+          data: message.payload ?? {},
+          userId: uiMessage.userId ?? owner?.userId,
+          userName: uiMessage.userName ?? owner?.name,
+          userEmail: uiMessage.userEmail ?? owner?.email,
+          userImageUrl: uiMessage.userImageUrl ?? owner?.imageUrl,
+        };
+      } else if (
         uiMessage.role === 'user' &&
         owner &&
         uiMessage.userId === owner.userId
@@ -828,46 +892,8 @@ export function FastSessionTranscript({
     pendingInputRequestOrder,
     requestUserInputById,
     requestUserInputTurnIds,
+    resolvedCapabilityOfferIds,
   ]);
-  const hasVisibleAssistantMessage = useMemo(
-    () =>
-      messages.some(
-        (message) =>
-          message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
-          message.metadata?.visibleInTranscript !== false &&
-          Boolean(getTextFromContentBlocks(message.contentBlocks)?.trim()),
-      ),
-    [messages],
-  );
-  // Source-control setup is rendered directly in the timeline rather than as
-  // a persisted request_user_input card. A model may correctly invoke that
-  // trusted preset without first emitting narration, so its successful tool
-  // action is sufficient to reveal the controls.
-  const hasCompletedSourceControlSetupAction = useMemo(
-    () =>
-      messages.some((message) => {
-        if (
-          message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolCall &&
-          message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
-          message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolResult
-        ) {
-          return false;
-        }
-        const payload = message.payload as {
-          toolName?: unknown;
-          title?: unknown;
-          status?: unknown;
-          rawInput?: { arguments?: { preset?: unknown } } | null;
-        } | null;
-        return (
-          (payload?.toolName === 'request_user_input' ||
-            payload?.title === 'request_user_input') &&
-          payload?.status === 'completed' &&
-          payload?.rawInput?.arguments?.preset === 'setup_source_control'
-        );
-      }),
-    [messages],
-  );
   const reviewOffers = useMemo(
     () =>
       messages.flatMap((message) => {
@@ -1479,6 +1505,7 @@ export function FastSessionTranscript({
               showInternalMessages={false}
               onSuppress={suppressMessageBeforeInput}
               onOpenDelegatedTask={openTaskPanel ?? undefined}
+              renderMessage={renderCapabilityOfferMessage}
             />
             {pendingInputRequest ? (
               <div className="mt-3">
@@ -1506,10 +1533,8 @@ export function FastSessionTranscript({
               showInternalMessages={false}
               onSuppress={suppressMessageAfterInput}
               onOpenDelegatedTask={openTaskPanel ?? undefined}
+              renderMessage={renderCapabilityOfferMessage}
             />
-            {hasVisibleAssistantMessage || hasCompletedSourceControlSetupAction
-              ? timelineExtras
-              : null}
             {pendingResponseState.pendingAfter !== null &&
             streamMessages.length === 0 ? (
               pendingResponseState.pendingAfter.id === '' ? (

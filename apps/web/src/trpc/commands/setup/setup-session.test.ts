@@ -24,6 +24,7 @@ vi.mock('@roomote/cloud-agents/server', async (importOriginal) => ({
   createFastAgentWebTaskLauncher: vi.fn(),
 }));
 vi.mock('@roomote/telemetry/server', () => ({ captureEvent: vi.fn() }));
+vi.mock('next/server', () => ({ after: vi.fn() }));
 
 import {
   db,
@@ -131,7 +132,7 @@ describe('optional setup integration discovery', () => {
   async function continueDiscovery(answer = 'continue') {
     const questions = await (
       await context()
-    ).adapterExtensions.resolveUserInputPreset!('setup_integrations');
+    ).adapterExtensions!.resolveUserInputPreset!('setup_integrations');
     const row = await request({
       requestId: 'integrations',
       sessionId: conversationId,
@@ -226,7 +227,7 @@ describe('optional setup integration discovery', () => {
     mocks.schedule.mockClear();
     const questions = await (
       await context()
-    ).adapterExtensions.resolveUserInputPreset!('setup_integrations');
+    ).adapterExtensions!.resolveUserInputPreset!('setup_integrations');
     expect(questions).toHaveLength(1);
     expect(questions[0]?.options?.map((option) => option.id)).toEqual([
       'notion',
@@ -240,6 +241,115 @@ describe('optional setup integration discovery', () => {
     expect(
       (await readState()).setupSession?.integrationDiscoveryCompletedAt,
     ).toBeNull();
+  });
+
+  it('validates capability arguments and allows source control after an initial skip', async () => {
+    await expect(
+      (await context()).adapterExtensions!.offerCapability!({
+        capability: 'integrations',
+        message: 'Connect Slack.',
+        integrationIds: ['slack'],
+      }),
+    ).rejects.toThrow('An offered integration was not found.');
+
+    const state = await readState();
+    state.setupSession!.sourceControlSkippedAt = '2026-01-01T00:00:00.000Z';
+    await db
+      .update(deploymentSettings)
+      .set({ setupCompletedAt: new Date(), setupNewState: state })
+      .where(eq(deploymentSettings.id, 'default'));
+    mocks.getStatus.mockImplementation(async () => ({
+      setupNewState: await readState(),
+      setupCompletedAt: new Date(),
+      modelSetup: { setupSatisfied: true },
+      computeSetup: { setupSatisfied: true, providers: [] },
+      sourceControlSetup: {
+        setupSatisfied: false,
+        providers: [
+          {
+            provider: 'gitlab',
+            label: 'GitLab',
+            connected: false,
+            repositoryCount: 0,
+          },
+        ],
+      },
+    }));
+
+    const completedContext = await context();
+    expect(
+      JSON.parse(completedContext.setupSnapshot).initialMilestones
+        .source_control,
+    ).toBe('declined');
+    await expect(
+      completedContext.adapterExtensions!.offerCapability!({
+        capability: 'source_control',
+        message: 'Connect GitLab so I can retrieve the event from your code.',
+        provider: 'gitlab',
+      }),
+    ).resolves.toMatchObject({
+      capability: 'source_control',
+      provider: 'gitlab',
+    });
+  });
+
+  it('persists an immutable response and advances only the first setup resolution', async () => {
+    const offerId = 'cap:integration-offer';
+    await db.insert(fastAgentMessages).values({
+      conversationId,
+      eventId: 'integration-offer',
+      turnId: 'integration-offer-turn',
+      turnSeq: 1,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Connect useful tools.' }],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        offerId,
+        capability: 'integrations',
+        message: 'Connect useful tools.',
+        integrationIds: ['notion'],
+        status: 'pending',
+      },
+      source: 'web',
+    });
+    const actualFastSessions =
+      await vi.importActual<typeof import('../fast-sessions')>(
+        '../fast-sessions',
+      );
+
+    await actualFastSessions.resolveFastSessionCapabilityOfferCommand(auth, {
+      sessionId,
+      offerId,
+      capability: 'integrations',
+      resolution: 'dismissed',
+    });
+    await actualFastSessions.resolveFastSessionCapabilityOfferCommand(auth, {
+      sessionId,
+      offerId,
+      capability: 'integrations',
+      resolution: 'dismissed',
+    });
+
+    const responses = await db
+      .select({ payload: fastAgentMessages.payload })
+      .from(fastAgentMessages)
+      .where(
+        eq(
+          fastAgentMessages.eventType,
+          ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse,
+        ),
+      );
+    expect(responses).toHaveLength(1);
+    expect(responses[0]?.payload).toMatchObject({
+      offerId,
+      capability: 'integrations',
+      resolution: 'dismissed',
+    });
+    expect(
+      (await readState()).setupSession?.integrationDiscoveryCompletedAt,
+    ).toEqual(expect.any(String));
   });
 
   it('persists source decline, renders its receipt, wakes continuation, and suppresses repository offers', async () => {
@@ -323,7 +433,7 @@ describe('optional setup integration discovery', () => {
     expect(mocks.schedule).toHaveBeenCalledOnce();
     const questions = await (
       await context()
-    ).adapterExtensions.resolveUserInputPreset!('setup_integrations');
+    ).adapterExtensions!.resolveUserInputPreset!('setup_integrations');
     expect(questions).toEqual([]);
     expect(
       JSON.parse((await context()).setupSnapshot).integrationDiscovery
@@ -334,7 +444,7 @@ describe('optional setup integration discovery', () => {
   it('keeps canonical prose-derived connector matches on the persisted final request across reloads', async () => {
     const questions = await (
       await context()
-    ).adapterExtensions.resolveUserInputPreset!('setup_integrations', {
+    ).adapterExtensions!.resolveUserInputPreset!('setup_integrations', {
       documents: { answers: ['Granola', 'Google Docs'] },
       'project-tracking': { answers: ['Vercel'] },
     });
@@ -416,7 +526,7 @@ describe('optional setup integration discovery', () => {
     await continueDiscovery();
 
     await expect(
-      (await context()).adapterExtensions.resolveUserInputPreset!(
+      (await context()).adapterExtensions!.resolveUserInputPreset!(
         'setup_integrations',
       ),
     ).resolves.toEqual([]);
@@ -437,7 +547,7 @@ describe('optional setup integration discovery', () => {
     }
   });
 
-  it('allows normal collaborative context after setup completes', async () => {
+  it('keeps capability context available after setup completes', async () => {
     const collaborator = await userFactory.create({ role: 'admin' });
     const collaboratorAuth = {
       userId: collaborator.id,
@@ -448,11 +558,51 @@ describe('optional setup integration discovery', () => {
       .set({ setupCompletedAt: new Date() })
       .where(eq(deploymentSettings.id, 'default'));
     try {
-      await expect(
-        resolveSetupSessionTurnContext(collaboratorAuth, sessionId),
-      ).resolves.toBeNull();
+      const resolved = await resolveSetupSessionTurnContext(
+        collaboratorAuth,
+        sessionId,
+      );
+      expect(resolved).toMatchObject({
+        setupSession: false,
+        adapterExtensions: { offerCapability: expect.any(Function) },
+      });
     } finally {
       await db.delete(users).where(eq(users.id, collaborator.id));
+    }
+  });
+
+  it('gives non-admin Sessions readiness without callable capability cards', async () => {
+    const member = await userFactory.create({ role: 'member' });
+    const [memberConversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        surface: 'web',
+        userId: member.id,
+        workspaceId: member.id,
+        conversationId: `member-session:${member.id}`,
+      })
+      .returning();
+    const memberSession = await ensureSessionForFastConversation(
+      db,
+      memberConversation!.id,
+    );
+    try {
+      const resolved = await resolveSetupSessionTurnContext(
+        { userId: member.id, isAdmin: false } as UserAuthSuccess,
+        memberSession.id,
+      );
+      expect(resolved?.adapterExtensions).toBeUndefined();
+      const snapshot = JSON.parse(resolved!.setupSnapshot);
+      expect(snapshot.capabilities.integrations).toMatchObject({
+        canOffer: false,
+        unavailableReason: expect.stringContaining('administrator'),
+      });
+    } finally {
+      await db.delete(sessions).where(eq(sessions.id, memberSession.id));
+      await db
+        .delete(fastAgentConversations)
+        .where(eq(fastAgentConversations.id, memberConversation!.id));
+      await db.delete(users).where(eq(users.id, member.id));
     }
   });
 
@@ -527,7 +677,7 @@ describe('optional setup integration discovery', () => {
     expect(
       snapshot.categories.map((category: { id: string }) => category.id),
     ).toEqual(['documents', 'monitoring', 'project-tracking']);
-    const questions = await turn.adapterExtensions.resolveUserInputPreset!(
+    const questions = await turn.adapterExtensions!.resolveUserInputPreset!(
       'setup_integrations',
       {
         communication: { answers: ['Teams'] },
@@ -583,7 +733,7 @@ describe('optional setup integration discovery', () => {
     expect(
       JSON.parse(turn.setupSnapshot).integrationDiscovery.matchedIntegrationIds,
     ).toEqual(['vercel', 'supabase']);
-    const questions = await turn.adapterExtensions.resolveUserInputPreset!(
+    const questions = await turn.adapterExtensions!.resolveUserInputPreset!(
       'setup_integrations',
       {
         documents: { answers: ['Slack', 'Vercel', 'Railway'] },
@@ -636,7 +786,7 @@ describe('optional setup integration discovery', () => {
     expect(mocks.schedule).toHaveBeenCalledTimes(6);
     const starterQuestions = await (
       await context()
-    ).adapterExtensions.resolveUserInputPreset!('setup_starter_tasks');
+    ).adapterExtensions!.resolveUserInputPreset!('setup_starter_tasks');
     expect(starterQuestions).toHaveLength(1);
     await continueDiscovery();
     expect(
@@ -646,7 +796,7 @@ describe('optional setup integration discovery', () => {
     ).toBe(true);
     const questions = await (
       await context()
-    ).adapterExtensions.resolveUserInputPreset!('setup_starter_tasks');
+    ).adapterExtensions!.resolveUserInputPreset!('setup_starter_tasks');
     expect(questions[0]?.options).toEqual(
       SETUP_STARTER_TASKS.map((task) => ({
         id: task.id,
@@ -654,6 +804,19 @@ describe('optional setup integration discovery', () => {
         description: task.description,
       })),
     );
+  });
+
+  it('schedules one corrective milestone turn after an applicable offer is missed', async () => {
+    await reconcileSetupPlatformEvents(auth);
+    const initialTurn = mocks.schedule.mock.calls[0]![0];
+
+    await initialTurn.adapterExtensions.onTurnSettled();
+
+    expect(mocks.schedule).toHaveBeenCalledTimes(2);
+    expect(mocks.schedule.mock.calls[1]![0].question).toContain(
+      'capability_milestone_correction',
+    );
+    expect(mocks.schedule.mock.calls[1]![0].question).toContain('integrations');
   });
 
   it('counts every selected launch call as attempted even when launches fail', async () => {
@@ -700,7 +863,7 @@ describe('optional setup integration discovery', () => {
   it('preserves a manual starter-task continuation across reconciliation', async () => {
     const questions = await (
       await context()
-    ).adapterExtensions.resolveUserInputPreset!('setup_starter_tasks');
+    ).adapterExtensions!.resolveUserInputPreset!('setup_starter_tasks');
     const pendingRequest = await request({
       requestId: 'manual-starter-request',
       sessionId: conversationId,

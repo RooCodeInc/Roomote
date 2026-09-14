@@ -29,6 +29,7 @@ import {
 import {
   and,
   db,
+  deploymentSettings,
   ensureSessionForFastConversation,
   eq,
   fastAgentConversations,
@@ -45,9 +46,14 @@ import {
   getAcpRequestUserInputValidationError,
   getUserDisplayName,
   isSetupIntegrationDiscoveryQuestionId,
+  isSetupStarterTaskId,
   parseAcpRequestUserInputAnswers,
   parseAcpRequestUserInputPayload,
   parseAcpRequestUserInputResponsePayload,
+  parseFastAgentCapabilityOfferPayload,
+  type FastAgentCapabilityId,
+  normalizeSetupNewSetupSession,
+  normalizeSetupNewState,
   normalizeAcpRequestUserInputAnswers,
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
@@ -55,6 +61,7 @@ import {
   type ReasoningEffort,
 } from '@roomote/types';
 import type { FastAgentTurnAdapter } from '@roomote/cloud-agents/server';
+import { captureEvent } from '@roomote/telemetry/server';
 
 import type { UserAuthSuccess } from '@/types';
 import {
@@ -67,6 +74,7 @@ import {
   updateFastSessionPrReviewOfferStatus,
 } from '@/lib/server/fast-sessions';
 import { handleWebPrReviewAction } from '@/lib/server/pr-review-actions';
+import { getSetupStarterTask } from '@/lib/setup-starter-tasks';
 import {
   currentEpochSeconds,
   signArtifactId,
@@ -183,7 +191,10 @@ async function hasCompletedWebFastAgentTurn(input: {
         sql`(
           (${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.AssistantMessage}
             AND ${fastAgentMessages.metadata} ->> 'purpose' IN ('closeout', 'clarification'))
-          OR ${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.RequestUserInput}
+          OR ${fastAgentMessages.eventType} IN (
+            ${ACP_ENVELOPE_EVENT_TYPES.RequestUserInput},
+            ${ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer}
+          )
         )`,
       ),
     )
@@ -379,6 +390,11 @@ async function runWebFastAgentTurn({
     );
   } finally {
     await release().catch(() => {});
+    await adapterExtensions?.onTurnSettled?.().catch((error) => {
+      console.error(
+        `[Fast Web] Post-turn reconciliation failed for ${conversation.conversationId}: ${formatErrorForLog(error)}`,
+      );
+    });
   }
 }
 
@@ -463,6 +479,12 @@ export async function startFastSessionCommand(
     const launchTask = createFastAgentWebTaskLauncher({
       userId: auth.userId,
     });
+    const { resolveSetupSessionTurnContext } =
+      await import('../setup/setup-session');
+    const capabilityContext = await resolveSetupSessionTurnContext(
+      auth,
+      unifiedSession.id,
+    );
 
     scheduleWebFastAgentTurn({
       userId: auth.userId,
@@ -496,6 +518,7 @@ export async function startFastSessionCommand(
             },
           }
         : {}),
+      ...capabilityContext,
     });
   }
 
@@ -772,6 +795,195 @@ export async function handleFastSessionPrReviewActionCommand(
         status,
       ),
   });
+}
+
+export async function resolveFastSessionCapabilityOfferCommand(
+  auth: UserAuthSuccess,
+  input: {
+    sessionId: string;
+    offerId: string;
+    capability: FastAgentCapabilityId;
+    resolution: 'completed' | 'dismissed';
+    selectedIds?: string[];
+  },
+): Promise<{ success: true }> {
+  if (!auth.isAdmin)
+    throw new Error('Only administrators can use capability cards.');
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) throw new Error('Fast session not found');
+  const [offer] = await db
+    .select({
+      eventId: fastAgentMessages.eventId,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, session.id),
+        eq(
+          fastAgentMessages.eventType,
+          ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+        ),
+        sql`${fastAgentMessages.payload}->>'offerId' = ${input.offerId}`,
+      ),
+    )
+    .limit(1);
+  const parsed = parseFastAgentCapabilityOfferPayload(offer?.payload);
+  if (!offer || !parsed || parsed.capability !== input.capability) {
+    throw new Error('This capability offer is no longer valid.');
+  }
+  const selectedStarterIds = (input.selectedIds ?? []).filter(
+    isSetupStarterTaskId,
+  );
+  if (input.capability !== 'starter_work' && input.selectedIds?.length) {
+    throw new Error('Selections are only valid for starter-work offers.');
+  }
+  if (
+    input.capability === 'starter_work' &&
+    selectedStarterIds.length !== (input.selectedIds ?? []).length
+  ) {
+    throw new Error('A selected starter task was not found.');
+  }
+  const now = new Date();
+  let responseCreated = false;
+  let advancedInitialSetup = false;
+  await db.transaction(async (tx) => {
+    const insertedResponses = await tx
+      .insert(fastAgentMessages)
+      .values({
+        conversationId: session.id,
+        eventId: `${offer.eventId}:response`,
+        turnId: offer.eventId,
+        turnSeq: 2_000_000_000,
+        ts: now.getTime(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse,
+        role: 'user',
+        contentBlocks: [
+          {
+            type: 'text',
+            text:
+              input.resolution === 'dismissed'
+                ? `Not now: ${input.capability.replaceAll('_', ' ')}.`
+                : `Completed: ${input.capability.replaceAll('_', ' ')}.`,
+          },
+        ],
+        metadata: {
+          visibleInTranscript: true,
+          inputKind: 'capability_offer_response',
+        },
+        payload: {
+          offerId: input.offerId,
+          capability: input.capability,
+          resolution: input.resolution,
+          ...(selectedStarterIds.length
+            ? { selectedIds: selectedStarterIds }
+            : {}),
+        },
+        source: 'web',
+      })
+      .onConflictDoNothing({
+        target: [fastAgentMessages.conversationId, fastAgentMessages.eventId],
+      })
+      .returning({ eventId: fastAgentMessages.eventId });
+    responseCreated = insertedResponses.length > 0;
+    if (!responseCreated) return;
+
+    const [settings] = await tx
+      .select({ setupNewState: deploymentSettings.setupNewState })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, 'default'))
+      .limit(1);
+    const state = normalizeSetupNewState(settings?.setupNewState ?? {});
+    const setupSession = normalizeSetupNewSetupSession(state.setupSession);
+    if (!setupSession) return;
+    const setupUpdates =
+      input.capability === 'source_control' &&
+      input.resolution === 'dismissed' &&
+      setupSession.sourceControlSkippedAt === null
+        ? { sourceControlSkippedAt: now.toISOString() }
+        : input.capability === 'integrations' &&
+            setupSession.integrationDiscoveryCompletedAt === null
+          ? { integrationDiscoveryCompletedAt: now.toISOString() }
+          : input.capability === 'starter_work' &&
+              setupSession.starterTaskSelection === null
+            ? {
+                starterTaskSelection: {
+                  requestId: input.offerId,
+                  taskIds: selectedStarterIds,
+                  selectedAt: now.toISOString(),
+                },
+              }
+            : null;
+    if (!setupUpdates) return;
+    advancedInitialSetup = true;
+    await tx
+      .update(deploymentSettings)
+      .set({
+        setupNewState: {
+          ...state,
+          setupSession: { ...setupSession, ...setupUpdates },
+        },
+        updatedAt: now,
+      })
+      .where(eq(deploymentSettings.id, 'default'));
+  });
+  if (!responseCreated) return { success: true };
+
+  void captureEvent(`capability_offer_${input.resolution}`, {
+    userId: auth.userId,
+    properties: {
+      capability: input.capability,
+      advanced_initial_setup: advancedInitialSetup,
+    },
+  });
+
+  const { reconcileSetupPlatformEvents } =
+    await import('../setup/setup-session');
+  await reconcileSetupPlatformEvents(auth);
+
+  const { resolveSetupSessionTurnContext } =
+    await import('../setup/setup-session');
+  const freshCapabilityContext = await resolveSetupSessionTurnContext(
+    auth,
+    session.id,
+  );
+  const responseTurnId = `capability-response:${input.offerId}`;
+  const selectedStarterTasks = selectedStarterIds.map((id) => {
+    const task = getSetupStarterTask(id);
+    return { id: task.id, title: task.title, prompt: task.prompt };
+  });
+  scheduleWebFastAgentTurn({
+    userId: auth.userId,
+    delivery: {
+      conversation: {
+        surface: 'web',
+        workspaceId: session.userId ?? auth.userId,
+        conversationId: session.conversationId,
+      },
+      adapter: {
+        createArtifact: buildFastAgentArtifactCreator(session.id),
+        launchTask: createFastAgentWebTaskLauncher({ userId: auth.userId }),
+        postReply: async () => {},
+      },
+    },
+    question: `<capability_offer_response>${JSON.stringify({
+      offerId: input.offerId,
+      capability: input.capability,
+      resolution: input.resolution,
+      ...(selectedStarterTasks.length > 0 ? { selectedStarterTasks } : {}),
+    })}</capability_offer_response>`,
+    turnSource: 'platform_event',
+    platformEventKind: 'input_response',
+    platformEventVisibility: 'required',
+    currentMessageId: responseTurnId,
+    durableSessionId: session.id,
+    skipIfTurnCompleted: {
+      conversationId: session.id,
+      turnId: responseTurnId,
+    },
+    ...freshCapabilityContext,
+  });
+  return { success: true };
 }
 
 /**

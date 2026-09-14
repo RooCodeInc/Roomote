@@ -1,5 +1,6 @@
 import type {
   DataVisualizationInput,
+  FastAgentCapabilityOfferInput,
   FastAgentConversation,
   FastAgentReactionExternalInput as SharedFastAgentReactionExternalInput,
   ReasoningEffort,
@@ -217,6 +218,12 @@ export type FastAgentTurnAdapter = {
     preset: FastAgentInputPreset,
     setupIntegrationAnswers?: Record<string, { answers: string[] }>,
   ) => Promise<FastAgentInputRequest['questions']>;
+  /** Validate and normalize a trusted capability offer for this surface. */
+  offerCapability?: (
+    input: FastAgentCapabilityOfferInput,
+  ) => Promise<FastAgentCapabilityOfferInput>;
+  /** Surface lifecycle callback used for server-owned post-turn reconciliation. */
+  onTurnSettled?: () => Promise<void>;
   /**
    * Called when an interrupted turn is still safe to replay and has handed
    * itself back to the durable queue; wakes the queue so recovery does not

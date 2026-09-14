@@ -31,6 +31,8 @@ export const ACP_ENVELOPE_EVENT_TYPES = {
   QueuedMessagesUpdate: 'roomote_runtime.queued_messages_update',
   RequestUserInput: 'roomote_runtime.request_user_input',
   RequestUserInputResponse: 'roomote_runtime.request_user_input_response',
+  CapabilityOffer: 'roomote_runtime.capability_offer',
+  CapabilityOfferResponse: 'roomote_runtime.capability_offer_response',
   TaskCancelled: 'roomote_runtime.task_cancelled',
   /** Voice call lifecycle marker persisted in a Fast Session transcript. */
   VoiceCall: 'roomote_runtime.voice_call',

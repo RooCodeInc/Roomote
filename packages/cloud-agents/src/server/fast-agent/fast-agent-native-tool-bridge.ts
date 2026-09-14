@@ -35,6 +35,7 @@ import {
   SESSION_WAKEUP_SCHEDULE_MAX_LENGTH,
   type FastAgentSurface,
   FAST_EXECUTION,
+  FAST_AGENT_CAPABILITY_IDS,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -642,6 +643,21 @@ export default {
     setupIntegrationAnswers: z.preprocess((value) => value === null || Array.isArray(value) ? undefined : value, z.record(z.string(), z.object({ answers: z.array(z.string()) })).optional()).describe("Only for setup_integrations: tools already named by the user, keyed by category ID from the setup snapshot"),
   },
   execute: (args, context) => invoke("request_user_input", args, context),
+}
+`,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Present a trusted, non-blocking Roomote capability card in a web Session. Use it when the user's current goal needs an unavailable capability or when the setup guidance recommends the next capability. A previous Not now choice does not prevent a later relevant offer.",
+  args: {
+    capability: z.enum(${JSON.stringify(FAST_AGENT_CAPABILITY_IDS)}),
+    message: z.string().min(1).max(500).describe("Concise user-facing reason this capability is useful now"),
+    provider: z.enum(["github", "gitlab", "gitea", "bitbucket", "ado"]).optional().describe("Optional source-control provider explicitly implied by the request"),
+    integrationIds: z.array(z.string().min(1)).max(20).optional().describe("Optional integration IDs from the capability snapshot"),
+  },
+  execute: (args, context) => invoke("offer_capability", args, context),
 }
 `,
   };

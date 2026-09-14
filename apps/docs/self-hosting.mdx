@@ -201,17 +201,24 @@ Roomote surfaces release history and available updates in the web app:
 ## Verify the deployment
 
 After sign-in and inference are ready, setup continues entirely in a persistent
-conversation with Roomote. Trusted action cards appear beside the relevant
-messages for source control, integrations, first work, sandbox configuration,
-and automation recommendations. Detailed provider instructions and credential
-entry open in a dialog from the source-control card; Roomote never asks for
-credentials in chat. You can connect source control or choose **Not now** at any
-point in that card.
+conversation with Roomote. Roomote suggests the next useful capability in a
+recommended order and presents its trusted action card in the conversation.
+Cards are non-blocking: the message composer remains available, and you can
+continue talking without completing a card. Source control, integrations,
+starter work, sandbox configuration, and automation recommendations can also be
+offered later when a new request would benefit from them. Choosing **Not now**
+advances the initial setup conversation; it does not permanently disable that
+capability or prevent Roomote from suggesting it for a later goal.
 
-After the source-control decision, the conversation asks briefly about the
-tools your team uses for documents, monitoring, and project tracking.
-You can skip these questions. The optional integrations card lists only supported
-tools you said you use and opens their secure configuration without leaving setup.
+Detailed provider instructions and credential entry open in trusted dialogs;
+Roomote never asks for credentials in chat. Only deployment administrators can
+use configuration cards. Other members need an administrator to configure a
+missing capability.
+
+After the source-control decision, Roomote normally offers integrations next.
+The optional integrations card lists supported, disconnected tools and opens
+their secure configuration without leaving the conversation. If you already
+named a tool, Roomote can narrow the card to matching supported integrations.
 If there are no eligible matches, setup moves on without showing suggestions.
 Tools without a built-in connector are not presented as supported. Use
 **Keep going** to move on without connecting; you can connect tools later in
@@ -224,9 +231,9 @@ Gateway inference.
 Without source control, setup completes after you connect or skip integrations;
 no sandbox is required. Roomote continues with useful integration-based ideas
 instead of repository starter tasks or automations. With synchronized
-repositories, Roomote offers starter tasks in one structured multi-select
-question after integrations. Choosing **I'll type it myself** completes setup
-without a sandbox. Selected starter work waits for a sandbox, then Roomote
+repositories, Roomote offers starter work after integrations. Choosing **Not
+now** completes that initial decision without a sandbox. Selected starter work
+waits for a sandbox, then Roomote
 attempts every launch and completes setup even if one fails; ask Roomote to
 retry a failed item. Automation analysis can begin after repository sync, but
 recommendations appear only after integrations and the starter-task decision.

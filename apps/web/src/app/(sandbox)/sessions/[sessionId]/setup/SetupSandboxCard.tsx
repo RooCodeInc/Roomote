@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 
 import { useTRPC } from '@/trpc/client';
 import { Container } from '@/components/system';
+import { Button } from '@/components/system';
 
 import { SandboxConfiguration } from './SandboxConfiguration';
 import { SandboxProviderPicker } from './SandboxProviderPicker';
@@ -18,7 +19,13 @@ import { SetupSessionActionCard } from './SetupSessionActionCard';
  * this card. Otherwise, this trusted provider/configuration UI appears only
  * after the administrator selects coding work that needs to launch.
  */
-export function SetupSandboxCard() {
+export function SetupSandboxCard({
+  forceVisible = false,
+  onDismiss,
+}: {
+  forceVisible?: boolean;
+  onDismiss?: () => void;
+} = {}) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [selectedProvider, setSelectedProvider] =
@@ -61,8 +68,8 @@ export function SetupSandboxCard() {
   if (
     !computeSetup ||
     computeReady ||
-    !hasSynchronizedRepository ||
-    !selectedStarterTaskIds?.length
+    (!forceVisible &&
+      (!hasSynchronizedRepository || !selectedStarterTaskIds?.length))
   ) {
     return null;
   }
@@ -94,6 +101,11 @@ export function SetupSandboxCard() {
           disabled={saveProviderChoice.isPending}
         />
       )}
+      {onDismiss ? (
+        <Button type="button" size="sm" variant="outline" onClick={onDismiss}>
+          Not now
+        </Button>
+      ) : null}
     </SetupSessionActionCard>
   );
 }

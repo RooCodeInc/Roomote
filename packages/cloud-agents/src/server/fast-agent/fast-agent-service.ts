@@ -22,6 +22,7 @@ import {
   buildDataVisualizationBlocks,
   dataVisualizationInputsSchema,
   fastAgentHumanFollowUpEventSchema,
+  fastAgentCapabilityOfferInputSchema,
   formatErrorForLog,
   manageWakeupsInputSchema,
   resolveInferenceProviderRetryDelayMs,
@@ -186,6 +187,7 @@ import {
 import {
   captureFastAgentInferenceAttemptOutcome,
   captureFastAgentInferenceContext,
+  captureFastAgentCapabilityOffer,
   type FastAgentPromptKind,
 } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
@@ -3589,6 +3591,7 @@ export async function answerFastAgentQuestion({
     // ones allowed to precede that communication.
     const acknowledgementExemptToolIds = new Set<string>([
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
+      FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
       FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
       // Scheduling or cancelling a wakeup is instant and its own confirmation
@@ -4542,6 +4545,94 @@ export async function answerFastAgentQuestion({
                   saved: false,
                   reason: result.reason ?? 'unknown',
                 };
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability: {
+            if (conversation.surface !== 'web' || !adapter.offerCapability) {
+              return {
+                success: false,
+                error:
+                  'Trusted capability cards are available only to administrators in web Sessions.',
+              };
+            }
+            const requestedArgs = fastAgentCapabilityOfferInputSchema.parse(
+              call.args,
+            );
+            captureFastAgentCapabilityOffer({
+              userId,
+              capability: requestedArgs.capability,
+              outcome: 'requested',
+            });
+            let args;
+            try {
+              args = await adapter.offerCapability(requestedArgs);
+            } catch (error) {
+              captureFastAgentCapabilityOffer({
+                userId,
+                capability: requestedArgs.capability,
+                outcome: 'unavailable',
+              });
+              throw error;
+            }
+            const [pending] = canonicalConversationId
+              ? await db.execute<{ offer_id: string }>(sql`
+                  select offer.payload ->> 'offerId' as offer_id
+                  from fast_agent_messages offer
+                  where offer.conversation_id = ${canonicalConversationId}
+                    and offer.event_type = ${ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer}
+                    and offer.payload ->> 'capability' = ${args.capability}
+                    and not exists (
+                      select 1 from fast_agent_messages response
+                      where response.conversation_id = offer.conversation_id
+                        and response.event_type = ${ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse}
+                        and response.payload ->> 'offerId' = offer.payload ->> 'offerId'
+                    )
+                  order by offer.ts desc
+                  limit 1
+                `)
+              : [];
+            if (pending?.offer_id) {
+              captureFastAgentCapabilityOffer({
+                userId,
+                capability: args.capability,
+                outcome: 'deduplicated',
+              });
+              visibleUpdatePosted = true;
+              closedInstructionVersions.add(instructionVersion);
+              return {
+                success: true,
+                duplicate: true,
+                offerId: pending.offer_id,
+                closed: true,
+              };
+            }
+            const offerEvent = allocateCanonicalEvent(
+              `capability_offer:${nextTurnSeq++}`,
+            );
+            const offerId = `cap:${offerEvent.eventId}`;
+            await persistCanonicalMessage(
+              {
+                ...offerEvent,
+                turnId,
+                ts: Date.now(),
+                eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+                role: 'assistant',
+                contentBlocks: [{ type: 'text', text: args.message }],
+                metadata: { visibleInTranscript: true },
+                payload: { offerId, status: 'pending', ...args },
+                source: conversation.surface,
+                nativeSessionId: activeOpenCodeSessionId,
+              },
+              true,
+            );
+            captureFastAgentCapabilityOffer({
+              userId,
+              capability: args.capability,
+              outcome: 'shown',
+            });
+            visibleUpdatePosted = true;
+            closedInstructionVersions.add(instructionVersion);
+            return { success: true, offerId, closed: true };
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput: {

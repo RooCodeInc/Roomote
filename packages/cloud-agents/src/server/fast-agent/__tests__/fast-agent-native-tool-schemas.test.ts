@@ -536,6 +536,28 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     });
   });
 
+  it('preserves bounded trusted capability offer arguments', async () => {
+    const offerTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability,
+    )!;
+    const request = {
+      capability: 'source_control',
+      message: 'Connect GitHub so I can retrieve the event from your code.',
+      provider: 'github',
+    };
+    const parsed = zod.z
+      .object(offerTool.args as Record<string, never>)
+      .parse(request);
+    const execute = offerTool.execute as (
+      args: unknown,
+      context: unknown,
+    ) => Promise<{ name: string; args: unknown }>;
+    expect(await execute(parsed, {})).toEqual({
+      name: 'offer_capability',
+      args: request,
+    });
+  });
+
   it('defaults omitted display metadata on structured questions', async () => {
     const inputTool = tools.find(
       (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,

@@ -16,7 +16,13 @@ import { SetupSessionActionCard } from './SetupSessionActionCard';
  * Enabling the selection adds a transcript-only acknowledgement and dismisses
  * the card. Optional: never blocks activation or launched tasks.
  */
-export function SetupAutomationRecommendationsCard() {
+export function SetupAutomationRecommendationsCard({
+  forceVisible = false,
+  onResolved,
+}: {
+  forceVisible?: boolean;
+  onResolved?: () => void;
+} = {}) {
   const trpc = useTRPC();
   const { user } = useUser();
   const [dismissed, setDismissed] = useState(false);
@@ -51,9 +57,10 @@ export function SetupAutomationRecommendationsCard() {
   if (
     dismissed ||
     user?.isAdmin !== true ||
-    !hasSynchronizedRepository ||
-    !integrationDiscoveryComplete ||
-    !starterDecisionComplete ||
+    (!forceVisible &&
+      (!hasSynchronizedRepository ||
+        !integrationDiscoveryComplete ||
+        !starterDecisionComplete)) ||
     recommendations?.status !== 'ready' ||
     recommendations.dismissed ||
     (recommendations.applicationState ?? 'pending') !== 'pending'
@@ -67,7 +74,12 @@ export function SetupAutomationRecommendationsCard() {
       icon={<Zap />}
       intro="Looking at your repos, I recommend enabling these to run in the background and do work on your behalf."
     >
-      <AutomationRecommendations onContinue={() => setDismissed(true)} />
+      <AutomationRecommendations
+        onContinue={() => {
+          setDismissed(true);
+          onResolved?.();
+        }}
+      />
     </SetupSessionActionCard>
   );
 }
