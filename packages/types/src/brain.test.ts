@@ -13,7 +13,16 @@ describe('Brain MCP instructions', () => {
       'Treat Brain recall as a sequential preflight',
     );
     expect(BRAIN_MCP_INSTRUCTIONS).toContain(
-      'run one `query` about the area you are about to touch and wait for its result',
+      'run exactly one `query` about the area you are about to touch before any other context or work tool call',
+    );
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      'Once that query returns, the initial Brain preflight is satisfied for the request',
+    );
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      'A tool result, runtime continuation, retry, or continued work on the same topic does not reset it',
+    );
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      'Do not call `query`, `entity`, or another Brain tool merely to repeat or reconfirm the preflight',
     );
     expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
       "never expose Brain's `source` field or other internal provenance metadata",
