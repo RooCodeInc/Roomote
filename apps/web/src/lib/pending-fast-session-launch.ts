@@ -1,5 +1,6 @@
 type PendingFastSessionLaunch = {
   fastConversationId: string;
+  presenceClientId?: string;
   text: string;
   images?: string[];
   createdAt: number;

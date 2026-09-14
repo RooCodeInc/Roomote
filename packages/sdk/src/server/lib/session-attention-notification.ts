@@ -172,6 +172,9 @@ async function deliverNotification(
       );
       return false;
     });
+    console.info(
+      `[sessionAttentionNotification] Presence check for ${subject.eventKey}: ${present ? 'present' : 'absent'}`,
+    );
     if (present) {
       await markOutcome(claim.id, claim.leaseToken, 'skipped_present', tx);
       return 'skipped';
