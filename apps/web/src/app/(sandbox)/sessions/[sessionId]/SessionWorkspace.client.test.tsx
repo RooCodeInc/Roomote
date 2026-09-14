@@ -32,6 +32,7 @@ const {
   routerReplaceMock,
   artifactQueryState,
   artifactQueryInputs,
+  disabledTaskPrompts,
 } = vi.hoisted(() => ({
   useMediaQueryMock: vi.fn(),
   useResizeObserverMock: vi.fn(),
@@ -46,6 +47,7 @@ const {
     path: string;
     version?: number;
   }>,
+  disabledTaskPrompts: new Set<string>(),
 }));
 
 vi.mock('usehooks-ts', () => ({
@@ -176,7 +178,10 @@ vi.mock('./NestedTaskSidePanel', () => ({
   }) => (
     <div aria-label={`Full task ${taskId}`} data-session-task-panel={taskId}>
       Nested panel {taskId}
-      <textarea aria-label={`Task prompt ${taskId}`} />
+      <textarea
+        aria-label={`Task prompt ${taskId}`}
+        disabled={disabledTaskPrompts.has(taskId)}
+      />
       <button
         type="button"
         onClick={() => onOpenArtifact('proof/nested.png', 3)}
@@ -348,6 +353,9 @@ function renderWorkspace({
       observedWorkspaceWidth = width;
       result.rerender(workspace());
     },
+    refresh() {
+      result.rerender(workspace());
+    },
     resizeToMobile() {
       mediaQuery.matches = true;
       act(() =>
@@ -411,6 +419,7 @@ function OpenTasksPanel() {
 describe('SessionWorkspace', () => {
   beforeEach(() => {
     routerReplaceMock.mockClear();
+    disabledTaskPrompts.clear();
     artifactQueryInputs.length = 0;
     artifactQueryState.dataByPath = {
       'tmp/capture-visual-proof/sidebar-alignment.png': {
@@ -1055,8 +1064,9 @@ describe('SessionWorkspace', () => {
     expect(screen.getByRole('button', { name: 'Tasks' })).toBeDisabled();
   });
 
-  it('lists session tasks with delegated task cards', () => {
-    renderWorkspace({
+  it('focuses a deliberately selected task when its prompt becomes ready', async () => {
+    disabledTaskPrompts.add('task-1');
+    const workspace = renderWorkspace({
       isMobile: false,
       sessionOverride: { tasks: [singleTask] },
     });
@@ -1076,28 +1086,42 @@ describe('SessionWorkspace', () => {
     );
 
     expect(screen.getByText('Nested panel task-1')).toBeInTheDocument();
-    expect(screen.getByLabelText('Task prompt task-1')).toHaveFocus();
+    expect(screen.getByLabelText('Task prompt task-1')).toBeDisabled();
+    disabledTaskPrompts.clear();
+    workspace.refresh();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Task prompt task-1')).toHaveFocus(),
+    );
   });
 
-  it('opens tasks side-by-side when the Tasks rail item is middle-clicked', async () => {
+  it('opens tasks side-by-side without moving focus from the session prompt', async () => {
     renderWorkspace({
       isMobile: false,
       workspaceWidth: 1280,
+      children: <textarea aria-label="Session prompt" />,
       sessionOverride: { tasks: [singleTask, secondTask] },
     });
 
     expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Close panel task-1' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close panel task-2' }));
-
-    fireEvent(
-      screen.getByRole('button', { name: 'Tasks' }),
-      new MouseEvent('auxclick', { bubbles: true, button: 1 }),
-    );
+    const sessionPrompt = screen.getByLabelText('Session prompt');
+    sessionPrompt.focus();
+    const tasksButton = screen.getByRole('button', { name: 'Tasks' });
+    if (fireEvent.pointerDown(tasksButton, { button: 0 })) tasksButton.focus();
+    fireEvent.click(tasksButton);
+    const sideBySideButton = screen.getByRole('button', {
+      name: 'Open side-by-side',
+    });
+    if (fireEvent.pointerDown(sideBySideButton, { button: 0 })) {
+      sideBySideButton.focus();
+    }
+    fireEvent.click(sideBySideButton);
 
     expect(screen.getByLabelText('Full task task-1')).toBeVisible();
     expect(screen.getByLabelText('Full task task-2')).toBeVisible();
-    expect(screen.getByText('Session transcript')).toBeVisible();
+    expect(sessionPrompt).toHaveFocus();
   });
 
   it('moves focus between visible prompt inputs with Alt+Arrow keys', async () => {
@@ -1145,32 +1169,41 @@ describe('SessionWorkspace', () => {
     expect(sessionPrompt).toHaveFocus();
   });
 
-  it('focuses the first task when several task panels open initially', async () => {
+  it('keeps session prompt focus when task prompts become ready after initial panel expansion', async () => {
     const thirdTask = {
       ...singleTask,
       taskId: 'task-3',
       title: 'Add homepage tests',
     };
-    renderWorkspace({
+    disabledTaskPrompts.add('task-1');
+    disabledTaskPrompts.add('task-2');
+    disabledTaskPrompts.add('task-3');
+    const workspace = renderWorkspace({
       isMobile: false,
       workspaceWidth: 1600,
-      children: <textarea aria-label="Session prompt" />,
+      children: <textarea aria-label="Session prompt" autoFocus />,
       sessionOverride: { tasks: [singleTask, secondTask, thirdTask] },
     });
 
-    expect(await screen.findByLabelText('Task prompt task-3')).toBeVisible();
+    expect(await screen.findByLabelText('Task prompt task-3')).toBeDisabled();
+    disabledTaskPrompts.clear();
+    workspace.refresh();
+
+    expect(screen.getByLabelText('Task prompt task-3')).toBeEnabled();
     await waitFor(() =>
-      expect(screen.getByLabelText('Task prompt task-1')).toHaveFocus(),
+      expect(screen.getByLabelText('Session prompt')).toHaveFocus(),
     );
   });
 
-  it('opens and focuses the first task when several delegated tasks start', async () => {
+  it('does not move session prompt focus when new delegated task prompts become ready', async () => {
     const thirdTask = {
       ...singleTask,
       taskId: 'task-3',
       title: 'Add homepage tests',
     };
-    const { queryClient } = renderWorkspace({
+    disabledTaskPrompts.add('task-2');
+    disabledTaskPrompts.add('task-3');
+    const { queryClient, refresh } = renderWorkspace({
       isMobile: false,
       workspaceWidth: 1600,
       children: <textarea aria-label="Session prompt" />,
@@ -1178,8 +1211,8 @@ describe('SessionWorkspace', () => {
     });
 
     expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
-    expect(screen.getByRole('heading', { name: 'Tasks' })).toBeVisible();
+    const sessionPrompt = screen.getByLabelText('Session prompt');
+    sessionPrompt.focus();
     act(() => {
       queryClient.setQueryData(['sessions', 'byId', session.id], {
         ...session,
@@ -1189,9 +1222,12 @@ describe('SessionWorkspace', () => {
 
     expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
     expect(screen.getByLabelText('Full task task-3')).toBeVisible();
-    await waitFor(() =>
-      expect(screen.getByLabelText('Task prompt task-2')).toHaveFocus(),
-    );
+    expect(screen.getByLabelText('Task prompt task-2')).toBeDisabled();
+    disabledTaskPrompts.clear();
+    refresh();
+
+    expect(screen.getByLabelText('Task prompt task-2')).toBeEnabled();
+    await waitFor(() => expect(sessionPrompt).toHaveFocus());
   });
 
   it('replaces the URL-selected task when a task card opens at one-panel capacity', () => {
