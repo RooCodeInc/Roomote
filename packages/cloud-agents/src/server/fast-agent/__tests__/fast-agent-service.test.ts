@@ -5428,7 +5428,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         id: 'github',
         name: 'GitHub',
         description: 'Repository access',
-        tools: [{ name: 'search_code' }],
+        tools: [
+          { name: 'search_code', annotations: { readOnlyHint: true } },
+          { name: 'create_issue', annotations: { readOnlyHint: false } },
+        ],
       },
       {
         id: 'roomote',
@@ -5439,12 +5442,25 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           { name: 'manage_tasks' },
         ],
       },
+      {
+        id: '_roomote_http_integrations',
+        name: 'HTTP integrations',
+        description: 'Credential broker',
+        tools: [
+          { name: 'list_integrations', annotations: { readOnlyHint: true } },
+          { name: 'list_session_secrets' },
+          { name: 'prepare_session_secret' },
+          { name: 'integration_request', annotations: { readOnlyHint: false } },
+        ],
+      },
     ]);
     mocks.callIntegration.mockImplementation(
       async (_context, _integrations, request) =>
         request.toolName === 'manage_tasks'
           ? { id: request.args.taskId, taskRunStatus: 'running' }
-          : { matches: ['fast-agent.ts'] },
+          : request.toolName === 'integration_request'
+            ? { status: 200, body: '{"ok":true}' }
+            : { matches: ['fast-agent.ts'] },
     );
 
     mocks.generateText.mockImplementation(
@@ -5506,7 +5522,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           }),
         ).resolves.toEqual({
           success: true,
-          availableToolCount: 1,
+          availableToolCount: 2,
           tools: [
             expect.objectContaining({
               integrationId: 'github',
@@ -5527,6 +5543,126 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ).resolves.toEqual({
           success: true,
           result: { matches: ['fast-agent.ts'] },
+        });
+        await expect(
+          subagentExecutor({
+            agent: 'advisor',
+            name: nativeToolNames.callIntegrationTool,
+            args: {
+              integrationId: '_roomote_http_integrations',
+              toolName: 'integration_request',
+              args: {
+                integrationId: 'status-service',
+                method: 'POST',
+                path: '/advisor-status',
+              },
+            },
+          }),
+        ).resolves.toEqual({
+          success: true,
+          result: { status: 200, body: '{"ok":true}' },
+        });
+        await expect(
+          parentExecutor({
+            name: nativeToolNames.callIntegrationTool,
+            args: {
+              integrationId: '_roomote_http_integrations',
+              toolName: 'integration_request',
+              args: {
+                integrationId: 'status-service',
+                method: 'GET',
+                path: '/parent-status',
+              },
+            },
+          }),
+        ).resolves.toEqual({
+          success: true,
+          result: { status: 200, body: '{"ok":true}' },
+        });
+        await expect(
+          subagentExecutor({
+            agent: 'judge',
+            name: nativeToolNames.findIntegrationTools,
+            args: { integrationId: '_roomote_http_integrations' },
+          }),
+        ).resolves.toMatchObject({
+          success: true,
+          tools: [
+            { name: 'list_integrations' },
+            { name: 'list_session_secrets' },
+            { name: 'integration_request' },
+          ],
+        });
+        const judgeDiscovery = await subagentExecutor({
+          agent: 'judge',
+          name: nativeToolNames.findIntegrationTools,
+          args: {},
+        });
+        expect(judgeDiscovery).toMatchObject({ success: true });
+        expect(JSON.stringify(judgeDiscovery)).not.toContain(
+          'prepare_session_secret',
+        );
+        await expect(
+          subagentExecutor({
+            agent: 'judge',
+            name: nativeToolNames.callIntegrationTool,
+            args: {
+              integrationId: '_roomote_http_integrations',
+              toolName: 'integration_request',
+              args: {
+                integrationId: 'status-service',
+                method: 'GET',
+                path: '/judge-status',
+              },
+            },
+          }),
+        ).resolves.toEqual({
+          success: true,
+          result: { status: 200, body: '{"ok":true}' },
+        });
+        for (const [toolName, args] of [
+          [
+            'integration_request',
+            {
+              integrationId: 'status-service',
+              method: 'POST',
+              path: '/judge-write',
+            },
+          ],
+          [
+            'prepare_session_secret',
+            {
+              label: 'API',
+              origin: 'https://api.example.com',
+              headerName: 'authorization',
+            },
+          ],
+        ] as const) {
+          await expect(
+            subagentExecutor({
+              agent: 'judge',
+              name: nativeToolNames.callIntegrationTool,
+              args: {
+                integrationId: '_roomote_http_integrations',
+                toolName,
+                args,
+              },
+            }),
+          ).resolves.toEqual({
+            success: false,
+            error:
+              'That integration action is unavailable to this subagent capability policy.',
+          });
+        }
+        await expect(
+          subagentExecutor({
+            agent: 'judge',
+            name: nativeToolNames.findIntegrationTools,
+            args: { integrationId: 'github' },
+          }),
+        ).resolves.toMatchObject({
+          success: true,
+          tools: [expect.objectContaining({ name: 'search_code' })],
         });
         // The shared call path must not hand subagents parent-only member
         // tools that the subagent tool filter denies.
@@ -5558,7 +5694,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter }),
     ).resolves.toBe('Subagent review completed.');
-    expect(mocks.callIntegration).toHaveBeenCalledTimes(3);
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(6);
     expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
       'conversation-1',
       expect.arrayContaining([

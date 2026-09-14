@@ -221,6 +221,7 @@ describe('buildOpenCodeCliEnv', () => {
     });
     expect(config.plugin).toEqual([
       expect.stringMatching(/^file:\/\/.*roomote-identity\.mjs$/u),
+      expect.stringMatching(/^file:\/\/.*roomote-subagent-tool-policy\.mjs$/u),
     ]);
     expect(Object.keys(config.agent)).toEqual(['advisor', 'judge']);
 
@@ -232,9 +233,6 @@ describe('buildOpenCodeCliEnv', () => {
         tools: {
           '*': true,
           task: false,
-          roomote_manage_custom_automations: false,
-          roomote_create_custom_skill: false,
-          roomote_update_custom_skill: false,
           send_chat_reply: false,
         },
       });
@@ -261,6 +259,25 @@ describe('buildOpenCodeCliEnv', () => {
         expect.stringContaining('read those images'),
       );
     }
+    expect(config.agent.advisor.tools).toMatchObject({
+      roomote_manage_custom_automations: false,
+      roomote_create_custom_skill: false,
+      roomote_update_custom_skill: false,
+    });
+    expect(config.agent.judge.tools).toMatchObject({
+      'roomote_*': false,
+      roomote_manage_tasks: true,
+      roomote_manage_source_control: true,
+      roomote_find_integration_tools: true,
+      roomote_call_integration_tool: true,
+      '_roomote_http_integrations_*': false,
+      _roomote_http_integrations_list_integrations: true,
+      _roomote_http_integrations_list_session_secrets: true,
+      _roomote_http_integrations_integration_request: true,
+    });
+    expect(config.agent.advisor.tools).not.toHaveProperty(
+      '_roomote_http_integrations_*',
+    );
     expect(config.agent).not.toHaveProperty('unsafe');
   });
 

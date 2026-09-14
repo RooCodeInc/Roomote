@@ -56,6 +56,7 @@ export type McpToolDefinition = {
   name: string;
   description?: string;
   inputSchema?: unknown;
+  annotations?: { readOnlyHint?: boolean };
 };
 
 /** List the tools exposed by a streamable-http MCP server. */
@@ -77,6 +78,13 @@ export async function listMcpTools(options: {
         : {}),
       ...(definition.inputSchema
         ? { inputSchema: definition.inputSchema }
+        : {}),
+      ...(typeof definition.annotations?.readOnlyHint === 'boolean'
+        ? {
+            annotations: {
+              readOnlyHint: definition.annotations.readOnlyHint,
+            },
+          }
         : {}),
     }));
   } finally {

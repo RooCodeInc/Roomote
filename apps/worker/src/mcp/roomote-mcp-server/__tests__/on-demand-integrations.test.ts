@@ -245,6 +245,77 @@ describe('on-demand integration tools', () => {
     expect(callTool).toHaveBeenCalledTimes(1);
   });
 
+  it('shows and executes only annotated evidence tools for judge', async () => {
+    const judgeTools = vi.fn(async () => [
+      {
+        name: 'search_code',
+        inputSchema,
+        annotations: { readOnlyHint: true },
+      },
+      {
+        name: 'create_issue',
+        inputSchema,
+        annotations: { readOnlyHint: false },
+      },
+      { name: 'unannotated', inputSchema },
+    ]);
+    const found = parse(
+      await findOnDemandIntegrationTools(
+        catalog,
+        { integrationId: 'github', _callerToolPolicy: 'evidence_review' },
+        judgeTools,
+      ),
+    );
+    expect(found.tools.map((tool: { name: string }) => tool.name)).toEqual([
+      'search_code',
+    ]);
+
+    const callTool = vi.fn(async () => ({
+      content: [{ type: 'text' as const, text: '{"matches":[]}' }],
+    }));
+    await expect(
+      callOnDemandIntegrationTool(
+        catalog,
+        {
+          integrationId: 'github',
+          toolName: 'search_code',
+          args: { query: 'judge' },
+          _callerToolPolicy: 'evidence_review',
+        },
+        callTool,
+        judgeTools,
+      ),
+    ).resolves.toMatchObject({ content: [{ text: '{"matches":[]}' }] });
+    expect(
+      parse(
+        await callOnDemandIntegrationTool(
+          catalog,
+          {
+            integrationId: 'github',
+            toolName: 'create_issue',
+            args: {},
+            _callerToolPolicy: 'evidence_review',
+          },
+          callTool,
+          judgeTools,
+        ),
+      ).success,
+    ).toBe(false);
+    expect(callTool).toHaveBeenCalledOnce();
+    expect(
+      parse(
+        await findOnDemandIntegrationTools(
+          catalog,
+          { integrationId: 'github', _callerToolPolicy: 'unknown' },
+          judgeTools,
+        ),
+      ),
+    ).toMatchObject({
+      success: false,
+      error: 'Integration caller policy is unavailable.',
+    });
+  });
+
   it('preserves an upstream MCP error result unchanged', async () => {
     const upstreamResult = {
       isError: true,

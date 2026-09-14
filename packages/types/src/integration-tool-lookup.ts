@@ -14,6 +14,7 @@ export type IntegrationToolCandidate = {
   name: string;
   description?: string;
   inputSchema?: unknown;
+  annotations?: { readOnlyHint?: boolean };
 };
 
 export type IntegrationToolLookupParams = {
@@ -21,6 +22,7 @@ export type IntegrationToolLookupParams = {
   toolName?: string;
   query?: string;
   limit?: number;
+  _callerToolPolicy?: string;
 };
 
 export const INTEGRATION_TOOL_LOOKUP_DEFAULT_LIMIT = 10;
@@ -153,6 +155,10 @@ export const FIND_INTEGRATION_TOOLS_TOOL = {
       .max(INTEGRATION_TOOL_LOOKUP_MAX_LIMIT)
       .optional()
       .describe(FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS.limit),
+    _callerToolPolicy: z
+      .string()
+      .optional()
+      .describe('Runtime-managed subagent capability policy. Omit this field.'),
   },
   annotations: {
     readOnlyHint: true,
@@ -184,6 +190,10 @@ export const CALL_INTEGRATION_TOOL_TOOL = {
     args: z
       .record(integrationToolArgumentValueSchema)
       .describe(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args),
+    _callerToolPolicy: z
+      .string()
+      .optional()
+      .describe('Runtime-managed subagent capability policy. Omit this field.'),
   },
   annotations: {
     readOnlyHint: false,

@@ -17,6 +17,7 @@ export { resolveRoomoteReleaseVersion } from './release-version';
 export * from './style-guidance';
 export * from './opencode-prompt-subagents';
 export { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from './opencode-identity-plugin';
+export { createOpenCodeSubagentToolPolicyPluginScript } from './opencode-subagent-tool-policy-plugin';
 export {
   DEFAULT_STANDARD_TASK_MODEL,
   DEFAULT_STANDARD_TASK_MODEL_PROVIDER,

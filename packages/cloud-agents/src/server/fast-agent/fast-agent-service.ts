@@ -36,6 +36,8 @@ import {
   sessionSecretPrepareToolSchema,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
+  isSubagentToolCallAllowed,
+  isSubagentToolVisible,
   truncateAcpOutputText,
   type ReasoningEffort,
   type RunStatus,
@@ -103,6 +105,7 @@ import {
 } from './fast-agent-constants';
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
+import { getRoomoteOpenCodeSubagentDefinition } from '../../opencode-prompt-subagents';
 import { getTherapistModeEnabledForUser } from '../therapist-mode';
 import {
   enqueueUserPersonalizationUpdate,
@@ -3954,6 +3957,7 @@ export async function answerFastAgentQuestion({
     });
     const describeIntegrationTools = (
       args: z.infer<typeof findIntegrationToolsArgsSchema>,
+      integrations = onDemandIntegrations,
     ) => {
       if (
         args.integrationId &&
@@ -3961,7 +3965,7 @@ export async function answerFastAgentQuestion({
       ) {
         return nativeIntegrationError(args.integrationId);
       }
-      const found = findFastAgentIntegrationTools(onDemandIntegrations, args);
+      const found = findFastAgentIntegrationTools(integrations, args);
       if (found.unknownIntegration) {
         return {
           success: false as const,
@@ -4013,15 +4017,54 @@ export async function answerFastAgentQuestion({
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
       try {
+        const toolPolicy = getRoomoteOpenCodeSubagentDefinition(
+          call.agent,
+        )?.toolPolicy;
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools) {
+          const integrations = toolPolicy
+            ? onDemandIntegrations.flatMap((integration) => {
+                const tools = integration.tools.filter((tool) =>
+                  isSubagentToolVisible(toolPolicy, {
+                    integrationId: integration.id,
+                    toolName: tool.name,
+                    annotations: tool.annotations,
+                  }),
+                );
+                return tools.length > 0 ? [{ ...integration, tools }] : [];
+              })
+            : onDemandIntegrations;
           return describeIntegrationTools(
             findIntegrationToolsArgsSchema.parse(call.args),
+            integrations,
           );
         }
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool) {
           const args = callIntegrationToolArgsSchema.parse(call.args);
           if (isFastAgentNativeIntegration(args.integrationId)) {
             return nativeIntegrationError(args.integrationId);
+          }
+          if (toolPolicy) {
+            const integration = onDemandIntegrations.find(
+              (candidate) => candidate.id === args.integrationId,
+            );
+            const tool = integration?.tools.find(
+              (candidate) => candidate.name === args.toolName,
+            );
+            if (
+              !tool ||
+              !isSubagentToolCallAllowed(toolPolicy, {
+                integrationId: args.integrationId,
+                toolName: args.toolName,
+                args: args.args ?? {},
+                annotations: tool.annotations,
+              })
+            ) {
+              return {
+                success: false,
+                error:
+                  'That integration action is unavailable to this subagent capability policy.',
+              };
+            }
           }
           return await executeMcpTool({
             integrationId: args.integrationId,

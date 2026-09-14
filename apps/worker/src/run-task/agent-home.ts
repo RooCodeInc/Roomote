@@ -2,17 +2,22 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
-import { HTTP_INTEGRATIONS_INSTRUCTIONS } from '@roomote/sdk/client';
+import {
+  HTTP_INTEGRATIONS_INSTRUCTIONS,
+  HTTP_INTEGRATIONS_MCP_ID,
+} from '@roomote/sdk/client';
 import { HTTP_INTEGRATIONS_BROKER } from '../mcp-provenance';
 
 import {
   createRoomoteAdvisorAgentPrompt,
   createRoomoteJudgeAgentPrompt,
+  createOpenCodeSubagentToolPolicyPluginScript,
   OPENCODE_IDENTITY_PLUGIN_SCRIPT,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
   ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
+  ROOMOTE_OPENCODE_SUBAGENT_DEFINITIONS,
 } from '@roomote/cloud-agents';
 import {
   AMAZON_BEDROCK_OPENCODE_PROVIDER_ID,
@@ -20,6 +25,7 @@ import {
   BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID,
   BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
   buildInferenceGatewayOpenCodeBaseUrl,
+  buildSubagentMcpToolFilter,
   buildOpenCodeModelReasoningOptions,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   CHATGPT_GATEWAY_PROVIDER_ID,
@@ -125,7 +131,12 @@ const ROOMOTE_OPENCODE_VISUAL_AGENT_NAME = 'visual';
 const ROOMOTE_OPENCODE_EXPLORE_AGENT_NAME = 'explore';
 const OPENCODE_GENERAL_AGENT_NAME = 'general';
 
-const MCP_ISOLATED_AGENT_NAMES = [ROOMOTE_OPENCODE_VISUAL_AGENT_NAME] as const;
+const MCP_AGENT_TOOL_EXCLUSION_POLICIES = [
+  {
+    agentName: ROOMOTE_OPENCODE_VISUAL_AGENT_NAME,
+    shouldExclude: () => true,
+  },
+] as const;
 
 const ROOMOTE_MCP_SERVER_NAME = 'roomote';
 // OpenCode otherwise applies its 30s MCP request default, while Roomote's
@@ -185,6 +196,8 @@ const ROOMOTE_OPENCODE_CHATGPT_GATEWAY_PLUGIN_FILE_NAME =
   'roomote-chatgpt-gateway.js';
 
 const ROOMOTE_OPENCODE_TOOL_SAFETY_PLUGIN_FILE_NAME = 'roomote-tool-safety.js';
+const ROOMOTE_OPENCODE_SUBAGENT_TOOL_POLICY_PLUGIN_FILE_NAME =
+  'roomote-subagent-tool-policy.js';
 
 const ROOMOTE_OPENCODE_IDENTITY_PLUGIN_FILE_NAME = 'roomote-identity.js';
 
@@ -923,7 +936,7 @@ function createMcpToolExclusions(
 
 function mergeAgentToolExclusions(
   agentConfig: unknown,
-  exclusions: Record<string, false>,
+  exclusions: Record<string, boolean>,
 ): Record<string, unknown> {
   const config = asRecord(agentConfig);
 
@@ -936,7 +949,10 @@ function mergeAgentToolExclusions(
   };
 }
 
-function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
+function writeOpenCodeManagedFiles(
+  openCodeConfigDir: string,
+  mcpServers: OpenCodeConfigMcpServer[] | undefined,
+): void {
   const pluginsDir = path.join(
     openCodeConfigDir,
     ROOMOTE_OPENCODE_PLUGINS_DIR_NAME,
@@ -952,6 +968,10 @@ function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
   const toolSafetyPluginPath = path.join(
     pluginsDir,
     ROOMOTE_OPENCODE_TOOL_SAFETY_PLUGIN_FILE_NAME,
+  );
+  const subagentToolPolicyPluginPath = path.join(
+    pluginsDir,
+    ROOMOTE_OPENCODE_SUBAGENT_TOOL_POLICY_PLUGIN_FILE_NAME,
   );
   const identityPluginPath = path.join(
     pluginsDir,
@@ -976,6 +996,26 @@ function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
   fs.writeFileSync(
     toolSafetyPluginPath,
     OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT,
+    'utf8',
+  );
+  fs.writeFileSync(
+    subagentToolPolicyPluginPath,
+    createOpenCodeSubagentToolPolicyPluginScript({
+      brokerNames: (mcpServers ?? [])
+        .filter(isHttpIntegrationsBroker)
+        .map((server) => server.name),
+      memoryNames: (mcpServers ?? [])
+        .filter((server) => isMemoryMcpServer(server.name))
+        .map((server) => server.name),
+      otherMcpNames: (mcpServers ?? [])
+        .filter(
+          (server) =>
+            server.name !== ROOMOTE_MCP_SERVER_NAME &&
+            !isHttpIntegrationsBroker(server) &&
+            !isMemoryMcpServer(server.name),
+        )
+        .map((server) => server.name),
+    }),
     'utf8',
   );
   fs.writeFileSync(identityPluginPath, OPENCODE_IDENTITY_PLUGIN_SCRIPT, 'utf8');
@@ -1993,7 +2033,7 @@ export function generateOpenCodeConfig({
   });
   const instructions: string[] = [];
 
-  writeOpenCodeManagedFiles(openCodeConfigDir);
+  writeOpenCodeManagedFiles(openCodeConfigDir, mcpServers);
 
   if (developerInstructionsContent) {
     const developerInstructionsPath = path.join(
@@ -2055,14 +2095,35 @@ export function generateOpenCodeConfig({
     onDemandMcpServers,
     runtimeEnv,
   );
-  const mcpToolExclusions = createMcpToolExclusions(mcpServers);
-  for (const agentName of MCP_ISOLATED_AGENT_NAMES) {
+  for (const {
+    agentName,
+    shouldExclude,
+  } of MCP_AGENT_TOOL_EXCLUSION_POLICIES) {
     if (operatorAgent[agentName]) {
       operatorAgent[agentName] = mergeAgentToolExclusions(
         operatorAgent[agentName],
-        mcpToolExclusions,
+        createMcpToolExclusions(mcpServers, shouldExclude),
       );
     }
+  }
+  for (const definition of ROOMOTE_OPENCODE_SUBAGENT_DEFINITIONS) {
+    if (!definition.toolPolicy || !operatorAgent[definition.name]) continue;
+    const toolFilter = Object.assign(
+      {},
+      ...(mcpServers ?? []).map((server) =>
+        buildSubagentMcpToolFilter(
+          definition.toolPolicy,
+          isHttpIntegrationsBroker(server)
+            ? HTTP_INTEGRATIONS_MCP_ID
+            : server.name,
+          server.name,
+        ),
+      ),
+    );
+    operatorAgent[definition.name] = mergeAgentToolExclusions(
+      operatorAgent[definition.name],
+      toolFilter,
+    );
   }
 
   const integrationInstructionsContent =

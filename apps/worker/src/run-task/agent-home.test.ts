@@ -15,7 +15,10 @@ import {
   generateOpenCodeConfig,
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
-import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '@roomote/cloud-agents';
+import {
+  createOpenCodeSubagentToolPolicyPluginScript,
+  OPENCODE_IDENTITY_PLUGIN_SCRIPT,
+} from '@roomote/cloud-agents';
 import { HTTP_INTEGRATIONS_INSTRUCTIONS } from '@roomote/sdk/client';
 import {
   buildInferenceGatewayUrl,
@@ -378,6 +381,22 @@ describe('generateOpenCodeConfig provider support', () => {
         'utf8',
       ),
     ).toBe(OPENCODE_IDENTITY_PLUGIN_SCRIPT);
+    expect(
+      readFileSync(
+        join(
+          result.openCodeConfigDir,
+          'plugins',
+          'roomote-subagent-tool-policy.js',
+        ),
+        'utf8',
+      ),
+    ).toBe(
+      createOpenCodeSubagentToolPolicyPluginScript({
+        brokerNames: [],
+        memoryNames: [],
+        otherMcpNames: [],
+      }),
+    );
   });
 
   it('applies the per-task reasoning effort to a launch-time model override', () => {
@@ -1209,7 +1228,7 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(config.agent.judge?.model).toBe('openrouter/openai/gpt-5.6-terra');
   });
 
-  it('isolates the visual agent from unrelated MCP tool schemas', () => {
+  it('limits the judge to evidence-capable MCP tools', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
@@ -1233,6 +1252,12 @@ describe('generateOpenCodeConfig provider support', () => {
           name: 'custom-tools',
           command: 'custom-mcp',
         },
+        {
+          type: 'remote',
+          name: 'runtime-broker',
+          url: 'https://api.example.com/api/mcp/http-integrations',
+          roomoteManaged: 'http-integrations-broker',
+        },
       ],
     });
     const config = JSON.parse(result.configContent) as {
@@ -1248,14 +1273,29 @@ describe('generateOpenCodeConfig provider support', () => {
       'roomote_*': false,
       'pylon_*': false,
       'custom-tools_*': false,
+      'runtime-broker_*': false,
     });
 
-    for (const agentName of ['judge', 'advisor']) {
-      expect(config.agent[agentName]?.tools).not.toHaveProperty('roomote_*');
-      expect(config.agent[agentName]?.tools).not.toHaveProperty('pylon_*');
-      expect(config.agent[agentName]?.tools).not.toHaveProperty(
-        'custom-tools_*',
-      );
+    expect(config.agent.judge?.tools).toMatchObject({
+      'roomote_*': false,
+      roomote_manage_tasks: true,
+      roomote_manage_source_control: true,
+      roomote_find_integration_tools: true,
+      roomote_call_integration_tool: true,
+      'pylon_*': false,
+      'custom-tools_*': false,
+      'runtime-broker_*': false,
+      'runtime-broker_list_integrations': true,
+      'runtime-broker_list_session_secrets': true,
+      'runtime-broker_integration_request': true,
+    });
+    for (const tool of [
+      'roomote_*',
+      'pylon_*',
+      'custom-tools_*',
+      'runtime-broker_*',
+    ]) {
+      expect(config.agent.advisor?.tools).not.toHaveProperty(tool);
     }
 
     expect(config.agent.general?.tools).not.toHaveProperty('pylon_*');
