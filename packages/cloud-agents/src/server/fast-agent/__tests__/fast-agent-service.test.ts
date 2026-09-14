@@ -7729,6 +7729,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       answerFastAgentQuestion({ ...baseParams, adapter }),
     ).resolves.toBe('It coordinates incoming requests.');
     expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(
+      mocks.upsertMessage.mock.calls.filter(
+        ([{ message }]) =>
+          message.eventType === 'roomote_runtime.assistant_message',
+      ),
+    ).toHaveLength(1);
   });
 
   it('posts final assistant text only as a defensive fallback', async () => {

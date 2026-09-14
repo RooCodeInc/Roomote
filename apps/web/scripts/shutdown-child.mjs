@@ -20,11 +20,15 @@ process.on('message', async (message) => {
   ) {
     return;
   }
+  console.log(
+    `[web] Received coordinated Fast shutdown request for ${message.signal}.`,
+  );
   const handler = await resolveShutdownHandler();
   if (typeof handler !== 'function') {
     console.error('[web] Fast shutdown handler was not registered in time.');
     return;
   }
   await handler(message.signal);
+  console.log(`[web] Fast shutdown handoff completed for ${message.signal}.`);
   process.send?.({ type: READY, signal: message.signal });
 });

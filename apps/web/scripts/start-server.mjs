@@ -40,14 +40,29 @@ export function coordinateWebShutdown(child, signal, options = {}) {
     }
   };
   child.on('message', onMessage);
-  child.send?.({ type: WEB_FAST_AGENT_SHUTDOWN_REQUEST, signal });
+  console.log(`[web] Requesting Fast shutdown handoff for ${signal}.`);
+  child.send?.({ type: WEB_FAST_AGENT_SHUTDOWN_REQUEST, signal }, (error) => {
+    if (error) {
+      console.error('[web] Failed to request Fast shutdown handoff:', error);
+    }
+  });
 
   const handoffDeadline = setTimeout(
-    startNextCleanup,
+    () => {
+      console.warn(
+        `[web] Fast shutdown handoff exceeded ${hardTimeoutMs - cleanupReserveMs}ms; starting Next cleanup.`,
+      );
+      startNextCleanup();
+    },
     Math.max(0, hardTimeoutMs - cleanupReserveMs),
   );
   const hardDeadline = setTimeout(() => {
-    if (child.exitCode === null) child.kill('SIGKILL');
+    if (child.exitCode === null) {
+      console.error(
+        `[web] Web shutdown exceeded the ${hardTimeoutMs}ms hard deadline; forcing exit.`,
+      );
+      child.kill('SIGKILL');
+    }
   }, hardTimeoutMs);
   handoffDeadline.unref?.();
   hardDeadline.unref?.();
