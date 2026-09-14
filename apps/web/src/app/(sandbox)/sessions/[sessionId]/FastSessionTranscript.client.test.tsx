@@ -1598,6 +1598,56 @@ describe('FastSessionTranscript', () => {
     expect(screen.queryByText('Thinking')).toBeNull();
   });
 
+  it('shows source-control setup controls after their trusted action without narration', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            id: 'source-control-setup-result',
+            eventId: 'turn-1:tool-result:0',
+            turnId: 'turn-1',
+            turnSeq: 1,
+            ts: 1,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+            role: 'tool',
+            contentBlocks: [
+              {
+                type: 'text',
+                text: JSON.stringify({ success: true, completed: true }),
+              },
+            ],
+            metadata: { visibleInTranscript: true },
+            payload: {
+              toolCallId: 'turn-1:tool:0',
+              title: 'request_user_input',
+              kind: 'communication',
+              status: 'completed',
+              isExecute: false,
+              isRead: false,
+              isMcp: false,
+              mcpServerName: null,
+              mcpToolName: null,
+              toolName: 'request_user_input',
+              command: null,
+              output: JSON.stringify({ success: true, completed: true }),
+              rawInput: { arguments: { preset: 'setup_source_control' } },
+            },
+            source: 'web',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          },
+        ]}
+        timelineExtras={<div>Connect source control</div>}
+      />,
+    );
+
+    expect(screen.getByText('Connect source control')).toBeInTheDocument();
+    expect(screen.queryByText('Asked for')).toBeNull();
+    expect(screen.queryByText('human guidance')).toBeNull();
+  });
+
   it('shows Thinking after a follow-up until streamed output arrives', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(2);
     replyMutate.mockResolvedValue({ success: true });

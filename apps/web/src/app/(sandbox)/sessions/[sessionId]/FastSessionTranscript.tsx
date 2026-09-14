@@ -127,14 +127,18 @@ function shouldSuppressRequestUserInputToolMessage(
     toolName?: unknown;
     title?: unknown;
     status?: unknown;
+    rawInput?: { arguments?: { preset?: unknown } } | null;
   } | null;
   const isRequestUserInput =
     payload?.toolName === 'request_user_input' ||
     payload?.title === 'request_user_input';
+  const isCompletedSourceControlSetup =
+    payload?.status === 'completed' &&
+    payload?.rawInput?.arguments?.preset === 'setup_source_control';
   return (
     isRequestUserInput &&
-    payload?.status !== 'failed' &&
-    requestTurnIds.has(message.turnId)
+    (isCompletedSourceControlSetup ||
+      (payload?.status !== 'failed' && requestTurnIds.has(message.turnId)))
   );
 }
 
@@ -835,6 +839,35 @@ export function FastSessionTranscript({
       ),
     [messages],
   );
+  // Source-control setup is rendered directly in the timeline rather than as
+  // a persisted request_user_input card. A model may correctly invoke that
+  // trusted preset without first emitting narration, so its successful tool
+  // action is sufficient to reveal the controls.
+  const hasCompletedSourceControlSetupAction = useMemo(
+    () =>
+      messages.some((message) => {
+        if (
+          message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolCall &&
+          message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
+          message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolResult
+        ) {
+          return false;
+        }
+        const payload = message.payload as {
+          toolName?: unknown;
+          title?: unknown;
+          status?: unknown;
+          rawInput?: { arguments?: { preset?: unknown } } | null;
+        } | null;
+        return (
+          (payload?.toolName === 'request_user_input' ||
+            payload?.title === 'request_user_input') &&
+          payload?.status === 'completed' &&
+          payload?.rawInput?.arguments?.preset === 'setup_source_control'
+        );
+      }),
+    [messages],
+  );
   const reviewOffers = useMemo(
     () =>
       messages.flatMap((message) => {
@@ -1474,7 +1507,9 @@ export function FastSessionTranscript({
               onSuppress={suppressMessageAfterInput}
               onOpenDelegatedTask={openTaskPanel ?? undefined}
             />
-            {hasVisibleAssistantMessage ? timelineExtras : null}
+            {hasVisibleAssistantMessage || hasCompletedSourceControlSetupAction
+              ? timelineExtras
+              : null}
             {pendingResponseState.pendingAfter !== null &&
             streamMessages.length === 0 ? (
               pendingResponseState.pendingAfter.id === '' ? (
