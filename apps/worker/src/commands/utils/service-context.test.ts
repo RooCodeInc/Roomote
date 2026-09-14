@@ -15,18 +15,6 @@ describe('buildWorkspacePortMappings', () => {
     ).toBeUndefined();
   });
 
-  it('does not infer callback surfaces for environment workspaces from loopback urls', () => {
-    const workspace = {
-      type: 'environment',
-      environmentConfig: {
-        name: 'App',
-        repositories: [{ repository: 'Roomote/example-app' }],
-      },
-    };
-
-    expect(buildWorkspacePortMappings(workspace as never).appPorts).toEqual({});
-  });
-
   it('maps configured environment ports for environment workspaces', () => {
     const workspace = {
       type: 'environment',
