@@ -38,10 +38,12 @@ export const demoSeedFastSession = {
   sessionId: '00000000-0000-4000-8000-000000000102',
   participantId: '00000000-0000-4000-8000-000000000103',
   title: 'Summarize launch readiness',
+  surface: 'slack' as const,
   workspaceId: 'TROOMOTEDEMO',
   providerConversationId: 'demo-fast-session',
   channelId: 'CROOMOTEDEMO',
   threadId: '1700000000.000100',
+  cachedStatus: 'ready' as const,
   messages: [
     {
       id: '00000000-0000-4000-8000-000000000104',
@@ -63,6 +65,77 @@ export const demoSeedFastSession = {
     },
   ],
 } as const;
+
+export const demoSeedPendingInputFastSession = {
+  conversationId: '00000000-0000-4000-8000-000000000106',
+  sessionId: '00000000-0000-4000-8000-000000000107',
+  participantId: '00000000-0000-4000-8000-000000000108',
+  title: 'Choose the launch validation scope',
+  surface: 'web' as const,
+  workspaceId: demoSeedUserId,
+  providerConversationId: 'demo-fast-session-pending-input',
+  cachedStatus: 'needs_input' as const,
+  messages: [
+    {
+      id: '00000000-0000-4000-8000-000000000109',
+      eventId: 'demo-fast-session-pending-input-user-prompt',
+      turnId: 'demo-fast-session-pending-input-turn',
+      turnSeq: 0,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user' as const,
+      contentBlocks: [
+        {
+          type: 'text' as const,
+          text: 'Validate the launch experience and ask me which scope to prioritize.',
+        },
+      ],
+      payload: {},
+    },
+    {
+      id: '00000000-0000-4000-8000-000000000110',
+      eventId: 'demo-fast-session-pending-input-request',
+      turnId: 'demo-fast-session-pending-input-turn',
+      turnSeq: 1,
+      eventType: 'roomote_runtime.request_user_input' as const,
+      role: 'assistant' as const,
+      contentBlocks: [
+        {
+          type: 'text' as const,
+          text: 'Which launch path should I validate first?',
+        },
+      ],
+      payload: {
+        requestId: 'rui:demo-fast-session-pending-input',
+        status: 'pending' as const,
+        sessionId: '00000000-0000-4000-8000-000000000106',
+        turnId: 'demo-fast-session-pending-input-turn',
+        callId: 'rui:demo-fast-session-pending-input',
+        questions: [
+          {
+            id: 'validation-scope',
+            header: 'Validation scope',
+            question: 'Which launch path should I validate first?',
+            options: [
+              {
+                label: 'New workspace',
+                description: 'Check the first-run setup and initial task.',
+              },
+              {
+                label: 'Returning workspace',
+                description: 'Check an existing workspace and active task.',
+              },
+            ],
+          },
+        ],
+      },
+    },
+  ],
+} as const;
+
+const demoSeedFastSessions = [
+  demoSeedFastSession,
+  demoSeedPendingInputFastSession,
+] as const;
 
 export const demoSeedRepositories = [
   {
@@ -204,118 +277,130 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
 
   record(`user ${demoSeedUserId}`, !existingUser);
 
-  // A complete Fast Session keeps the standard seed useful for validating the
-  // canonical Session detail route, transcript, and Slack origin metadata.
-  const existingFastConversation =
-    await db.query.fastAgentConversations.findFirst({
-      where: eq(fastAgentConversations.id, demoSeedFastSession.conversationId),
-    });
+  // Complete and waiting-for-input Fast Sessions keep the standard seed useful
+  // for validating the canonical detail route, transcript, and active composer.
+  for (const fastSessionSeed of demoSeedFastSessions) {
+    const existingFastConversation =
+      await db.query.fastAgentConversations.findFirst({
+        where: eq(fastAgentConversations.id, fastSessionSeed.conversationId),
+      });
 
-  if (!existingFastConversation) {
-    await db.insert(fastAgentConversations).values({
-      id: demoSeedFastSession.conversationId,
-      userId: demoSeedUserId,
-      surface: 'slack',
-      workspaceId: demoSeedFastSession.workspaceId,
-      conversationId: demoSeedFastSession.providerConversationId,
-      currentReplyChannelId: demoSeedFastSession.channelId,
-      currentReplyThreadId: demoSeedFastSession.threadId,
-      replyTargetVerified: true,
-      title: demoSeedFastSession.title,
-      llmTitleCheckpoint: 1,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  record('Fast conversation demo', !existingFastConversation);
-
-  for (const [index, message] of demoSeedFastSession.messages.entries()) {
-    const existingMessage = await db.query.fastAgentMessages.findFirst({
-      where: eq(fastAgentMessages.id, message.id),
-    });
-
-    if (!existingMessage) {
-      await db.insert(fastAgentMessages).values({
-        id: message.id,
-        conversationId: demoSeedFastSession.conversationId,
-        eventId: message.eventId,
-        turnId: message.turnId,
-        turnSeq: message.turnSeq,
-        ts:
-          now.getTime() - (demoSeedFastSession.messages.length - index) * 1_000,
-        eventType: message.eventType,
-        role: message.role,
-        contentBlocks: [{ type: 'text', text: message.text }],
-        metadata: {
-          visibleInTranscript: true,
-          ...(message.role === 'user' ? { userId: demoSeedUserId } : {}),
-        },
-        payload: {},
-        source: 'slack',
+    if (!existingFastConversation) {
+      await db.insert(fastAgentConversations).values({
+        id: fastSessionSeed.conversationId,
+        userId: demoSeedUserId,
+        surface: fastSessionSeed.surface,
+        workspaceId: fastSessionSeed.workspaceId,
+        conversationId: fastSessionSeed.providerConversationId,
+        currentReplyChannelId:
+          'channelId' in fastSessionSeed ? fastSessionSeed.channelId : null,
+        currentReplyThreadId:
+          'threadId' in fastSessionSeed ? fastSessionSeed.threadId : null,
+        replyTargetVerified: fastSessionSeed.surface !== 'web',
+        title: fastSessionSeed.title,
+        llmTitleCheckpoint: 1,
         createdAt: now,
         updatedAt: now,
       });
     }
 
-    record(`Fast message ${message.eventId}`, !existingMessage);
-  }
+    record(
+      `Fast conversation demo ${fastSessionSeed.title}`,
+      !existingFastConversation,
+    );
 
-  let fastSession = await db.query.sessions.findFirst({
-    where: eq(sessions.fastConversationId, demoSeedFastSession.conversationId),
-  });
-  const fastSessionCreated = !fastSession;
+    for (const [index, message] of fastSessionSeed.messages.entries()) {
+      const existingMessage = await db.query.fastAgentMessages.findFirst({
+        where: eq(fastAgentMessages.id, message.id),
+      });
 
-  if (!fastSession) {
-    [fastSession] = await db
-      .insert(sessions)
-      .values({
-        id: demoSeedFastSession.sessionId,
-        title: demoSeedFastSession.title,
-        llmTitleCheckpoint: 1,
-        ownerKind: 'user',
-        ownerUserId: demoSeedUserId,
-        sourceSurface: 'slack',
-        sourceTrigger: 'message',
-        fastConversationId: demoSeedFastSession.conversationId,
-        visibility: 'visible',
-        activityAt: Math.floor(now.getTime() / 1_000),
-        cachedStatus: 'ready',
+      if (!existingMessage) {
+        await db.insert(fastAgentMessages).values({
+          id: message.id,
+          conversationId: fastSessionSeed.conversationId,
+          eventId: message.eventId,
+          turnId: message.turnId,
+          turnSeq: message.turnSeq,
+          ts: now.getTime() - (fastSessionSeed.messages.length - index) * 1_000,
+          eventType: message.eventType,
+          role: message.role,
+          contentBlocks:
+            'contentBlocks' in message
+              ? [...message.contentBlocks]
+              : [{ type: 'text' as const, text: message.text }],
+          metadata: {
+            visibleInTranscript: true,
+            ...(message.role === 'user' ? { userId: demoSeedUserId } : {}),
+          },
+          payload: 'payload' in message ? message.payload : {},
+          source: fastSessionSeed.surface,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+
+      record(`Fast message ${message.eventId}`, !existingMessage);
+    }
+
+    let fastSession = await db.query.sessions.findFirst({
+      where: eq(sessions.fastConversationId, fastSessionSeed.conversationId),
+    });
+    const fastSessionCreated = !fastSession;
+
+    if (!fastSession) {
+      [fastSession] = await db
+        .insert(sessions)
+        .values({
+          id: fastSessionSeed.sessionId,
+          title: fastSessionSeed.title,
+          llmTitleCheckpoint: 1,
+          ownerKind: 'user',
+          ownerUserId: demoSeedUserId,
+          sourceSurface: fastSessionSeed.surface,
+          sourceTrigger: 'message',
+          fastConversationId: fastSessionSeed.conversationId,
+          visibility: 'visible',
+          activityAt: Math.floor(now.getTime() / 1_000),
+          cachedStatus: fastSessionSeed.cachedStatus,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+    }
+
+    if (!fastSession) {
+      throw new Error('Failed to seed the canonical Fast Session');
+    }
+
+    record(
+      `Session for Fast conversation demo ${fastSessionSeed.title}`,
+      fastSessionCreated,
+    );
+
+    const existingFastSessionParticipant =
+      await db.query.sessionParticipants.findFirst({
+        where: and(
+          eq(sessionParticipants.sessionId, fastSession.id),
+          eq(sessionParticipants.userId, demoSeedUserId),
+        ),
+      });
+
+    if (!existingFastSessionParticipant) {
+      await db.insert(sessionParticipants).values({
+        id: fastSessionSeed.participantId,
+        sessionId: fastSession.id,
+        userId: demoSeedUserId,
+        role: 'owner',
         createdAt: now,
         updatedAt: now,
-      })
-      .returning();
+      });
+    }
+
+    record(
+      `owner participant for Fast conversation demo ${fastSessionSeed.title}`,
+      !existingFastSessionParticipant,
+    );
   }
-
-  if (!fastSession) {
-    throw new Error('Failed to seed the canonical Fast Session');
-  }
-
-  record('Session for Fast conversation demo', fastSessionCreated);
-
-  const existingFastSessionParticipant =
-    await db.query.sessionParticipants.findFirst({
-      where: and(
-        eq(sessionParticipants.sessionId, fastSession.id),
-        eq(sessionParticipants.userId, demoSeedUserId),
-      ),
-    });
-
-  if (!existingFastSessionParticipant) {
-    await db.insert(sessionParticipants).values({
-      id: demoSeedFastSession.participantId,
-      sessionId: fastSession.id,
-      userId: demoSeedUserId,
-      role: 'owner',
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  record(
-    'owner participant for Fast conversation demo',
-    !existingFastSessionParticipant,
-  );
 
   // Demo GitHub installation owned by the demo user.
   let installation = await db.query.githubInstallations.findFirst({
