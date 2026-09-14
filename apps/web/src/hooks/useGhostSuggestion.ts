@@ -23,7 +23,7 @@ export function useGhostSuggestion({
   suggestion: string | null;
   /** Whether the composer is empty and idle (ghost text may render). */
   active: boolean;
-  surface: 'task' | 'session';
+  surface: 'home' | 'task' | 'session';
   /** Insert the accepted suggestion into the composer. */
   onAccept: (text: string) => void;
 }) {

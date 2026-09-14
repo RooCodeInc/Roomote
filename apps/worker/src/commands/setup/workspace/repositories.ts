@@ -1,10 +1,14 @@
 import pLimit from 'p-limit';
 
-import { sdk } from '@roomote/sdk/client';
 import { DEFAULT_SOURCE_CONTROL_PROVIDER } from '@roomote/types';
 
 import type { StartupLogger } from '../../../logging';
+import {
+  discoverClonedRepositoryPaths,
+  writeRepositoriesManifest,
+} from '../../../workspace/on-demand-repositories';
 import { discoverRepoLocalSkills } from '../../../workspace/repo-local-skills';
+import { listOnDemandRepositories } from './list-on-demand-repositories';
 
 import {
   type PrepareWorkspaceOptions,
@@ -37,9 +41,11 @@ function summarizeSkippedRepositories(
 function formatWorkspacePreparationLabel(
   workspaceType: PrepareWorkspaceOptions['workspace']['type'],
 ): string {
-  return workspaceType === 'all_repositories'
-    ? 'all-repositories workspace'
-    : `${workspaceType} workspace`;
+  return `${workspaceType} workspace`;
+}
+
+function pluralizeRepositories(count: number): string {
+  return `${count} repositor${count === 1 ? 'y' : 'ies'}`;
 }
 
 async function discoverWorkspaceRepoLocalSkills({
@@ -90,7 +96,6 @@ export async function initializeRepositories(
       : { sourceControlProvider: resolvedSourceControlProvider }),
     ...(repositoryProviders ? { repositoryProviders } : {}),
   };
-  const mappedRepositoryNames = Object.keys(repositoryProviders ?? {});
   const { workspaceRoot, workspaceManager } = createWorkspaceManager(
     envVars,
     logger,
@@ -159,24 +164,61 @@ export async function initializeRepositories(
       };
     }
 
-    case 'repository_set':
     case 'all_repositories': {
-      // A stamped map is the launch-time workspace snapshot. Prefer it over
-      // a live provider-filtered list so mixed-provider tasks keep every
-      // repository selected when the task was queued.
-      const repositoriesToPrepare =
-        workspace.type === 'repository_set'
-          ? workspace.repositories.map((fullName) => ({ fullName }))
-          : mappedRepositoryNames.length > 0
-            ? mappedRepositoryNames.map((fullName) => ({ fullName }))
-            : await timedStep(
-                logger,
-                'initializeRepositories: list repositories',
-                () =>
-                  sdk.repositories.listRepositories({
-                    sourceControlProvider: resolvedSourceControlProvider,
-                  }),
-              );
+      // An all-repositories workspace exposes every active repository, which
+      // can be hundreds on a large installation. Cloning them all up front
+      // made setup take minutes and a single stalled clone could wedge the
+      // run, so the workspace root gets a manifest instead and the agent
+      // checks out the repositories it needs through `clone_repository`.
+      // Checkouts left by a previous run (snapshot resume) are kept as-is.
+      const onDemandRepositories = await timedStep(
+        logger,
+        'initializeRepositories: list repositories',
+        () =>
+          listOnDemandRepositories({
+            sourceControlProvider: resolvedSourceControlProvider,
+            repositoryProviders,
+          }),
+      );
+      const repoPaths = discoverClonedRepositoryPaths(
+        workspaceRoot,
+        onDemandRepositories,
+      );
+      const clonedCount = Object.keys(repoPaths).length;
+
+      writeRepositoriesManifest({
+        workspaceRoot,
+        repositories: onDemandRepositories,
+        clonedPaths: repoPaths,
+      });
+      logger.userLog.info(
+        `Indexed ${pluralizeRepositories(onDemandRepositories.length)} for on-demand checkout${
+          clonedCount > 0
+            ? ` (${pluralizeRepositories(clonedCount)} already checked out)`
+            : ''
+        }`,
+      );
+
+      const repoLocalSkills = await discoverWorkspaceRepoLocalSkills({
+        repoPaths,
+        repoFullNamesByDir: Object.fromEntries(
+          Object.keys(repoPaths).map((fullName) => [fullName, fullName]),
+        ),
+      });
+
+      return {
+        workspacePath: workspaceRoot,
+        repoPaths,
+        repoLocalSkills,
+        usesSharedWorkspaceRoot: true,
+        onDemandRepositories,
+      };
+    }
+
+    case 'repository_set': {
+      const repositoriesToPrepare = workspace.repositories.map((fullName) => ({
+        fullName,
+      }));
 
       const limit = pLimit(REPO_PREPARATION_CONCURRENCY);
 

@@ -1,9 +1,9 @@
 // Queries
 export { useDeploymentMcpEnablements } from './useDeploymentMcpEnablements';
-export { useCuratedIntegrationsAvailability } from './useCuratedIntegrationsAvailability';
 export { useUserMcpConnections } from './useUserMcpConnections';
 export { useMcpConnectionTools } from './useMcpConnectionTools';
-export { useMcpOauthReadiness } from './useMcpOauthReadiness';
+export { useEffectiveMcpIntegrations } from './useEffectiveMcpIntegrations';
+export { invalidateMcpIntegrationStatusQueries } from './invalidateMcpIntegrationStatusQueries';
 
 // Mutations
 export { useSetDeploymentMcpEnabled } from './useSetDeploymentMcpEnabled';

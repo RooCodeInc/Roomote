@@ -221,6 +221,7 @@ describe('captureFastAgentInferenceContext', () => {
         integration_count: null,
         integration_tool_count: null,
         active_task_count: null,
+        prompt_skill_count: null,
         opencode_server_lease_ms: null,
         opencode_session_validate_ms: null,
         opencode_session_create_ms: null,

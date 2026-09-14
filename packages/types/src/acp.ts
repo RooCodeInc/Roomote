@@ -31,6 +31,8 @@ export const ACP_ENVELOPE_EVENT_TYPES = {
   QueuedMessagesUpdate: 'roomote_runtime.queued_messages_update',
   RequestUserInput: 'roomote_runtime.request_user_input',
   RequestUserInputResponse: 'roomote_runtime.request_user_input_response',
+  CapabilityOffer: 'roomote_runtime.capability_offer',
+  CapabilityOfferResponse: 'roomote_runtime.capability_offer_response',
   TaskCancelled: 'roomote_runtime.task_cancelled',
   /** Voice call lifecycle marker persisted in a Fast Session transcript. */
   VoiceCall: 'roomote_runtime.voice_call',
@@ -82,6 +84,18 @@ export const ACP_LOGICAL_EVENT_ID_KEY = 'logicalEventId' as const;
  * or mirrored into Fast Agent compatibility history.
  */
 export const SETUP_RECEIPT_INPUT_KIND = 'setup_receipt' as const;
+
+/** Payload shared by canonical setup receipts persisted in transcript history. */
+export interface SetupReceiptPayload {
+  kind: string;
+  /** Request-user-input event represented by this receipt, when applicable. */
+  requestId?: string;
+  presentation?: {
+    label: string;
+    iconKey: string;
+  };
+  [key: string]: unknown;
+}
 
 export interface AcpLogicalEventIdParts {
   sessionId: string | null | undefined;
@@ -166,6 +180,8 @@ export const ACP_REQUEST_USER_INPUT_METHOD =
 export const ACP_REQUEST_USER_INPUT_REQUEST_ID_PREFIX = 'rui' as const;
 
 export interface AcpRequestUserInputQuestionOption {
+  /** Canonical option identity supplied by trusted server presets. */
+  id?: string;
   label: string;
   description: string;
 }
@@ -211,11 +227,13 @@ export function getAcpRequestUserInputValidationError(
       return 'This question accepts a single answer.';
     }
     if (question.options?.length) {
-      const optionLabels = new Set(
-        question.options.map((option) => option.label),
+      const optionValues = new Set(
+        question.options.flatMap((option) =>
+          option.id ? [option.id, option.label] : [option.label],
+        ),
       );
       const customAnswerCount = submitted.filter(
-        (answer) => !optionLabels.has(answer),
+        (answer) => !optionValues.has(answer),
       ).length;
       if (customAnswerCount > (question.isOther ? 1 : 0)) {
         return 'One or more selections are not valid options.';
@@ -223,6 +241,34 @@ export function getAcpRequestUserInputValidationError(
     }
   }
   return null;
+}
+
+/** Normalize trusted option selections to stable IDs while accepting labels
+ * persisted or submitted by clients from before option IDs were available. */
+export function normalizeAcpRequestUserInputAnswers(
+  questions: AcpRequestUserInputQuestion[],
+  answers: AcpRequestUserInputAnswers,
+): AcpRequestUserInputAnswers {
+  const questionsById = new Map(
+    questions.map((question) => [question.id, question]),
+  );
+  return Object.fromEntries(
+    Object.entries(answers).map(([questionId, response]) => {
+      const question = questionsById.get(questionId);
+      return [
+        questionId,
+        {
+          answers: response.answers.map((answer) => {
+            const option = question?.options?.find(
+              (candidate) =>
+                candidate.id === answer || candidate.label === answer,
+            );
+            return option?.id ?? answer;
+          }),
+        },
+      ];
+    }),
+  );
 }
 
 export interface AcpRequestUserInputRequestParams {
@@ -235,7 +281,10 @@ export interface AcpRequestUserInputRequestParams {
 export interface AcpRequestUserInputPayload extends AcpRequestUserInputRequestParams {
   requestId: string;
   status: 'pending';
-  preset?: 'setup_starter_tasks';
+  preset?:
+    | 'setup_source_control'
+    | 'setup_starter_tasks'
+    | 'setup_integrations';
 }
 
 export interface AcpRequestUserInputResponsePayload {
@@ -335,7 +384,8 @@ function parseAcpRequestUserInputQuestionOption(
     return null;
   }
 
-  return { label, description };
+  const id = asStringOrNull(record?.id);
+  return { label, description, ...(id ? { id } : {}) };
 }
 
 export function parseAcpRequestUserInputQuestion(
@@ -433,7 +483,11 @@ export function parseAcpRequestUserInputPayload(
   const requestId = asStringOrNull(payload?.requestId);
   const request = parseAcpRequestUserInputRequestParams(payload);
   const preset =
-    payload?.preset === 'setup_starter_tasks' ? payload.preset : undefined;
+    payload?.preset === 'setup_source_control' ||
+    payload?.preset === 'setup_starter_tasks' ||
+    payload?.preset === 'setup_integrations'
+      ? payload.preset
+      : undefined;
 
   if (!requestId || !request) {
     return null;
@@ -515,7 +569,9 @@ function resolveAcpRequestUserInputAnswerDetailed(
 
     if (optionIndex >= 0 && optionIndex < question.options.length) {
       return {
-        answer: question.options[optionIndex]!.label,
+        answer:
+          question.options[optionIndex]!.id ??
+          question.options[optionIndex]!.label,
         viaOtherFallback: false,
       };
     }
@@ -524,12 +580,17 @@ function resolveAcpRequestUserInputAnswerDetailed(
   const normalizedAnswer = normalizeAcpRequestUserInputOptionLabel(answer);
   const exactMatch = question.options.find(
     (option) =>
+      normalizeAcpRequestUserInputOptionLabel(option.id ?? '') ===
+        normalizedAnswer ||
       normalizeAcpRequestUserInputOptionLabel(option.label) ===
-      normalizedAnswer,
+        normalizedAnswer,
   );
 
   if (exactMatch) {
-    return { answer: exactMatch.label, viaOtherFallback: false };
+    return {
+      answer: exactMatch.id ?? exactMatch.label,
+      viaOtherFallback: false,
+    };
   }
 
   const partialMatches = question.options.filter((option) =>
@@ -539,7 +600,10 @@ function resolveAcpRequestUserInputAnswerDetailed(
   );
 
   if (partialMatches.length === 1) {
-    return { answer: partialMatches[0]!.label, viaOtherFallback: false };
+    return {
+      answer: partialMatches[0]!.id ?? partialMatches[0]!.label,
+      viaOtherFallback: false,
+    };
   }
 
   if (question.isOther) {
@@ -781,6 +845,7 @@ export function parseAcpRequestUserInputAnswerReply(
 
 export type AcpMessageKind =
   | 'text'
+  | 'setup_receipt'
   | 'reasoning'
   | 'tool_call'
   | 'tool_result'
@@ -1159,7 +1224,7 @@ export interface AcpToolResultPayload {
 export interface ShowWidgetFallbackDelivery {
   toolCallId: string;
   title: string | null;
-  textFallback: string;
+  textFallback: string | null;
   widgetUrl: string;
 }
 
@@ -2491,8 +2556,13 @@ export function getAnswerDisplayValue(
     return '[hidden]';
   }
 
+  const optionLabelsById = new Map(
+    question?.options?.flatMap((option) =>
+      option.id ? [[option.id, option.label] as const] : [],
+    ) ?? [],
+  );
   const joined = answers
-    .map((answer) => answer.trim())
+    .map((answer) => (optionLabelsById.get(answer) ?? answer).trim())
     .filter(Boolean)
     .join(', ');
 

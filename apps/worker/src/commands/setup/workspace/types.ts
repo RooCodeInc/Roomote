@@ -6,6 +6,7 @@ import type {
 
 import type { ServiceContext } from '../../../services';
 import type { WorkspaceConfig } from '../../../workspace';
+import type { OnDemandRepository } from '../../../workspace/on-demand-repositories';
 import type { RepoLocalSkill } from '../../../workspace/repo-local-skills';
 
 export type WorkspaceRepositoryPreparationWorkspaceType =
@@ -52,6 +53,13 @@ export interface PrepareWorkspaceResult {
   repoPaths?: Record<string, string>;
   repoLocalSkills?: RepoLocalSkill[];
   usesSharedWorkspaceRoot?: boolean;
+  /**
+   * Repositories the task may check out on demand through the
+   * `clone_repository` tool instead of having them cloned during setup.
+   * `repoPaths` then lists only the checkouts that already exist. Set for
+   * all-repositories workspaces.
+   */
+  onDemandRepositories?: OnDemandRepository[];
   repositoryPreparationOutcome?: WorkspaceRepositoryPreparationContinued;
   environmentSetupWarnings?: EnvironmentSetupWarning[];
 }

@@ -138,7 +138,7 @@ describe('AcpGroupedToolMessage', () => {
     expect(codeBlockSpy).not.toHaveBeenCalled();
   });
 
-  it('renders natural timer wording in the group and expanded item headings', () => {
+  it('renders natural timer wording for compact internal groups', () => {
     const group = buildGroup();
     group.action = 'Used';
     group.objectSummary = '2 timer calls';
@@ -159,10 +159,10 @@ describe('AcpGroupedToolMessage', () => {
       });
     });
 
-    render(<AcpGroupedToolMessage group={group} />);
+    render(<AcpGroupedToolMessage group={group} showSubagentPayload />);
 
     expect(screen.getByText('Used 2 timer calls')).toBeInTheDocument();
-    expect(screen.getAllByText('Listed timers')).toHaveLength(2);
+    expect(screen.queryByText('Listed timers')).not.toBeInTheDocument();
     expect(screen.queryByText('manage_wakeups')).not.toBeInTheDocument();
   });
 

@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import {
   computeProviders,
+  fastAgentCapabilityIdSchema,
   launchCodingHarnesses,
   REASONING_EFFORT_VALUES,
 } from '@roomote/types';
@@ -110,6 +111,14 @@ export const fastSessionPrReviewActionInputSchema = z.object({
   sessionId: z.string().uuid(),
   deliveryId: z.string().uuid(),
   choice: z.enum(['yes', 'auto', 'dismiss']),
+});
+
+export const fastSessionCapabilityOfferResponseInputSchema = z.object({
+  sessionId: z.string().uuid(),
+  offerId: z.string().min(1),
+  capability: fastAgentCapabilityIdSchema,
+  resolution: z.enum(['completed', 'dismissed']),
+  selectedIds: z.array(z.string().min(1)).max(20).optional(),
 });
 
 export const updateFastSessionModelSelectionInputSchema = z.object({

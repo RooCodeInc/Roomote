@@ -1,21 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TRPCError } from '@trpc/server';
 
+import { VoicePreviewPermissionError } from '@/lib/server/voice';
+
 const {
   mockResolveVoiceOpenAiKey,
   mockCreateVoiceLiveSession,
   mockCreateVoicePreview,
   mockCleanVoiceTranscript,
   mockResolveVoiceId,
+  mockGetVoiceConsent,
+  mockLoadVoiceWorkspaceContext,
 } = vi.hoisted(() => ({
   mockResolveVoiceOpenAiKey: vi.fn(),
   mockCreateVoiceLiveSession: vi.fn(),
   mockCreateVoicePreview: vi.fn(),
   mockCleanVoiceTranscript: vi.fn(),
   mockResolveVoiceId: vi.fn(),
+  mockGetVoiceConsent: vi.fn(),
+  mockLoadVoiceWorkspaceContext: vi.fn(),
 }));
 
-vi.mock('@/lib/server/voice', () => ({
+vi.mock('@/lib/server/voice', async (importOriginal) => ({
+  // The real error class so the command's instanceof check works.
+  VoicePreviewPermissionError: (
+    await importOriginal<typeof import('@/lib/server/voice')>()
+  ).VoicePreviewPermissionError,
   resolveVoiceOpenAiKey: mockResolveVoiceOpenAiKey,
   createVoiceLiveSession: mockCreateVoiceLiveSession,
   createVoicePreview: mockCreateVoicePreview,
@@ -30,18 +40,28 @@ const voiceContext = {
 };
 
 vi.mock('@/lib/server/voice-context', () => ({
-  loadVoiceWorkspaceContext: vi.fn(async () => voiceContext),
+  loadVoiceWorkspaceContext: mockLoadVoiceWorkspaceContext,
 }));
 
-const { mockUpsertFastAgentMessage, mockAppendFastAgentVisibleMessages } =
-  vi.hoisted(() => ({
-    mockUpsertFastAgentMessage: vi.fn(),
-    mockAppendFastAgentVisibleMessages: vi.fn(),
-  }));
+vi.mock('../preferences', () => ({
+  getVoiceConsentCommand: mockGetVoiceConsent,
+}));
+
+const {
+  mockUpsertFastAgentMessage,
+  mockAppendFastAgentVisibleMessages,
+  mockRefreshOwnTaskFollowThroughWakeupCadence,
+} = vi.hoisted(() => ({
+  mockUpsertFastAgentMessage: vi.fn(),
+  mockAppendFastAgentVisibleMessages: vi.fn(),
+  mockRefreshOwnTaskFollowThroughWakeupCadence: vi.fn(),
+}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   upsertFastAgentMessage: mockUpsertFastAgentMessage,
   appendFastAgentVisibleMessages: mockAppendFastAgentVisibleMessages,
+  refreshOwnTaskFollowThroughWakeupCadence:
+    mockRefreshOwnTaskFollowThroughWakeupCadence,
 }));
 
 const mockFindAccessibleFastSession = vi.hoisted(() => vi.fn());
@@ -54,6 +74,7 @@ const auth = {
   name: 'Matt',
   primaryEmail: 'matt@example.com',
   isAdmin: true,
+  cloudEnabled: true,
 } as unknown as import('@/types').UserAuthSuccess;
 
 import {
@@ -67,7 +88,10 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockGetVoiceConsent.mockResolvedValue(true);
+  mockLoadVoiceWorkspaceContext.mockResolvedValue(voiceContext);
   mockResolveVoiceId.mockResolvedValue('marin');
+  mockRefreshOwnTaskFollowThroughWakeupCadence.mockResolvedValue(null);
 });
 
 describe('getVoiceStatusCommand', () => {
@@ -106,6 +130,36 @@ describe('createVoiceLiveSessionCommand', () => {
       context: voiceContext,
       voiceId: 'marin',
     });
+  });
+
+  it('rejects an unaccepted Cloud user before loading context or contacting OpenAI', async () => {
+    mockGetVoiceConsent.mockResolvedValue(false);
+
+    await expect(
+      createVoiceLiveSessionCommand(auth, { sdp: 'offer-sdp' }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'Accept voice data sharing before using voice',
+    });
+    expect(mockResolveVoiceOpenAiKey).not.toHaveBeenCalled();
+    expect(mockLoadVoiceWorkspaceContext).not.toHaveBeenCalled();
+    expect(mockCreateVoiceLiveSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps non-Cloud live voice behavior unchanged', async () => {
+    mockResolveVoiceOpenAiKey.mockResolvedValue('sk-test');
+    mockCreateVoiceLiveSession.mockResolvedValue({
+      sessionId: 'live_abc',
+      sdp: 'answer-sdp',
+    });
+
+    await expect(
+      createVoiceLiveSessionCommand(
+        { ...auth, cloudEnabled: false },
+        { sdp: 'offer-sdp' },
+      ),
+    ).resolves.toEqual({ sessionId: 'live_abc', sdp: 'answer-sdp' });
+    expect(mockGetVoiceConsent).not.toHaveBeenCalled();
   });
 
   it('refuses when voice is not configured', async () => {
@@ -152,6 +206,19 @@ describe('previewVoiceCommand', () => {
     expect(mockResolveVoiceOpenAiKey).not.toHaveBeenCalled();
   });
 
+  it('tells the admin what permission the key is missing for previews', async () => {
+    mockCreateVoicePreview.mockRejectedValue(new VoicePreviewPermissionError());
+
+    const error = await previewVoiceCommand(auth, {
+      apiKey: 'sk-restricted',
+      voiceId: 'marin',
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(TRPCError);
+    expect((error as TRPCError).code).toBe('PRECONDITION_FAILED');
+    expect((error as TRPCError).message).toContain('Audio model permission');
+  });
+
   it('uses the stored key when editing with a blank key', async () => {
     mockResolveVoiceOpenAiKey.mockResolvedValue('sk-stored');
     mockCreateVoicePreview.mockResolvedValue({
@@ -185,6 +252,17 @@ describe('cleanVoiceTranscriptCommand', () => {
     });
   });
 
+  it('rejects unaccepted Cloud transcript cleanup before loading context or contacting OpenAI', async () => {
+    mockGetVoiceConsent.mockResolvedValue(false);
+
+    await expect(
+      cleanVoiceTranscriptCommand(auth, { text: 'check the build' }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    expect(mockResolveVoiceOpenAiKey).not.toHaveBeenCalled();
+    expect(mockLoadVoiceWorkspaceContext).not.toHaveBeenCalled();
+    expect(mockCleanVoiceTranscript).not.toHaveBeenCalled();
+  });
+
   it('falls back to the raw transcript when cleanup fails', async () => {
     mockResolveVoiceOpenAiKey.mockResolvedValue('sk-test');
     mockCleanVoiceTranscript.mockRejectedValue(new Error('status 500'));
@@ -206,7 +284,7 @@ describe('cleanVoiceTranscriptCommand', () => {
 });
 
 describe('recordVoiceTurnCommand', () => {
-  it('writes direct voice output as spoken but unverified in Fast history', async () => {
+  it('writes what the voice said as a spoken assistant turn and adds it to Fast history', async () => {
     mockFindAccessibleFastSession.mockResolvedValue({ id: 'fast-1' });
     mockUpsertFastAgentMessage.mockResolvedValue({});
     mockAppendFastAgentVisibleMessages.mockResolvedValue(undefined);
@@ -305,5 +383,9 @@ describe('recordVoiceCallEventCommand', () => {
         }),
       }),
     );
+    expect(mockRefreshOwnTaskFollowThroughWakeupCadence).toHaveBeenCalledWith({
+      conversationId: 'fast-1',
+      userId: 'user-1',
+    });
   });
 });

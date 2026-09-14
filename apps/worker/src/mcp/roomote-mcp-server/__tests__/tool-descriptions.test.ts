@@ -11,6 +11,7 @@ import {
 import {
   CREATE_CUSTOM_SKILL_TOOL,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  UPDATE_CUSTOM_SKILL_TOOL,
 } from '@roomote/types';
 
 const thisFilePath = fileURLToPath(import.meta.url);
@@ -235,6 +236,24 @@ describe('roomote MCP tool descriptions', () => {
     ).toBe(false);
   });
 
+  it('registers the shared custom skill update descriptor', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(
+      registeredTools,
+      UPDATE_CUSTOM_SKILL_TOOL.name,
+    );
+    expect(tool.config.title).toBe(UPDATE_CUSTOM_SKILL_TOOL.title);
+    expect(tool.config.description).toBe(UPDATE_CUSTOM_SKILL_TOOL.description);
+    expect(tool.config.annotations).toEqual(
+      UPDATE_CUSTOM_SKILL_TOOL.annotations,
+    );
+    const schema = tool.config
+      .inputSchema as unknown as z.ZodObject<z.ZodRawShape>;
+    expect(Object.keys(schema.shape)).toEqual(
+      Object.keys(UPDATE_CUSTOM_SKILL_TOOL.inputSchema),
+    );
+  });
+
   it('requires a token before creating a custom skill', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -381,12 +400,11 @@ describe('roomote MCP tool descriptions', () => {
       'send_message',
       'search_tasks',
       'get_compute_logs',
-      'launch',
       'cancel',
-      'list_environments',
       'list_models',
       'update_models',
     ]);
+    expect(manageTasksTool.config.description).not.toContain('launch');
     expect(taskIdField.description).toBe(
       'Optional concrete task ID. When provided to get_summary, get_messages, get_updates, or send_message, targets that task instead of a Session. Required for task-only controls such as get_compute_logs and cancel.',
     );
@@ -397,6 +415,14 @@ describe('roomote MCP tool descriptions', () => {
       'targetTasks',
     );
     expect(manageTasksTool.config.inputSchema).not.toHaveProperty('targetType');
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty('prompt');
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty(
+      'environmentId',
+    );
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty('branch');
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty(
+      'notifyOnSettle',
+    );
   });
 
   it('keeps task model discovery beside task model switching', async () => {
@@ -458,12 +484,12 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
-  it('registers show_widget for presentational HTML in the task transcript', async () => {
+  it('registers show_widget for rendered visuals in the task transcript', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const tool = getRegisteredTool(registeredTools, 'show_widget');
 
     expect(tool.config.description).toContain(
-      'Render a presentational HTML widget in the current task transcript.',
+      'Create and share a rendered visual in the current task transcript.',
     );
     expect(tool.config.description).not.toContain('Roomote');
     expect(tool.config.description).toContain(
@@ -486,6 +512,9 @@ describe('roomote MCP tool descriptions', () => {
       'HTML, CSS, and inline SVG are displayed in a sandboxed iframe',
     );
     expect(tool.config.description).toContain('request_user_input');
+    expect(tool.config.description).not.toContain('communication provider');
+    expect(tool.config.description).not.toContain('link to open');
+    expect(tool.config.description).not.toContain('HTML inline');
     expect(getInputSchemaField(tool, 'html').description).toContain('HTML');
     expect(getInputSchemaField(tool, 'html').description).toContain(
       'Avoid long prose',
@@ -500,7 +529,7 @@ describe('roomote MCP tool descriptions', () => {
       SHOW_WIDGET_HEIGHT_DESCRIPTION,
     );
     expect(getInputSchemaField(tool, 'textFallback').description).toContain(
-      'originating chat surface',
+      'Optional short plain-text preview of the rendered visual',
     );
     for (const field of ['html', 'title', 'css', 'height', 'textFallback']) {
       expect(getInputSchemaField(tool, field).description).not.toContain(
@@ -877,7 +906,7 @@ describe('roomote MCP tool descriptions', () => {
     const latestField = getInputSchemaField(lookupTool, 'latest');
 
     expect(lookupTool.config.description).toBe(
-      'Fetch readable history from the task communication channel. When the task has no communication channel, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply.',
+      'Fetch readable history from the task communication channel. When the task has no communication channel, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply. Large results are cut to the newest messages: when the response has truncated set, call again with latest set to nextLatest (and the same oldest) to read older messages.',
     );
     expect(channelField.description).toBe(
       'Optional channel ID, name, mention, or Slack/Discord channel/message link. Omit it to use the task communication channel.',

@@ -1,6 +1,8 @@
 import {
   createCustomSkillInputSchema,
   type CreateCustomSkillInput,
+  type UpdateCustomSkillInput,
+  updateCustomSkillInputSchema,
 } from '@roomote/types';
 
 import { buildApiHeaders, fetchWithTimeout } from './api-client.js';
@@ -54,6 +56,62 @@ export async function handleCreateCustomSkill(
         type: 'text',
         text: JSON.stringify(
           { success, persisted, skillId, name, scope },
+          null,
+          2,
+        ),
+      },
+    ],
+  };
+}
+
+export async function handleUpdateCustomSkill(
+  params: UpdateCustomSkillInput,
+  config: RoomoteConfig,
+): Promise<ToolResult> {
+  const body = updateCustomSkillInputSchema.parse(params);
+  const response = await fetchWithTimeout(
+    `${config.platformApiUrl}/api/mcp/custom-skills`,
+    {
+      method: 'PATCH',
+      headers: buildApiHeaders(config, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    },
+    { label: 'Failed to update custom skill' },
+  );
+  const raw: unknown = await response.json().catch(() => null);
+  const payload =
+    raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  if (!response.ok) {
+    return errorResult(
+      typeof payload.error === 'string'
+        ? payload.error
+        : `Custom skill update failed (${response.status})`,
+      { httpStatus: response.status },
+    );
+  }
+
+  const { success, persisted, skillId, name, scope, version } = payload;
+  if (
+    success !== true ||
+    persisted !== true ||
+    typeof skillId !== 'string' ||
+    typeof name !== 'string' ||
+    scope !== 'instance' ||
+    typeof version !== 'number'
+  ) {
+    return {
+      ...errorResult('Custom skill update could not be confirmed.'),
+      isError: true,
+    };
+  }
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify(
+          { success, persisted, skillId, name, scope, version },
           null,
           2,
         ),

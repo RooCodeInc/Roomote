@@ -16,14 +16,14 @@ import {
   RunStatus,
 } from '@roomote/types';
 import { captureTaskSettled } from '@roomote/telemetry/server';
-import { settleSlackLiveTaskCardForRun } from '@roomote/slack';
+import { settleLiveTaskMessageOnExit } from '@roomote/sdk/server';
 import { TRPCClientError } from '@trpc/client';
 import { withSandboxServerRpcClient } from '../../../../../../packages/sdk/src/server/lib/auth/sandbox-server-rpc';
 import type { UserAuthSuccess } from '@/types';
 
 vi.mock('@roomote/telemetry/server', () => ({ captureTaskSettled: vi.fn() }));
-vi.mock('@roomote/slack', () => ({ settleSlackLiveTaskCardForRun: vi.fn() }));
 vi.mock('@roomote/sdk/server', async () => ({
+  settleLiveTaskMessageOnExit: vi.fn(),
   stopTaskRun: (
     await import('../../../../../../packages/sdk/src/server/lib/task-runs/stop-task-run')
   ).stopTaskRun,
@@ -98,11 +98,14 @@ describe('cancelTaskRunCommand', () => {
         selected.id,
         'canceled',
       );
-      expect(settleSlackLiveTaskCardForRun).toHaveBeenCalledExactlyOnceWith({
-        taskId: task.id,
-        payload: selected.payload,
-        status: RunStatus.Canceled,
-      });
+      expect(settleLiveTaskMessageOnExit).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          id: selected.id,
+          taskId: task.id,
+          payload: selected.payload,
+        }),
+        RunStatus.Canceled,
+      );
     },
   );
 
@@ -147,7 +150,7 @@ describe('cancelTaskRunCommand', () => {
       });
       expect(await readRun(sibling.id)).toEqual(sibling);
       expect(captureTaskSettled).not.toHaveBeenCalled();
-      expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
+      expect(settleLiveTaskMessageOnExit).not.toHaveBeenCalled();
     },
   );
 
@@ -181,7 +184,7 @@ describe('cancelTaskRunCommand', () => {
         canceledAt: null,
       });
       expect(captureTaskSettled).not.toHaveBeenCalled();
-      expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
+      expect(settleLiveTaskMessageOnExit).not.toHaveBeenCalled();
     },
   );
 
@@ -203,7 +206,7 @@ describe('cancelTaskRunCommand', () => {
       expect(await readRun(selected.id)).toEqual(selected);
       expect(withSandboxServerRpcClient).not.toHaveBeenCalled();
       expect(captureTaskSettled).not.toHaveBeenCalled();
-      expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
+      expect(settleLiveTaskMessageOnExit).not.toHaveBeenCalled();
     },
   );
 
@@ -245,7 +248,7 @@ describe('cancelTaskRunCommand', () => {
       await db.query.sessions.findFirst({ where: eq(sessions.id, parent.id) }),
     ).toEqual(parent);
     expect(captureTaskSettled).not.toHaveBeenCalled();
-    expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
+    expect(settleLiveTaskMessageOnExit).not.toHaveBeenCalled();
   });
 
   it.each(['mismatched', 'missing'])(
@@ -262,7 +265,7 @@ describe('cancelTaskRunCommand', () => {
       expect(await readRun(selected.id)).toEqual(selected);
       expect(await readRun(other.id)).toEqual(other);
       expect(captureTaskSettled).not.toHaveBeenCalled();
-      expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
+      expect(settleLiveTaskMessageOnExit).not.toHaveBeenCalled();
     },
   );
 
@@ -287,7 +290,7 @@ describe('cancelTaskRunCommand', () => {
       expect(await readRun(terminal.id)).toEqual(terminal);
       expect(await readRun(active.id)).toEqual(active);
       expect(captureTaskSettled).not.toHaveBeenCalled();
-      expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
+      expect(settleLiveTaskMessageOnExit).not.toHaveBeenCalled();
     },
   );
 
@@ -298,7 +301,7 @@ describe('cancelTaskRunCommand', () => {
     await cancelTaskRunCommand(auth, { taskId: run.taskId, runId: run.id });
     expect(await readRun(run.id)).toEqual(canceled);
     expect(captureTaskSettled).toHaveBeenCalledTimes(1);
-    expect(settleSlackLiveTaskCardForRun).toHaveBeenCalledTimes(1);
+    expect(settleLiveTaskMessageOnExit).toHaveBeenCalledTimes(1);
   });
 
   it('keeps task-only selection of the newest active run with ID tie-breaking', async () => {
@@ -358,7 +361,7 @@ describe('cancelTaskRunCommand', () => {
       ).resolves.toEqual({ success: false, error: 'Task not found' });
       expect(await readRun(run.id)).toEqual(run);
       expect(captureTaskSettled).not.toHaveBeenCalled();
-      expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
+      expect(settleLiveTaskMessageOnExit).not.toHaveBeenCalled();
     } finally {
       consoleError.mockRestore();
     }

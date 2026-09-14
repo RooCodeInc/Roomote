@@ -789,6 +789,71 @@ describe('Fast parent event durable queue', () => {
     );
   });
 
+  it('durably enqueues setup continuation after resumed zero-match discovery', async () => {
+    const setupEvent = {
+      type: 'human_follow_up' as const,
+      eventId: 'setup-state-1',
+      currentMessageId: 'setup-state-1',
+      userId: 'user-1',
+      question:
+        '<platform_event>{"type":"setup_state_changed"}</platform_event>',
+      turnSource: 'platform_event' as const,
+      platformEventKind: 'setup' as const,
+      platformEventVisibility: 'required' as const,
+      setupSession: true,
+      setupContext: {
+        sessionId: parent.sessionId,
+        fastConversationId: parent.sessionId,
+        setupSnapshot: JSON.stringify({
+          integrationDiscovery: { completed: false },
+          rail: { source: 'ready' },
+        }),
+        starterTaskOptions: [],
+      },
+    };
+    const row = {
+      ...pendingRow('setup-inline', setupEvent),
+      admission: 'inline' as const,
+      claimedUntil: null,
+      retryAt: null,
+      inferenceRetries: 0,
+    };
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce({ deliveredAt: new Date(), discardedAt: null })
+      .mockResolvedValueOnce(undefined);
+    mocks.deliver.mockImplementationOnce(async (params) => {
+      await params.onSetupIntegrationDiscoveryCompleted();
+      return 'delivered';
+    });
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    });
+
+    expect(mocks.insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent,
+        event: expect.objectContaining({
+          eventId: 'setup-state-1:integration-discovery-completed',
+          currentMessageId: 'setup-state-1:integration-discovery-completed',
+          setupContext: expect.objectContaining({
+            setupSnapshot: expect.stringContaining('"completed":true'),
+          }),
+        }),
+      }),
+    );
+    expect(mocks.queueAdd).toHaveBeenCalledWith(
+      'deliver',
+      expect.objectContaining({ conversationId: parent.sessionId }),
+      expect.objectContaining({
+        jobId: expect.any(String),
+      }),
+    );
+  });
+
   it('leaves scheduled retries alone until their time', async () => {
     mocks.findPending.mockResolvedValueOnce(undefined);
 

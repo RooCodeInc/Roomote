@@ -4,6 +4,7 @@ const {
   mockFindFirstTaskRun,
   mockFindFirstTaskPullRequest,
   mockFindFirstSlackInstallation,
+  mockGetSessionForFastConversation,
   mockConsumePending,
   mockRequeuePending,
   mockRetrySupersededPrReviewAction,
@@ -42,6 +43,7 @@ const {
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
   mockFindFirstSlackInstallation: vi.fn(),
+  mockGetSessionForFastConversation: vi.fn(),
   mockConsumePending: vi.fn(),
   mockRequeuePending: vi.fn(),
   mockRetrySupersededPrReviewAction: vi.fn(),
@@ -103,6 +105,12 @@ vi.mock('@roomote/db/server', () => ({
   desc: vi.fn(() => 'desc-order'),
   getCanonicalPrReviewAction: (...args: unknown[]) =>
     mockGetCanonicalPrReviewAction(...args),
+  getSessionForFastConversation: (...args: unknown[]) =>
+    mockGetSessionForFastConversation(...args),
+  isSessionConversationResponding: (session: {
+    respondingUntil: Date | null;
+  }) =>
+    session.respondingUntil !== null && session.respondingUntil > new Date(),
   taskRuns: { taskId: 'taskId', createdAt: 'createdAt' },
   taskPullRequests: {
     taskId: 'taskId',
@@ -299,6 +307,7 @@ describe('prReviewNotificationJob', () => {
       status: 'open',
       autoHandleFeedbackByUserId: null,
     });
+    mockGetSessionForFastConversation.mockResolvedValue(null);
     mockFindFirstSlackInstallation.mockResolvedValue({
       botAccessToken: 'xoxb-token',
     });
@@ -618,6 +627,60 @@ describe('prReviewNotificationJob', () => {
     );
     expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
     expect(mockStickyFooterPost).not.toHaveBeenCalled();
+  });
+
+  it('auto-dispatches opted-in feedback through a Telegram Fast parent', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      taskId: 'task-1',
+      payload: {
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'telegram',
+            workspaceId: '12345',
+            conversationId: '12345:77',
+            replyTarget: { channelId: '12345', threadId: '77' },
+          },
+        },
+      },
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
+    });
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      sourceControlProvider: 'github',
+      host: 'github.com',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prTitle: 'PR title',
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      status: 'open',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: null,
+      text: 'Alice requested changes on owner/repo#42.',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+    mockNotifyFastAgentParent.mockResolvedValue(true);
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockNotifyFastAgentParent.mock.calls[0]?.[0]).not.toHaveProperty(
+      'suggestedActionPrompt',
+    );
+    expect(mockDispatchFollowUp).toHaveBeenCalledWith({
+      provider: 'telegram',
+      taskId: 'task-1',
+      channelId: '12345',
+      threadId: '77',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+      actingUserId: 'user-9',
+    });
   });
 
   it('does not auto-dispatch when Fast-parent delivery fails', async () => {
@@ -977,6 +1040,8 @@ describe('prReviewNotificationJob', () => {
               text: 'Resolve these issues',
               callbackData: `prr:y:${storedNonce}`,
             }),
+          ],
+          [
             expect.objectContaining({
               text: 'Auto-resolve on this PR',
               callbackData: `prr:a:${storedNonce}`,
@@ -1549,6 +1614,68 @@ describe('prReviewNotificationJob', () => {
     });
     expect(mockConsumePending).not.toHaveBeenCalled();
     expect(mockPostMessage).not.toHaveBeenCalled();
+  });
+
+  it('posts Fast feedback while the child task runs and its parent Session is idle', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      payload: {
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'slack',
+            workspaceId: 'T123',
+            conversationId: 'C123:111.222',
+            replyTarget: { channelId: 'C123', threadId: '111.222' },
+          },
+        },
+      },
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      workerHeartbeatAt: new Date(),
+    });
+    mockGetSessionForFastConversation.mockResolvedValue({
+      respondingUntil: null,
+    });
+    mockNotifyFastAgentParent.mockResolvedValue(true);
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockSchedule).not.toHaveBeenCalled();
+    expect(mockConsumePending).toHaveBeenCalled();
+    expect(mockNotifyFastAgentParent).toHaveBeenCalled();
+  });
+
+  it('defers Fast feedback while its parent Session is responding', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      payload: {
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'slack',
+            workspaceId: 'T123',
+            conversationId: 'C123:111.222',
+            replyTarget: { channelId: 'C123', threadId: '111.222' },
+          },
+        },
+      },
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
+    });
+    mockGetSessionForFastConversation.mockResolvedValue({
+      respondingUntil: new Date(Date.now() + 60_000),
+    });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockSchedule).toHaveBeenCalledWith({
+      request: expect.objectContaining({ deferrals: 1 }),
+      delayMs: 5000,
+    });
+    expect(mockConsumePending).not.toHaveBeenCalled();
+    expect(mockNotifyFastAgentParent).not.toHaveBeenCalled();
   });
 
   it('defers during follow-up turns on a live sandbox before the cap', async () => {

@@ -270,6 +270,12 @@ export type StartAgentMailConversationResult =
         conversationId: string;
         inboxId: string;
         messageId: string | null;
+        providerThreadId: string;
+      } | null;
+      replyAnchor: {
+        inboxId: string;
+        messageId: string | null;
+        providerThreadId: string;
       } | null;
     };
 
@@ -415,7 +421,17 @@ export async function startAgentMailConversationWithResult(input: {
     );
   }
 
-  return { sent: true, conversation };
+  return {
+    sent: true,
+    conversation,
+    replyAnchor: response.thread_id
+      ? {
+          inboxId,
+          messageId: response.message_id ?? null,
+          providerThreadId: response.thread_id,
+        }
+      : null,
+  };
 }
 
 export async function startAgentMailConversation(
@@ -435,6 +451,7 @@ async function recordOutboundConversation(input: {
   conversationId: string;
   inboxId: string;
   messageId: string | null;
+  providerThreadId: string;
 } | null> {
   if (!input.providerThreadId) {
     return null;
@@ -512,6 +529,7 @@ async function recordOutboundConversation(input: {
     conversationId: conversation.id,
     inboxId: input.inboxId,
     messageId: input.messageId,
+    providerThreadId: input.providerThreadId,
   };
 }
 

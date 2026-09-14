@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
+import { useSessionNavigationState } from '@/hooks/useSessionNavigationState';
 import { parseSessionArtifactSearchParams } from '@/lib/artifact-view-urls';
 import type { SessionArtifactViewerSelection } from './session-task-panel-context';
 
@@ -370,6 +371,7 @@ export function useSessionWorkspacePanels({
 }: SessionWorkspacePanelControllerOptions) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const navigationState = useSessionNavigationState();
   const selectedTaskId = searchParams.get('task');
   const selectedPanelTaskId =
     selectedTaskId && taskIds.includes(selectedTaskId) ? selectedTaskId : null;
@@ -386,6 +388,16 @@ export function useSessionWorkspacePanels({
   );
   const knownTaskIdsRef = useRef<string[] | null>(null);
   const widePanelsSeededRef = useRef(false);
+
+  useEffect(() => {
+    if (selectedPanelTaskId) {
+      navigationState?.setTaskPanelDismissed(
+        sessionId,
+        selectedPanelTaskId,
+        false,
+      );
+    }
+  }, [navigationState, selectedPanelTaskId, sessionId]);
 
   const replaceSearchParams = useCallback(
     (update: (params: URLSearchParams) => void) => {
@@ -419,13 +431,17 @@ export function useSessionWorkspacePanels({
   useEffect(() => {
     if (!isMdOrLarger || workspaceWidth <= 0) return;
 
+    const dismissedTaskPanelIds =
+      navigationState?.getDismissedTaskPanelIds(sessionId);
     const previousTaskIds = knownTaskIdsRef.current;
     knownTaskIdsRef.current = taskIds;
     if (!widePanelsSeededRef.current && taskPanelCapacity >= 2) {
       widePanelsSeededRef.current = true;
       dispatch({
         type: 'seed-wide-panels',
-        taskIds,
+        taskIds: dismissedTaskPanelIds
+          ? taskIds.filter((taskId) => !dismissedTaskPanelIds.has(taskId))
+          : taskIds,
         selectedTaskId: selectedPanelTaskId,
       });
       return;
@@ -434,7 +450,8 @@ export function useSessionWorkspacePanels({
 
     const previousTaskIdSet = new Set(previousTaskIds);
     const newTaskIds = taskIds.filter(
-      (taskId) => !previousTaskIdSet.has(taskId),
+      (taskId) =>
+        !previousTaskIdSet.has(taskId) && !dismissedTaskPanelIds?.has(taskId),
     );
     if (newTaskIds.length === 0) return;
     dispatch({
@@ -445,7 +462,9 @@ export function useSessionWorkspacePanels({
     });
   }, [
     isMdOrLarger,
+    navigationState,
     selectedPanelTaskId,
+    sessionId,
     taskIds,
     taskPanelCapacity,
     workspaceWidth,
@@ -453,6 +472,7 @@ export function useSessionWorkspacePanels({
 
   const openTaskPanel = useCallback(
     (taskId: string) => {
+      navigationState?.setTaskPanelDismissed(sessionId, taskId, false);
       dispatch({
         type: 'open-task',
         taskId,
@@ -467,7 +487,13 @@ export function useSessionWorkspacePanels({
         selectTask(taskId);
       }
     },
-    [selectedPanelTaskId, selectTask, taskPanelCapacity],
+    [
+      navigationState,
+      selectedPanelTaskId,
+      selectTask,
+      sessionId,
+      taskPanelCapacity,
+    ],
   );
   const openTasksPanel = useCallback(() => {
     if (singleRunningTaskId) {
@@ -477,15 +503,16 @@ export function useSessionWorkspacePanels({
     }
     dispatch({ type: 'open-tasks-utility' });
   }, [selectTask, singleRunningTaskId]);
-  const openTasksSideBySide = useCallback(
-    () =>
-      dispatch({
-        type: 'open-tasks-side-by-side',
-        taskIds,
-        selectedTaskId: selectedPanelTaskId,
-      }),
-    [selectedPanelTaskId, taskIds],
-  );
+  const openTasksSideBySide = useCallback(() => {
+    for (const taskId of taskIds) {
+      navigationState?.setTaskPanelDismissed(sessionId, taskId, false);
+    }
+    dispatch({
+      type: 'open-tasks-side-by-side',
+      taskIds,
+      selectedTaskId: selectedPanelTaskId,
+    });
+  }, [navigationState, selectedPanelTaskId, sessionId, taskIds]);
   const showMain = useCallback(() => {
     dispatch({ type: 'show-main' });
     selectTask(null);
@@ -512,6 +539,7 @@ export function useSessionWorkspacePanels({
   }, []);
   const closeTaskPanel = useCallback(
     (taskId: string) => {
+      navigationState?.setTaskPanelDismissed(sessionId, taskId, true);
       dispatch({
         type: 'close-task',
         taskId,
@@ -519,11 +547,12 @@ export function useSessionWorkspacePanels({
       });
       if (taskId === selectedPanelTaskId) selectTask(null);
     },
-    [selectedPanelTaskId, selectTask],
+    [navigationState, selectedPanelTaskId, selectTask, sessionId],
   );
   const selectPanelTask = useCallback(
     (currentTaskId: string, nextTaskId: string) => {
       if (currentTaskId === nextTaskId) return;
+      navigationState?.setTaskPanelDismissed(sessionId, nextTaskId, false);
       dispatch({
         type: 'select-panel-task',
         currentTaskId,
@@ -533,7 +562,7 @@ export function useSessionWorkspacePanels({
       if (currentTaskId === selectedPanelTaskId) selectTask(nextTaskId);
       else if (nextTaskId === selectedPanelTaskId) selectTask(currentTaskId);
     },
-    [selectedPanelTaskId, selectTask],
+    [navigationState, selectedPanelTaskId, selectTask, sessionId],
   );
   const openTaskArtifact = useCallback(
     (taskId: string, path: string, version?: number) =>

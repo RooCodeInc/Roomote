@@ -48,10 +48,7 @@ describe('task board', () => {
     ).toBe('needs-input');
   });
 
-  it('groups goal blockers and failures together', () => {
-    expect(getTaskBoardColumn(createTask({ goalStatus: 'blocked' }))).toBe(
-      'blocked',
-    );
+  it('groups failed tasks as blocked', () => {
     expect(getTaskBoardColumn(createTask({ state: 'failed' }))).toBe('blocked');
   });
 

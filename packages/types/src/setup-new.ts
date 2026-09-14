@@ -158,6 +158,10 @@ export function isSetupStarterTaskId(
  */
 export type SetupNewSetupSession = {
   workflowVersion: number;
+  /** Missing on pre-discovery sessions; null means the optional conversation is pending. */
+  integrationDiscoveryCompletedAt?: string | null;
+  /** Missing on older sessions; null means source control is still undecided. */
+  sourceControlSkippedAt?: string | null;
   /** Unified (canonical) session ID shown in routes and transcript. */
   sessionId: string;
   startedAt: string;
@@ -177,6 +181,8 @@ export function createSetupNewSetupSession(input: {
     sessionId: input.sessionId,
     startedAt: input.startedAt ?? new Date().toISOString(),
     starterTaskSelection: null,
+    integrationDiscoveryCompletedAt: null,
+    sourceControlSkippedAt: null,
   };
 }
 
@@ -208,10 +214,18 @@ export function normalizeSetupNewSetupSession(
     const selection = record.starterTaskSelection as Record<string, unknown>;
     const requestId = asNonEmptyString(selection.requestId);
     const selectedAt = asIsoTimestamp(selection.selectedAt);
-    const taskIds = Array.isArray(selection.taskIds)
-      ? [...new Set(selection.taskIds.filter(isSetupStarterTaskId))]
+    const persistedTaskIds = Array.isArray(selection.taskIds)
+      ? selection.taskIds
+      : null;
+    const taskIds = persistedTaskIds
+      ? [...new Set(persistedTaskIds.filter(isSetupStarterTaskId))]
       : [];
-    if (requestId && selectedAt && taskIds.length > 0) {
+    if (
+      requestId &&
+      selectedAt &&
+      persistedTaskIds &&
+      (persistedTaskIds.length === 0 || taskIds.length > 0)
+    ) {
       starterTaskSelection = { requestId, taskIds, selectedAt };
     }
   }
@@ -228,6 +242,24 @@ export function normalizeSetupNewSetupSession(
     sessionId,
     startedAt,
     starterTaskSelection,
+    ...(record.integrationDiscoveryCompletedAt === null
+      ? { integrationDiscoveryCompletedAt: null }
+      : asIsoTimestamp(record.integrationDiscoveryCompletedAt)
+        ? {
+            integrationDiscoveryCompletedAt: asIsoTimestamp(
+              record.integrationDiscoveryCompletedAt,
+            ),
+          }
+        : {}),
+    ...(record.sourceControlSkippedAt === null
+      ? { sourceControlSkippedAt: null }
+      : asIsoTimestamp(record.sourceControlSkippedAt)
+        ? {
+            sourceControlSkippedAt: asIsoTimestamp(
+              record.sourceControlSkippedAt,
+            ),
+          }
+        : {}),
   };
 }
 

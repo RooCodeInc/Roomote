@@ -19,6 +19,7 @@ const { state, createMock, updateMock, deleteMock, saveManualMock } =
           content: '# My skill body',
           canManage: true,
           createdByName: 'Me',
+          version: 3,
         },
         {
           id: '00000000-0000-4000-8000-000000000002',
@@ -27,6 +28,7 @@ const { state, createMock, updateMock, deleteMock, saveManualMock } =
           content: '# Shared skill body',
           canManage: false,
           createdByName: 'Teammate',
+          version: 1,
         },
       ],
       environments: [
@@ -338,6 +340,7 @@ it('updates a creator skill and invalidates the catalog', async () => {
   await waitFor(() => expect(updateMock).toHaveBeenCalled());
   expect(updateMock.mock.calls[0]?.[0]).toMatchObject({
     skillId: state.skills[0]!.id,
+    expectedVersion: 3,
     content: '# Updated body\n',
   });
   await waitFor(() =>

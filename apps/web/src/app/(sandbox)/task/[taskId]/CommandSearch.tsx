@@ -25,13 +25,9 @@ interface SlashCommand {
   description?: string;
 }
 
-const AVAILABLE_COMMANDS: SlashCommand[] = [
-  {
-    name: '/goal',
-    description: 'Keep working toward an objective across multiple turns',
-  },
-  ...PACKAGED_SKILL_INVOCATIONS.map((name) => ({ name: `/${name}` })),
-];
+const AVAILABLE_COMMANDS: SlashCommand[] = PACKAGED_SKILL_INVOCATIONS.map(
+  (name) => ({ name: `/${name}` }),
+);
 
 export const CommandSearch = ({
   open,

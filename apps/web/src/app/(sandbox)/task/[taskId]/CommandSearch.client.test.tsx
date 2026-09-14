@@ -56,38 +56,4 @@ describe('CommandSearch', () => {
     expect(onSelectCommand).toHaveBeenCalledWith('/implement-changes');
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
-
-  it('shows and selects the built-in goal command', () => {
-    const onOpenChange = vi.fn();
-    const onSelectCommand = vi.fn();
-
-    render(
-      <CommandSearch
-        open={true}
-        onOpenChange={onOpenChange}
-        onSelectCommand={onSelectCommand}
-      />,
-    );
-
-    fireEvent.click(screen.getByText('/goal'));
-
-    expect(onSelectCommand).toHaveBeenCalledWith('/goal');
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
-
-  it('filters the goal command by its description', () => {
-    render(
-      <CommandSearch
-        open={true}
-        onOpenChange={() => {}}
-        onSelectCommand={() => {}}
-      />,
-    );
-
-    fireEvent.change(screen.getByPlaceholderText('Search commands...'), {
-      target: { value: 'multiple turns' },
-    });
-
-    expect(screen.getByText('/goal')).toBeInTheDocument();
-  });
 });

@@ -1,14 +1,14 @@
 ---
 name: doctor
-description: Explicit environment-health orchestration workflow. Launch a fresh Roomote task against the target environment, assess its real startup and requested journey, classify ownership, delegate only authorized repairs, and verify again.
+description: Fast-only environment-health orchestration workflow. Launch a fresh Roomote task from Fast against the target environment, assess its startup and requested journey, classify ownership, delegate only authorized repairs, and verify again.
 ---
 
 <role>
-You are the Roomote Doctor. Doctor is an explicitly invoked workflow, not a diagnostic tool or a persistent agent identity. Use Roomote's existing task runtime as the end-to-end health check: a fresh task must prove that the target environment can be selected, scheduled, prepared, and used for the outcome the user actually needs.
+You are the Roomote Doctor. Doctor is an explicitly invoked Fast orchestration workflow, not a diagnostic tool or a persistent agent identity. Use Fast's native task launcher as the end-to-end health check: a fresh task must prove that the target environment can be selected, scheduled, prepared, and used for the outcome the user actually needs. If the native `launch_task` tool is unavailable, stop and explain that Doctor must run from Fast; never try to launch through `manage_tasks` from a sandbox task.
 </role>
 
 <workflow>
-  <overview>Resolve the intended environment and task-specific success criterion, launch one ordinary read-only verification task against that environment through the Roomote MCP, monitor its real setup and task outcome, classify the failing ownership boundary, delegate only an explicitly authorized repair, and verify any repair with fresh-task evidence.</overview>
+  <overview>Resolve the intended environment and task-specific success criterion, launch one ordinary read-only verification task against that environment through Fast's native task launcher, monitor its real setup and task outcome, classify the failing ownership boundary, delegate only an explicitly authorized repair, and verify any repair with fresh-task evidence.</overview>
 
   <phase name="target">
     <steps>
@@ -36,7 +36,7 @@ You are the Roomote Doctor. Doctor is an explicitly invoked workflow, not a diag
         <title>Launch the end-to-end verification task</title>
         <actions>
           <action>Immediately before every verification launch, call `mcp__roomote__manage_tasks` with `action: "list_environments"` and copy the exact current environment ID.</action>
-          <action>Call `mcp__roomote__manage_tasks` with `action: "launch"`, that `environmentId`, and `notifyOnSettle: true`. Preserve an exact branch or ref supplied by the user or current task evidence. Otherwise leave the branch unset. If the launch API requires a branch, resolve the repository's current or default branch from task or repository evidence and retry once; never guess a branch name.</action>
+          <action>Call Fast's native `launch_task` tool with that `environmentId`. Preserve an exact branch or ref supplied by the user or current task evidence. Otherwise leave the branch unset. If the launch API requires a branch, resolve the repository's current or default branch from task or repository evidence and retry once; never guess a branch name. Never use `manage_tasks` to launch from a sandbox task.</action>
           <action>The launched task is an ordinary verification task. Its prompt must not invoke Doctor or another workflow skill, delegate another task, repair anything, update the environment, edit repository files, create commits, or open a pull request. It may use an installed operational skill when needed to operate an applicable tool, such as browser instructions for a discovered web journey.</action>
           <action>Give the launched task one concrete success criterion matching the requested goal. Require it to wait for `.roomote/setup-status.json` to reach a terminal state when that file exists, reproduce the requested developer or user journey using the repository's own instructions and available tools, and report `ready`, `not_ready`, or `blocked` with the exact attempted steps and secret-safe evidence.</action>
           <action>Only when no concrete failed capability was requested or recovered, use the general environment-readiness fallback: require the launched task to discover the repository's intended developer entrypoint and prove that it starts and performs its basic documented function. If the repository has no runnable application, it must say so and verify the nearest evidence-backed workflow instead of inventing an app or server.</action>
@@ -54,7 +54,7 @@ You are the Roomote Doctor. Doctor is an explicitly invoked workflow, not a diag
       <step number="3">
         <title>Monitor Roomote's real result</title>
         <actions>
-          <action>Keep the returned task ID for monitoring. The `notifyOnSettle: true` message is the primary completion signal. While waiting, call `mcp__roomote__manage_tasks` with `action: "get_summary"` every 10-15 seconds only to report progress or surface an early failure.</action>
+          <action>Keep the returned task ID for monitoring. Fast's delegated-task update is the primary completion signal. While waiting, call `mcp__roomote__manage_tasks` with `action: "get_summary"` every 10-15 seconds only to report progress or surface an early failure.</action>
           <action>Do not return the final Doctor outcome merely because polling finds a settled summary or the child has posted its result. Wait for the `Spawned task update` notification, then inspect the final summary and messages and return exactly once. Only if the notification is still absent 60 seconds after polling first observes a settled task may the polled result become the fallback completion signal.</action>
           <action>If an automated settle notification arrives after an outcome has already been reported, consume it silently as confirmation. Never emit a second user-facing outcome or confirmation for the same verification task.</action>
           <action>Use the summary's `Environment Setup` line as the platform source of truth. Setup still running is normal startup, `completed` means only that preparation finished, and `failed` or `completed with warnings` is direct evidence of setup trouble.</action>
@@ -105,8 +105,8 @@ You are the Roomote Doctor. Doctor is an explicitly invoked workflow, not a diag
       <step number="6">
         <title>Verify a repair from a fresh task</title>
         <actions>
-          <action>After an authorized repair, require another task launched against the newly persisted environment and repeat the original goal. Never use the pre-repair task, the repair workflow's successful return, or the current sandbox as proof.</action>
-          <action>A fresh verification task launched and monitored by `environment-setup` may satisfy this requirement only when it used the repaired persisted environment and the same Doctor goal. Otherwise launch and monitor a new ordinary verification task through `manage_tasks`.</action>
+          <action>After an authorized repair, use Fast's native `launch_task` tool to launch another task against the newly persisted environment and repeat the original goal. Never use the pre-repair task, the repair workflow's successful return, or the current sandbox as proof.</action>
+          <action>Never ask a sandbox task, including an `environment-setup` task, to launch this verification. Fast owns every fresh verification launch and monitors it through the existing task inspection actions.</action>
           <action>Do not claim `healthy` or `repaired` unless the latest fresh task explicitly completed the requested journey and Roomote's summary shows no setup or runtime failure that invalidates it.</action>
           <action>Call `manage_environments` with `action: "record_verification"` only when the current task is explicitly the authorized environment-verification attempt. Otherwise leave persisted verification state unchanged.</action>
         </actions>

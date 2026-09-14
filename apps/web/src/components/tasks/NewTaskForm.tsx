@@ -46,7 +46,11 @@ type FastSessionSubmission = {
 type NewTaskFormProps = {
   animate?: boolean;
   onTaskStarted?: () => void;
+  initialPrompt?: string;
   placeholder?: string;
+  promptSuggestion?: string;
+  onPromptFocusChange?: (focused: boolean) => void;
+  autoFocus?: boolean;
   textareaMaxHeight?: number;
   promptContainerRef?: Ref<HTMLDivElement>;
 };
@@ -54,7 +58,11 @@ type NewTaskFormProps = {
 export function NewTaskForm({
   animate = true,
   onTaskStarted,
+  initialPrompt = '',
   placeholder = DEFAULT_PROMPT_PLACEHOLDER,
+  promptSuggestion,
+  onPromptFocusChange,
+  autoFocus = true,
   textareaMaxHeight,
   promptContainerRef,
 }: NewTaskFormProps) {
@@ -68,7 +76,8 @@ export function NewTaskForm({
   const modelParam = searchParams.get('model')?.trim() || undefined;
   const environmentIdParam = searchParams.get('environmentId')?.trim() ?? '';
 
-  const [promptText, setPromptText] = useState(promptParam);
+  const initialPromptText = promptParam || initialPrompt;
+  const [promptText, setPromptText] = useState(initialPromptText);
   const [selectedModelOverrideId, setSelectedModelOverrideId] = useState<
     string | undefined
   >(modelParam);
@@ -76,7 +85,7 @@ export function NewTaskForm({
     ReasoningEffort | null | undefined
   >(undefined);
 
-  useEffect(() => setPromptText(promptParam), [promptParam]);
+  useEffect(() => setPromptText(initialPromptText), [initialPromptText]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
   const startFastSessionMutation = useStartFastSession();
@@ -107,9 +116,14 @@ export function NewTaskForm({
             ...payload,
             conversationId,
           });
-        if (payload.text || payload.images?.length) {
+        if (
+          payload.text ||
+          payload.images?.length ||
+          payload.attachmentTexts?.length
+        ) {
           stagePendingFastSessionLaunch(sessionId, {
             fastConversationId: fastConversationId ?? conversationId,
+            presenceClientId: conversationId,
             text: payload.text,
             images: payload.images,
           });
@@ -299,13 +313,15 @@ export function NewTaskForm({
       }
     >
       <TaskPromptInput
-        promptKey={promptParam}
+        promptKey={initialPromptText}
         isBusy={isBusy}
         promptText={promptText}
         onPromptTextChange={setPromptText}
         onSubmit={handleSubmit}
         placeholder={placeholder}
-        autoFocus
+        promptSuggestion={promptSuggestion}
+        onPromptFocusChange={onPromptFocusChange}
+        autoFocus={autoFocus}
         textareaMaxHeight={textareaMaxHeight}
         animateContainer={false}
         submitWithMetaKey={false}

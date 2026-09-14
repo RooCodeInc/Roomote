@@ -8,7 +8,6 @@ import type {
   AcpTurnCompletedEvent,
   TaskEnvVarRequestVariable,
   TaskEvent,
-  TaskGoal,
 } from '@roomote/types';
 
 /** Internal task-message signal for an unrecoverable provider failure. */
@@ -46,7 +45,6 @@ export interface StartNewTaskCommand {
     userName?: string;
     userImageUrl?: string;
     clientMessageId?: string;
-    goalContext?: TaskGoal;
     configuration?: Record<string, unknown>;
     newTab?: boolean;
   };
@@ -66,7 +64,6 @@ export interface SendMessageCommand {
     userName?: string;
     userImageUrl?: string;
     clientMessageId?: string;
-    goalContext?: TaskGoal;
   };
 }
 
@@ -81,7 +78,6 @@ export interface QueuedPromptMessageSnapshot {
   userName?: string;
   userImageUrl?: string;
   clientMessageId?: string;
-  goalContext?: TaskGoal;
   timestamp: number;
 }
 

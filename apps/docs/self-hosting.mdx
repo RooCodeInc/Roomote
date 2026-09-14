@@ -12,9 +12,10 @@ control.
 
 Choose the fastest path for your team. Every deployment needs model inference:
 use hosting-provisioned Roomote inference when it is offered, or connect a
-ChatGPT subscription or inference provider API key. You also need source control
-and a sandbox provider. Connect communications providers and other tools when
-your team needs them.
+ChatGPT subscription or inference provider API key. Source control is optional.
+Connect it when Roomote should work on repositories, and configure a sandbox
+provider only when you are ready to run coding work. Connect communications
+providers and other tools when your team needs them.
 
 <Tip>
   Asking a coding agent to install Roomote? Send it this page. Agents should
@@ -42,9 +43,10 @@ Running Roomote on Proxmox or another server at home? Follow the
 [Homelab deployment guide](/homelab) for VM sizing, Tailscale administration,
 public ingress, and a prompt that a local agent can follow.
 
-By the end of setup, you should have a reachable Roomote URL, sign-in, a
-source-control provider, managed Roomote inference or a connected inference
-provider, at least one environment, and a first reviewable Roomote task.
+By the end of setup, you should have a reachable Roomote URL, sign-in, and
+managed Roomote inference or a connected inference provider. Repository access,
+an environment, and a first reviewable task are optional until you choose coding
+work.
 
 The canonical, always up-to-date guide for operating your own server lives in
 [`SELF_HOSTING.md`](https://github.com/RooCodeInc/Roomote/blob/main/SELF_HOSTING.md)
@@ -60,9 +62,11 @@ curl -fsSL https://get.roomote.dev | sudo bash
 
 The installer brings up the full stack from published images and prints a setup
 link. Open it in a browser to create the first administrator and configure
-inference. Roomote then opens a persistent setup conversation where trusted
-cards guide you through source control, your first task, a sandbox provider,
-and recommended automations.
+inference. Roomote then opens a persistent setup conversation. You can connect
+or skip source control, choose useful integrations, and continue talking without
+a repository. With synchronized repositories, Roomote offers starter work and
+then repository-aware automations. A sandbox is requested only when selected
+coding work needs to launch.
 
 No DNS setup is needed to try it out; pass `--domain roomote.example.com` for a
 production install on your own domain.
@@ -84,12 +88,13 @@ Have these ready before setup asks for them:
   callbacks need to reach it
 - a sign-in provider for the people who will use the deployment
 - a source-control provider account with permission to install or configure the
-  app for the repositories Roomote should reach
+  app, if Roomote should work on repositories
 - a ChatGPT subscription or inference provider API key, such as OpenRouter,
   Anthropic, or OpenAI, unless your host already provisioned Roomote inference
 - a communications provider workspace, such as Slack, Microsoft Teams,
   Telegram, or Discord, if your team wants to start work from chat
-- at least one repository that can become the first Roomote environment
+- at least one repository that can become the first Roomote environment, if you
+  want to launch coding work during setup
 
 ## Day-2 operations
 
@@ -196,20 +201,43 @@ Roomote surfaces release history and available updates in the web app:
 ## Verify the deployment
 
 After sign-in and inference are ready, setup continues entirely in a persistent
-conversation with Roomote. Trusted action cards appear beside the relevant
-messages for source control, first work, sandbox configuration, and automation
-recommendations. Detailed provider instructions and credential entry open in a
-dialog from the source-control card; Roomote never asks for credentials in
-chat.
+conversation with Roomote. Roomote suggests the next useful capability in a
+recommended order and presents its trusted action card in the conversation.
+Cards are non-blocking: the message composer remains available, and you can
+continue talking without completing a card. Source control, integrations,
+starter work, sandbox configuration, and automation recommendations can also be
+offered later when a new request would benefit from them. Choosing **Not now**
+advances the initial setup conversation; it does not permanently disable that
+capability or prevent Roomote from suggesting it for a later goal.
 
-Setup completes once inference and a sandbox provider are ready, source control
-is successfully configured, and at least one repository has synchronized.
-Roomote then offers preselected starter tasks in one structured multi-select
-question. Starter work is optional and does not gate setup completion; selected
-work launches visibly in the same session. A launch failure does not reopen
-setup; ask Roomote to retry that item. Automation recommendations are analyzed
-after repository sync and appear only after at least one starter task launches.
-They remain optional.
+Detailed provider instructions and credential entry open in trusted dialogs;
+Roomote never asks for credentials in chat. Only deployment administrators can
+use configuration cards. Other members need an administrator to configure a
+missing capability.
+
+After the source-control decision, Roomote normally offers integrations next.
+The optional integrations card lists supported, disconnected tools and opens
+their secure configuration without leaving the conversation. If you already
+named a tool, Roomote can narrow the card to matching supported integrations.
+If there are no eligible matches, setup moves on without showing suggestions.
+Tools without a built-in connector are not presented as supported. Use
+**Keep going** to move on without connecting; you can connect tools later in
+Settings. Integration choices do not change the starter tasks offered.
+Services that are also source-control, communications, inference, or sandbox
+providers are excluded from this optional step; their separate setup is unchanged.
+The Vercel deployments integration remains available separately from Vercel AI
+Gateway inference.
+
+Without source control, setup completes after you connect or skip integrations;
+no sandbox is required. Roomote continues with useful integration-based ideas
+instead of repository starter tasks or automations. With synchronized
+repositories, Roomote offers starter work after integrations. Choosing **Not
+now** completes that initial decision without a sandbox. Selected starter work
+waits for a sandbox, then Roomote
+attempts every launch and completes setup even if one fails; ask Roomote to
+retry a failed item. Automation analysis can begin after repository sync, but
+recommendations appear only after integrations and the starter-task decision.
+They never gate completion.
 
 After setup, run a small task that uses the first environment if you did not
 start one from the starter list. A healthy deployment should let you:

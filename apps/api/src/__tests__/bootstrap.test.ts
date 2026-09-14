@@ -33,6 +33,17 @@ function stubDeclarativeEnvironmentsBootstrap() {
   };
 }
 
+function stubTelegramCommandRegistration() {
+  const refreshTelegramCommandMenuAtBoot = vi.fn().mockResolvedValue(undefined);
+
+  return {
+    refreshTelegramCommandMenuAtBoot,
+    loadTelegramCommandRegistration: async () => ({
+      refreshTelegramCommandMenuAtBoot,
+    }),
+  };
+}
+
 describe('runApiServer', () => {
   it('captures startup failures when loading the server module throws', async () => {
     const captureException = vi.fn();
@@ -51,6 +62,8 @@ describe('runApiServer', () => {
           .loadDeclarativeEnvironmentsBootstrap,
       loadEnsureArtifactsBucket:
         stubEnsureArtifactsBucket().loadEnsureArtifactsBucket,
+      loadTelegramCommandRegistration:
+        stubTelegramCommandRegistration().loadTelegramCommandRegistration,
       captureException,
       flushSentry,
       logError,
@@ -80,18 +93,24 @@ describe('runApiServer', () => {
       bootstrapDeclarativeEnvironments,
       loadDeclarativeEnvironmentsBootstrap,
     } = stubDeclarativeEnvironmentsBootstrap();
+    const {
+      refreshTelegramCommandMenuAtBoot,
+      loadTelegramCommandRegistration,
+    } = stubTelegramCommandRegistration();
 
     await runApiServer({
       loadStartApiServer: async () => ({ startApiServer }),
       loadAuthKeypairsBootstrap,
       loadDeclarativeEnvironmentsBootstrap,
       loadEnsureArtifactsBucket,
+      loadTelegramCommandRegistration,
     });
 
     expect(bootstrapGeneratedAuthKeypairs).toHaveBeenCalledTimes(1);
     expect(ensureArtifactsBucketAtBoot).toHaveBeenCalledTimes(1);
     expect(bootstrapDeclarativeEnvironments).toHaveBeenCalledTimes(1);
     expect(startApiServer).toHaveBeenCalledTimes(1);
+    expect(refreshTelegramCommandMenuAtBoot).toHaveBeenCalledTimes(1);
     expect(
       bootstrapGeneratedAuthKeypairs.mock.invocationCallOrder[0],
     ).toBeLessThan(ensureArtifactsBucketAtBoot.mock.invocationCallOrder[0]!);
@@ -123,6 +142,8 @@ describe('runApiServer', () => {
       }),
       loadEnsureArtifactsBucket:
         stubEnsureArtifactsBucket().loadEnsureArtifactsBucket,
+      loadTelegramCommandRegistration:
+        stubTelegramCommandRegistration().loadTelegramCommandRegistration,
       captureException,
       flushSentry,
       logError,
@@ -142,6 +163,44 @@ describe('runApiServer', () => {
     );
   });
 
+  it('keeps the API server running when Telegram command refresh fails', async () => {
+    const captureException = vi.fn();
+    const logError = vi.fn();
+    const exitProcess = vi.fn() as unknown as (code?: number) => never;
+    const startApiServer = vi.fn().mockResolvedValue(undefined);
+
+    await runApiServer({
+      loadStartApiServer: async () => ({ startApiServer }),
+      loadAuthKeypairsBootstrap:
+        stubAuthKeypairsBootstrap().loadAuthKeypairsBootstrap,
+      loadDeclarativeEnvironmentsBootstrap:
+        stubDeclarativeEnvironmentsBootstrap()
+          .loadDeclarativeEnvironmentsBootstrap,
+      loadEnsureArtifactsBucket:
+        stubEnsureArtifactsBucket().loadEnsureArtifactsBucket,
+      loadTelegramCommandRegistration: async () => ({
+        refreshTelegramCommandMenuAtBoot: vi
+          .fn()
+          .mockRejectedValue(new Error('Telegram unavailable')),
+      }),
+      captureException,
+      logError,
+      exitProcess,
+    });
+
+    expect(startApiServer).toHaveBeenCalledTimes(1);
+    expect(exitProcess).not.toHaveBeenCalled();
+    expect(captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Telegram unavailable' }),
+      undefined,
+      { phase: 'telegram-commands' },
+    );
+    expect(logError).toHaveBeenCalledWith(
+      'Failed to refresh Telegram command menu',
+      expect.objectContaining({ message: 'Telegram unavailable' }),
+    );
+  });
+
   it('reports skipped declarative definitions without failing startup', async () => {
     const captureException = vi.fn();
     const startApiServer = vi.fn().mockResolvedValue(undefined);
@@ -157,6 +216,8 @@ describe('runApiServer', () => {
       }),
       loadEnsureArtifactsBucket:
         stubEnsureArtifactsBucket().loadEnsureArtifactsBucket,
+      loadTelegramCommandRegistration:
+        stubTelegramCommandRegistration().loadTelegramCommandRegistration,
       captureException,
     });
 
@@ -189,6 +250,8 @@ describe('runApiServer', () => {
           .loadDeclarativeEnvironmentsBootstrap,
       loadEnsureArtifactsBucket:
         stubEnsureArtifactsBucket().loadEnsureArtifactsBucket,
+      loadTelegramCommandRegistration:
+        stubTelegramCommandRegistration().loadTelegramCommandRegistration,
       captureException,
       flushSentry,
       logError,

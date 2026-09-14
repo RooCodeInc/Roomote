@@ -430,6 +430,7 @@ describe('manage custom automations tool contract', () => {
           kind: 'verified',
         },
       ],
+      defaultTarget: null,
     });
     expect(
       buildManageCustomAutomationsRequest({

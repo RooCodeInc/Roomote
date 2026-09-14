@@ -1,7 +1,9 @@
+import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 import {
   db,
   eq,
   fastAgentConversations,
+  fastAgentMessages,
   listSessionWakeups,
   sessionWakeups,
   userFactory,
@@ -11,7 +13,10 @@ import {
 import { enqueueSessionWakeupFireBestEffort } from './queue';
 import {
   ensureOwnTaskFollowThroughWakeup,
+  ensureSessionGoalContinuationWakeup,
+  cancelSessionGoalContinuationWakeups,
   handleManageWakeupsToolCall,
+  refreshOwnTaskFollowThroughWakeupCadence,
   type SessionWakeupActor,
 } from './service';
 
@@ -119,6 +124,24 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
       expect(enqueueSessionWakeupFireBestEffort).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('schedules and cancels the internal Session goal continuation', async () => {
+    const created = await ensureSessionGoalContinuationWakeup(actor);
+
+    expect(created).toMatchObject({
+      duplicate: false,
+      wakeup: {
+        name: 'Continue pursuing session goal',
+        internal: true,
+        reportPolicy: 'only_when_notable',
+        schedule: { mode: 'once', inMinutes: 1 },
+      },
+    });
+    await cancelSessionGoalContinuationWakeups(actor.conversationId);
+    await expect(
+      listSessionWakeups(actor.conversationId),
+    ).resolves.toHaveLength(0);
+  });
 
   it('deduplicates equivalent seconds and minutes schedules', async () => {
     const nextRunAt = new Date(now.getTime() + 60_000);
@@ -236,5 +259,91 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
         }),
       ]),
     );
+  });
+
+  it('schedules and deduplicates voice follow-through at one minute', async () => {
+    await db.insert(fastAgentMessages).values({
+      conversationId: actor.conversationId,
+      eventId: 'voice-call:started',
+      turnId: 'voice-call:started',
+      turnSeq: 0,
+      ts: now.getTime(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.VoiceCall,
+      role: 'system',
+      payload: { phase: 'started' },
+    });
+
+    const created = await ensureOwnTaskFollowThroughWakeup(actor);
+    const duplicate = await ensureOwnTaskFollowThroughWakeup(actor);
+
+    expect(created).toMatchObject({
+      duplicate: false,
+      wakeup: {
+        schedule: { mode: 'once', inMinutes: 1 },
+        nextRunAt: new Date(now.getTime() + 60_000).toISOString(),
+        internal: true,
+      },
+    });
+    expect(duplicate).toMatchObject({
+      duplicate: true,
+      wakeup: { id: created.wakeup.id },
+    });
+    expect(await listSessionWakeups(actor.conversationId)).toHaveLength(1);
+    expect(enqueueSessionWakeupFireBestEffort).toHaveBeenCalledOnce();
+  });
+
+  it('rearms at one minute in voice mode, then returns to ten minutes when the call ends', async () => {
+    await db.insert(fastAgentMessages).values({
+      conversationId: actor.conversationId,
+      eventId: 'voice-call:started',
+      turnId: 'voice-call:started',
+      turnSeq: 0,
+      ts: now.getTime(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.VoiceCall,
+      role: 'system',
+      payload: { phase: 'started' },
+    });
+    const initial = await ensureOwnTaskFollowThroughWakeup(actor);
+    await db
+      .update(sessionWakeups)
+      .set({ status: 'completed', nextRunAt: null })
+      .where(eq(sessionWakeups.id, initial.wakeup.id));
+
+    vi.setSystemTime(new Date(now.getTime() + 60_000));
+    const rearmed = await handleManageWakeupsToolCall(actor, {
+      ...ownTaskFollowThroughInput,
+      internal: true,
+    });
+    expect(rearmed).toMatchObject({
+      success: true,
+      duplicate: false,
+      wakeup: {
+        schedule: { mode: 'once', inMinutes: 1 },
+        nextRunAt: new Date(now.getTime() + 2 * 60_000).toISOString(),
+      },
+    });
+
+    await db.insert(fastAgentMessages).values({
+      conversationId: actor.conversationId,
+      eventId: 'voice-call:ended',
+      turnId: 'voice-call:ended',
+      turnSeq: 0,
+      ts: now.getTime() + 60_000,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.VoiceCall,
+      role: 'system',
+      payload: { phase: 'ended', durationMs: 60_000 },
+    });
+    const transitioned = await refreshOwnTaskFollowThroughWakeupCadence(actor);
+
+    expect(transitioned).toMatchObject({
+      duplicate: false,
+      wakeup: {
+        schedule: { mode: 'once', inMinutes: 10 },
+        nextRunAt: new Date(now.getTime() + 11 * 60_000).toISOString(),
+      },
+    });
+    const active = await listSessionWakeups(actor.conversationId);
+    expect(active).toHaveLength(1);
+    expect(active[0]!.id).toBe(transitioned!.wakeup.id);
   });
 });

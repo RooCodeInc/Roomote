@@ -7,7 +7,9 @@ const { state, navigation, mutations } = vi.hoisted(() => ({
     query: {
       isPending: false,
       isError: false,
-      data: null as BrainSettingsData | null,
+      isFetching: false,
+      data: undefined as BrainSettingsData | undefined,
+      refetch: vi.fn(),
     },
     searchParams: new URLSearchParams(),
     pageInputs: [] as Array<{ slug: string }>,
@@ -168,7 +170,14 @@ function buildSettings(
 }
 
 beforeEach(() => {
-  state.query = { isPending: false, isError: false, data: buildSettings() };
+  state.query = {
+    isPending: false,
+    isError: false,
+    isFetching: false,
+    data: buildSettings(),
+    refetch: state.query.refetch,
+  };
+  state.query.refetch.mockClear();
   state.searchParams = new URLSearchParams();
   state.pageInputs.length = 0;
   state.listInputs.length = 0;
@@ -180,6 +189,30 @@ beforeEach(() => {
 });
 
 describe('BrainSettings', () => {
+  it('offers a disabled-aware Retry after an initial settings failure', () => {
+    state.query.data = undefined;
+    state.query.isError = true;
+
+    const { rerender } = render(<BrainSettings />);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(state.query.refetch).toHaveBeenCalledOnce();
+
+    state.query.isFetching = true;
+    rerender(<BrainSettings />);
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled();
+  });
+
+  it('keeps cached Memory settings visible when a refetch fails', () => {
+    state.query.isError = true;
+
+    render(<BrainSettings />);
+
+    expect(screen.getByText('Memory Stats')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Failed to load Memory.'),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows Memory stats, the embedded browser, and sources', () => {
     render(<BrainSettings />);
 

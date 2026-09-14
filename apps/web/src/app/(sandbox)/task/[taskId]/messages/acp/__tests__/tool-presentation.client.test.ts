@@ -876,4 +876,50 @@ describe('tool presentation policy', () => {
       }).rowVisibility,
     ).toBe('visible');
   });
+
+  it.each(['create', 'list'])(
+    'hides manage_wakeups %s receipts outside internal transcript debugging',
+    (action) => {
+      const message = toolMessage({
+        title: 'mcp__roomote__manage_wakeups',
+        kind: 'mcp',
+        isMcp: true,
+        mcpServerName: 'roomote',
+        mcpToolName: 'manage_wakeups',
+        serverName: 'roomote',
+        toolName: 'manage_wakeups',
+        rawInput: { arguments: { action } },
+      } as never);
+
+      expect(
+        resolveToolPresentationPolicy(message, {
+          showInternalMessages: false,
+        }).rowVisibility,
+      ).toBe('debug-only');
+      expect(
+        resolveToolPresentationPolicy(message, {
+          showInternalMessages: true,
+        }).rowVisibility,
+      ).toBe('visible');
+    },
+  );
+
+  it.each(['get', 'cancel'])(
+    'keeps manage_wakeups %s receipts visible in normal transcripts',
+    (action) => {
+      const message = toolMessage({
+        kind: 'mcp',
+        isMcp: true,
+        serverName: 'roomote',
+        toolName: 'manage_wakeups',
+        rawInput: { arguments: { action } },
+      } as never);
+
+      expect(
+        resolveToolPresentationPolicy(message, {
+          showInternalMessages: false,
+        }).rowVisibility,
+      ).toBe('visible');
+    },
+  );
 });

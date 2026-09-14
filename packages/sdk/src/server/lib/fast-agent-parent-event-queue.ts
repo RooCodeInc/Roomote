@@ -27,6 +27,7 @@ import {
   RunStatus,
   exitedRunStatuses,
   type FastAgentParent,
+  type FastAgentHumanFollowUpEvent,
 } from '@roomote/types';
 
 import {
@@ -43,6 +44,46 @@ export type FastAgentParentEventQueueRequest = {
   conversationId: string;
   eventKey: string;
 };
+
+function buildSetupDiscoveryCompletedEvent(
+  event: FastAgentHumanFollowUpEvent,
+): FastAgentHumanFollowUpEvent | null {
+  if (!event.setupContext) return null;
+  const snapshot = JSON.parse(event.setupContext.setupSnapshot) as Record<
+    string,
+    unknown
+  >;
+  const discovery =
+    snapshot.integrationDiscovery &&
+    typeof snapshot.integrationDiscovery === 'object' &&
+    !Array.isArray(snapshot.integrationDiscovery)
+      ? (snapshot.integrationDiscovery as Record<string, unknown>)
+      : {};
+  const nextSnapshot = {
+    ...snapshot,
+    integrationDiscovery: { ...discovery, completed: true },
+  };
+  const eventId = `${event.eventId}:integration-discovery-completed`;
+  return {
+    type: 'human_follow_up',
+    eventId,
+    currentMessageId: eventId,
+    userId: event.userId,
+    question: `<platform_event>${JSON.stringify({
+      type: 'setup_state_changed',
+      snapshot: nextSnapshot,
+      changes: [{ type: 'integration_discovery_completed' }],
+    })}</platform_event>`,
+    turnSource: 'platform_event',
+    platformEventKind: 'setup',
+    platformEventVisibility: 'required',
+    setupSession: true,
+    setupContext: {
+      ...event.setupContext,
+      setupSnapshot: JSON.stringify(nextSnapshot),
+    },
+  };
+}
 type FastAgentPullRequestOpenedEvent = Extract<
   FastAgentParentEvent,
   { type: 'pull_request_opened' }
@@ -391,6 +432,10 @@ export async function drainFastAgentParentEvents(
           conversationId: request.conversationId,
           eventKey: row.eventKey,
         };
+        const durableSetupEvent =
+          row.event.type === 'human_follow_up' && row.event.setupContext
+            ? row.event
+            : null;
         if (row.admission === 'inline') {
           // Bind the row to the lock the way the inline surfaces do, so a
           // process shutdown that aborts this turn before it reaches its own
@@ -428,6 +473,19 @@ export async function drainFastAgentParentEvents(
                     wakeFastAgentParentEventNow(wakeRequest),
                   requestDurableRetry: (retryAt: Date) =>
                     wakeFastAgentParentEventAt(wakeRequest, retryAt),
+                }
+              : {}),
+            ...(durableSetupEvent
+              ? {
+                  onSetupIntegrationDiscoveryCompleted: async () => {
+                    const continuation =
+                      buildSetupDiscoveryCompletedEvent(durableSetupEvent);
+                    if (!continuation) return;
+                    await enqueueFastAgentParentEvent({
+                      parent: row.parent,
+                      event: continuation,
+                    });
+                  },
                 }
               : {}),
           },

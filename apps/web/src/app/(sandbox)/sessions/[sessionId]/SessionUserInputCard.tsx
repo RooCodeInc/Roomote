@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react';
 import {
   parseAcpRequestUserInputPayload,
+  SETUP_INTEGRATION_CATEGORIES,
+  getSetupIntegrationQuestionId,
   type AcpRequestUserInputPayload,
 } from '@roomote/types';
 
@@ -50,6 +52,7 @@ export function SessionUserInputCard({
   isResolved,
   submission = 'session',
   cancellable = true,
+  emptySubmissionLabel,
 }: {
   sessionId: string;
   request: Pick<
@@ -59,6 +62,8 @@ export function SessionUserInputCard({
   isResolved?: boolean;
   submission?: 'session' | 'setup';
   cancellable?: boolean;
+  /** Submit no answers for an optional trusted choice while continuing setup. */
+  emptySubmissionLabel?: string;
 }) {
   const trpc = useTRPC();
   const [selections, setSelections] = useState<SelectionState>(() =>
@@ -356,7 +361,14 @@ export function SessionUserInputCard({
               })
             }
           >
-            Cancel
+            {request.questions.some((question) =>
+              SETUP_INTEGRATION_CATEGORIES.some(
+                (category) =>
+                  getSetupIntegrationQuestionId(category.id) === question.id,
+              ),
+            )
+              ? 'Skip tool setup'
+              : 'Cancel'}
           </Button>
         ) : null}
         <Button
@@ -371,6 +383,23 @@ export function SessionUserInputCard({
               ? "Let's go"
               : 'Submit'}
         </Button>
+        {emptySubmissionLabel ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={submit.isPending}
+            onClick={() =>
+              submit.mutate({
+                sessionId,
+                requestId: request.requestId,
+                answers: {},
+              })
+            }
+          >
+            {emptySubmissionLabel}
+          </Button>
+        ) : null}
       </div>
     </form>
   );

@@ -3,7 +3,10 @@ import {
   buildDiscordRequestUserInputPromptText,
   getCommunicationRequestUserInputConversationId,
   getPendingCommunicationRequestUserInput,
+  getThreadReplyFooterRecord,
+  setThreadReplyFooterRecord,
   setPendingCommunicationRequestUserInput,
+  withThreadReplyFooterLock,
   type PendingCommunicationRequestUserInput,
 } from '@roomote/communication';
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
@@ -166,7 +169,9 @@ export async function publishCommunicationRequestUserInput(params: {
         : {}),
       ...(serviceUrl ? { serviceUrl } : {}),
       text: promptText,
-      ...(provider === 'teams' || provider === 'agentmail'
+      ...(provider === 'telegram' ||
+      provider === 'teams' ||
+      provider === 'agentmail'
         ? { textFormat: 'markdown' as const }
         : {}),
       // A re-publish of the same question (worker restart, snapshot resume)
@@ -228,6 +233,7 @@ async function editCommunicationPromptMessage(params: {
       channelId: params.channelId,
       messageId: params.messageId,
       text: params.text,
+      textFormat: 'markdown',
       ...(params.buttons ? { buttons: params.buttons } : { buttons: [] }),
     });
     return params.messageId;
@@ -249,4 +255,48 @@ async function editCommunicationPromptMessage(params: {
   }
 
   return null;
+}
+
+export async function retireTelegramRequestUserInputPromptBestEffort(params: {
+  channelId: string;
+  threadId?: string | null;
+  messageId: string;
+}): Promise<void> {
+  try {
+    const adapter = await getCommunicationProviderAdapter('telegram');
+    if (!adapter || adapter.provider !== 'telegram') return;
+
+    const footerThreadId = params.threadId?.trim() || 'root';
+    await withThreadReplyFooterLock({
+      lockKey: `telegram:thread_reply_footer_lock:${params.channelId}:${footerThreadId}`,
+      fn: async (assertLock, lock) => {
+        const footer = await getThreadReplyFooterRecord(
+          'telegram',
+          params.channelId,
+          footerThreadId,
+        );
+        await assertLock();
+        if (footer && footer.messageId === params.messageId && footer.buttons) {
+          const { buttons: _buttons, ...withoutButtons } = footer;
+          await setThreadReplyFooterRecord(
+            'telegram',
+            params.channelId,
+            footerThreadId,
+            withoutButtons,
+            { keepTtl: true, lock },
+          );
+        }
+        await adapter.editMessageReplyMarkup({
+          channelId: params.channelId,
+          messageId: params.messageId,
+        });
+      },
+    });
+  } catch (error) {
+    console.warn(
+      `[CommunicationRequestUserInput] Failed to retire Telegram prompt ${params.messageId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }

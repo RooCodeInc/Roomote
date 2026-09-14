@@ -8,6 +8,7 @@ import { AcpVoiceCallMessage } from './AcpVoiceCallMessage';
 import { AcpTodoSectionMessage } from './AcpTodoSectionMessage';
 import { AcpTextMessage } from './AcpTextMessage';
 import { AcpToolMessage } from './AcpToolMessage';
+import { AcpSetupReceiptMessage } from './AcpSetupReceiptMessage';
 import { AcpUnknownMessage } from './AcpUnknownMessage';
 import { DelegatedTaskCard } from './DelegatedTaskCard';
 import { getDelegatedTaskDetails } from './delegated-task';
@@ -29,6 +30,8 @@ function AcpMessageItemBase({
   children,
 }: AcpMessageItemProps) {
   switch (msg.kind) {
+    case 'setup_receipt':
+      return <AcpSetupReceiptMessage msg={msg} />;
     case 'text':
       return <AcpTextMessage msg={msg} />;
     case 'reasoning':

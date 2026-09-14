@@ -20,7 +20,7 @@ import {
   type ThreadFooterRefreshOutcome,
   type ThreadFooterRefreshTarget,
 } from './thread-footer-refresh';
-import { chunkTelegramMarkdownAsHtml } from './telegram-format';
+import { planTelegramRichMessages } from './telegram-format';
 
 type PostedFooterRecord<T extends { messageId: string }> = T & {
   textWithoutFooter: string;
@@ -155,7 +155,11 @@ export async function refreshManagedThreadReplyFooter(params: {
       if (
         (params.provider === 'discord' && text.length > 2000) ||
         (params.provider === 'telegram' &&
-          chunkTelegramMarkdownAsHtml(text).length > 1)
+          planTelegramRichMessages({
+            text: record.textWithoutFooter,
+            footerText: current.text,
+            textFormat: 'markdown',
+          }).length > 1)
       ) {
         console.warn('[threadFooter] Retiring a footer whose carrier is full', {
           ...target,

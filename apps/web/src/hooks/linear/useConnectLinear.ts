@@ -5,6 +5,7 @@ import {
 } from '@tanstack/react-query';
 
 import { useTRPC, useTRPCClient } from '@/trpc/client';
+import { invalidateMcpIntegrationStatusQueries } from '@/hooks/mcp-connections';
 
 type UseConnectLinearOptions = Omit<
   UseMutationOptions<string, Error, void>,
@@ -28,13 +29,10 @@ export const useConnectLinear = (
       });
     },
     onSuccess: (data, variables, onMutateResult, context) => {
+      void invalidateMcpIntegrationStatusQueries(queryClient, trpc);
       queryClient.invalidateQueries({
         queryKey: trpc.linear.installation.queryKey(),
       });
-      queryClient.invalidateQueries({
-        queryKey: trpc.mcpConnections.deploymentEnablements.queryKey(),
-      });
-
       options?.onSuccess?.(data, variables, onMutateResult, context);
     },
     onError: options?.onError,

@@ -30,6 +30,7 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
+  RetryableLoadError,
   Skeleton,
 } from '@/components/system';
 
@@ -370,6 +371,8 @@ type AnalyticsStackedBarChartProps = {
   granularity: AnalyticsGranularity;
   isLoading: boolean;
   isError: boolean;
+  isRetrying: boolean;
+  onRetry: () => void;
   onResetFilters: () => void;
   onSelectSegment: (selection: {
     bucketKey: string;
@@ -386,6 +389,8 @@ export function AnalyticsStackedBarChart({
   granularity,
   isLoading,
   isError,
+  isRetrying,
+  onRetry,
   onResetFilters,
   onSelectSegment,
 }: AnalyticsStackedBarChartProps) {
@@ -448,14 +453,12 @@ export function AnalyticsStackedBarChart({
 
   if (isError) {
     return (
-      <Empty className="min-h-[320px] rounded-[24px] bg-background/20 md:min-h-[420px]">
-        <EmptyHeader>
-          <EmptyTitle>Unable to load analytics</EmptyTitle>
-          <EmptyDescription>
-            Please refresh the page and try again.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <RetryableLoadError
+        className="min-h-[320px] border md:min-h-[420px]"
+        message="Failed to load analytics."
+        isRetrying={isRetrying}
+        onRetry={onRetry}
+      />
     );
   }
 

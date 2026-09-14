@@ -92,6 +92,23 @@ describe('AuthForm', () => {
     });
   });
 
+  it('falls back to setup for a sign-in redirect loop', async () => {
+    searchParams = new URLSearchParams('redirect_url=/sign-in?invited=1');
+
+    render(<AuthForm />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with Microsoft Teams' }),
+    );
+
+    await waitFor(() => {
+      expect(signInOauth2Mock).toHaveBeenCalledWith({
+        providerId: 'microsoft-entra-id',
+        callbackURL: '/setup',
+      });
+    });
+  });
+
   it('starts Microsoft Teams sign-in through generic OAuth with the requested redirect path', async () => {
     searchParams = new URLSearchParams('redirect_url=/settings');
 

@@ -9,6 +9,8 @@ import {
   advanceSessionReadCursor,
   cancelSessionWakeupsForConversation,
   db,
+  getSessionGoal,
+  markSessionGoal,
 } from '@roomote/db/server';
 import { captureEvent } from '@roomote/telemetry/server';
 
@@ -52,6 +54,7 @@ export const sessionsListInputSchema = z.object({
   period: z.union([z.literal('all'), z.number().int().positive()]).optional(),
   q: z.string().max(200).nullish(),
   ids: z.array(z.string().uuid()).max(20).optional(),
+  ownedOnly: z.boolean().optional(),
   before: z.string().nullish(),
   limit: z.number().int().min(1).max(200).optional(),
 });
@@ -171,6 +174,14 @@ export async function archiveSessionCommand(
       archivedAt: new Date(),
     });
     if (archived) {
+      const goal = await getSessionGoal(sessionId);
+      if (goal?.status === 'active') {
+        await markSessionGoal({
+          sessionId,
+          generation: goal.generation,
+          status: 'canceled',
+        });
+      }
       if (archived.fastConversationId) {
         // An archived session must not wake itself up later.
         await cancelSessionWakeupsForConversation(

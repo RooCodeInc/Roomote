@@ -16,10 +16,12 @@ import {
   users,
 } from '@roomote/db/server';
 import {
+  CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
   listConnectedCommunicationProviders,
   listAvailableAgentMailOutboundIdentities,
   canStartAgentMailConversationWithUser,
   resolveCustomAutomationSchedule,
+  resolveDefaultAutomationTarget,
   runCustomAutomationNow,
 } from '@roomote/sdk/server';
 import {
@@ -27,6 +29,7 @@ import {
   AUTOMATION_TARGET_EMAIL_IDENTITY_KEY,
   FAST_EXECUTION,
   REASONING_EFFORT_VALUES,
+  AUTOMATION_RESULT_PRIORITIES,
   getAutomationTargetEmailIdentityId,
   getAutomationTargetKind,
   type BackgroundAutomationProvider,
@@ -64,6 +67,7 @@ const writeSchema = z.object({
   name: z.string().trim().min(1).max(100),
   prompt: z.string().trim().min(1).max(8_000),
   enabled: z.boolean().default(true),
+  resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
   schedule: z.string().trim().min(1).max(500),
   model: modelSchema.optional(),
   reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
@@ -79,6 +83,7 @@ const updateSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   prompt: z.string().trim().min(1).max(8_000).optional(),
   enabled: z.boolean().optional(),
+  resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).optional(),
   schedule: z.string().trim().min(1).max(500).optional(),
   model: modelSchema.nullable().optional(),
   reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
@@ -397,16 +402,27 @@ customAutomationsRouter.get('/models', async (c) =>
 customAutomationsRouter.get('/destinations', async (c) => {
   const automationId = c.req.query('automationId');
   let ownerUserId = actorId(c);
+  let existingTarget: OptionalAutomationTarget | null = null;
   if (automationId) {
     const automation = await getCustomAutomationById(automationId);
     if (!automation || !canManage(c, automation)) {
       return c.json({ error: 'Custom automation was not found.' }, 404);
     }
     ownerUserId = automation.createdByUserId ?? ownerUserId;
+    existingTarget = automation.target;
   }
+  const [emailIdentities, defaultTarget] = await Promise.all([
+    listAvailableAgentMailOutboundIdentities(ownerUserId),
+    resolveDefaultAutomationTarget({
+      ownerUserId,
+      capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+      existingTarget,
+      includeSharedChannels: c.get('customAutomationUser').role === 'admin',
+    }),
+  ]);
   return c.json({
-    emailIdentities:
-      await listAvailableAgentMailOutboundIdentities(ownerUserId),
+    emailIdentities,
+    defaultTarget,
   });
 });
 
@@ -473,6 +489,7 @@ customAutomationsRouter.post('/', async (c) => {
       name: parsed.data.name,
       prompt: parsed.data.prompt,
       enabled: parsed.data.enabled,
+      resultPriority: parsed.data.resultPriority,
       scheduleMode: schedule.scheduleMode,
       cronExpression: schedule.cronExpression,
       model: parsed.data.model ?? null,
@@ -594,6 +611,7 @@ customAutomationsRouter.patch('/:id', async (c) => {
       name: parsed.data.name ?? existing.name,
       prompt: parsed.data.prompt ?? existing.prompt,
       enabled: parsed.data.enabled ?? existing.enabled,
+      resultPriority: parsed.data.resultPriority ?? existing.resultPriority,
       scheduleMode: schedule.scheduleMode,
       cronExpression: schedule.cronExpression,
       // Explicit null clears the override; omitted keeps the existing value.

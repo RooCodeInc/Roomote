@@ -1,10 +1,11 @@
 import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
 
-import type { TaskGoalStatus, TaskState } from '@roomote/types';
+import type { SessionGoalStatus, TaskState } from '@roomote/types';
 
 import type { DatabaseOrTransaction } from '../db';
 import {
   sessionParticipants,
+  sessionGoals,
   sessions,
   sessionTasks,
   fastAgentConversations,
@@ -22,10 +23,10 @@ export type SessionStatusInput = {
   conversationResponding: boolean;
   /** True when the linked Fast conversation awaits structured user input. */
   conversationPendingInput?: boolean;
+  goalStatus?: SessionGoalStatus | null;
   tasks: Array<{
     state: TaskState;
     taskPhase: string | null;
-    goalStatus: TaskGoalStatus | null;
   }>;
 };
 
@@ -42,18 +43,16 @@ export function deriveSessionStatus(input: SessionStatusInput): SessionStatus {
 
   if (
     input.conversationResponding ||
+    input.goalStatus === 'active' ||
     input.tasks.some((task) => task.state === 'active')
   ) {
     return 'active';
   }
 
   if (
-    input.tasks.some(
-      (task) =>
-        task.state === 'failed' ||
-        task.goalStatus === 'blocked' ||
-        task.goalStatus === 'budget_limited',
-    )
+    input.tasks.some((task) => task.state === 'failed') ||
+    input.goalStatus === 'blocked' ||
+    input.goalStatus === 'budget_limited'
   ) {
     return 'blocked';
   }
@@ -160,7 +159,6 @@ async function refreshLockedSession(
       .selectDistinctOn([tasks.id], {
         state: tasks.state,
         taskPhase: taskRuns.taskPhase,
-        goalStatus: tasks.goalStatus,
       })
       .from(sessionTasks)
       .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
@@ -172,6 +170,11 @@ async function refreshLockedSession(
         ),
       )
       .orderBy(tasks.id, desc(taskRuns.id));
+
+    const goal = await tx.query.sessionGoals.findFirst({
+      where: eq(sessionGoals.sessionId, lockedSession.id),
+      columns: { status: true },
+    });
 
     const conversationPendingInput = lockedSession.fastConversationId
       ? await hasFastConversationPendingUserInput(
@@ -185,6 +188,7 @@ async function refreshLockedSession(
         respondingUntil,
       }),
       conversationPendingInput,
+      goalStatus: goal?.status ?? null,
       tasks: linkedTasks,
     });
   }
@@ -306,7 +310,6 @@ export async function ensureSessionForTask(
       id: tasks.id,
       title: tasks.title,
       state: tasks.state,
-      goalStatus: tasks.goalStatus,
       initiatorKind: tasks.initiatorKind,
       initiatorUserId: tasks.initiatorUserId,
       initiatorAutomation: tasks.initiatorAutomation,
@@ -384,7 +387,6 @@ export async function ensureSessionForTask(
             {
               state: task.state,
               taskPhase: null,
-              goalStatus: task.goalStatus,
             },
           ],
         }),

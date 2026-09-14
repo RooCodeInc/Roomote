@@ -53,6 +53,14 @@ import {
   router,
 } from '../trpc';
 import { resolveActorScopedUserContext } from '../lib/auth';
+import {
+  readSessionEgressDelivery,
+  markSessionEgressBootstrapReady,
+} from '../lib/session-egress-delivery';
+import {
+  HTTP_INTEGRATIONS_MCP_ID,
+  HTTP_INTEGRATIONS_MCP_PATH,
+} from '../../http-integrations';
 
 const INTEGRATION_PROXY_MCP_IDS = new Set(
   MCP_INTEGRATIONS.map((integration) => integration.id),
@@ -68,6 +76,7 @@ type ResolvedMcpServerConfig = {
   url: string;
   headers: Record<string, string>;
   disabledTools?: string[];
+  cacheRevision?: string;
 };
 
 type ResolvedMcpServerConfigs = Record<string, ResolvedMcpServerConfig>;
@@ -95,6 +104,7 @@ async function resolveMcpServerConfigs(options: {
   auth: Parameters<typeof resolveActorScopedUserContext>[0];
   requestOrigin: string | null;
   includeRoomoteMemberTools?: boolean;
+  includeCacheRevision?: boolean;
   quiet?: boolean;
 }): Promise<ResolvedMcpServerConfigs> {
   const logInfo: InfoLogger = options.quiet ? () => {} : console.info;
@@ -136,6 +146,17 @@ async function resolveMcpServerConfigs(options: {
     };
   }
 
+  // Reserved infrastructure descriptor, independent of Settings connections.
+  servers[HTTP_INTEGRATIONS_MCP_ID] = {
+    url: `${options.requestOrigin ?? ''}${HTTP_INTEGRATIONS_MCP_PATH}`,
+    headers: {},
+  };
+  if (!options.includeCacheRevision) {
+    for (const server of Object.values(servers)) {
+      delete server.cacheRevision;
+    }
+  }
+
   logInfo('[getMcpServerConfigs] Final resolved server keys:', [
     ...Object.keys(servers),
   ]);
@@ -152,6 +173,7 @@ export async function resolveUserMcpServerConfigs(options: {
     auth: { userId: options.userId },
     requestOrigin: getRequestOrigin({ url: options.apiBaseUrl }),
     includeRoomoteMemberTools: options.includeRoomoteMemberTools,
+    includeCacheRevision: true,
     // This runs on every Fast turn; the per-connection info stream is worker
     // config-fetch debugging noise at that frequency.
     quiet: true,
@@ -252,6 +274,35 @@ export const mcpConnectionsRouter = router({
    * needs to launch the local process, which a member's plain auth token must
    * not be able to read directly.
    */
+  markSessionEgressBootstrapReady: authenticatedProcedure
+    .input(z.object({ nonce: z.string().uuid() }).strict())
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await markSessionEgressBootstrapReady(ctx.auth, input.nonce);
+        return { requested: true };
+      } catch {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Session egress bootstrap unavailable',
+        });
+      }
+    }),
+
+  getSessionEgressDelivery: authenticatedProcedure
+    .input(z.object({ nonce: z.string().uuid() }).strict())
+    .query(async ({ ctx, input }) => {
+      try {
+        return {
+          environment: await readSessionEgressDelivery(ctx.auth, input.nonce),
+        };
+      } catch {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Session egress client configuration unavailable',
+        });
+      }
+    }),
+
   getCustomStdioMcpServers: authenticatedProcedure.query(async ({ ctx }) => {
     if (!isRunToken(ctx.auth)) {
       throw new TRPCError({
@@ -323,13 +374,14 @@ async function buildCustomMcpServerConfigs(
       continue;
     }
 
+    let connectionUpdatedAt: Date | undefined;
     if (row.authType === 'oauth') {
       const connection = await db.query.mcpConnections.findFirst({
         where: and(
           eq(mcpConnections.mcpId, customMcpConnectionId(row.id)),
           isNull(mcpConnections.userId),
         ),
-        columns: { authStatus: true },
+        columns: { authStatus: true, updatedAt: true },
       });
 
       if (connection?.authStatus !== 'authenticated') {
@@ -338,6 +390,7 @@ async function buildCustomMcpServerConfigs(
         );
         continue;
       }
+      connectionUpdatedAt = connection.updatedAt;
     }
 
     const proxyPath = `${CUSTOM_MCP_PROXY_PATH_PREFIX}${row.id}`;
@@ -345,6 +398,7 @@ async function buildCustomMcpServerConfigs(
     servers[row.name] = {
       url: requestOrigin ? `${requestOrigin}${proxyPath}` : proxyPath,
       headers: { 'X-MCP-Client': PRODUCT_NAME },
+      cacheRevision: `${row.updatedAt?.getTime() ?? 0}:${connectionUpdatedAt?.getTime() ?? ''}`,
     };
   }
 
@@ -387,6 +441,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
     .select({
       enabledMcpId: deploymentMcpEnablements.mcpId,
       disabledTools: deploymentMcpEnablements.disabledTools,
+      enablementUpdatedAt: deploymentMcpEnablements.updatedAt,
       connection: mcpConnections,
     })
     .from(deploymentMcpEnablements)
@@ -421,6 +476,12 @@ async function buildCuratedMcpServerConfigs(ctx: {
   });
 
   const servers: ResolvedMcpServerConfigs = {};
+  const revisionByMcpId = new Map(
+    enabledConnections.map((entry) => [
+      entry.enabledMcpId,
+      `${entry.enablementUpdatedAt.getTime()}:${entry.connection?.updatedAt.getTime() ?? ''}`,
+    ]),
+  );
   const requestOrigin = ctx.requestOrigin;
 
   for (const connection of connections) {
@@ -603,6 +664,10 @@ async function buildCuratedMcpServerConfigs(ctx: {
     if (server.disabledTools?.length && servers[server.enabledMcpId]) {
       servers[server.enabledMcpId]!.disabledTools = server.disabledTools;
     }
+  }
+
+  for (const [mcpId, server] of Object.entries(servers)) {
+    server.cacheRevision = revisionByMcpId.get(mcpId);
   }
 
   return servers;

@@ -29,6 +29,7 @@ const { connection, resolveHost, resolveToken, createClient, client } =
       listPullRequestComments: vi.fn(),
       updatePullRequest: vi.fn(),
       declinePullRequest: vi.fn(),
+      mergePullRequest: vi.fn(),
       getPullRequestComment: vi.fn(),
       createPullRequestComment: vi.fn(),
     },
@@ -55,6 +56,7 @@ const toolNames = [
   'list_pull_request_comments',
   'update_pull_request',
   'decline_pull_request',
+  'merge_pull_request',
   'add_pull_request_comment',
 ];
 let auth: Variables['authContext'];
@@ -100,7 +102,12 @@ async function request(name?: string, args: Record<string, unknown> = {}) {
 }
 
 function pullRequest() {
-  return { id: 7, destination: { repository: identity } };
+  return {
+    id: 7,
+    state: 'OPEN',
+    source: { commit: { hash: 'a'.repeat(12) } },
+    destination: { repository: identity },
+  };
 }
 
 function parentComment() {
@@ -140,6 +147,10 @@ beforeEach(async () => {
   createClient.mockReturnValue(client);
   client.getRepository.mockResolvedValue(identity);
   client.getPullRequest.mockResolvedValue(pullRequest());
+  client.getCommit.mockResolvedValue({
+    hash: 'a'.repeat(40),
+    repository: identity,
+  });
   client.getPullRequestComment.mockResolvedValue(parentComment());
 });
 
@@ -395,6 +406,7 @@ describe('Bitbucket MCP call authorization', () => {
       });
       expect(body.result.isError).toBe(true);
       expect(client.declinePullRequest).not.toHaveBeenCalled();
+      expect(client.mergePullRequest).not.toHaveBeenCalled();
     },
   );
 
@@ -622,7 +634,6 @@ describe('Bitbucket MCP bounded operations', () => {
   );
 
   it.each([
-    'merge_pull_request',
     'reopen_pull_request',
     'create_commit',
     'delete_file',
@@ -631,6 +642,68 @@ describe('Bitbucket MCP bounded operations', () => {
     const { body } = await request(name);
     expect(body.result.isError).toBe(true);
     expect(createClient).not.toHaveBeenCalled();
+  });
+
+  it('trusts verified merge state after an ambiguous provider error and sanitizes its audit', async () => {
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    client.mergePullRequest.mockRejectedValue(new Error('ambiguous failure'));
+    client.getPullRequest
+      .mockResolvedValueOnce(pullRequest())
+      .mockResolvedValueOnce(pullRequest())
+      .mockResolvedValueOnce({ ...pullRequest(), state: 'MERGED' });
+    try {
+      const { body } = await request('merge_pull_request', {
+        pullRequestNumber: 7,
+        expectedHeadSha: 'a'.repeat(40),
+      });
+      expect(body.result.isError).not.toBe(true);
+      expect(client.mergePullRequest).toHaveBeenCalledWith(7, {
+        mergeStrategy: undefined,
+      });
+      expect(client.getCommit).toHaveBeenCalledWith('a'.repeat(12));
+      expect(client.getPullRequest).toHaveBeenCalledTimes(3);
+      const audit = JSON.parse(log.mock.calls[0]![0]);
+      expect(audit).toMatchObject({
+        provider: 'bitbucket',
+        userId,
+        repositoryId: repoId,
+        repositoryFullName: fullName,
+        targetNumber: 7,
+      });
+      expect(JSON.stringify(log.mock.calls)).not.toContain('a'.repeat(40));
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('rejects a stale Bitbucket head before merge', async () => {
+    const { body } = await request('merge_pull_request', {
+      pullRequestNumber: 7,
+      expectedHeadSha: 'b'.repeat(40),
+    });
+    expect(body.result.isError).toBe(true);
+    expect(client.mergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it('does not merge when the PR head changes after the authorization read', async () => {
+    client.getPullRequest
+      .mockResolvedValueOnce(pullRequest())
+      .mockResolvedValueOnce({
+        ...pullRequest(),
+        source: { commit: { hash: 'b'.repeat(12) } },
+      });
+    client.getCommit.mockResolvedValueOnce({
+      hash: 'b'.repeat(40),
+      repository: identity,
+    });
+    const { body } = await request('merge_pull_request', {
+      pullRequestNumber: 7,
+      expectedHeadSha: 'a'.repeat(40),
+    });
+    expect(body.result.isError).toBe(true);
+    expect(client.getPullRequest).toHaveBeenCalledTimes(2);
+    expect(client.getCommit).toHaveBeenCalledWith('b'.repeat(12));
+    expect(client.mergePullRequest).not.toHaveBeenCalled();
   });
 
   it.each([

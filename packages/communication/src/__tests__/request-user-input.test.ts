@@ -23,6 +23,71 @@ const { redisLists, redisMock, redisStrings } = vi.hoisted(() => {
     del: vi.fn(async (key: string) => deleteKey(key)),
     eval: vi.fn(
       async (_script: string, keyCount: number, ...args: unknown[]) => {
+        if (keyCount === 1) {
+          const [pendingKey, requestId, runId] = args as [
+            string,
+            string,
+            string,
+          ];
+          const rawRequest = strings.get(pendingKey);
+          if (!rawRequest) {
+            return 0;
+          }
+          const pendingRequest = JSON.parse(rawRequest) as Record<
+            string,
+            unknown
+          >;
+          if (
+            (requestId !== '' && pendingRequest.requestId !== requestId) ||
+            (runId !== '' && String(pendingRequest.runId) !== runId)
+          ) {
+            return 0;
+          }
+          strings.delete(pendingKey);
+          return 1;
+        }
+
+        if (keyCount === 3) {
+          const [
+            pendingKey,
+            sourceQueueKey,
+            resumedQueueKey,
+            taskId,
+            sourceRunId,
+            resumedRunId,
+          ] = args as [string, string, string, string, string, string];
+          const rawRequest = strings.get(pendingKey);
+          if (!rawRequest) {
+            return 0;
+          }
+          const pendingRequest = JSON.parse(rawRequest) as Record<
+            string,
+            unknown
+          >;
+          if (
+            pendingRequest.taskId !== taskId ||
+            String(pendingRequest.runId) !== sourceRunId
+          ) {
+            return 0;
+          }
+
+          const queuedAnswers = lists.get(sourceQueueKey) ?? [];
+          for (const answer of queuedAnswers) {
+            pushListValue(resumedQueueKey, answer);
+          }
+          if (queuedAnswers.length > 0) {
+            lists.delete(sourceQueueKey);
+          }
+          strings.set(
+            pendingKey,
+            JSON.stringify({
+              ...pendingRequest,
+              runId: Number.parseInt(resumedRunId, 10),
+            }),
+          );
+          return 1;
+        }
+
         if (keyCount !== 2) {
           return 0;
         }
@@ -120,6 +185,8 @@ import {
   clearPendingCommunicationRequestUserInput,
   getCommunicationRequestUserInputAnswers,
   getPendingCommunicationRequestUserInput,
+  queueCommunicationRequestUserInputAnswer,
+  rebindPendingCommunicationRequestUserInputRun,
   setPendingCommunicationRequestUserInput,
   submitPendingCommunicationRequestUserInputAnswer,
 } from '../request-user-input';
@@ -211,5 +278,103 @@ describe('communication request_user_input Redis helpers', () => {
       status: 'submitted',
       answers: answer.answers,
     });
+  });
+
+  it('atomically clears only the matching request and run', async () => {
+    await setPendingCommunicationRequestUserInput('discord', 'channel-1', {
+      requestId: 'request-new',
+      runId: 42,
+      taskId: 'task-1',
+      questions: [],
+    });
+
+    await expect(
+      clearPendingCommunicationRequestUserInput('discord', 'channel-1', {
+        requestId: 'request-old',
+        runId: 42,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      clearPendingCommunicationRequestUserInput('discord', 'channel-1', {
+        requestId: 'request-new',
+        runId: 41,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      getPendingCommunicationRequestUserInput('discord', 'channel-1'),
+    ).resolves.toMatchObject({ requestId: 'request-new', runId: 42 });
+
+    await expect(
+      clearPendingCommunicationRequestUserInput('discord', 'channel-1', {
+        requestId: 'request-new',
+        runId: 42,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      getPendingCommunicationRequestUserInput('discord', 'channel-1'),
+    ).resolves.toBeNull();
+  });
+
+  it('atomically rebinds a pending request and queued answers to a resumed run', async () => {
+    await setPendingCommunicationRequestUserInput('discord', 'channel-1', {
+      requestId: 'request-1',
+      runId: 42,
+      taskId: 'task-1',
+      questions: [],
+    });
+    await queueCommunicationRequestUserInputAnswer('discord', 42, {
+      requestId: 'request-1',
+      answers: {},
+      timestamp: 456,
+    });
+
+    await expect(
+      rebindPendingCommunicationRequestUserInputRun({
+        provider: 'discord',
+        conversationId: 'channel-1',
+        taskId: 'task-1',
+        sourceRunId: 42,
+        resumedRunId: 84,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      getPendingCommunicationRequestUserInput('discord', 'channel-1'),
+    ).resolves.toMatchObject({ requestId: 'request-1', runId: 84 });
+    await expect(
+      getCommunicationRequestUserInputAnswers('discord', 42),
+    ).resolves.toEqual([]);
+    await expect(
+      getCommunicationRequestUserInputAnswers('discord', 84),
+    ).resolves.toEqual([
+      { requestId: 'request-1', answers: {}, timestamp: 456 },
+    ]);
+  });
+
+  it('does not rebind a different task or the same run', async () => {
+    await setPendingCommunicationRequestUserInput('discord', 'channel-1', {
+      requestId: 'request-1',
+      runId: 42,
+      taskId: 'task-1',
+      questions: [],
+    });
+
+    await expect(
+      rebindPendingCommunicationRequestUserInputRun({
+        provider: 'discord',
+        conversationId: 'channel-1',
+        taskId: 'task-2',
+        sourceRunId: 42,
+        resumedRunId: 84,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      rebindPendingCommunicationRequestUserInputRun({
+        provider: 'discord',
+        conversationId: 'channel-1',
+        taskId: 'task-1',
+        sourceRunId: 42,
+        resumedRunId: 42,
+      }),
+    ).resolves.toBe(false);
   });
 });

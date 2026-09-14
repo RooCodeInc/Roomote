@@ -45,7 +45,11 @@ import {
   syncDiscordInstallationChannels,
 } from '@roomote/sdk/server';
 
-import { Env, isEmailChannelEnabled } from '@/lib/server/env';
+import {
+  Env,
+  isEmailChannelEnabled,
+  isRoomoteCloudEnabled,
+} from '@/lib/server/env';
 import { DISCORD_INSTALL_PERMISSIONS } from '@/lib/discord-install';
 import {
   PRODUCT_NAME,
@@ -667,6 +671,12 @@ const EMAIL_CHANNEL_DISABLED_MESSAGE =
 function assertEmailChannelEnabled(): void {
   if (!isEmailChannelEnabled()) {
     throw new Error(EMAIL_CHANNEL_DISABLED_MESSAGE);
+  }
+}
+
+function assertAgentMailMutationAllowed(provider: CommsProviderId): void {
+  if (provider === 'agentmail' && isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED)) {
+    throw new Error('Email configuration is managed by Roomote Cloud.');
   }
 }
 
@@ -1471,6 +1481,7 @@ export async function saveCommsAuthConfigCommand(
   },
 ) {
   assertAdmin(auth);
+  assertAgentMailMutationAllowed(input.provider);
 
   const { userId } = auth;
   const provider = getCommsProviderDefinition(input.provider);
@@ -1737,6 +1748,7 @@ export async function clearCommsAuthConfigCommand(
   input: { provider: CommsProviderId },
 ) {
   assertAdmin(auth);
+  assertAgentMailMutationAllowed(input.provider);
 
   const provider = getCommsProviderDefinition(input.provider);
   const fieldEnvVarNames = provider.fields.flatMap((field) => [

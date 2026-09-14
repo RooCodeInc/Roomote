@@ -31,6 +31,7 @@ import {
   markTaskStartParallelCountEndedAt,
   resolveComputeProviderEnvValues,
   syncTaskStateFromRuns,
+  terminateSessionEgressWorkloadsForRun,
 } from '@roomote/db/server';
 import {
   AzureDataPlaneError,
@@ -810,6 +811,9 @@ async function claimAndEnterStandby(
         runId: job.id,
         endedAt: completedAt,
       });
+      // Substitutes must not survive a retained standby: the resume path
+      // registers a fresh workload (new generation) before the worker starts.
+      await terminateSessionEgressWorkloadsForRun(job.id, 'stopped', tx);
     });
 
     await recordSleepCheckEvent(

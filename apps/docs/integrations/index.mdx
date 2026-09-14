@@ -1,5 +1,5 @@
 ---
-title: Integrations Overview
+title: Integrations overview
 icon: plug
 description: Connect the tools that give Roomote the right context inside tasks.
 ---
@@ -75,6 +75,13 @@ from [Personal Settings](/personal-settings).
 | <IntegrationName href="/integrations/voice" icon="openai" name="Voice" />                               | Voice calls with Roomote on Fast Sessions         | Admin connection once                      |
 | <IntegrationName href="/integrations/x" icon="x" name="X" />                                                      | Public X posts, users, trends, and news           | Admin connection once                      |
 | <IntegrationName href="/integrations/zero" icon="/logo/integrations/zero.svg" name="Zero" />                      | Paid external capabilities via Zero               | Admin connection once                      |
+
+## HTTP APIs without an MCP server
+
+Deployment operators can configure [HTTP integrations](/integrations/http-integrations)
+for approved HTTPS APIs. Fast sessions and sandbox agents use the same actor
+access rules, while Roomote keeps credentials server-side and attaches them to
+authorized requests. This opt-in feature does not change sandbox networking.
 
 ## Custom MCP servers
 

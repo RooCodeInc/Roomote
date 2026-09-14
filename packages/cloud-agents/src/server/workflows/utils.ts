@@ -298,8 +298,30 @@ function buildPrBodyAttributionLine({
 export function getWorkspaceInstructions(
   repoFullNames?: string[],
   _conflictResolverLabel?: string,
+  options: {
+    /**
+     * All-repositories workspaces index the deployment's repositories in
+     * `REPOSITORIES.md` at the workspace root and check them out through
+     * the `clone_repository` tool instead of cloning every one at setup.
+     */
+    repositoriesOnDemand?: boolean;
+  } = {},
 ): string {
-  let instructions = `
+  let instructions = options.repositoriesOnDemand
+    ? `
+Note: This workspace gives you every active repository in the deployment, checked out on demand. Repositories are NOT cloned up front:
+- \`REPOSITORIES.md\` at the workspace root lists each repository with its default branch and description; read it to choose the right one
+- Before reading, searching, or changing a repository that has no directory yet, call the \`clone_repository\` tool with its full name (owner/repo); it clones the repository into \`<workspace root>/<owner>/<repo>\` and returns the path
+- Check out only the repositories the task needs, and never run \`git clone\` yourself
+- A missing directory does not mean the repository is unavailable; check \`REPOSITORIES.md\`
+
+When working with multiple repositories:
+- Be explicit about which repository you're working in
+- Use relative paths from the workspace root
+- Consider the impact of changes across repositories
+- Create multiple PRs in different repositories as necessary to complete your task
+`
+    : `
 Note: You have access to every repository prepared in the workspace. You can:
 - Navigate between different repositories using relative paths
 - Make changes across multiple repositories
@@ -315,7 +337,12 @@ When working with multiple repositories:
 `;
 
   if (repoFullNames && repoFullNames.length > 0) {
-    instructions += `
+    instructions += options.repositoriesOnDemand
+      ? `
+
+Available repositories (check out with \`clone_repository\` before use):
+`
+      : `
 
 Available repositories:
 `;

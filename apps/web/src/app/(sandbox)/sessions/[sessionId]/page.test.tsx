@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 const {
   authorizeMock,
+  resolveEffectiveModelRuntimeEnvMock,
   getFastSessionByIdMock,
   getFastSessionTasksMock,
   getSessionByIdCommandMock,
@@ -12,6 +13,7 @@ const {
   sessionReadTrackerMock,
 } = vi.hoisted(() => ({
   authorizeMock: vi.fn(),
+  resolveEffectiveModelRuntimeEnvMock: vi.fn(),
   getFastSessionByIdMock: vi.fn(),
   getFastSessionTasksMock: vi.fn(),
   getSessionByIdCommandMock: vi.fn(),
@@ -41,6 +43,10 @@ const {
 }));
 
 vi.mock('@/lib/server/auth-context', () => ({ authorize: authorizeMock }));
+vi.mock('@roomote/db/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/db/server')>()),
+  resolveEffectiveModelRuntimeEnv: resolveEffectiveModelRuntimeEnvMock,
+}));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
@@ -109,10 +115,113 @@ vi.mock('@/components/sessions/SessionViewers', () => ({
 import SessionDetailPage, { generateMetadata } from './page';
 
 describe('Session detail page', () => {
+  it.each(['user-1', 'other-user'])(
+    'mounts secret approval only for the owner with canonical identity (%s)',
+    async (userId) => {
+      authorizeMock.mockResolvedValue({
+        success: true,
+        userId,
+        isAdmin: false,
+      });
+      getSessionByIdCommandMock.mockResolvedValue({
+        id: '6a1f8f1e-0000-4000-8000-000000000006',
+        ownerUserId: 'user-1',
+        title: 'Session',
+        ownerName: 'Owner',
+        sourceSurface: 'web',
+        fastConversationId: '6a1f8f1e-0000-4000-8000-000000000005',
+        tasks: [],
+        artifacts: [],
+        inferenceCostMicroUsd: 0,
+        directInferenceCostMicroUsd: 0,
+        createdAt: new Date(),
+        status: 'active',
+      });
+      getFastSessionByIdMock.mockResolvedValue({
+        id: '6a1f8f1e-0000-4000-8000-000000000005',
+        messages: [],
+        model: null,
+        reasoningEffort: null,
+      });
+      renderToStaticMarkup(
+        await SessionDetailPage({
+          params: Promise.resolve({
+            sessionId: '6a1f8f1e-0000-4000-8000-000000000006',
+          }),
+        }),
+      );
+      expect(transcriptMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: '6a1f8f1e-0000-4000-8000-000000000005',
+          secretSessionId:
+            userId === 'user-1'
+              ? '6a1f8f1e-0000-4000-8000-000000000006'
+              : undefined,
+        }),
+        undefined,
+      );
+    },
+  );
+
   beforeEach(() => {
     vi.clearAllMocks();
+    resolveEffectiveModelRuntimeEnvMock.mockResolvedValue({});
     getSessionByIdCommandMock.mockResolvedValue(null);
     getFastSessionTasksMock.mockResolvedValue([]);
+  });
+
+  it('loads session data and model configuration in parallel', async () => {
+    authorizeMock.mockResolvedValue({
+      success: true,
+      userId: 'user-1',
+      isAdmin: false,
+    });
+    const sessionLookup = Promise.withResolvers<{
+      id: string;
+      title: string;
+      ownerName: string;
+      ownerEmail: string;
+      ownerImageUrl: null;
+      sourceSurface: string;
+      fastConversationId: null;
+      directInferenceCostMicroUsd: number;
+      inferenceCostMicroUsd: number;
+      createdAt: Date;
+      status: string;
+      tasks: [];
+    }>();
+    const modelLookup = Promise.withResolvers<Record<string, string>>();
+    getSessionByIdCommandMock.mockReturnValue(sessionLookup.promise);
+    resolveEffectiveModelRuntimeEnvMock.mockReturnValue(modelLookup.promise);
+
+    const renderPromise = SessionDetailPage({
+      params: Promise.resolve({
+        sessionId: '6a1f8f1e-0000-4000-8000-000000000007',
+      }),
+    });
+
+    await vi.waitFor(() => {
+      expect(getSessionByIdCommandMock).toHaveBeenCalledOnce();
+      expect(resolveEffectiveModelRuntimeEnvMock).toHaveBeenCalledOnce();
+    });
+
+    sessionLookup.resolve({
+      id: '6a1f8f1e-0000-4000-8000-000000000007',
+      title: 'Parallel session lookup',
+      ownerName: 'User',
+      ownerEmail: 'user@example.com',
+      ownerImageUrl: null,
+      sourceSurface: 'web',
+      fastConversationId: null,
+      directInferenceCostMicroUsd: 0,
+      inferenceCostMicroUsd: 0,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      status: 'completed',
+      tasks: [],
+    });
+    modelLookup.resolve({});
+
+    await expect(renderPromise).resolves.toBeDefined();
   });
 
   it('uses the Session title in the initial route metadata', async () => {
@@ -375,6 +484,11 @@ describe('Session detail page', () => {
     expect(isValidElement(headerExtras)).toBe(true);
     expect(isValidElement(headerExtras) ? headerExtras.key : null).toBe(
       'session-pull-requests',
+    );
+    const headerActions = transcriptMock.mock.calls[0]?.[0].headerActions;
+    expect(isValidElement(headerActions)).toBe(true);
+    expect(isValidElement(headerActions) ? headerActions.key : null).toBe(
+      'session-viewers',
     );
   });
 

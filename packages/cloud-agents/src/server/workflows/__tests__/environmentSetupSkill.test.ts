@@ -14,6 +14,20 @@ function readSkillContent() {
 }
 
 describe('environment-setup guidance', () => {
+  it('forbids follow-up launches from the sandbox task', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'Sandbox tasks cannot launch follow-up Roomote tasks.',
+    );
+    expect(skillContent).toContain(
+      'fresh-task verification must be initiated by Fast or an authenticated user',
+    );
+    expect(skillContent).toContain(
+      'Do not mark the environment verified from current-sandbox evidence.',
+    );
+  });
+
   it('follows repo-local agent guidance and codified setup configuration', () => {
     const skillContent = readSkillContent();
 
@@ -94,12 +108,6 @@ describe('environment-setup guidance', () => {
       'successful install and canonical tests may be sufficient only when omitted credentials affect optional integrations or external runtime capabilities rather than a required local runtime',
     );
     expect(skillContent).toContain(
-      'For a backend service or library persisted from install and canonical test validation without a selected localhost surface, instead instruct the task to confirm setup completed cleanly and run the canonical tests',
-    );
-    expect(skillContent).toContain(
-      'do not require an HTTP service or initial URL that the environment does not claim to provide.',
-    );
-    expect(skillContent).toContain(
       'If the selected validation path includes starting an HTTP API or another non-browser service, verify localhost reachability using loopback addresses only.',
     );
     expect(skillContent).toContain(
@@ -127,7 +135,7 @@ describe('environment-setup guidance', () => {
       'Do not invent install, dev, or test commands for code that does not exist.',
     );
     expect(skillContent).toContain(
-      'it should confirm the workspace clones and environment setup completes cleanly, not expect a running service, test suite, or localhost surface',
+      'any later fresh-task verification should confirm the workspace clones and environment setup completes cleanly without expecting a running service, test suite, or localhost surface',
     );
   });
 
@@ -267,155 +275,21 @@ describe('environment-setup guidance', () => {
     expect(skillContent).toContain('<docker_project_port>');
   });
 
-  it('launches a follow-up verification task after persisting the environment', () => {
+  it('keeps fresh-task verification outside the sandbox setup task', () => {
     const skillContent = readSkillContent();
 
     expect(skillContent).toContain(
-      'After successful environment persistence, use the Roomote MCP tool `mcp__roomote__manage_tasks` to launch a lightweight verification task against the created or updated environment and monitor it yourself instead of leaving verification as an implicit manual next step.',
+      'do not launch a follow-up task from this sandbox',
     );
     expect(skillContent).toContain(
-      'For that follow-up task launch, call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "list_environments"` first so you can confirm the created or updated environment appears as a current launch target and copy the exact returned `environmentId`.',
+      'Fast or an authenticated user must initiate a fresh top-level task',
     );
     expect(skillContent).toContain(
-      'Then call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "launch"`, `environmentId` set to that created or updated environment ID, `notifyOnSettle` set to `true`',
-    );
-    expect(skillContent).toContain('a concrete read-only verification prompt');
-    expect(skillContent).toContain(
-      'finish with exactly one explicit result: `ready`, `not_ready`, or `blocked`',
-    );
-    expect(skillContent).toContain(
-      'It must not invoke Doctor or another workflow skill, launch another task, repair the environment, edit repository files',
-    );
-    expect(skillContent).toContain(
-      'or assume that a service, port, HTTP endpoint, browser preview, test suite, container, or long-running process exists.',
-    );
-    expect(
-      skillContent.indexOf('a concrete read-only verification prompt'),
-    ).toBeGreaterThan(
-      skillContent.indexOf('After environment persistence succeeds'),
-    );
-    expect(skillContent).toContain(
-      'the platform delivers a `Spawned task update` message into this session when the verification task settles',
-    );
-    expect(skillContent).toContain(
-      'Treat that message as the primary completion signal',
-    );
-    expect(skillContent).toContain(
-      'While waiting for that settle notification, treat the notification as the primary completion signal and check the verification task only as a fallback with the Roomote MCP tool `mcp__roomote__manage_tasks` using `action: "get_summary"` and the returned `taskId`. Space fallback checks roughly 60-90 seconds apart using one blocking `sleep` per wait',
-    );
-    expect(skillContent).toContain(
-      'treat `failed` or `completed with warnings` as direct evidence that specific setup commands failed even when the verification task has not described the failure yet',
-    );
-    expect(skillContent).toContain(
-      'when `Environment Setup` is `completed` immediately inspect the latest task messages instead of sleeping for another long interval',
-    );
-    expect(skillContent).toContain(
-      'relaunch the verification task with `notifyOnSettle: true`, and wait for the new settle notification',
-    );
-    expect(skillContent).toContain(
-      'Narrate concise, plain-language progress updates while the follow-up check runs',
-    );
-    expect(skillContent).toContain(
-      'Preparing the environment can take several minutes, so do not stop monitoring just because startup is taking a long time; the settle notification guarantees prompt awareness of completion',
-    );
-    expect(skillContent).toContain(
-      'If the monitored summary reaches `Ready`, `Idle`, or `Needs input`, do not keep polling that same state indefinitely.',
-    );
-    expect(skillContent).toContain(
-      'If those latest task messages explicitly report `ready` and contain evidence that the requested developer workflow completed, treat that as a successful spawned-task run and report the observed success directly.',
-    );
-    expect(skillContent).toContain(
-      'A `Completed`, `Ready`, or `Idle` task state is not proof that verification passed.',
-    );
-    expect(skillContent).toContain(
-      'Treat explicit `not_ready` or `blocked` results as verification failures or blockers even when setup and task execution completed cleanly, except that a `not_ready` justified solely by clearly pre-existing repository test failures with setup itself completing cleanly should be re-evaluated against the classification above',
-    );
-    expect(skillContent).toContain(
-      'use `success: true` only for the explicit evidence-backed `ready` criterion above',
-    );
-    expect(skillContent).toContain(
-      'use `success: false` with a short, user-safe `error` message for `not_ready`, `blocked`',
-    );
-    expect(skillContent).toContain(
-      'The final response reports that the environment is ready only when the follow-up verification task explicitly reports `ready` with evidence',
-    );
-    expect(skillContent).toContain(
-      '`Completed`, `Ready`, or `Idle` task state without that explicit result is insufficient.',
-    );
-    expect(skillContent).toContain(
-      'Treat it as success only when those messages explicitly report `ready` with evidence that the requested developer workflow completed',
-    );
-    expect(skillContent).toContain(
-      '`success: true` only for an explicit evidence-backed `ready` result',
-    );
-    expect(skillContent).toContain(
-      'When the spawned verification task reveals a fixable setup or environment-definition error, try to fix it yourself, rerun any affected local validation, recreate or update the environment with the revised YAML, launch a fresh verification task, and repeat the monitoring process instead of stopping after the first failure.',
-    );
-    expect(skillContent).toContain(
-      'Retry at most 2 additional full environment-update-plus-verification attempts after the first spawned verification task',
-    );
-    expect(skillContent).toContain(
-      'If the observed verification error appears to require product or source-code changes outside environment-setup scope',
-    );
-    expect(skillContent).not.toContain('monitoring limit');
-    expect(skillContent).toContain(
-      'When setup succeeds, begin with a plain-language outcome sentence such as `Your environment is ready.`',
-    );
-    expect(skillContent).toContain(
-      'Describe internal orchestration in user terms.',
-    );
-    expect(skillContent).toContain(
-      "[Create a new task](/) and describe what you'd like done.",
-    );
-    expect(skillContent).toContain(
-      'This is the final visible paragraph; do not append an internal status summary after it.',
-    );
-    expect(skillContent).toContain(
-      'Do not mention a spawned task, task status, polling, or monitoring in those user-facing updates.',
+      'does not claim the persisted environment is verified without a separate top-level launch',
     );
     expect(skillContent).not.toContain(
-      'When the verification task completed cleanly, report that the spawned verification task completed.',
+      'Then call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "launch"`',
     );
-    expect(skillContent).toContain(
-      'Never include the full environment YAML in your visible response or Slack reply.',
-    );
-    expect(skillContent).toContain(
-      "derive one minimal Roomote environment configuration for Roomote's environment editor and `manage_environments`",
-    );
-    expect(skillContent).toContain(
-      'Produce one environment definition that is valid for the Roomote environment editor.',
-    );
-    expect(skillContent).toContain(
-      'Always derive a best-effort environment definition that is ready to work once required environment variables are supplied.',
-    );
-    expect(skillContent).toContain(
-      'The final environment definition is best-effort and should support the validated local coding path; credentials for optional integrations or external runtime capabilities may remain deferred.',
-    );
-    expect(skillContent).toContain('repositories:');
-    expect(skillContent).not.toContain('workspace manifest');
-    expect(skillContent).not.toContain(
-      "produce one minimal Roomote environment configuration YAML that is directly usable in Roomote's environment editor",
-    );
-    expect(skillContent).not.toContain(
-      'Produce one environment YAML that is valid for the Roomote environment editor.',
-    );
-    expect(skillContent).not.toContain(
-      'Always produce a best-effort YAML that is ready to work once required environment variables are supplied.',
-    );
-    expect(skillContent).not.toContain(
-      'The final YAML is best-effort and should be runnable once required environment variables are provided.',
-    );
-    expect(skillContent).not.toContain('- `YAML:`');
-    expect(skillContent).not.toContain(
-      'Under `YAML:`, output only one fenced code block labeled `yaml` containing exactly one Roomote environment configuration.',
-    );
-    expect(skillContent).not.toContain(
-      'confirm the environment works before clicking Continue',
-    );
-    expect(skillContent).toContain(
-      'Do not expose the spawned verification task link in the user-facing response.',
-    );
-    expect(skillContent).not.toContain('[Open verification task](https://...)');
   });
 
   it('requires installing missing toolchains in the validation sandbox instead of skipping validation', () => {
@@ -447,52 +321,6 @@ describe('environment-setup guidance', () => {
     );
     expect(skillContent).toContain(
       'report the expected setup duration in the final handoff when it exceeds a few minutes',
-    );
-  });
-
-  it('requires efficient waiting instead of tight polling loops', () => {
-    const skillContent = readSkillContent();
-    expect(skillContent).toContain(
-      'Space fallback checks roughly 60-90 seconds apart using one blocking `sleep` per wait',
-    );
-    expect(skillContent).toContain(
-      'a single bounded blocking shell command (for example one `timeout`-wrapped poll loop in one tool call) rather than many separate short `sleep` calls across turns',
-    );
-    expect(skillContent).not.toContain('every 10-15 seconds');
-  });
-
-  it('lets verification pass on clearly pre-existing repository test failures', () => {
-    const skillContent = readSkillContent();
-    expect(skillContent).toContain(
-      'The prompt must also tell the task how to classify test failures',
-    );
-    expect(skillContent).toContain(
-      'report `not_ready` for failures that point to a setup or environment-definition problem',
-    );
-    expect(skillContent).toContain(
-      'report `ready` and list those failures explicitly as pre-existing',
-    );
-    expect(skillContent).toContain(
-      'A `ready` result that names clearly pre-existing repository test failures is still a verification success for the environment',
-    );
-    expect(skillContent).toContain(
-      'instead of letting them permanently block environment verification',
-    );
-  });
-
-  it('forbids finishing with a persisted but unverified environment revision', () => {
-    const skillContent = readSkillContent();
-    expect(skillContent).toContain(
-      'Never finish with a persisted runtime-affecting revision that no verification task has exercised.',
-    );
-    expect(skillContent).toContain(
-      'the retry budget bounds repair attempts, not the confirmation of changes you already applied',
-    );
-    expect(skillContent).toContain(
-      'If you cannot verify a proposed fix at all, do not persist it',
-    );
-    expect(skillContent).toContain(
-      'no run ends with an applied-but-unverified fix',
     );
   });
 });

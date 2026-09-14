@@ -6,8 +6,6 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { z } from 'zod';
 import {
-  ALL_REPOSITORIES,
-  NO_REPOSITORIES,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
   CHAT_CHANNELS_TOOL,
@@ -15,6 +13,7 @@ import {
   CHAT_MESSAGE_CONTEXT_TOOL,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   CREATE_CUSTOM_SKILL_TOOL,
+  UPDATE_CUSTOM_SKILL_TOOL,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   dataVisualizationInputsSchema,
@@ -22,7 +21,7 @@ import {
   PRODUCT_NAME,
   ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
   ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION,
-  ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
+  ROOMOTE_TASK_RUNTIME_MANAGEMENT_ACTIONS,
   getRoomoteSearchStatusError,
   resolveRoomoteCommunicationTarget,
   roomoteManagementFieldSchemas,
@@ -50,14 +49,12 @@ import { handleDescribeVideo } from './describe-video.js';
 import { handleDownload } from './download.js';
 import { handleListArtifacts } from './list-artifacts.js';
 import { handleSearchTasks } from './search-tasks.js';
-import { handleLaunchTask } from './launch-task.js';
 import { handleGetTaskMessages } from './task-messages.js';
 import { handleGetTaskSummary } from './task-summary.js';
 import { handleGetTaskComputeLogs } from './task-compute-logs.js';
 import { handleCancelTask } from './cancel-task.js';
 import { handleUpdateTaskModels } from './update-task-models.js';
 import { handleSendMessage } from './send-message.js';
-import { handleListEnvironments } from './list-environments.js';
 import { handleListTaskModels } from './list-models.js';
 import {
   handleCreateEnvironment,
@@ -95,8 +92,10 @@ import { errorResult } from './tool-result.js';
 import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-summary-state.js';
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
-import { handleCreateCustomSkill } from './custom-skills.js';
-import { handleManageGoal } from './goal.js';
+import {
+  handleCreateCustomSkill,
+  handleUpdateCustomSkill,
+} from './custom-skills.js';
 import {
   handleGetSessionMessages,
   handleGetSessionSummary,
@@ -105,6 +104,12 @@ import {
   handleStartSession,
 } from './sessions.js';
 import { handleGetRelayUpdates } from './relay-updates.js';
+import { handleCloneRepository } from './clone-repository.js';
+import {
+  CLONE_REPOSITORY_TOOL_NAME,
+  ON_DEMAND_REPOSITORIES_ENV_VAR,
+  ON_DEMAND_REPOSITORIES_MANIFEST_FILE,
+} from '../../workspace/on-demand-repositories.js';
 
 export {
   taskSuggestionResultHasSubmittedSuggestions,
@@ -147,6 +152,23 @@ roomoteMcpServer.registerTool(
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
     }
     return handleManageCustomAutomations(params, config);
+  },
+);
+
+roomoteMcpServer.registerTool(
+  UPDATE_CUSTOM_SKILL_TOOL.name,
+  {
+    title: UPDATE_CUSTOM_SKILL_TOOL.title,
+    description: UPDATE_CUSTOM_SKILL_TOOL.description,
+    inputSchema: z.object(UPDATE_CUSTOM_SKILL_TOOL.inputSchema).strict(),
+    annotations: UPDATE_CUSTOM_SKILL_TOOL.annotations,
+  },
+  async (params): Promise<ToolResult> => {
+    const config = getRoomoteConfig();
+    if (!config) {
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+    return handleUpdateCustomSkill(params, config);
   },
 );
 
@@ -208,7 +230,7 @@ roomoteMcpServer.registerTool(
   {
     title: 'Show Widget',
     description:
-      'Render a presentational HTML widget in the current task transcript. ' +
+      'Create and share a rendered visual in the current task transcript. ' +
       'Use it proactively when the user asks to show, mock up, preview, or visualize an interface or interaction; prefer it over an ASCII or text-only example when a compact visual would answer the request better. ' +
       'Use it when a structured or visual presentation is clearer than plain text, or to demonstrate how something would look. ' +
       'Examples include mock UI, status cards, tables, annotated plans, and other visual examples. ' +
@@ -217,8 +239,7 @@ roomoteMcpServer.registerTool(
       ' ' +
       SHOW_WIDGET_FIXED_CANVAS_GUIDANCE +
       ' ' +
-      'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers. ' +
-      'Optional textFallback is delivered to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
+      'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers.',
     inputSchema: {
       html: nonEmptyStringSchema.describe(
         'Non-empty compact HTML fragment or full document to display, including inline SVG. Avoid long prose, large lists, and dense data likely to require scrolling. Scripts and nested browsing contexts are stripped. Built-in widget classes include rw-card, rw-stack, rw-row, rw-grid, rw-stat, rw-badge, rw-callout, and rw-muted.',
@@ -237,9 +258,7 @@ roomoteMcpServer.registerTool(
       textFallback: z
         .string()
         .optional()
-        .describe(
-          'Optional plain-text fallback posted to the originating chat surface when this task was started from chat',
-        ),
+        .describe('Optional short plain-text preview of the rendered visual'),
     },
     annotations: {
       readOnlyHint: true,
@@ -565,21 +584,15 @@ function shouldRegisterAutomationWorkItemsTool(): boolean {
   return process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan;
 }
 
-const ENVIRONMENT_ID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 const manageTasksToolDescription =
   ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION +
   ' ' +
   `When the user provides an existing ${PRODUCT_NAME} task URL, extract its task ID and pass taskId to get_summary or get_messages before resorting to browser navigation. ` +
-  'Always call action "list_environments" immediately before action "launch" so you can copy a valid environmentId. ' +
-  'Use action "list_environments" to list launch targets (named environments, Blank slate, and the org-wide target). ' +
   'Use action "search_tasks" only to search direct tasks by query or status. ' +
   `Use action "get_summary" with taskId to inspect a specific task's latest status, failure details, and uploaded image artifact IDs and viewer links. Use those stable IDs to attach a delegated task's images to a later reply. ` +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
   'Use action "get_messages" with sessionId for Session history, or taskId for a specific task transcript; results are newest first. ' +
   'Use action "get_updates" with sessionId or taskId and its returned cursor for compact, chronological relay narrative and state deltas; unchanged polls return no narrative. ' +
-  `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
   'Use action "send_message" with sessionId to continue a Session, or taskId to message a specific task. ' +
   'Use action "list_models" to list the enabled model IDs available for task model selection. Call it before "update_models" when resolving a requested model name to an exact ID. ' +
@@ -587,13 +600,16 @@ const manageTasksToolDescription =
 
 const manageTasksInputSchema = {
   action: z
-    .enum([
-      ...ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
-      'list_models',
-      'update_models',
-    ])
+    .enum(ROOMOTE_TASK_RUNTIME_MANAGEMENT_ACTIONS)
     .describe(ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION),
-  ...roomoteManagementFieldSchemas,
+  query: roomoteManagementFieldSchemas.query,
+  pullRequest: roomoteManagementFieldSchemas.pullRequest,
+  status: roomoteManagementFieldSchemas.status,
+  limit: roomoteManagementFieldSchemas.limit,
+  cursor: roomoteManagementFieldSchemas.cursor,
+  taskId: roomoteManagementFieldSchemas.taskId,
+  sessionId: roomoteManagementFieldSchemas.sessionId,
+  message: roomoteManagementFieldSchemas.message,
   role: z
     .enum(['coding', 'helper', 'vision', 'codeReview', 'explore', 'planning'])
     .optional()
@@ -613,38 +629,6 @@ const manageTasksInputSchema = {
       'For update_models: desired reasoning level for the role ("extra high" maps to xhigh). A level qualifier trailing a model name ("Luna Max", "Sonnet high") is this field, not part of the model id — pass it here alongside the model. Omit to use the deployment default level.',
     ),
 } satisfies Record<string, z.ZodTypeAny>;
-
-roomoteMcpServer.registerTool(
-  'manage_goal',
-  {
-    title: 'Manage Goal',
-    description:
-      'Read or finish the current task goal. Use get to inspect it. Use complete only after the full objective is verified. Use blocked only when progress cannot continue without user input or an external state change. The agent cannot create, replace, pause, resume, or clear goals.',
-    inputSchema: {
-      action: z.enum(['get', 'complete', 'blocked']),
-      generation: z
-        .string()
-        .max(200)
-        .nullable()
-        .optional()
-        .describe(
-          'Required for complete and blocked. Pass the exact generation assigned in the current turn goal instructions.',
-        ),
-      reason: z
-        .string()
-        .max(2_000)
-        .optional()
-        .describe('Required for blocked; explain the concrete blocker.'),
-    },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (params): Promise<ToolResult> => handleManageGoal(params),
-);
 
 roomoteMcpServer.registerTool(
   'manage_tasks',
@@ -775,42 +759,6 @@ roomoteMcpServer.registerTool(
           config,
         );
       }
-      case 'launch': {
-        if (!params.prompt?.trim()) {
-          return errorResult('prompt is required for launch');
-        }
-        if (!params.environmentId?.trim()) {
-          return errorResult(
-            'environmentId is required for launch. Call "list_environments" immediately before launching and copy one of the returned environmentId values.',
-          );
-        }
-
-        const environmentId = params.environmentId.trim();
-        if (environmentId.includes('/')) {
-          return errorResult(
-            'environmentId must be a value returned by "list_environments", not a repository string.',
-          );
-        }
-        if (
-          environmentId !== ALL_REPOSITORIES &&
-          environmentId !== NO_REPOSITORIES &&
-          !ENVIRONMENT_ID_PATTERN.test(environmentId)
-        ) {
-          return errorResult(
-            `environmentId must be a value returned by "list_environments", a UUID, "${NO_REPOSITORIES}", or "${ALL_REPOSITORIES}".`,
-          );
-        }
-
-        return handleLaunchTask(
-          {
-            prompt: params.prompt,
-            branch: params.branch,
-            environmentId,
-            notifyOnSettle: params.notifyOnSettle,
-          },
-          config,
-        );
-      }
       case 'cancel': {
         if (!params.taskId?.trim()) {
           return errorResult('taskId is required for cancel');
@@ -859,9 +807,6 @@ roomoteMcpServer.registerTool(
               { sessionId: target.id, message: params.message },
               config,
             );
-      }
-      case 'list_environments': {
-        return handleListEnvironments(config);
       }
     }
   },
@@ -1347,6 +1292,53 @@ roomoteMcpServer.registerTool(
   async (input) => handleUpdatePersonalization(input),
 );
 
+if (process.env[ON_DEMAND_REPOSITORIES_ENV_VAR] === 'true') {
+  roomoteMcpServer.registerTool(
+    CLONE_REPOSITORY_TOOL_NAME,
+    {
+      title: 'Clone Repository',
+      description:
+        "Check out one of the deployment's repositories into the shared workspace root. " +
+        `This workspace lists its repositories in ${ON_DEMAND_REPOSITORIES_MANIFEST_FILE} at the workspace root but does not clone them up front; ` +
+        'call this before reading, searching, or changing any repository that has no directory yet, and only for the repositories the task needs. ' +
+        'Returns the checkout path. An existing checkout is returned as-is without touching its working tree. ' +
+        'Large repositories can take a minute or two. Do not run `git clone` yourself.',
+      inputSchema: {
+        repositoryFullName: z
+          .string()
+          .trim()
+          .min(1)
+          .describe(
+            `Full repository name (owner/repo) exactly as listed in ${ON_DEMAND_REPOSITORIES_MANIFEST_FILE}`,
+          ),
+        branch: z
+          .string()
+          .trim()
+          .min(1)
+          .optional()
+          .describe(
+            'Branch to check out. Omit to use the repository default branch',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (params): Promise<ToolResult> => {
+      const config = getRoomoteConfig();
+
+      if (!config) {
+        return errorResult('ROOMOTE_CLOUD_TOKEN not set');
+      }
+
+      return handleCloneRepository(params, config);
+    },
+  );
+}
+
 if (shouldRegisterEnvVarRequestTool()) {
   roomoteMcpServer.registerTool(
     'request_environment_variables',
@@ -1715,6 +1707,9 @@ if (
                 charts: params.charts as DataVisualizationInput[] | undefined,
                 suggestions: params.suggestions,
                 chatReplySurface: chatReplySurfaceLabel,
+                purpose: params.purpose,
+                recordAutomationOutput:
+                  process.env.ROOMOTE_AUTOMATION_TASK === 'true',
               },
               artifactConfig,
               roomoteConfig,

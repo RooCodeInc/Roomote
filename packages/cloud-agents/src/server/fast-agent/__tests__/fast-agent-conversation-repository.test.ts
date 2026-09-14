@@ -699,7 +699,6 @@ describe('Fast conversation repository', () => {
         messages: [visibleMessage],
       }),
     ]);
-
     const stored = await fastAgentConversationRepository.findById({
       id: canonical.id,
     });
@@ -757,10 +756,11 @@ describe('Fast conversation repository', () => {
       source: 'slack',
     };
 
-    await Promise.all([
+    const claimResults = await Promise.all([
       fastAgentConversationRepository.upsertMessage({
         conversationId: session.id,
         message: baseMessage,
+        insertOnly: true,
       }),
       fastAgentConversationRepository.upsertMessage({
         conversationId: session.id,
@@ -768,7 +768,12 @@ describe('Fast conversation repository', () => {
           ...baseMessage,
           contentBlocks: [{ type: 'text', text: 'Recovered' }],
         },
+        insertOnly: true,
       }),
+    ]);
+    expect(claimResults.map((result) => result.inserted).sort()).toEqual([
+      false,
+      true,
     ]);
 
     const rows = await db
@@ -820,7 +825,7 @@ describe('Fast conversation repository', () => {
         conversationId: session.id,
         message: prompt('platform-event', 'platform_event'),
       }),
-    ).resolves.toEqual({ initialHumanTurn: false });
+    ).resolves.toMatchObject({ initialHumanTurn: false });
     await expect(
       fastAgentConversationRepository.upsertMessage({
         conversationId: session.id,
@@ -830,25 +835,25 @@ describe('Fast conversation repository', () => {
           FAST_AGENT_REACTION_INPUT_TYPE,
         ),
       }),
-    ).resolves.toEqual({ initialHumanTurn: false });
+    ).resolves.toMatchObject({ initialHumanTurn: false });
     await expect(
       fastAgentConversationRepository.upsertMessage({
         conversationId: session.id,
         message: prompt('first-human', 'human'),
       }),
-    ).resolves.toEqual({ initialHumanTurn: true });
+    ).resolves.toMatchObject({ initialHumanTurn: true });
     await expect(
       fastAgentConversationRepository.upsertMessage({
         conversationId: session.id,
         message: prompt('first-human', 'human'),
       }),
-    ).resolves.toEqual({ initialHumanTurn: true });
+    ).resolves.toMatchObject({ initialHumanTurn: true });
     await expect(
       fastAgentConversationRepository.upsertMessage({
         conversationId: session.id,
         message: prompt('later-human', 'human'),
       }),
-    ).resolves.toEqual({ initialHumanTurn: false });
+    ).resolves.toMatchObject({ initialHumanTurn: false });
   });
 
   it('lets only one concurrent human prompt claim the initial turn', async () => {
@@ -910,7 +915,7 @@ describe('Fast conversation repository', () => {
           source: 'slack',
         },
       }),
-    ).resolves.toEqual({ initialHumanTurn: false });
+    ).resolves.toMatchObject({ initialHumanTurn: false });
   });
 
   it('does not treat legacy platform-event history as a human turn', async () => {
@@ -950,7 +955,7 @@ describe('Fast conversation repository', () => {
           source: 'slack',
         },
       }),
-    ).resolves.toEqual({ initialHumanTurn: true });
+    ).resolves.toMatchObject({ initialHumanTurn: true });
   });
 
   it('reconciles a persisted legacy retry notice after its turn stops', async () => {
