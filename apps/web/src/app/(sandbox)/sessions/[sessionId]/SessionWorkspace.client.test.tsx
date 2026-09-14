@@ -10,6 +10,7 @@ import {
 } from '@testing-library/react';
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
+import { SessionNavigationStateProvider } from '@/hooks/useSessionNavigationState';
 import {
   SessionHeaderPullRequests,
   SessionWorkspace,
@@ -328,11 +329,15 @@ function renderWorkspace({
     defaultOptions: { queries: { retry: false } },
   });
   const workspace = () => (
-    <QueryClientProvider client={queryClient}>
-      <SandboxLayoutProvider>
-        <SessionWorkspace session={initialSession}>{children}</SessionWorkspace>
-      </SandboxLayoutProvider>
-    </QueryClientProvider>
+    <SessionNavigationStateProvider>
+      <QueryClientProvider client={queryClient}>
+        <SandboxLayoutProvider>
+          <SessionWorkspace session={initialSession}>
+            {children}
+          </SessionWorkspace>
+        </SandboxLayoutProvider>
+      </QueryClientProvider>
+    </SessionNavigationStateProvider>
   );
   const result = render(workspace());
 
@@ -348,6 +353,14 @@ function renderWorkspace({
       act(() =>
         viewportChangeListener?.({ matches: true } as MediaQueryListEvent),
       );
+    },
+    navigateAwayAndBack() {
+      result.rerender(
+        <SessionNavigationStateProvider>
+          <div>Another session</div>
+        </SessionNavigationStateProvider>,
+      );
+      result.rerender(workspace());
     },
   };
 }
@@ -815,6 +828,34 @@ describe('SessionWorkspace', () => {
 
     expect(screen.getByLabelText('Full task task-7')).toBeVisible();
     expect(screen.queryByLabelText('Full task task-5')).toBeNull();
+  });
+
+  it('keeps closed task panels dismissed after navigating away and back', async () => {
+    const { navigateAwayAndBack } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel task-1' }));
+
+    navigateAwayAndBack();
+
+    expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'View coding task: Update homepage background',
+      }),
+    );
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+
+    navigateAwayAndBack();
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
   });
 
   it('limits focus dimming to the Session and task conversations', async () => {

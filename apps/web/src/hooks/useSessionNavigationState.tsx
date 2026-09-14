@@ -15,6 +15,12 @@ type SessionNavigationState = {
   setDraft: (sessionId: string, draft: string) => void;
   getScrollPosition: (sessionId: string) => number | undefined;
   setScrollPosition: (sessionId: string, scrollTop: number) => void;
+  getDismissedTaskPanelIds: (sessionId: string) => ReadonlySet<string>;
+  setTaskPanelDismissed: (
+    sessionId: string,
+    taskId: string,
+    dismissed: boolean,
+  ) => void;
   prepareSessionSwitch: (sessionId: string) => void;
   consumeSessionSwitch: (sessionId: string) => boolean;
 };
@@ -29,6 +35,7 @@ export function SessionNavigationStateProvider({
 }) {
   const draftsRef = useRef(new Map<string, string>());
   const scrollPositionsRef = useRef(new Map<string, number>());
+  const dismissedTaskPanelIdsRef = useRef(new Map<string, Set<string>>());
   const pendingSwitchesRef = useRef(new Set<string>());
 
   const getDraft = useCallback(
@@ -49,6 +56,27 @@ export function SessionNavigationStateProvider({
     },
     [],
   );
+  const getDismissedTaskPanelIds = useCallback(
+    (sessionId: string) =>
+      dismissedTaskPanelIdsRef.current.get(sessionId) ?? new Set<string>(),
+    [],
+  );
+  const setTaskPanelDismissed = useCallback(
+    (sessionId: string, taskId: string, dismissed: boolean) => {
+      const dismissedTaskPanelIds =
+        dismissedTaskPanelIdsRef.current.get(sessionId) ?? new Set<string>();
+      if (dismissed) {
+        dismissedTaskPanelIds.add(taskId);
+        dismissedTaskPanelIdsRef.current.set(sessionId, dismissedTaskPanelIds);
+      } else {
+        dismissedTaskPanelIds.delete(taskId);
+        if (dismissedTaskPanelIds.size === 0) {
+          dismissedTaskPanelIdsRef.current.delete(sessionId);
+        }
+      }
+    },
+    [],
+  );
   const prepareSessionSwitch = useCallback((sessionId: string) => {
     pendingSwitchesRef.current.add(sessionId);
   }, []);
@@ -64,16 +92,20 @@ export function SessionNavigationStateProvider({
       setDraft,
       getScrollPosition,
       setScrollPosition,
+      getDismissedTaskPanelIds,
+      setTaskPanelDismissed,
       prepareSessionSwitch,
       consumeSessionSwitch,
     }),
     [
       consumeSessionSwitch,
       getDraft,
+      getDismissedTaskPanelIds,
       getScrollPosition,
       prepareSessionSwitch,
       setDraft,
       setScrollPosition,
+      setTaskPanelDismissed,
     ],
   );
 
