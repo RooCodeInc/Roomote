@@ -23,6 +23,32 @@ describe('personal preferences', () => {
       expect.objectContaining({
         mindReaderMode: false,
         therapistMode: false,
+        homeComposerSuggestionsEnabled: false,
+      }),
+    );
+  });
+
+  it('persists the Home suggestions experimental flag per user', async () => {
+    const user = await userFactory.create({
+      metadata: { existing_value: 'preserved' },
+    });
+
+    await expect(
+      updatePersonalPreferencesCommand(buildAuth(user.id), {
+        homeComposerSuggestionsEnabled: true,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({ homeComposerSuggestionsEnabled: true }),
+    );
+
+    const storedUser = await db.query.users.findFirst({
+      where: eq(users.id, user.id),
+      columns: { metadata: true },
+    });
+    expect(storedUser?.metadata).toEqual(
+      expect.objectContaining({
+        existing_value: 'preserved',
+        home_composer_suggestions_enabled: true,
       }),
     );
   });

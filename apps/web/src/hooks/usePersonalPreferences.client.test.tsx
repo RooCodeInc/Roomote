@@ -152,6 +152,7 @@ describe('usePersonalPreferences', () => {
       narrationMode: false,
       therapistMode: false,
       resultsPageEnabled: false,
+      homeComposerSuggestionsEnabled: false,
     });
   });
 

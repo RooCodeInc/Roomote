@@ -50,6 +50,7 @@ type NewTaskFormProps = {
   placeholder?: string;
   promptSuggestion?: string;
   onPromptFocusChange?: (focused: boolean) => void;
+  autoFocus?: boolean;
   textareaMaxHeight?: number;
   promptContainerRef?: Ref<HTMLDivElement>;
 };
@@ -61,6 +62,7 @@ export function NewTaskForm({
   placeholder = DEFAULT_PROMPT_PLACEHOLDER,
   promptSuggestion,
   onPromptFocusChange,
+  autoFocus = true,
   textareaMaxHeight,
   promptContainerRef,
 }: NewTaskFormProps) {
@@ -314,7 +316,7 @@ export function NewTaskForm({
         placeholder={placeholder}
         promptSuggestion={promptSuggestion}
         onPromptFocusChange={onPromptFocusChange}
-        autoFocus
+        autoFocus={autoFocus}
         textareaMaxHeight={textareaMaxHeight}
         animateContainer={false}
         submitWithMetaKey={false}

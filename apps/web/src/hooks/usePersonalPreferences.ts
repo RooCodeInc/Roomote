@@ -59,6 +59,10 @@ function mergeResultForUpdatedFields(
       updates.resultsPageEnabled === undefined
         ? mergedPreferences.resultsPageEnabled
         : result.resultsPageEnabled,
+    homeComposerSuggestionsEnabled:
+      updates.homeComposerSuggestionsEnabled === undefined
+        ? mergedPreferences.homeComposerSuggestionsEnabled
+        : result.homeComposerSuggestionsEnabled,
   };
 }
 
@@ -100,6 +104,12 @@ function rollbackUpdatedFields(
         optimisticPreferences.resultsPageEnabled
         ? previousPreferences.resultsPageEnabled
         : mergedPreferences.resultsPageEnabled,
+    homeComposerSuggestionsEnabled:
+      updates.homeComposerSuggestionsEnabled !== undefined &&
+      mergedPreferences.homeComposerSuggestionsEnabled ===
+        optimisticPreferences.homeComposerSuggestionsEnabled
+        ? previousPreferences.homeComposerSuggestionsEnabled
+        : mergedPreferences.homeComposerSuggestionsEnabled,
   };
 }
 

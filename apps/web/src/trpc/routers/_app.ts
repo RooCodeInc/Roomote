@@ -1616,6 +1616,7 @@ export const appRouter = createRouter({
             narrationMode: z.boolean().optional(),
             therapistMode: z.boolean().optional(),
             resultsPageEnabled: z.boolean().optional(),
+            homeComposerSuggestionsEnabled: z.boolean().optional(),
           })
           .refine(
             (input) =>
@@ -1623,7 +1624,8 @@ export const appRouter = createRouter({
               input.mindReaderMode !== undefined ||
               input.narrationMode !== undefined ||
               input.therapistMode !== undefined ||
-              input.resultsPageEnabled !== undefined,
+              input.resultsPageEnabled !== undefined ||
+              input.homeComposerSuggestionsEnabled !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
