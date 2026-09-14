@@ -728,8 +728,8 @@ export default {
   args: {
     capability: z.enum(${JSON.stringify(FAST_AGENT_CAPABILITY_IDS)}),
     message: z.string().min(1).max(500).describe("Concise user-facing reason this capability is useful now"),
-    provider: z.preprocess((value) => value === null ? undefined : value, z.enum(["github", "gitlab", "gitea", "bitbucket", "ado"]).optional()).describe("Optional source-control provider explicitly implied by the request"),
-    integrationIds: z.preprocess((value) => value === null ? undefined : value, z.array(z.string().min(1)).max(20).optional()).describe("Optional integration IDs from the capability snapshot"),
+    provider: z.preprocess((value) => value === null ? undefined : value, z.enum(["github", "gitlab", "gitea", "bitbucket", "ado"]).optional()).describe("Only for source_control offers: the provider explicitly implied by the request; ignored for other capabilities"),
+    integrationIds: z.preprocess((value) => value === null ? undefined : value, z.array(z.string().min(1)).max(20).optional()).describe("Only for integrations offers: integration IDs from the capability snapshot; ignored for other capabilities"),
   },
   execute: (args, context) => invoke("offer_capability", args, context),
 }

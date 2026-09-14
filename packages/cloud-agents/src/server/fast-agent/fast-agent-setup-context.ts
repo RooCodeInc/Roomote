@@ -93,6 +93,20 @@ async function completeEmptySetupIntegrationDiscovery(
   });
 }
 
+/** Keep only the qualifiers that apply to the offered capability. */
+export function dropIrrelevantOfferQualifiers(
+  input: FastAgentCapabilityOfferInput,
+): FastAgentCapabilityOfferInput {
+  const { provider, integrationIds, ...rest } = input;
+  return {
+    ...rest,
+    ...(input.capability === 'source_control' && provider ? { provider } : {}),
+    ...(input.capability === 'integrations' && integrationIds?.length
+      ? { integrationIds }
+      : {}),
+  };
+}
+
 /** Rebuild trusted setup-only adapter behavior from durable, serializable data. */
 export function buildFastAgentSetupAdapter(
   context: FastAgentSetupTurnContext,
@@ -111,18 +125,21 @@ export function buildFastAgentSetupAdapter(
     ...(lifecycle.onTurnSettled
       ? { onTurnSettled: lifecycle.onTurnSettled }
       : {}),
-    offerCapability: async (input: FastAgentCapabilityOfferInput) => {
+    offerCapability: async (rawInput: FastAgentCapabilityOfferInput) => {
       const snapshot = parseSetupSnapshot(context);
-      const capability = snapshot.capabilities?.[input.capability];
+      const capability = snapshot.capabilities?.[rawInput.capability];
       if (!capability?.canOffer) {
         throw new Error(
           capability?.unavailableReason ??
             'That capability is not currently available to offer.',
         );
       }
-      if (input.capability !== 'source_control' && input.provider) {
-        throw new Error('A provider is only valid for source-control offers.');
-      }
+      // Some models carry every optional argument forward from the previous
+      // call (a source-control provider on an integrations offer, or an
+      // empty integration list on a source-control offer) and retry the
+      // identical call when it is rejected. The capability decides which
+      // qualifiers apply; the rest are ignored rather than refused.
+      const input = dropIrrelevantOfferQualifiers(rawInput);
       if (input.provider && snapshot.sourceControl?.providers) {
         const provider = snapshot.sourceControl.providers.find(
           (candidate) => candidate.provider === input.provider,
@@ -135,11 +152,6 @@ export function buildFastAgentSetupAdapter(
             'That source-control provider already has repositories ready.',
           );
         }
-      }
-      if (input.capability !== 'integrations' && input.integrationIds?.length) {
-        throw new Error(
-          'Integration IDs are only valid for integration offers.',
-        );
       }
       if (
         input.integrationIds?.some(
