@@ -63,6 +63,46 @@ describe('loadFastAgentPromptSkillCatalog', () => {
     expect(catalog.warnings).toEqual(['one environment skill was too large']);
   });
 
+  it('drops custom skills that collide with a packaged skill name', async () => {
+    const catalog = await loadFastAgentPromptSkillCatalog({
+      instanceSkills: {
+        list: vi.fn().mockResolvedValue({
+          skills: [instanceSkill('review-code'), instanceSkill('daily-brief')],
+          warnings: [],
+        }),
+      },
+      settingsSkills: {
+        listPromptCatalog: vi.fn().mockResolvedValue({
+          marketplaceSources: [],
+          skills: [settingsSkill('create-pr'), settingsSkill('support-triage')],
+          warnings: [],
+        }),
+      },
+    });
+
+    expect(catalog.skills.map((skill) => skill.name)).toEqual([
+      'daily-brief',
+      'support-triage',
+    ]);
+  });
+
+  it('throws when every source fails so the prompt shows the recovery state', async () => {
+    await expect(
+      loadFastAgentPromptSkillCatalog({
+        instanceSkills: {
+          list: vi.fn().mockRejectedValue(new Error('Not a member.')),
+        },
+        settingsSkills: {
+          listPromptCatalog: vi
+            .fn()
+            .mockRejectedValue(new Error('database unavailable')),
+        },
+      }),
+    ).rejects.toThrow(
+      'Instance skills: Not a member.; environment skills: database unavailable',
+    );
+  });
+
   it('degrades each source independently instead of failing the prompt', async () => {
     const catalog = await loadFastAgentPromptSkillCatalog({
       instanceSkills: {
