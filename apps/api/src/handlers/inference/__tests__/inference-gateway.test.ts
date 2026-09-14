@@ -1235,6 +1235,7 @@ describe('inference gateway', () => {
       createApp(createRunToken()),
       undefined,
       {
+        'api-key': 'run-token-value',
         'anthropic-version': '2023-06-01',
       },
     );
@@ -1249,6 +1250,7 @@ describe('inference gateway', () => {
     expect(url).toBe('https://api.anthropic.com/v1/messages');
 
     const headers = new Headers(init.headers);
+    expect(headers.get('api-key')).toBeNull();
     expect(headers.get('x-api-key')).toBe('provider-secret-key');
     expect(headers.get('authorization')).toBeNull();
     expect(headers.get('anthropic-version')).toBe('2023-06-01');
