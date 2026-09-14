@@ -221,7 +221,7 @@ describe('buildOpenCodeCliEnv', () => {
     });
     expect(config.plugin).toEqual([
       expect.stringMatching(/^file:\/\/.*roomote-identity\.mjs$/u),
-      expect.stringMatching(/^file:\/\/.*roomote-judge-tool-policy\.mjs$/u),
+      expect.stringMatching(/^file:\/\/.*roomote-subagent-tool-policy\.mjs$/u),
     ]);
     expect(Object.keys(config.agent)).toEqual(['advisor', 'judge']);
 

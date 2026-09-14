@@ -262,7 +262,7 @@ describe('on-demand integration tools', () => {
     const found = parse(
       await findOnDemandIntegrationTools(
         catalog,
-        { integrationId: 'github', _callerAgent: 'judge' },
+        { integrationId: 'github', _callerToolPolicy: 'evidence_review' },
         judgeTools,
       ),
     );
@@ -280,7 +280,7 @@ describe('on-demand integration tools', () => {
           integrationId: 'github',
           toolName: 'search_code',
           args: { query: 'judge' },
-          _callerAgent: 'judge',
+          _callerToolPolicy: 'evidence_review',
         },
         callTool,
         judgeTools,
@@ -294,7 +294,7 @@ describe('on-demand integration tools', () => {
             integrationId: 'github',
             toolName: 'create_issue',
             args: {},
-            _callerAgent: 'judge',
+            _callerToolPolicy: 'evidence_review',
           },
           callTool,
           judgeTools,
@@ -306,13 +306,13 @@ describe('on-demand integration tools', () => {
       parse(
         await findOnDemandIntegrationTools(
           catalog,
-          { integrationId: 'github', _callerAgent: 'unknown' },
+          { integrationId: 'github', _callerToolPolicy: 'unknown' },
           judgeTools,
         ),
       ),
     ).toMatchObject({
       success: false,
-      error: 'Integration caller role is unavailable.',
+      error: 'Integration caller policy is unavailable.',
     });
   });
 

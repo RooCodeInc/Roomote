@@ -11,12 +11,13 @@ import { HTTP_INTEGRATIONS_BROKER } from '../mcp-provenance';
 import {
   createRoomoteAdvisorAgentPrompt,
   createRoomoteJudgeAgentPrompt,
-  createOpenCodeJudgeToolPolicyPluginScript,
+  createOpenCodeSubagentToolPolicyPluginScript,
   OPENCODE_IDENTITY_PLUGIN_SCRIPT,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
   ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
+  ROOMOTE_OPENCODE_SUBAGENT_DEFINITIONS,
 } from '@roomote/cloud-agents';
 import {
   AMAZON_BEDROCK_OPENCODE_PROVIDER_ID,
@@ -24,7 +25,7 @@ import {
   BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID,
   BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
   buildInferenceGatewayOpenCodeBaseUrl,
-  buildJudgeMcpToolFilter,
+  buildSubagentMcpToolFilter,
   buildOpenCodeModelReasoningOptions,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   CHATGPT_GATEWAY_PROVIDER_ID,
@@ -195,8 +196,8 @@ const ROOMOTE_OPENCODE_CHATGPT_GATEWAY_PLUGIN_FILE_NAME =
   'roomote-chatgpt-gateway.js';
 
 const ROOMOTE_OPENCODE_TOOL_SAFETY_PLUGIN_FILE_NAME = 'roomote-tool-safety.js';
-const ROOMOTE_OPENCODE_JUDGE_TOOL_POLICY_PLUGIN_FILE_NAME =
-  'roomote-judge-tool-policy.js';
+const ROOMOTE_OPENCODE_SUBAGENT_TOOL_POLICY_PLUGIN_FILE_NAME =
+  'roomote-subagent-tool-policy.js';
 
 const ROOMOTE_OPENCODE_IDENTITY_PLUGIN_FILE_NAME = 'roomote-identity.js';
 
@@ -968,9 +969,9 @@ function writeOpenCodeManagedFiles(
     pluginsDir,
     ROOMOTE_OPENCODE_TOOL_SAFETY_PLUGIN_FILE_NAME,
   );
-  const judgeToolPolicyPluginPath = path.join(
+  const subagentToolPolicyPluginPath = path.join(
     pluginsDir,
-    ROOMOTE_OPENCODE_JUDGE_TOOL_POLICY_PLUGIN_FILE_NAME,
+    ROOMOTE_OPENCODE_SUBAGENT_TOOL_POLICY_PLUGIN_FILE_NAME,
   );
   const identityPluginPath = path.join(
     pluginsDir,
@@ -998,8 +999,8 @@ function writeOpenCodeManagedFiles(
     'utf8',
   );
   fs.writeFileSync(
-    judgeToolPolicyPluginPath,
-    createOpenCodeJudgeToolPolicyPluginScript({
+    subagentToolPolicyPluginPath,
+    createOpenCodeSubagentToolPolicyPluginScript({
       brokerNames: (mcpServers ?? [])
         .filter(isHttpIntegrationsBroker)
         .map((server) => server.name),
@@ -2105,11 +2106,13 @@ export function generateOpenCodeConfig({
       );
     }
   }
-  if (operatorAgent[ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]) {
-    const judgeToolFilter = Object.assign(
+  for (const definition of ROOMOTE_OPENCODE_SUBAGENT_DEFINITIONS) {
+    if (!definition.toolPolicy || !operatorAgent[definition.name]) continue;
+    const toolFilter = Object.assign(
       {},
       ...(mcpServers ?? []).map((server) =>
-        buildJudgeMcpToolFilter(
+        buildSubagentMcpToolFilter(
+          definition.toolPolicy,
           isHttpIntegrationsBroker(server)
             ? HTTP_INTEGRATIONS_MCP_ID
             : server.name,
@@ -2117,9 +2120,9 @@ export function generateOpenCodeConfig({
         ),
       ),
     );
-    operatorAgent[ROOMOTE_OPENCODE_JUDGE_AGENT_NAME] = mergeAgentToolExclusions(
-      operatorAgent[ROOMOTE_OPENCODE_JUDGE_AGENT_NAME],
-      judgeToolFilter,
+    operatorAgent[definition.name] = mergeAgentToolExclusions(
+      operatorAgent[definition.name],
+      toolFilter,
     );
   }
 

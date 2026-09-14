@@ -9,8 +9,9 @@ import {
   INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_PARTIALLY_UNAVAILABLE_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
-  isJudgeToolCallAllowed,
-  isJudgeToolVisible,
+  getSubagentToolPolicy,
+  isSubagentToolCallAllowed,
+  isSubagentToolVisible,
   matchIntegrationTools,
   parseMcpToolResult,
 } from '@roomote/types';
@@ -126,14 +127,22 @@ export async function findOnDemandIntegrationTools(
     toolName?: string;
     query?: string;
     limit?: number;
-    _callerAgent?: string;
+    _callerToolPolicy?: string;
   },
   listTools: (
     server: OnDemandMcpServer,
   ) => Promise<OnDemandMcpTool[]> = listOnDemandMcpTools,
 ): Promise<ToolResult> {
-  if (params._callerAgent === 'unknown') {
-    return errorResult('Integration caller role is unavailable.');
+  if (params._callerToolPolicy === 'unknown') {
+    return errorResult('Integration caller policy is unavailable.');
+  }
+  const toolPolicy = getSubagentToolPolicy(params._callerToolPolicy);
+  if (
+    params._callerToolPolicy &&
+    params._callerToolPolicy !== 'unrestricted' &&
+    !toolPolicy
+  ) {
+    return errorResult('Integration caller policy is unavailable.');
   }
   const scoped = params.integrationId
     ? catalog.servers.filter((server) => server.name === params.integrationId)
@@ -165,8 +174,8 @@ export async function findOnDemandIntegrationTools(
     }
     return listing.value.flatMap((tool) => {
       const candidate = { integrationId: server.name, ...tool };
-      return params._callerAgent === 'judge' &&
-        !isJudgeToolVisible({
+      return toolPolicy &&
+        !isSubagentToolVisible(toolPolicy, {
           integrationId: candidate.integrationId,
           toolName: candidate.name,
           annotations: candidate.annotations,
@@ -233,7 +242,7 @@ export async function callOnDemandIntegrationTool(
     integrationId: string;
     toolName: string;
     args?: Record<string, unknown>;
-    _callerAgent?: string;
+    _callerToolPolicy?: string;
   },
   callTool: (
     server: OnDemandMcpServer,
@@ -244,8 +253,16 @@ export async function callOnDemandIntegrationTool(
     server: OnDemandMcpServer,
   ) => Promise<OnDemandMcpTool[]> = listOnDemandMcpTools,
 ): Promise<ToolResult> {
-  if (params._callerAgent === 'unknown') {
-    return errorResult('Integration caller role is unavailable.');
+  if (params._callerToolPolicy === 'unknown') {
+    return errorResult('Integration caller policy is unavailable.');
+  }
+  const toolPolicy = getSubagentToolPolicy(params._callerToolPolicy);
+  if (
+    params._callerToolPolicy &&
+    params._callerToolPolicy !== 'unrestricted' &&
+    !toolPolicy
+  ) {
+    return errorResult('Integration caller policy is unavailable.');
   }
   const server = catalog.servers.find(
     (candidate) => candidate.name === params.integrationId,
@@ -257,20 +274,22 @@ export async function callOnDemandIntegrationTool(
     );
   }
   try {
-    if (params._callerAgent === 'judge') {
+    if (toolPolicy) {
       const tool = (await listTools(server)).find(
         (candidate) => candidate.name === params.toolName,
       );
       if (
         !tool ||
-        !isJudgeToolCallAllowed({
+        !isSubagentToolCallAllowed(toolPolicy, {
           integrationId: server.name,
           toolName: params.toolName,
           args: params.args,
           annotations: tool.annotations,
         })
       ) {
-        return errorResult('That integration action is unavailable to judge.');
+        return errorResult(
+          'That integration action is unavailable to this subagent capability policy.',
+        );
       }
     }
     return await callTool(server, params.toolName, params.args ?? {});

@@ -5642,7 +5642,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             }),
           ).resolves.toEqual({
             success: false,
-            error: 'That integration action is unavailable to judge.',
+            error:
+              'That integration action is unavailable to this subagent capability policy.',
           });
         }
         await expect(

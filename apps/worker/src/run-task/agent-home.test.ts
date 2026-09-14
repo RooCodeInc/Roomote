@@ -16,7 +16,7 @@ import {
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 import {
-  createOpenCodeJudgeToolPolicyPluginScript,
+  createOpenCodeSubagentToolPolicyPluginScript,
   OPENCODE_IDENTITY_PLUGIN_SCRIPT,
 } from '@roomote/cloud-agents';
 import { HTTP_INTEGRATIONS_INSTRUCTIONS } from '@roomote/sdk/client';
@@ -386,12 +386,12 @@ describe('generateOpenCodeConfig provider support', () => {
         join(
           result.openCodeConfigDir,
           'plugins',
-          'roomote-judge-tool-policy.js',
+          'roomote-subagent-tool-policy.js',
         ),
         'utf8',
       ),
     ).toBe(
-      createOpenCodeJudgeToolPolicyPluginScript({
+      createOpenCodeSubagentToolPolicyPluginScript({
         brokerNames: [],
         memoryNames: [],
         otherMcpNames: [],

@@ -1,11 +1,51 @@
-export const ROOMOTE_OPENCODE_JUDGE_AGENT_NAME = 'judge';
-export const ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME = 'advisor';
+import {
+  EVIDENCE_REVIEW_SUBAGENT_TOOL_POLICY,
+  type SubagentToolPolicy,
+} from '@roomote/types';
+
+export type RoomoteOpenCodeSubagentDefinition = {
+  name: string;
+  description: string;
+  toolPolicy?: SubagentToolPolicy;
+};
+
+export const ROOMOTE_OPENCODE_JUDGE_AGENT_DEFINITION = {
+  name: 'judge',
+  description:
+    'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, opens captured proof images to verify them, and returns concise review findings.',
+  toolPolicy: EVIDENCE_REVIEW_SUBAGENT_TOOL_POLICY,
+} as const satisfies RoomoteOpenCodeSubagentDefinition;
+
+export const ROOMOTE_OPENCODE_ADVISOR_AGENT_DEFINITION = {
+  name: 'advisor',
+  description:
+    'Consulting advisor the coding agent can ask for help when it is stuck, hits repeated or insurmountable task failures, needs a second opinion on approach or debugging, or the user contradicts or challenges it.',
+  toolPolicy: undefined,
+} as const satisfies RoomoteOpenCodeSubagentDefinition;
+
+export const ROOMOTE_OPENCODE_SUBAGENT_DEFINITIONS = [
+  ROOMOTE_OPENCODE_JUDGE_AGENT_DEFINITION,
+  ROOMOTE_OPENCODE_ADVISOR_AGENT_DEFINITION,
+] as const;
+
+export const ROOMOTE_OPENCODE_JUDGE_AGENT_NAME =
+  ROOMOTE_OPENCODE_JUDGE_AGENT_DEFINITION.name;
+export const ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME =
+  ROOMOTE_OPENCODE_ADVISOR_AGENT_DEFINITION.name;
 
 export const ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION =
-  'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, opens captured proof images to verify them, and returns concise review findings.';
+  ROOMOTE_OPENCODE_JUDGE_AGENT_DEFINITION.description;
 
 export const ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION =
-  'Consulting advisor the coding agent can ask for help when it is stuck, hits repeated or insurmountable task failures, needs a second opinion on approach or debugging, or the user contradicts or challenges it.';
+  ROOMOTE_OPENCODE_ADVISOR_AGENT_DEFINITION.description;
+
+export function getRoomoteOpenCodeSubagentDefinition(
+  name: string | undefined,
+): RoomoteOpenCodeSubagentDefinition | undefined {
+  return ROOMOTE_OPENCODE_SUBAGENT_DEFINITIONS.find(
+    (definition) => definition.name === name,
+  );
+}
 
 export function createRoomoteJudgeAgentPrompt(
   options: { contextOnly?: boolean } = {},

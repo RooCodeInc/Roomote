@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 
 import {
   collectOpenRouterVariantModelAlias,
-  buildJudgeMcpToolFilter,
+  buildSubagentMcpToolFilter,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   HTTP_INTEGRATIONS_MCP_ID,
@@ -34,9 +34,10 @@ import {
   ROOMOTE_OPENCODE_ADVISOR_AGENT_DESCRIPTION,
   ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
   ROOMOTE_OPENCODE_JUDGE_AGENT_DESCRIPTION,
+  ROOMOTE_OPENCODE_JUDGE_AGENT_DEFINITION,
   ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
 } from '../opencode-prompt-subagents';
-import { createOpenCodeJudgeToolPolicyPluginScript } from '../opencode-judge-tool-policy-plugin';
+import { createOpenCodeSubagentToolPolicyPluginScript } from '../opencode-subagent-tool-policy-plugin';
 import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '../opencode-identity-plugin';
 import { FAST_AGENT_SUBAGENT_TOOL_FILTER } from './fast-agent/fast-agent-tool-policy';
 import { seedOpenCodePluginDependenciesForEnv } from './opencode-plugin-seed';
@@ -239,9 +240,18 @@ const PROMPT_ONLY_SUBAGENTS = {
     permission: NON_TASK_TOOL_PERMISSION_DENIALS,
     tools: {
       ...FAST_AGENT_SUBAGENT_TOOL_FILTER,
-      ...buildJudgeMcpToolFilter('roomote'),
-      ...buildJudgeMcpToolFilter(HTTP_INTEGRATIONS_MCP_ID),
-      ...buildJudgeMcpToolFilter('supermemory'),
+      ...buildSubagentMcpToolFilter(
+        ROOMOTE_OPENCODE_JUDGE_AGENT_DEFINITION.toolPolicy,
+        'roomote',
+      ),
+      ...buildSubagentMcpToolFilter(
+        ROOMOTE_OPENCODE_JUDGE_AGENT_DEFINITION.toolPolicy,
+        HTTP_INTEGRATIONS_MCP_ID,
+      ),
+      ...buildSubagentMcpToolFilter(
+        ROOMOTE_OPENCODE_JUDGE_AGENT_DEFINITION.toolPolicy,
+        'supermemory',
+      ),
     },
   },
 } as const;
@@ -253,7 +263,7 @@ type NonTaskOpenCodeRuntimeOptions = {
 };
 
 let openCodeIdentityPluginUrl: string | undefined;
-let openCodeJudgeToolPolicyPluginUrl: string | undefined;
+let openCodeSubagentToolPolicyPluginUrl: string | undefined;
 
 function getOpenCodeIdentityPluginUrl(): string {
   if (openCodeIdentityPluginUrl) {
@@ -270,20 +280,20 @@ function getOpenCodeIdentityPluginUrl(): string {
   return openCodeIdentityPluginUrl;
 }
 
-function getOpenCodeJudgeToolPolicyPluginUrl(): string {
-  if (openCodeJudgeToolPolicyPluginUrl) {
-    return openCodeJudgeToolPolicyPluginUrl;
+function getOpenCodeSubagentToolPolicyPluginUrl(): string {
+  if (openCodeSubagentToolPolicyPluginUrl) {
+    return openCodeSubagentToolPolicyPluginUrl;
   }
   const directory = mkdtempSync(
-    join(tmpdir(), 'roomote-opencode-judge-policy-'),
+    join(tmpdir(), 'roomote-opencode-subagent-policy-'),
   );
-  const pluginPath = join(directory, 'roomote-judge-tool-policy.mjs');
-  writeFileSync(pluginPath, createOpenCodeJudgeToolPolicyPluginScript(), {
+  const pluginPath = join(directory, 'roomote-subagent-tool-policy.mjs');
+  writeFileSync(pluginPath, createOpenCodeSubagentToolPolicyPluginScript(), {
     encoding: 'utf8',
     mode: 0o600,
   });
-  openCodeJudgeToolPolicyPluginUrl = pathToFileURL(pluginPath).href;
-  return openCodeJudgeToolPolicyPluginUrl;
+  openCodeSubagentToolPolicyPluginUrl = pathToFileURL(pluginPath).href;
+  return openCodeSubagentToolPolicyPluginUrl;
 }
 
 function buildRestrictedNonTaskConfig(
@@ -298,7 +308,7 @@ function buildRestrictedNonTaskConfig(
     agent: PROMPT_ONLY_SUBAGENTS,
     plugin: [
       getOpenCodeIdentityPluginUrl(),
-      getOpenCodeJudgeToolPolicyPluginUrl(),
+      getOpenCodeSubagentToolPolicyPluginUrl(),
     ],
     permission: { ...NON_TASK_TOOL_PERMISSION_DENIALS, task: 'allow' },
   };
