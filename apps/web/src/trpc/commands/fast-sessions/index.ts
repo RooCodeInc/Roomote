@@ -76,6 +76,7 @@ import {
   getFastSessionTasks,
   updateFastSessionPrReviewOfferStatus,
 } from '@/lib/server/fast-sessions';
+import { installWebFastAgentGracefulShutdown } from '@/lib/server/fast-agent-graceful-shutdown';
 import { handleWebPrReviewAction } from '@/lib/server/pr-review-actions';
 import {
   currentEpochSeconds,
@@ -83,6 +84,13 @@ import {
 } from '@/lib/server/artifact-signature';
 import type { PinnedFastSessionLaunchInput } from './input';
 import { startPinnedFastSessionLaunch } from './pinned-launch';
+
+// This module schedules every web-run Fast turn, so the SIGTERM hand-off is
+// installed here to share its lock registry and error classes with the turns
+// in the standalone bundle.
+if (process.env.NODE_ENV !== 'test') {
+  installWebFastAgentGracefulShutdown();
+}
 
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
 
