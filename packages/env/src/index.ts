@@ -110,6 +110,7 @@ function sessionEgressAllowedOrigins() {
           url.pathname !== '/' ||
           url.search ||
           url.hash ||
+          url.port === '0' ||
           !SESSION_EGRESS_ORIGIN_HOST_PATTERN.test(url.hostname)
         ) {
           context.addIssue({

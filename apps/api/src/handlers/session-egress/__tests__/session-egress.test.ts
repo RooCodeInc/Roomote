@@ -79,8 +79,13 @@ const allowedOrigins = [
 ];
 
 function setAllowedOrigins(origins: string[]) {
+  const skipValidation = process.env.SKIP_ENV_VALIDATION;
+  delete process.env.SKIP_ENV_VALIDATION;
   process.env.R_SESSION_EGRESS_ALLOWED_ORIGINS = JSON.stringify(origins);
   rehydrateEnv(process.env);
+  if (skipValidation !== undefined) {
+    process.env.SKIP_ENV_VALIDATION = skipValidation;
+  }
 }
 
 function connector() {
@@ -238,8 +243,13 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  const skipValidation = process.env.SKIP_ENV_VALIDATION;
+  delete process.env.SKIP_ENV_VALIDATION;
   delete process.env.R_SESSION_EGRESS_ALLOWED_ORIGINS;
   rehydrateEnv(process.env);
+  if (skipValidation !== undefined) {
+    process.env.SKIP_ENV_VALIDATION = skipValidation;
+  }
   configureAuthClientEnv(null);
 });
 

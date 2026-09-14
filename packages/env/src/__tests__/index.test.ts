@@ -71,6 +71,7 @@ describe('Env', () => {
     '["https://api.example.com?query=1"]',
     '["https://api.example.com#fragment"]',
     '["https://127.0.0.1"]',
+    '["https://api.example.com:0"]',
     '["https://api.example.com."]',
     '["https://*.example.com"]',
     '["https://ｅxample.com"]',

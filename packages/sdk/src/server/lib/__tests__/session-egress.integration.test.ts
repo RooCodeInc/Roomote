@@ -17,6 +17,7 @@ import {
   users,
   type SessionSecretContext,
 } from '@roomote/db/server';
+import { rehydrateEnv } from '@roomote/env';
 import { RunStatus, type RunTokenContext } from '@roomote/types';
 import * as redisModule from '@roomote/redis';
 import {
@@ -48,8 +49,27 @@ let context: SessionSecretContext;
 let runId: number;
 let taskId: string;
 let connectorIdentity: string;
+let previousAllowedOrigins: string | undefined;
+
+function rehydrateAllowedOrigins(value: string | undefined) {
+  const skipValidation = process.env.SKIP_ENV_VALIDATION;
+  delete process.env.SKIP_ENV_VALIDATION;
+  if (value === undefined) {
+    delete process.env.R_SESSION_EGRESS_ALLOWED_ORIGINS;
+  } else {
+    process.env.R_SESSION_EGRESS_ALLOWED_ORIGINS = value;
+  }
+  rehydrateEnv(process.env);
+  if (skipValidation !== undefined) {
+    process.env.SKIP_ENV_VALIDATION = skipValidation;
+  }
+}
 
 beforeEach(async () => {
+  previousAllowedOrigins = process.env.R_SESSION_EGRESS_ALLOWED_ORIGINS;
+  rehydrateAllowedOrigins(
+    JSON.stringify([policy.origin, 'https://other.example.com']),
+  );
   const owner = await userFactory.create();
   const session = await sessionFactory.create({
     ownerKind: 'user',
@@ -73,6 +93,7 @@ afterEach(async () => {
   await db.delete(sessions).where(eq(sessions.id, context.sessionId));
   await db.delete(tasks).where(eq(tasks.id, taskId));
   await db.delete(users).where(eq(users.id, context.userId!));
+  rehydrateAllowedOrigins(previousAllowedOrigins);
 });
 
 it('registers exact prepared GET+POST consent and authorizes both methods without widening it', async () => {
