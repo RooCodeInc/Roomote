@@ -4278,6 +4278,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect(params.prompt).toContain(
           '<explicit_skill_invocation name="daily-brief" />',
         );
+        expect(params.system).toContain(
+          `- daily-brief [id: instance:${skill.id}] (instance-wide): Prepare a daily brief.`,
+        );
         await options.onSessionReady('opencode-session-1');
         options.onPromptStarted?.();
         const callTool = async (
@@ -4356,9 +4359,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         adapter,
       });
       expect(mocks.generateText).toHaveBeenCalledOnce();
-      expect(mocks.listCustomSkills).toHaveBeenCalledExactlyOnceWith(
-        baseParams.userId,
-      );
+      // Once for the system prompt catalog, once for the model's lookup;
+      // both as the current user rather than the workspace.
+      expect(mocks.listCustomSkills).toHaveBeenCalledTimes(2);
+      expect(
+        mocks.listCustomSkills.mock.calls.every(
+          (call) => call[0] === baseParams.userId,
+        ),
+      ).toBe(true);
       expect(mocks.getCustomSkill).toHaveBeenCalledExactlyOnceWith(
         baseParams.userId,
         skill.id,
