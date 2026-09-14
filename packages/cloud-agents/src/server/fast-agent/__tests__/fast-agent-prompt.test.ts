@@ -651,6 +651,16 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'The runtime rejects those actions until a visible text reply has been delivered',
     );
+
+    const enabledPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      sessionSecretToolsEnabled: true,
+    });
+    expect(enabledPrompt).toContain('`prepare_session_secret`');
+    expect(enabledPrompt).toContain('`list_session_secrets`');
+    expect(enabledPrompt).not.toContain(
+      'Session-secret tools are temporarily unavailable',
+    );
     expect(prompt).toContain(
       'On a human-authored turn, acknowledge first, then send the instruction immediately',
     );

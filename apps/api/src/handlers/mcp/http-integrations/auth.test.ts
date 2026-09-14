@@ -52,9 +52,7 @@ vi.mock('@roomote/types', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/types')>();
   return {
     ...actual,
-    get SESSION_SECRET_TOOLS_ENABLED() {
-      return secretToolsEnabled.value;
-    },
+    isSessionSecretToolsExperimentEnabled: () => secretToolsEnabled.value,
   };
 });
 vi.mock('@roomote/env', async (importOriginal) => {
@@ -1190,8 +1188,8 @@ it.each(['broker', 'run'] as const)(
   async (kind) => {
     const actual =
       await vi.importActual<typeof import('@roomote/types')>('@roomote/types');
-    expect(actual.SESSION_SECRET_TOOLS_ENABLED).toBe(false);
-    secretToolsEnabled.value = actual.SESSION_SECRET_TOOLS_ENABLED;
+    expect(actual.isSessionSecretToolsExperimentEnabled(undefined)).toBe(false);
+    secretToolsEnabled.value = false;
     const fixture = await sessionGrant();
     const token = kind === 'broker' ? fixture.brokerToken : fixture.runToken;
     const response = await post(token);

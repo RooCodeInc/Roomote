@@ -22,6 +22,12 @@ describe('getFastAgentNativeAcpKind', () => {
     expect(buildFastAgentToolFilter([], { surface: 'slack' })[name]).toBe(
       false,
     );
+    expect(
+      buildFastAgentToolFilter([], {
+        surface: 'web',
+        sessionSecretToolsEnabled: true,
+      })[name],
+    ).toBe(true);
     expect(FAST_AGENT_SUBAGENT_TOOL_FILTER[name]).toBe(false);
     expect(getFastAgentNativeAcpKind(name)).toBe(kind);
   });

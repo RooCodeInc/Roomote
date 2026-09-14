@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   revoke: vi.fn(),
   findSession: vi.fn(),
+  findUser: vi.fn(),
   reply: vi.fn(),
   eq: vi.fn((column, value) => ({ column, value })),
   env: {
@@ -17,8 +18,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/server/auth-context', () => ({ authorize: mocks.authorize }));
 vi.mock('@/lib/server/env', () => ({ Env: mocks.env }));
 vi.mock('@roomote/db/server', () => ({
-  db: { query: { sessions: { findFirst: mocks.findSession } } },
+  db: {
+    query: {
+      sessions: { findFirst: mocks.findSession },
+      users: { findFirst: mocks.findUser },
+    },
+  },
   sessions: { id: 'sessions.id' },
+  users: { id: 'users.id' },
   eq: mocks.eq,
 }));
 vi.mock('@/trpc/commands/fast-sessions', () => ({
@@ -74,6 +81,7 @@ beforeEach(() => {
   mocks.env.R_PUBLIC_URL = 'https://roomote.example';
   mocks.authorize.mockResolvedValue(auth);
   mocks.findSession.mockResolvedValue(liveSession);
+  mocks.findUser.mockResolvedValue({ metadata: {} });
   mocks.reply.mockResolvedValue({ success: true });
   mocks.create.mockResolvedValue(metadata);
   mocks.list.mockResolvedValue({
@@ -163,7 +171,8 @@ describe('session secret route boundary', () => {
       { sessionId, userId: 'cookie-user' },
       createArgs,
     );
-    expect(mocks.eq).toHaveBeenCalledExactlyOnceWith('sessions.id', sessionId);
+    expect(mocks.eq).toHaveBeenCalledWith('sessions.id', sessionId);
+    expect(mocks.eq).toHaveBeenCalledWith('users.id', auth.userId);
     expect(mocks.findSession).toHaveBeenCalledExactlyOnceWith({
       where: { column: 'sessions.id', value: sessionId },
       columns: {
@@ -189,6 +198,19 @@ describe('session secret route boundary', () => {
     for (const value of [plaintext, secretRef, sessionId, fastConversationId]) {
       expect(text).not.toContain(value);
     }
+  });
+
+  it('resumes with the available workflow when the experiment is enabled', async () => {
+    mocks.findUser.mockResolvedValue({
+      metadata: { session_secret_tools_enabled: true },
+    });
+
+    await POST(request('POST', createArgs), props);
+
+    expect(mocks.reply).toHaveBeenCalledWith(auth, {
+      sessionId: fastConversationId,
+      text: expect.stringContaining('Check list_session_secrets'),
+    });
   });
 
   it('uses fixed nonsecret continuation text independent of the saved credential metadata', async () => {

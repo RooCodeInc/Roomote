@@ -4,7 +4,6 @@ import {
   type FastAgentSurface,
   isMemoryMcpServer,
   ROOMOTE_MCP_ID,
-  SESSION_SECRET_TOOLS_ENABLED,
   type FastAgentNativeToolName,
 } from '@roomote/types';
 
@@ -20,12 +19,9 @@ export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
   ...Object.fromEntries(
     Object.values(FAST_AGENT_NATIVE_TOOL_NAMES).map((name) => [name, true]),
   ),
-  [FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret]:
-    SESSION_SECRET_TOOLS_ENABLED,
-  [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets]:
-    SESSION_SECRET_TOOLS_ENABLED,
-  [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret]:
-    SESSION_SECRET_TOOLS_ENABLED,
+  [FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret]: false,
+  [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets]: false,
+  [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret]: false,
 };
 
 export const FAST_AGENT_SUBAGENT_TOOL_FILTER: Record<string, boolean> = {
@@ -58,10 +54,19 @@ export function isFastAgentNativeIntegration(integrationId: string): boolean {
 
 export function buildFastAgentToolFilter(
   integrationIds: string[],
-  options: { surface?: FastAgentSurface } = {},
+  options: {
+    surface?: FastAgentSurface;
+    sessionSecretToolsEnabled?: boolean;
+  } = {},
 ): Record<string, boolean> {
   return {
     ...FAST_AGENT_NATIVE_TOOL_FILTER,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret]:
+      options.sessionSecretToolsEnabled === true,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets]:
+      options.sessionSecretToolsEnabled === true,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret]:
+      options.sessionSecretToolsEnabled === true,
     ...(options.surface && options.surface !== 'web'
       ? {
           [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: false,

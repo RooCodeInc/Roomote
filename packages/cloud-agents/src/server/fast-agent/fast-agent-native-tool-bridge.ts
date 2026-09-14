@@ -1449,7 +1449,10 @@ function pruneSessionRuntimes(): void {
 export async function getFastAgentNativeToolRuntime(
   sessionId: string,
   integrations: FastAgentIntegration[],
-  options: { surface?: FastAgentSurface } = {},
+  options: {
+    surface?: FastAgentSurface;
+    sessionSecretToolsEnabled?: boolean;
+  } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
   const bridge = await bridgePromise;
@@ -1503,7 +1506,11 @@ export async function getFastAgentNativeToolRuntime(
         build: {
           tools: buildFastAgentToolFilter(
             nativeIntegrations.map((integration) => integration.id),
-            { surface: options.surface ?? 'web' },
+            {
+              surface: options.surface ?? 'web',
+              sessionSecretToolsEnabled:
+                options.sessionSecretToolsEnabled === true,
+            },
           ),
         },
       },

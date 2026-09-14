@@ -11,6 +11,7 @@ import {
 } from '@roomote/db/server';
 import { TRPCError } from '@trpc/server';
 import { headers } from 'next/headers';
+import { SESSION_SECRET_TOOLS_EXPERIMENT_KEY } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 import { getAuth } from '@/lib/server/auth';
@@ -59,6 +60,10 @@ function normalizePersonalPreferences(
       typeof metadata.home_composer_suggestions_enabled === 'boolean'
         ? metadata.home_composer_suggestions_enabled
         : DEFAULT_PERSONAL_PREFERENCES.homeComposerSuggestionsEnabled,
+    sessionSecretToolsEnabled:
+      typeof metadata[SESSION_SECRET_TOOLS_EXPERIMENT_KEY] === 'boolean'
+        ? metadata[SESSION_SECRET_TOOLS_EXPERIMENT_KEY]
+        : DEFAULT_PERSONAL_PREFERENCES.sessionSecretToolsEnabled,
   };
 }
 
@@ -157,6 +162,10 @@ export async function updatePersonalPreferencesCommand(
   if (input.homeComposerSuggestionsEnabled !== undefined) {
     nextMetadataRecord.home_composer_suggestions_enabled =
       input.homeComposerSuggestionsEnabled;
+  }
+  if (input.sessionSecretToolsEnabled !== undefined) {
+    nextMetadataRecord[SESSION_SECRET_TOOLS_EXPERIMENT_KEY] =
+      input.sessionSecretToolsEnabled;
   }
 
   if (Object.keys(nextMetadataRecord).length === 0) {

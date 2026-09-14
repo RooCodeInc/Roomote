@@ -6,8 +6,21 @@ import {
   type SessionEgressMethod,
 } from './session-egress';
 
-// Temporary rollout pause: keep Session-secret tools hidden until hosted access works.
-export const SESSION_SECRET_TOOLS_ENABLED = false;
+export const SESSION_SECRET_TOOLS_EXPERIMENT_KEY =
+  'session_secret_tools_enabled' as const;
+
+export function isSessionSecretToolsExperimentEnabled(
+  metadata: unknown,
+): boolean {
+  return (
+    Boolean(metadata) &&
+    typeof metadata === 'object' &&
+    !Array.isArray(metadata) &&
+    (metadata as Record<string, unknown>)[
+      SESSION_SECRET_TOOLS_EXPERIMENT_KEY
+    ] === true
+  );
+}
 
 const sessionSecretPrepareFields = {
   label: z.string().trim().min(1).max(80),
