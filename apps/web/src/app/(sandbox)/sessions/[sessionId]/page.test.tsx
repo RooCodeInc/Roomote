@@ -485,6 +485,11 @@ describe('Session detail page', () => {
     expect(isValidElement(headerExtras) ? headerExtras.key : null).toBe(
       'session-pull-requests',
     );
+    const headerActions = transcriptMock.mock.calls[0]?.[0].headerActions;
+    expect(isValidElement(headerActions)).toBe(true);
+    expect(isValidElement(headerActions) ? headerActions.key : null).toBe(
+      'session-viewers',
+    );
   });
 
   it('renders a task-only workspace for unified sessions without a Fast conversation', async () => {

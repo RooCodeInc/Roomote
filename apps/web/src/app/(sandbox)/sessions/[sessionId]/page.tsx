@@ -182,7 +182,10 @@ export default async function SessionDetailPage({
                     <SessionHeaderPullRequests key="session-pull-requests" />
                   }
                   headerActions={
-                    <SessionViewers sessionId={unifiedSession.id} />
+                    <SessionViewers
+                      key="session-viewers"
+                      sessionId={unifiedSession.id}
+                    />
                   }
                 />
               </div>
