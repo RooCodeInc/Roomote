@@ -35,6 +35,7 @@ import {
  */
 const REQUEST_HEADER_DENYLIST = new Set([
   'authorization',
+  'api-key',
   'x-api-key',
   'x-goog-api-key',
   // The gateway sets the ChatGPT account-id authoritatively from the OAuth
