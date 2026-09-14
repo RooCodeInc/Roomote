@@ -64,12 +64,15 @@ vi.mock('../brain-corpus', () => ({
   readBrainTaskMemories: mockReadMemories,
 }));
 
-vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
-  NON_TASK_INFERENCE_SURFACES: {
-    composerSuggestionGeneration: 'composer_suggestion_generation',
-  },
-  generateTrackedNonTaskObject: mockGenerate,
-}));
+vi.mock(
+  '@roomote/cloud-agents/server/non-task-provider-usage',
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import('@roomote/cloud-agents/server/non-task-provider-usage')
+    >()),
+    generateTrackedNonTaskObject: mockGenerate,
+  }),
+);
 
 vi.mock('bullmq', () => ({
   Queue: class MockQueue {
@@ -89,6 +92,7 @@ import {
   requestHomeComposerRecommendationPrecomputeForRun,
   resetHomeComposerRecommendationQueueForTests,
 } from '../home-composer-recommendations';
+import { buildNonTaskStructuredOutputJsonSchema } from '@roomote/cloud-agents/server/non-task-provider-usage';
 
 const refs = [
   {
@@ -186,16 +190,19 @@ describe('Home composer recommendations', () => {
       safeParse: (value: unknown) => { success: boolean };
     };
     expect(schema.safeParse({ suggestions }).success).toBe(true);
+    // Provider-facing validation stays structural; semantic limits are applied
+    // after generation so unsupported JSON Schema keywords never reach Luna.
     expect(
       schema.safeParse({
-        suggestions: Array.from({ length: 5 }, () => suggestionAtLength(160)),
+        suggestions: [suggestionAtLength(161)],
       }).success,
     ).toBe(true);
-    expect(
-      schema.safeParse({
-        suggestions: Array.from({ length: 5 }, () => suggestionAtLength(161)),
-      }).success,
-    ).toBe(false);
+    const wireSchema = buildNonTaskStructuredOutputJsonSchema(
+      schema as Parameters<typeof buildNonTaskStructuredOutputJsonSchema>[0],
+    );
+    expect(JSON.stringify(wireSchema)).not.toMatch(
+      /"(?:pattern|minItems|maxItems|minLength|maxLength)"/u,
+    );
     expect(redisStore.get(cacheKey)).toContain(suggestions[0]);
   });
 
