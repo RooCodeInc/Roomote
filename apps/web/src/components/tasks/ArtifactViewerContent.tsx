@@ -417,7 +417,7 @@ export function ArtifactViewerContent({
 
         <div
           className={cn(
-            'ph-no-capture flex-1 min-h-0 bg-card overflow-y-auto h-full',
+            'ph-no-capture flex-1 min-h-0 bg-background overflow-y-auto h-full',
             (isMarkdown && !isRaw) || (isHTML && !isRaw) || isPDF || isVideo
               ? 'overflow-x-hidden'
               : 'overflow-x-auto',
@@ -482,6 +482,7 @@ export function ArtifactViewerContent({
                 <MediaViewerImage
                   src={artifact.downloadUrl}
                   alt={artifact.path}
+                  viewportClassName="bg-background"
                 />
               )}
 
@@ -494,7 +495,7 @@ export function ArtifactViewerContent({
               )}
 
               {isVideo && (
-                <div className="flex h-full w-full min-w-0 items-center justify-center bg-zinc-800 p-4">
+                <div className="flex h-full w-full min-w-0 items-center justify-center bg-background p-4">
                   <video
                     src={artifact.downloadUrl}
                     controls

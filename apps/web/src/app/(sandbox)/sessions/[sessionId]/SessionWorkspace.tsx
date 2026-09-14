@@ -401,7 +401,7 @@ function SessionArtifactViewer({
         onClose={onClose}
         closeLabel={closeLabel}
       />
-      <div className="min-h-0 flex-1 bg-zinc-800">
+      <div className="min-h-0 flex-1 bg-background">
         <ArtifactViewerContent
           artifact={selectedArtifact}
           owner={selection.owner}
