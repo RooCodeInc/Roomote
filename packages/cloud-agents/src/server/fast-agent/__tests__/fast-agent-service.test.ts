@@ -1566,6 +1566,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             sessionUrl: url.toString(),
           });
           expect(
+            await invokeTool(nativeToolNames.prepareSessionSecret, {
+              label: 'No-prefix API',
+              origin: args.origin,
+              headerName: 'x-api-key',
+            }),
+          ).toEqual({
+            pending,
+            sessionUrl: url.toString(),
+          });
+          expect(
             await invokeTool(nativeToolNames.listSessionSecrets, {}),
           ).toEqual(metadata);
           await invokeTool(nativeToolNames.sendChatReply, {
@@ -1580,9 +1590,22 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         conversation: { ...baseParams.conversation, surface },
         adapter: callbacks(),
       });
-      expect(mocks.prepareSessionSecret).toHaveBeenCalledExactlyOnceWith(
+      expect(mocks.prepareSessionSecret).toHaveBeenNthCalledWith(
+        1,
         { sessionId: 'canonical-session-1', userId: 'user-1' },
         { ...args, ttlHours: 24, allowedMethods: ['GET', 'HEAD'] },
+      );
+      expect(mocks.prepareSessionSecret).toHaveBeenNthCalledWith(
+        2,
+        { sessionId: 'canonical-session-1', userId: 'user-1' },
+        {
+          label: 'No-prefix API',
+          origin: args.origin,
+          headerName: 'x-api-key',
+          headerPrefix: '',
+          ttlHours: 24,
+          allowedMethods: ['GET', 'HEAD'],
+        },
       );
       expect(mocks.listSessionSecretApprovals).toHaveBeenCalledExactlyOnceWith({
         sessionId: 'canonical-session-1',

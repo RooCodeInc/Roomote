@@ -12,6 +12,7 @@ import {
   FAST_AGENT_NATIVE_TOOL_NAMES,
   sessionSecretRequestSchema,
   sessionSecretPrepareSchema,
+  sessionSecretPrepareToolSchema,
   MANAGE_WAKEUPS_TOOL,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -359,7 +360,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
         label: { type: 'string', minLength: 1, maxLength: 80 },
         origin: { type: 'string', minLength: 1, maxLength: 2048 },
         headerName: { enum: ['authorization', 'x-api-key', 'api-key'] },
-        headerPrefix: { enum: ['', 'Bearer ', 'Basic ', 'Token '] },
+        headerPrefix: { enum: ['Bearer ', 'Basic ', 'Token '] },
         ttlHours: { type: 'integer', minimum: 1, maximum: 720, default: 24 },
         allowedMethods: {
           type: 'array',
@@ -370,6 +371,8 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       },
     });
     expect(schema.required).not.toContain('allowedMethods');
+    expect(schema.required).not.toContain('headerPrefix');
+    expect(JSON.stringify(schema)).not.toContain('"enum":[""');
     expect(status.args).toEqual({});
     expect(toOpenCodeJsonSchema(zod, status.args!)).toMatchObject({
       type: 'object',
@@ -383,6 +386,20 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     };
     expect(sessionSecretPrepareSchema.parse(args)).toEqual({
       ...args,
+      ttlHours: 24,
+      allowedMethods: ['GET', 'HEAD'],
+    });
+    expect(
+      sessionSecretPrepareToolSchema.parse({
+        label: 'API',
+        origin: 'https://api.example.com',
+        headerName: 'x-api-key',
+      }),
+    ).toEqual({
+      label: 'API',
+      origin: 'https://api.example.com',
+      headerName: 'x-api-key',
+      headerPrefix: '',
       ttlHours: 24,
       allowedMethods: ['GET', 'HEAD'],
     });
@@ -406,9 +423,13 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       { allowedMethods: ['OPTIONS'] },
     ]) {
       expect(
-        sessionSecretPrepareSchema.safeParse({ ...args, ...extra }).success,
+        sessionSecretPrepareToolSchema.safeParse({ ...args, ...extra }).success,
       ).toBe(false);
     }
+    expect(
+      sessionSecretPrepareSchema.parse({ ...args, headerPrefix: '' })
+        .headerPrefix,
+    ).toBe('');
     for (const [tool, input] of [
       [prepare, args],
       [status, {}],
