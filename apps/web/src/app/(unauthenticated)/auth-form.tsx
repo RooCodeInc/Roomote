@@ -10,6 +10,7 @@ import {
 
 import { authClient } from '@/lib/auth-client';
 import { getAuthProviderCallbackUrl } from '@/lib/auth-provider-callback';
+import { getSafeSignInRedirectPath } from '@/lib/auth-redirect';
 import { cn } from '@/lib/utils';
 import { OriginMismatchAlert } from '@/components/layout';
 import { EmailPasswordAuth } from './email-password-auth';
@@ -43,18 +44,6 @@ function AuthProviderIcon({ provider }: { provider: AuthProvider }) {
   }
 
   return <BrandIcon icon={provider} name="" className="size-4" />;
-}
-
-function getSafeRedirectUrl(rawRedirectUrl: string | null): string {
-  if (!rawRedirectUrl) {
-    return '/setup';
-  }
-
-  if (!rawRedirectUrl.startsWith('/') || rawRedirectUrl.startsWith('//')) {
-    return '/setup';
-  }
-
-  return rawRedirectUrl;
 }
 
 function getAuthErrorMessage(
@@ -94,7 +83,7 @@ export function AuthForm({
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectUrl = useMemo(
-    () => getSafeRedirectUrl(searchParams.get('redirect_url')),
+    () => getSafeSignInRedirectPath(searchParams.get('redirect_url'), '/setup'),
     [searchParams],
   );
   const enabledProviderSet = useMemo(

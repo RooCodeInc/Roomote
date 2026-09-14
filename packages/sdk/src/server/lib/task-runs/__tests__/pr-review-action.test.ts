@@ -15,6 +15,9 @@ const {
   mockSlackInstallation,
   mockSlackBlocks,
   mockSlackUpdate,
+  mockGetThreadReplyFooterRecord,
+  mockSetThreadReplyFooterRecord,
+  mockWithThreadReplyFooterLock,
 } = vi.hoisted(() => {
   const mockUpdateReturning = vi.fn();
   const mockUpdateWhere = vi.fn(() => ({ returning: mockUpdateReturning }));
@@ -36,8 +39,21 @@ const {
     mockSlackInstallation: vi.fn(),
     mockSlackBlocks: vi.fn(),
     mockSlackUpdate: vi.fn(),
+    mockGetThreadReplyFooterRecord: vi.fn(),
+    mockSetThreadReplyFooterRecord: vi.fn(),
+    mockWithThreadReplyFooterLock: vi.fn(),
   };
 });
+
+vi.mock('@roomote/communication', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/communication')>()),
+  getThreadReplyFooterRecord: (...args: unknown[]) =>
+    mockGetThreadReplyFooterRecord(...args),
+  setThreadReplyFooterRecord: (...args: unknown[]) =>
+    mockSetThreadReplyFooterRecord(...args),
+  withThreadReplyFooterLock: (...args: unknown[]) =>
+    mockWithThreadReplyFooterLock(...args),
+}));
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
@@ -121,6 +137,16 @@ describe('PR review action state', () => {
     mockRetireCanonicalForPullRequest.mockResolvedValue([]);
     mockAttachCanonical.mockResolvedValue(false);
     mockGetCommunicationProviderAdapter.mockResolvedValue(null);
+    mockGetThreadReplyFooterRecord.mockResolvedValue(null);
+    mockSetThreadReplyFooterRecord.mockResolvedValue(true);
+    mockWithThreadReplyFooterLock.mockImplementation(
+      async ({
+        fn,
+      }: {
+        fn: (assertLock: () => Promise<void>, lock: object) => unknown;
+      }) =>
+        fn(async () => undefined, { key: 'footer-lock', ownerId: 'owner-1' }),
+    );
   });
 
   it('creates and orders each nonce atomically without overwriting retries', async () => {
@@ -453,6 +479,15 @@ describe('PR review action state', () => {
 
   it('retires a superseded chat message even when its task link is gone', async () => {
     const editMessageReplyMarkup = vi.fn().mockResolvedValue(undefined);
+    mockGetThreadReplyFooterRecord.mockResolvedValue({
+      messageId: '456',
+      textWithoutFooter: 'Review feedback.',
+      buttons: [[{ text: 'Resolve', callbackData: 'prr:y:nonce' }]],
+      refresh: {
+        footerText: 'Reply anytime',
+        channelId: 'chat-1',
+      },
+    });
     mockGetCommunicationProviderAdapter.mockResolvedValue({
       provider: 'telegram',
       editMessageReplyMarkup,
@@ -490,6 +525,23 @@ describe('PR review action state', () => {
       channelId: 'chat-1',
       messageId: '456',
     });
+    expect(mockSetThreadReplyFooterRecord).toHaveBeenCalledWith(
+      'telegram',
+      'chat-1',
+      'root',
+      {
+        messageId: '456',
+        textWithoutFooter: 'Review feedback.',
+        refresh: {
+          footerText: 'Reply anytime',
+          channelId: 'chat-1',
+        },
+      },
+      {
+        keepTtl: true,
+        lock: { key: 'footer-lock', ownerId: 'owner-1' },
+      },
+    );
   });
 
   it('retires superseded Slack controls without adding a notice', async () => {

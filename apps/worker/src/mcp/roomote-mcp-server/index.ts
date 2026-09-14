@@ -13,6 +13,7 @@ import {
   CHAT_MESSAGE_CONTEXT_TOOL,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   CREATE_CUSTOM_SKILL_TOOL,
+  UPDATE_CUSTOM_SKILL_TOOL,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   dataVisualizationInputsSchema,
@@ -91,8 +92,10 @@ import { errorResult } from './tool-result.js';
 import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-summary-state.js';
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
-import { handleCreateCustomSkill } from './custom-skills.js';
-import { handleManageGoal } from './goal.js';
+import {
+  handleCreateCustomSkill,
+  handleUpdateCustomSkill,
+} from './custom-skills.js';
 import {
   handleGetSessionMessages,
   handleGetSessionSummary,
@@ -143,6 +146,23 @@ roomoteMcpServer.registerTool(
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
     }
     return handleManageCustomAutomations(params, config);
+  },
+);
+
+roomoteMcpServer.registerTool(
+  UPDATE_CUSTOM_SKILL_TOOL.name,
+  {
+    title: UPDATE_CUSTOM_SKILL_TOOL.title,
+    description: UPDATE_CUSTOM_SKILL_TOOL.description,
+    inputSchema: z.object(UPDATE_CUSTOM_SKILL_TOOL.inputSchema).strict(),
+    annotations: UPDATE_CUSTOM_SKILL_TOOL.annotations,
+  },
+  async (params): Promise<ToolResult> => {
+    const config = getRoomoteConfig();
+    if (!config) {
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+    return handleUpdateCustomSkill(params, config);
   },
 );
 
@@ -204,7 +224,7 @@ roomoteMcpServer.registerTool(
   {
     title: 'Show Widget',
     description:
-      'Render a presentational HTML widget in the current task transcript. ' +
+      'Create and share a rendered visual in the current task transcript. ' +
       'Use it proactively when the user asks to show, mock up, preview, or visualize an interface or interaction; prefer it over an ASCII or text-only example when a compact visual would answer the request better. ' +
       'Use it when a structured or visual presentation is clearer than plain text, or to demonstrate how something would look. ' +
       'Examples include mock UI, status cards, tables, annotated plans, and other visual examples. ' +
@@ -213,8 +233,7 @@ roomoteMcpServer.registerTool(
       ' ' +
       SHOW_WIDGET_FIXED_CANVAS_GUIDANCE +
       ' ' +
-      'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers. ' +
-      'Optional textFallback is delivered to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
+      'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers.',
     inputSchema: {
       html: nonEmptyStringSchema.describe(
         'Non-empty compact HTML fragment or full document to display, including inline SVG. Avoid long prose, large lists, and dense data likely to require scrolling. Scripts and nested browsing contexts are stripped. Built-in widget classes include rw-card, rw-stack, rw-row, rw-grid, rw-stat, rw-badge, rw-callout, and rw-muted.',
@@ -233,9 +252,7 @@ roomoteMcpServer.registerTool(
       textFallback: z
         .string()
         .optional()
-        .describe(
-          'Optional plain-text fallback posted to the originating chat surface when this task was started from chat',
-        ),
+        .describe('Optional short plain-text preview of the rendered visual'),
     },
     annotations: {
       readOnlyHint: true,
@@ -606,38 +623,6 @@ const manageTasksInputSchema = {
       'For update_models: desired reasoning level for the role ("extra high" maps to xhigh). A level qualifier trailing a model name ("Luna Max", "Sonnet high") is this field, not part of the model id — pass it here alongside the model. Omit to use the deployment default level.',
     ),
 } satisfies Record<string, z.ZodTypeAny>;
-
-roomoteMcpServer.registerTool(
-  'manage_goal',
-  {
-    title: 'Manage Goal',
-    description:
-      'Read or finish the current task goal. Use get to inspect it. Use complete only after the full objective is verified. Use blocked only when progress cannot continue without user input or an external state change. The agent cannot create, replace, pause, resume, or clear goals.',
-    inputSchema: {
-      action: z.enum(['get', 'complete', 'blocked']),
-      generation: z
-        .string()
-        .max(200)
-        .nullable()
-        .optional()
-        .describe(
-          'Required for complete and blocked. Pass the exact generation assigned in the current turn goal instructions.',
-        ),
-      reason: z
-        .string()
-        .max(2_000)
-        .optional()
-        .describe('Required for blocked; explain the concrete blocker.'),
-    },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (params): Promise<ToolResult> => handleManageGoal(params),
-);
 
 roomoteMcpServer.registerTool(
   'manage_tasks',
@@ -1669,6 +1654,9 @@ if (
                 charts: params.charts as DataVisualizationInput[] | undefined,
                 suggestions: params.suggestions,
                 chatReplySurface: chatReplySurfaceLabel,
+                purpose: params.purpose,
+                recordAutomationOutput:
+                  process.env.ROOMOTE_AUTOMATION_TASK === 'true',
               },
               artifactConfig,
               roomoteConfig,

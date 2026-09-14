@@ -13,6 +13,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   inspectImages: 'inspect_images',
   launchTask: 'launch_task',
   manageWakeups: 'manage_wakeups',
+  manageGoal: 'manage_goal',
   retryTaskStart: 'retry_task_start',
   saveMemory: 'save_memory',
   updatePersonalization: 'update_personalization',
@@ -27,6 +28,9 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   stopTask: 'stop_task',
   requestUserInput: 'request_user_input',
   offerCapability: 'offer_capability',
+  requestWithSessionSecret: 'request_with_session_secret',
+  prepareSessionSecret: 'prepare_session_secret',
+  listSessionSecrets: 'list_session_secrets',
   reviewPullRequest: 'review_pull_request',
 } as const;
 
@@ -65,6 +69,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
     kind: ACP_TOOL_KINDS.task,
   },
   {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.manageGoal,
+    kind: ACP_TOOL_KINDS.task,
+  },
+  {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart,
     kind: ACP_TOOL_KINDS.task,
   },
@@ -97,6 +105,18 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep, kind: ACP_TOOL_KINDS.search },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead, kind: ACP_TOOL_KINDS.read },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.stopTask, kind: ACP_TOOL_KINDS.task },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+    kind: ACP_TOOL_KINDS.read,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret,
+    kind: ACP_TOOL_KINDS.tool,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets,
+    kind: ACP_TOOL_KINDS.list,
+  },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
     kind: ACP_TOOL_KINDS.communication,

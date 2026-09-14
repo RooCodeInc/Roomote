@@ -33,8 +33,22 @@ it('advertises a usable MCP schema and persists through the real actor-authorize
           }),
         }),
       }),
+      expect.objectContaining({
+        name: 'update_custom_skill',
+        inputSchema: expect.objectContaining({
+          type: 'object',
+          additionalProperties: false,
+          required: ['skillId', 'expectedVersion'],
+        }),
+      }),
     ]);
-    expect(Object.keys(tools[0]!.inputSchema.properties!)).toEqual([
+    const createTool = tools.find(
+      (tool) => tool.name === 'create_custom_skill',
+    )!;
+    const updateTool = tools.find(
+      (tool) => tool.name === 'update_custom_skill',
+    )!;
+    expect(Object.keys(createTool.inputSchema.properties!)).toEqual([
       'name',
       'description',
       'content',
@@ -45,7 +59,7 @@ it('advertises a usable MCP schema and persists through the real actor-authorize
       content: 'Check examples.\r\n',
     };
     const created = await client.callTool({
-      name: tools[0]!.name,
+      name: createTool.name,
       arguments: args,
     });
     expect(created.isError).not.toBe(true);
@@ -64,9 +78,38 @@ it('advertises a usable MCP schema and persists through the real actor-authorize
       description: 'Review examples',
       content: 'Check examples.\n',
       createdByUserId: member.id,
+      version: 1,
     });
+    const stored = await db.query.instanceSkills.findFirst({
+      where: eq(instanceSkills.name, name),
+    });
+    const updated = await client.callTool({
+      name: updateTool.name,
+      arguments: {
+        skillId: `instance:${stored!.id}`,
+        expectedVersion: 1,
+        content: {
+          type: 'update_content',
+          update_content: {
+            content_updates: [{ old_str: 'Check', new_str: 'Review' }],
+          },
+        },
+      },
+    });
+    expect(updated.isError).not.toBe(true);
+    expect(updated.content).toEqual([
+      expect.objectContaining({
+        type: 'text',
+        text: expect.stringContaining('"version": 2'),
+      }),
+    ]);
+    expect(
+      await db.query.instanceSkills.findFirst({
+        where: eq(instanceSkills.id, stored!.id),
+      }),
+    ).toMatchObject({ content: 'Review examples.\n', version: 2 });
     const duplicate = await client.callTool({
-      name: tools[0]!.name,
+      name: createTool.name,
       arguments: args,
     });
     expect(duplicate.isError).toBe(true);
@@ -83,7 +126,7 @@ it('advertises a usable MCP schema and persists through the real actor-authorize
       { createdByUserId: member.id },
     ]) {
       const invalid = await client.callTool({
-        name: tools[0]!.name,
+        name: createTool.name,
         arguments: { ...args, name: `${name}-invalid`, ...extra },
       });
       expect(invalid.isError).toBe(true);

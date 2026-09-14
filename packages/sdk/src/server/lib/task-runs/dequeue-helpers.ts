@@ -53,7 +53,9 @@ import {
 import { withBootstrapFailureSignal } from '../../../bootstrap-failure-signal';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
 import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
-import { settleSlackLiveTaskCardOnExit } from './settle-slack-live-task-card-on-exit';
+import { notifyWebTaskInitiatorOnSettle } from './notify-web-task-initiator-on-settle';
+import { enqueueWebTaskInitiatorSettleNotification } from './enqueue-web-task-initiator-settle-notification';
+import { settleLiveTaskMessageOnExit } from './settle-live-task-message-on-exit';
 
 /**
  * Resolved git author identity for commits made by the worker.
@@ -424,6 +426,17 @@ export async function notifyCanceledTaskRunOnSettle(
       RunStatus.Canceled,
       taskTitle,
     );
+    const notification = await notifyWebTaskInitiatorOnSettle(
+      taskRun,
+      RunStatus.Canceled,
+    );
+    if (notification === 'failed') {
+      await enqueueWebTaskInitiatorSettleNotification({
+        runId: taskRun.id,
+        taskId: taskRun.taskId,
+        status: RunStatus.Canceled,
+      });
+    }
     // Detached like the finishRun call site: never block the cancel path on
     // the parent's turn lock plus an orchestrator turn.
     void notifyFastAgentParentOnSettle(
@@ -434,7 +447,7 @@ export async function notifyCanceledTaskRunOnSettle(
       RunStatus.Canceled,
       taskTitle,
     );
-    void settleSlackLiveTaskCardOnExit(taskRun, RunStatus.Canceled, taskTitle);
+    void settleLiveTaskMessageOnExit(taskRun, RunStatus.Canceled, taskTitle);
   } catch (error) {
     console.error(
       `[notifyCanceledTaskRunOnSettle] Failed for run ${taskRun.id}: ${

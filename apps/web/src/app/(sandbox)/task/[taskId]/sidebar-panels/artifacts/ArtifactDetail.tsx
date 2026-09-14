@@ -179,7 +179,7 @@ export function ArtifactDetail({
           </>
         }
       />
-      <div className="min-h-0 flex-1 bg-zinc-800">
+      <div className="min-h-0 flex-1 bg-background">
         {!isFullscreenOpen ? (
           <ArtifactViewerContent
             artifact={artifact}

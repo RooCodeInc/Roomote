@@ -3,7 +3,6 @@ import type {
   SourceControlProvider,
   TaskArtifactType,
   TaskModelOption,
-  TaskGoal,
   RoomoteTranscriptMessagesResponse,
 } from '@roomote/types';
 
@@ -21,18 +20,6 @@ export interface RoomoteConfig {
   authBypassHeaderName?: string;
   authBypassHeaderValue?: string;
 }
-
-export type TaskGoalWire = Omit<TaskGoal, 'completedAt'> & {
-  completedAt: string | null;
-};
-
-export interface TaskGoalResponse {
-  goal: TaskGoalWire | null;
-}
-
-export type TaskGoalMutationResponse =
-  | { updated: true; goal: TaskGoalWire }
-  | { updated: false; reason: string; goal: TaskGoalWire | null };
 
 export interface TaskSearchResult {
   id: string;

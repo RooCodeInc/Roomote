@@ -14,6 +14,7 @@ import { useTRPC } from '@/trpc/client';
 
 import { NavbarHeader, SideNav, Logo } from '@/components/layout';
 import { Spinner } from '@/components/system';
+import { SessionNavigationStateProvider } from '@/hooks/useSessionNavigationState';
 
 import { SandboxLayoutContext } from './use-sandbox-layout';
 
@@ -115,33 +116,35 @@ export function SandboxShell({
   }
 
   return (
-    <div className="h-viewport flex flex-col overflow-hidden">
-      {/* Mobile-only top bar */}
-      <div
-        className={`md:hidden top-0 ${zIndex('NAV_HEADER')} w-full shrink-0 bg-card`}
-      >
-        {isSignedIn ? (
-          <NavbarHeader setupIncomplete={needsAdminSetup} />
-        ) : (
-          <div className="h-(--header-height) mx-auto px-3 flex items-center">
-            <Link href="/" className="shrink-0">
-              <Logo scale={0.3} />
-            </Link>
-          </div>
-        )}
-      </div>
-
-      {/* Main layout with side nav on desktop */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {isSignedIn && <SideNav setupIncomplete={needsAdminSetup} />}
-        <SandboxLayoutContext.Provider value={sandboxLayoutValue}>
-          <div className="flex flex-1 min-h-0 min-w-0 md:rounded-l-sm md:shadow-md">
-            <div className="flex flex-col min-h-0 min-w-0 flex-1">
-              {children}
+    <SessionNavigationStateProvider>
+      <div className="h-viewport flex flex-col overflow-hidden">
+        {/* Mobile-only top bar */}
+        <div
+          className={`md:hidden top-0 ${zIndex('NAV_HEADER')} w-full shrink-0 bg-card`}
+        >
+          {isSignedIn ? (
+            <NavbarHeader setupIncomplete={needsAdminSetup} />
+          ) : (
+            <div className="h-(--header-height) mx-auto px-3 flex items-center">
+              <Link href="/" className="shrink-0">
+                <Logo scale={0.3} />
+              </Link>
             </div>
-          </div>
-        </SandboxLayoutContext.Provider>
+          )}
+        </div>
+
+        {/* Main layout with side nav on desktop */}
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          {isSignedIn && <SideNav setupIncomplete={needsAdminSetup} />}
+          <SandboxLayoutContext.Provider value={sandboxLayoutValue}>
+            <div className="flex flex-1 min-h-0 min-w-0 md:rounded-l-sm md:shadow-md">
+              <div className="flex flex-col min-h-0 min-w-0 flex-1">
+                {children}
+              </div>
+            </div>
+          </SandboxLayoutContext.Provider>
+        </div>
       </div>
-    </div>
+    </SessionNavigationStateProvider>
   );
 }

@@ -17,6 +17,8 @@ export interface PersonalPreferences {
   mindReaderMode: boolean;
   narrationMode: boolean;
   therapistMode: boolean;
+  resultsPageEnabled?: boolean;
+  homeComposerSuggestionsEnabled?: boolean;
 }
 
 export type PersonalPreferencesUpdate = Partial<PersonalPreferences>;
@@ -26,6 +28,8 @@ export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
   mindReaderMode: false,
   narrationMode: false,
   therapistMode: false,
+  resultsPageEnabled: false,
+  homeComposerSuggestionsEnabled: false,
 };
 
 export interface UserPersonalizationSettings {

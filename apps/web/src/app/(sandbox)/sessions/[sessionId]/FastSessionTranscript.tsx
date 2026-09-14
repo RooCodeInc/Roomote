@@ -1,14 +1,18 @@
 'use client';
 
+import { SessionSecrets } from '@/components/sessions/SessionSecrets';
+
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { useStickToBottomContext } from 'use-stick-to-bottom';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   SETUP_RECEIPT_INPUT_KIND,
@@ -26,6 +30,7 @@ import {
   type PrReviewActionChoice,
   type AcpEventType,
   type ReasoningEffort,
+  type SessionGoal,
 } from '@roomote/types';
 
 import type { FastSessionMessage } from '@/lib/server/fast-sessions';
@@ -45,6 +50,7 @@ import {
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
+import { useSessionNavigationState } from '@/hooks/useSessionNavigationState';
 import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 import {
   SessionPromptInput,
@@ -60,6 +66,7 @@ import {
 } from './session-task-panel-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { useUser } from '@/hooks/useUser';
 import { truncatePageTitle } from '@/lib/page-title';
 import { VOICE_AUTOSTART_QUERY_PARAM } from '@/lib/voice-autostart';
 import { splitSpeakableSentences, toSpeakableText } from '@/lib/voice-speech';
@@ -198,6 +205,7 @@ function buildOptimisticContentBlocks(text: string, images: string[] = []) {
 function getInitialOptimisticMessage(
   sessionId: string,
   initialMessages: FastSessionMessage[],
+  currentUser?: TranscriptOwner,
 ): TranscriptMessage | null {
   const launch = getPendingFastSessionLaunch(sessionId);
   if (!launch) return null;
@@ -217,14 +225,17 @@ function getInitialOptimisticMessage(
     eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
     role: 'user',
     contentBlocks: buildOptimisticContentBlocks(launch.text, launch.images),
-    metadata: { visibleInTranscript: true },
+    metadata: {
+      visibleInTranscript: true,
+      ...(currentUser ? { userId: currentUser.userId } : {}),
+    },
     payload: {},
     source: 'web',
     nativeSessionId: null,
     nativeMessageId: null,
-    userName: null,
-    userEmail: null,
-    userImageUrl: null,
+    userName: currentUser?.name ?? null,
+    userEmail: currentUser?.email ?? null,
+    userImageUrl: currentUser?.imageUrl ?? null,
     createdAt: new Date(launch.createdAt),
   };
 }
@@ -353,6 +364,35 @@ function RunningTasksMessage({
   );
 }
 
+function SessionScrollRestoration({ sessionId }: { sessionId: string }) {
+  const { scrollRef, stopScroll } = useStickToBottomContext();
+  const navigationState = useSessionNavigationState();
+
+  useLayoutEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement || !navigationState) return;
+
+    const savedScrollTop = navigationState.getScrollPosition(sessionId);
+    if (savedScrollTop !== undefined) {
+      stopScroll();
+      scrollElement.scrollTop = savedScrollTop;
+    }
+
+    const saveScrollPosition = () => {
+      navigationState.setScrollPosition(sessionId, scrollElement.scrollTop);
+    };
+    scrollElement.addEventListener('scroll', saveScrollPosition, {
+      passive: true,
+    });
+
+    return () => {
+      scrollElement.removeEventListener('scroll', saveScrollPosition);
+    };
+  }, [navigationState, scrollRef, sessionId, stopScroll]);
+
+  return null;
+}
+
 export function FastSessionTranscript({
   sessionId,
   initialMessages,
@@ -367,6 +407,9 @@ export function FastSessionTranscript({
   owner,
   headerExtras,
   headerActions,
+  secretSessionId,
+  timelineExtras,
+  sessionGoal,
   autoStartVoice = false,
 }: {
   sessionId: string;
@@ -382,6 +425,9 @@ export function FastSessionTranscript({
   owner?: TranscriptOwner;
   headerExtras?: ReactNode;
   headerActions?: ReactNode;
+  secretSessionId?: string;
+  timelineExtras?: ReactNode;
+  sessionGoal?: SessionGoal | null;
   /**
    * Begin a voice conversation as soon as the page loads: set when the
    * session was opened from a voice utterance in the new-session composer,
@@ -390,6 +436,25 @@ export function FastSessionTranscript({
   autoStartVoice?: boolean;
 }) {
   const trpcClient = useTRPCClient();
+  const { user: authenticatedUser } = useUser();
+  const currentUser = useMemo<TranscriptOwner | undefined>(
+    () =>
+      authenticatedUser
+        ? {
+            userId: authenticatedUser.userId,
+            name: authenticatedUser.name,
+            email:
+              authenticatedUser.primaryEmail ??
+              authenticatedUser.resource.primaryEmailAddress?.emailAddress ??
+              null,
+            imageUrl: authenticatedUser.resource.imageUrl,
+          }
+        : undefined,
+    [authenticatedUser],
+  );
+  const navigationState = useSessionNavigationState();
+  const hasSavedScrollPosition =
+    navigationState?.getScrollPosition(sessionId) !== undefined;
   const openTaskPanel = useOpenSessionTaskPanel();
   const openTasksPanel = useOpenSessionTasksPanel();
   const runningTaskCount = useSessionRunningTaskCount();
@@ -409,11 +474,19 @@ export function FastSessionTranscript({
   const serverMessagesRef = useRef(serverMessages);
   const hasReceivedInitialSessionStateRef = useRef(false);
   const [initialOptimisticMessage] = useState(() =>
-    getInitialOptimisticMessage(sessionId, initialMessages),
+    getInitialOptimisticMessage(sessionId, initialMessages, currentUser),
   );
+  const initialOptimisticMessages = initialOptimisticMessage
+    ? [initialOptimisticMessage]
+    : [];
   const [optimisticMessages, setOptimisticMessages] = useState<
     TranscriptMessage[]
-  >(() => (initialOptimisticMessage ? [initialOptimisticMessage] : []));
+  >(initialOptimisticMessages);
+  const optimisticMessagesRef = useRef(initialOptimisticMessages);
+  const replaceOptimisticMessages = useCallback((next: TranscriptMessage[]) => {
+    optimisticMessagesRef.current = next;
+    setOptimisticMessages(next);
+  }, []);
   const [isSending, setIsSending] = useState(false);
   const [pendingResponseState, dispatchPendingResponse] = useReducer(
     pendingResponseReducer,
@@ -486,9 +559,26 @@ export function FastSessionTranscript({
         const canonicalUserMessages = canonicalMessages.filter(
           (message) => message.role === 'user',
         );
+        const pendingOptimistic = [...optimisticMessagesRef.current];
         const next = new Map(previous);
         for (const message of messages) {
-          next.set(message.eventId, message);
+          const existing = previous.get(message.eventId);
+          let renderId = existing?.id;
+          if (!renderId && message.role === 'user') {
+            const optimisticIndex = pendingOptimistic.findIndex(
+              (optimistic) =>
+                getUserMessageIdentity(optimistic) ===
+                getUserMessageIdentity(message),
+            );
+            if (optimisticIndex >= 0) {
+              renderId = pendingOptimistic[optimisticIndex]?.id;
+              pendingOptimistic.splice(optimisticIndex, 1);
+            }
+          }
+          next.set(
+            message.eventId,
+            renderId ? { ...message, id: renderId } : message,
+          );
         }
         serverMessagesRef.current = next;
         setServerMessages(next);
@@ -520,18 +610,7 @@ export function FastSessionTranscript({
 
         if (canonicalUserMessages.length > 0) {
           clearPendingFastSessionLaunch(sessionId);
-          setOptimisticMessages((current) => {
-            const pending = [...current];
-            for (const canonical of canonicalUserMessages) {
-              const index = pending.findIndex(
-                (optimistic) =>
-                  getUserMessageIdentity(optimistic) ===
-                  getUserMessageIdentity(canonical),
-              );
-              if (index >= 0) pending.splice(index, 1);
-            }
-            return pending;
-          });
+          replaceOptimisticMessages(pendingOptimistic);
         }
       } catch {
         // Ignore malformed frames; the next poll re-sends current state.
@@ -614,7 +693,13 @@ export function FastSessionTranscript({
       source.removeEventListener('chunk', onChunk);
       source.close();
     };
-  }, [sessionId, clearStreamMessages, getStreamService, replaceStreamMessages]);
+  }, [
+    sessionId,
+    clearStreamMessages,
+    getStreamService,
+    replaceOptimisticMessages,
+    replaceStreamMessages,
+  ]);
 
   const messages = useMemo(() => {
     return [...serverMessages.values(), ...optimisticMessages].sort(
@@ -936,9 +1021,10 @@ export function FastSessionTranscript({
           metadata: { visibleInTranscript: true, voiceTurn: 'heard' },
           payload: {},
           text: liveVoiceTurns.user.text,
-          userName: owner?.name ?? null,
-          userEmail: owner?.email ?? null,
-          userImageUrl: owner?.imageUrl ?? null,
+          userId: currentUser?.userId ?? null,
+          userName: currentUser?.name ?? null,
+          userEmail: currentUser?.email ?? null,
+          userImageUrl: currentUser?.imageUrl ?? null,
         }),
         partial: liveVoiceTurns.user.eventId === null,
       });
@@ -965,7 +1051,7 @@ export function FastSessionTranscript({
       });
     }
     return turns;
-  }, [liveVoiceTurns, owner]);
+  }, [currentUser, liveVoiceTurns]);
   const { uiMessagesBeforeInput, uiMessagesAfterInput } = useMemo(() => {
     if (!pendingInputRequestOrder) {
       return {
@@ -1071,17 +1157,23 @@ export function FastSessionTranscript({
           eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
           role: 'user',
           contentBlocks: buildOptimisticContentBlocks(prepared.text, images),
-          metadata: { visibleInTranscript: true },
+          metadata: {
+            visibleInTranscript: true,
+            ...(currentUser ? { userId: currentUser.userId } : {}),
+          },
           payload: {},
           source: 'web',
           nativeSessionId: null,
           nativeMessageId: null,
-          userName: null,
-          userEmail: null,
-          userImageUrl: null,
+          userName: currentUser?.name ?? null,
+          userEmail: currentUser?.email ?? null,
+          userImageUrl: currentUser?.imageUrl ?? null,
           createdAt: new Date(),
         };
-        setOptimisticMessages((previous) => [...previous, optimistic]);
+        replaceOptimisticMessages([
+          ...optimisticMessagesRef.current,
+          optimistic,
+        ]);
         dispatchPendingResponse({ type: 'optimistic', message: optimistic });
         await trpcClient.fastSessions.reply.mutate({
           sessionId,
@@ -1108,8 +1200,10 @@ export function FastSessionTranscript({
         }
         if (optimisticId) {
           const failedId = optimisticId;
-          setOptimisticMessages((previous) =>
-            previous.filter((row) => row.eventId !== failedId),
+          replaceOptimisticMessages(
+            optimisticMessagesRef.current.filter(
+              (row) => row.eventId !== failedId,
+            ),
           );
         }
         setReplyError(
@@ -1126,7 +1220,7 @@ export function FastSessionTranscript({
         setIsSending(false);
       }
     },
-    [isSending, sessionId, trpcClient],
+    [currentUser, isSending, replaceOptimisticMessages, sessionId, trpcClient],
   );
 
   const handleReviewAction = useCallback(
@@ -1182,6 +1276,7 @@ export function FastSessionTranscript({
   const requestInFlightRef = useRef(false);
   const liveVoice = useLiveVoice({
     onUtterance: enqueueVoiceUtterance,
+    onHeardTurn: (text) => recordVoiceTurnRef.current('user', text),
     onSpokenTurn: (text) => {
       if (requestInFlightRef.current) {
         heldSpokenTurnsRef.current.push(text);
@@ -1317,9 +1412,9 @@ export function FastSessionTranscript({
     }
   }, [messages, streamMessages, liveVoiceActive]);
 
-  // The call is transcribed into the Session: Fast turns record what the
-  // person said, this path records what the voice said, and call events mark
-  // where the conversation started and ended.
+  // The call is transcribed into the Session: what the person said when the
+  // voice answered directly, what the voice said, and where the call started
+  // and ended. Delegated requests are recorded by the Fast turn they start.
   const recordVoiceTurn = useCallback(
     (role: 'user' | 'assistant', text: string) => {
       // The finished words stay on screen until their persisted row arrives.
@@ -1367,27 +1462,31 @@ export function FastSessionTranscript({
     for (const text of held) recordVoiceTurn('assistant', text);
   }, [liveVoiceActive, requestInFlight, recordVoiceTurn]);
   const callStartedAtRef = useRef<number | null>(null);
+  const callEventWriteRef = useRef<Promise<void>>(Promise.resolve());
+  const recordVoiceCallEvent = useCallback(
+    (event: { phase: 'started' | 'ended'; durationMs?: number }) => {
+      const write = callEventWriteRef.current.then(async () => {
+        await trpcClient.voice.recordCallEvent.mutate({ sessionId, ...event });
+      });
+      callEventWriteRef.current = write.catch((error: unknown) => {
+        console.error(`[voice] Failed to record call ${event.phase}`, error);
+      });
+    },
+    [sessionId, trpcClient],
+  );
   useEffect(() => {
     if (liveVoice.active && liveVoice.startedAt !== null) {
       if (callStartedAtRef.current === liveVoice.startedAt) return;
       callStartedAtRef.current = liveVoice.startedAt;
-      void trpcClient.voice.recordCallEvent
-        .mutate({ sessionId, phase: 'started' })
-        .catch((error: unknown) => {
-          console.error('[voice] Failed to record call start', error);
-        });
+      recordVoiceCallEvent({ phase: 'started' });
       return;
     }
     if (!liveVoice.active && callStartedAtRef.current !== null) {
       const durationMs = Date.now() - callStartedAtRef.current;
       callStartedAtRef.current = null;
-      void trpcClient.voice.recordCallEvent
-        .mutate({ sessionId, phase: 'ended', durationMs })
-        .catch((error: unknown) => {
-          console.error('[voice] Failed to record call end', error);
-        });
+      recordVoiceCallEvent({ phase: 'ended', durationMs });
     }
-  }, [liveVoice.active, liveVoice.startedAt, sessionId, trpcClient]);
+  }, [liveVoice.active, liveVoice.startedAt, recordVoiceCallEvent]);
 
   const handleVoiceToggle = useCallback(() => {
     // Toggling while the handshake is still connecting cancels it.
@@ -1469,7 +1568,17 @@ export function FastSessionTranscript({
         <WorkspaceHeader
           className="py-3.25"
           contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-row !flex-nowrap`}
-          actions={headerActions}
+          actions={
+            <>
+              {secretSessionId ? (
+                <SessionSecrets
+                  key={secretSessionId}
+                  sessionId={secretSessionId}
+                />
+              ) : null}
+              {headerActions}
+            </>
+          }
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <h1
@@ -1493,7 +1602,29 @@ export function FastSessionTranscript({
             )}
           </div>
         </WorkspaceHeader>
-        <Conversation className="min-h-0 flex-1" initial="instant">
+        {sessionGoal ? (
+          <div className="mx-auto w-full max-w-4xl px-4 pb-3">
+            <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2">
+              <span className="mt-0.5 shrink-0 text-xs font-medium text-muted-foreground">
+                Goal
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-foreground">
+                  {sessionGoal.objective}
+                </p>
+                <p className="mt-0.5 text-xs capitalize text-muted-foreground">
+                  {sessionGoal.status.replace('_', ' ')} -{' '}
+                  {sessionGoal.continuationsUsed}/{sessionGoal.maxContinuations}{' '}
+                  continuations
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        <Conversation
+          className="min-h-0 flex-1"
+          initial={hasSavedScrollPosition ? false : 'instant'}
+        >
           <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4 pt-0">
             {hasOlderMessages ? (
               <p className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
@@ -1563,6 +1694,7 @@ export function FastSessionTranscript({
               />
             ))}
           </ConversationContent>
+          <SessionScrollRestoration sessionId={sessionId} />
           <ConversationScrollButton />
         </Conversation>
         {canReply && !pendingInputRequest?.preset ? (

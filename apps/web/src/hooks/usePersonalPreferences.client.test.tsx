@@ -151,6 +151,8 @@ describe('usePersonalPreferences', () => {
       mindReaderMode: false,
       narrationMode: false,
       therapistMode: false,
+      resultsPageEnabled: false,
+      homeComposerSuggestionsEnabled: false,
     });
   });
 

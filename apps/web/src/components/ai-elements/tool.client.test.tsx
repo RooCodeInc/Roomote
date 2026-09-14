@@ -40,7 +40,7 @@ describe('ToolHeader', () => {
     },
   );
 
-  it('announces running and success accessibly while failures stay visible', () => {
+  it('announces every status accessibly without redundant visible text', () => {
     const { rerender } = render(
       <ToolHeader
         action="Using"
@@ -75,7 +75,7 @@ describe('ToolHeader', () => {
         collapsible={false}
       />,
     );
-    expect(screen.getByText('Failed')).not.toHaveClass('sr-only');
+    expect(screen.getByText('Failed')).toHaveClass('sr-only');
   });
 
   it('exposes expansion state only for interactive headers', () => {

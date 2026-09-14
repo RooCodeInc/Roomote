@@ -1,13 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import {
-  claimTaskGoalContinuationForRun,
-  db,
-  eq,
-  getTaskGoalForRun,
-  releaseTaskGoalContinuationForRun,
-  slackInstallations,
-} from '@roomote/db/server';
+import { db, eq, slackInstallations } from '@roomote/db/server';
 
 import {
   RunStatus,
@@ -65,6 +58,7 @@ import { publishCommunicationRequestUserInput } from '../lib/communication-reque
 import { publishFastAgentRequestUserInput } from '../lib/task-runs/publish-fast-agent-request-user-input';
 import { reportToParentSession } from '../lib/task-runs/report-to-parent-session';
 import { renderSlackLiveTaskCardForRun } from '../lib/task-runs/slack-live-task-stream';
+import { notifyDirectWebTaskAttention } from '../lib/session-attention-notification';
 import {
   authenticatedProcedure,
   isRunToken,
@@ -255,6 +249,16 @@ export const taskRunsRouter = router({
       sleepAt: sleepAt ?? null,
     }),
   ),
+  notifyUserAttention: runScoped(
+    z.object({
+      id: z.number(),
+      eventId: z.string().min(1),
+      kind: z.enum(['result_ready', 'input_needed']),
+    }),
+    'id',
+  ).mutation(({ input: { id, eventId, kind } }) =>
+    notifyDirectWebTaskAttention({ runId: id, eventId, kind }),
+  ),
   touchTaskRunHeartbeat: runScoped(
     z.object({
       id: z.number(),
@@ -294,17 +298,6 @@ export const taskRunsRouter = router({
       completedAt: completedAt ?? undefined,
     }),
   ),
-  getGoal: runTokenOnlyScoped(z.object({ runId: z.number() }), 'runId').query(
-    ({ input }) => getTaskGoalForRun(input.runId),
-  ),
-  claimGoalContinuation: runTokenOnlyScoped(
-    z.object({ runId: z.number(), continuationId: z.string().min(1).max(200) }),
-    'runId',
-  ).mutation(({ input }) => claimTaskGoalContinuationForRun(input)),
-  releaseGoalContinuation: runTokenOnlyScoped(
-    z.object({ runId: z.number(), continuationId: z.string().min(1).max(200) }),
-    'runId',
-  ).mutation(({ input }) => releaseTaskGoalContinuationForRun(input)),
   dequeue: runScoped(
     z.object({ runId: z.number() }).merge(workerReleaseMetadataSchema),
     'runId',

@@ -2,7 +2,12 @@ import { z } from 'zod';
 
 import { SESSION_STATUSES, type SessionStatus } from './sessions';
 import type { RoomoteTranscriptMessage } from './task-messages';
-import type { TaskGoalStatus, TaskPhase, TaskState } from './task-runs';
+import type {
+  SessionGoal,
+  SessionGoalStatus,
+  TaskPhase,
+  TaskState,
+} from './task-runs';
 import { roomoteTaskInspectionFieldSchemas } from './task-inspection-tool';
 
 export const ROOMOTE_SESSION_DEFAULT_ACTIONS = [
@@ -151,7 +156,6 @@ export interface RoomoteSessionChildTask {
   taskId: string;
   title: string | null;
   state: TaskState;
-  goalStatus: TaskGoalStatus | null;
   repositoryName: string | null;
   activityAt: number;
   origin: string;
@@ -172,6 +176,9 @@ export interface RoomoteSessionSummary {
   activityAt: number;
   createdAt: string;
   fastConversationId: string | null;
+  goal:
+    | (Omit<SessionGoal, 'completedAt'> & { completedAt: string | null })
+    | null;
   tasks: RoomoteSessionChildTask[];
 }
 
@@ -213,18 +220,17 @@ export interface RoomoteTaskRelayState {
   taskState: TaskState;
   taskRunStatus: string | null;
   taskPhase: TaskPhase | null;
-  goalStatus: TaskGoalStatus | null;
 }
 
 export interface RoomoteSessionRelayState {
   kind: 'session';
   status: SessionStatus | null;
+  goalStatus: SessionGoalStatus | null;
   tasks: Array<{
     taskId: string;
     state: TaskState;
     taskRunStatus: string | null;
     taskPhase: TaskPhase | null;
-    goalStatus: TaskGoalStatus | null;
   }>;
 }
 

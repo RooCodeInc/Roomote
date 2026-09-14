@@ -16,6 +16,7 @@ import {
   sql,
   trackedMessages,
   workItems,
+  customAutomations,
 } from '@roomote/db/server';
 import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
 export { requireFastSuggestionOriginSessionId } from './fast-suggestion-origin';
@@ -71,6 +72,7 @@ function buildSlackSuggestionClientMessageId(seed: string): string {
 async function persistFastAutomationSuggestions(params: {
   eventId: string;
   suggestions: FastAutomationSuggestion[];
+  createdByUserId: string;
 }): Promise<PersistedFastAutomationSuggestion[]> {
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -128,6 +130,13 @@ async function persistFastAutomationSuggestions(params: {
         index,
       ),
     }));
+    const customAutomationId = /^[0-9a-f-]{36}/iu.exec(params.eventId)?.[0];
+    const customAutomation = customAutomationId
+      ? await tx.query.customAutomations.findFirst({
+          where: eq(customAutomations.id, customAutomationId),
+          columns: { id: true, name: true, resultPriority: true },
+        })
+      : null;
     const existing = await tx
       .select({
         id: workItems.id,
@@ -170,6 +179,9 @@ async function persistFastAutomationSuggestions(params: {
             fingerprint,
             status: 'open' as const,
             sortOrder: index,
+            resultAutomationName: customAutomation?.name ?? 'Custom automation',
+            resultPriority: customAutomation?.resultPriority ?? 'normal',
+            resultUserId: params.createdByUserId,
           })),
         )
         .returning({

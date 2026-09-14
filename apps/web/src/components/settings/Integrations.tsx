@@ -1270,6 +1270,14 @@ function VoiceConnectionFields({
               {OPENAI_REALTIME_VOICE_OPTIONS.map((option) => (
                 <SelectItem key={option.id} value={option.id}>
                   {option.label}
+                  {option.recommended ? (
+                    <span
+                      className="ml-2 text-xs text-muted-foreground"
+                      aria-hidden="true"
+                    >
+                      Recommended
+                    </span>
+                  ) : null}
                 </SelectItem>
               ))}
             </SelectContent>

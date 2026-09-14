@@ -97,6 +97,8 @@ export const queuedCommunicationMessageSchema = z.object({
   channel: z.string().optional(),
   threadTs: z.string().optional(),
   images: z.array(z.string()).optional(),
+  /** Trusted provider context associated with the current message. */
+  agentContext: z.string().optional(),
   formattedPrompt: z.string().optional(),
   turnPolicy: z
     .object({

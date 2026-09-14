@@ -35,8 +35,6 @@ import type {
   SourceControlPullRequestReadResponse,
   SourceControlPullRequestResponse,
   SourceControlIssueResponse,
-  TaskGoalResponse,
-  TaskGoalMutationResponse,
 } from './types.js';
 
 /**
@@ -216,34 +214,20 @@ export async function getTaskSummary(
   );
 }
 
-export async function getTaskGoal(
+export async function recordAutomationResult(
   config: RoomoteConfig,
-  runId: number,
-): Promise<TaskGoalResponse> {
+  taskId: string,
+  params: { content: string; dedupeKey: string },
+): Promise<{ recorded: boolean }> {
   return apiFetch(
     config,
-    `/api/mcp/tasks/runs/${runId}/goal`,
-    {},
-    'Failed to get goal',
-  );
-}
-
-export async function updateTaskGoal(
-  config: RoomoteConfig,
-  runId: number,
-  params:
-    | { action: 'complete'; generation: string | null }
-    | { action: 'blocked'; generation: string | null; reason: string },
-): Promise<TaskGoalMutationResponse> {
-  return apiFetch(
-    config,
-    `/api/mcp/tasks/runs/${runId}/goal`,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/automation_result`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     },
-    'Failed to update goal',
+    'Failed to record automation result',
   );
 }
 

@@ -318,4 +318,14 @@ describe('Voice credential-only integration', () => {
     expect(australianVoice).toBeUndefined();
     expect(DEFAULT_OPENAI_REALTIME_VOICE_ID).toBe('marin');
   });
+
+  it('lists voices alphabetically with the recommended ones marked', () => {
+    const labels = OPENAI_REALTIME_VOICE_OPTIONS.map((voice) => voice.label);
+    expect(labels).toEqual([...labels].sort((a, b) => a.localeCompare(b)));
+    expect(
+      OPENAI_REALTIME_VOICE_OPTIONS.filter((voice) => voice.recommended).map(
+        (voice) => voice.id,
+      ),
+    ).toEqual(['cedar', 'marin']);
+  });
 });

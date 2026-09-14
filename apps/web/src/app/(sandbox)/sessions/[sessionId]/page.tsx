@@ -20,6 +20,7 @@ import {
 import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
 import { SessionViewers } from '@/components/sessions/SessionViewers';
+import { SessionSecrets } from '@/components/sessions/SessionSecrets';
 
 import { hasVoiceAutostartFlag } from '@/lib/voice-autostart';
 import { FastSessionTranscript } from './FastSessionTranscript';
@@ -94,13 +95,21 @@ export default async function SessionDetailPage({
   searchParams,
 }: SessionDetailPageProps) {
   const { sessionId } = await params;
-  const { authorizedUser, unifiedSession, session } =
-    await getSessionPageData(sessionId);
-  const autoStartVoice = hasVoiceAutostartFlag(await searchParams);
+  const sessionPageDataPromise = getSessionPageData(sessionId);
+  const modelEnvPromise: Promise<Record<string, string>> =
+    resolveEffectiveModelRuntimeEnv().catch(() => ({}));
+  const [
+    { authorizedUser, unifiedSession, session },
+    modelEnv,
+    resolvedParams,
+  ] = await Promise.all([
+    sessionPageDataPromise,
+    modelEnvPromise,
+    searchParams,
+  ]);
+  const autoStartVoice = hasVoiceAutostartFlag(resolvedParams);
   // The chip's "default" must reflect what Fast actually runs with: the
   // deployment's orchestration model, not the task launch default.
-  const modelEnv: Record<string, string> =
-    await resolveEffectiveModelRuntimeEnv().catch(() => ({}));
   const defaultModelId =
     modelEnv.R_ORCHESTRATION_MODEL || modelEnv.R_MODEL || null;
   const rawDefaultEffort = modelEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
@@ -130,6 +139,7 @@ export default async function SessionDetailPage({
       },
       createdAt: unifiedSession.createdAt,
       status: unifiedSession.status,
+      goal: unifiedSession.goal,
       tasks: unifiedSession.tasks,
       artifacts: unifiedSession.artifacts,
     };
@@ -142,6 +152,11 @@ export default async function SessionDetailPage({
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <FastSessionTranscript
                   sessionId={session.id}
+                  secretSessionId={
+                    unifiedSession.ownerUserId === authorizedUser.userId
+                      ? unifiedSession.id
+                      : undefined
+                  }
                   initialMessages={session.messages}
                   hasOlderMessages={session.hasOlderMessages}
                   canReply
@@ -152,6 +167,7 @@ export default async function SessionDetailPage({
                   defaultModelId={defaultModelId}
                   defaultReasoningEffort={defaultReasoningEffort}
                   autoStartVoice={autoStartVoice}
+                  sessionGoal={unifiedSession.goal}
                   {...(unifiedSession.ownerUserId
                     ? {
                         owner: {
@@ -176,7 +192,14 @@ export default async function SessionDetailPage({
               <WorkspaceHeader
                 className="py-4"
                 contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-nowrap`}
-                actions={<SessionViewers sessionId={unifiedSession.id} />}
+                actions={
+                  <>
+                    {unifiedSession.ownerUserId === authorizedUser.userId ? (
+                      <SessionSecrets sessionId={unifiedSession.id} />
+                    ) : null}
+                    <SessionViewers sessionId={unifiedSession.id} />
+                  </>
+                }
               >
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                   <h1 className={SESSION_HEADER_TITLE_CLASS_NAME}>
@@ -221,6 +244,7 @@ export default async function SessionDetailPage({
     },
     createdAt: session.createdAt,
     status: null,
+    goal: null,
     tasks: [],
     artifacts: [],
     taskSource: 'fast',

@@ -19,6 +19,7 @@ import {
   isTaskExecutingTurn,
   type ReasoningEffort,
   type RunStatus,
+  type SessionGoal,
 } from '@roomote/types';
 
 import {
@@ -189,6 +190,7 @@ export type SessionInfo = {
   };
   createdAt: Date;
   status: string | null;
+  goal?: SessionGoal | null;
   tasks: SessionTaskSummary[];
   artifacts?: SessionArtifact[];
   taskSource?: 'unified' | 'fast';
@@ -399,7 +401,7 @@ function SessionArtifactViewer({
         onClose={onClose}
         closeLabel={closeLabel}
       />
-      <div className="min-h-0 flex-1 bg-zinc-800">
+      <div className="min-h-0 flex-1 bg-background">
         <ArtifactViewerContent
           artifact={selectedArtifact}
           owner={selection.owner}

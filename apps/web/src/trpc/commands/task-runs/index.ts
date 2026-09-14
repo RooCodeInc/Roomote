@@ -1,6 +1,5 @@
 import {
   activeRunStatuses,
-  type TaskGoal,
   RunStatus,
   isExitedRunStatus,
 } from '@roomote/types';
@@ -12,83 +11,12 @@ import {
   eq,
   inArray,
   markTaskStartParallelCountEndedAt,
-  prepareTaskGoalActivation,
   taskRuns,
 } from '@roomote/db/server';
-import { settleSlackLiveTaskCardForRun } from '@roomote/slack';
-import { stopTaskRun } from '@roomote/sdk/server';
+import { settleLiveTaskMessageOnExit, stopTaskRun } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
-import { sendSandboxPromptCommand } from '../sandbox-session';
-import { resolveTaskByIdAccessCommand } from '../tasks/by-id';
-
-export async function startTaskGoalCommand(
-  auth: UserAuthSuccess,
-  input: {
-    taskId: string;
-    goal: { objective: string; maxContinuations: number };
-    clientMessageId?: string;
-    userImageUrl?: string;
-  },
-): Promise<
-  { success: true; goal: TaskGoal } | { success: false; error: string }
-> {
-  const taskAccess = await resolveTaskByIdAccessCommand(auth, {
-    taskId: input.taskId,
-  });
-
-  if (taskAccess.kind !== 'resolved') {
-    return { success: false, error: 'Task not found' };
-  }
-
-  const activation = await prepareTaskGoalActivation({
-    taskId: input.taskId,
-    goal: input.goal,
-  });
-  if (!activation) {
-    return { success: false, error: 'Goal Mode activation is already pending' };
-  }
-
-  try {
-    await sendSandboxPromptCommand(
-      auth,
-      {
-        taskId: input.taskId,
-        prompt: input.goal.objective,
-        source: 'web',
-        clientMessageId: input.clientMessageId,
-        userImageUrl: input.userImageUrl,
-        autoSteerWhenQueued: true,
-      },
-      {
-        goalContext: {
-          ...input.goal,
-          generation: activation.generation,
-          status: 'active',
-          continuationsUsed: 0,
-          blockedReason: null,
-          completedAt: null,
-        },
-      },
-    );
-  } catch (error) {
-    try {
-      await activation.rollback();
-    } catch (rollbackError) {
-      console.error('Failed to roll back Goal Mode activation:', rollbackError);
-    }
-    throw error;
-  }
-
-  const goal = await activation.commit();
-  if (!goal) {
-    await activation.rollback();
-    return { success: false, error: 'Goal Mode activation was superseded' };
-  }
-
-  return { success: true, goal };
-}
 
 export async function cancelTaskRunCommand(
   auth: UserAuthSuccess,
@@ -134,11 +62,7 @@ export async function cancelTaskRunCommand(
           return { success: false, error: result.error };
         }
         if (terminate && result.mode === 'direct_cancel') {
-          void settleSlackLiveTaskCardForRun({
-            taskId: job.taskId,
-            payload: job.payload,
-            status: RunStatus.Canceled,
-          });
+          void settleLiveTaskMessageOnExit(job, RunStatus.Canceled);
         }
         return { success: true };
       }
@@ -172,12 +96,8 @@ export async function cancelTaskRunCommand(
       if (canceledRun) {
         void captureTaskSettled(canceledRun.id, 'canceled');
         // A run canceled before any worker claimed it has nobody else to
-        // settle its Slack task card.
-        void settleSlackLiveTaskCardForRun({
-          taskId: job.taskId,
-          payload: job.payload,
-          status: RunStatus.Canceled,
-        });
+        // settle its live task message.
+        void settleLiveTaskMessageOnExit(job, RunStatus.Canceled);
       }
     }
 

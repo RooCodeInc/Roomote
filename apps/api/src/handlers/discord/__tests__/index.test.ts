@@ -104,6 +104,10 @@ vi.mock('../provider.js', () => {
 });
 
 vi.mock('@roomote/sdk/server', () => ({
+  findSessionAttentionNotificationReply: vi.fn(async () => ({
+    status: 'none',
+  })),
+  resolveSessionAttentionFastConversation: vi.fn(async () => null),
   findDiscordMappedUserId: mocks.findMappedUserId,
   findDiscordInstallationByGuildId: mocks.findInstallation,
   consumeDiscordLinkCode: mocks.consumeLinkCode,
@@ -117,10 +121,14 @@ vi.mock('@roomote/sdk/server', () => ({
   isFastAgentProviderMessage: mocks.isFastProviderMessage,
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   queueFastAgentSurfaceReply: mocks.queueFastSurfaceReply,
+  startFastSessionGoal: mocks.startGoal,
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   persistFastAgentInlineHumanTurn: vi.fn(async () => null),
   wakeFastAgentParentEventNow: vi.fn(async () => undefined),
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
+}));
+vi.mock('../../tasks/continue-session-attention-reply', () => ({
+  continueSessionAttentionReply: vi.fn(async () => false),
 }));
 
 vi.mock('@roomote/sdk/server/communication', () => ({
@@ -175,10 +183,6 @@ vi.mock('../../call-roomote-via-emoji.js', () => ({
 
 vi.mock('../task-orchestration.js', () => ({
   startNewDiscordTask: mocks.startNewTask,
-}));
-
-vi.mock('../goal-command.js', () => ({
-  startDiscordTaskGoal: mocks.startGoal,
 }));
 
 vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
@@ -331,7 +335,7 @@ describe('Discord Gateway event handler', () => {
       status: 'started',
       launchResult: { id: 17, taskId: 'task-17' },
     });
-    mocks.startGoal.mockResolvedValue({ success: true });
+    mocks.startGoal.mockResolvedValue({ success: true, goal: {} });
     mocks.acquireFastTurnLock.mockResolvedValue(
       vi.fn().mockResolvedValue(undefined),
     );
@@ -1527,6 +1531,7 @@ describe('Discord Gateway event handler', () => {
       workspaceId: 'dm',
       channelId: 'dm-1',
       replyToMessageId: 'fast-report-1',
+      userId: 'roomote-user-1',
     });
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2225,7 +2230,7 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining(
-          'keep working toward an objective across multiple turns',
+          'keep this Session working toward an objective across multiple turns',
         ),
       }),
     );
@@ -2355,7 +2360,7 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
-  it('uses /goal to enable Goal Mode on the active task', async () => {
+  it('uses /goal to start a Fast Session goal', async () => {
     mocks.findActiveRun.mockResolvedValue({
       id: 23,
       taskId: 'task-23',
@@ -2381,21 +2386,22 @@ describe('Discord Gateway event handler', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.startGoal).toHaveBeenCalledWith({
-      taskId: 'task-23',
+      sessionId: 'fast-session-1',
       userId: 'roomote-user-1',
+      senderDisplayName: 'matt',
       objective: 'Ship the release',
-      clientMessageId: 'interaction-goal',
+      currentMessageId: 'interaction-goal',
     });
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         interaction: { interaction, interactionDeferred: true },
-        text: 'Goal Mode enabled.',
+        text: 'Pursuing goal: Ship the release',
         ephemeral: true,
       }),
     );
   });
 
-  it('does not create a task when /goal has no active task', async () => {
+  it('starts a Session goal without requiring an active child task', async () => {
     const interaction = {
       id: 'interaction-goal',
       application_id: 'app-1',
@@ -2415,10 +2421,12 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.startGoal).not.toHaveBeenCalled();
+    expect(mocks.startGoal).toHaveBeenCalledWith(
+      expect.objectContaining({ objective: 'Ship the release' }),
+    );
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: expect.stringContaining('active Roomote task'),
+        text: 'Pursuing goal: Ship the release',
         ephemeral: true,
       }),
     );

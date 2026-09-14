@@ -2,6 +2,77 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.9.0 (2026-09-13)
+
+Roomote 1.9 brings a native Telegram experience for Fast work, direct pull request merging and shared-skill editing, clearer mobile navigation, and personal task-finish notifications.
+
+### Highlights
+
+- Work with Fast natively in Telegram through rich streaming replies, `/goal`, live coding progress, reliable attachments, and clearer automation and review controls.
+- Merge pull requests directly in Fast across supported source-control providers with explicit authorization and head-version safeguards.
+- Create and maintain shared custom skills conversationally without overwriting newer edits.
+- Reach recent Sessions more easily on mobile and receive a personal notification when web-started tasks finish while you are away.
+
+### Minor changes
+
+- Fast can now update shared custom skills by exact catalog ID, with atomic exact-text or full-content edits and version protection that prevents stale changes from overwriting newer work.
+- Fast can now merge pull requests directly across supported source-control providers after an explicit request, while preserving provider checks, permissions, head-version safeguards, and post-merge verification.
+- Telegram now delivers Fast replies, edits, private-chat drafts, and compact Session footers as native rich messages, with live streaming and links back to active work.
+- Telegram users can now start Goal Mode for an active task with `/goal`, keeping goal-directed work in the same chat or topic without switching to the web app.
+- Telegram now shows Fast-delegated coding work in one compact, editable live message with topic-aware routing, expandable progress, elapsed status, and a direct link to the selected task.
+- Users who leave the web app can now receive a personal notification when a web-started task completes, fails, or is canceled, with a direct link back to the task.
+
+### Patch changes
+
+- Roomote Cloud hides managed Email configuration that members cannot change, while continuing to show the deployment-provided address and connection state.
+- Deployment setup rejects malformed domain names before they can produce invalid routing or certificate configuration.
+- Fast now handles incomplete skill lookup arguments and unavailable skill sources without hiding valid skills, and integration discovery reports exact filter misses instead of returning an ambiguous empty result.
+- Mobile navigation makes recent Sessions easier to reach and moves Session switching into a responsive left rail that keeps the current conversation usable.
+- Telegram replies now preserve paragraphs, lists, reply context, and supported Markdown consistently, split long responses without losing content, and avoid adding redundant reply quotes.
+- Session history is clearer: internal timer receipts and redundant failed-tool labels stay hidden, task memories identify their initiating member, and the Experimental Results setting accurately describes its available features.
+- Tasks launch in the intended environment more reliably, and task-list failures now offer a retry instead of leaving users stranded on an error state.
+- Telegram conversations are more reliable across attachments, voice messages, topics, automations, reviews, mentions, and interactive prompts, with stable titles and icons, correctly threaded reports, clearer automation headings, durable review actions, and stale controls removed when they are no longer usable.
+- Telegram live coding progress stays stable through short and resumed Fast turns, and successful tasks keep their last useful update instead of being replaced with a generic completion message.
+- Voice conversations follow active coding tasks more consistently during calls and render transcript whitespace cleanly.
+- Automation reports use consistent default destinations across communication providers, while Fast widgets and their shareable links remain available across providers and resumed background turns.
+
+## 1.8.0 (2026-09-11)
+
+Roomote 1.8 adds a durable automation results inbox, private personalization, more flexible setup and environments, and faster independent delegated work.
+
+### Highlights
+
+- Review durable automation reports and suggested follow-ups by priority, then clear them or turn them into editable Session work.
+- Configure optional integrations through more reliable guided setup, and create environments that provide tools or services without cloning repositories.
+- Personalize how Roomote works with you through encrypted private instructions and optional conversational learning.
+- Finish multi-scope requests sooner when Fast can safely delegate independent coding work in parallel.
+
+### Minor changes
+
+- Review durable automation reports and suggested follow-ups in an opt-in Results inbox, ordered by priority and recency, then clear them or turn them into editable Session work.
+- Guided setup can discover supported document, monitoring, and project-tracking integrations, while structured questions and saved answers now remain reliable across reloads, retries, and recovery.
+- Fast proactively launches independent, non-overlapping coding work in parallel when doing so can complete a multi-scope request sooner.
+- Personalize how Roomote works with you through encrypted, private instructions and optional conversational learning, with stable per-participant behavior throughout each Fast conversation.
+- Create environments without repositories for workspaces that provide services, tools, variables, integrations, ports, or guidance without cloning source code.
+
+### Patch changes
+
+- Custom automation cards show the next scheduled run in the deployment timezone and refresh it when the displayed occurrence becomes due.
+- Email setup gives unverified members an achievable admin-assisted path when verification delivery is unavailable, and oversized Fast replies retain their trusted reply footer.
+- Fast reports actionable MCP tool failures instead of presenting upstream validation errors with empty structured data as successful results.
+- Clarify how environments help Roomote verify its work.
+- Pull request feedback reaches idle Fast Sessions promptly while delegated tasks continue, while still waiting when the Session is actively responding.
+- Visual proof work continues with an honestly disclosed representative UI when genuine application state is unavailable instead of stopping at the first infrastructure limitation.
+- Recent Sessions show the current user's genuinely latest work, reveal full truncated titles on hover, and keep the shared rail responsive while a selected Session loads. Thanks to @stea9499 for contributing the title improvement.
+- Coding agents wait for Roomote-managed Docker startup instead of launching duplicate services and can install a necessary system dependency inside the disposable sandbox when authorized work requires it.
+- Sandbox tasks can no longer launch nested Roomote tasks through run-scoped credentials, while authenticated users and Fast retain their supported launch paths.
+- Fast-delegated tasks keep user interaction in their parent Session while retaining task workspaces for execution details, steering, previews, artifacts, and resumption.
+- Task controls show actionable feedback when a stop attempt fails and remain available for a retry instead of failing only in the browser console.
+- Voice conversations start with the selected GPT-Live voice, survive phone rotation, release call resources after terminal connection failures, show the Call ended marker, and keep internal delivery rows out of web transcripts.
+- Voice previews now say when the OpenAI key lacks the Audio model permission instead of a generic failure.
+- Voice answers greetings and small talk itself again instead of starting a Fast turn for every utterance, which doubled replies and read out of order; it still never states facts about code, tools, or the product without Fast.
+- Sandbox tasks keep implementation on the root build agent so users can steer active work while purpose-built exploration, advice, review, and visual delegation remain available.
+
 ## 1.7.0 (2026-09-11)
 
 Roomote 1.7 adds natural voice and email conversations, smarter follow-through for delegated work, richer automation controls, and clearer usage insights.

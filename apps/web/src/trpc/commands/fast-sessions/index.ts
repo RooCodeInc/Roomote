@@ -20,8 +20,10 @@ import {
   buildFastAgentArtifactCreator,
   buildFastAgentSurfaceReplyDelivery,
   createFastAgentSessionArtifact,
+  notifyFastWebSessionAttention,
   persistFastAgentInlineHumanTurn,
   resolveUserMcpServerConfigs,
+  startFastSessionGoal,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
   type FastAgentSurfaceReplyDelivery,
@@ -349,6 +351,18 @@ async function runWebFastAgentTurn({
       setupSession,
       ...(voiceMode ? { voiceMode: true } : {}),
       adapter: {
+        ...(durableSessionId
+          ? {
+              notifyUserAttention: ({ kind, eventId, message, manual }) =>
+                notifyFastWebSessionAttention({
+                  fastConversationId: durableSessionId,
+                  kind,
+                  eventId,
+                  message,
+                  manual,
+                }).then(() => undefined),
+            }
+          : {}),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId,
@@ -765,6 +779,22 @@ export async function replyToFastSessionCommand(
   });
 
   return { success: true };
+}
+
+export async function startFastSessionGoalCommand(
+  auth: UserAuthSuccess,
+  input: { sessionId: string; objective: string; clientMessageId?: string },
+) {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) throw new Error('Fast session not found');
+  return startFastSessionGoal({
+    sessionId: session.id,
+    userId: auth.userId,
+    senderDisplayName:
+      getUserDisplayName({ name: auth.name, email: auth.primaryEmail }) ?? null,
+    objective: input.objective,
+    currentMessageId: input.clientMessageId ?? `web-goal:${randomUUID()}`,
+  });
 }
 
 export async function handleFastSessionPrReviewActionCommand(

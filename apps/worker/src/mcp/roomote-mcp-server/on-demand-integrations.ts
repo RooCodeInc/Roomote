@@ -3,6 +3,11 @@ import { readFileSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
+  formatErrorForLog,
+  formatSingleLineLog,
+  INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE,
+  INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE,
+  INTEGRATION_TOOL_LOOKUP_PARTIALLY_UNAVAILABLE_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   matchIntegrationTools,
   parseMcpToolResult,
@@ -137,6 +142,15 @@ export async function findOnDemandIntegrationTools(
     const server = scoped[index]!;
     if (listing.status === 'rejected') {
       unavailable.push(server.name);
+      console.warn(
+        formatSingleLineLog(
+          '[Roomote MCP] On-demand integration tool listing failed.',
+          {
+            integrationId: server.name,
+            error: formatErrorForLog(listing.reason),
+          },
+        ),
+      );
       return [];
     }
     return listing.value.map((tool) => ({
@@ -144,13 +158,54 @@ export async function findOnDemandIntegrationTools(
       ...tool,
     }));
   });
-  const { tools, truncated } = matchIntegrationTools(candidates, params);
+  const { tools, truncated, availableToolCount } = matchIntegrationTools(
+    candidates,
+    params,
+  );
+  const emptyReason =
+    tools.length === 0
+      ? unavailable.length > 0 && availableToolCount > 0
+        ? 'partial_integration_unavailable'
+        : unavailable.length > 0
+          ? 'integration_unavailable'
+          : availableToolCount > 0
+            ? 'no_filter_match'
+            : 'no_exposed_tools'
+      : undefined;
+  if (tools.length === 0) {
+    console.warn(
+      formatSingleLineLog(
+        '[Roomote MCP] On-demand integration lookup returned no tools.',
+        {
+          integrationId: params.integrationId,
+          toolName: params.toolName,
+          queryTermCount: params.query?.trim().split(/\s+/u).length ?? 0,
+          catalogIntegrationCount: catalog.servers.length,
+          scopedIntegrationCount: scoped.length,
+          availableToolCount,
+          emptyReason,
+          unavailableIntegrations: unavailable,
+        },
+      ),
+    );
+  }
   return jsonResult({
     success: true,
     tools,
+    availableToolCount,
+    ...(emptyReason ? { emptyReason } : {}),
     ...(truncated
       ? { guidance: INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE }
-      : {}),
+      : emptyReason === 'no_filter_match'
+        ? { guidance: INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE }
+        : emptyReason === 'no_exposed_tools'
+          ? { guidance: INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE }
+          : emptyReason === 'partial_integration_unavailable'
+            ? {
+                guidance:
+                  INTEGRATION_TOOL_LOOKUP_PARTIALLY_UNAVAILABLE_GUIDANCE,
+              }
+            : {}),
     ...(unavailable.length > 0 ? { unavailableIntegrations: unavailable } : {}),
   });
 }

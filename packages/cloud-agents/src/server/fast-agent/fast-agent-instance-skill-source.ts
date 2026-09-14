@@ -12,6 +12,7 @@ function summarize(skill: {
   id: string;
   name: string;
   description: string;
+  version: number;
 }): FastAgentSkillSummary {
   return {
     id: `instance:${skill.id}`,
@@ -19,6 +20,7 @@ function summarize(skill: {
     invocation: skill.name,
     description: skill.description,
     source: 'instance',
+    version: skill.version,
   };
 }
 

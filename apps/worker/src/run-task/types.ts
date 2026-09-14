@@ -65,7 +65,8 @@ type TaskChannelBindings = Pick<
   DequeuedTaskRun['task'],
   'slackChannelId' | 'slackThreadTs' | 'linearSessionId'
 > & {
-  goal?: DequeuedTaskRun['task']['goal'];
+  surface?: DequeuedTaskRun['task']['surface'];
+  initiatorUserId?: DequeuedTaskRun['task']['initiatorUserId'];
 };
 
 type Todo = {

@@ -77,6 +77,16 @@ export function createFastAgentSurfaceReplyStreamer(options: {
     appendTimer = setTimeout(appendPending, wait);
     appendTimer.unref?.();
   };
+  const openStream = () => {
+    if (stream || !latestIncomplete || !latestText.trim()) return;
+    const opened = options.createStream?.();
+    if (!opened) return;
+    stream = opened;
+    sentText = latestText;
+    lastAppendAtMs = Date.now();
+    const text = latestText;
+    run(() => opened.append(text));
+  };
   const reset = () => {
     clearTimers();
     const active = stream;
@@ -104,15 +114,13 @@ export function createFastAgentSurfaceReplyStreamer(options: {
         return;
       }
       if (startTimer) return;
+      if (startDelayMs === 0) {
+        openStream();
+        return;
+      }
       startTimer = setTimeout(() => {
         startTimer = undefined;
-        if (stream || !latestIncomplete || !latestText.trim()) return;
-        const opened = createStream();
-        stream = opened;
-        sentText = latestText;
-        lastAppendAtMs = Date.now();
-        const text = latestText;
-        run(() => opened.append(text));
+        openStream();
       }, startDelayMs);
       startTimer.unref?.();
     },

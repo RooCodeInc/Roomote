@@ -11,6 +11,7 @@ import {
 import {
   CREATE_CUSTOM_SKILL_TOOL,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  UPDATE_CUSTOM_SKILL_TOOL,
 } from '@roomote/types';
 
 const thisFilePath = fileURLToPath(import.meta.url);
@@ -233,6 +234,24 @@ describe('roomote MCP tool descriptions', () => {
         environmentIds: [],
       }).success,
     ).toBe(false);
+  });
+
+  it('registers the shared custom skill update descriptor', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(
+      registeredTools,
+      UPDATE_CUSTOM_SKILL_TOOL.name,
+    );
+    expect(tool.config.title).toBe(UPDATE_CUSTOM_SKILL_TOOL.title);
+    expect(tool.config.description).toBe(UPDATE_CUSTOM_SKILL_TOOL.description);
+    expect(tool.config.annotations).toEqual(
+      UPDATE_CUSTOM_SKILL_TOOL.annotations,
+    );
+    const schema = tool.config
+      .inputSchema as unknown as z.ZodObject<z.ZodRawShape>;
+    expect(Object.keys(schema.shape)).toEqual(
+      Object.keys(UPDATE_CUSTOM_SKILL_TOOL.inputSchema),
+    );
   });
 
   it('requires a token before creating a custom skill', async () => {
@@ -465,12 +484,12 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
-  it('registers show_widget for presentational HTML in the task transcript', async () => {
+  it('registers show_widget for rendered visuals in the task transcript', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const tool = getRegisteredTool(registeredTools, 'show_widget');
 
     expect(tool.config.description).toContain(
-      'Render a presentational HTML widget in the current task transcript.',
+      'Create and share a rendered visual in the current task transcript.',
     );
     expect(tool.config.description).not.toContain('Roomote');
     expect(tool.config.description).toContain(
@@ -493,6 +512,9 @@ describe('roomote MCP tool descriptions', () => {
       'HTML, CSS, and inline SVG are displayed in a sandboxed iframe',
     );
     expect(tool.config.description).toContain('request_user_input');
+    expect(tool.config.description).not.toContain('communication provider');
+    expect(tool.config.description).not.toContain('link to open');
+    expect(tool.config.description).not.toContain('HTML inline');
     expect(getInputSchemaField(tool, 'html').description).toContain('HTML');
     expect(getInputSchemaField(tool, 'html').description).toContain(
       'Avoid long prose',
@@ -507,7 +529,7 @@ describe('roomote MCP tool descriptions', () => {
       SHOW_WIDGET_HEIGHT_DESCRIPTION,
     );
     expect(getInputSchemaField(tool, 'textFallback').description).toContain(
-      'originating chat surface',
+      'Optional short plain-text preview of the rendered visual',
     );
     for (const field of ['html', 'title', 'css', 'height', 'textFallback']) {
       expect(getInputSchemaField(tool, field).description).not.toContain(

@@ -6,6 +6,8 @@ import type {
   ReasoningEffort,
 } from '@roomote/types';
 
+import type { TelegramTopicIconEmoji } from '../llm-task-title';
+
 export {
   isFastAgentCommunicationConversation,
   type FastAgentConversation,
@@ -156,7 +158,13 @@ export type FastAgentTurnActivity = {
   settle: (options?: { keepProcessing?: boolean }) => Promise<void>;
   /** Synchronously cancel delayed starts and fence new status writes, then drain issued writes. */
   dispose: () => Promise<void>;
-  updateTitle?: (title: string | null) => void;
+  updateTitle?: (
+    title: string | null,
+    metadata?: {
+      iconEmoji?: TelegramTopicIconEmoji | null;
+      titleChanged?: boolean;
+    },
+  ) => void;
 };
 
 export type FastAgentMcpServerConfig = {
@@ -200,6 +208,8 @@ export type FastAgentTurnAdapter = {
   postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
   /** Surfaces with a streaming API render the reply as it is written. */
   createReplyStream?: () => FastAgentReplyStream;
+  /** Override the default delay before an incomplete reply opens a stream. */
+  replyStreamStartDelayMs?: number;
   replaceReply?: (
     handle: FastAgentReplyHandle,
     reply: FastAgentReply,
@@ -213,6 +223,13 @@ export type FastAgentTurnAdapter = {
   /** Called when the turn ends waiting on structured user input. The caller
    * persists the pending request and marks the session needs_input. */
   requestUserInput?: (request: FastAgentInputRequest) => Promise<void>;
+  /** Called after a durable visible turn settles and requires user attention. */
+  notifyUserAttention?: (attention: {
+    kind: 'result_ready' | 'input_needed';
+    eventId: string;
+    message?: string;
+    manual: boolean;
+  }) => Promise<void>;
   /** Resolve a trusted preset without accepting model-supplied options. */
   resolveUserInputPreset?: (
     preset: FastAgentInputPreset,

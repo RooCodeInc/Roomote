@@ -83,6 +83,19 @@ const telegramVoiceSchema = z
   })
   .passthrough();
 
+const telegramRepliedToMessageSchema = z
+  .object({
+    message_id: z.number().int(),
+    text: z.string().optional(),
+    caption: z.string().optional(),
+    photo: z.array(telegramPhotoSizeSchema).optional(),
+    document: telegramDocumentSchema.optional(),
+    audio: telegramAudioSchema.optional(),
+    voice: telegramVoiceSchema.optional(),
+    from: telegramUserSchema.optional(),
+  })
+  .passthrough();
+
 const telegramMessageSchema = z
   .object({
     message_id: z.number().int(),
@@ -99,6 +112,7 @@ const telegramMessageSchema = z
     entities: z.array(telegramMessageEntitySchema).optional(),
     caption_entities: z.array(telegramMessageEntitySchema).optional(),
     forum_topic_created: telegramForumTopicCreatedSchema.optional(),
+    reply_to_message: telegramRepliedToMessageSchema.optional(),
   })
   .passthrough();
 
@@ -166,6 +180,50 @@ function cleanOptionalString(value: string | undefined): string | undefined {
 
 function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
+}
+
+const TELEGRAM_REPLY_CONTENT_MAX_LENGTH = 500;
+
+function getTelegramMessageContent(message: {
+  text?: string;
+  caption?: string;
+  photo?: unknown[];
+  document?: { file_name?: string };
+  audio?: { file_name?: string };
+  voice?: unknown;
+}): string | undefined {
+  const text = normalizeWhitespace(message.text ?? message.caption ?? '');
+  if (text) {
+    return text.length <= TELEGRAM_REPLY_CONTENT_MAX_LENGTH
+      ? text
+      : `${text.slice(0, TELEGRAM_REPLY_CONTENT_MAX_LENGTH - 3).trimEnd()}...`;
+  }
+
+  return message.photo?.length
+    ? 'Image attachment'
+    : message.document
+      ? `Document attachment${message.document.file_name ? `: ${message.document.file_name}` : ''}`
+      : message.audio
+        ? `Audio attachment${message.audio.file_name ? `: ${message.audio.file_name}` : ''}`
+        : message.voice
+          ? 'Audio attachment: voice message'
+          : undefined;
+}
+
+export function getTelegramRepliedToMessageContext(
+  message: TelegramMessage,
+): string | undefined {
+  const repliedTo = message.reply_to_message;
+  if (!repliedTo) {
+    return undefined;
+  }
+
+  const content = getTelegramMessageContent(repliedTo);
+  return `The person is replying to this Telegram message:\n${JSON.stringify({
+    message_id: String(repliedTo.message_id),
+    author: formatTelegramUser(repliedTo),
+    ...(content ? { content } : {}),
+  })}`;
 }
 
 function readEntityText(
@@ -261,7 +319,9 @@ export function isTelegramImplicitTopicCreatedMessage(
   return message.forum_topic_created?.is_name_implicit === true;
 }
 
-export function formatTelegramUser(message: TelegramMessage): string {
+export function formatTelegramUser(message: {
+  from?: z.infer<typeof telegramUserSchema>;
+}): string {
   const from = message.from;
 
   if (!from) {
@@ -341,9 +401,11 @@ function isMatchingBotCommand(
 
   const botUsername = normalizeTelegramBotUsername(options.botUsername);
 
-  if (!botUsername || isTelegramPrivateChat(message)) {
+  if (isTelegramPrivateChat(message)) {
     return true;
   }
+
+  if (!botUsername) return false;
 
   return parseTelegramBotCommand(entityText)?.botSuffix === botUsername;
 }
@@ -358,9 +420,7 @@ function isMatchingBotMention(
     return false;
   }
 
-  if (!botUsername) {
-    return true;
-  }
+  if (!botUsername) return false;
 
   return entityText.slice(1).toLowerCase() === botUsername;
 }
@@ -520,6 +580,17 @@ export function isTelegramStartCommand(update: TelegramUpdate): boolean {
   return /^\/start(@[A-Za-z0-9_]+)?$/u.test(message.text.trim());
 }
 
+/** A bare `/help` uses the same private-chat help response as `/start`. */
+export function isTelegramHelpCommand(update: TelegramUpdate): boolean {
+  const message = getTelegramUpdateMessage(update);
+
+  if (!message?.text || !isTelegramPrivateChat(message)) {
+    return false;
+  }
+
+  return /^\/help(@[A-Za-z0-9_]+)?$/u.test(message.text.trim());
+}
+
 export function isTelegramTaskEntryUpdate(
   update: TelegramUpdate,
   options: TelegramBotMentionOptions = {},
@@ -539,18 +610,15 @@ export function isTelegramTaskEntryUpdate(
   );
 }
 
-export const TELEGRAM_NEW_TASK_COMMANDS = ['new'] as const;
-
 export type TelegramNewTaskCommand = {
-  command: (typeof TELEGRAM_NEW_TASK_COMMANDS)[number];
+  command: 'new';
   text: string;
 };
 
-function isNewTaskCommandName(
-  command: string,
-): command is TelegramNewTaskCommand['command'] {
-  return (TELEGRAM_NEW_TASK_COMMANDS as readonly string[]).includes(command);
-}
+export type TelegramGoalCommand = {
+  command: 'goal';
+  objective: string;
+};
 
 /**
  * Detects an explicit `/new` command and returns the command name plus the task
@@ -571,6 +639,23 @@ export function getTelegramNewTaskCommand(
   update: TelegramUpdate,
   options: TelegramBotMentionOptions = {},
 ): TelegramNewTaskCommand | null {
+  const command = getTelegramLeadingCommand(update, 'new', options);
+  return command ? { command: 'new', text: command.argument } : null;
+}
+
+export function getTelegramGoalCommand(
+  update: TelegramUpdate,
+  options: TelegramBotMentionOptions = {},
+): TelegramGoalCommand | null {
+  const command = getTelegramLeadingCommand(update, 'goal', options);
+  return command ? { command: 'goal', objective: command.argument } : null;
+}
+
+function getTelegramLeadingCommand<T extends 'new' | 'goal'>(
+  update: TelegramUpdate,
+  commandName: T,
+  options: TelegramBotMentionOptions,
+): { command: T; argument: string } | null {
   const message = getTelegramUpdateMessage(update);
   const text = message?.text;
 
@@ -579,6 +664,9 @@ export function getTelegramNewTaskCommand(
   }
 
   const botUsername = normalizeTelegramBotUsername(options.botUsername);
+  if (!botUsername && !isTelegramPrivateChat(message)) {
+    return null;
+  }
   const entities = message.entities ?? [];
 
   for (const entity of entities) {
@@ -588,12 +676,12 @@ export function getTelegramNewTaskCommand(
 
     const parsed = parseTelegramBotCommand(readEntityText(text, entity));
 
-    if (!parsed || !isNewTaskCommandName(parsed.command)) {
+    if (!parsed || parsed.command !== commandName) {
       continue;
     }
 
     if (botUsername && parsed.botSuffix && parsed.botSuffix !== botUsername) {
-      // `/new@some_other_bot` is addressed to another bot.
+      // A command suffixed for another bot is not addressed to this bot.
       continue;
     }
 
@@ -611,8 +699,8 @@ export function getTelegramNewTaskCommand(
       options,
     );
 
-    // In groups the command must target this bot, via either the
-    // `/new@<botUsername>` suffix or a leading bot mention.
+    // In groups the command must target this bot, via either a bot suffix or
+    // a leading bot mention.
     if (
       botUsername &&
       !isTelegramPrivateChat(message) &&
@@ -623,8 +711,8 @@ export function getTelegramNewTaskCommand(
     }
 
     return {
-      command: parsed.command,
-      text: normalizeWhitespace(text.slice(entity.offset + entity.length)),
+      command: commandName,
+      argument: normalizeWhitespace(text.slice(entity.offset + entity.length)),
     };
   }
 
@@ -682,6 +770,8 @@ export function telegramUpdateToQueuedCommunicationMessage(
     return null;
   }
 
+  const agentContext = getTelegramRepliedToMessageContext(message);
+
   return {
     provider: 'telegram',
     text,
@@ -689,6 +779,7 @@ export function telegramUpdateToQueuedCommunicationMessage(
     ...(options.userId ? { userId: options.userId } : {}),
     ts: String(message.message_id),
     channel: getTelegramChatId(message),
+    ...(agentContext ? { agentContext } : {}),
     ...(getTelegramMessageThreadId(message)
       ? { threadTs: getTelegramMessageThreadId(message) }
       : {}),

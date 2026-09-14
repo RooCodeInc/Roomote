@@ -22,6 +22,7 @@ const mockReleaseRedisLock = Object.assign(
   { renewDetailed: mockRenewRedisLock },
 );
 const mockDbExecute = vi.fn().mockResolvedValue([]);
+const mockTerminateSessionEgress = vi.fn().mockResolvedValue([]);
 const mockRecordTaskRunLifecycleEvent = vi.fn().mockResolvedValue(undefined);
 const mockCleanupSandboxOidcTargetsForTaskRun = vi
   .fn()
@@ -30,6 +31,11 @@ const mockResolveDiscordRuntimeCredentials = vi.fn();
 const mockDiscordPostMessage = vi.fn();
 const mockNotifySourceRunOnSettle = vi.fn().mockResolvedValue(undefined);
 const mockNotifyFastAgentParentOnSettle = vi.fn().mockResolvedValue(undefined);
+const mockNotifyWebTaskInitiatorOnSettle = vi.fn().mockResolvedValue(undefined);
+const mockEnqueueWebTaskInitiatorSettleNotification = vi
+  .fn()
+  .mockResolvedValue(undefined);
+const mockSettleLiveTaskMessageOnExit = vi.fn().mockResolvedValue(undefined);
 const mockDbTransaction = vi.fn();
 const mockCaptureTaskSettled = vi.fn();
 const mockResolveDefaultComputeProvider = vi.fn().mockResolvedValue('modal');
@@ -126,6 +132,8 @@ vi.mock('@roomote/db/server', async () => {
     );
   return {
     ...actual,
+    terminateSessionEgressWorkloadsForRun: (...args: unknown[]) =>
+      mockTerminateSessionEgress(...args),
     db: {
       query: {
         taskRuns: {
@@ -333,6 +341,21 @@ vi.mock('../notify-fast-agent-parent-on-settle', () => ({
     mockNotifyFastAgentParentOnSettle(...args),
 }));
 
+vi.mock('../notify-web-task-initiator-on-settle', () => ({
+  notifyWebTaskInitiatorOnSettle: (...args: unknown[]) =>
+    mockNotifyWebTaskInitiatorOnSettle(...args),
+}));
+
+vi.mock('../enqueue-web-task-initiator-settle-notification', () => ({
+  enqueueWebTaskInitiatorSettleNotification: (...args: unknown[]) =>
+    mockEnqueueWebTaskInitiatorSettleNotification(...args),
+}));
+
+vi.mock('../settle-live-task-message-on-exit', () => ({
+  settleLiveTaskMessageOnExit: (...args: unknown[]) =>
+    mockSettleLiveTaskMessageOnExit(...args),
+}));
+
 vi.mock('../../automation-result-metadata', () => ({
   resolveAutomationResultSubtitle: (...args: unknown[]) =>
     mockResolveAutomationResultSubtitle(...args),
@@ -428,6 +451,7 @@ describe('finishRun', () => {
     mockResolveDefaultComputeProvider.mockResolvedValue('modal');
     mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
     mockNotifyFastAgentParentOnSettle.mockResolvedValue('admitted');
+    mockNotifyWebTaskInitiatorOnSettle.mockResolvedValue('delivered');
     syncRunRows = [];
     mockDbTransaction.mockImplementation(
       async (callback: (tx: unknown) => unknown) =>
@@ -561,6 +585,10 @@ describe('finishRun', () => {
         outcome,
         errorCode,
       );
+      expect(mockNotifyWebTaskInitiatorOnSettle).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1 }),
+        status,
+      );
     },
   );
 
@@ -570,6 +598,26 @@ describe('finishRun', () => {
     await finishRun({ id: 1, status: RunStatus.Idle });
 
     expect(mockCaptureTaskSettled).not.toHaveBeenCalled();
+    expect(mockTerminateSessionEgress).not.toHaveBeenCalled();
+    expect(mockNotifyWebTaskInitiatorOnSettle).not.toHaveBeenCalled();
+  });
+
+  it('continues terminal side effects when retry queue admission fails', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+    mockNotifyWebTaskInitiatorOnSettle.mockResolvedValue('failed');
+    mockEnqueueWebTaskInitiatorSettleNotification.mockResolvedValue(false);
+
+    await finishRun({ id: 1, status: RunStatus.Completed });
+
+    expect(mockEnqueueWebTaskInitiatorSettleNotification).toHaveBeenCalledWith({
+      runId: 1,
+      taskId: 'task-1',
+      status: RunStatus.Completed,
+    });
+    expect(mockNotifyFastAgentParentOnSettle).toHaveBeenCalledOnce();
+    expect(mockSettleLiveTaskMessageOnExit).toHaveBeenCalledOnce();
+    expect(mockCaptureTaskSettled).toHaveBeenCalledOnce();
+    expect(mockCleanupSandboxOidcTargetsForTaskRun).toHaveBeenCalledWith(1);
   });
 
   it('derives tasks.state completed via the shared sync when the job completes', async () => {
@@ -589,6 +637,11 @@ describe('finishRun', () => {
       state: 'completed',
       updatedAt: expect.any(Date),
     });
+    expect(mockTerminateSessionEgress).toHaveBeenCalledWith(
+      1,
+      'completed',
+      expect.anything(),
+    );
   });
 
   it('derives tasks.state canceled via the shared sync when the job is canceled', async () => {
@@ -605,6 +658,11 @@ describe('finishRun', () => {
       state: 'canceled',
       updatedAt: expect.any(Date),
     });
+    expect(mockTerminateSessionEgress).toHaveBeenCalledWith(
+      1,
+      'stopped',
+      expect.anything(),
+    );
   });
 
   it('derives tasks.state failed via the shared sync when the job fails', async () => {
@@ -622,6 +680,11 @@ describe('finishRun', () => {
       state: 'failed',
       updatedAt: expect.any(Date),
     });
+    expect(mockTerminateSessionEgress).toHaveBeenCalledWith(
+      1,
+      'failed',
+      expect.anything(),
+    );
   });
 
   it('keeps the task active (not terminal) when the finishing run goes idle', async () => {

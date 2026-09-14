@@ -174,10 +174,10 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     id: 'experimental',
     label: 'Experimental',
     title: 'Experimental',
-    description: 'No experimental features at the moment. Check back soon.',
+    description:
+      'Try opt-in features that may change while they are being evaluated.',
     href: SETTINGS_PATHS.experimental,
     icon: FlaskConical,
-    adminOnly: true,
     newGroup: true,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.experimental),
   },

@@ -100,6 +100,7 @@ vi.mock('@/components/system', () => ({
   PanelLeftOpen: () => <svg aria-hidden="true" />,
   Plus: () => <svg aria-hidden="true" />,
   Rows4: () => <svg aria-hidden="true" />,
+  NotepadText: () => <svg aria-hidden="true" />,
   Search: () => <svg aria-hidden="true" />,
   Settings: () => <svg aria-hidden="true" />,
   Zap: () => <svg aria-hidden="true" />,
@@ -153,6 +154,10 @@ vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => state.user,
 }));
 
+vi.mock('@/hooks/useResultsPage', () => ({
+  useResultsPage: () => ({ enabled: false, isLoading: false }),
+}));
+
 vi.mock('@/hooks/tasks', () => ({
   useLiveTaskStatus: (taskId: string | null) => useLiveTaskStatusMock(taskId),
   useTaskPins: () => ({
@@ -170,6 +175,9 @@ vi.mock('@/trpc/client', () => ({
     tasks: {
       search: { queryOptions: queryOptionsMock },
     },
+    results: {
+      unreadCount: { queryOptions: () => ({ queryKey: ['results'] }) },
+    },
   }),
 }));
 
@@ -182,6 +190,7 @@ vi.mock('./SideNavItem', () => ({
     expanded,
     disabled,
     description,
+    'aria-label': ariaLabel,
   }: {
     href?: string;
     onClick?: () => void;
@@ -190,9 +199,12 @@ vi.mock('./SideNavItem', () => ({
     expanded?: boolean;
     disabled?: boolean;
     description?: ReactNode;
+    'aria-label'?: string;
   }) =>
     href ? (
-      <div
+      <a
+        href={href}
+        aria-label={ariaLabel}
         data-testid={`nav-${href}`}
         data-expanded={String(expanded)}
         data-disabled={String(disabled ?? false)}
@@ -202,6 +214,7 @@ vi.mock('./SideNavItem', () => ({
     ) : (
       <button
         type="button"
+        aria-label={ariaLabel}
         data-testid={`nav-action-${typeof tooltip === 'string' ? tooltip : label}`}
         data-expanded={String(expanded)}
         onClick={onClick}
@@ -258,11 +271,8 @@ vi.mock('./SideNavSessionItem', () => ({
   ),
 }));
 
-import {
-  SideNav,
-  getSessionIdFromPathname,
-  getTaskIdFromPathname,
-} from './SideNav';
+import { getSessionIdFromPathname } from './RecentSessions';
+import { SideNav, getTaskIdFromPathname } from './SideNav';
 
 describe('SideNav recent sessions', () => {
   beforeEach(() => {
@@ -426,6 +436,11 @@ describe('SideNav recent sessions', () => {
   it('preserves collapsed and expanded sidebar controls', () => {
     const view = render(<SideNav />);
 
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
+    expect(screen.getByRole('button', { name: 'Search' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open sidebar' }));
     expect(setSideNavExpandedMock).toHaveBeenCalledWith(true);
     fireEvent.click(screen.getByTestId('nav-action-Expand sidebar'));
@@ -433,6 +448,11 @@ describe('SideNav recent sessions', () => {
 
     state.isSideNavExpanded = true;
     view.rerender(<SideNav />);
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
+    expect(screen.getByRole('button', { name: 'Search' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
     expect(setSideNavExpandedMock).toHaveBeenCalledWith(false);
     expect(

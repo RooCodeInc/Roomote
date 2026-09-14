@@ -1,7 +1,21 @@
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+
 import { defineConfig } from 'tsup';
 
+const nodeRequire = createRequire(import.meta.url);
+const jsdomEntry = nodeRequire.resolve('jsdom');
+const jsdomSyncWorkerEntry = join(
+  dirname(jsdomEntry),
+  'jsdom/living/xhr/xhr-sync-worker.js',
+);
+
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: {
+    index: 'src/index.ts',
+    // JSDOM resolves this helper relative to the bundle at runtime.
+    'xhr-sync-worker': jsdomSyncWorkerEntry,
+  },
   format: ['esm'],
   target: 'node22',
   platform: 'node',
