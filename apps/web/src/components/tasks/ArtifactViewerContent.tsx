@@ -437,7 +437,7 @@ export function ArtifactViewerContent({
           ) : canRender ? (
             <>
               {isMarkdown && !isRaw && artifact.content && (
-                <div className="max-w-3xl p-6 text-sm">
+                <div className="mx-auto w-full max-w-4xl p-6 text-sm">
                   <Streamdown
                     className="size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
                     remarkPlugins={[
@@ -469,7 +469,12 @@ export function ArtifactViewerContent({
 
               {((isMarkdown && isRaw) || (isHTML && isRaw) || isText) &&
                 artifact.content && (
-                  <div className="min-w-0 overflow-x-auto p-2 text-sm leading-relaxed text-foreground">
+                  <div
+                    className={cn(
+                      'min-w-0 overflow-x-auto p-2 text-sm leading-relaxed text-foreground',
+                      isText && 'mx-auto w-full max-w-4xl',
+                    )}
+                  >
                     <CodeBlock
                       code={artifact.content}
                       language={language}
