@@ -638,8 +638,8 @@ export default {
       })).min(1).max(12).optional().describe("Present options as choices; omit for free-text"),
       multiple: z.boolean().optional().describe("Allow more than one option; defaults to false"),
     })).min(1).max(4).optional().describe("Structured questions to ask; omit when using a preset"),
-    preset: z.enum(["setup_source_control", "setup_starter_tasks", "setup_integrations"]).optional().describe("Use a trusted setup preset instead of questions"),
-    setupIntegrationAnswers: z.record(z.string(), z.object({ answers: z.array(z.string()) })).optional().describe("Only for setup_integrations: tools already named by the user, keyed by category ID from the setup snapshot"),
+    preset: z.preprocess((value) => value === null ? undefined : value, z.enum(["setup_source_control", "setup_starter_tasks", "setup_integrations"]).optional()).describe("Use a trusted setup preset instead of questions"),
+    setupIntegrationAnswers: z.preprocess((value) => value === null || Array.isArray(value) ? undefined : value, z.record(z.string(), z.object({ answers: z.array(z.string()) })).optional()).describe("Only for setup_integrations: tools already named by the user, keyed by category ID from the setup snapshot"),
   },
   execute: (args, context) => invoke("request_user_input", args, context),
 }

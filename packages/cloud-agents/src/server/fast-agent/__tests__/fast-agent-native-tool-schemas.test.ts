@@ -541,6 +541,10 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
     )!;
     const parsed = zod.z.object(inputTool.args as Record<string, never>).parse({
+      // Models sometimes send unused optional values as placeholders. This
+      // mirrors the setup payload from the regression report.
+      preset: null,
+      setupIntegrationAnswers: [],
       questions: [
         {
           id: 'team-knowledge',
@@ -557,6 +561,8 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
         },
       ],
     });
+    expect(parsed.preset).toBeUndefined();
+    expect(parsed.setupIntegrationAnswers).toBeUndefined();
   });
 
   it('rejects a bare union or object as args, the shape that broke OpenAI models', () => {

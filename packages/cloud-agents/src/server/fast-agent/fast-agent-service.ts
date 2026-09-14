@@ -594,16 +594,28 @@ const requestUserInputArgsSchema = z.preprocess(
     }
     if (input.preset === 'setup_integrations') {
       // Integration answers are meaningful for this preset, but questions
-      // are still server-owned. Treat a model-emitted null as omitted.
+      // are still server-owned. Treat model-emitted placeholders as omitted.
       return {
         preset: input.preset,
         ...(input.setupIntegrationAnswers !== undefined &&
-        input.setupIntegrationAnswers !== null
+        input.setupIntegrationAnswers !== null &&
+        !Array.isArray(input.setupIntegrationAnswers)
           ? { setupIntegrationAnswers: input.setupIntegrationAnswers }
           : {}),
       };
     }
-    return raw;
+    // Models can serialize unused optional arguments as null or an empty
+    // array. Generic questions do not accept integration answers, so discard
+    // those placeholders instead of rejecting an otherwise usable question.
+    const {
+      preset,
+      setupIntegrationAnswers: _setupIntegrationAnswers,
+      ...rest
+    } = input;
+    return {
+      ...rest,
+      ...(preset !== null && preset !== undefined ? { preset } : {}),
+    };
   },
   z
     .object({
