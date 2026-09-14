@@ -9,6 +9,7 @@ import {
   revokeSessionSecret,
 } from '@roomote/sdk/server/session-secrets';
 import {
+  SESSION_SECRET_TOOLS_ENABLED,
   sessionSecretCreateSchema,
   sessionSecretRevokeSchema,
 } from '@roomote/types';
@@ -131,7 +132,9 @@ async function handle(
         ) {
           await replyToFastSessionCommand(auth, {
             sessionId: session.fastConversationId,
-            text: 'I saved an API key approval securely for this Session. Check list_session_secrets for ready approvals and continue the requested work using only the approved methods and destination. Attached coding runs may use this same approval. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.',
+            text: SESSION_SECRET_TOOLS_ENABLED
+              ? 'I saved an API key approval securely for this Session. Check list_session_secrets for ready approvals and continue the requested work using only the approved methods and destination. Attached coding runs may use this same approval. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.'
+              : 'I saved an API key approval securely for this Session. Credential-backed Session access is temporarily unavailable. Explain that the approval was saved but cannot currently be used; do not attempt a credential-backed request or ask me to paste credentials into chat.',
           });
           resumed = true;
         }

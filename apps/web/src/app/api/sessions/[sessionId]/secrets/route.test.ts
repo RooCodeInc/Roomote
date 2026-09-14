@@ -175,7 +175,9 @@ describe('session secret route boundary', () => {
     });
     expect(mocks.reply).toHaveBeenCalledExactlyOnceWith(auth, {
       sessionId: fastConversationId,
-      text: expect.stringContaining('Check list_session_secrets'),
+      text: expect.stringContaining(
+        'Credential-backed Session access is temporarily unavailable',
+      ),
     });
     expect(mocks.create.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.findSession.mock.invocationCallOrder[0]!,
@@ -193,7 +195,14 @@ describe('session secret route boundary', () => {
     await POST(request('POST', createArgs), props);
     const text = mocks.reply.mock.calls[0]![1].text;
     expect(text).not.toContain('GET or HEAD');
-    expect(text).toContain('approved methods');
+    expect(text).toContain('approval was saved but cannot currently be used');
+    for (const tool of [
+      'list_session_secrets',
+      'prepare_session_secret',
+      'request_with_session_secret',
+    ]) {
+      expect(text).not.toContain(tool);
+    }
     const otherRef = '603dbf6f-baea-446f-83fd-63923f9d464a';
     const otherSecret = 'another-private-key-canary';
     mocks.create.mockResolvedValueOnce({
