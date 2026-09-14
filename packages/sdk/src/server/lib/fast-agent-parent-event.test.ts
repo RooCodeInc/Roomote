@@ -525,7 +525,6 @@ describe('deliverFastAgentParentEvent', () => {
       },
       mocks.releaseTurnLock,
     );
-
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         question: 'Use the corrected requirement.',
@@ -797,6 +796,46 @@ describe('deliverFastAgentParentEvent', () => {
       }),
     );
     expect(mocks.answerQuestion.mock.calls[1]?.[0]).not.toHaveProperty('input');
+    expect(mocks.buildSetupAdapter).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Object),
+      expect.objectContaining({ setupSession: true }),
+    );
+  });
+
+  it('rebuilds ordinary capability context without setup Session enforcement', async () => {
+    mocks.answerQuestion.mockResolvedValue('');
+    const setupContext = {
+      sessionId: 'session-1',
+      fastConversationId: parent.sessionId,
+      setupSnapshot: '{"rail":{"source":"ready"}}',
+      starterTaskOptions: [],
+    };
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'ordinary-input:conversation-1',
+          currentMessageId: 'ordinary-input:conversation-1',
+          userId: 'user-2',
+          question: '<capability_offer_response>{}</capability_offer_response>',
+          turnSource: 'platform_event',
+          platformEventKind: 'input_response',
+          platformEventVisibility: 'required',
+          setupContext,
+        },
+        resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'row-3' },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    expect(mocks.buildSetupAdapter).toHaveBeenCalledWith(
+      setupContext,
+      expect.objectContaining({ setupSession: false }),
+    );
   });
 
   it('lets a queued web turn create artifacts in its Session', async () => {

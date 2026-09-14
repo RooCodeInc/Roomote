@@ -646,9 +646,174 @@ describe('optional setup integration discovery', () => {
         setupSession: false,
         adapterExtensions: { offerCapability: expect.any(Function) },
       });
+      expect(resolved!.adapterExtensions!.assertTaskLaunch).toBeUndefined();
+      expect(
+        resolved!.adapterExtensions!.resolveUserInputPreset,
+      ).toBeUndefined();
+      expect(JSON.parse(resolved!.setupSnapshot)).toMatchObject({
+        recommendedNextCapability: null,
+        capabilities: { starter_work: { canOffer: false } },
+      });
     } finally {
       await db.delete(users).where(eq(users.id, collaborator.id));
     }
+  });
+
+  it.each([
+    ['while first work is pending', null],
+    ['after setup completes', new Date('2026-01-01T00:00:00.000Z')],
+  ])(
+    'keeps integration offers but removes setup-only behavior from ordinary admin Sessions %s',
+    async (_label, setupCompletedAt) => {
+      const [ordinaryConversation] = await db
+        .insert(fastAgentConversations)
+        .values({
+          surface: 'web',
+          userId: auth.userId,
+          workspaceId: auth.userId,
+          conversationId: `ordinary-session:${crypto.randomUUID()}`,
+        })
+        .returning();
+      const ordinarySession = await ensureSessionForFastConversation(
+        db,
+        ordinaryConversation!.id,
+      );
+      await db
+        .update(deploymentSettings)
+        .set({ setupCompletedAt })
+        .where(eq(deploymentSettings.id, 'default'));
+      mocks.getStatus.mockImplementation(async () => ({
+        setupNewState: await readState(),
+        setupCompletedAt,
+        modelSetup: { setupSatisfied: true },
+        computeSetup: { setupSatisfied: true, providers: [] },
+        sourceControlSetup: {
+          setupSatisfied: true,
+          providers: [
+            {
+              provider: 'github',
+              label: 'GitHub',
+              connected: true,
+              repositoryCount: 1,
+            },
+          ],
+        },
+      }));
+
+      try {
+        const resolved = await resolveSetupSessionTurnContext(
+          auth,
+          ordinarySession.id,
+        );
+        expect(resolved).toMatchObject({
+          setupSession: false,
+          adapterExtensions: { offerCapability: expect.any(Function) },
+        });
+        expect(resolved!.adapterExtensions!.assertTaskLaunch).toBeUndefined();
+        expect(
+          resolved!.adapterExtensions!.resolveUserInputPreset,
+        ).toBeUndefined();
+        expect(JSON.parse(resolved!.setupSnapshot)).toMatchObject({
+          recommendedNextCapability: null,
+          capabilities: {
+            integrations: { canOffer: true },
+            starter_work: { canOffer: false },
+          },
+        });
+      } finally {
+        await db.delete(sessions).where(eq(sessions.id, ordinarySession.id));
+        await db
+          .delete(fastAgentConversations)
+          .where(eq(fastAgentConversations.id, ordinaryConversation!.id));
+      }
+    },
+  );
+
+  it('does not advance onboarding from an integration card in an ordinary Session', async () => {
+    const [ordinaryConversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        surface: 'web',
+        userId: auth.userId,
+        workspaceId: auth.userId,
+        conversationId: `ordinary-offer:${crypto.randomUUID()}`,
+      })
+      .returning();
+    const ordinarySession = await ensureSessionForFastConversation(
+      db,
+      ordinaryConversation!.id,
+    );
+    const offerId = 'cap:ordinary-integration-offer';
+    await db.insert(fastAgentMessages).values({
+      conversationId: ordinaryConversation!.id,
+      eventId: 'ordinary-integration-offer',
+      turnId: 'ordinary-integration-offer-turn',
+      turnSeq: 1,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'Connect Notion.' }],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        offerId,
+        capability: 'integrations',
+        message: 'Connect Notion.',
+        integrationIds: ['notion'],
+        status: 'pending',
+      },
+      source: 'web',
+    });
+    mocks.schedule.mockClear();
+
+    try {
+      await actualFastSessions.resolveFastSessionCapabilityOfferCommand(auth, {
+        sessionId: ordinarySession.id,
+        offerId,
+        capability: 'integrations',
+        resolution: 'completed',
+      });
+
+      const state = await readState();
+      expect(state.setupSession?.integrationDiscoveryCompletedAt).toBeNull();
+      expect(state.setupSession?.starterTaskSelection).toBeNull();
+      expect(mocks.schedule).not.toHaveBeenCalled();
+      expect(mocks.after).toHaveBeenCalledOnce();
+      await mocks.after.mock.calls[0]![0]();
+      const turn = mocks.answerQuestion.mock.calls.at(-1)?.[0];
+      expect(JSON.parse(turn.setupSnapshot)).toMatchObject({
+        recommendedNextCapability: null,
+        capabilities: { starter_work: { canOffer: false } },
+      });
+      expect(turn.adapter.offerCapability).toEqual(expect.any(Function));
+      expect(turn.adapter.assertTaskLaunch).toBeUndefined();
+    } finally {
+      await db.delete(sessions).where(eq(sessions.id, ordinarySession.id));
+      await db
+        .delete(fastAgentConversations)
+        .where(eq(fastAgentConversations.id, ordinaryConversation!.id));
+    }
+  });
+
+  it('retains first-work launch gating in the active setup Session', async () => {
+    const adapter = (await context()).adapterExtensions!;
+    await expect(adapter.assertTaskLaunch!()).rejects.toThrow(
+      'Choose your first work before starting a task.',
+    );
+
+    const state = await readState();
+    state.setupSession!.starterTaskSelection = {
+      requestId: 'manual-work',
+      taskIds: [],
+      selectedAt: new Date().toISOString(),
+    };
+    await db
+      .update(deploymentSettings)
+      .set({ setupNewState: state })
+      .where(eq(deploymentSettings.id, 'default'));
+
+    await expect(
+      (await context()).adapterExtensions!.assertTaskLaunch!(),
+    ).resolves.toBeUndefined();
   });
 
   it('gives non-admin Sessions readiness without callable capability cards', async () => {
