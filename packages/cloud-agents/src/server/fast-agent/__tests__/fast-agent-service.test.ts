@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   captureInferenceContext: vi.fn(),
   captureInferenceAttemptOutcome: vi.fn(),
   captureTurnSettled: vi.fn(),
+  captureCapabilityOffer: vi.fn(),
   captureEvent: vi.fn(),
   markShutdownCloseoutPending: vi.fn(),
   markShutdownCloseoutSettled: vi.fn(),
@@ -281,7 +282,7 @@ vi.mock('../fast-agent-integration-broker', () => ({
 }));
 
 vi.mock('../fast-agent-context-telemetry', () => ({
-  captureFastAgentCapabilityOffer: vi.fn(),
+  captureFastAgentCapabilityOffer: mocks.captureCapabilityOffer,
   captureFastAgentInferenceContext: mocks.captureInferenceContext,
   captureFastAgentInferenceAttemptOutcome: mocks.captureInferenceAttemptOutcome,
   captureFastAgentTurnSettled: mocks.captureTurnSettled,
@@ -1526,6 +1527,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         workspaceId: 'deployment-1',
         conversationId: 'session-1',
       },
+      setupSession: true,
       adapter: callbacks({ offerCapability }),
     });
 
@@ -1538,6 +1540,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       capability: 'source_control',
       message: 'Connect GitHub so I can retrieve the event from your code.',
       provider: 'github',
+    });
+    expect(mocks.captureCapabilityOffer).toHaveBeenCalledWith({
+      userId: 'user-1',
+      capability: 'source_control',
+      outcome: 'requested',
+      advancedInitialSetup: true,
+    });
+    expect(mocks.captureCapabilityOffer).toHaveBeenCalledWith({
+      userId: 'user-1',
+      capability: 'source_control',
+      outcome: 'shown',
+      advancedInitialSetup: true,
     });
     expect(mocks.upsertMessage).toHaveBeenCalledWith(
       expect.objectContaining({

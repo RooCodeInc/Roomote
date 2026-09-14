@@ -4792,6 +4792,7 @@ export async function answerFastAgentQuestion({
               userId,
               capability: requestedArgs.capability,
               outcome: 'requested',
+              advancedInitialSetup: setupSession,
             });
             let args;
             try {
@@ -4801,6 +4802,7 @@ export async function answerFastAgentQuestion({
                 userId,
                 capability: requestedArgs.capability,
                 outcome: 'unavailable',
+                advancedInitialSetup: setupSession,
               });
               throw error;
             }
@@ -4826,6 +4828,7 @@ export async function answerFastAgentQuestion({
                 userId,
                 capability: args.capability,
                 outcome: 'deduplicated',
+                advancedInitialSetup: setupSession,
               });
               visibleUpdatePosted = true;
               closedInstructionVersions.add(instructionVersion);
@@ -4859,6 +4862,7 @@ export async function answerFastAgentQuestion({
               userId,
               capability: args.capability,
               outcome: 'shown',
+              advancedInitialSetup: setupSession,
             });
             visibleUpdatePosted = true;
             closedInstructionVersions.add(instructionVersion);

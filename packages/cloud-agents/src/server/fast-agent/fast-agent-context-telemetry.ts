@@ -16,12 +16,13 @@ export function captureFastAgentCapabilityOffer(input: {
   userId: string;
   capability: FastAgentCapabilityId;
   outcome: 'requested' | 'shown' | 'deduplicated' | 'unavailable';
+  advancedInitialSetup: boolean;
 }): void {
   void captureEvent(`capability_offer_${input.outcome}`, {
     userId: input.userId,
     properties: {
       capability: input.capability,
-      advanced_initial_setup: false,
+      advanced_initial_setup: input.advancedInitialSetup,
     },
   });
 }
