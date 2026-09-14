@@ -130,7 +130,7 @@ export function reconcileCandidate(
     );
     if (ancestor.status === 0) throw new Error('Candidate already in main');
   }
-  function pullRequest(branch, base, headSha, baseSha, number) {
+  function pullRequest(branch, base, headSha, number) {
     if (number === undefined) {
       const matches = pages(
         `repos/${repository}/pulls?state=open&base=${encodeURIComponent(base)}&head=${encodeURIComponent(`${owner}:${branch}`)}&per_page=100`,
@@ -142,6 +142,8 @@ export function reconcileCandidate(
     if (!Number.isSafeInteger(number) || number <= 0)
       throw new Error('Invalid PR number');
     const pr = api(`repos/${repository}/pulls/${number}`);
+    // GitHub can retain the PR's creation-time base SHA; pins() verifies the
+    // live base branch independently before this check and again before push.
     if (
       pr.number !== number ||
       pr.state !== 'open' ||
@@ -149,7 +151,6 @@ export function reconcileCandidate(
       pr.head?.ref !== branch ||
       pr.base?.ref !== base ||
       pr.head?.sha !== headSha ||
-      pr.base?.sha !== baseSha ||
       pr.head?.repo?.full_name !== repository ||
       pr.base?.repo?.full_name !== repository ||
       !pr.user?.login ||
@@ -238,13 +239,8 @@ export function reconcileCandidate(
   }
 
   pins();
-  const promote = pullRequest(releaseBranch, 'main', candidate, main);
-  const review = pullRequest(
-    reviewBranch,
-    releaseBranch,
-    resolution,
-    candidate,
-  );
+  const promote = pullRequest(releaseBranch, 'main', candidate);
+  const review = pullRequest(reviewBranch, releaseBranch, resolution);
   reviewed(review);
   // Exact parents exclude newer develop ancestry as well as ungrounded resolution diffs.
   if (git('show', '-s', '--format=%P', resolution) !== `${candidate} ${main}`) {
@@ -359,20 +355,11 @@ export function reconcileCandidate(
   reconciliationBody(promote.body, metadata);
 
   // Re-read review state and PR identities, then pins immediately before the ordinary FF push.
-  reviewed(
-    pullRequest(
-      reviewBranch,
-      releaseBranch,
-      resolution,
-      candidate,
-      review.number,
-    ),
-  );
+  reviewed(pullRequest(reviewBranch, releaseBranch, resolution, review.number));
   const currentPromote = pullRequest(
     releaseBranch,
     'main',
     candidate,
-    main,
     promote.number,
   );
   reconciliationBody(currentPromote.body, metadata);
@@ -384,7 +371,6 @@ export function reconcileCandidate(
       releaseBranch,
       'main',
       head,
-      main,
       promote.number,
     );
     // JSON travels over stdin, never through a shell or a candidate-owned file.
