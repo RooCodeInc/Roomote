@@ -195,7 +195,7 @@ describe('initializeRepositories', () => {
     );
   });
 
-  it('creates a shared Blank slate workspace without listing or preparing repositories', async () => {
+  it('configures git for a Blank slate workspace without listing or preparing repositories', async () => {
     const configureSpy = vi
       .spyOn(WorkspaceManager.prototype, 'configure')
       .mockResolvedValue(undefined);
@@ -208,17 +208,63 @@ describe('initializeRepositories', () => {
       workspace: { type: 'no_repositories' },
       envVars: {},
       taskRunType: TaskPayloadKind.StandardTask,
+      gitAuthorName: 'Roomote',
+      gitAuthorEmail: 'roomote@roomote.dev',
     });
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       workspacePath: expect.any(String),
       repoPaths: {},
       repoLocalSkills: [],
       usesSharedWorkspaceRoot: true,
     });
-    expect(configureSpy).not.toHaveBeenCalled();
+    // A hand-cloned repository still needs an author to commit and the
+    // credential helper to push.
+    expect(configureSpy).toHaveBeenCalledWith({
+      gitAuthorName: 'Roomote',
+      gitAuthorEmail: 'roomote@roomote.dev',
+    });
     expect(mockListRepositories).not.toHaveBeenCalled();
     expect(prepareRepositorySpy).not.toHaveBeenCalled();
+  });
+
+  it('indexes repositories for on-demand checkout in a Blank slate workspace with a stamped scope', async () => {
+    const workspaceRoot = createTempWorkspaceRoot();
+    vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
+      undefined,
+    );
+    mockListRepositories.mockResolvedValue([
+      { fullName: 'acme/api', sourceControlProvider: 'github' },
+      { fullName: 'acme/web', sourceControlProvider: 'github' },
+    ]);
+    const prepareRepositorySpy = vi.spyOn(
+      WorkspaceManager.prototype,
+      'prepareRepository',
+    );
+    const logger = createLogger();
+
+    const result = await initializeRepositories(logger, {
+      workspace: { type: 'no_repositories' },
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+      sourceControlProvider: 'github',
+      repositoryProviders: { 'acme/api': 'github', 'acme/web': 'github' },
+    });
+
+    expect(prepareRepositorySpy).not.toHaveBeenCalled();
+    expect(result.repoPaths).toEqual({});
+    expect(result.usesSharedWorkspaceRoot).toBe(true);
+    expect(
+      result.onDemandRepositories?.map((repository) => repository.fullName),
+    ).toEqual(['acme/api', 'acme/web']);
+    expect(
+      fs.readFileSync(path.join(workspaceRoot, 'REPOSITORIES.md'), 'utf8'),
+    ).toContain(
+      '2 repositories are available to this task; 0 are checked out.',
+    );
+    expect(logger.userLog.info).toHaveBeenCalledWith(
+      'Indexed 2 repositories for on-demand checkout',
+    );
   });
 
   it('resolves repository providers from the map before the scalar fallback', async () => {

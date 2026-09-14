@@ -551,7 +551,7 @@ describe('buildFastAgentSystemPrompt', () => {
       `All repositories [id: ${ALL_REPOSITORIES}]: Every active repository is available; the task checks out only the ones it needs.`,
     );
     expect(prompt).toContain(
-      `Blank slate [id: ${NO_REPOSITORIES}]: Start a sandbox without repositories.`,
+      `Blank slate [id: ${NO_REPOSITORIES}]: Start a sandbox with no repositories checked out; the task can still check out any active repository on demand.`,
     );
     expect(prompt).toContain('conversational orchestrator');
     const turnStartupIndex = prompt.indexOf(

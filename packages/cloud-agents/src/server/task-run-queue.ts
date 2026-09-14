@@ -2172,25 +2172,38 @@ async function stampWorkspaceSourceControlProviders(
   payload: FreshTask['payload'],
   workspace: ReturnType<typeof resolveTaskWorkspace>,
 ): Promise<void> {
-  if (workspace.type === 'no_repositories') {
+  // A Blank slate prepares no repositories, but when the deployment has
+  // source control connected the agent can still check any active
+  // repository out on demand, so it carries the same complete provider map
+  // (and mints the same credentials) as an all-repositories run. With no
+  // active repositories it stays credential-free.
+  const scopeWorkspace =
+    workspace.type === 'no_repositories'
+      ? ({ type: 'all_repositories' } as const)
+      : workspace;
+  const [repositoryProviders, workspaceHost] = await Promise.all([
+    resolveWorkspaceRepositoryProviders(db, scopeWorkspace),
+    resolveWorkspaceSourceControlHost(db, scopeWorkspace),
+  ]);
+
+  if (
+    workspace.type === 'no_repositories' &&
+    Object.keys(repositoryProviders).length === 0
+  ) {
     payload.repositoryProviders = undefined;
     payload.sourceControlProvider = undefined;
     payload.sourceControlHost = undefined;
     return;
   }
 
-  const [repositoryProviders, workspaceHost] = await Promise.all([
-    resolveWorkspaceRepositoryProviders(db, workspace),
-    resolveWorkspaceSourceControlHost(db, workspace),
-  ]);
   const isAggregateWorkspace =
-    workspace.type === 'repository_set' ||
-    workspace.type === 'all_repositories';
+    scopeWorkspace.type === 'repository_set' ||
+    scopeWorkspace.type === 'all_repositories';
   const requiresCompleteCoverage =
-    isAggregateWorkspace || workspace.type === 'environment';
+    isAggregateWorkspace || scopeWorkspace.type === 'environment';
   const expectedRepositoryCount =
-    workspace.type === 'repository_set'
-      ? new Set(workspace.repositories).size
+    scopeWorkspace.type === 'repository_set'
+      ? new Set(scopeWorkspace.repositories).size
       : undefined;
 
   if (requiresCompleteCoverage) {

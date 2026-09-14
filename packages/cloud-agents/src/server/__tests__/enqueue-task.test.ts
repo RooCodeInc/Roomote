@@ -16,6 +16,7 @@ vi.mock('../llm-task-title', async (importOriginal) => ({
 
 import {
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   type TaskSpec,
   type SnapshotResumeTask,
   RunStatus,
@@ -2400,6 +2401,44 @@ describe('enqueueTask source-control provider stamping', () => {
         .delete(repositories)
         .where(inArray(repositories.id, createdRepositoryIds));
     }
+  });
+
+  it('stamps a Blank slate launch with the deployment repositories so they can be checked out on demand', async () => {
+    const userId = await createUser();
+    const repository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
+      linkedByUserId: userId,
+      fullName: 'group/blank-slate-api',
+      isActive: true,
+    });
+    createdRepositoryIds.push(repository.id);
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: NO_REPOSITORIES,
+          description: 'Start blank, clone only if needed',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    const persistedRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, run.id),
+    });
+    const payload = persistedRun!.payload as {
+      repo?: string;
+      repositoryProviders?: Record<string, string>;
+    };
+
+    expect(payload.repo).toBe(NO_REPOSITORIES);
+    expect(payload.repositoryProviders?.['group/blank-slate-api']).toBe(
+      'gitea',
+    );
   });
 
   it('stamps the provider and host on a homogeneous environment-workspace launch', async () => {

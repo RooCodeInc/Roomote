@@ -5,9 +5,9 @@ import type { SourceControlProvider } from '@roomote/types';
 
 /**
  * Markdown manifest written to the shared workspace root for all-repositories
- * workspaces. It replaces the eager clone of every active repository: the
- * agent reads this file to pick a repository, then checks it out with the
- * `clone_repository` tool.
+ * and Blank slate workspaces. It replaces the eager clone of every active
+ * repository: the agent reads this file to pick a repository, then checks it
+ * out with the `clone_repository` tool.
  */
 export const ON_DEMAND_REPOSITORIES_MANIFEST_FILE = 'REPOSITORIES.md';
 

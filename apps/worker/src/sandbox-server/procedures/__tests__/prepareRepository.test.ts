@@ -238,7 +238,6 @@ describe('prepareRepository procedure', () => {
       },
     ],
     ['environment', { environmentId: 'env-1', repo: 'acme/api' }],
-    ['blank-slate', { repo: '__no_repositories__' }],
   ])(
     'refuses to widen a %s workspace with another deployment repository',
     async (_label, payload) => {
@@ -253,12 +252,68 @@ describe('prepareRepository procedure', () => {
           repositoryFullName: 'acme/web',
         }),
       ).rejects.toThrow(
-        'Repository checkout on demand is only available in all-repositories workspaces',
+        'Repository checkout on demand is only available in all-repositories and Blank slate workspaces',
       );
       expect(mockFindRepository).not.toHaveBeenCalled();
       expect(prepareSpy).not.toHaveBeenCalled();
     },
   );
+
+  it('refuses a Blank slate run launched without a repository stamp', async () => {
+    stubTaskRun({ repo: '__no_repositories__' });
+    const prepareSpy = vi.spyOn(
+      WorkspaceManager.prototype,
+      'prepareRepository',
+    );
+
+    await expect(
+      createCaller().commands.prepareRepository({
+        repositoryFullName: 'acme/web',
+      }),
+    ).rejects.toThrow(
+      'this Blank slate run was launched without connected source control',
+    );
+    expect(mockFindRepository).not.toHaveBeenCalled();
+    expect(prepareSpy).not.toHaveBeenCalled();
+  });
+
+  it('checks a stamped deployment repository out for a Blank slate run', async () => {
+    stubTaskRun({
+      repo: '__no_repositories__',
+      sourceControlProvider: 'github',
+      repositoryProviders: { 'acme/api': 'github', 'acme/web': 'github' },
+    });
+    mockFindRepository.mockResolvedValue(apiRepository);
+    const prepareSpy = vi
+      .spyOn(WorkspaceManager.prototype, 'prepareRepository')
+      .mockImplementation(async (fullName) => {
+        const repoPath = path.join(workspaceRootRef.current, fullName);
+        fs.mkdirSync(path.join(repoPath, '.git'), { recursive: true });
+        return repoPath;
+      });
+
+    const result = await createCaller().commands.prepareRepository({
+      repositoryFullName: 'acme/api',
+    });
+
+    expect(prepareSpy).toHaveBeenCalledWith(
+      'acme/api',
+      undefined,
+      undefined,
+      false,
+      false,
+      {},
+    );
+    expect(result).toMatchObject({
+      success: true,
+      repositoryFullName: 'acme/api',
+      repositoryPath: path.join(workspaceRootRef.current, 'acme', 'api'),
+      alreadyCheckedOut: false,
+    });
+    expect(fs.readFileSync(result.manifestPath, 'utf8')).toContain(
+      `| \`acme/api\` | yes (\`${result.repositoryPath}\`) |`,
+    );
+  });
 
   it('leaves an existing checkout untouched', async () => {
     mockFindRepository.mockResolvedValue(apiRepository);

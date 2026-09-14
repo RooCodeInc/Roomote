@@ -8,6 +8,7 @@ import {
 } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   environmentConfigSchema,
   getSourceControlProviderLabel,
   normalizeSourceControlProvider,
@@ -264,8 +265,10 @@ async function resolveTaskRunRepositoryScope(
     }
   }
 
+  // All-repositories and Blank slate runs check repositories out on demand,
+  // so any active deployment repository is in scope for them.
   const repo = typeof payload.repo === 'string' ? payload.repo.trim() : '';
-  if (repo && repo !== ALL_REPOSITORIES) {
+  if (repo && repo !== ALL_REPOSITORIES && repo !== NO_REPOSITORIES) {
     return [repo];
   }
 

@@ -101,20 +101,79 @@ export async function initializeRepositories(
     logger,
   );
 
-  if (workspace.type === 'no_repositories') {
-    return {
-      workspacePath: workspaceRoot,
-      repoPaths: {},
-      repoLocalSkills: [],
-      usesSharedWorkspaceRoot: true,
-    };
-  }
-
+  // Git identity and the credential helper do not depend on any repository
+  // being prepared: a Blank slate agent that clones a repository by hand
+  // still needs an author to commit and a helper to push.
   await timedStep(logger, 'initializeRepositories: configure git', () =>
     workspaceManager.configure({ gitAuthorName, gitAuthorEmail }),
   );
 
+  const prepareOnDemandWorkspace =
+    async (): Promise<PrepareWorkspaceResult> => {
+      // Checkouts left by a previous run (snapshot resume) are kept as-is.
+      const onDemandRepositories = await timedStep(
+        logger,
+        'initializeRepositories: list repositories',
+        () =>
+          listOnDemandRepositories({
+            sourceControlProvider: resolvedSourceControlProvider,
+            repositoryProviders,
+          }),
+      );
+      const repoPaths = discoverClonedRepositoryPaths(
+        workspaceRoot,
+        onDemandRepositories,
+      );
+      const clonedCount = Object.keys(repoPaths).length;
+
+      writeRepositoriesManifest({
+        workspaceRoot,
+        repositories: onDemandRepositories,
+        clonedPaths: repoPaths,
+      });
+      logger.userLog.info(
+        `Indexed ${pluralizeRepositories(onDemandRepositories.length)} for on-demand checkout${
+          clonedCount > 0
+            ? ` (${pluralizeRepositories(clonedCount)} already checked out)`
+            : ''
+        }`,
+      );
+
+      const repoLocalSkills = await discoverWorkspaceRepoLocalSkills({
+        repoPaths,
+        repoFullNamesByDir: Object.fromEntries(
+          Object.keys(repoPaths).map((fullName) => [fullName, fullName]),
+        ),
+      });
+
+      return {
+        workspacePath: workspaceRoot,
+        repoPaths,
+        repoLocalSkills,
+        usesSharedWorkspaceRoot: true,
+        onDemandRepositories,
+      };
+    };
+
   switch (workspace.type) {
+    case 'no_repositories': {
+      // A Blank slate starts with nothing checked out. When the launch
+      // stamped a repository scope (the deployment has source control
+      // connected), the agent can still check repositories out on demand
+      // exactly like an all-repositories workspace; without a stamp the
+      // sandbox needs no source-control credentials at all.
+      if (Object.keys(repositoryProviders ?? {}).length === 0) {
+        return {
+          workspacePath: workspaceRoot,
+          repoPaths: {},
+          repoLocalSkills: [],
+          usesSharedWorkspaceRoot: true,
+        };
+      }
+
+      return prepareOnDemandWorkspace();
+    }
+
     case 'environment': {
       applyEnvironmentEnvVars(workspace, envVars);
 
@@ -170,49 +229,7 @@ export async function initializeRepositories(
       // made setup take minutes and a single stalled clone could wedge the
       // run, so the workspace root gets a manifest instead and the agent
       // checks out the repositories it needs through `clone_repository`.
-      // Checkouts left by a previous run (snapshot resume) are kept as-is.
-      const onDemandRepositories = await timedStep(
-        logger,
-        'initializeRepositories: list repositories',
-        () =>
-          listOnDemandRepositories({
-            sourceControlProvider: resolvedSourceControlProvider,
-            repositoryProviders,
-          }),
-      );
-      const repoPaths = discoverClonedRepositoryPaths(
-        workspaceRoot,
-        onDemandRepositories,
-      );
-      const clonedCount = Object.keys(repoPaths).length;
-
-      writeRepositoriesManifest({
-        workspaceRoot,
-        repositories: onDemandRepositories,
-        clonedPaths: repoPaths,
-      });
-      logger.userLog.info(
-        `Indexed ${pluralizeRepositories(onDemandRepositories.length)} for on-demand checkout${
-          clonedCount > 0
-            ? ` (${pluralizeRepositories(clonedCount)} already checked out)`
-            : ''
-        }`,
-      );
-
-      const repoLocalSkills = await discoverWorkspaceRepoLocalSkills({
-        repoPaths,
-        repoFullNamesByDir: Object.fromEntries(
-          Object.keys(repoPaths).map((fullName) => [fullName, fullName]),
-        ),
-      });
-
-      return {
-        workspacePath: workspaceRoot,
-        repoPaths,
-        repoLocalSkills,
-        usesSharedWorkspaceRoot: true,
-        onDemandRepositories,
-      };
+      return prepareOnDemandWorkspace();
     }
 
     case 'repository_set': {

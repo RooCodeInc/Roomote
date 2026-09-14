@@ -305,8 +305,26 @@ export function getWorkspaceInstructions(
      * the `clone_repository` tool instead of cloning every one at setup.
      */
     repositoriesOnDemand?: boolean;
+    /**
+     * Blank slate workspaces start with nothing checked out. When the
+     * deployment has source control connected they carry the same
+     * `REPOSITORIES.md` index and `clone_repository` tool as an
+     * all-repositories workspace; otherwise the sandbox has no
+     * source-control credentials at all.
+     */
+    blankSlate?: boolean;
   } = {},
 ): string {
+  if (options.blankSlate) {
+    return `
+Note: This workspace starts with no repositories checked out (Blank slate).
+- If \`REPOSITORIES.md\` exists at the workspace root, this deployment's source control is connected: the file lists every active repository with its default branch and description, and the \`clone_repository\` tool checks one out into \`<workspace root>/<owner>/<repo>\` and returns the path. Use it before reading, searching, or changing any of those repositories, and never run \`git clone\` for them yourself
+- If there is no \`REPOSITORIES.md\`, the sandbox has no source-control credentials: complete the task without repository changes and do not attempt to commit, push, or open pull requests
+- A public repository outside the deployment may be cloned with git for read-only reference, but commits, pushes, and pull requests only work for repositories checked out through \`clone_repository\`
+- Check out only the repositories the task needs, and be explicit about which repository you're working in
+`;
+  }
+
   let instructions = options.repositoriesOnDemand
     ? `
 Note: This workspace gives you every active repository in the deployment, checked out on demand. Repositories are NOT cloned up front:

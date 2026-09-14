@@ -267,6 +267,29 @@ describe('createSourceControlTokenForTaskRun', () => {
     expect(mockCreateTaskRunBitbucketCredentials).not.toHaveBeenCalled();
   });
 
+  it('mints credentials for a Blank slate stamped with the deployment repositories', async () => {
+    const taskRun = makeTaskRun({
+      repo: NO_REPOSITORIES,
+      description: 'Investigate and open a PR if needed',
+      sourceControlProvider: 'github',
+      repositoryProviders: { 'acme/api': 'github', 'acme/web': 'github' },
+    });
+
+    const result = await createSourceControlTokenForTaskRun(taskRun, '[test]', {
+      maxRetries: 1,
+    });
+
+    expect(result).toMatchObject({
+      provider: 'github',
+      token: 'ghs_app_token',
+      envVars: { GH_TOKEN: 'ghs_app_token' },
+      source: 'app',
+    });
+    expect(mockCreateTaskRunWorkerGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      taskRun,
+    );
+  });
+
   it('creates GitLab token metadata from repo-scoped credentials', async () => {
     const result = await createSourceControlTokenForTaskRun(
       makeTaskRun({

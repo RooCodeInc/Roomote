@@ -49,11 +49,13 @@ const inFlightPreparations = new Map<
  * minted from the same stamp, so a repository outside it (or under a
  * different provider) would fail authentication rather than clone.
  *
- * Only all-repositories workspaces check repositories out on demand. The
- * MCP tool is hidden elsewhere, but any holder of the run token can call
- * this mutation directly, so the persisted workspace scope is the gate:
- * a single-repository, repository-set, or environment run must not be able
- * to widen its workspace to other deployment repositories.
+ * Only all-repositories and Blank slate workspaces check repositories out on
+ * demand. The MCP tool is hidden elsewhere, but any holder of the run token
+ * can call this mutation directly, so the persisted workspace scope is the
+ * gate: a single-repository, repository-set, or environment run must not be
+ * able to widen its workspace to other deployment repositories. A Blank
+ * slate launched without a repository stamp (no source control connected)
+ * has no credentials to clone with, so it is refused as well.
  */
 async function loadRepositoryScope(runId: number): Promise<RepositoryScope> {
   const taskRun = await sdk.taskRuns.findFirstById(runId);
@@ -62,11 +64,27 @@ async function loadRepositoryScope(runId: number): Promise<RepositoryScope> {
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Task run not found' });
   }
 
-  if (resolveTaskWorkspace(taskRun.payload).type !== 'all_repositories') {
+  const workspaceType = resolveTaskWorkspace(taskRun.payload).type;
+  const repositoryProviders = resolveRepositoryProvidersFromPayload(
+    taskRun.payload,
+  );
+
+  if (workspaceType === 'no_repositories' && !repositoryProviders) {
     throw new TRPCError({
       code: 'FORBIDDEN',
       message:
-        'Repository checkout on demand is only available in all-repositories workspaces; this run is scoped to its prepared repositories.',
+        'Repository checkout on demand is unavailable: this Blank slate run was launched without connected source control.',
+    });
+  }
+
+  if (
+    workspaceType !== 'all_repositories' &&
+    workspaceType !== 'no_repositories'
+  ) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message:
+        'Repository checkout on demand is only available in all-repositories and Blank slate workspaces; this run is scoped to its prepared repositories.',
     });
   }
 
@@ -74,7 +92,7 @@ async function loadRepositoryScope(runId: number): Promise<RepositoryScope> {
     sourceControlProvider: resolveSourceControlProviderFromPayload(
       taskRun.payload,
     ),
-    repositoryProviders: resolveRepositoryProvidersFromPayload(taskRun.payload),
+    repositoryProviders,
   };
 }
 
@@ -199,9 +217,9 @@ async function prepareOnDemandRepository({
 
 /**
  * Check out one of the deployment's repositories into the shared workspace
- * root. All-repositories workspaces no longer clone every repository during
- * setup; the agent calls this (through the `clone_repository` MCP tool) for
- * the repositories the task actually needs.
+ * root. All-repositories and Blank slate workspaces do not clone repositories
+ * during setup; the agent calls this (through the `clone_repository` MCP
+ * tool) for the repositories the task actually needs.
  */
 export const prepareRepository = publicProcedure
   .input(prepareRepositoryInputSchema)
