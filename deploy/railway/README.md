@@ -110,7 +110,7 @@ follow the image.
 | --------------- | ------------------------------ | -------------------------------------------------- | -------------------------- | ------------------ |
 | `Postgres`      | Railway managed PostgreSQL     | —                                                  | no                         | managed            |
 | `Redis`         | Railway managed Redis          | —                                                  | no                         | managed            |
-| `minio`         | pinned `minio/minio` + `/data` | `minio server /data --console-address :9001`       | yes (HTTP proxy port 9000) | —                  |
+| `minio`         | pinned `quay.io/minio/minio` + `/data` | `minio server /data --console-address :9001`       | yes (HTTP proxy port 9000) | —                  |
 | `gbrain`        | `roomote-gbrain:<channel>` + `/data` | image entrypoint                               | no                         | `/health`          |
 | `web`           | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh web`           | yes (HTTP proxy port 8080) | `/health`          |
 | `api`           | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh api`           | yes (HTTP proxy port 8080) | `/health/liveness` |
