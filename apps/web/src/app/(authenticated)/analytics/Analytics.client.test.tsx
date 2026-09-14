@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
 const hooks = vi.hoisted(() => ({
   useAnalyticsDetails: vi.fn(),
   useAnalyticsOverview: vi.fn(),
+  usePullRequestAnalyticsOverview: vi.fn(),
 }));
 
 const EMPTY_CHART = {
@@ -51,16 +52,7 @@ vi.mock('@/hooks/useDelayedRefetchLoading', () => ({
 vi.mock('@/hooks/analytics', () => ({
   useAnalyticsDetails: hooks.useAnalyticsDetails,
   useAnalyticsOverview: hooks.useAnalyticsOverview,
-  usePullRequestAnalyticsOverview: () => ({
-    data: {
-      summary: null,
-      chart: EMPTY_CHART,
-      filterOptions: { filters: {} },
-    },
-    isLoading: false,
-    isFetching: false,
-    isError: false,
-  }),
+  usePullRequestAnalyticsOverview: hooks.usePullRequestAnalyticsOverview,
 }));
 
 vi.mock('./AnalyticsShell', () => ({
@@ -108,8 +100,14 @@ vi.mock('./AnalyticsControlRow', () => ({
 
 vi.mock('./AnalyticsStackedBarChart', () => ({
   AnalyticsStackedBarChart: ({
+    isError,
+    isRetrying,
+    onRetry,
     onSelectSegment,
   }: {
+    isError: boolean;
+    isRetrying: boolean;
+    onRetry: () => void;
     onSelectSegment: (selection: {
       bucketKey: string;
       bucketLabel: string;
@@ -118,20 +116,27 @@ vi.mock('./AnalyticsStackedBarChart', () => ({
       metric: 'tokens';
     }) => void;
   }) => (
-    <button
-      type="button"
-      onClick={() =>
-        onSelectSegment({
-          bucketKey: '2026-03-27',
-          bucketLabel: 'Mar 27',
-          seriesKey: 'openai',
-          seriesLabel: 'OpenAI',
-          metric: 'tokens',
-        })
-      }
-    >
-      Select token segment
-    </button>
+    <div>
+      {isError ? (
+        <button type="button" disabled={isRetrying} onClick={onRetry}>
+          {isRetrying ? 'Retrying...' : 'Retry'}
+        </button>
+      ) : null}
+      <button
+        type="button"
+        onClick={() =>
+          onSelectSegment({
+            bucketKey: '2026-03-27',
+            bucketLabel: 'Mar 27',
+            seriesKey: 'openai',
+            seriesLabel: 'OpenAI',
+            metric: 'tokens',
+          })
+        }
+      >
+        Select token segment
+      </button>
+    </div>
   ),
 }));
 
@@ -142,7 +147,9 @@ vi.mock('./AnalyticsDetailsDialog', () => ({
 }));
 
 vi.mock('./PullRequestSummaryCards', () => ({
-  PullRequestSummaryCards: () => <div>summary</div>,
+  PullRequestSummaryCards: ({ isError }: { isError: boolean }) => (
+    <div>{isError ? 'summary error' : 'summary ready'}</div>
+  ),
 }));
 
 import { Analytics } from './Analytics';
@@ -153,6 +160,7 @@ describe('Analytics', () => {
     state.push.mockReset();
     state.replace.mockReset();
     hooks.useAnalyticsOverview.mockReset();
+    hooks.usePullRequestAnalyticsOverview.mockReset();
     hooks.useAnalyticsDetails.mockReset();
     hooks.useAnalyticsDetails.mockReturnValue({
       data: null,
@@ -167,6 +175,18 @@ describe('Analytics', () => {
       isLoading: false,
       isFetching: false,
       isError: false,
+      refetch: vi.fn(),
+    });
+    hooks.usePullRequestAnalyticsOverview.mockReturnValue({
+      data: {
+        summary: null,
+        chart: EMPTY_CHART,
+        filterOptions: { filters: {} },
+      },
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      refetch: vi.fn(),
     });
   });
 
@@ -240,5 +260,71 @@ describe('Analytics', () => {
       }),
       { enabled: true },
     );
+  });
+
+  it('retries an initial analytics overview error', () => {
+    const refetch = vi.fn();
+    hooks.useAnalyticsOverview.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isFetching: false,
+      isError: true,
+      refetch,
+    });
+
+    render(<Analytics />);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(refetch).toHaveBeenCalledOnce();
+  });
+
+  it('keeps cached analytics visible after a later refetch error', () => {
+    hooks.useAnalyticsOverview.mockReturnValue({
+      data: {
+        chart: EMPTY_CHART,
+        filterOptions: { filters: {} },
+      },
+      isLoading: false,
+      isFetching: false,
+      isError: true,
+      refetch: vi.fn(),
+    });
+
+    render(<Analytics />);
+
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
+  it('recovers the pull request chart and summary with one retry', () => {
+    state.searchParams = new URLSearchParams('object=pullRequests');
+    const refetch = vi.fn();
+    hooks.usePullRequestAnalyticsOverview.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isFetching: false,
+      isError: true,
+      refetch,
+    });
+
+    const { rerender } = render(<Analytics />);
+    expect(screen.getByText('summary error')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(refetch).toHaveBeenCalledOnce();
+
+    hooks.usePullRequestAnalyticsOverview.mockReturnValue({
+      data: {
+        summary: null,
+        chart: EMPTY_CHART,
+        filterOptions: { filters: {} },
+      },
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      refetch,
+    });
+    rerender(<Analytics />);
+
+    expect(screen.getByText('summary ready')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 });

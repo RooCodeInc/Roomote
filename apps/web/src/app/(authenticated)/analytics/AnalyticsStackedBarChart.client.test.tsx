@@ -200,6 +200,59 @@ describe('AnalyticsStackedBarChart', () => {
     ];
   });
 
+  it('offers an actionable retry for an initial load error', () => {
+    const onRetry = vi.fn();
+    const { rerender } = render(
+      <AnalyticsStackedBarChart
+        axisLabel="Tasks"
+        chart={undefined}
+        granularity="day"
+        isLoading={false}
+        isError
+        isRetrying={false}
+        onRetry={onRetry}
+        onResetFilters={vi.fn()}
+        onSelectSegment={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetry).toHaveBeenCalledOnce();
+
+    rerender(
+      <AnalyticsStackedBarChart
+        axisLabel="Tasks"
+        chart={undefined}
+        granularity="day"
+        isLoading={false}
+        isError
+        isRetrying
+        onRetry={onRetry}
+        onResetFilters={vi.fn()}
+        onSelectSegment={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Retrying...' })).toBeDisabled();
+
+    rerender(
+      <AnalyticsStackedBarChart
+        axisLabel="Tasks"
+        chart={undefined}
+        granularity="day"
+        isLoading={false}
+        isError
+        isRetrying={false}
+        onRetry={onRetry}
+        onResetFilters={vi.fn()}
+        onSelectSegment={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetry).toHaveBeenCalledTimes(2);
+  });
+
   it('allows pointer interaction on the tooltip wrapper for long lists', () => {
     const { container } = render(
       <AnalyticsStackedBarChart
@@ -208,6 +261,8 @@ describe('AnalyticsStackedBarChart', () => {
         granularity="day"
         isLoading={false}
         isError={false}
+        isRetrying={false}
+        onRetry={vi.fn()}
         onResetFilters={vi.fn()}
         onSelectSegment={vi.fn()}
       />,
@@ -240,6 +295,8 @@ describe('AnalyticsStackedBarChart', () => {
           granularity="day"
           isLoading={false}
           isError={false}
+          isRetrying={false}
+          onRetry={vi.fn()}
           onResetFilters={vi.fn()}
           onSelectSegment={vi.fn()}
         />
@@ -272,6 +329,8 @@ describe('AnalyticsStackedBarChart', () => {
         granularity="day"
         isLoading={false}
         isError={false}
+        isRetrying={false}
+        onRetry={vi.fn()}
         onResetFilters={vi.fn()}
         onSelectSegment={vi.fn()}
       />,
@@ -302,6 +361,8 @@ describe('AnalyticsStackedBarChart', () => {
         granularity="day"
         isLoading={false}
         isError={false}
+        isRetrying={false}
+        onRetry={vi.fn()}
         onResetFilters={vi.fn()}
         onSelectSegment={vi.fn()}
       />,
@@ -322,6 +383,8 @@ describe('AnalyticsStackedBarChart', () => {
         granularity="day"
         isLoading={false}
         isError={false}
+        isRetrying={false}
+        onRetry={vi.fn()}
         onResetFilters={vi.fn()}
         onSelectSegment={vi.fn()}
       />,
@@ -346,6 +409,8 @@ describe('AnalyticsStackedBarChart', () => {
         granularity="day"
         isLoading={false}
         isError={false}
+        isRetrying={false}
+        onRetry={vi.fn()}
         onResetFilters={vi.fn()}
         onSelectSegment={vi.fn()}
       />,
@@ -388,6 +453,8 @@ describe('AnalyticsStackedBarChart', () => {
         granularity="day"
         isLoading={false}
         isError={false}
+        isRetrying={false}
+        onRetry={vi.fn()}
         onResetFilters={vi.fn()}
         onSelectSegment={onSelectSegment}
       />,
@@ -474,6 +541,8 @@ describe('AnalyticsStackedBarChart', () => {
         granularity="day"
         isLoading={false}
         isError={false}
+        isRetrying={false}
+        onRetry={vi.fn()}
         onResetFilters={vi.fn()}
         onSelectSegment={vi.fn()}
       />,

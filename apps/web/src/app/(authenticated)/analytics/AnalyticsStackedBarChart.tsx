@@ -370,6 +370,8 @@ type AnalyticsStackedBarChartProps = {
   granularity: AnalyticsGranularity;
   isLoading: boolean;
   isError: boolean;
+  isRetrying: boolean;
+  onRetry: () => void;
   onResetFilters: () => void;
   onSelectSegment: (selection: {
     bucketKey: string;
@@ -386,6 +388,8 @@ export function AnalyticsStackedBarChart({
   granularity,
   isLoading,
   isError,
+  isRetrying,
+  onRetry,
   onResetFilters,
   onSelectSegment,
 }: AnalyticsStackedBarChartProps) {
@@ -451,9 +455,16 @@ export function AnalyticsStackedBarChart({
       <Empty className="min-h-[320px] rounded-[24px] bg-background/20 md:min-h-[420px]">
         <EmptyHeader>
           <EmptyTitle>Unable to load analytics</EmptyTitle>
-          <EmptyDescription>
-            Please refresh the page and try again.
-          </EmptyDescription>
+          <EmptyDescription>Please try again.</EmptyDescription>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isRetrying}
+            onClick={onRetry}
+          >
+            {isRetrying ? 'Retrying...' : 'Retry'}
+          </Button>
         </EmptyHeader>
       </Empty>
     );
