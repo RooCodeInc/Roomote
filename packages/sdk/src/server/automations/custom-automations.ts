@@ -63,6 +63,7 @@ import {
 } from '../lib/fast-agent-provider-message';
 import {
   canStartAgentMailConversationWithUser,
+  listAvailableAgentMailOutboundIdentities,
   prepareAgentMailConversation,
 } from '../lib/agentmail/outbound';
 
@@ -87,7 +88,7 @@ const PROVIDER_LABELS: Record<
 };
 
 type CustomAutomationDestination =
-  | ResolvedAutomationDestination
+  | (ResolvedAutomationDestination & { isDirectMessage?: boolean })
   | {
       provider: 'email';
       userId: string;
@@ -249,6 +250,42 @@ async function resolveDestination(
   };
 }
 
+async function resolveOwnerFallbackDestination(
+  ownerUserId: string,
+): Promise<CustomAutomationDestination | null> {
+  for (const provider of await listConnectedCommunicationProviders()) {
+    try {
+      const destination = await findUserDirectMessageDestination(
+        provider,
+        ownerUserId,
+      );
+      if (destination) {
+        return {
+          provider,
+          ...destination,
+          source: 'automation_target',
+          isDirectMessage: true,
+        };
+      }
+    } catch (error) {
+      console.warn(
+        `${LOG_PREFIX} Failed to resolve owner fallback DM on ${provider}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  const [identity] =
+    await listAvailableAgentMailOutboundIdentities(ownerUserId);
+  return identity
+    ? {
+        provider: 'email',
+        userId: ownerUserId,
+        identityId: identity.id,
+        source: 'automation_target',
+      }
+    : null;
+}
+
 function isFastDeliveryTarget(target: AutomationTarget): boolean {
   return isAutomationDestinationTarget(target);
 }
@@ -364,7 +401,7 @@ async function buildFastAutomationConversation(params: {
     if (!provider) {
       throw new Error('Discord is not connected.');
     }
-    if (target?.targetKind === 'discord_user') {
+    if (target?.targetKind === 'discord_user' || destination.isDirectMessage) {
       const posted = await provider.postMessage({
         channelId: destination.channelId,
         text: `${automation.name} is running.`,
@@ -798,6 +835,10 @@ async function launchCustomAutomationRow(
       });
       return result;
     }
+  } else if (automation.createdByUserId) {
+    destination = await resolveOwnerFallbackDestination(
+      automation.createdByUserId,
+    );
   }
 
   // The short claim fence prevents concurrent launchers from double-launching
