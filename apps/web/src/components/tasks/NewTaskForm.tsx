@@ -116,7 +116,11 @@ export function NewTaskForm({
             ...payload,
             conversationId,
           });
-        if (payload.text || payload.images?.length) {
+        if (
+          payload.text ||
+          payload.images?.length ||
+          payload.attachmentTexts?.length
+        ) {
           stagePendingFastSessionLaunch(sessionId, {
             fastConversationId: fastConversationId ?? conversationId,
             presenceClientId: conversationId,

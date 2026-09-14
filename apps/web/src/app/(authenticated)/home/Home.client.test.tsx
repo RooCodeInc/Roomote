@@ -530,6 +530,27 @@ describe('Home', () => {
     );
   });
 
+  it('hands off seeded presence for an attachment-only Fast session', async () => {
+    mockPreparePromptAttachments.mockResolvedValueOnce({
+      text: '',
+      attachmentTexts: ['Attachment contents'],
+    });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => expect(mockStartFastSession).toHaveBeenCalledOnce());
+    const conversationId =
+      mockStartFastSession.mock.calls[0]![0].conversationId;
+    expect(
+      getPendingFastSessionLaunch('11111111-1111-4111-8111-111111111111'),
+    ).toEqual(
+      expect.objectContaining({
+        presenceClientId: conversationId,
+      }),
+    );
+  });
+
   it('renders the feedback prompt below the input and opens its dialog', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
