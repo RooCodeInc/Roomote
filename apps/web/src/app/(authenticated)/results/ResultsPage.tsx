@@ -68,6 +68,10 @@ function ResultTextInline({ children }: { children?: ReactNode }) {
   return <span>{children}</span>;
 }
 
+function ResultImageText({ alt }: { alt?: string }) {
+  return alt ? <span>{alt}</span> : null;
+}
+
 const resultMarkdownComponents = {
   a: CustomLink,
   blockquote: ResultTextBlock,
@@ -80,6 +84,7 @@ const resultMarkdownComponents = {
   h4: ResultTextBlock,
   h5: ResultTextBlock,
   h6: ResultTextBlock,
+  img: ResultImageText,
   li: ResultTextBlock,
   ol: ResultTextBlock,
   p: ResultTextBlock,

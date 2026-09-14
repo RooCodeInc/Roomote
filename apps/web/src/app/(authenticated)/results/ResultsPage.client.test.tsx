@@ -24,7 +24,7 @@ const results: ResultInboxItem[] = [
     automationName: 'Security Auditor',
     title: null,
     content:
-      '# Important report\n\n**Review** https://example.com/details and PR #2343 before release. Add enough supporting detail for the result to overflow at narrow widths.',
+      '# Important report\n\n**Review** https://example.com/details and PR #2343 before release. ![Architecture diagram](https://example.com/image.png) Add enough supporting detail for the result to overflow at narrow widths.',
     priority: 'critical',
     createdAt: new Date('2026-09-11T10:00:00Z'),
     repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
@@ -242,6 +242,8 @@ describe('ResultsPage', () => {
       screen.queryByRole('heading', { name: 'Important report' }),
     ).toBeNull();
     expect(container.querySelector('strong')).toBeNull();
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByText('Architecture diagram')).toBeInTheDocument();
     expect(
       screen.getByRole('link', { name: 'https://example.com/details' }),
     ).toHaveAttribute('rel', 'noopener noreferrer');
