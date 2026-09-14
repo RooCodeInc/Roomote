@@ -5,6 +5,7 @@ const fastMocks = vi.hoisted(() => ({
   enqueueParentEvent: vi.fn(),
   slackPostMessage: vi.fn(),
   slackUpdateMessage: vi.fn(),
+  slackIsAppInChannel: vi.fn(),
   createDiscordProvider: vi.fn(),
   discordPostMessage: vi.fn(),
   createDiscordThread: vi.fn(),
@@ -45,6 +46,7 @@ vi.mock('@roomote/slack', async (importOriginal) => ({
   SlackNotifier: class SlackNotifier {
     postMessage = fastMocks.slackPostMessage;
     updateMessage = fastMocks.slackUpdateMessage;
+    isAppInChannel = fastMocks.slackIsAppInChannel;
   },
 }));
 
@@ -84,7 +86,7 @@ vi.mock('@roomote/db/server', () => ({
       environments: { findFirst: vi.fn() },
       fastAgentConversations: { findFirst: fastMocks.findFastConversation },
       slackInstallationChannels: { findFirst: vi.fn() },
-      slackInstallations: { findFirst: vi.fn() },
+      slackInstallations: { findFirst: vi.fn(), findMany: vi.fn() },
     },
   },
   and: vi.fn((...args: unknown[]) => args),
@@ -212,6 +214,10 @@ describe('customAutomationsJob', () => {
       botAccessToken: 'xoxb-test',
       teamId: 'T123',
     } as never);
+    vi.mocked(db.query.slackInstallations.findMany).mockResolvedValue([
+      { botAccessToken: 'xoxb-test', teamId: 'T123' },
+    ] as never);
+    fastMocks.slackIsAppInChannel.mockResolvedValue(true);
     vi.mocked(findUserDirectMessageDestination).mockResolvedValue({
       channelId: 'D123',
       teamId: 'T123',
@@ -355,6 +361,40 @@ describe('customAutomationsJob', () => {
         event: expect.not.objectContaining({
           rootMessageId: expect.anything(),
         }),
+      }),
+    );
+  });
+
+  it('resolves an uncached Slack channel from its unique live workspace membership', async () => {
+    vi.mocked(db.query.slackInstallationChannels.findFirst).mockResolvedValue(
+      undefined,
+    );
+    vi.mocked(db.query.slackInstallations.findMany).mockResolvedValue([
+      { botAccessToken: 'xoxb-other', teamId: 'T_OTHER' },
+      { botAccessToken: 'xoxb-test', teamId: 'T123' },
+    ] as never);
+    fastMocks.slackIsAppInChannel
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    const result = await customAutomationsJob();
+
+    expect(result).toMatchObject({ queued: true, errors: [] });
+    expect(fastMocks.slackIsAppInChannel).toHaveBeenNthCalledWith(1, 'C123');
+    expect(fastMocks.slackIsAppInChannel).toHaveBeenNthCalledWith(2, 'C123');
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: expect.objectContaining({
+        surface: 'slack',
+        workspaceId: 'T123',
+        replyTarget: { channelId: 'C123' },
+      }),
+    });
+    expect(recordCustomAutomationRunOutcome).not.toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        status: 'failed',
+        error: 'Report destination could not be resolved.',
       }),
     );
   });
@@ -1130,6 +1170,7 @@ describe('customAutomationsJob', () => {
     vi.mocked(db.query.slackInstallationChannels.findFirst).mockResolvedValue(
       undefined,
     );
+    fastMocks.slackIsAppInChannel.mockResolvedValue(false);
 
     const result = await customAutomationsJob();
 
@@ -1528,6 +1569,28 @@ describe('runCustomAutomationNow', () => {
         status: 'succeeded',
       }),
     );
+  });
+
+  it('uses live Slack membership to run an uncached channel target now', async () => {
+    vi.mocked(db.query.slackInstallationChannels.findFirst).mockResolvedValue(
+      undefined,
+    );
+    vi.mocked(db.query.slackInstallations.findMany).mockResolvedValue([
+      { botAccessToken: 'xoxb-test', teamId: 'T123' },
+    ] as never);
+    fastMocks.slackIsAppInChannel.mockResolvedValue(true);
+
+    const result = await runCustomAutomationNow(automation.id);
+
+    expect(result).toEqual({ outcome: 'queued' });
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: expect.objectContaining({
+        surface: 'slack',
+        workspaceId: 'T123',
+        replyTarget: { channelId: 'C123' },
+      }),
+    });
   });
 
   it('skips manual run when a concurrent launch holds the claim', async () => {
