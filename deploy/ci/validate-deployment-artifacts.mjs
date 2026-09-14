@@ -670,7 +670,6 @@ const imageLocations = {
     'deploy/railway/template.yaml',
     'render.yaml',
   ],
-  minioClient: ['docker-compose.yml', 'deploy/compose/docker-compose.prod.yml'],
   caddy: [
     'docker-compose.yml',
     'docker-compose.production.yml',
