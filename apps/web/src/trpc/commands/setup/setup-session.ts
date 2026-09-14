@@ -1038,9 +1038,6 @@ async function persistSetupPresetResponse(input: {
         }) ?? [],
       ),
     ];
-    if (preset === 'setup_starter_tasks' && taskIds.length === 0) {
-      throw new Error('Select at least one starter task.');
-    }
     const selectedAt = new Date();
     const nextState = {
       ...state,

@@ -58,7 +58,6 @@ export function SetupStarterTasksCard({
         sessionId={sessionId}
         request={request}
         submission="setup"
-        cancellable={false}
       />
     </SetupSessionActionCard>
   );

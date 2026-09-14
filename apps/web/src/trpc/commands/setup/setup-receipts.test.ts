@@ -71,6 +71,7 @@ describe('setup transcript receipts', () => {
         'Fix flaky tests',
       ]),
     ).toBe('Selected Speed up CI, Security scan, and Fix flaky tests.');
+    expect(formatStarterSelectionReceipt([])).toBe('No starter work selected.');
     expect(
       formatRecommendationApplicationReceipt({
         action: 'saved',

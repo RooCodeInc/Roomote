@@ -893,6 +893,9 @@ export async function submitFastSessionUserInputCommand(
     parsedAnswers,
   );
   const resolution = input.resolution ?? 'submitted';
+  const isEmptyStarterTaskSelection =
+    requestPayload.preset === 'setup_starter_tasks' &&
+    Object.keys(submitted).length === 0;
   if (requestPayload.preset && resolution === 'cancelled') {
     throw new Error('This required setup choice cannot be cancelled.');
   }
@@ -901,7 +904,7 @@ export async function submitFastSessionUserInputCommand(
     submitted,
     resolution,
   );
-  if (validationError) {
+  if (validationError && !isEmptyStarterTaskSelection) {
     throw new Error(validationError);
   }
   if (requestPayload.preset && existingResponse) {

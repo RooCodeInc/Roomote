@@ -213,12 +213,34 @@ describe('SessionUserInputCard', () => {
     ).toHaveClass('sr-only');
     expect(screen.queryByText('Select at least one option.')).toBeNull();
     expect(screen.getByRole('button', { name: "Let's go" })).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: "I'll type it myself" }),
+    ).toHaveClass('border');
     for (const option of multiRequest.questions[0]!.options) {
       expect(screen.getByLabelText(option.label)).toHaveAttribute(
         'aria-checked',
         'true',
       );
     }
+  });
+
+  it('continues without launching starter work when the user will type it themselves', () => {
+    render(
+      <SetupStarterTasksCard
+        sessionId="s"
+        request={{ ...multiRequest, preset: 'setup_starter_tasks' }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: "I'll type it myself" }),
+    );
+
+    expect(mockMutate).toHaveBeenCalledWith({
+      sessionId: 's',
+      requestId: 'rui:test-multi',
+      answers: {},
+    });
   });
 
   it('tracks each displayed starter-task request once', () => {

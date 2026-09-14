@@ -347,24 +347,48 @@ export function SessionUserInputCard({
           <Button
             type="button"
             size="sm"
-            variant="ghost"
+            variant={
+              request.preset === 'setup_integrations' ||
+              request.preset === 'setup_starter_tasks'
+                ? 'outline'
+                : 'ghost'
+            }
             disabled={submit.isPending}
             onClick={() =>
-              submit.mutate({
-                sessionId,
-                requestId: request.requestId,
-                answers: {},
-                resolution: 'cancelled',
-              })
+              request.preset === 'setup_integrations'
+                ? submit.mutate({
+                    sessionId,
+                    requestId: request.requestId,
+                    answers: {
+                      'setup-integrations': { answers: ['Continue'] },
+                    },
+                  })
+                : request.preset === 'setup_starter_tasks'
+                  ? submit.mutate({
+                      sessionId,
+                      requestId: request.requestId,
+                      answers: {},
+                    })
+                  : submit.mutate({
+                      sessionId,
+                      requestId: request.requestId,
+                      answers: {},
+                      resolution: 'cancelled',
+                    })
             }
           >
-            {request.questions.some((question) =>
-              SETUP_INTEGRATION_CATEGORIES.some(
-                (category) =>
-                  getSetupIntegrationQuestionId(category.id) === question.id,
-              ),
-            )
-              ? 'Skip tool setup'
+            {request.preset === 'setup_integrations'
+              ? 'No integrations now'
+              : request.preset === 'setup_starter_tasks'
+                ? "I'll type it myself"
+                : request.questions.some((question) =>
+                      SETUP_INTEGRATION_CATEGORIES.some(
+                        (category) =>
+                          getSetupIntegrationQuestionId(category.id) ===
+                          question.id,
+                      ),
+                    )
+                  ? 'Skip tool setup'
               : 'Cancel'}
           </Button>
         ) : null}

@@ -35,6 +35,7 @@ export function formatComputeReadinessReceipt(providerLabel: string): string {
 }
 
 export function formatStarterSelectionReceipt(taskTitles: string[]): string {
+  if (taskTitles.length === 0) return 'No starter work selected.';
   return `Selected ${formatList(taskTitles)}.`;
 }
 
