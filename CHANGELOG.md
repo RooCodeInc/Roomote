@@ -28,6 +28,7 @@ Roomote 1.9 adds secure Session-approved API keys, a native Telegram Fast experi
 - Web Session notifications now arrive when an absent user needs to review a response or provide input, carry the actual reply into one personal provider thread, and accept replies that continue the same Session or pending task without duplicate or stale notifications.
 - Goal Mode now belongs to the Fast Session instead of one child task, so Roomote can pursue an objective across turns and delegated tasks, continue automatically within a bounded budget, and preserve goal state across web, Telegram, and Discord conversations.
 - Session owners can now approve narrowly scoped API keys through a secure form without placing credentials in chat or agent context. Fast and attached Docker coding runs can use approved keys only for the selected public HTTPS origin, allowed methods, and lifetime, with revocation and expiry enforced before requests and responses.
+- Cloud users now explicitly accept the experimental Voice data flow before their first call, before microphone capture or OpenAI contact begins. The consent explains that audio, transcripts, and workspace context are sent to OpenAI, is stored per user, and does not change self-hosted Voice behavior.
 
 ### Patch changes
 
@@ -48,6 +49,9 @@ Roomote 1.9 adds secure Session-approved API keys, a native Telegram Fast experi
 - Signed-in users no longer remain on the login page, and safe local return paths now resume the requested page without allowing external, protocol-relative, or sign-in-loop redirects.
 - Custom automations can now run for discoverable Slack channels even when the local channel cache has no row, while ambiguous, inaccessible, or unverified workspace matches continue to fail closed.
 - The web app now preserves composer focus after sends, announces integration validation errors to assistive technology, stabilizes optimistic avatars, labels collapsed navigation actions, and keeps rendered text artifacts readable on wide screens.
+- Fast sessions now reject integration tool calls that pass undeclared argument keys, such as chat history bounds wrapped in a stringified `args` field, with an error naming the accepted arguments. Previously the MCP server silently dropped those keys, so the default 24-hour history window applied and the model kept repeating the malformed shape.
+- Fast Sessions now see the names and descriptions of instance skills and inline environment skills in every turn, so Roomote recognizes a matching playbook from the request and loads it without being asked. Previously skills were only discoverable after the model chose to call `list_skills`, so custom skills from Settings > Skills went unused unless a user typed `$skill-name`. Marketplace and repository skills stay on demand; the prompt names each environment's marketplace sources so the model knows when to look them up.
+- Closed agent panels now stay dismissed when users navigate away from a Session and return, while explicitly reopening or deep-linking a task still restores its panel. Thanks to @PierrunoYT for contributing this improvement.
 
 ## 1.8.2 (2026-09-14)
 
