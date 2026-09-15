@@ -1,5 +1,6 @@
 const mocks = vi.hoisted(() => ({
   appendLearnedPreference: vi.fn(),
+  generateTrackedObject: vi.fn(),
   getPersonalization: vi.fn(),
 }));
 
@@ -8,9 +9,14 @@ vi.mock('@roomote/db/server', () => ({
   getUserPersonalizationRuntimeContext: mocks.getPersonalization,
 }));
 
+vi.mock('./non-task-provider-usage', () => ({
+  generateTrackedNonTaskObject: mocks.generateTrackedObject,
+}));
+
 import {
   buildUserPersonalizationInstructions,
   enqueueUserPersonalizationUpdate,
+  resolveUserPersonalizationUpdate,
 } from './user-personalization';
 
 describe('user personalization instructions', () => {
@@ -29,6 +35,8 @@ describe('user personalization instructions', () => {
     expect(prompt).toContain('current trusted speaker');
     expect(prompt).toContain("original requester's task requirements");
     expect(prompt).toContain("current user's own current message");
+    expect(prompt).toContain('explicitly state durable personal work context');
+    expect(prompt).toContain('recurring responsibilities, workflows, tools');
     expect(prompt).toContain('historical messages after a reset');
     expect(prompt).toContain('Never quote, reveal, summarize, or mention');
     expect(prompt).toContain('Do not use public-web or LinkedIn enrichment');
@@ -122,5 +130,42 @@ describe('queued user personalization updates', () => {
         confidence: 'explicit',
       }),
     ).rejects.toThrow('db unavailable');
+  });
+});
+
+describe('personalization update resolution', () => {
+  it('accepts durable personal work context as personalization', async () => {
+    mocks.getPersonalization.mockResolvedValue({
+      instructions: '- Prefers concise summaries.',
+      learnFromConversations: true,
+    });
+    mocks.generateTrackedObject.mockResolvedValue({
+      object: {
+        action: 'append',
+        preference: 'Runs a recurring monthly close.',
+        supersedes: [],
+      },
+    });
+
+    await expect(
+      resolveUserPersonalizationUpdate({
+        userId: 'user-1',
+        preference: 'Runs a recurring monthly close.',
+        confidence: 'explicit',
+      }),
+    ).resolves.toEqual({
+      action: 'append',
+      preference: 'Runs a recurring monthly close.',
+      supersedes: [],
+    });
+
+    expect(mocks.generateTrackedObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining(
+          'Accept concise, explicitly stated durable personal work context',
+        ),
+        prompt: expect.stringContaining('Runs a recurring monthly close.'),
+      }),
+    );
   });
 });

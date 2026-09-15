@@ -150,10 +150,10 @@ describe('packaged skill invocation routing', () => {
       'do not make integration or repository setup a prerequisite for this interview',
     );
     expect(skill).toContain(
-      "Learning the user's durable working preferences is part of this conversation",
+      'Learning durable context about how the user works is part of this conversation',
     );
     expect(skill).toContain(
-      'call `update_personalization` immediately with confidence `explicit`',
+      'durable personal work context or a durable preference that would improve future help',
     );
     expect(skill).toContain('Do not copy it into shared memory');
   });
