@@ -246,11 +246,14 @@ const mockGetCheckRun = vi.fn().mockResolvedValue({
   data: { external_id: 'roomote-review:1' },
 });
 const mockUpdateCheckRun = vi.fn().mockResolvedValue(undefined);
+const mockFetchIssueCommentWithToken = vi.fn();
 
 vi.mock('@roomote/github', () => ({
   createTaskRunGitHubToken: vi.fn().mockResolvedValue('github-token'),
   createIssueComment: (...args: unknown[]) => mockCreateIssueComment(...args),
   deleteReaction: (...args: unknown[]) => mockDeleteReaction(...args),
+  fetchIssueCommentWithToken: (...args: unknown[]) =>
+    mockFetchIssueCommentWithToken(...args),
   getCheckRun: (...args: unknown[]) => mockGetCheckRun(...args),
   updateCheckRun: (...args: unknown[]) => mockUpdateCheckRun(...args),
 }));
@@ -2382,6 +2385,7 @@ describe('finishRun', () => {
     };
 
     beforeEach(() => {
+      mockFetchIssueCommentWithToken.mockReset();
       mockFindFirstTaskPullRequest.mockResolvedValue({
         githubCheckRunId: 123,
       });
@@ -2409,6 +2413,126 @@ describe('finishRun', () => {
           status: 'completed',
           conclusion: 'success',
         }),
+      );
+    });
+
+    it('reads the review summary over REST when the CLI read fails and passes the check', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      // gh api failed transiently; the comment itself is fine.
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        fetchFailed: true,
+        commentId: 456,
+      });
+      mockFetchIssueCommentWithToken.mockResolvedValueOnce({
+        data: {
+          body: '<!-- roomote-review-summary sha=abc1234 -->\n<!-- roomote-review-status:start -->\nNo issues found.\n<!-- roomote-review-status:end -->\n<!-- roomote-review-checklist:start -->\n<!-- roomote-review-checklist:end -->',
+        },
+      });
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockFetchIssueCommentWithToken).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          owner: 'owner',
+          repo: 'repo',
+          comment_id: 456,
+        }),
+      );
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'success',
+        }),
+      );
+    });
+
+    it('completes the check as neutral when the review summary cannot be read at all', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        fetchFailed: true,
+        commentId: 456,
+      });
+      mockFetchIssueCommentWithToken.mockRejectedValue(
+        new Error('HttpError: 502 Bad Gateway'),
+      );
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockFetchIssueCommentWithToken).toHaveBeenCalledTimes(3);
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'neutral',
+          output: expect.objectContaining({
+            title: 'Roomote review result could not be read',
+          }),
+        }),
+      );
+      expect(mockUpdateCheckRun).not.toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          output: expect.objectContaining({
+            title: 'Roomote review result unavailable',
+          }),
+        }),
+      );
+    }, 15_000);
+
+    it('keeps the failing check when the review summary comment no longer exists', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        fetchFailed: true,
+        commentId: 456,
+      });
+      // The comment was deleted (or the stored id is stale): a definitive
+      // answer from GitHub, not a transient failure.
+      mockFetchIssueCommentWithToken.mockRejectedValue(
+        Object.assign(new Error('HttpError: Not Found'), { status: 404 }),
+      );
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockFetchIssueCommentWithToken).toHaveBeenCalledTimes(1);
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'failure',
+          output: expect.objectContaining({
+            title: 'Roomote review result unavailable',
+          }),
+        }),
+      );
+      expect(mockUpdateCheckRun).not.toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({ conclusion: 'neutral' }),
       );
     });
 

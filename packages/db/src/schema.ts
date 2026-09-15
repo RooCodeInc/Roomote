@@ -5762,3 +5762,197 @@ export const brainMemoryEventsRelations = relations(
     }),
   }),
 );
+
+/**
+ * N-1 ROLLBACK: legacy Session-secret and Session-egress tables.
+ *
+ * Release 1.9.2 still selects from and inserts into these seven tables. The
+ * rename to `service_credentials` / `credential_egress_*` (migration 0093)
+ * dropped them, which broke the upgrade-compatibility guarantee; migration
+ * 0094 recreates them, empty, with their 1.9.2 shapes so a rollback keeps
+ * working. No current code reads or writes them. Drop them (and delete these
+ * definitions) in the release after 1.9.3 ships.
+ */
+export const legacySessionSecrets = pgTable(
+  'session_secrets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    origin: text('origin').notNull(),
+    // Any lowercase RFC 7230 token; validated by the shared credential header
+    // schema at prepare time, never constrained here.
+    headerName: text('header_name').notNull(),
+    headerPrefix: text('header_prefix')
+      .notNull()
+      .$type<'' | 'Bearer ' | 'Basic ' | 'Token '>(),
+    // Method policy enforced by the egress gateway authorize path. Additive
+    // with a read-only default so grants approved before it existed stay
+    // GET/HEAD-only; N-1 code ignores the column.
+    allowedMethods: text('allowed_methods')
+      .array()
+      .notNull()
+      .default(sql`'{GET,HEAD}'::text[]`)
+      .$type<CredentialEgressMethod[]>(),
+    value: encryptedText('value'),
+    expiresAt: timestamp('expires_at').notNull(),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('session_secrets_session_owner_idx').on(
+      table.sessionId,
+      table.ownerUserId,
+    ),
+  ],
+);
+
+export const legacySessionSecretApprovals = pgTable(
+  'session_secret_approvals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    origin: text('origin').notNull(),
+    // Any lowercase RFC 7230 token; validated by the shared credential header
+    // schema at prepare time, never constrained here.
+    headerName: text('header_name').notNull(),
+    headerPrefix: text('header_prefix')
+      .notNull()
+      .$type<'' | 'Bearer ' | 'Basic ' | 'Token '>(),
+    allowedMethods: text('allowed_methods')
+      .array()
+      .notNull()
+      .default(sql`'{GET,HEAD}'::text[]`)
+      .$type<CredentialEgressMethod[]>(),
+    expiresAt: timestamp('expires_at').notNull(),
+    consumedAt: timestamp('consumed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('session_secret_approvals_session_owner_idx').on(
+      table.sessionId,
+      table.ownerUserId,
+    ),
+  ],
+);
+
+export const legacySessionSecretAudit = pgTable('session_secret_audit', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  actorUserId: text('actor_user_id'),
+  secretRef: uuid('secret_ref'),
+  method: text('method').$type<'GET' | 'HEAD'>(),
+  destination: text('destination'),
+  outcome: text('outcome')
+    .notNull()
+    .$type<'started' | 'succeeded' | 'denied' | 'failed'>(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export const legacySessionEgressWorkloads = pgTable(
+  'session_egress_workloads',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    taskRunId: integer('task_run_id')
+      .notNull()
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    connectorIdentity: text('connector_identity').notNull(),
+    // Bumped on re-registration (resume, actor change, connector rotation).
+    // Substitutes are bound to the generation they were minted in.
+    generation: integer('generation').notNull().default(1),
+    status: text('status')
+      .notNull()
+      .default('active')
+      .$type<'active' | 'terminated'>(),
+    // Controller-renewed lease; never extended on a sandbox's say-so.
+    expiresAt: timestamp('expires_at').notNull(),
+    terminatedAt: timestamp('terminated_at'),
+    terminationReason: text('termination_reason'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_egress_workloads_active_run_unique')
+      .on(table.taskRunId)
+      .where(sql`${table.status} = 'active'`),
+    uniqueIndex('session_egress_workloads_active_connector_unique')
+      .on(table.connectorIdentity)
+      .where(sql`${table.status} = 'active'`),
+    index('session_egress_workloads_session_idx').on(table.sessionId),
+    check(
+      'session_egress_workloads_status_check',
+      sql`${table.status} in ('active', 'terminated')`,
+    ),
+  ],
+);
+
+export const legacySessionEgressSubstitutes = pgTable(
+  'session_egress_substitutes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workloadId: uuid('workload_id')
+      .notNull()
+      .references(() => legacySessionEgressWorkloads.id, {
+        onDelete: 'cascade',
+      }),
+    secretId: uuid('secret_id')
+      .notNull()
+      .references(() => legacySessionSecrets.id, { onDelete: 'cascade' }),
+    generation: integer('generation').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_egress_substitutes_token_hash_unique').on(
+      table.tokenHash,
+    ),
+    uniqueIndex(
+      'session_egress_substitutes_workload_secret_generation_unique',
+    ).on(table.workloadId, table.secretId, table.generation),
+  ],
+);
+
+export const legacySessionEgressAudit = pgTable('session_egress_audit', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  authorizationId: uuid('authorization_id'),
+  workloadId: uuid('workload_id'),
+  sessionId: uuid('session_id'),
+  actorUserId: text('actor_user_id'),
+  secretRef: uuid('secret_ref'),
+  phase: text('phase').notNull().$type<CredentialEgressPhase>(),
+  method: text('method').$type<CredentialEgressMethod>(),
+  destination: text('destination'),
+  decision: text('decision').notNull().$type<'allowed' | 'denied'>(),
+  reason: text('reason').$type<CredentialEgressDenialReason>(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export const legacySessionEgressRevocations = pgTable(
+  'session_egress_revocations',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    kind: text('kind').notNull().$type<CredentialEgressRevocationKind>(),
+    workloadId: uuid('workload_id'),
+    secretRef: uuid('secret_ref'),
+    generation: integer('generation'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+);

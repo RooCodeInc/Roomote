@@ -123,7 +123,7 @@ function buildMessage(
 
 function buildResultMessage(
   kind: string | null,
-  overrides?: Partial<AcpToolResultUiMessage['data']>,
+  overrides?: Partial<AcpToolResultUiMessage['data']> & { rawInput?: unknown },
 ): AcpToolResultUiMessage {
   return {
     id: 'tool-result-1',
@@ -185,6 +185,44 @@ describe('AcpToolMessage', () => {
       );
     },
   );
+
+  it('names skill activity and only makes it collapsible when details exist', () => {
+    const { rerender } = render(
+      <AcpToolMessage
+        msg={buildResultMessage('skill', {
+          toolName: 'skill',
+          rawInput: { name: 'implement-changes' },
+          output: '',
+        })}
+      />,
+    );
+    expect(toolHeaderSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        action: 'Loaded',
+        object: 'skill implement-changes',
+        collapsible: false,
+      }),
+    );
+    expect(toolDetailsSpy).not.toHaveBeenCalled();
+
+    rerender(
+      <AcpToolMessage
+        msg={buildResultMessage('skill', {
+          toolName: 'skill',
+          rawInput: { name: 'implement-changes' },
+          output: '# Implementation workflow',
+        })}
+      />,
+    );
+    expect(toolHeaderSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        action: 'Loaded',
+        object: 'skill implement-changes',
+        collapsible: true,
+      }),
+    );
+    expect(toolDetailsSpy).toHaveBeenCalledOnce();
+  });
 
   it('renders failure language even when a failed patch is still partial', () => {
     render(

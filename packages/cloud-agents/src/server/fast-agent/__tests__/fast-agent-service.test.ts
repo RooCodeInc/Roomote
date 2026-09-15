@@ -1704,7 +1704,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           ).toEqual({ success: false, error: 'Secret request unavailable' });
           expect(mocks.listServiceCredentialApprovals).not.toHaveBeenCalled();
           const url = new URL(`${Env.R_APP_URL}/sessions/canonical-session-1`);
-          url.hash = 'service-credentials';
+          url.hash = 'integrations';
           expect(
             await invokeTool(nativeToolNames.prepareServiceCredential, args),
           ).toEqual({

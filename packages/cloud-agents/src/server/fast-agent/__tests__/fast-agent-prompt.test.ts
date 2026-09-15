@@ -727,7 +727,7 @@ describe('buildFastAgentSystemPrompt', () => {
       expect(prompt).not.toContain(name);
     }
     expect(prompt).toContain(
-      'Integration-key tools are temporarily unavailable',
+      'Integration-key tools are turned off for this user',
     );
     expect(prompt).toContain(
       'The runtime rejects those actions until a visible text reply has been delivered',
@@ -739,8 +739,18 @@ describe('buildFastAgentSystemPrompt', () => {
     });
     expect(enabledPrompt).toContain('`prepare_integration_key`');
     expect(enabledPrompt).toContain('`list_integration_keys`');
+    expect(enabledPrompt).toContain(
+      'do not launch a coding task to build a connector when an integration key would do',
+    );
+    expect(enabledPrompt).toContain(
+      'Do not probe whether the service is publicly reachable and do not delegate that check to a coding task',
+    );
+    expect(enabledPrompt).toContain(
+      'Never tell the human to enable the Integration keys setting while these tools are available to you',
+    );
+    expect(prompt).toContain('Settings → Experimental');
     expect(enabledPrompt).not.toContain(
-      'Integration-key tools are temporarily unavailable',
+      'Integration-key tools are turned off for this user',
     );
     expect(prompt).toContain(
       'On a human-authored turn, acknowledge first, then send the instruction immediately',
