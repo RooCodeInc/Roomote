@@ -1,4 +1,10 @@
-import { formatErrorForLog, formatSingleLineLog } from '@roomote/types';
+import {
+  formatErrorForLog,
+  formatOperationalEvent,
+  formatSingleLineLog,
+  getOperationalLogRuntimeFields,
+  type OperationalLogFields,
+} from '@roomote/types';
 import { Env } from '@roomote/env';
 
 function isApiDebugLoggingEnabled(): boolean {
@@ -31,6 +37,19 @@ export const apiLogger = {
 export function logApiError(prefix: string, error: unknown): void {
   const message = formatErrorForLog(error);
   apiLogger.error(`${prefix}: ${message}`);
+}
+
+export function logApiOperationalEvent(
+  level: 'info' | 'warn' | 'error',
+  event: string,
+  fields: OperationalLogFields,
+): void {
+  apiLogger[level](
+    formatOperationalEvent(event, {
+      ...getOperationalLogRuntimeFields('api', process.env),
+      ...fields,
+    }),
+  );
 }
 
 export function createSingleLineWarnLogger(): Pick<Console, 'warn'> {
