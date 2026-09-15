@@ -14,7 +14,7 @@ import type { UserAuthSuccess } from '@/types';
 
 const mockDeleteArtifactsBatch = vi.hoisted(() => vi.fn());
 
-vi.mock('@/lib/server', () => ({
+vi.mock('@/lib/server/s3-client', () => ({
   deleteArtifactsBatch: mockDeleteArtifactsBatch,
 }));
 

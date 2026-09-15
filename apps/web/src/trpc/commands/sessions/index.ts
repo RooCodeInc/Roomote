@@ -39,7 +39,7 @@ import {
   currentEpochSeconds,
   signArtifactId,
 } from '@/lib/server/artifact-signature';
-import { deleteArtifactsBatch } from '@/lib/server';
+import { deleteArtifactsBatch } from '@/lib/server/s3-client';
 
 // Keep polled session payloads stable for the raw route's one-hour cache lifetime.
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
