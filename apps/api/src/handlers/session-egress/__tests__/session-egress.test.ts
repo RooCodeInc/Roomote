@@ -36,13 +36,16 @@ import {
   prepareSessionSecret,
   revokeSessionSecret,
 } from '@roomote/sdk/server/session-secrets';
-import { createSessionEgressControllerClient } from '@roomote/sdk/server/session-egress';
+import {
+  authorizeProxy,
+  createSessionEgressControllerClient,
+} from '@roomote/sdk/server/session-egress';
 import {
   RunStatus,
   SESSION_EGRESS_CONTROL_PLANE_PATH,
   SESSION_EGRESS_SUBSTITUTE_PREFIX,
   type SessionEgressAuthorization,
-  type SessionEgressAuthorize,
+  type SessionEgressProxyAuthorize,
   type SessionEgressWorkloadRegistration,
 } from '@roomote/types';
 import { routePolicyMiddleware } from '../../../middleware/routePolicyMiddleware';
@@ -52,7 +55,6 @@ import type { Variables } from '../../../types';
 import { integrationRequest } from '../../mcp/http-integrations/broker';
 import { createSessionEgressControlPlane } from '../index';
 
-const GATEWAY = 'test-gateway-shared-secret-that-is-long-enough-0123456789';
 const secret = 'Real-Upstream-Key/A+b=<"&>123';
 const origin = 'https://api.example.com';
 const path = SESSION_EGRESS_CONTROL_PLANE_PATH;
@@ -72,7 +74,7 @@ const minted: string[] = [];
 const consoleOutput: string[] = [];
 
 function connector() {
-  return `spiffe://roomote/connector/${randomBytes(12).toString('hex')}`;
+  return `roomote://api-proxy/run/test/${randomBytes(12).toString('hex')}`;
 }
 
 async function session(userId: string) {
@@ -120,7 +122,9 @@ async function call(
     headers: {
       ...(init.token === null
         ? {}
-        : { authorization: `Bearer ${init.token ?? GATEWAY}` }),
+        : {
+            authorization: `Bearer ${init.token ?? (await createSessionEgressControllerToken())}`,
+          }),
       ...(init.body === undefined
         ? {}
         : { 'content-type': 'application/json' }),
@@ -135,7 +139,14 @@ async function call(
         }),
   });
   const text = await response.text();
-  return { status: response.status, json: text ? JSON.parse(text) : null };
+  let json: unknown = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    // Unknown routes answer with Hono's plain-text 404.
+    json = text;
+  }
+  return { status: response.status, json };
 }
 
 async function register(
@@ -161,30 +172,15 @@ async function registered() {
   expect(result.status).toBe(201);
   const registration = result.json as SessionEgressWorkloadRegistration;
   const [issue] = registration.substitutes;
-  return {
-    registration,
-    connectorIdentity: (
-      await db.execute<{ connector_identity: string }>(
-        sql`select connector_identity from session_egress_workloads where id = ${registration.workloadId}`,
-      )
-    )[0]!.connector_identity,
-    substitute: issue!.substitute,
-  };
+  return { registration, substitute: issue!.substitute };
 }
 
 function authorizeBody(
-  base: {
-    registration: SessionEgressWorkloadRegistration;
-    connectorIdentity: string;
-    substitute: string;
-  },
-  overrides: Partial<SessionEgressAuthorize> = {},
-): SessionEgressAuthorize {
+  base: { substitute: string },
+  overrides: Partial<SessionEgressProxyAuthorize> = {},
+): SessionEgressProxyAuthorize {
   return {
-    workloadId: base.registration.workloadId,
-    connectorIdentity: base.connectorIdentity,
     substitute: base.substitute,
-    destination: { host: 'api.example.com', port: 443 },
     method: 'GET',
     path: '/v1/items?token=private-query-marker',
     phase: 'request',
@@ -192,10 +188,9 @@ function authorizeBody(
   };
 }
 
-async function authorize(body: unknown, token = GATEWAY) {
-  const result = await call('/authorize', { token, body });
-  expect(result.status).toBe(200);
-  return result.json as SessionEgressAuthorization;
+/** The proxy's in-process decision; the same live path the handler takes per request. */
+async function authorize(body: unknown): Promise<SessionEgressAuthorization> {
+  return authorizeProxy(body);
 }
 
 async function tableDump() {
@@ -235,10 +230,7 @@ beforeEach(async () => {
   app = new Hono<{ Variables: Variables }>();
   app.use('*', tokenAuthMiddleware());
   app.use('*', routePolicyMiddleware);
-  app.route(
-    path,
-    createSessionEgressControlPlane({ gatewayToken: () => GATEWAY }),
-  );
+  app.route(path, createSessionEgressControlPlane());
   userIds = [];
   sessionIds = [];
   taskIds = [];
@@ -300,33 +292,13 @@ afterEach(async () => {
 });
 
 it('is classified as a handler-authenticated internal surface', () => {
-  expect(findRoutePolicyRule(`${path}/authorize`)).toMatchObject({
+  expect(findRoutePolicyRule(`${path}/workloads`)).toMatchObject({
     name: 'internal-session-egress',
     policy: 'webhook',
   });
 });
 
-it('serves the controller without a gateway secret and stays invisible to everyone else', async () => {
-  app = new Hono<{ Variables: Variables }>();
-  app.route(
-    path,
-    createSessionEgressControlPlane({ gatewayToken: () => null }),
-  );
-  // Non-controller bearers, including a would-be gateway, see nothing.
-  expect((await call('/workloads', { body: {} })).status).toBe(404);
-  expect((await call('/authorize', { body: {} })).status).toBe(404);
-  expect(
-    (await call('/revocations', { method: 'GET', token: null })).status,
-  ).toBe(404);
-  // The controller keeps its routes for API-proxy admission.
-  const result = await register({
-    provider: 'modal',
-    connectorIdentity: 'roomote://api-proxy/run/1/0123456789abcdef',
-  });
-  expect(result.status).toBe(201);
-});
-
-it('accepts only the controller and gateway service principals on their own routes', async () => {
+it('accepts only the controller service principal and serves no gateway routes', async () => {
   const runToken = await createRunToken({
     runId,
     userId: ownerId,
@@ -348,24 +320,19 @@ it('accepts only the controller and gateway service principals on their own rout
     runToken,
     userToken,
     brokerToken,
-    `${GATEWAY}x`,
-    GATEWAY.slice(1),
+    randomBytes(32).toString('base64url'),
   ]) {
     expect((await call('/workloads', { token, body })).status).toBe(401);
     expect((await call('/authorize', { token, body: {} })).status).toBe(401);
-    expect((await call('/revocations', { method: 'GET', token })).status).toBe(
-      401,
-    );
   }
-  // The gateway may not register workloads; the controller may not resolve credentials.
-  expect((await call('/workloads', { token: GATEWAY, body })).status).toBe(403);
+  // The former gateway routes no longer exist, even for the controller.
   const controller = await createSessionEgressControllerToken();
   expect(
     (await call('/authorize', { token: controller, body: {} })).status,
-  ).toBe(403);
+  ).toBe(404);
   expect(
     (await call('/revocations', { method: 'GET', token: controller })).status,
-  ).toBe(403);
+  ).toBe(404);
   const dump = await tableDump();
   expect(dump).not.toContain('session_egress_workloads_placeholder');
   expect(
@@ -375,6 +342,9 @@ it('accepts only the controller and gateway service principals on their own rout
       )
     )[0],
   ).toEqual({ n: 0 });
+  // The controller keeps its routes on every deployment.
+  const result = await register({ provider: 'modal' });
+  expect(result.status).toBe(201);
 });
 
 it('registers an attached run, returns substitutes once, and stores only a keyed hash', async () => {
@@ -478,78 +448,25 @@ it('authorizes each phase live and resolves the credential only on the request p
     expect(serialized).not.toContain(forbidden);
 });
 
-it('denies unknown, stolen, misbound, and unscoped substitutes without touching the grant', async () => {
+it('denies an unknown substitute without attributing it to any Session or grant', async () => {
   const a = await registered();
   const earlier = await authorize(authorizeBody(a));
   expect(earlier.allowed).toBe(true);
   if (!earlier.allowed) throw new Error('Expected initial authorization');
-  const otherSession = await session(ownerId);
-  const otherRun = await run(ownerId, otherSession.id);
-  const b = await (async () => {
-    const result = await register({ runId: otherRun.id });
-    expect(result.status).toBe(201);
-    const registration = result.json as SessionEgressWorkloadRegistration;
-    expect(registration.substitutes).toEqual([]);
-    return {
-      registration,
-      connectorIdentity: (
-        await db.execute<{ connector_identity: string }>(
-          sql`select connector_identity from session_egress_workloads where id = ${registration.workloadId}`,
-        )
-      )[0]!.connector_identity,
-    };
-  })();
-  const cases: [string, SessionEgressAuthorize][] = [
-    [
-      'unknown_substitute',
-      authorizeBody(a, {
+  // Even an ID from a successful check by the same principal is only correlation.
+  expect(
+    await authorize({
+      ...authorizeBody(a, {
         substitute: `${SESSION_EGRESS_SUBSTITUTE_PREFIX}${randomBytes(32).toString('base64url')}`,
       }),
-    ],
-    // Same owner, other Session's workload presents A's token over its own channel.
-    [
-      'workload_mismatch',
-      authorizeBody(a, {
-        workloadId: b.registration.workloadId,
-        connectorIdentity: b.connectorIdentity,
-      }),
-    ],
-    // A's workload id claimed over B's authenticated connector.
-    [
-      'workload_mismatch',
-      authorizeBody(a, { connectorIdentity: b.connectorIdentity }),
-    ],
-    // Unscoped public client: token without any registered channel.
-    [
-      'workload_mismatch',
-      authorizeBody(a, {
-        workloadId: randomUUID(),
-        connectorIdentity: connector(),
-      }),
-    ],
-  ];
-  for (const [reason, body] of cases) {
-    // Even an ID from a successful check by the same principal is only correlation.
-    expect(
-      await authorize({ ...body, authorizationId: earlier.authorizationId }),
-    ).toEqual({ allowed: false, reason });
-  }
-  // Denials that never bound a workload record nothing about a Session or grant.
+      authorizationId: earlier.authorizationId,
+    }),
+  ).toEqual({ allowed: false, reason: 'unknown_substitute' });
+  // A token that names nothing leaves no audit row to misattribute.
   const denied = await db.execute(
-    sql`select session_id, secret_ref, actor_user_id, decision, reason from session_egress_audit where decision = 'denied' and workload_id in (${a.registration.workloadId}, ${b.registration.workloadId}) order by created_at`,
+    sql`select 1 from session_egress_audit where decision = 'denied' and workload_id = ${a.registration.workloadId}`,
   );
-  expect(denied.map((row) => row.reason)).toEqual([
-    'unknown_substitute',
-    'workload_mismatch',
-    'workload_mismatch',
-  ]);
-  for (const row of denied)
-    expect(row).toMatchObject({
-      session_id: null,
-      secret_ref: null,
-      actor_user_id: null,
-      decision: 'denied',
-    });
+  expect(denied).toEqual([]);
   expect(await authorize(authorizeBody(a))).toMatchObject({ allowed: true });
 });
 
@@ -683,19 +600,31 @@ it.each([
         json: { error: 'workload_not_found' },
       });
     }
-    const events = (await call('/revocations', { method: 'GET' })).json;
+    const events = await db
+      .select({
+        kind: sessionEgressRevocations.kind,
+        workloadId: sessionEgressRevocations.workloadId,
+        secretRef: sessionEgressRevocations.secretRef,
+      })
+      .from(sessionEgressRevocations)
+      .where(
+        or(
+          eq(sessionEgressRevocations.workloadId, base.registration.workloadId),
+          eq(sessionEgressRevocations.secretRef, secretRef),
+        ),
+      );
     if (kind === 'grant-revoked')
-      expect(events.events).toContainEqual(
-        expect.objectContaining({ kind: 'grant', secretRef, workloadId: null }),
-      );
+      expect(events).toContainEqual({
+        kind: 'grant',
+        secretRef,
+        workloadId: null,
+      });
     if (kind === 'workload-terminated')
-      expect(events.events).toContainEqual(
-        expect.objectContaining({
-          kind: 'workload',
-          workloadId: base.registration.workloadId,
-        }),
-      );
-    expect(JSON.stringify(events)).not.toContain(base.substitute);
+      expect(events).toContainEqual({
+        kind: 'workload',
+        workloadId: base.registration.workloadId,
+        secretRef: null,
+      });
     expect(await tableDump()).not.toContain(base.substitute);
   },
 );
@@ -841,36 +770,26 @@ it('rotates the generation on re-registration and invalidates earlier substitute
   expect(second.generation).toBe(2);
   expect(second.substitutes).toHaveLength(1);
   expect(second.substitutes[0]!.substitute).not.toBe(first.substitute);
-  // Old token over the old channel: the channel no longer belongs to the workload.
+  // The earlier generation's token is dead everywhere.
   expect(await authorize(authorizeBody(first))).toEqual({
     allowed: false,
-    reason: 'workload_mismatch',
+    reason: 'stale_generation',
   });
-  // Old token smuggled over the rotated channel.
-  expect(
-    await authorize(
-      authorizeBody(first, { connectorIdentity: rotatedIdentity }),
-    ),
-  ).toEqual({ allowed: false, reason: 'stale_generation' });
-  const current = {
-    registration: second,
-    connectorIdentity: rotatedIdentity,
-    substitute: second.substitutes[0]!.substitute,
-  };
+  const current = { substitute: second.substitutes[0]!.substitute };
   expect(await authorize(authorizeBody(current))).toMatchObject({
     allowed: true,
     generation: 2,
     credential: { value: secret },
   });
-  const feed = (await call('/revocations', { method: 'GET' })).json;
-  expect(feed.events).toContainEqual(
-    expect.objectContaining({
-      kind: 'generation',
-      workloadId: second.workloadId,
-      generation: 2,
-    }),
-  );
-  // A connector identity still bound to another live workload cannot be reused.
+  const feed = await db
+    .select({
+      kind: sessionEgressRevocations.kind,
+      generation: sessionEgressRevocations.generation,
+    })
+    .from(sessionEgressRevocations)
+    .where(eq(sessionEgressRevocations.workloadId, second.workloadId));
+  expect(feed).toContainEqual({ kind: 'generation', generation: 2 });
+  // A workload identity still bound to another live workload cannot be reused.
   const otherRun = await run(ownerId, (await session(ownerId)).id);
   expect(
     await register({ runId: otherRun.id, connectorIdentity: rotatedIdentity }),
@@ -920,24 +839,8 @@ it('issues substitutes for grants approved after registration without rotating',
     headerPrefix: '',
   });
   minted.push(registration.substitutes[0]!.substitute);
-  const bound = {
-    ...base,
-    substitute: registration.substitutes[0]!.substitute,
-  };
-  expect(
-    await authorize(
-      authorizeBody(bound, {
-        destination: { host: 'second.example.com', port: 443 },
-      }),
-    ),
-  ).toEqual({ allowed: false, reason: 'destination_mismatch' });
-  expect(
-    await authorize(
-      authorizeBody(bound, {
-        destination: { host: 'second.example.com', port: 8443 },
-      }),
-    ),
-  ).toMatchObject({
+  const bound = { substitute: registration.substitutes[0]!.substitute };
+  expect(await authorize(authorizeBody(bound))).toMatchObject({
     allowed: true,
     secretRef: second.secretRef,
     credential: {
@@ -953,21 +856,8 @@ it('issues substitutes for grants approved after registration without rotating',
   });
 });
 
-it('binds authorization to the exact approved origin and method policy', async () => {
+it('binds authorization to the grant method policy and rejects malformed input', async () => {
   const base = await registered();
-  for (const [destination, reason] of [
-    [{ host: 'api.example.com', port: 8443 }, 'destination_mismatch'],
-    [{ host: 'evil.example.com', port: 443 }, 'destination_mismatch'],
-    [
-      { host: 'api.example.com.evil.example', port: 443 },
-      'destination_mismatch',
-    ],
-  ] as const) {
-    expect(await authorize(authorizeBody(base, { destination }))).toEqual({
-      allowed: false,
-      reason,
-    });
-  }
   for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
     expect(await authorize(authorizeBody(base, { method }))).toEqual({
       allowed: false,
@@ -979,11 +869,6 @@ it('binds authorization to the exact approved origin and method policy', async (
     'not json',
     {},
     { ...authorizeBody(base), extra: true },
-    { ...authorizeBody(base), destination: { host: '10.0.0.1', port: 443 } },
-    {
-      ...authorizeBody(base),
-      destination: { host: 'api.example.com:443', port: 443 },
-    },
     { ...authorizeBody(base), path: 'relative' },
     { ...authorizeBody(base), path: '/has space' },
     { ...authorizeBody(base), method: 'OPTIONS' },
@@ -998,11 +883,8 @@ it('binds authorization to the exact approved origin and method policy', async (
     sql`select decision, reason from session_egress_audit where workload_id = ${base.registration.workloadId}`,
   );
   expect(audit.every((row) => row.decision === 'denied')).toBe(true);
-  expect(audit.map((row) => row.reason).sort()).toEqual(
-    [
-      ...Array<string>(3).fill('destination_mismatch'),
-      ...Array<string>(4).fill('method_not_allowed'),
-    ].sort(),
+  expect(audit.map((row) => row.reason)).toEqual(
+    Array<string>(4).fill('method_not_allowed'),
   );
 });
 
@@ -1040,23 +922,18 @@ it('allows write methods only for grants the owner explicitly acknowledged, with
     (item) => item.secretRef === write.secretRef,
   )!;
   expect(issue.allowedMethods).toEqual(['GET', 'POST']);
-  const bound = { ...base, substitute: issue.substitute };
-  const destination = { host: 'write.example.com', port: 443 };
+  const bound = { substitute: issue.substitute };
   expect(
-    await authorize(authorizeBody(bound, { destination, method: 'POST' })),
+    await authorize(authorizeBody(bound, { method: 'POST' })),
   ).toMatchObject({
     allowed: true,
     credential: { value: 'write-capable-key-000111' },
   });
-  expect(
-    await authorize(authorizeBody(bound, { destination, method: 'HEAD' })),
-  ).toEqual({
+  expect(await authorize(authorizeBody(bound, { method: 'HEAD' }))).toEqual({
     allowed: false,
     reason: 'method_not_allowed',
   });
-  expect(
-    await authorize(authorizeBody(bound, { destination, method: 'DELETE' })),
-  ).toEqual({
+  expect(await authorize(authorizeBody(bound, { method: 'DELETE' }))).toEqual({
     allowed: false,
     reason: 'method_not_allowed',
   });
@@ -1081,47 +958,6 @@ it('allows write methods only for grants the owner explicitly acknowledged, with
       async () => context,
     ),
   ).rejects.toThrow(/^Secret request unavailable$/);
-});
-
-it('pages the revocation feed by cursor', async () => {
-  const base = await registered();
-  await register();
-  await revokeSessionSecret(context, { secretRef });
-  const controller = await createSessionEgressControllerToken();
-  await call(`/workloads/${base.registration.workloadId}`, {
-    method: 'DELETE',
-    token: controller,
-  });
-  const all = (await call('/revocations', { method: 'GET' })).json;
-  const own = all.events.filter(
-    (event: { workloadId: string | null; secretRef: string | null }) =>
-      event.workloadId === base.registration.workloadId ||
-      event.secretRef === secretRef,
-  );
-  expect(own.map((event: { kind: string }) => event.kind)).toEqual([
-    'generation',
-    'grant',
-    'workload',
-  ]);
-  const firstId = own[0].id as number;
-  const page = await app.request(
-    `${path}/revocations?after=${firstId - 1}&limit=1`,
-    {
-      headers: { authorization: `Bearer ${GATEWAY}` },
-    },
-  );
-  const paged = await page.json();
-  expect(paged.events).toHaveLength(1);
-  expect(paged.events[0]).toMatchObject({
-    id: firstId,
-    kind: 'generation',
-    generation: 2,
-  });
-  expect(paged.cursor).toBe(firstId);
-  const bad = await app.request(`${path}/revocations?after=-1`, {
-    headers: { authorization: `Bearer ${GATEWAY}` },
-  });
-  expect(bad.status).toBe(400);
 });
 
 it('drives the controller flow through the typed SDK client', async () => {

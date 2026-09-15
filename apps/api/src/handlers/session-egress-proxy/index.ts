@@ -29,9 +29,9 @@ import { buildProxyResponseHeaders } from '../mcp/proxy-utils';
 /**
  * Session egress substitution proxy: `/api/session-egress/<upstream path>`.
  *
- * The API-side counterpart of the Iron gateway for compute providers that
- * have no per-workload connector. A workload uses one base URL for every
- * approved service and presents the service's substitute token as its
+ * The only gateway between a coding run and its approved services. A
+ * workload uses one base URL for every approved service and presents the
+ * service's substitute token as its
  * credential in any header (`Authorization: Bearer rses_...`,
  * `x-api-key: rses_...`, `private-token: rses_...`). The substitute alone
  * names the grant: the API re-joins the live workload,
@@ -42,7 +42,7 @@ import { buildProxyResponseHeaders } from '../mcp/proxy-utils';
  *
  * What a sandbox can send is never authority on its own: the substitute is a
  * random capability bound to one workload generation and one grant, and every
- * check the gateway path performs is performed here too. What this path does
+ * check is re-joined from live state per request. What this path does
  * not have is a physical origin proof (the connector certificate); a copied
  * substitute is usable until the run ends, the lease lapses, or the grant is
  * revoked. Responses are buffered and bounded so the echo scan sees the whole

@@ -17,17 +17,16 @@ describe('protected execution bootstrap', () => {
     expect(source).not.toHaveProperty(
       'ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED',
     );
-    expect(env.buildSetupEnv()).not.toHaveProperty('HTTPS_PROXY');
+    expect(env.buildSetupEnv()).not.toHaveProperty('ROOMOTE_SERVICE_BASE_URL');
     expect(env.buildSessionEgressClientEnv()).toEqual({});
     env.acceptSessionEgressDelivery({
-      ROOMOTE_SESSION_EGRESS_PROXY_URL: 'http://connector:3128',
-      ROOMOTE_SESSION_EGRESS_CA_FILE:
-        '/etc/roomote/session-egress/ca-bundle.pem',
+      ROOMOTE_SERVICE_BASE_URL: 'https://api.example.com/api/session-egress',
+      ROOMOTE_SESSION_EGRESS_SERVICES: '[]',
       ROOMOTE_SERVICE_TOKEN_EXAMPLE: `rses_${'a'.repeat(40)}`,
     });
-    expect(env.buildSessionEgressClientEnv()).toMatchObject({
-      HTTPS_PROXY: 'http://connector:3128',
-      NODE_USE_ENV_PROXY: '1',
+    expect(env.buildSessionEgressClientEnv()).toEqual({
+      ROOMOTE_SERVICE_BASE_URL: 'https://api.example.com/api/session-egress',
+      ROOMOTE_SESSION_EGRESS_SERVICES: '[]',
       ROOMOTE_SERVICE_TOKEN_EXAMPLE: `rses_${'a'.repeat(40)}`,
     });
     expect(env.buildSessionEgressClientEnv()).not.toHaveProperty('AUTH_TOKEN');

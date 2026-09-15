@@ -1,30 +1,22 @@
-import { timingSafeEqual } from 'node:crypto';
-
 import {
   createSessionEgressControllerToken,
   validateSessionEgressControllerToken,
 } from '@roomote/auth';
 import {
-  authorizeSessionEgress,
   authorizeSessionEgressProxy,
   issueSessionEgressSubstitutes,
-  listSessionEgressRevocations,
   registerSessionEgressWorkload,
   renewSessionEgressWorkloadLease,
   SessionEgressRegistrationError,
   terminateSessionEgressWorkload,
 } from '@roomote/db/server';
-import { Env } from '@roomote/env';
 import {
   SESSION_EGRESS_CONTROL_PLANE_PATH,
-  sessionEgressAuthorizeSchema,
   sessionEgressProxyAuthorizeSchema,
-  sessionEgressRevocationsQuerySchema,
   sessionEgressWorkloadLeaseSchema,
   sessionEgressWorkloadRegisterSchema,
   sessionEgressWorkloadTerminateSchema,
   type SessionEgressAuthorization,
-  type SessionEgressRevocationFeed,
   type SessionEgressWorkloadLease,
   type SessionEgressWorkloadRegister,
   type SessionEgressWorkloadRegistration,
@@ -37,35 +29,13 @@ import { assertEgressUrlAllowed } from './safe-fetch';
 /**
  * Session egress control plane service layer.
  *
- * Two service principals, deliberately different mechanisms:
- * - `controller`: a short-lived ES256 token signed with the deployment
- *   job-auth key (which controllers already hold and sandboxes never do).
- * - `gateway`: the `R_SESSION_EGRESS_GATEWAY_TOKEN` shared secret, because
- *   the gateway is an external binary that must not hold the signing key.
- *
- * Neither run tokens, user tokens, MCP tokens, nor session-broker tokens are
- * accepted anywhere on this surface.
+ * One service principal: the controller, authenticated by a short-lived
+ * ES256 token signed with the deployment job-auth key (which controllers
+ * already hold and sandboxes never do). Run tokens, user tokens, MCP tokens,
+ * and session-broker tokens are not accepted anywhere on this surface. The
+ * API-side proxy authorizes substitutes in-process through `authorizeProxy`.
  */
-export type SessionEgressPrincipal = 'controller' | 'gateway';
-
-export interface SessionEgressServiceOptions {
-  /** Resolves the gateway shared secret; `null` disables the gateway principal. */
-  gatewayToken?: () => string | null;
-}
-
-export function getSessionEgressGatewayToken(): string | null {
-  return Env.R_SESSION_EGRESS_GATEWAY_TOKEN?.trim() || null;
-}
-
-function constantTimeEquals(presented: string, expected: string): boolean {
-  const a = Buffer.from(presented);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) {
-    timingSafeEqual(a, a);
-    return false;
-  }
-  return timingSafeEqual(a, b);
-}
+export type SessionEgressPrincipal = 'controller';
 
 function bearer(header: string | undefined): string | null {
   if (
@@ -82,12 +52,9 @@ function bearer(header: string | undefined): string | null {
 
 export async function authenticateSessionEgressPrincipal(
   authorizationHeader: string | undefined,
-  gatewayToken: string | null,
 ): Promise<SessionEgressPrincipal | null> {
   const token = bearer(authorizationHeader);
   if (!token) return null;
-  if (gatewayToken !== null && constantTimeEquals(token, gatewayToken))
-    return 'gateway';
   try {
     await validateSessionEgressControllerToken(token);
     return 'controller';
@@ -158,17 +125,10 @@ export async function terminateWorkload(workloadId: unknown, input: unknown) {
   return { workloadId: id, terminated };
 }
 
-export async function authorize(
-  input: unknown,
-): Promise<SessionEgressAuthorization> {
-  const parsed = sessionEgressAuthorizeSchema.safeParse(input);
-  // Malformed gateway input is a denial, not an exception: the gateway must
-  // treat it exactly like any other refusal.
-  if (!parsed.success) return { allowed: false, reason: 'malformed' };
-  return authorizeSessionEgress(parsed.data, { isOriginAllowed });
-}
-
-/** Same decision surface for the API-side proxy; malformed input is a denial. */
+/**
+ * Live per-request decision for the API-side proxy. Malformed input is a
+ * denial, not an exception: the proxy treats it like any other refusal.
+ */
 export async function authorizeProxy(
   input: unknown,
 ): Promise<SessionEgressAuthorization> {
@@ -183,13 +143,6 @@ function isOriginAllowed(origin: string): boolean {
   } catch {
     return false;
   }
-}
-
-export async function revocations(
-  query: unknown,
-): Promise<SessionEgressRevocationFeed> {
-  const { after, limit } = parse(sessionEgressRevocationsQuerySchema, query);
-  return listSessionEgressRevocations(after, limit);
 }
 
 /**

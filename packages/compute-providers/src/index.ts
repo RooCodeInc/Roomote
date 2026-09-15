@@ -1,4 +1,5 @@
 export * from './types';
+export * from './session-egress-legacy-cleanup';
 export * from './command-output-transcript';
 export * from './docker-environment-validation';
 export * from './mutation-events';
@@ -22,4 +23,3 @@ export * from './adapters/box';
 export * from './box';
 export * from './adapters/azure';
 export * from './azure';
-export * from './session-egress-docker-boundary';

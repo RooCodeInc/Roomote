@@ -17,7 +17,7 @@ import {
 import type { SessionEgressLifecycle } from './lifecycle';
 
 /**
- * API-proxy admission for connector-less compute providers.
+ * API-proxy admission, shared by every supported compute provider.
  *
  * The provider spawns the sandbox normally with a bootstrap nonce. The worker
  * runs its ordinary setup, marks the nonce ready, and waits. The controller
@@ -129,14 +129,6 @@ export async function admitSessionEgressApiProxy(
   });
   if (outcome.status !== 'registered')
     throw new Error('Session egress admission is no longer eligible');
-  if (outcome.admission !== 'api_proxy') {
-    await input.lifecycle.terminate(
-      input.taskRun.id,
-      outcome.workload.workloadId,
-      'provision_failed',
-    );
-    throw new Error('Session egress admission mode mismatch');
-  }
 
   try {
     await deps.publish(

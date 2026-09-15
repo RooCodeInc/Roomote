@@ -1,14 +1,14 @@
 import { z } from 'zod';
 
 /**
- * Session egress control plane: the gateway -> API and controller -> API
- * contract behind ordinary HTTP clients that talk to real service URLs
- * through a credential-substituting egress gateway.
+ * Session egress control plane: the controller -> API contract behind
+ * ordinary HTTP clients that call approved services through the API-side
+ * credential-substituting proxy.
  *
  * Workloads (attached runs) only ever hold opaque substitute tokens. The
- * real credential is resolved here, per request, for the gateway alone.
- * Nothing in this module is a model tool schema; none of these payloads is
- * accepted from a sandbox or a Fast tool argument.
+ * real credential is resolved by the API, per request, and injected on its
+ * way to the approved origin. Nothing in this module is a model tool schema;
+ * none of these payloads is accepted from a sandbox or a Fast tool argument.
  *
  * Full contract: apps/api/src/handlers/session-egress/CONTRACT.md
  */
@@ -125,18 +125,6 @@ const connectorIdentitySchema = z
   .max(512)
   .regex(/^[\x21-\x7e]+$/);
 
-/**
- * Hostnames only: the gateway dials by name and pins the vetted address.
- * Literal IPs, credentials, ports inside the host, and non-ASCII are rejected.
- */
-const destinationHostSchema = z
-  .string()
-  .min(1)
-  .max(253)
-  .regex(
-    /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
-  );
-
 /** Validated for shape so the gateway cannot pass junk, but never persisted or logged. */
 const requestPathSchema = z
   .string()
@@ -185,37 +173,12 @@ const substituteSchema = z
   .max(128)
   .regex(/^[A-Za-z0-9_-]+$/);
 
-export const sessionEgressAuthorizeSchema = z
-  .object({
-    workloadId: z.string().uuid(),
-    connectorIdentity: connectorIdentitySchema,
-    substitute: substituteSchema,
-    destination: z
-      .object({
-        host: destinationHostSchema,
-        port: z.number().int().min(1).max(65_535),
-      })
-      .strict(),
-    method: sessionEgressMethodSchema,
-    path: requestPathSchema,
-    phase: z.enum(SESSION_EGRESS_PHASES).default('request'),
-    /**
-     * Correlates the request, response, and stream checks of one HTTP
-     * exchange in the audit trail. Minted by the API when omitted. Caller-
-     * controlled correlation only: never authority, uniqueness, or proof
-     * that a previous phase succeeded.
-     */
-    authorizationId: z.string().uuid().optional(),
-  })
-  .strict();
-
 /**
  * Public prefix of the API-side substitution proxy. A workload points an
  * ordinary HTTP client at `<api origin>/api/session-egress` as the base URL
  * of every approved service and presents the service's substitute as its
  * credential; the substitute alone names the grant, so the API rewrites the
  * request onto that grant's approved origin and injects the real credential.
- * This is the path for compute providers without a per-workload connector.
  */
 export const SESSION_EGRESS_PROXY_PATH = '/api/session-egress';
 
@@ -235,9 +198,8 @@ export function sessionEgressProxyBaseUrl(
 }
 
 /**
- * Authorization input for the API-side proxy. The substitute names the grant;
- * there is no connector identity because the API itself is the only party
- * between the workload and the origin.
+ * Authorization input for the API-side proxy. The substitute alone names the
+ * grant: the API is the only party between the workload and the origin.
  */
 export const sessionEgressProxyAuthorizeSchema = z
   .object({
@@ -246,13 +208,6 @@ export const sessionEgressProxyAuthorizeSchema = z
     path: requestPathSchema,
     phase: z.enum(SESSION_EGRESS_PHASES).default('request'),
     authorizationId: z.string().uuid().optional(),
-  })
-  .strict();
-
-export const sessionEgressRevocationsQuerySchema = z
-  .object({
-    after: z.coerce.number().int().min(0).default(0),
-    limit: z.coerce.number().int().min(1).max(500).default(100),
   })
   .strict();
 
@@ -265,14 +220,8 @@ export type SessionEgressWorkloadLease = z.infer<
 export type SessionEgressWorkloadTerminate = z.infer<
   typeof sessionEgressWorkloadTerminateSchema
 >;
-export type SessionEgressAuthorize = z.infer<
-  typeof sessionEgressAuthorizeSchema
->;
 export type SessionEgressProxyAuthorize = z.infer<
   typeof sessionEgressProxyAuthorizeSchema
->;
-export type SessionEgressRevocationsQuery = z.infer<
-  typeof sessionEgressRevocationsQuerySchema
 >;
 
 export interface SessionEgressGrantPolicy {
@@ -306,7 +255,7 @@ export const SESSION_EGRESS_DENIAL_REASONS = [
   'malformed',
   /** No live substitute matches the presented token hash. */
   'unknown_substitute',
-  /** Token exists but belongs to another workload, generation, or connector identity. */
+  /** Historical (connector gateway): token bound to another workload or identity. */
   'workload_mismatch',
   /** Workload terminated or its lease expired. */
   'workload_inactive',
@@ -333,11 +282,11 @@ export type SessionEgressAuthorization =
       secretRef: string;
       /**
        * Earliest of the grant expiry and the workload lease expiry; the
-       * gateway must not keep a stream open past it.
+       * proxy must not keep a response open past it.
        */
       expiresAt: string;
       /**
-       * Present only on the `request` phase. The gateway injects this and
+       * Present only on the `request` phase. The proxy injects this and
        * discards it after the exchange; it is never cached across requests.
        */
       credential?: {
@@ -356,46 +305,22 @@ export const SESSION_EGRESS_REVOCATION_KINDS = [
 export type SessionEgressRevocationKind =
   (typeof SESSION_EGRESS_REVOCATION_KINDS)[number];
 
-export interface SessionEgressRevocationEvent {
-  id: number;
-  kind: SessionEgressRevocationKind;
-  workloadId: string | null;
-  secretRef: string | null;
-  /** For `generation`, the first generation that remains valid. */
-  generation: number | null;
-  createdAt: string;
-}
-
-export interface SessionEgressRevocationFeed {
-  events: SessionEgressRevocationEvent[];
-  /** Pass back as `after` on the next poll. */
-  cursor: number;
-}
-
 /**
  * Workload delivery contract (controller -> worker launcher env). The worker
- * captures these at startup, scrubs them from its own process env, and turns
- * them into ordinary client configuration (proxy + CA + substitute env vars)
- * for task processes. Nothing here is a real credential: the values are the
- * connector address, the PUBLIC gateway CA bundle path, the no-proxy list for
- * control-plane hosts, a nonsecret service manifest, and substitute tokens.
+ * captures these at startup, scrubs them from its own process env, and hands
+ * task processes the proxy base URL, a nonsecret service manifest, and one
+ * substitute env var per approved service. Nothing here is a real credential.
  */
 export const SESSION_EGRESS_WORKLOAD_ENV = {
   /** Wait for the controller's post-bootstrap verified network admission. */
   BOOTSTRAP_REQUIRED: 'ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED',
   BOOTSTRAP_NONCE: 'ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE',
-  /** `http://<connector-alias>:<port>` reachable only from the workload network. */
-  PROXY_URL: 'ROOMOTE_SESSION_EGRESS_PROXY_URL',
-  /** Path inside the workload to the PEM bundle (system roots + gateway public CA). */
-  CA_FILE: 'ROOMOTE_SESSION_EGRESS_CA_FILE',
-  /** Comma-separated hosts task processes must reach directly (control plane). */
-  NO_PROXY: 'ROOMOTE_SESSION_EGRESS_NO_PROXY',
   /** JSON `SessionEgressWorkloadServiceManifestEntry[]`; never contains token values. */
   SERVICES: 'ROOMOTE_SESSION_EGRESS_SERVICES',
   /**
-   * API-proxy admission only: the one base URL every approved service is
-   * called through (`<api origin>/api/session-egress`, or the deployment's
-   * dedicated proxy host). Nonsecret; delivered next to the substitutes.
+   * The one base URL every approved service is called through
+   * (`<api origin>/api/session-egress`, or the deployment's dedicated proxy
+   * host). Nonsecret; delivered next to the substitutes.
    */
   BASE_URL: 'ROOMOTE_SERVICE_BASE_URL',
 } as const;
@@ -403,16 +328,12 @@ export const SESSION_EGRESS_WORKLOAD_ENV = {
 /** Substitute tokens are delivered as `ROOMOTE_SERVICE_TOKEN_<LABEL_SLUG>`. */
 export const SESSION_EGRESS_SERVICE_TOKEN_ENV_PREFIX = 'ROOMOTE_SERVICE_TOKEN_';
 
-/** Default listener port of the connector sidecar (plain HTTP CONNECT). */
-export const SESSION_EGRESS_CONNECTOR_PORT = 3128;
-
 export interface SessionEgressWorkloadServiceManifestEntry extends SessionEgressGrantPolicy {
   /** The env var that carries this service's substitute token. */
   envName: string;
   /**
-   * API-proxy admission only: call this instead of `origin`, with the
-   * substitute as the credential; the API forwards to `origin`. Absent under
-   * connector admission, where clients use `origin` through the proxy.
+   * Call this instead of `origin`, with the substitute as the credential; the
+   * API forwards to `origin`.
    */
   baseUrl?: string;
 }
@@ -459,49 +380,6 @@ export function buildSessionEgressServiceTokenEnv(
     });
   }
   return { tokens, manifest };
-}
-
-/** Names task processes read to route through the connector and trust the gateway CA. */
-export const SESSION_EGRESS_CLIENT_ENV_NAMES = [
-  'HTTPS_PROXY',
-  'https_proxy',
-  'HTTP_PROXY',
-  'http_proxy',
-  'NO_PROXY',
-  'no_proxy',
-  'SSL_CERT_FILE',
-  'NODE_EXTRA_CA_CERTS',
-  'NODE_USE_ENV_PROXY',
-  'REQUESTS_CA_BUNDLE',
-  'CURL_CA_BUNDLE',
-  'GIT_SSL_CAINFO',
-] as const;
-
-/**
- * Ordinary-client configuration for a workload: proxy and trust settings for
- * curl/libcurl, Python requests/httpx, Node, and git. Configuration is a
- * convenience, not the boundary: egress enforcement outside the sandbox is
- * what makes a client that ignores these settings fail closed.
- */
-export function buildSessionEgressClientEnv(input: {
-  proxyUrl: string;
-  caFile: string;
-  noProxy: string;
-}): Record<(typeof SESSION_EGRESS_CLIENT_ENV_NAMES)[number], string> {
-  return {
-    HTTPS_PROXY: input.proxyUrl,
-    https_proxy: input.proxyUrl,
-    HTTP_PROXY: input.proxyUrl,
-    http_proxy: input.proxyUrl,
-    NO_PROXY: input.noProxy,
-    no_proxy: input.noProxy,
-    SSL_CERT_FILE: input.caFile,
-    NODE_EXTRA_CA_CERTS: input.caFile,
-    NODE_USE_ENV_PROXY: '1',
-    REQUESTS_CA_BUNDLE: input.caFile,
-    CURL_CA_BUNDLE: input.caFile,
-    GIT_SSL_CAINFO: input.caFile,
-  };
 }
 
 export function isSessionEgressWorkloadEnvKey(key: string): boolean {
