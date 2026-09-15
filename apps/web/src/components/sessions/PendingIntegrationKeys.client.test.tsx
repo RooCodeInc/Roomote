@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 
+import { notifyIntegrationKeysChanged } from './integration-key-dialog';
 import { PendingIntegrationKeys } from './PendingIntegrationKeys';
 
 const refetch = vi.fn();
@@ -48,11 +49,32 @@ describe('PendingIntegrationKeys', () => {
     expect(refetch).toHaveBeenCalled();
   });
 
-  it('refetches when the dialog fragment changes', () => {
+  it('refetches after a key is saved', () => {
     state.pending = [demo];
     refetch.mockClear();
     render(<PendingIntegrationKeys sessionId="s1" latestRequestId={null} />);
-    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    notifyIntegrationKeysChanged();
     expect(refetch).toHaveBeenCalledTimes(1);
   });
+
+  it('refetches once the soonest approval expires', () => {
+    vi.useFakeTimers();
+    try {
+      state.pending = [
+        { ...demo, expiresAt: new Date(Date.now() + 5_000).toISOString() },
+      ];
+      refetch.mockClear();
+      render(<PendingIntegrationKeys sessionId="s1" latestRequestId={null} />);
+      vi.advanceTimersByTime(5_500);
+      expect(refetch).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1_000);
+      expect(refetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+afterEach(() => {
+  state.pending = [];
 });

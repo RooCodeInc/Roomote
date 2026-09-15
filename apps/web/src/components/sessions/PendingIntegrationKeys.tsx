@@ -1,11 +1,14 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 
 import { Button, KeyRound } from '@/components/system';
 import { useSessionIntegrationApprovals } from '@/hooks/useSessionIntegrationApprovals';
 
-import { openIntegrationKeyDialog } from './integration-key-dialog';
+import {
+  INTEGRATION_KEYS_CHANGED_EVENT,
+  openIntegrationKeyDialog,
+} from './integration-key-dialog';
 
 /**
  * One card per approval still waiting for a key, shown to the Session owner
@@ -25,15 +28,35 @@ export function PendingIntegrationKeys({
   useEffect(() => {
     if (latestRequestId) void refetch();
   }, [latestRequestId, refetch]);
-  // The dialog opens and closes through the URL fragment, so a hash change is
-  // the signal that a key may just have been saved.
   useEffect(() => {
-    const handleHash = () => void refetch();
-    window.addEventListener('hashchange', handleHash);
-    return () => window.removeEventListener('hashchange', handleHash);
+    const handleChange = () => void refetch();
+    window.addEventListener(INTEGRATION_KEYS_CHANGED_EVENT, handleChange);
+    return () =>
+      window.removeEventListener(INTEGRATION_KEYS_CHANGED_EVENT, handleChange);
   }, [refetch]);
 
-  const pending = data?.pending ?? [];
+  const pending = useMemo(() => data?.pending ?? [], [data]);
+  // Approvals stop accepting a key at expiresAt; refetch then so the card
+  // disappears without waiting for another trigger.
+  const nextExpiry = useMemo(
+    () =>
+      pending.reduce<number | null>((soonest, item) => {
+        const at = Date.parse(item.expiresAt);
+        return Number.isFinite(at) && (soonest === null || at < soonest)
+          ? at
+          : soonest;
+      }, null),
+    [pending],
+  );
+  useEffect(() => {
+    if (nextExpiry === null) return;
+    const timer = window.setTimeout(
+      () => void refetch(),
+      Math.max(0, nextExpiry - Date.now()) + 1_000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [nextExpiry, refetch]);
+
   if (pending.length === 0) return null;
   return (
     <div className="mt-4 space-y-2" data-testid="pending-integration-keys">

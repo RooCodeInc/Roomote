@@ -9,3 +9,11 @@ export function openIntegrationKeyDialog() {
   if (window.location.hash === INTEGRATION_KEY_DIALOG_HASH) return;
   window.location.hash = INTEGRATION_KEY_DIALOG_HASH;
 }
+
+/** Fired on `window` after the owner saves a key, so pending-key views refetch. */
+export const INTEGRATION_KEYS_CHANGED_EVENT =
+  'roomote:integration-keys-changed';
+
+export function notifyIntegrationKeysChanged() {
+  window.dispatchEvent(new Event(INTEGRATION_KEYS_CHANGED_EVENT));
+}

@@ -9,11 +9,11 @@ import type { ServiceCredentialApprovals } from '@roomote/types';
  * owner-only route the key dialog submits to; the card, the dialog, and the
  * transcript trigger all share this one query.
  */
-export function sessionIntegrationApprovalsQueryKey(sessionId: string) {
+function sessionIntegrationApprovalsQueryKey(sessionId: string) {
   return ['session-integration-approvals', sessionId] as const;
 }
 
-export async function fetchSessionIntegrationApprovals(
+async function fetchSessionIntegrationApprovals(
   sessionId: string,
   signal?: AbortSignal,
 ): Promise<ServiceCredentialApprovals> {

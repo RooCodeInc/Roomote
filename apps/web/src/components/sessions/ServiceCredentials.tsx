@@ -18,7 +18,10 @@ import {
   Skeleton,
 } from '@/components/system';
 
-import { INTEGRATION_KEY_DIALOG_HASH } from './integration-key-dialog';
+import {
+  INTEGRATION_KEY_DIALOG_HASH,
+  notifyIntegrationKeysChanged,
+} from './integration-key-dialog';
 
 export function ServiceCredentials({ sessionId }: { sessionId: string }) {
   const [open, setOpen] = useState(false);
@@ -197,6 +200,7 @@ function ServiceCredentialsForm({ sessionId }: { sessionId: string }) {
                   );
                   setPending(remaining);
                   setSelectedRef(remaining[0]?.pendingRef ?? '');
+                  notifyIntegrationKeysChanged();
                   setNotice(
                     data.resumed
                       ? 'Integration saved. The Session has been notified without sharing your key.'
