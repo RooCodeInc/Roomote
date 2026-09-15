@@ -16,10 +16,8 @@ const turnActivityRegistrations = new WeakMap<
   AbortSignal,
   (activity: TurnActivityCleanup) => () => void
 >();
-const activeFastAgentTurnLocks = new Set<FastAgentTurnLockHandle>();
 const shutdownCloseoutResolvers = new WeakMap<AbortSignal, () => void>();
 const shutdownCloseoutPendingSignals = new WeakSet<AbortSignal>();
-let processShutdownReason: FastAgentProcessShutdownError | null = null;
 
 /** Bind one invocation's surface cleanup to its actual Redis lock, not inference completion. */
 export function registerFastAgentTurnActivity(
@@ -67,6 +65,28 @@ export type FastAgentTurnLockHandle = (() => Promise<void>) & {
   durableResume?: () => Promise<void>;
 };
 
+const FAST_AGENT_TURN_RUNTIME_STATE = Symbol.for(
+  'roomote.fast-agent-turn-runtime-state',
+);
+type FastAgentTurnRuntimeState = {
+  activeLocks: Set<FastAgentTurnLockHandle>;
+  settleWaiters: Set<() => void>;
+  shutdownReason: FastAgentProcessShutdownError | null;
+};
+const createTurnRuntimeState = (): FastAgentTurnRuntimeState => ({
+  activeLocks: new Set(),
+  settleWaiters: new Set(),
+  shutdownReason: null,
+});
+const turnRuntimeState = (() => {
+  if (process.env.NODE_ENV === 'test') return createTurnRuntimeState();
+  const scope = globalThis as typeof globalThis & {
+    [FAST_AGENT_TURN_RUNTIME_STATE]?: FastAgentTurnRuntimeState;
+  };
+  return (scope[FAST_AGENT_TURN_RUNTIME_STATE] ??= createTurnRuntimeState());
+})();
+const activeFastAgentTurnLocks = turnRuntimeState.activeLocks;
+
 /** Mark the user-visible shutdown closeout as posted and persisted (or as
  * attempted when the provider rejects delivery). */
 export function markFastAgentShutdownCloseoutSettled(
@@ -88,16 +108,12 @@ export function markFastAgentShutdownCloseoutPending(
 export async function abortActiveFastAgentTurns(
   reason: FastAgentProcessShutdownError,
 ): Promise<number> {
-  processShutdownReason ??= reason;
+  turnRuntimeState.shutdownReason ??= reason;
   const activeLocks = [...activeFastAgentTurnLocks];
-  await Promise.allSettled(
-    activeLocks.map((lock) => lock.abortForShutdown(processShutdownReason!)),
-  );
-  // A turn interrupted before it reached its own abort handling (still in
-  // setup, no inference yet) never releases its durable claim, and the row
-  // would wait out the full claim lease before recovery. Release here for
-  // every bound row; the release is a guarded no-op for rows the turn
-  // already revoked or settled, so replay safety is unaffected.
+  // Release replay-safe durable rows before waiting for surface cleanup. The
+  // Redis lock still fences execution until abortForShutdown finishes, while
+  // the queue can already schedule the successor instead of risking a stale
+  // claim if the process reaches its hard shutdown deadline during cleanup.
   await Promise.allSettled(
     activeLocks
       .filter((lock) => lock.durableRowId)
@@ -119,10 +135,15 @@ export async function abortActiveFastAgentTurns(
         }
       }),
   );
+  await Promise.allSettled(
+    activeLocks.map((lock) =>
+      lock.abortForShutdown(turnRuntimeState.shutdownReason!),
+    ),
+  );
   return activeLocks.length;
 }
 
-const turnSettleWaiters = new Set<() => void>();
+const turnSettleWaiters = turnRuntimeState.settleWaiters;
 
 function notifyTurnSettleWaitersIfIdle() {
   if (activeFastAgentTurnLocks.size > 0) return;
@@ -136,7 +157,7 @@ function notifyTurnSettleWaitersIfIdle() {
 export function beginFastAgentTurnDrain(
   reason: FastAgentProcessShutdownError,
 ): void {
-  processShutdownReason ??= reason;
+  turnRuntimeState.shutdownReason ??= reason;
 }
 
 /**
@@ -174,7 +195,7 @@ export async function acquireFastAgentTurnLock(params: {
    * user-feedback path can fail fast instead of blocking their context. */
   maxWaitMs?: number;
 }) {
-  if (processShutdownReason) return null;
+  if (turnRuntimeState.shutdownReason) return null;
 
   const key = buildFastAgentTurnLockKey(params.conversation);
   const maxAttempts =
@@ -186,7 +207,7 @@ export async function acquireFastAgentTurnLock(params: {
         );
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    if (processShutdownReason) return null;
+    if (turnRuntimeState.shutdownReason) return null;
     const release = await acquireRedisLock(key, {
       ttlSeconds: FAST_AGENT_TURN_LOCK_TTL_SECONDS,
     });
@@ -329,8 +350,8 @@ export async function acquireFastAgentTurnLock(params: {
       };
       releaseTurnLock.shutdownCloseoutSettled = shutdownCloseoutPromise;
       activeFastAgentTurnLocks.add(releaseTurnLock);
-      if (processShutdownReason) {
-        ownership.abort(processShutdownReason);
+      if (turnRuntimeState.shutdownReason) {
+        ownership.abort(turnRuntimeState.shutdownReason);
         await releaseTurnLock();
         return null;
       }

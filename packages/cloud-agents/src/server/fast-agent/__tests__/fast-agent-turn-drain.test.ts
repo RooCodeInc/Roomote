@@ -126,6 +126,42 @@ describe('Fast turn shutdown drain', () => {
     await unboundLock!();
   });
 
+  it('hands back the durable row before waiting for surface cleanup', async () => {
+    releaseDurableClaimMock.mockResolvedValue(true);
+    const resume = vi.fn().mockResolvedValue(undefined);
+    let finishCleanup: (() => void) | undefined;
+    const boundLock = await turnLock.acquireFastAgentTurnLock({ conversation });
+    boundLock!.durableRowId = 'durable-row-before-cleanup';
+    boundLock!.durableResume = resume;
+    turnLock.registerFastAgentTurnActivity(boundLock!.signal, {
+      settle: () =>
+        new Promise<void>((resolve) => {
+          finishCleanup = resolve;
+        }),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const shutdown = turnLock.abortActiveFastAgentTurns(
+      new turnLock.FastAgentProcessShutdownError('SIGTERM'),
+    );
+    let shutdownFinished = false;
+    void shutdown.then(() => {
+      shutdownFinished = true;
+    });
+    await vi.waitFor(() => {
+      expect(releaseDurableClaimMock).toHaveBeenCalledWith(
+        'durable-row-before-cleanup',
+      );
+      expect(resume).toHaveBeenCalledOnce();
+    });
+    expect(shutdownFinished).toBe(false);
+
+    finishCleanup?.();
+    await expect(shutdown).resolves.toBe(1);
+    expect(boundLock!.signal.aborted).toBe(true);
+    await boundLock!();
+  });
+
   it('does not wake the queue when the shutdown release found no pending row', async () => {
     releaseDurableClaimMock.mockResolvedValue(false);
     const resume = vi.fn().mockResolvedValue(undefined);
@@ -158,4 +194,32 @@ describe('Fast turn shutdown drain', () => {
     expect(straggler!.signal.reason).toBe(drainReason);
     await straggler!();
   });
+});
+
+it('shares active turn ownership across production server bundles', async () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const stateKey = Symbol.for('roomote.fast-agent-turn-runtime-state');
+  const scope = globalThis as typeof globalThis & { [stateKey]?: unknown };
+  try {
+    process.env.NODE_ENV = 'production';
+    delete scope[stateKey];
+    vi.resetModules();
+    const turnOwner = await import('../fast-agent-turn-lock');
+    const activeLock = await turnOwner.acquireFastAgentTurnLock({
+      conversation,
+    });
+
+    vi.resetModules();
+    const shutdownOwner = await import('../fast-agent-turn-lock');
+    await expect(
+      shutdownOwner.abortActiveFastAgentTurns(
+        new shutdownOwner.FastAgentProcessShutdownError('SIGTERM'),
+      ),
+    ).resolves.toBe(1);
+    expect(activeLock!.signal.aborted).toBe(true);
+    await activeLock!();
+  } finally {
+    delete scope[stateKey];
+    process.env.NODE_ENV = originalNodeEnv;
+  }
 });
