@@ -4,14 +4,14 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 1.9.3 (2026-09-15)
 
-Roomote 1.9.3 makes integration keys personal and reusable, improves artifact and activity inspection, and strengthens background delivery and pull-request review workflows.
+Roomote 1.9.3 makes integration keys personal and reusable, improves artifact and activity inspection, routes notifications more intelligently, and strengthens background delivery, upgrades, and pull-request review workflows.
 
 ### Highlights
 
 - Add, reuse, and revoke personal integration keys across every Session and coding task you own.
 - Scan tabular artifacts more easily and inspect the skills, reasoning, and tool details behind agent activity.
-- Keep background Session delivery moving with deadlock prevention, worker recovery, and queue health diagnostics.
-- Get more reliable Roomote review checks and cleaner automatic review confirmations in Telegram.
+- Keep background Session delivery moving with deadlock prevention, worker recovery, queue health diagnostics, and stale-review guards.
+- Route notifications to the chat platform you chose most recently and recover self-hosted upgrades from transient Postgres disconnects.
 
 ### Patch changes
 
@@ -26,6 +26,9 @@ Roomote 1.9.3 makes integration keys personal and reusable, improves artifact an
 - CSV and TSV artifacts are easier to scan: gallery cards show abstract table previews, wide tables scroll without clipping columns, and users can choose whether the first row should be treated as column headers.
 - Telegram now resolves automatic pull-request review offers in place, removing stale controls and keeping the confirmation with the original review summary instead of posting a separate reply.
 - Fast Session and coding-task transcripts now show which skills were actually loaded, keep skill instructions private, and prevent agents from claiming that a listed but unloaded skill was used.
+- When an absent web user needs a new personal notification thread, Roomote now prefers the Slack, Teams, Telegram, or Discord platform that user most recently chose to start work while preserving existing Session threads and the standard provider fallback order.
+- Self-hosted upgrades now retry the bundled database migration runner when Postgres briefly drops its connection, avoiding a failed deployment when the transaction can safely restart while still failing immediately for migration and SQL errors.
+- Automatic pull-request review follow-ups now confirm the pull request is still open before launching or resuming work, and retire deliveries that have remained stuck for too long, preventing stale feedback from reopening completed work days after a pull request merged.
 
 ## 1.9.2 (2026-09-15)
 
