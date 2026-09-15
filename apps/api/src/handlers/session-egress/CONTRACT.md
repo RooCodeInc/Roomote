@@ -260,7 +260,10 @@ workload points an ordinary HTTP client at that base URL and presents the
 service's substitute as its credential in any credential slot
 (`Authorization: Bearer rses_…`, `x-api-key: rses_…`); the substitute alone
 names the grant. The workload never receives the real credential, a proxy
-address, or a CA bundle.
+address, or a CA bundle. A deployment may additionally serve the same route at
+the root of a dedicated hostname (`R_SESSION_EGRESS_PROXY_HOST`) for SDK
+clients that allow only a host override; the base URL delivered to workloads
+is then that host, and nothing else differs.
 
 Per request the API performs the same live decision as `/authorize` with the
 grant taken from the token instead of a connector identity: token lookup by

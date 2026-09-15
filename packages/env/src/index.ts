@@ -427,6 +427,19 @@ const serverSchema = {
   // its own; the surface stays disabled (404) until this is set. Controllers
   // authenticate to the same surface with a signed job-auth token instead.
   R_SESSION_EGRESS_GATEWAY_TOKEN: z.string().min(32).optional(),
+  // Optional dedicated hostname for the API-side session egress proxy. When a
+  // request arrives for this host, the API serves `/api/session-egress` at the
+  // root, so SDK clients that allow only a host override (no path prefix) can
+  // use it. Same route and checks; only the address differs. Point DNS for the
+  // name at the API service; the path form keeps working on the API host.
+  R_SESSION_EGRESS_PROXY_HOST: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(
+      /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/,
+    )
+    .optional(),
   // Controller-side Session-egress provisioning. All five *_ADDR/*_FILE values
   // below must be set for the controller to register workloads; otherwise
   // every run is reported as `disabled` and receives no substitute tokens.

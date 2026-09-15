@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { Agent, fetch as undiciFetch } from 'undici';
 
@@ -430,3 +430,28 @@ export function createSessionEgressProxy(
 }
 
 export const sessionEgressProxy = createSessionEgressProxy();
+
+/**
+ * Serve the proxy at the root of a dedicated hostname. A request whose host
+ * is `proxyHost` is re-addressed onto the proxy path and handed to the same
+ * app, so there is exactly one route and one set of checks; only the address
+ * a client uses differs. Lets SDK clients with a host-only override use the
+ * proxy without a path prefix.
+ */
+export function sessionEgressProxyHostAlias(
+  proxy: Hono<{ Variables: Variables }>,
+  proxyHost: string,
+): MiddlewareHandler<{ Variables: Variables }> {
+  const host = proxyHost.toLowerCase();
+  return async (c, next) => {
+    const url = new URL(c.req.url);
+    if (
+      url.hostname.toLowerCase() !== host ||
+      url.pathname.startsWith(`${SESSION_EGRESS_PROXY_PATH}/`) ||
+      url.pathname === SESSION_EGRESS_PROXY_PATH
+    )
+      return next();
+    url.pathname = `${SESSION_EGRESS_PROXY_PATH}${url.pathname}`;
+    return proxy.fetch(new Request(url, c.req.raw));
+  };
+}

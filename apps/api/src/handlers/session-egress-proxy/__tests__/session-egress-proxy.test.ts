@@ -42,7 +42,11 @@ import { routePolicyMiddleware } from '../../../middleware/routePolicyMiddleware
 import { tokenAuthMiddleware } from '../../../middleware/tokenAuthMiddleware';
 import { findRoutePolicyRule } from '../../../route-policies';
 import type { Variables } from '../../../types';
-import { createSessionEgressProxy, presentedSubstitute } from '../index';
+import {
+  createSessionEgressProxy,
+  presentedSubstitute,
+  sessionEgressProxyHostAlias,
+} from '../index';
 
 const { destroy } = vi.hoisted(() => ({ destroy: vi.fn(async () => {}) }));
 vi.mock('undici', () => ({
@@ -264,6 +268,40 @@ it('is a handler-authenticated public surface with one shared base URL', () => {
   expect(sessionEgressProxyBaseUrl('https://api.roomote.test/')).toBe(
     `https://api.roomote.test${base}`,
   );
+  expect(
+    sessionEgressProxyBaseUrl(
+      'https://api.roomote.test/',
+      'egress.roomote.test',
+    ),
+  ).toBe('https://egress.roomote.test');
+});
+
+it('serves the same route at the root of a dedicated hostname', async () => {
+  const proxy = createSessionEgressProxy();
+  app = new Hono<{ Variables: Variables }>();
+  app.use('*', sessionEgressProxyHostAlias(proxy, 'Egress.Roomote.Test'));
+  // Registered ahead of the default-deny policy gate, like the real health routes.
+  app.get('/health', (c) => c.text('ok'));
+  app.use('*', tokenAuthMiddleware());
+  app.use('*', routePolicyMiddleware);
+  app.route(base, proxy);
+  const aliased = await app.request(
+    'https://egress.roomote.test/v1/items?x=1',
+    { headers: { authorization: `Bearer ${substitute}` } },
+  );
+  expect(aliased.status).toBe(200);
+  expect(String(vi.mocked(fetch).mock.calls[0]![0])).toBe(
+    'https://api.example.com/v1/items?x=1',
+  );
+  // Other hosts and other paths are untouched.
+  const other = await app.request('https://api.roomote.test/health');
+  expect(await other.text()).toBe('ok');
+  const viaPath = await app.request(
+    `https://egress.roomote.test${base}/v1/items`,
+    { headers: { authorization: `Bearer ${substitute}` } },
+  );
+  expect(viaPath.status).toBe(200);
+  expect(fetch).toHaveBeenCalledTimes(2);
 });
 
 it('reads an exact substitute after any single authentication scheme', () => {

@@ -51,6 +51,7 @@ import {
   brainInference,
   sessionEgress,
   sessionEgressProxy,
+  sessionEgressProxyHostAlias,
   inference,
   tts,
   mcp,
@@ -171,6 +172,18 @@ export function createApiApp(): ApiApp {
   // app.use(logger());
 
   app.use('*', requestObservabilityMiddleware);
+
+  // A deployment may serve the session egress proxy at the root of its own
+  // hostname so host-only SDK clients need no path prefix. Same route and
+  // checks as `/api/session-egress`; the proxy authenticates its own callers.
+  if (Env.R_SESSION_EGRESS_PROXY_HOST)
+    app.use(
+      '*',
+      sessionEgressProxyHostAlias(
+        sessionEgressProxy,
+        Env.R_SESSION_EGRESS_PROXY_HOST,
+      ),
+    );
 
   const corsOptions = {
     origin: resolveApiCorsOrigin,

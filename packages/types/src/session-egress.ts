@@ -149,8 +149,16 @@ export const sessionEgressAuthorizeSchema = z
  */
 export const SESSION_EGRESS_PROXY_PATH = '/api/session-egress';
 
-/** The one base URL a workload uses for every approved service. */
-export function sessionEgressProxyBaseUrl(apiBaseUrl: string): string {
+/**
+ * The one base URL a workload uses for every approved service: the dedicated
+ * proxy hostname when the deployment has one, otherwise the API origin plus
+ * the proxy path. Workloads never learn which form they were given.
+ */
+export function sessionEgressProxyBaseUrl(
+  apiBaseUrl: string,
+  proxyHost?: string | null,
+): string {
+  if (proxyHost) return `https://${proxyHost}`;
   let end = apiBaseUrl.length;
   while (end > 0 && apiBaseUrl[end - 1] === '/') end--;
   return `${apiBaseUrl.slice(0, end)}${SESSION_EGRESS_PROXY_PATH}`;

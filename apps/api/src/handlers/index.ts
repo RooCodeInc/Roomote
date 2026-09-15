@@ -36,7 +36,10 @@ export { brainInference } from './brain-inference';
 export { sessionEgress } from './session-egress';
 
 // API-side substitution proxy for workloads without a connector
-export { sessionEgressProxy } from './session-egress-proxy';
+export {
+  sessionEgressProxy,
+  sessionEgressProxyHostAlias,
+} from './session-egress-proxy';
 
 // narration tts
 export { tts } from './tts';
