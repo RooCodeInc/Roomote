@@ -67,41 +67,72 @@ function replaceMarkdownLinks(
   text: string,
   render: (label: string, url: string, source: string) => string,
 ): string {
-  let result = '';
-  let cursor = 0;
+  const parts: string[] = [];
+  let labelStart = -1;
+  let unchangedStart = 0;
+  let index = 0;
 
-  while (cursor < text.length) {
-    const open = text.indexOf('[', cursor);
-    if (open < 0) {
-      result += text.slice(cursor);
-      break;
+  while (index < text.length) {
+    const character = text[index];
+
+    if (character === '\n') {
+      labelStart = -1;
+    } else if (character === '[' && labelStart === -1) {
+      labelStart = index;
+    } else if (character === ']') {
+      if (
+        labelStart !== -1 &&
+        index > labelStart + 1 &&
+        text[index + 1] === '('
+      ) {
+        const urlStart = index + 2;
+        let urlEnd = urlStart;
+
+        while (
+          urlEnd < text.length &&
+          text[urlEnd] !== ')' &&
+          !/\s/.test(text[urlEnd] ?? '')
+        ) {
+          urlEnd += 1;
+        }
+
+        if (urlEnd > urlStart && text[urlEnd] === ')') {
+          const source = text.slice(labelStart, urlEnd + 1);
+          parts.push(
+            text.slice(unchangedStart, labelStart),
+            render(
+              text.slice(labelStart + 1, index),
+              text.slice(urlStart, urlEnd),
+              source,
+            ),
+          );
+          index = urlEnd + 1;
+          unchangedStart = index;
+          labelStart = -1;
+          continue;
+        }
+
+        if (urlEnd === text.length) {
+          break;
+        }
+
+        index = urlEnd;
+        labelStart = -1;
+        continue;
+      }
+
+      labelStart = -1;
     }
-    const labelEnd = text.indexOf('](', open + 1);
-    const urlEnd = labelEnd < 0 ? -1 : text.indexOf(')', labelEnd + 2);
-    if (labelEnd < 0 || urlEnd < 0) {
-      result += text.slice(cursor);
-      break;
-    }
-    const label = text.slice(open + 1, labelEnd);
-    const url = text.slice(labelEnd + 2, urlEnd);
-    if (
-      !label ||
-      label.includes('\n') ||
-      label.includes(']') ||
-      !url ||
-      /\s/.test(url)
-    ) {
-      result += text.slice(cursor, open + 1);
-      cursor = open + 1;
-      continue;
-    }
-    result += text.slice(cursor, open);
-    const source = text.slice(open, urlEnd + 1);
-    result += render(label, url, source);
-    cursor = urlEnd + 1;
+
+    index += 1;
   }
 
-  return result;
+  if (parts.length === 0) {
+    return text;
+  }
+
+  parts.push(text.slice(unchangedStart));
+  return parts.join('');
 }
 
 function convertInlineMarkdown(escaped: string): string {
@@ -351,75 +382,6 @@ function stripInlineMarkdown(text: string): string {
     .replace(/^_([^_\n](?:[^\n]*[^_\n])?)_$/gm, '$1')
     .replace(/~~([^~\n]+)~~/g, '$1')
     .replace(/`([^`\n]+)`/g, '$1');
-}
-
-function replaceMarkdownLinksWithText(text: string): string {
-  const parts: string[] = [];
-  let labelStart = -1;
-  let unchangedStart = 0;
-  let index = 0;
-
-  while (index < text.length) {
-    const character = text[index];
-
-    if (character === '\n') {
-      labelStart = -1;
-    } else if (character === '[' && labelStart === -1) {
-      labelStart = index;
-    } else if (character === ']') {
-      if (
-        labelStart !== -1 &&
-        index > labelStart + 1 &&
-        text[index + 1] === '('
-      ) {
-        const urlStart = index + 2;
-        let urlEnd = urlStart;
-
-        while (
-          urlEnd < text.length &&
-          text[urlEnd] !== ')' &&
-          !/\s/.test(text[urlEnd] ?? '')
-        ) {
-          urlEnd += 1;
-        }
-
-        if (urlEnd > urlStart && text[urlEnd] === ')') {
-          parts.push(
-            text.slice(unchangedStart, labelStart),
-            text.slice(labelStart + 1, index),
-            ' (',
-            text.slice(urlStart, urlEnd),
-            ')',
-          );
-          index = urlEnd + 1;
-          unchangedStart = index;
-          labelStart = -1;
-          continue;
-        }
-
-        if (urlEnd === text.length) {
-          break;
-        }
-
-        if (/\s/.test(text[urlEnd] ?? '')) {
-          index = urlEnd;
-          labelStart = -1;
-          continue;
-        }
-      }
-
-      labelStart = -1;
-    }
-
-    index += 1;
-  }
-
-  if (parts.length === 0) {
-    return text;
-  }
-
-  parts.push(text.slice(unchangedStart));
-  return parts.join('');
 }
 
 /**
