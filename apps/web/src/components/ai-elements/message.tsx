@@ -107,9 +107,21 @@ export function MessageTimestamp({
 }: MessageTimestampProps) {
   const date = new Date(ts);
   const isValidDate = Number.isFinite(date.getTime());
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   if (!isValidDate) {
     return null;
+  }
+
+  if (!mounted) {
+    return (
+      <time
+        dateTime={date.toISOString()}
+        className="text-xs text-muted-foreground whitespace-nowrap select-none"
+      />
+    );
   }
 
   const shortDate = isToday(date)
