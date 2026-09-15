@@ -201,6 +201,7 @@ export function AcpTranscriptBlockList({
       const content = (
         <AcpActivityGroupMessage
           group={block}
+          showSubagentPayload={showInternalMessages}
           anchorIds={collectBlockAnchorIds(block.blocks, [
             messageAnchorId(block.ts),
           ])}

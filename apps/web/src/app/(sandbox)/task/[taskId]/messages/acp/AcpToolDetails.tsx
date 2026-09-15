@@ -31,14 +31,16 @@ interface AcpToolDetailsProps {
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage;
   maxHeight?: number;
   showSubagentPayload?: boolean;
+  forceVisible?: boolean;
 }
 
 export function AcpToolDetails({
   msg,
   maxHeight = 400,
   showSubagentPayload = false,
+  forceVisible = false,
 }: AcpToolDetailsProps) {
-  if (hidesExpandedToolResult(msg, { showSubagentPayload })) {
+  if (!forceVisible && hidesExpandedToolResult(msg, { showSubagentPayload })) {
     return null;
   }
 
