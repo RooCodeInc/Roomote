@@ -143,7 +143,10 @@ export async function findSessionEgressCandidateForRun(runId: number): Promise<{
 /** An active workload whose run, Session, owner, and attachment are all still live. */
 async function liveWorkload(tx: DatabaseOrTransaction, workloadId: string) {
   const [row] = await tx
-    .select({ workload: sessionEgressWorkloads })
+    .select({
+      workload: sessionEgressWorkloads,
+      ownerMetadata: users.metadata,
+    })
     .from(sessionEgressWorkloads)
     .innerJoin(taskRuns, eq(taskRuns.id, sessionEgressWorkloads.taskRunId))
     .innerJoin(sessions, eq(sessions.id, sessionEgressWorkloads.sessionId))
@@ -169,7 +172,11 @@ async function liveWorkload(tx: DatabaseOrTransaction, workloadId: string) {
       ),
     )
     .for('update', { of: sessionEgressWorkloads });
-  return row?.workload ?? null;
+  // The owner's experiment gates the tools per request; a workload is only
+  // live while it stays on, so renewals and new substitutes stop with it.
+  return row && isSessionSecretToolsExperimentEnabled(row.ownerMetadata)
+    ? row.workload
+    : null;
 }
 
 /** Authorization for controller-to-worker delivery of substitute-only client config. */
@@ -294,7 +301,14 @@ export async function registerSessionEgressWorkload(
       .where(eq(taskRuns.id, input.runId))
       .for('update');
     const eligible = await eligibleRunSession(tx, input.runId);
-    if (!eligible) throw new SessionEgressRegistrationError('run_not_eligible');
+    // Re-checked inside the minting transaction: the controller's preflight
+    // is planning, and an owner who turned the tools off in between must not
+    // have substitutes minted for their key.
+    if (
+      !eligible ||
+      !isSessionSecretToolsExperimentEnabled(eligible.ownerMetadata)
+    )
+      throw new SessionEgressRegistrationError('run_not_eligible');
 
     const [existing] = await tx
       .select()
@@ -571,6 +585,7 @@ async function authorizeSubstitute(
           archivedAt: sessions.archivedAt,
         },
         ownerDeletedAt: users.deletedAt,
+        ownerMetadata: users.metadata,
         run: { actingUserId: taskRuns.actingUserId, status: taskRuns.status },
         attached: sql<boolean>`exists (
         select 1 from ${sessionTasks}
@@ -624,6 +639,7 @@ async function authorizeSubstitute(
       secret.sessionId !== workload.sessionId ||
       session.archivedAt ||
       row.ownerDeletedAt ||
+      !isSessionSecretToolsExperimentEnabled(row.ownerMetadata) ||
       run.actingUserId !== workload.ownerUserId ||
       !ELIGIBLE_RUN_STATUSES.includes(run.status) ||
       !row.attached

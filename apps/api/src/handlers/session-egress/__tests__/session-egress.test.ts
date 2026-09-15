@@ -245,6 +245,10 @@ beforeEach(async () => {
   minted.length = 0;
   for (let i = 0; i < 2; i++) userIds.push((await userFactory.create()).id);
   [ownerId, otherId] = userIds as [string, string];
+  await db
+    .update(users)
+    .set({ metadata: { session_secret_tools_enabled: true } })
+    .where(eq(users.id, ownerId));
   const row = await session(ownerId);
   sessionId = row.id;
   context = { userId: ownerId, sessionId };
@@ -1162,4 +1166,33 @@ it('drives the controller flow through the typed SDK client', async () => {
   await expect(
     client.renewLease(registration.workloadId, { leaseSeconds: 300 }),
   ).rejects.toThrow(/404 workload_not_found/);
+});
+
+it('treats an owner who turned Session secret tools off as ineligible everywhere', async () => {
+  const base = await registered();
+  await db.update(users).set({ metadata: {} }).where(eq(users.id, ownerId));
+  // Registration and rotation refuse inside the minting transaction.
+  expect(await register()).toMatchObject({
+    status: 409,
+    json: { error: 'run_not_eligible' },
+  });
+  // Existing substitutes stop authorizing, and the workload is no longer live.
+  expect(await authorize(authorizeBody(base))).toEqual({
+    allowed: false,
+    reason: 'session_unavailable',
+  });
+  expect(
+    (
+      await call(`/workloads/${base.registration.workloadId}/lease`, {
+        token: await createSessionEgressControllerToken(),
+        body: {},
+      })
+    ).status,
+  ).toBe(404);
+  // Turning it back on restores the same workload without a new registration.
+  await db
+    .update(users)
+    .set({ metadata: { session_secret_tools_enabled: true } })
+    .where(eq(users.id, ownerId));
+  expect((await authorize(authorizeBody(base))).allowed).toBe(true);
 });

@@ -65,7 +65,9 @@ Request (`sessionEgressWorkloadRegisterSchema`):
 - `runId`: the attached run. Eligible only if the run status is in
   `activeRunStatuses`, it is attached (`session_tasks`) to exactly one Session,
   that Session is `ownerKind = 'user'`, unarchived, and the run's
-  `actingUserId` equals the Session owner, who is not deleted.
+  `actingUserId` equals the Session owner, who is not deleted and has Session
+  secret tools enabled (`session_secret_tools_enabled`). The owner check is
+  made inside the minting transaction, not only in the controller's preflight.
 - `connectorIdentity`: the identity the gateway will authenticate at connection
   time (16–512 printable ASCII chars). Unique among active workloads.
 - `leaseSeconds`: 60–86400, default 3600. Leases are renewed only by the
@@ -206,9 +208,9 @@ Response is always `200` with `Cache-Control: no-store`:
 
 Decision order (first failing rule wins): token lookup by hash →
 workload/connector binding → workload active and lease unexpired → generation
-match → grant not revoked → grant not expired → owner not deleted, Session
-unarchived and still owned by the same user, grant belongs to that
-Session/owner, run still active with `actingUserId = owner`, run still
+match → grant not revoked → grant not expired → owner not deleted and still has Session secret tools
+enabled, Session unarchived and still owned by the same user, grant belongs to
+that Session/owner, run still active with `actingUserId = owner`, run still
 attached to the Session → exact `host:port` equals the approved origin
 (default port 443) and that origin still passes the deployment public-egress
 policy (`assertEgressUrlAllowed`, HTTPS) → method in the grant's
