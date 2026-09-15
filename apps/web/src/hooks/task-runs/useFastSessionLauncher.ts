@@ -10,7 +10,7 @@ import { sessionPathWithVoiceAutostart } from '@/lib/voice-autostart';
 
 import { useStartFastSession } from './useStartFastSession';
 
-export type FastSessionSubmission = {
+type FastSessionSubmission = {
   text: string;
   images?: string[];
   attachmentTexts?: string[];
