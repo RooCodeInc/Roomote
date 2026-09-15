@@ -33,6 +33,7 @@ import {
   finalizePrReviewNotificationRequest,
   isDurablePrReviewNotificationRequest,
   renewPrReviewNotificationRequestLease,
+  readLivePullRequestStateForNotification,
   releaseCanonicalPrReviewWebAutoDispatch,
   retirePrReviewActionMessagesBestEffort,
   migrateLegacyPrReviewNotificationRequest,
@@ -140,8 +141,17 @@ async function getNotificationActivity(
   return { active: isLiveTaskTurn(run), source: 'task' };
 }
 
-function findTaskPullRequestForNotification(data: PrReviewNotificationRequest) {
-  return db.query.taskPullRequests.findFirst({
+/**
+ * The task's link for the pull request this notification is about. The same
+ * task, provider, repository, and number can name pull requests on different
+ * source-control hosts, so the request's repository id or host picks the
+ * instance; a legacy link that recorded neither is the only fallback, and an
+ * ambiguous set yields no link rather than an arbitrary one.
+ */
+async function findTaskPullRequestForNotification(
+  data: PrReviewNotificationRequest,
+) {
+  const links = await db.query.taskPullRequests.findMany({
     where: and(
       eq(taskPullRequests.taskId, data.taskId),
       eq(
@@ -152,6 +162,7 @@ function findTaskPullRequestForNotification(data: PrReviewNotificationRequest) {
       eq(taskPullRequests.prNumber, data.prNumber),
     ),
     columns: {
+      id: true,
       sourceControlProvider: true,
       host: true,
       repository: true,
@@ -163,6 +174,22 @@ function findTaskPullRequestForNotification(data: PrReviewNotificationRequest) {
       autoHandleFeedbackByUserId: true,
     },
   });
+  if (data.repositoryId) {
+    const byRepository = links.find(
+      (link) => link.repositoryId === data.repositoryId,
+    );
+    if (byRepository) return byRepository;
+  }
+  if (data.host) {
+    const byHost = links.find((link) => link.host === data.host);
+    if (byHost) return byHost;
+  }
+  const legacy = links.filter(
+    (link) => link.host == null && link.repositoryId == null,
+  );
+  if (legacy.length === 1) return legacy[0];
+  if (!data.repositoryId && !data.host && links.length === 1) return links[0];
+  return undefined;
 }
 
 function logPrReviewNotificationTriage(input: {
@@ -855,6 +882,42 @@ export const prReviewNotificationJob = async (
     const canAutoHandleWeb = webAutoDispatchKey !== null;
     const autoHandleUserId =
       autoHandleRoute || canAutoHandleWeb ? autoHandlePreference?.userId : null;
+
+    // Auto-dispatch resumes or launches work on the pull request, so it is
+    // held to the provider's live state rather than the persisted link. The
+    // link is webhook-maintained and can miss a merge; a delivery that
+    // waited long enough for that to happen would otherwise reopen a merged
+    // pull request days later (a week-old CI failure did exactly that).
+    if (followUp && autoHandlePreference && autoHandleUserId) {
+      const provider = data.sourceControlProvider ?? 'github';
+      const liveState = await readLivePullRequestStateForNotification({
+        provider,
+        host: deliveryPrLink?.host ?? data.host,
+        repository: data.repository,
+        prNumber: data.prNumber,
+      });
+      if (liveState === 'merged' || liveState === 'closed') {
+        console.log(
+          `[PrReviewNotification] PR ${data.repository}#${data.prNumber} is ${liveState} on the provider while the task link says ${deliveryPrLink?.status ?? 'unknown'}; suppressing stale review feedback instead of auto-dispatching`,
+        );
+        // Correct only the link row this notification resolved. The same
+        // task/provider/repository/number can name pull requests on
+        // different hosts, and those links must keep their own status.
+        if (deliveryPrLink) {
+          await db
+            .update(taskPullRequests)
+            .set({ status: liveState, updatedAt: new Date() })
+            .where(eq(taskPullRequests.id, deliveryPrLink.id))
+            .catch((error: unknown) => {
+              console.warn(
+                `[PrReviewNotification] Could not record ${data.repository}#${data.prNumber} as ${liveState}: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            });
+        }
+        await finalizePrReviewNotificationRequest(data, 'suppressed');
+        return;
+      }
+    }
 
     // Fast-parent delivery can fail and release this notification for retry.
     // Complete it before auto-dispatch so a retry cannot enqueue the same

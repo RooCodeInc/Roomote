@@ -4,6 +4,8 @@ import {
   extractAutomationTriggeredPromptText,
   extractAcpMessageText,
   getTextFromContentBlocks,
+  hasLeadingIntegrationSavedBlock,
+  stripLeadingIntegrationSavedBlock,
   parsePrReviewActionOffer,
   type PrReviewActionOfferStatus,
   sanitizeEnvelopeFields,
@@ -583,6 +585,28 @@ function prepareFastSessionMessageRow<
     { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
   );
 
+  if (
+    row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+    sanitized.metadata?.visibleInTranscript !== false
+  ) {
+    // The turn Roomote sends after the owner saves an integration key starts
+    // with one `<integration_saved>` block; the transcript shows only the text
+    // after it. Only that exact leading envelope is recognized, so a block
+    // quoted or pasted anywhere else in a human message stays as written.
+    const text = getTextFromContentBlocks(sanitized.contentBlocks) ?? '';
+    if (hasLeadingIntegrationSavedBlock(text)) {
+      return {
+        ...row,
+        contentBlocks: [
+          { type: 'text', text: stripLeadingIntegrationSavedBlock(text) },
+          ...sanitized.contentBlocks.filter((block) => block.type !== 'text'),
+        ],
+        metadata: sanitized.metadata,
+        payload: sanitized.payload ?? {},
+      };
+    }
+  }
+
   if (sanitized.metadata?.visibleInTranscript === false) {
     if (
       row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
@@ -768,11 +792,12 @@ export async function getFastSessionSuggestableMessages(
     id: row.id,
     eventType: row.eventType,
     role: row.role,
-    text:
+    text: visibleSuggestableText(
       extractAcpMessageText(
         row.contentBlocks,
         (row.payload as Record<string, unknown> | null) ?? null,
       ) ?? null,
+    ),
   }));
 }
 
@@ -884,4 +909,10 @@ export async function getFastSessionById(
     directInferenceCostMicroUsd,
     inferenceCostMicroUsd: directInferenceCostMicroUsd,
   };
+}
+
+function visibleSuggestableText(text: string | null): string | null {
+  return text && hasLeadingIntegrationSavedBlock(text)
+    ? stripLeadingIntegrationSavedBlock(text)
+    : text;
 }

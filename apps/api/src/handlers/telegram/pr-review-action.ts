@@ -16,6 +16,10 @@ import {
   postTelegramMessageBestEffort,
 } from './replies.js';
 
+function escapeTelegramMarkdown(value: string): string {
+  return value.replace(/[\\`*_[\]<>]/g, '\\$&');
+}
+
 /**
  * Handles clicks on a PR review-feedback notification's Yes / auto-handle /
  * Dismiss buttons in Telegram: claims the nonce-keyed pending offer and, on
@@ -149,15 +153,28 @@ export async function handleTelegramPrReviewActionCallback(params: {
     });
 
     if (chatId && messageId) {
-      if (dispatched.outcome !== 'unavailable') {
+      if (choice === 'auto') {
+        const addressedName = escapeTelegramMarkdown(senderName ?? 'there');
+        await retirePrReviewActionMessagesBestEffort(
+          [
+            {
+              provider: 'telegram',
+              channelId: chatId,
+              threadId: threadId ?? null,
+              messageId,
+              ...(message?.text ? { messageText: message.text } : {}),
+            },
+          ],
+          {
+            resolution: `OK, ${addressedName}. Future review feedback on this PR will get resolved automatically.`,
+          },
+        );
+      } else if (dispatched.outcome !== 'unavailable') {
         await postTelegramMessageBestEffort({
           chatId,
           ...(threadId !== undefined ? { threadId } : {}),
           replyToMessageId: messageId,
-          text:
-            choice === 'auto'
-              ? `OK, ${senderName ?? 'there'}. Future review feedback on this PR will get resolved automatically.`
-              : 'On it — resolving the review feedback.',
+          text: 'On it — resolving the review feedback.',
         });
       }
     }

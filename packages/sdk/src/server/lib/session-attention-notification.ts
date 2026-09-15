@@ -7,6 +7,7 @@ import {
   db,
   desc,
   eq,
+  getUserChatInitiationProvider,
   getSessionForTask,
   gt,
   isNotNull,
@@ -237,6 +238,10 @@ async function deliverNotification(
       includeInitialMessage: false,
       ...(continuation ? { continuation } : {}),
     });
+    const preferredProvider = await getUserChatInitiationProvider(
+      subject.userId,
+      tx,
+    );
     const { receipts } = await sendUserDirectMessageBestEffortWithReceipts({
       userId: subject.userId,
       text: notificationText,
@@ -244,6 +249,7 @@ async function deliverNotification(
       logContext: 'sessionAttentionNotification',
       idempotencyKey: buildIdempotencyKey(subject.sessionId, subject.eventKey),
       ...(previousDelivery ? { replyAnchor: previousDelivery.receipt } : {}),
+      ...(preferredProvider ? { preferredProvider } : {}),
       presentation: initialPresentation,
       replyPresentation,
     });

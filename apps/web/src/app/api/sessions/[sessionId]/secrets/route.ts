@@ -16,6 +16,7 @@ import {
 
 import { authorize } from '@/lib/server/auth-context';
 import { readBoundedJsonBody } from '@/lib/server/bounded-json-body';
+import { buildIntegrationSavedContinuation } from '@/lib/server/integration-saved-continuation';
 import { Env } from '@/lib/server/env';
 
 export const runtime = 'nodejs';
@@ -106,9 +107,9 @@ async function handle(
         ) {
           await replyToFastSessionCommand(auth, {
             sessionId: session.fastConversationId,
-            text: isServiceCredentialToolsExperimentEnabled(user?.metadata)
-              ? 'I saved an API key securely as an integration for every Session I own. Check list_integration_keys for ready integrations and continue the requested work using only the approved methods and destination. Attached coding runs may use this same integration. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.'
-              : 'I saved an API key securely as an integration. Credential-backed Session access is temporarily unavailable. Explain that the integration was saved but cannot currently be used; do not attempt a credential-backed request or ask me to paste credentials into chat.',
+            text: buildIntegrationSavedContinuation(
+              isServiceCredentialToolsExperimentEnabled(user?.metadata),
+            ),
           });
           resumed = true;
         }

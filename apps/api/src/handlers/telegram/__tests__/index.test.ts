@@ -590,7 +590,7 @@ describe('Telegram webhook handler', () => {
     info.mockRestore();
   });
 
-  it('retires Auto-resolve controls through the managed Telegram footer path', async () => {
+  it('resolves Auto-resolve in the original Telegram offer without another reply', async () => {
     mockTelegramLinkedSender('linked-user-1');
     claimPendingPrReviewActionMock.mockResolvedValueOnce({
       nonce: 'review-action-1',
@@ -615,19 +615,23 @@ describe('Telegram webhook handler', () => {
           message_id: 777,
           message_thread_id: 7,
           chat: { id: 222, type: 'supergroup' },
+          text: 'Review feedback: add a regression test.',
         },
       },
     });
 
     expect(response.status).toBe(200);
-    expect(retirePrReviewActionMessagesBestEffortMock).toHaveBeenCalledWith([
-      {
-        provider: 'telegram',
-        channelId: '222',
-        threadId: '7',
-        messageId: '777',
-      },
-    ]);
+    expect(retirePrReviewActionMessagesBestEffortMock).toHaveBeenNthCalledWith(
+      1,
+      [
+        {
+          provider: 'telegram',
+          channelId: '222',
+          threadId: '7',
+          messageId: '777',
+        },
+      ],
+    );
     expect(editMessageReplyMarkupMock).not.toHaveBeenCalled();
     expect(dispatchPrReviewFollowUpMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -642,15 +646,23 @@ describe('Telegram webhook handler', () => {
       prNumber: 42,
       userId: 'linked-user-1',
     });
-    expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: '222',
-        replyToMessageId: '777',
-        text: expect.stringContaining(
-          'Future review feedback on this PR will get resolved automatically.',
-        ),
-      }),
+    expect(retirePrReviewActionMessagesBestEffortMock).toHaveBeenNthCalledWith(
+      2,
+      [
+        {
+          provider: 'telegram',
+          channelId: '222',
+          threadId: '7',
+          messageId: '777',
+          messageText: 'Review feedback: add a regression test.',
+        },
+      ],
+      {
+        resolution:
+          'OK, Ada. Future review feedback on this PR will get resolved automatically.',
+      },
     );
+    expect(postMessageMock).not.toHaveBeenCalled();
   });
 
   it('queues a new reaction on the owner’s bound Fast message', async () => {

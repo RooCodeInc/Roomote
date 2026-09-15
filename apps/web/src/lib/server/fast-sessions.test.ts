@@ -402,6 +402,47 @@ describe('Fast session queries', () => {
   });
 
   it.each(['history', 'polling'])(
+    'shows only the request text of a Roomote-framed human turn in %s',
+    async (readMode) => {
+      const owner = await userFactory.create();
+      const session = await createFastSession({
+        userId: owner.id,
+        conversationId: `framed-turn-${readMode}`,
+        updatedAt: new Date(),
+      });
+      await createFastMessage({
+        conversationId: session.id,
+        eventId: 'framed-turn',
+        turnSeq: 0,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        metadata: { visibleInTranscript: true, turnSource: 'human' },
+        contentBlocks: [
+          {
+            type: 'text',
+            text: '<integration_saved>\nCall list_integration_keys and continue.\n</integration_saved>\nI added the integration, go ahead.',
+          },
+        ],
+      });
+      const result =
+        readMode === 'history'
+          ? await getFastSessionById(
+              { userId: owner.id, isAdmin: false },
+              session.id,
+            )
+          : await getFastSessionMessagesSince(session.id, 0);
+      expect(result?.messages).toHaveLength(1);
+      expect(result?.messages[0]?.contentBlocks).toEqual([
+        { type: 'text', text: 'I added the integration, go ahead.' },
+      ]);
+      expect(result?.messages[0]?.metadata).toMatchObject({
+        visibleInTranscript: true,
+        turnSource: 'human',
+      });
+    },
+  );
+
+  it.each(['history', 'polling'])(
     'enriches known task references with current non-deleted titles in %s',
     async (readMode) => {
       const owner = await userFactory.create();

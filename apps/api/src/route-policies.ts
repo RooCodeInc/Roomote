@@ -120,6 +120,11 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'public',
   },
   {
+    name: 'health-bullmq',
+    match: { type: 'prefix', path: '/health/bullmq' },
+    policy: 'public',
+  },
+  {
     name: 'roomote-mcp-oauth-protected-resource-metadata',
     match: {
       type: 'exact',

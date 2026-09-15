@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   db,
+  createChatInitiationOrder,
   fastAgentConversations,
   fastAgentMessages,
+  recordUserChatInitiationProvider,
   runFactory,
   sessionFactory,
   sessionTasks,
@@ -226,6 +228,25 @@ describe('session attention notifications', () => {
     );
     expect(mocks.send).not.toHaveBeenCalledWith(
       expect.objectContaining({ text: expect.stringContaining(task.title) }),
+    );
+  });
+
+  it('uses the recipient task-starting chat preference for a new route', async () => {
+    const { run, user } = await createDirectWebRun();
+    await recordUserChatInitiationProvider(
+      user.id,
+      'discord',
+      createChatInitiationOrder(),
+    );
+
+    await notifyDirectWebTaskAttention({
+      runId: run.id,
+      kind: 'result_ready',
+      eventId: 'completion-with-preference',
+    });
+
+    expect(mocks.send).toHaveBeenCalledWith(
+      expect.objectContaining({ preferredProvider: 'discord' }),
     );
   });
 

@@ -50,9 +50,12 @@ import {
   ensureAutomationRowsOnce,
   ensureSessionForTask,
   isChatGptSubscriptionConnected,
+  createChatInitiationOrder,
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
   projectPendingPrReviewEventsForAssociation,
+  isChatInitiationProvider,
+  recordUserChatInitiationProvider,
   recordTaskStartParallelCount,
   syncTaskStateFromRuns,
   taskPullRequests,
@@ -1351,13 +1354,18 @@ export async function enqueueTask(
   input: EnqueueTaskInput,
   options: EnqueueTaskOptions = {},
 ): Promise<TaskRun> {
+  const chatInitiationOrder = createChatInitiationOrder();
   await assertDeploymentIsActive();
 
   if (input.task.type === TaskPayloadKind.SnapshotResume) {
     return enqueueSnapshotResume(input as ResumeTaskLaunch, options);
   }
 
-  return enqueueFreshLaunch(input as FreshTaskLaunch, options);
+  return enqueueFreshLaunch(
+    input as FreshTaskLaunch,
+    options,
+    chatInitiationOrder,
+  );
 }
 
 async function inheritSourceCommunicationMetadata(
@@ -1404,6 +1412,7 @@ async function inheritSourceCommunicationMetadata(
 async function enqueueFreshLaunch(
   input: FreshTaskLaunch,
   options: EnqueueTaskOptions,
+  chatInitiationOrder: ReturnType<typeof createChatInitiationOrder>,
 ): Promise<TaskRun> {
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
@@ -1779,6 +1788,18 @@ async function enqueueFreshLaunch(
           },
           { db: tx },
         );
+        if (
+          initiator.kind === 'user' &&
+          linkedUserId &&
+          isChatInitiationProvider(surface)
+        ) {
+          await recordUserChatInitiationProvider(
+            linkedUserId,
+            surface,
+            chatInitiationOrder,
+            tx,
+          );
+        }
         taskId = createdTask.id;
       }
 

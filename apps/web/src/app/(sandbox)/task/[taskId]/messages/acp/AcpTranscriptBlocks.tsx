@@ -198,14 +198,16 @@ export function AcpTranscriptBlockList({
       ) : null;
 
     if (block.kind === 'activity_group') {
+      const nestedBlocks = withoutToolBlocks(block.blocks);
       const content = (
         <AcpActivityGroupMessage
           group={block}
-          anchorIds={collectBlockAnchorIds(block.blocks, [
+          showSubagentPayload={showInternalMessages}
+          anchorIds={collectBlockAnchorIds(nestedBlocks, [
             messageAnchorId(block.ts),
           ])}
         >
-          {renderNestedBlocks(withoutToolBlocks(block.blocks))}
+          {renderNestedBlocks(nestedBlocks)}
         </AcpActivityGroupMessage>
       );
 

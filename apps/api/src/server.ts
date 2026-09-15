@@ -35,6 +35,7 @@ import {
 import {
   apiHealth,
   apiLiveness,
+  bullmqHealth,
   controllerHealth,
   github,
   gitlab,
@@ -225,6 +226,7 @@ export function createApiApp(): ApiApp {
   app.route('/health/api', apiHealth);
   app.route('/health/liveness', apiLiveness);
   app.route('/health/controller', controllerHealth);
+  app.route('/health/bullmq', bullmqHealth);
 
   app.route('/api/webhooks/github', github);
   app.route('/api/webhooks/gitlab', gitlab);
