@@ -92,3 +92,35 @@ export async function createTaskArtifactRecord(input: {
 }) {
   return createArtifactRecord(input);
 }
+
+export async function authorizeTaskArtifactUpload(input: {
+  taskId: string;
+  artifactId: string;
+  expiresAt: Date;
+}): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [task] = await tx
+      .select({ id: tasks.id, privacy: tasks.privacy })
+      .from(tasks)
+      .where(eq(tasks.id, input.taskId))
+      .for('key share');
+    if (!task) throw new Error('Task not found.');
+    if (task.privacy === 'private') {
+      throw new Error(
+        'Artifact publishing is unavailable in private Sessions.',
+      );
+    }
+
+    const [authorized] = await tx
+      .update(taskArtifacts)
+      .set({ uploadUrlExpiresAt: input.expiresAt, updatedAt: new Date() })
+      .where(
+        and(
+          eq(taskArtifacts.id, input.artifactId),
+          eq(taskArtifacts.taskId, input.taskId),
+        ),
+      )
+      .returning({ id: taskArtifacts.id });
+    if (!authorized) throw new Error('Artifact not found.');
+  });
+}

@@ -48,6 +48,10 @@ vi.mock('@/components/settings/SessionSecretToolsExperimentalSetting', () => ({
   ),
 }));
 
+vi.mock('@/components/settings/PrivateSessionsExperimentalSetting', () => ({
+  PrivateSessionsExperimentalSetting: () => <div>Private Sessions setting</div>,
+}));
+
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 
 describe('ExperimentalSettingsPage', () => {
@@ -75,6 +79,9 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.queryByText('Slack peer conversations setting'),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Private Sessions setting'),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(refetchMock).toHaveBeenCalledOnce();
@@ -91,6 +98,7 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.getByText('Session secret tools setting'),
     ).toBeInTheDocument();
+    expect(screen.getByText('Private Sessions setting')).toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental preferences.'),
     ).not.toBeInTheDocument();
@@ -124,6 +132,7 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.getByText('Session secret tools setting'),
     ).toBeInTheDocument();
+    expect(screen.getByText('Private Sessions setting')).toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental preferences.'),
     ).not.toBeInTheDocument();

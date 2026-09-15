@@ -7,10 +7,13 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Env } from '@roomote/env';
-import { getArtifactStorageKey } from '@roomote/types';
+import {
+  ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
+  getArtifactStorageKey,
+} from '@roomote/types';
 
-const PRESIGNED_URL_EXPIRY_SECONDS = 3600;
 const LOCAL_DOCKER_HOSTNAME = 'host.docker.internal';
+const PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS = 3600;
 const HOST_LOCAL_ENDPOINT_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
 
 const s3PresignClients = new Map<string, S3Client>();
@@ -103,7 +106,7 @@ export async function generateUploadUrl(
     ),
     command,
     {
-      expiresIn: PRESIGNED_URL_EXPIRY_SECONDS,
+      expiresIn: ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
     },
   );
 }
@@ -127,7 +130,7 @@ export async function generateDownloadUrl(
     ),
     command,
     {
-      expiresIn: PRESIGNED_URL_EXPIRY_SECONDS,
+      expiresIn: PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
     },
   );
 }

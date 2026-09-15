@@ -5,6 +5,8 @@ import {
   getUserPersonalization,
   isNull,
   isSlackPeerConversationsExperimentEnabledInMetadata,
+  isPrivateSessionsExperimentEnabledInMetadata,
+  PRIVATE_SESSIONS_EXPERIMENT_METADATA_KEY,
   SLACK_PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY,
   sql,
   updateUserPersonalization,
@@ -66,6 +68,8 @@ function normalizePersonalPreferences(
       typeof metadata[SESSION_SECRET_TOOLS_EXPERIMENT_KEY] === 'boolean'
         ? metadata[SESSION_SECRET_TOOLS_EXPERIMENT_KEY]
         : DEFAULT_PERSONAL_PREFERENCES.sessionSecretToolsEnabled,
+    privateSessionsExperimentEnabled:
+      isPrivateSessionsExperimentEnabledInMetadata(metadata),
   };
 }
 
@@ -208,6 +212,10 @@ export async function updatePersonalPreferencesCommand(
   if (input.sessionSecretToolsEnabled !== undefined) {
     nextMetadataRecord[SESSION_SECRET_TOOLS_EXPERIMENT_KEY] =
       input.sessionSecretToolsEnabled;
+  }
+  if (input.privateSessionsExperimentEnabled !== undefined) {
+    nextMetadataRecord[PRIVATE_SESSIONS_EXPERIMENT_METADATA_KEY] =
+      input.privateSessionsExperimentEnabled;
   }
 
   if (Object.keys(nextMetadataRecord).length === 0) {

@@ -85,6 +85,7 @@ type IntegrationAuditContext = BrokerContext & {
   messageId: string;
   privacy?: 'shared' | 'private';
   privateOwnerUserId?: string | null;
+  privateSessionsExperimentEnabled?: boolean;
 };
 
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
@@ -658,7 +659,8 @@ export async function callFastAgentIntegration(
   const privateIntegrationCall = integration.dataPolicy === 'private';
   if (
     privateIntegrationCall &&
-    (context.privacy !== 'private' ||
+    (context.privateSessionsExperimentEnabled !== true ||
+      context.privacy !== 'private' ||
       context.privateOwnerUserId !== context.userId)
   ) {
     throw new Error(

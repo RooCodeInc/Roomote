@@ -984,6 +984,7 @@ export const taskArtifacts = pgTable(
     version: integer('version').notNull().default(0),
     size: bigint('size', { mode: 'number' }).notNull(),
     uploaded: boolean('uploaded').notNull().default(false),
+    uploadUrlExpiresAt: timestamp('upload_url_expires_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },

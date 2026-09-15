@@ -2084,6 +2084,7 @@ describe('fast-agent integration broker', () => {
           ...auditContext,
           privacy: 'private',
           privateOwnerUserId: auditContext.userId,
+          privateSessionsExperimentEnabled: true,
         },
         [integration],
         request,
@@ -2096,6 +2097,19 @@ describe('fast-agent integration broker', () => {
       expect.objectContaining({ resultPreview: null }),
     );
     expect(mocks.callMcpTool).toHaveBeenCalledTimes(1);
+
+    await expect(
+      callFastAgentIntegration(
+        {
+          ...auditContext,
+          privacy: 'private',
+          privateOwnerUserId: auditContext.userId,
+          privateSessionsExperimentEnabled: false,
+        },
+        [integration],
+        request,
+      ),
+    ).rejects.toThrow('require a private Session');
   });
 
   it('does not execute a tool when its durable audit cannot be created', async () => {

@@ -66,6 +66,7 @@ import {
   getSessionForTask,
   inArray,
   isBrainEnabled,
+  isPrivateSessionsExperimentEnabledForUser,
   isNull,
   markSessionGoalForConversation,
   releaseSessionGoalContinuation,
@@ -1852,6 +1853,7 @@ export async function answerFastAgentQuestion({
   let canonicalConversationId: string | null = null;
   let currentSessionPrivacy: 'shared' | 'private' = 'shared';
   let currentPrivateOwnerUserId: string | null = null;
+  let privateSessionsExperimentEnabled = false;
   let availableIntegrations: FastAgentIntegration[] = [];
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
@@ -3229,6 +3231,10 @@ export async function answerFastAgentQuestion({
       reasoningEffort = session.reasoningEffort;
     currentSessionPrivacy = session.privacy ?? 'shared';
     currentPrivateOwnerUserId = session.privateOwnerUserId ?? null;
+    privateSessionsExperimentEnabled =
+      currentSessionPrivacy === 'private'
+        ? await isPrivateSessionsExperimentEnabledForUser(userId)
+        : false;
     availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
       conversation,
@@ -3239,6 +3245,7 @@ export async function answerFastAgentQuestion({
         ? integration.dataPolicy !== 'private'
         : integration.id === BRAIN_MCP_ID ||
           (integration.dataPolicy === 'private' &&
+            privateSessionsExperimentEnabled &&
             currentPrivateOwnerUserId === userId),
     );
     if (currentSessionPrivacy === 'private') {
@@ -3985,6 +3992,7 @@ export async function answerFastAgentQuestion({
             sessionId: session.id,
             privacy: currentSessionPrivacy,
             privateOwnerUserId: currentPrivateOwnerUserId,
+            privateSessionsExperimentEnabled,
             humanTurn: !platformEvent,
             conversation,
             messageId: currentMessageId ?? conversation.conversationId,

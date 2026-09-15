@@ -1641,6 +1641,7 @@ export const appRouter = createRouter({
             slackPeerConversationsExperimentEnabled: z.boolean().optional(),
             homeComposerSuggestionsEnabled: z.boolean().optional(),
             sessionSecretToolsEnabled: z.boolean().optional(),
+            privateSessionsExperimentEnabled: z.boolean().optional(),
           })
           .refine(
             (input) =>
@@ -1650,7 +1651,8 @@ export const appRouter = createRouter({
               input.resultsPageEnabled !== undefined ||
               input.slackPeerConversationsExperimentEnabled !== undefined ||
               input.homeComposerSuggestionsEnabled !== undefined ||
-              input.sessionSecretToolsEnabled !== undefined,
+              input.sessionSecretToolsEnabled !== undefined ||
+              input.privateSessionsExperimentEnabled !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },

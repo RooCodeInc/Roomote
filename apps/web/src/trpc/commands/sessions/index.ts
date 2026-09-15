@@ -4,7 +4,10 @@ import {
   acquireFastAgentTurnLock,
   fastAgentConversationRepository,
 } from '@roomote/cloud-agents/server';
-import { SESSION_STATUSES } from '@roomote/types';
+import {
+  ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
+  SESSION_STATUSES,
+} from '@roomote/types';
 import {
   and,
   asc,
@@ -95,9 +98,34 @@ export async function deletePrivateSessionCommand(
           taskId: taskArtifacts.taskId,
           path: taskArtifacts.path,
           version: taskArtifacts.version,
+          uploadUrlExpiresAt: taskArtifacts.uploadUrlExpiresAt,
         })
         .from(taskArtifacts)
         .where(inArray(taskArtifacts.taskId, taskIds));
+      const now = new Date();
+      const legacyExpiry = new Date(
+        now.getTime() + ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS * 1_000,
+      );
+      const legacyArtifactIds = artifacts
+        .filter((artifact) => artifact.uploadUrlExpiresAt === null)
+        .map((artifact) => artifact.id);
+      if (legacyArtifactIds.length > 0) {
+        await tx
+          .update(taskArtifacts)
+          .set({ uploadUrlExpiresAt: legacyExpiry, updatedAt: now })
+          .where(inArray(taskArtifacts.id, legacyArtifactIds));
+      }
+      const latestExpiry = artifacts.reduce((latest, artifact) => {
+        const expiry = artifact.uploadUrlExpiresAt ?? legacyExpiry;
+        return expiry > latest ? expiry : latest;
+      }, now);
+      if (latestExpiry > now) {
+        return {
+          deleted: false,
+          retryAfter: latestExpiry.toISOString(),
+          reason: 'artifact_uploads_pending' as const,
+        };
+      }
       if (artifacts.length > 0) {
         const result = await deleteArtifactsBatch(
           artifacts.map((artifact) => ({

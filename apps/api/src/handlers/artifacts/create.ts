@@ -1,11 +1,13 @@
 import type { Context } from 'hono';
 import {
+  ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
   type ReservedTaskArtifactType,
   resolveCreateArtifactType,
 } from '@roomote/types';
 
 import {
   buildSignedArtifactRawUrl,
+  authorizeTaskArtifactUpload,
   createTaskArtifactRecord,
   currentEpochSeconds,
 } from '@roomote/sdk/server';
@@ -124,6 +126,13 @@ async function createArtifactRecord(
       ),
     },
   );
+  await authorizeTaskArtifactUpload({
+    taskId,
+    artifactId: artifact.id,
+    expiresAt: new Date(
+      Date.now() + ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS * 1_000,
+    ),
+  });
 
   const artifactUrlBase = (Env.R_PUBLIC_URL ?? Env.R_APP_URL).replace(
     /\/+$/,

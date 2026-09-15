@@ -66,6 +66,7 @@ describe('deletePrivateSessionCommand', () => {
         version: 1,
         size: 7,
         uploaded: true,
+        uploadUrlExpiresAt: new Date(0),
       })
       .returning();
 
@@ -129,6 +130,7 @@ describe('deletePrivateSessionCommand', () => {
         version: 0,
         size: 5,
         uploaded: true,
+        uploadUrlExpiresAt: new Date(0),
       })
       .returning();
     mockDeleteArtifactsBatch.mockResolvedValue({ deleted: 0, errors: 1 });
@@ -177,6 +179,7 @@ describe('deletePrivateSessionCommand', () => {
       version: 0,
       size: 8,
       uploaded: true,
+      uploadUrlExpiresAt: new Date(0),
     });
     let concurrentInsert: Promise<unknown> | null = null;
     mockDeleteArtifactsBatch.mockImplementation(async () => {
@@ -212,5 +215,64 @@ describe('deletePrivateSessionCommand', () => {
       ),
     ).resolves.toEqual({ deleted: true });
     await expect(concurrentInsert).rejects.toThrow();
+  });
+
+  it('waits for authorized uploads to expire before deleting objects or rows', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'fast_delegation',
+    });
+    const [artifact] = await db
+      .insert(taskArtifacts)
+      .values({
+        taskId: task.id,
+        contentType: 'text/plain',
+        path: 'authorized.txt',
+        version: 1,
+        size: 8,
+        uploaded: false,
+        uploadUrlExpiresAt: new Date(Date.now() + 60_000),
+      })
+      .returning();
+
+    await expect(
+      deletePrivateSessionCommand(
+        { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+        session.id,
+      ),
+    ).resolves.toMatchObject({
+      deleted: false,
+      reason: 'artifact_uploads_pending',
+      retryAfter: expect.any(String),
+    });
+    expect(mockDeleteArtifactsBatch).not.toHaveBeenCalled();
+    await expect(
+      db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
+    ).resolves.toBeDefined();
+
+    await db
+      .update(taskArtifacts)
+      .set({ uploadUrlExpiresAt: new Date(0) })
+      .where(eq(taskArtifacts.id, artifact!.id));
+    await expect(
+      deletePrivateSessionCommand(
+        { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+        session.id,
+      ),
+    ).resolves.toEqual({ deleted: true });
+    expect(mockDeleteArtifactsBatch).toHaveBeenCalledOnce();
   });
 });

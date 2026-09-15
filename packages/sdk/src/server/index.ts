@@ -143,7 +143,10 @@ export {
   signArtifactIdWithKey,
   verifyArtifactSignatureWithKeys,
 } from './lib/artifacts/raw-url';
-export { createTaskArtifactRecord } from './lib/artifacts/create-record';
+export {
+  authorizeTaskArtifactUpload,
+  createTaskArtifactRecord,
+} from './lib/artifacts/create-record';
 export {
   createFastAgentConversationArtifact,
   createFastAgentSessionArtifact,

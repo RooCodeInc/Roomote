@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   startPinnedLaunch: vi.fn(),
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
+  privateSessionsEnabled: vi.fn(),
   startSessionGoal: vi.fn(),
   getFastSessionTasks: vi.fn(),
   currentEpochSeconds: vi.fn(),
@@ -67,6 +68,7 @@ vi.mock('@roomote/db/server', () => ({
   sessions: {},
   getSessionForFastConversation: mocks.getUnifiedSession,
   ensureSessionForFastConversation: mocks.getUnifiedSession,
+  isPrivateSessionsExperimentEnabledForUser: mocks.privateSessionsEnabled,
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -726,6 +728,7 @@ describe('startFastSessionCommand', () => {
     mocks.createWebTaskLauncher.mockReturnValue(mocks.launchTask);
     mocks.launchTask.mockResolvedValue({ success: true, taskId: 'task-1' });
     mocks.getUnifiedSession.mockResolvedValue({ id: 'unified-session-1' });
+    mocks.privateSessionsEnabled.mockResolvedValue(true);
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'fast-session-1',
       created: true,
@@ -799,6 +802,18 @@ describe('startFastSessionCommand', () => {
         conversationId: '22222222-2222-4222-8222-222222222221',
       },
     });
+  });
+
+  it('rejects private Session creation when the experiment is disabled', async () => {
+    mocks.privateSessionsEnabled.mockResolvedValue(false);
+
+    await expect(
+      startFastSessionCommand(auth, {
+        text: 'Review private context',
+        privacy: 'private',
+      }),
+    ).rejects.toThrow('not enabled for this user');
+    expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
   });
 
   it('runs a typed kickoff in voice mode when the Session is opened for a call', async () => {

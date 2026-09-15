@@ -17,6 +17,7 @@ import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { useFastSessionLauncher } from '@/hooks/task-runs';
 import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
+import { usePrivateSessionsExperiment } from '@/hooks/usePrivateSessionsExperiment';
 
 import { type PromptInputMessage } from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
@@ -75,6 +76,8 @@ export function NewTaskForm({
   const [privateSession, setPrivateSession] = useState(
     searchParams.get('private') === '1',
   );
+  const { enabled: privateSessionsEnabled } = usePrivateSessionsExperiment();
+  const privateModeActive = privateSessionsEnabled && privateSession;
 
   useEffect(() => setPromptText(initialPromptText), [initialPromptText]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
@@ -187,7 +190,7 @@ export function NewTaskForm({
   const voiceActive = openingVoiceSession;
 
   // Voice only applies to Fast sessions; an environment launch is a task.
-  const showVoice = voiceEnabled && !environmentIdParam && !privateSession;
+  const showVoice = voiceEnabled && !environmentIdParam && !privateModeActive;
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
@@ -218,7 +221,7 @@ export function NewTaskForm({
           images: submission.images,
           attachmentTexts: submission.attachmentTexts,
           model: selectedModelOverrideId,
-          ...(privateSession ? { privacy: 'private' as const } : {}),
+          ...(privateModeActive ? { privacy: 'private' as const } : {}),
           ...(selectedReasoningEffort !== undefined
             ? { reasoningEffort: selectedReasoningEffort }
             : {}),
@@ -242,7 +245,7 @@ export function NewTaskForm({
       startFastSession,
       selectedModelOverrideId,
       selectedReasoningEffort,
-      privateSession,
+      privateModeActive,
     ],
   );
 
@@ -274,7 +277,7 @@ export function NewTaskForm({
         }
         tools={
           <div className="flex items-center gap-2">
-            {!environmentIdParam ? (
+            {!environmentIdParam && privateSessionsEnabled ? (
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Lock className="size-3.5" />
                 <span>Private</span>

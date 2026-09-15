@@ -25,8 +25,34 @@ describe('personal preferences', () => {
         slackPeerConversationsExperimentEnabled: false,
         homeComposerSuggestionsEnabled: false,
         sessionSecretToolsEnabled: false,
+        privateSessionsExperimentEnabled: false,
       }),
     );
+  });
+
+  it('persists the Private Sessions experiment per user', async () => {
+    const user = await userFactory.create({
+      metadata: { existing_value: 'preserved' },
+    });
+
+    await expect(
+      updatePersonalPreferencesCommand(buildAuth(user.id), {
+        privateSessionsExperimentEnabled: true,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({ privateSessionsExperimentEnabled: true }),
+    );
+    await expect(
+      db.query.users.findFirst({
+        where: eq(users.id, user.id),
+        columns: { metadata: true },
+      }),
+    ).resolves.toMatchObject({
+      metadata: expect.objectContaining({
+        existing_value: 'preserved',
+        private_sessions_experiment_enabled: true,
+      }),
+    });
   });
 
   it('persists the Slack peer-conversations experiment without replacing other metadata', async () => {

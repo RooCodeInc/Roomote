@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   appendMemory: vi.fn(),
   appendLearnedPreference: vi.fn(),
   isBrainEnabled: vi.fn(),
+  privateSessionsEnabled: vi.fn(),
   generateText: vi.fn(),
   generateHelperText: vi.fn(),
   generateTrackedObject: vi.fn(),
@@ -199,6 +200,7 @@ vi.mock('@roomote/db/server', () => ({
   appendLearnedUserPreference: mocks.appendLearnedPreference,
   getUserPersonalizationRuntimeContext: mocks.getPersonalization,
   isBrainEnabled: mocks.isBrainEnabled,
+  isPrivateSessionsExperimentEnabledForUser: mocks.privateSessionsEnabled,
   db: {
     execute: mocks.executeDb,
     query: {
@@ -468,6 +470,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.getUnifiedSession.mockResolvedValue(null);
     mocks.touchSessionActivity.mockResolvedValue(undefined);
     mocks.getSessionForTask.mockResolvedValue(null);
+    mocks.privateSessionsEnabled.mockResolvedValue(true);
     mocks.getPendingHumanFollowUp.mockResolvedValue([]);
     mocks.ensureOwnTaskFollowThroughWakeup.mockResolvedValue(undefined);
     mocks.ensureSessionGoalContinuationWakeup.mockResolvedValue(undefined);
