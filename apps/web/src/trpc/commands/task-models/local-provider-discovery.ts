@@ -116,6 +116,15 @@ type LocalProviderDiscoveryResult = {
   modelCount: number;
   recommendedModels: TaskModelLookupResult[];
   error: string | null;
+  failureReason:
+    | 'invalid_credentials'
+    | 'insufficient_credits'
+    | 'invalid_endpoint'
+    | 'endpoint_not_found'
+    | 'rate_limited'
+    | 'provider_unavailable'
+    | 'endpoint_unreachable'
+    | null;
 };
 
 function isLocalTaskModelProviderId(
@@ -232,6 +241,9 @@ function getLocalProviderError(
   if (response.status === 401 || response.status === 403) {
     return `${label} rejected the API key. Check the saved credentials.`;
   }
+  if (response.status === 402) {
+    return `${label} does not have enough credits or quota.`;
+  }
   if (response.status === 404) {
     return `${label} did not recognize this endpoint. Check the endpoint URL and API compatibility.`;
   }
@@ -242,6 +254,24 @@ function getLocalProviderError(
     return `${label} returned a server error (${response.status}). Check that the provider is healthy.`;
   }
   return `${label} returned HTTP ${response.status}.`;
+}
+
+function getLocalProviderFailureReason(
+  response: Response,
+): Exclude<LocalProviderDiscoveryResult['failureReason'], null> {
+  if (response.status === 401 || response.status === 403) {
+    return 'invalid_credentials';
+  }
+  if (response.status === 402) {
+    return 'insufficient_credits';
+  }
+  if (response.status === 404) {
+    return 'endpoint_not_found';
+  }
+  if (response.status === 429) {
+    return 'rate_limited';
+  }
+  return 'provider_unavailable';
 }
 
 function getLocalProviderNetworkError(provider: LocalTaskModelProviderId) {
@@ -371,6 +401,7 @@ async function fetchLocalProviderModels(
   const paths =
     provider === 'ollama' ? ['/api/tags', '/v1/models'] : ['/v1/models'];
   let lastError: string | null = null;
+  let lastFailureReason: LocalProviderDiscoveryResult['failureReason'] = null;
 
   for (const path of paths) {
     try {
@@ -383,6 +414,7 @@ async function fetchLocalProviderModels(
       );
       if (!response.ok) {
         lastError = getLocalProviderError(provider, response);
+        lastFailureReason = getLocalProviderFailureReason(response);
         continue;
       }
 
@@ -443,9 +475,11 @@ async function fetchLocalProviderModels(
         modelCount: models.length,
         recommendedModels: getRecommendedLocalProviderModels(models),
         error: null,
+        failureReason: null,
       };
     } catch {
       lastError = getLocalProviderNetworkError(provider);
+      lastFailureReason = 'endpoint_unreachable';
     }
   }
 
@@ -454,6 +488,7 @@ async function fetchLocalProviderModels(
     modelCount: 0,
     recommendedModels: [],
     error: lastError ?? getLocalProviderNetworkError(provider),
+    failureReason: lastFailureReason ?? 'endpoint_unreachable',
   };
 }
 
@@ -471,6 +506,7 @@ export async function discoverProviderModels(
       modelCount: 0,
       recommendedModels: [],
       error: 'Save a valid endpoint URL before discovering models.',
+      failureReason: 'invalid_endpoint',
     };
   }
 

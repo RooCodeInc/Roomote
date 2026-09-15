@@ -159,6 +159,7 @@ describe('discoverProviderModels', () => {
       }),
     ).resolves.toMatchObject({
       error: null,
+      failureReason: null,
       models: [{ modelId: 'vllm/qwen3' }],
     });
     expect(fetchMock).toHaveBeenCalledWith(
@@ -167,6 +168,57 @@ describe('discoverProviderModels', () => {
         headers: { Authorization: 'Bearer submitted-key' },
       }),
     );
+  });
+
+  it.each([
+    [401, 'invalid_credentials', 'rejected the API key'],
+    [402, 'insufficient_credits', 'enough credits or quota'],
+    [404, 'endpoint_not_found', 'did not recognize this endpoint'],
+    [429, 'rate_limited', 'rate limiting requests'],
+    [503, 'provider_unavailable', 'server error (503)'],
+  ] as const)(
+    'classifies HTTP %d discovery failures as %s',
+    async (status, reason, message) => {
+      fetchMock.mockResolvedValue(new Response(null, { status }));
+
+      await expect(
+        discoverProviderModels({
+          provider: 'vllm',
+          baseUrl: 'https://vllm.example/v1',
+        }),
+      ).resolves.toMatchObject({
+        models: [],
+        failureReason: reason,
+        error: expect.stringContaining(message),
+      });
+    },
+  );
+
+  it('classifies unreachable discovery endpoints separately', async () => {
+    fetchMock.mockRejectedValue(new Error('connect ECONNREFUSED'));
+
+    await expect(
+      discoverProviderModels({
+        provider: 'vllm',
+        baseUrl: 'https://vllm.example/v1',
+      }),
+    ).resolves.toMatchObject({
+      models: [],
+      failureReason: 'endpoint_unreachable',
+    });
+  });
+
+  it('rejects a syntactically invalid endpoint before discovery', async () => {
+    await expect(
+      discoverProviderModels({
+        provider: 'vllm',
+        baseUrl: 'not a URL',
+      }),
+    ).resolves.toMatchObject({
+      models: [],
+      failureReason: 'invalid_endpoint',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('uses saved LiteLLM credentials and metadata when discovering models', async () => {
