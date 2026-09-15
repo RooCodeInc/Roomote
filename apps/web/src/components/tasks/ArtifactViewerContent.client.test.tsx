@@ -155,6 +155,24 @@ vi.mock('@/components/system', () => ({
   ),
   BasicTooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
   MediaViewerImage: () => <div>image</div>,
+  Table: ({ children, ...props }: React.ComponentProps<'table'>) => (
+    <table {...props}>{children}</table>
+  ),
+  TableHeader: ({ children, ...props }: React.ComponentProps<'thead'>) => (
+    <thead {...props}>{children}</thead>
+  ),
+  TableBody: ({ children, ...props }: React.ComponentProps<'tbody'>) => (
+    <tbody {...props}>{children}</tbody>
+  ),
+  TableHead: ({ children, ...props }: React.ComponentProps<'th'>) => (
+    <th {...props}>{children}</th>
+  ),
+  TableRow: ({ children, ...props }: React.ComponentProps<'tr'>) => (
+    <tr {...props}>{children}</tr>
+  ),
+  TableCell: ({ children, ...props }: React.ComponentProps<'td'>) => (
+    <td {...props}>{children}</td>
+  ),
 }));
 
 vi.mock('@/components/ai-elements', () => ({
@@ -319,6 +337,192 @@ describe('ArtifactViewerContent', () => {
     expect(
       screen.getByTitle('Preview of reports/second.html'),
     ).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      path: 'reports/data.bin',
+      contentType: 'TEXT/CSV; charset=UTF-8',
+      delimiter: ',',
+    },
+    {
+      path: 'reports/data.TSV',
+      contentType: 'application/octet-stream',
+      delimiter: '\t',
+    },
+  ])(
+    'renders $path as a table without consuming the first row as headers',
+    ({ path, contentType, delimiter }) => {
+      render(
+        <ArtifactViewerContent
+          taskId="task-1"
+          artifact={{
+            id: 'artifact-table',
+            taskId: 'task-1',
+            path,
+            version: 1,
+            artifactType: 'general',
+            contentType,
+            size: 128,
+            createdAt: new Date('2026-05-22T00:00:00.000Z'),
+            downloadUrl: 'https://example.test/data',
+            content: `name${delimiter}value\nAda${delimiter}42`,
+          }}
+        />,
+      );
+
+      expect(screen.getByRole('table')).toBeInTheDocument();
+      expect(
+        screen.getByRole('columnheader', { name: 'Column 1' }),
+      ).toBeVisible();
+      expect(screen.getByRole('cell', { name: 'name' })).toBeVisible();
+      expect(screen.getByRole('cell', { name: 'Ada' })).toBeVisible();
+      expect(screen.getByText('Source')).toBeVisible();
+    },
+  );
+
+  it('renders table values as inert text and keeps source available', () => {
+    const content = 'value\n<script>window.alert(1)</script>';
+    const { container } = render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/data.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: content.length,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/data.csv',
+          content,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('<script>window.alert(1)</script>')).toBeVisible();
+    expect(container.querySelector('script')).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Source'));
+
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === 'PRE' && element.textContent === content,
+      ),
+    ).toBeVisible();
+  });
+
+  it('resets table artifacts to preview when the path or version changes', () => {
+    const createTableArtifact = (path: string, version: number) => ({
+      id: 'artifact-table',
+      taskId: 'task-1',
+      path,
+      version,
+      artifactType: 'general' as const,
+      contentType: 'text/csv',
+      size: 32,
+      createdAt: new Date('2026-05-22T00:00:00.000Z'),
+      downloadUrl: 'https://example.test/data.csv',
+      content: `path,version\n${path},${version}`,
+    });
+    const { rerender } = render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={createTableArtifact('reports/first.csv', 1)}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Source'));
+    rerender(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={createTableArtifact('reports/second.csv', 1)}
+      />,
+    );
+    expect(screen.getByRole('table')).toBeVisible();
+
+    fireEvent.click(screen.getByLabelText('Source'));
+    rerender(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={createTableArtifact('reports/second.csv', 2)}
+      />,
+    );
+    expect(screen.getByRole('table')).toBeVisible();
+  });
+
+  it('handles empty and malformed tables with source available', () => {
+    const { rerender } = render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/empty.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 0,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/empty.csv',
+          content: '',
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/This table is empty/)).toBeVisible();
+    expect(screen.getByText('Source')).toBeVisible();
+
+    rerender(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/malformed.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 8,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/malformed.csv',
+          content: 'one,"two',
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/unclosed quoted field/)).toBeVisible();
+    expect(screen.getByRole('cell', { name: 'two' })).toBeVisible();
+  });
+
+  it('clearly reports table preview limits', () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/large.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 1024,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/large.csv',
+          content: Array.from({ length: 201 }, (_, index) => `${index}`).join(
+            '\n',
+          ),
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Preview is limited to 200 rows, 50 columns, and 2,000 characters per cell.',
+    );
+    expect(screen.getAllByRole('row')).toHaveLength(201);
   });
 
   it('keeps non-HTML text artifacts in the existing code view', () => {
