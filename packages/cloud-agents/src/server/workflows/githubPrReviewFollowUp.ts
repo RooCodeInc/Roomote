@@ -27,14 +27,12 @@ export async function githubPrReviewFollowUp({
   taskRunUrl,
   additionalInstructions,
   attribution,
-  therapistModeEnabled,
 }: {
   taskSpec: GithubPullRequestReviewFollowUpTask;
   gitHubToken: string;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
-  therapistModeEnabled?: boolean;
 }): Promise<{
   prompt: string;
   harnessInstructions?: string;
@@ -151,7 +149,6 @@ export async function githubPrReviewFollowUp({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems,
-    therapistModeEnabled,
   });
 
   const mentionFollowUpPolicy = buildGitHubMentionFollowUpHarnessInstructions();

@@ -52,10 +52,6 @@ function normalizePersonalPreferences(
       typeof metadata.narration_mode === 'boolean'
         ? metadata.narration_mode
         : DEFAULT_PERSONAL_PREFERENCES.narrationMode,
-    therapistMode:
-      typeof metadata.therapist_mode === 'boolean'
-        ? metadata.therapist_mode
-        : DEFAULT_PERSONAL_PREFERENCES.therapistMode,
     resultsPageEnabled:
       typeof metadata.results_page_enabled === 'boolean'
         ? metadata.results_page_enabled
@@ -198,9 +194,6 @@ export async function updatePersonalPreferencesCommand(
     nextMetadataRecord.narration_mode = input.narrationMode;
   }
 
-  if (input.therapistMode !== undefined) {
-    nextMetadataRecord.therapist_mode = input.therapistMode;
-  }
   if (input.resultsPageEnabled !== undefined) {
     nextMetadataRecord.results_page_enabled = input.resultsPageEnabled;
   }

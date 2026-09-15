@@ -51,10 +51,6 @@ function mergeResultForUpdatedFields(
       updates.narrationMode === undefined
         ? mergedPreferences.narrationMode
         : result.narrationMode,
-    therapistMode:
-      updates.therapistMode === undefined
-        ? mergedPreferences.therapistMode
-        : result.therapistMode,
     resultsPageEnabled:
       updates.resultsPageEnabled === undefined
         ? mergedPreferences.resultsPageEnabled
@@ -101,11 +97,6 @@ function rollbackUpdatedFields(
       mergedPreferences.narrationMode === optimisticPreferences.narrationMode
         ? previousPreferences.narrationMode
         : mergedPreferences.narrationMode,
-    therapistMode:
-      updates.therapistMode !== undefined &&
-      mergedPreferences.therapistMode === optimisticPreferences.therapistMode
-        ? previousPreferences.therapistMode
-        : mergedPreferences.therapistMode,
     resultsPageEnabled:
       updates.resultsPageEnabled !== undefined &&
       mergedPreferences.resultsPageEnabled ===
