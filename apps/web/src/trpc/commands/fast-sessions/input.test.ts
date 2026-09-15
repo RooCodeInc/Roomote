@@ -34,6 +34,25 @@ describe('Fast session input schemas', () => {
     ).toEqual(['Attachment: plan.md\nAdd the feature.']);
   });
 
+  it('accepts structured integration IDs and bounds the selection', () => {
+    expect(
+      replyToFastSessionInputSchema.parse({
+        sessionId: '00000000-0000-4000-8000-000000000000',
+        text: '@Sentry investigate this',
+        integrationIds: [' sentry '],
+      }).integrationIds,
+    ).toEqual(['sentry']);
+    expect(() =>
+      startFastSessionInputSchema.parse({
+        text: 'Check these integrations',
+        integrationIds: Array.from(
+          { length: 11 },
+          (_, index) => `mcp-${index}`,
+        ),
+      }),
+    ).toThrow('Array must contain at most 10 element(s)');
+  });
+
   it('accepts a stable client conversation identity for initial retries', () => {
     expect(
       startFastSessionInputSchema.parse({

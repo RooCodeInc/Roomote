@@ -17,6 +17,7 @@ import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { useFastSessionLauncher } from '@/hooks/task-runs';
 import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
+import { useSessionIntegrationMentions } from '@/components/tasks/useSessionIntegrationMentions';
 
 import { type PromptInputMessage } from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
@@ -28,6 +29,7 @@ type SubmissionSnapshot = {
   description?: string;
   images?: string[];
   attachmentTexts?: string[];
+  integrationIds?: string[];
 };
 
 type NewTaskFormProps = {
@@ -71,6 +73,15 @@ export function NewTaskForm({
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<
     ReasoningEffort | null | undefined
   >(undefined);
+  const integrationMentionTextareaRef = useRef<HTMLTextAreaElement | null>(
+    null,
+  );
+  const integrationMentions = useSessionIntegrationMentions({
+    enabled: !environmentIdParam,
+    value: promptText,
+    onValueChange: setPromptText,
+    textareaRef: integrationMentionTextareaRef,
+  });
 
   useEffect(() => setPromptText(initialPromptText), [initialPromptText]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
@@ -160,11 +171,14 @@ export function NewTaskForm({
   const [openingVoiceSession, setOpeningVoiceSession] = useState(false);
   const handleVoiceToggle = useCallback(() => {
     if (openingVoiceSession) return;
+    const integrationIds =
+      integrationMentions.getSelectedIntegrationIds(promptText);
     setOpeningVoiceSession(true);
     void startFastSessionRef
       .current(
         {
           text: promptText.trim(),
+          ...(integrationIds.length > 0 ? { integrationIds } : {}),
           model: selectedModelOverrideId,
           ...(selectedReasoningEffort !== undefined
             ? { reasoningEffort: selectedReasoningEffort }
@@ -179,6 +193,7 @@ export function NewTaskForm({
     promptText,
     selectedModelOverrideId,
     selectedReasoningEffort,
+    integrationMentions,
   ]);
   const voiceActive = openingVoiceSession;
 
@@ -186,7 +201,7 @@ export function NewTaskForm({
   const showVoice = voiceEnabled && !environmentIdParam;
 
   const handleSubmit = useCallback(
-    async (message: PromptInputMessage) => {
+    async (message: PromptInputMessage & { integrationIds?: string[] }) => {
       const text = message.text.trim();
 
       const preparedPrompt = await preparePromptAttachments({
@@ -199,6 +214,7 @@ export function NewTaskForm({
           preparedPrompt.text.length > 0 ? preparedPrompt.text : undefined,
         images: preparedPrompt.images,
         attachmentTexts: preparedPrompt.attachmentTexts,
+        integrationIds: message.integrationIds,
       };
 
       if (!environmentIdParam) {
@@ -213,6 +229,9 @@ export function NewTaskForm({
           text: submission.description ?? '',
           images: submission.images,
           attachmentTexts: submission.attachmentTexts,
+          ...(submission.integrationIds?.length
+            ? { integrationIds: submission.integrationIds }
+            : {}),
           model: selectedModelOverrideId,
           ...(selectedReasoningEffort !== undefined
             ? { reasoningEffort: selectedReasoningEffort }
@@ -261,6 +280,9 @@ export function NewTaskForm({
         animateContainer={false}
         submitWithMetaKey={false}
         submitDisabledReason={submitDisabledReason}
+        integrationMentions={
+          environmentIdParam ? undefined : integrationMentions
+        }
         voice={
           showVoice
             ? { active: voiceActive, onToggle: handleVoiceToggle }

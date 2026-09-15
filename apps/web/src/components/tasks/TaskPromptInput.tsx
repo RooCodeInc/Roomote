@@ -28,6 +28,7 @@ import { useVoiceDictation } from '@/hooks/useVoiceDictation';
 import { useGhostSuggestion } from '@/hooks/useGhostSuggestion';
 import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
 import { cn } from '@/lib/utils';
+import type { useSessionIntegrationMentions } from './useSessionIntegrationMentions';
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -105,7 +106,9 @@ type TaskPromptInputProps = {
   isBusy: boolean;
   promptText: string;
   onPromptTextChange: (text: string) => void;
-  onSubmit: (message: PromptInputMessage) => Promise<void> | void;
+  onSubmit: (
+    message: PromptInputMessage & { integrationIds?: string[] },
+  ) => Promise<void> | void;
   placeholder: string;
   /** Optional empty-composer suggestion accepted with Tab. */
   promptSuggestion?: string;
@@ -134,6 +137,7 @@ type TaskPromptInputProps = {
    * conversation rather than filling the textarea.
    */
   voice?: TaskPromptVoiceControls;
+  integrationMentions?: ReturnType<typeof useSessionIntegrationMentions>;
 };
 
 type TaskPromptVoiceControls = {
@@ -161,6 +165,7 @@ export function TaskPromptInput({
   submitIcon,
   surface = 'default',
   voice,
+  integrationMentions,
 }: TaskPromptInputProps) {
   const [isTextareaFocused, setIsTextareaFocused] = useState(false);
   const voiceDictation = useVoiceDictation({
@@ -197,15 +202,24 @@ export function TaskPromptInput({
     >
       <PromptInputRoot
         key={promptKey}
-        onSubmit={onSubmit}
+        onSubmit={(message) => {
+          const integrationIds =
+            integrationMentions?.getSelectedIntegrationIds(message.text) ?? [];
+          return onSubmit({
+            ...message,
+            ...(integrationIds.length > 0 ? { integrationIds } : {}),
+          });
+        }}
         clearOnSubmit={false}
         accept={ROOMOTE_FILE_ATTACHMENT_ACCEPT}
         multiple
       >
         <AttachmentsDisplay />
         <PromptInputBody>
+          {integrationMentions?.suggestions}
           <div className="flex items-start">
             <PromptInputTextarea
+              ref={integrationMentions?.textareaRef}
               autoFocus={autoFocus}
               placeholder={ghostSuggestion ?? placeholder}
               disabled={isBusy}
@@ -220,17 +234,42 @@ export function TaskPromptInput({
               }
               value={promptText}
               submitWithMetaKey={submitWithMetaKey}
-              onChange={(e) => onPromptTextChange(e.target.value)}
+              onChange={(event) => {
+                if (integrationMentions) {
+                  integrationMentions.handleValueChange(
+                    event.target.value,
+                    event.target.selectionStart,
+                  );
+                } else {
+                  onPromptTextChange(event.target.value);
+                }
+              }}
+              onSelect={(event) =>
+                integrationMentions?.handleCursorChange(
+                  event.currentTarget.selectionStart,
+                )
+              }
+              onClick={(event) =>
+                integrationMentions?.handleCursorChange(
+                  event.currentTarget.selectionStart,
+                )
+              }
               onFocus={() => {
                 setIsTextareaFocused(true);
+                integrationMentions?.handleFocus();
                 onPromptFocusChange?.(true);
               }}
               onBlur={() => {
                 setIsTextareaFocused(false);
+                integrationMentions?.handleBlur();
                 onPromptFocusChange?.(false);
               }}
-              onKeyDown={handleSuggestionKeyDown}
+              onKeyDown={(event) => {
+                if (integrationMentions?.handleKeyDown(event)) return;
+                handleSuggestionKeyDown(event);
+              }}
               aria-describedby={ghostSuggestion ? suggestionHintId : undefined}
+              {...integrationMentions?.inputProps}
             />
             {ghostSuggestion ? (
               <>

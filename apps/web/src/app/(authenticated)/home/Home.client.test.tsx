@@ -33,6 +33,7 @@ let capturedAutoFocus: boolean | undefined;
 let capturedHomeSuggestionsQueryEnabled: boolean | undefined;
 let capturedDefaultReasoningEffort: string | null | undefined;
 let submittedPromptText = 'Test prompt';
+let submittedIntegrationIds: string[] | undefined;
 
 const {
   voiceState,
@@ -86,6 +87,11 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 
 vi.mock('@/trpc/client', () => ({
+  useTRPCClient: () => ({
+    fastSessions: {
+      integrationMentions: { query: vi.fn() },
+    },
+  }),
   useTRPC: () => ({
     home: {
       composerSuggestions: {
@@ -224,7 +230,9 @@ vi.mock('@/components/tasks', async () => {
       tools,
       voice,
     }: {
-      onSubmit: (message: PromptInputMessage) => Promise<void> | void;
+      onSubmit: (
+        message: PromptInputMessage & { integrationIds?: string[] },
+      ) => Promise<void> | void;
       onPromptTextChange?: (value: string) => void;
       promptText?: string;
       placeholder?: string;
@@ -247,7 +255,13 @@ vi.mock('@/components/tasks', async () => {
               return;
             }
             onPromptTextChange?.(submittedPromptText);
-            const result = onSubmit({ text: submittedPromptText, files: [] });
+            const result = onSubmit({
+              text: submittedPromptText,
+              files: [],
+              ...(submittedIntegrationIds
+                ? { integrationIds: submittedIntegrationIds }
+                : {}),
+            });
 
             if (result instanceof Promise) {
               void result.catch(() => {});
@@ -352,6 +366,7 @@ describe('Home', () => {
     capturedHomeSuggestionsQueryEnabled = undefined;
     capturedDefaultReasoningEffort = undefined;
     submittedPromptText = 'Test prompt';
+    submittedIntegrationIds = undefined;
     localStorage.clear();
     vi.clearAllMocks();
 
@@ -928,6 +943,26 @@ describe('Home', () => {
       });
     });
     expect(mockStartFastSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('carries selected integration IDs into a new Fast session', async () => {
+    currentEnvironments = [];
+    submittedPromptText = '@Sentry investigate this';
+    submittedIntegrationIds = ['sentry'];
+
+    render(<Home initialPlaceholderIndex={0} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() =>
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: '@Sentry investigate this',
+        images: undefined,
+        attachmentTexts: undefined,
+        integrationIds: ['sentry'],
+        model: undefined,
+        conversationId: expect.any(String),
+      }),
+    );
   });
 
   it('reuses the client conversation identity after an ambiguous start failure', async () => {

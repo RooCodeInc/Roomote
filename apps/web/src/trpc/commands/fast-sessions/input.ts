@@ -9,6 +9,7 @@ import {
 
 const MAX_FAST_ATTACHMENT_COUNT = 20;
 const MAX_FAST_ATTACHMENT_TEXT_CHARS = 200_000;
+const MAX_FAST_INTEGRATION_MENTIONS = 10;
 
 const fastSessionMessageInputShape = {
   text: z.string().trim(),
@@ -26,6 +27,10 @@ const fastSessionMessageInputShape = {
   attachmentTexts: z
     .array(z.string().trim().min(1))
     .max(MAX_FAST_ATTACHMENT_COUNT)
+    .optional(),
+  integrationIds: z
+    .array(z.string().trim().min(1))
+    .max(MAX_FAST_INTEGRATION_MENTIONS)
     .optional(),
   model: z.string().trim().min(1).nullable().optional(),
   reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),

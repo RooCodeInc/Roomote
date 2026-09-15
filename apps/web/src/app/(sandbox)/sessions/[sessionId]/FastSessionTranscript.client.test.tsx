@@ -47,6 +47,7 @@ const {
   openTasksPanel,
   narrationState,
   composerSuggestionState,
+  integrationMentionsState,
   voiceStatusQuery,
   recordVoiceTurnMutate,
   recordVoiceCallEventMutate,
@@ -63,6 +64,13 @@ const {
   narrationState: { enabled: false },
   composerSuggestionState: {
     data: undefined as { suggestion: string; messageCount: number } | undefined,
+  },
+  integrationMentionsState: {
+    integrations: [] as Array<{
+      id: string;
+      name: string;
+      description: string;
+    }>,
   },
   voiceStatusQuery: vi.fn(),
   recordVoiceTurnMutate: vi.fn(),
@@ -158,6 +166,9 @@ vi.mock('@/hooks/useNarrationMode', () => ({
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
     fastSessions: {
+      integrationMentions: {
+        query: vi.fn(),
+      },
       reply: { mutate: replyMutate },
       startGoal: { mutate: startGoalMutate },
       reviewAction: { mutate: reviewActionMutate },
@@ -189,11 +200,17 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
-// The session composer's suggestion query needs no QueryClientProvider here;
-// these tests exercise the transcript, not suggestions.
+// The composer queries need no QueryClientProvider in this focused transcript
+// suite; return their controlled state directly.
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useQuery: () => ({ data: composerSuggestionState.data }),
+  useQuery: (options: { queryKey?: unknown[] }) =>
+    options.queryKey?.[0] === 'fastSessions.integrationMentions'
+      ? {
+          data: { integrations: integrationMentionsState.integrations },
+          isPending: false,
+        }
+      : { data: composerSuggestionState.data },
 }));
 
 // Wakeup polling has dedicated provider-backed tests. Keep this suite's query
@@ -333,6 +350,7 @@ beforeEach(() => {
   );
   narrationState.enabled = false;
   composerSuggestionState.data = undefined;
+  integrationMentionsState.integrations = [];
   openTaskPanel.mockReset();
   openTasksPanel.mockReset();
   voiceStatusQuery.mockReset();
@@ -2621,6 +2639,106 @@ describe('FastSessionTranscript', () => {
       model: null,
       reasoningEffort: null,
     });
+  });
+
+  it('selects an integration mention with the keyboard and submits its identity', async () => {
+    integrationMentionsState.integrations = [
+      {
+        id: 'sentry',
+        name: 'Sentry',
+        description: 'Inspect errors and performance data.',
+      },
+    ];
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-integration-keyboard"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, {
+      target: { value: '@sen', selectionStart: 4 },
+    });
+
+    expect(
+      await screen.findByRole('listbox', { name: 'Available integrations' }),
+    ).toBeInTheDocument();
+    expect(input).toHaveAttribute('aria-autocomplete', 'list');
+    expect(input).toHaveAttribute('aria-expanded', 'true');
+    const option = screen.getByRole('option', { name: /Sentry/ });
+    expect(input).toHaveAttribute('aria-activedescendant', option.id);
+
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    expect(input).toHaveValue('@Sentry ');
+    expect(input).toHaveFocus();
+
+    fireEvent.change(input, {
+      target: {
+        value: '@Sentry investigate the latest error',
+        selectionStart: 36,
+      },
+    });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() =>
+      expect(replyMutate).toHaveBeenCalledWith({
+        sessionId: 'session-integration-keyboard',
+        text: '@Sentry investigate the latest error',
+        integrationIds: ['sentry'],
+        model: null,
+        reasoningEffort: null,
+      }),
+    );
+  });
+
+  it('supports touch selection and sends unavailable text without hidden context', async () => {
+    integrationMentionsState.integrations = [
+      {
+        id: 'notion',
+        name: 'Notion',
+        description: 'Read and update shared workspace pages.',
+      },
+    ];
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-integration-touch"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: '@', selectionStart: 1 } });
+    const option = await screen.findByRole('option', { name: /Notion/ });
+    expect(
+      fireEvent.pointerDown(option, {
+        pointerType: 'touch',
+        cancelable: true,
+      }),
+    ).toBe(false);
+    fireEvent.click(option);
+    expect(input).toHaveValue('@Notion ');
+    expect(input).toHaveFocus();
+
+    fireEvent.change(input, {
+      target: { value: '@Unavailable check this', selectionStart: 23 },
+    });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() =>
+      expect(replyMutate).toHaveBeenCalledWith({
+        sessionId: 'session-integration-touch',
+        text: '@Unavailable check this',
+        model: null,
+        reasoningEffort: null,
+      }),
+    );
   });
 
   it('keeps the current-user avatar mounted while an optimistic reply reconciles', async () => {
