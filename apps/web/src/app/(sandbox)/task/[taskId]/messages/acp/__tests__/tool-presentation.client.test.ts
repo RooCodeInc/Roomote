@@ -801,6 +801,15 @@ describe('tool presentation policy', () => {
   );
 
   it('only expands skill receipts when they contain meaningful detail', () => {
+    const missingOutput = toolMessage({
+      toolName: 'skill',
+      rawInput: { name: 'implement-changes' },
+    });
+    delete (missingOutput.data as Partial<AcpToolResultPayload>).output;
+
+    expect(resolveToolPresentationPolicy(missingOutput).detailMode).toBe(
+      'none',
+    );
     expect(
       resolveToolPresentationPolicy(
         toolMessage({

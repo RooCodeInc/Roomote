@@ -82,6 +82,12 @@ thread, and follow-up emails in that thread continue the same conversation; a
 running delegated task receives them as follow-ups. Start a new request with a
 new email so it opens a new thread.
 
+Roomote also requires AgentMail to report a passing DMARC result before it
+trusts the sender address. Sender domains therefore need a published DMARC
+policy and either SPF or DKIM aligned with the From domain. Mail that does not
+pass DMARC is refused with setup guidance instead of being matched to a Roomote
+account.
+
 Only verified account email addresses are recognized. Mail from any other
 address may receive a polite refusal explaining that it must come from the
 verified email on a Roomote account; resend from that address once it is

@@ -31,6 +31,8 @@ import { isAgentMailAddressSuppressed } from '../outbound';
 
 const INBOX = 'roomote-test@agentmail.to';
 
+const DMARC_PASS = { spf: 'pass', dkim: 'pass', dmarc: 'pass' } as const;
+
 function messageReceivedPayload(input: {
   eventId: string;
   threadId: string;
@@ -38,7 +40,21 @@ function messageReceivedPayload(input: {
   from: string;
   text: string;
   timestamp?: string;
+  /**
+   * The provider's verdicts. Defaults to a full pass, which is what an
+   * ordinary delivery carries; `null` omits the field to exercise the
+   * re-fetch path.
+   */
+  authenticationResults?: {
+    spf?: string;
+    dkim?: string;
+    dmarc?: string;
+  } | null;
 }) {
+  const authenticationResults =
+    input.authenticationResults === undefined
+      ? DMARC_PASS
+      : input.authenticationResults;
   return {
     type: 'event',
     event_type: 'message.received',
@@ -53,6 +69,9 @@ function messageReceivedPayload(input: {
       text: input.text,
       extracted_text: input.text,
       timestamp: input.timestamp ?? new Date().toISOString(),
+      ...(authenticationResults
+        ? { authentication_results: authenticationResults }
+        : {}),
     },
     thread: {
       thread_id: input.threadId,
@@ -200,6 +219,121 @@ describe('agentmail webhook event outbox (real database)', () => {
       where: eq(agentmailInboundTurns.conversationId, conversation!.id),
     });
     expect(turns).toHaveLength(1);
+  });
+
+  it('refuses a known sender whose message did not pass DMARC, before any turn', async () => {
+    const { senderEmail } = await createVerifiedSender();
+    const originalFetch = globalThis.fetch;
+    const replies: string[] = [];
+    globalThis.fetch = (async (
+      _url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      replies.push(String(init?.body ?? ''));
+      return new Response(JSON.stringify({ message_id: 'm-refusal' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      const deliveryId = `msg_${randomUUID()}`;
+      const threadId = `thread-${randomUUID()}`;
+      await recordAgentMailWebhookEvent({
+        deliveryId,
+        eventId: null,
+        eventType: 'message.received',
+        payload: messageReceivedPayload({
+          eventId: `evt_${randomUUID()}`,
+          threadId,
+          messageId: `m-${randomUUID()}`,
+          from: `Sender <${senderEmail}>`,
+          text: 'Please look into the flaky test',
+          // A domain with no DMARC policy: nothing ties the From header to
+          // the message, so a verified account address proves nothing.
+          authenticationResults: { spf: 'pass', dkim: 'pass', dmarc: 'none' },
+        }),
+      });
+
+      await processAgentMailWebhookEvent(deliveryId);
+
+      const eventRow = await db.query.agentmailWebhookEvents.findFirst({
+        where: eq(agentmailWebhookEvents.deliveryId, deliveryId),
+      });
+      expect(eventRow?.state).toBe('processed');
+      const conversation = await db.query.agentmailConversations.findFirst({
+        where: eq(agentmailConversations.providerThreadId, threadId),
+      });
+      expect(conversation).toBeUndefined();
+      expect(replies).toHaveLength(1);
+      expect(replies[0]).toContain('did not pass DMARC');
+      expect(replies[0]).not.toContain('verified email on a Roomote account');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('re-fetches the message when the webhook omits the verdicts, then admits the turn', async () => {
+    const { user, senderEmail } = await createVerifiedSender();
+    const originalFetch = globalThis.fetch;
+    const fetched: string[] = [];
+    const messageId = `m-${randomUUID()}`;
+    const threadId = `thread-${randomUUID()}`;
+    globalThis.fetch = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const href = String(url);
+      if ((init?.method ?? 'GET') === 'GET' && href.includes('/messages/')) {
+        fetched.push(href);
+        return new Response(
+          JSON.stringify({
+            message_id: messageId,
+            thread_id: threadId,
+            inbox_id: INBOX,
+            from: `Sender <${senderEmail}>`,
+            to: [INBOX],
+            subject: 'Test request',
+            text: 'Please look into the flaky test',
+            extracted_text: 'Please look into the flaky test',
+            timestamp: new Date().toISOString(),
+            authentication_results: DMARC_PASS,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? 'GET'} ${href}`);
+    }) as typeof fetch;
+    try {
+      const deliveryId = `msg_${randomUUID()}`;
+      await recordAgentMailWebhookEvent({
+        deliveryId,
+        eventId: null,
+        eventType: 'message.received',
+        payload: messageReceivedPayload({
+          eventId: `evt_${randomUUID()}`,
+          threadId,
+          messageId,
+          from: `Sender <${senderEmail}>`,
+          text: 'Please look into the flaky test',
+          authenticationResults: null,
+        }),
+      });
+
+      await processAgentMailWebhookEvent(deliveryId);
+
+      expect(fetched).toHaveLength(1);
+      expect(fetched[0]).toContain(encodeURIComponent(messageId));
+      const conversation = await db.query.agentmailConversations.findFirst({
+        where: eq(agentmailConversations.providerThreadId, threadId),
+      });
+      expect(conversation?.ownerUserId).toBe(user.id);
+      const turn = await db.query.agentmailInboundTurns.findFirst({
+        where: eq(agentmailInboundTurns.conversationId, conversation!.id),
+      });
+      expect(turn?.state).toBe('pending');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('drops auto-generated mail without admitting a turn', async () => {
