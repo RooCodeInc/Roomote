@@ -18,6 +18,9 @@ describe('Better Stack MCP tool policy', () => {
         'sources',
         'source',
         'source_fields',
+        'query_help',
+        'errors_query_help',
+        'metrics_query_help',
         'query_instructions',
       ]),
     );
@@ -25,6 +28,7 @@ describe('Better Stack MCP tool policy', () => {
     expect(allowedToolNames).not.toContain('telemetry_query');
     expect(allowedToolNames).not.toContain('remove_dashboard');
     expect(allowedToolNames).not.toContain('remove_chart');
+    expect(allowedToolNames).not.toContain('create_cloud_connection');
 
     expect(
       filterMcpToolDefinitions(
