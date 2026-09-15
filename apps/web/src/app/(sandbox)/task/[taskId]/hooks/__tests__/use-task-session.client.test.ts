@@ -63,6 +63,26 @@ describe('getTaskRunPromptText', () => {
 });
 
 describe('getTaskRunVisiblePrompt', () => {
+  it('projects linked work-item fields for legacy automation execution payloads', () => {
+    expect(
+      getTaskRunVisiblePrompt(
+        buildTaskRun({
+          repo: 'Roomote/example-app',
+          description:
+            '$implement-changes\n\nAutomation work item: Fix the failing route\n<untrusted_external_content>Useful brief</untrusted_external_content>\n\nInternal execution policy',
+          visibleInTranscript: false,
+        } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>),
+        {
+          title: 'Fix the failing route',
+          brief: 'A production route fails for signed-in users.',
+        },
+      ),
+    ).toEqual({
+      text: 'Fix the failing route\n\nA production route fails for signed-in users.',
+      visibleInTranscript: true,
+    });
+  });
+
   it('strips Slack thread context and reply targets from the visible prompt text', () => {
     expect(
       getTaskRunVisiblePrompt(

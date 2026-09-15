@@ -1,4 +1,5 @@
 import {
+  buildAutomationWorkItemDisplayPrompt,
   isSystemInjectedAcpPromptText,
   normalizeTranscriptUserText,
   ACP_ENVELOPE_EVENT_TYPES,
@@ -133,7 +134,15 @@ function getTaskRunPromptImages(
  */
 export function getTaskRunVisiblePrompt(
   taskRun: Pick<TaskRunDetail, 'payload'> | null | undefined,
+  automationWorkItem?: { title: string; brief?: string | null } | null,
 ): TaskRunVisiblePrompt | null {
+  if (automationWorkItem) {
+    return {
+      text: buildAutomationWorkItemDisplayPrompt(automationWorkItem),
+      visibleInTranscript: true,
+    };
+  }
+
   const text = getTaskRunPromptText(taskRun);
 
   const visibleText = normalizeTranscriptUserText(

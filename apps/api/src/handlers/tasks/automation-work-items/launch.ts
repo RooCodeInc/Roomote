@@ -7,7 +7,11 @@ import {
   escapeTaskContextText,
 } from '@roomote/cloud-agents/server';
 import { finalizeAutomationLaunch } from '@roomote/sdk/server/automation-post-launch-finalization';
-import { TaskPayloadKind, type BackgroundAutomationKey } from '@roomote/types';
+import {
+  TaskPayloadKind,
+  buildAutomationWorkItemDisplayPrompt,
+  type BackgroundAutomationKey,
+} from '@roomote/types';
 import {
   and,
   claimWorkItem,
@@ -247,8 +251,27 @@ export async function launchActWorkItems(params: {
         });
       }
 
+      const agentPromptText = buildExecutionTaskPrompt(workItem, {
+        executionTaskBootstrap: params.executionTaskBootstrap,
+        lateBoundChatReplies: workItemChatTarget !== null,
+        hasChatThread:
+          (workItemChatTarget?.provider === 'slack' &&
+            Boolean(workItemChatTarget.threadTs)) ||
+          (workItemChatTarget?.provider === 'discord' &&
+            Boolean(workItemChatTarget.threadId)),
+        chatSurface:
+          workItemChatTarget?.provider === 'telegram'
+            ? 'Telegram'
+            : workItemChatTarget?.provider === 'teams'
+              ? 'Teams'
+              : workItemChatTarget?.provider === 'discord'
+                ? 'Discord'
+                : 'Slack',
+      });
+
       await enqueueTask(
         {
+          title: workItem.title,
           task: {
             type: TaskPayloadKind.StandardTask,
             payload: {
@@ -257,23 +280,8 @@ export async function launchActWorkItems(params: {
                 ? { environmentId: workItem.targetEnvironmentId }
                 : {}),
               selectedRepositories: [workItem.targetRepositoryFullName],
-              description: buildExecutionTaskPrompt(workItem, {
-                executionTaskBootstrap: params.executionTaskBootstrap,
-                lateBoundChatReplies: workItemChatTarget !== null,
-                hasChatThread:
-                  (workItemChatTarget?.provider === 'slack' &&
-                    Boolean(workItemChatTarget.threadTs)) ||
-                  (workItemChatTarget?.provider === 'discord' &&
-                    Boolean(workItemChatTarget.threadId)),
-                chatSurface:
-                  workItemChatTarget?.provider === 'telegram'
-                    ? 'Telegram'
-                    : workItemChatTarget?.provider === 'teams'
-                      ? 'Teams'
-                      : workItemChatTarget?.provider === 'discord'
-                        ? 'Discord'
-                        : 'Slack',
-              }),
+              description: buildAutomationWorkItemDisplayPrompt(workItem),
+              agentPromptText,
               ...(workItemChatTarget?.provider === 'slack'
                 ? {
                     automationWorkItemId: workItem.id,
@@ -319,7 +327,7 @@ export async function launchActWorkItems(params: {
                     discordTaskThread: Boolean(workItemChatTarget.threadId),
                   }
                 : {}),
-              visibleInTranscript: false,
+              visibleInTranscript: true,
             },
           },
           initiator: { kind: 'automation', key: params.automationKey },
