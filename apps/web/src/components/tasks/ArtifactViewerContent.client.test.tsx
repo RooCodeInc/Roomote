@@ -371,7 +371,9 @@ describe('ArtifactViewerContent', () => {
         />,
       );
 
-      expect(screen.getByRole('table')).toBeInTheDocument();
+      const table = screen.getByRole('table');
+      expect(table).toBeInTheDocument();
+      expect(table.parentElement).toHaveClass('overflow-x-auto');
       expect(
         screen.getByRole('columnheader', { name: 'Column 1' }),
       ).toBeVisible();
