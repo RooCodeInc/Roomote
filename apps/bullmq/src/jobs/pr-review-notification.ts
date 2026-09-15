@@ -97,8 +97,17 @@ async function getNotificationActivity(
   return { active: isLiveTaskTurn(run), source: 'task' };
 }
 
-function findTaskPullRequestForNotification(data: PrReviewNotificationRequest) {
-  return db.query.taskPullRequests.findFirst({
+/**
+ * The task's link for the pull request this notification is about. The same
+ * task, provider, repository, and number can name pull requests on different
+ * source-control hosts, so the request's repository id or host picks the
+ * instance; a legacy link that recorded neither is the only fallback, and an
+ * ambiguous set yields no link rather than an arbitrary one.
+ */
+async function findTaskPullRequestForNotification(
+  data: PrReviewNotificationRequest,
+) {
+  const links = await db.query.taskPullRequests.findMany({
     where: and(
       eq(taskPullRequests.taskId, data.taskId),
       eq(
@@ -121,6 +130,22 @@ function findTaskPullRequestForNotification(data: PrReviewNotificationRequest) {
       autoHandleFeedbackByUserId: true,
     },
   });
+  if (data.repositoryId) {
+    const byRepository = links.find(
+      (link) => link.repositoryId === data.repositoryId,
+    );
+    if (byRepository) return byRepository;
+  }
+  if (data.host) {
+    const byHost = links.find((link) => link.host === data.host);
+    if (byHost) return byHost;
+  }
+  const legacy = links.filter(
+    (link) => link.host == null && link.repositoryId == null,
+  );
+  if (legacy.length === 1) return legacy[0];
+  if (!data.repositoryId && !data.host && links.length === 1) return links[0];
+  return undefined;
 }
 
 function logPrReviewNotificationTriage(input: {

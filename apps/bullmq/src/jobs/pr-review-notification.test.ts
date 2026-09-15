@@ -100,6 +100,12 @@ vi.mock('@roomote/db/server', () => ({
       taskPullRequests: {
         findFirst: (...args: unknown[]) =>
           mockFindFirstTaskPullRequest(...args),
+        // The job lists links and picks the instance itself; tests keep
+        // describing one link (or an explicit list) through the same mock.
+        findMany: async (...args: unknown[]) => {
+          const links = await mockFindFirstTaskPullRequest(...args);
+          return Array.isArray(links) ? links : links ? [links] : [];
+        },
       },
       slackInstallations: {
         findFirst: (...args: unknown[]) =>
@@ -1223,6 +1229,49 @@ describe('prReviewNotificationJob', () => {
       expect.objectContaining({ taskId: 'task-1' }),
       'suppressed',
     );
+  });
+
+  it('checks the link for the host the notification names, not a same-name PR elsewhere', async () => {
+    mockFindFirstTaskPullRequest.mockResolvedValue([
+      {
+        id: 'link-github',
+        status: 'merged',
+        host: 'github.com',
+        repositoryId: 'repo-github',
+        autoHandleFeedbackByUserId: 'user-9',
+      },
+      {
+        id: 'link-gitea',
+        status: 'open',
+        host: 'gitea.example.com',
+        repositoryId: 'repo-gitea',
+        autoHandleFeedbackByUserId: 'user-9',
+      },
+    ]);
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockReadLivePullRequestState.mockResolvedValue('open');
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+
+    await prReviewNotificationJob(
+      makeJob({
+        sourceControlProvider: 'gitea',
+        host: 'gitea.example.com',
+        repositoryId: 'repo-gitea',
+      }) as never,
+    );
+
+    // The merged GitHub link did not suppress the Gitea delivery, and the
+    // live read was scoped to the Gitea host.
+    expect(mockReadLivePullRequestState).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'gitea', host: 'gitea.example.com' }),
+    );
+    expect(mockDispatchFollowUp).toHaveBeenCalled();
   });
 
   it('auto-dispatches when the live PR state cannot be read', async () => {
