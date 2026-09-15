@@ -544,6 +544,52 @@ describe('Telegram webhook handler', () => {
     );
   });
 
+  it('logs receipt and an explicit terminal reason without message content', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+
+    const response = await postTelegramUpdate({ update_id: 901 });
+
+    expect(response.status).toBe(200);
+    const logs = info.mock.calls.map(([message]) => String(message));
+    const terminal = logs
+      .map((message) => JSON.parse(message))
+      .find((entry) => entry.event === 'communication_webhook_terminal');
+    expect(terminal).toMatchObject({
+      provider: 'telegram',
+      updateId: 901,
+      externalEventId: '901',
+      outcome: 'skipped',
+      reason: 'unsupported_update',
+      status: 200,
+    });
+    expect(logs.join('\n')).not.toContain('continue the task');
+    info.mockRestore();
+  });
+
+  it('logs provider acceptance for outbound replies without reply content', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    mockTelegramLinkedSender();
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({ message: { text: '/help' } }),
+    );
+
+    expect(response.status).toBe(200);
+    const logs = info.mock.calls.map(([message]) => String(message));
+    const delivery = logs
+      .map((message) => JSON.parse(message))
+      .find((entry) => entry.event === 'communication_delivery_terminal');
+    expect(delivery).toMatchObject({
+      provider: 'telegram',
+      channelId: '222',
+      messageId: 'telegram-response',
+      outcome: 'accepted',
+      reason: 'provider_message_created',
+    });
+    expect(logs.join('\n')).not.toContain('Available commands');
+    info.mockRestore();
+  });
+
   it('retires Auto-resolve controls through the managed Telegram footer path', async () => {
     mockTelegramLinkedSender('linked-user-1');
     claimPendingPrReviewActionMock.mockResolvedValueOnce({
@@ -861,6 +907,7 @@ describe('Telegram webhook handler', () => {
   });
 
   it('continues a Telegram Fast reply without an automatic reaction', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     mockTelegramLinkedSender('mapped-user-1');
     findFastReplySessionMock.mockResolvedValueOnce({
       id: '22222222-2222-4222-8222-222222222222',
@@ -910,6 +957,17 @@ describe('Telegram webhook handler', () => {
     expect(addReactionMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
+    const operationalEvents = info.mock.calls
+      .map(([message]) => JSON.parse(String(message)))
+      .filter((entry) => entry.event === 'communication_dispatch_terminal');
+    expect(operationalEvents).toContainEqual(
+      expect.objectContaining({
+        sessionId: '22222222-2222-4222-8222-222222222222',
+        outcome: 'dispatched',
+        reason: 'fast_session_reply_queued',
+      }),
+    );
+    info.mockRestore();
   });
 
   it('continues a canonical web Session from a later Telegram reply', async () => {

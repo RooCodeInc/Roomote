@@ -514,8 +514,11 @@ describe('queuePrReviewActivityNotification', () => {
     });
   });
 
-  it('enqueues qualifying events', () => {
-    queuePrReviewActivityNotification(reviewPayload({ state: 'approved' }));
+  it('enqueues qualifying events with the webhook delivery correlation', async () => {
+    await queuePrReviewActivityNotification(
+      reviewPayload({ state: 'approved' }),
+      'github-delivery-1',
+    );
 
     expect(mockEnqueuePrReviewNotification).toHaveBeenCalledWith({
       repository: 'owner/repo',
@@ -525,6 +528,7 @@ describe('queuePrReviewActivityNotification', () => {
       event: {
         kind: 'review',
         providerEventId: 'github-review:1000',
+        sourceDeliveryId: 'github-delivery-1',
         authorLogin: 'alice',
         reviewHeadSha,
         batchId: 'github-review:1000',
@@ -541,6 +545,36 @@ describe('queuePrReviewActivityNotification', () => {
     );
 
     expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
+  });
+
+  it('logs the explicit trust decision for a filtered external bot', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+
+    await queuePrReviewActivityNotification(
+      reviewPayload({
+        login: 'untrusted-reviewer[bot]',
+        userType: 'Bot',
+      }),
+      'github-delivery-2',
+    );
+
+    const events = info.mock.calls
+      .map(([message]) =>
+        typeof message === 'string' ? JSON.parse(message) : null,
+      )
+      .filter(Boolean);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: 'source_control_review_admission',
+        deliveryId: 'github-delivery-2',
+        repository: 'owner/repo',
+        prNumber: 42,
+        reviewId: 1000,
+        outcome: 'skipped',
+        reason: 'external_bot_not_trusted',
+      }),
+    );
+    info.mockRestore();
   });
 
   it('passes Roomote-authored activity to the shared coordinator', async () => {

@@ -1832,13 +1832,25 @@ describe('prReviewNotificationJob', () => {
   });
 
   it('records review feedback to task history when the task has no conversation routing', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     mockPrepareDelivery.mockResolvedValue({
       post: true,
       route: null,
       text: 'I reviewed owner/repo#42 on GitHub and found no issues.',
     });
 
-    await prReviewNotificationJob(makeJob() as never);
+    await prReviewNotificationJob(
+      makeJob({
+        events: [
+          {
+            kind: 'review',
+            authorLogin: 'alice',
+            providerEventId: 'github-review:5212618392',
+            sourceDeliveryId: 'github-delivery-3',
+          },
+        ],
+      }) as never,
+    );
 
     expect(mockPostMessage).not.toHaveBeenCalled();
     expect(mockRecordDelivery).toHaveBeenCalledWith({
@@ -1847,6 +1859,27 @@ describe('prReviewNotificationJob', () => {
       route: null,
       text: 'I reviewed owner/repo#42 on GitHub and found no issues.',
     });
+    const operationalEvents = log.mock.calls
+      .map(([message]) => {
+        try {
+          return JSON.parse(String(message));
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    expect(operationalEvents).toContainEqual(
+      expect.objectContaining({
+        event: 'source_control_review_routing',
+        deliveryId: 'github-delivery-3',
+        externalEventId: 'github-review:5212618392',
+        reviewId: 5212618392,
+        taskId: 'task-1',
+        outcome: 'no_route',
+        reason: 'task_history_only',
+      }),
+    );
+    log.mockRestore();
   });
 
   it('publishes an actionable canonical offer for a web-only standard task', async () => {
