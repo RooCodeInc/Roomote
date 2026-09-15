@@ -11,6 +11,7 @@ const {
   isAppInChannelMock,
   isUserInChannelMock,
   isPublicChannelMock,
+  getWorkspaceIdentityMock,
 } = vi.hoisted(() => ({
   findActiveSlackInstallationForChannelMock: vi.fn(),
   getMessageMock: vi.fn(),
@@ -19,6 +20,7 @@ const {
   isAppInChannelMock: vi.fn(),
   isUserInChannelMock: vi.fn(),
   isPublicChannelMock: vi.fn(),
+  getWorkspaceIdentityMock: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -64,6 +66,7 @@ vi.mock('@roomote/slack', () => ({
       isAppInChannel = isAppInChannelMock;
       isUserInChannel = isUserInChannelMock;
       isPublicChannel = isPublicChannelMock;
+      getWorkspaceIdentity = getWorkspaceIdentityMock;
     },
   ),
   clearLatestUserMessage: vi.fn(),
@@ -217,6 +220,10 @@ describe('slack thread lookup MCP endpoint', () => {
     isAppInChannelMock.mockResolvedValue(true);
     isUserInChannelMock.mockResolvedValue(true);
     isPublicChannelMock.mockResolvedValue(true);
+    getWorkspaceIdentityMock.mockResolvedValue({
+      teamId: 'T123',
+      teamDomain: 'acme',
+    });
   });
 
   it('rejects non-run tokens', async () => {
@@ -324,14 +331,18 @@ describe('slack thread lookup MCP endpoint', () => {
     expect(isPublicChannelMock).not.toHaveBeenCalled();
   });
 
-  it('resolves a Slack archive link workspace by its domain', async () => {
+  it('resolves a Slack archive link using authenticated workspace metadata when the stored domain is missing', async () => {
     vi.mocked(db.query.slackInstallations.findMany).mockResolvedValue([
       {
         botAccessToken: 'xoxb-domain',
         teamId: 'T_DOMAIN',
-        teamDomain: 'acme',
+        teamDomain: null,
       },
     ] as never);
+    getWorkspaceIdentityMock.mockResolvedValue({
+      teamId: 'T_DOMAIN',
+      teamDomain: 'acme',
+    });
     getMessageMock.mockResolvedValue({
       text: 'root',
       ts: '111.222',
@@ -350,15 +361,18 @@ describe('slack thread lookup MCP endpoint', () => {
     });
 
     expect(result.slackTeamId).toBe('T_DOMAIN');
-    expect(findActiveSlackInstallationForChannelMock).not.toHaveBeenCalled();
+    expect(getWorkspaceIdentityMock).toHaveBeenCalledOnce();
     expect(resolveChannelIdMock).toHaveBeenCalledWith('C123ABC456');
   });
 
-  it('rejects ambiguous Slack archive workspace domains', async () => {
+  it('rejects ambiguous authenticated Slack workspace domains', async () => {
     vi.mocked(db.query.slackInstallations.findMany).mockResolvedValue([
       { botAccessToken: 'xoxb-one', teamId: 'T1', teamDomain: 'acme' },
       { botAccessToken: 'xoxb-two', teamId: 'T2', teamDomain: 'acme' },
     ] as never);
+    getWorkspaceIdentityMock
+      .mockResolvedValueOnce({ teamId: 'T1', teamDomain: 'acme' })
+      .mockResolvedValueOnce({ teamId: 'T2', teamDomain: 'acme' });
 
     await expect(
       lookupSlackThread({
@@ -372,6 +386,48 @@ describe('slack thread lookup MCP endpoint', () => {
     );
     expect(resolveChannelIdMock).not.toHaveBeenCalled();
   });
+
+  it('rejects a stale stored domain when authenticated metadata does not match', async () => {
+    vi.mocked(db.query.slackInstallations.findMany).mockResolvedValue([
+      { botAccessToken: 'xoxb-one', teamId: 'T1', teamDomain: 'acme' },
+    ] as never);
+    getWorkspaceIdentityMock.mockResolvedValue({
+      teamId: 'T1',
+      teamDomain: 'renamed-workspace',
+    });
+
+    await expect(
+      lookupSlackThread({
+        channel: 'C123ABC456',
+        messageTs: '111.222',
+        slackTeamDomain: 'acme',
+        actingSlackMembershipUserId: 'user-1',
+      }),
+    ).rejects.toThrow(
+      'No active Slack installation matches the supplied Slack link workspace',
+    );
+    expect(resolveChannelIdMock).not.toHaveBeenCalled();
+  });
+
+  it.each([null, { teamId: 'T_OTHER', teamDomain: 'acme' }])(
+    'fails closed when an active Slack workspace identity is unavailable or mismatched: %j',
+    async (identity) => {
+      vi.mocked(db.query.slackInstallations.findMany).mockResolvedValue([
+        { botAccessToken: 'xoxb-one', teamId: 'T1', teamDomain: null },
+      ] as never);
+      getWorkspaceIdentityMock.mockResolvedValue(identity);
+
+      await expect(
+        lookupSlackThread({
+          channel: 'C123ABC456',
+          messageTs: '111.222',
+          slackTeamDomain: 'acme',
+          actingSlackMembershipUserId: 'user-1',
+        }),
+      ).rejects.toThrow('Slack link workspace could not be verified');
+      expect(resolveChannelIdMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects a channel without unique active workspace ownership', async () => {
     findActiveSlackInstallationForChannelMock.mockResolvedValue(null);
