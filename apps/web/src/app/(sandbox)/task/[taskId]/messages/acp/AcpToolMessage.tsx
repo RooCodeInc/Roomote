@@ -36,12 +36,14 @@ import { useTaskToolIcon } from './task-tool-icon';
 interface AcpToolMessageProps {
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage;
   showSubagentPayload?: boolean;
+  forceDetails?: boolean;
   children?: ReactNode;
 }
 
 export function AcpToolMessage({
   msg,
   showSubagentPayload = false,
+  forceDetails = false,
   children,
 }: AcpToolMessageProps) {
   const artifactLink = useArtifactLink();
@@ -87,7 +89,7 @@ export function AcpToolMessage({
   // subagent rows keep their collapsible prompt/result details alongside it.
   const showExpandedDetails =
     (isSubagentRow || (!showVisualProofPreview && !showWidgetPreview)) &&
-    policy.detailMode === 'expandable';
+    (forceDetails || policy.detailMode === 'expandable');
   const showNestedActivity = Boolean(children);
   const showCollapsibleContent = showExpandedDetails || showNestedActivity;
 
@@ -148,6 +150,7 @@ export function AcpToolMessage({
                 <AcpToolDetails
                   msg={msg}
                   showSubagentPayload={showSubagentPayload}
+                  forceVisible={forceDetails}
                 />
               ) : null}
               {showNestedActivity ? (
