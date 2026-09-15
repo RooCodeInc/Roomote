@@ -137,7 +137,7 @@ type FastAgentNativeToolBridge = {
  * actually loaded, instead of taking the model's word for it. Skill content
  * stays out of the record: the summary names what was loaded, not its body.
  */
-export type FastAgentSkillToolCallRecord = {
+type FastAgentSkillToolCallRecord = {
   name:
     | typeof FAST_AGENT_NATIVE_TOOL_NAMES.listSkills
     | typeof FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill;
@@ -147,7 +147,7 @@ export type FastAgentSkillToolCallRecord = {
   result: Record<string, unknown>;
 };
 
-export type FastAgentSkillToolCallRecorder = (
+type FastAgentSkillToolCallRecorder = (
   record: FastAgentSkillToolCallRecord,
 ) => Promise<void>;
 
@@ -197,7 +197,7 @@ export function summarizeSkillListForRecord(
   };
 }
 
-export function summarizeSkillDocumentForRecord(
+function summarizeSkillDocumentForRecord(
   document: FastAgentSkillDocument,
 ): Record<string, unknown> {
   return {
