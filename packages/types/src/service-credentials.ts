@@ -62,10 +62,12 @@ export const serviceCredentialPrepareSchema = z
 export const serviceCredentialPrepareToolSchema = z
   .object({
     ...serviceCredentialPrepareFields,
+    // Models routinely drop the trailing space; accept both spellings and
+    // normalize to the persisted form.
     headerPrefix: z
-      .enum(['Bearer ', 'Basic ', 'Token '])
+      .enum(['Bearer', 'Basic', 'Token', 'Bearer ', 'Basic ', 'Token '])
       .optional()
-      .transform((prefix) => prefix ?? ''),
+      .transform((prefix) => (prefix ? `${prefix.trimEnd()} ` : '')),
   })
   .strict();
 

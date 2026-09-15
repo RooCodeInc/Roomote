@@ -732,7 +732,7 @@ export default {
       .describe(
         "Lowercase HTTP header that carries the key at this service: authorization, x-api-key, api-key, or the service's own name such as private-token or x-shopify-access-token",
       ),
-    headerPrefix: z.enum(["Bearer ", "Basic ", "Token "]).optional(),
+    headerPrefix: z.enum(["Bearer", "Basic", "Token", "Bearer ", "Basic ", "Token "]).optional().describe("Scheme before the key, with or without the trailing space; omit when the header takes the bare key"),
     lifetimeHours: z.number().int().min(1).max(8760).optional().describe("Hours until the integration expires. Omit unless the human asked for a temporary key; integrations are kept until revoked."),
     allowedMethods: z.array(z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])).min(1).max(6).optional().describe("HTTP methods the approved key may be used with. Defaults to GET and HEAD."),
   },

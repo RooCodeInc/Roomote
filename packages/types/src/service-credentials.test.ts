@@ -4,6 +4,7 @@ import {
   serviceCredentialPrepareSchema,
   hasLeadingIntegrationSavedBlock,
   stripLeadingIntegrationSavedBlock,
+  serviceCredentialPrepareToolSchema,
 } from './service-credentials';
 import { isCredentialEgressCredentialHeaderName } from './credential-egress';
 
@@ -119,5 +120,28 @@ describe('integration saved block', () => {
     const started = performance.now();
     expect(stripLeadingIntegrationSavedBlock(hostile)).toBe(hostile);
     expect(performance.now() - started).toBeLessThan(50);
+  });
+
+  it('normalizes a header prefix typed without its trailing space', () => {
+    const base = {
+      label: 'Postman Echo',
+      origin: 'https://postman-echo.com',
+      headerName: 'authorization',
+    };
+    expect(
+      serviceCredentialPrepareToolSchema.parse({
+        ...base,
+        headerPrefix: 'Basic',
+      }).headerPrefix,
+    ).toBe('Basic ');
+    expect(
+      serviceCredentialPrepareToolSchema.parse({
+        ...base,
+        headerPrefix: 'Bearer ',
+      }).headerPrefix,
+    ).toBe('Bearer ');
+    expect(serviceCredentialPrepareToolSchema.parse(base).headerPrefix).toBe(
+      '',
+    );
   });
 });
