@@ -195,7 +195,13 @@ export function getSlackReplyTarget(
 
 export async function resolveVerifiedSlackChannel(options: {
   channel: string;
-  slack: SlackNotifier;
+  slack: Pick<
+    SlackNotifier,
+    | 'resolveChannelId'
+    | 'isAppInChannel'
+    | 'isPublicChannel'
+    | 'isUserInChannel'
+  >;
   slackTeamId: string;
   actingSlackMembershipUserId?: string | null;
 }): Promise<string> {

@@ -88,6 +88,17 @@ export class SlackCommunicationProvider implements CommunicationProviderAdapter 
     return this.slack.isAppInChannel(channelId);
   }
 
+  isPublicChannel(channelId: string): Promise<boolean | null> {
+    return this.slack.isPublicChannel(channelId);
+  }
+
+  isUserInChannel(input: {
+    channelId: string;
+    userId: string;
+  }): Promise<boolean | null> {
+    return this.slack.isUserInChannel(input);
+  }
+
   async postMessage(
     input: CommunicationPostMessageInput,
   ): Promise<CommunicationPostMessageResult> {

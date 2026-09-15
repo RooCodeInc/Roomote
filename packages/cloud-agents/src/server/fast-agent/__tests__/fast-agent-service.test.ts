@@ -8974,7 +8974,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('omits gated channel tools when the Fast surface has no valid chat context', async () => {
+  it('keeps cross-surface posts while omitting origin-scoped channel tools', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
         id: 'roomote',
@@ -9018,7 +9018,70 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     )
       .find(({ id }) => id === 'roomote')!
       .tools.map(({ name }) => name);
-    expect(roomoteTools).toEqual(['get_chat_message_context']);
+    expect(roomoteTools).toEqual([
+      'get_chat_message_context',
+      'post_to_channel',
+    ]);
+  });
+
+  it('exposes an explicit Slack post from a Telegram Fast conversation', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [{ name: 'post_to_channel' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({ ok: true });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll share that.',
+        });
+        await invokeMcpTool('roomote', 'post_to_channel', {
+          provider: 'slack',
+          slackTeamId: 'team-1',
+          channel: 'channel-1',
+          threadTs: '199.9',
+          text: 'Release is ready.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Posted the release update.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'telegram',
+        workspaceId: 'chat-1',
+        conversationId: 'notification:chat-1:user:user-1',
+        replyTarget: { channelId: 'chat-1' },
+      },
+      adapter: callbacks(),
+    });
+
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      {
+        integrationId: 'roomote',
+        toolName: 'post_to_channel',
+        args: {
+          provider: 'slack',
+          slackTeamId: 'team-1',
+          channel: 'channel-1',
+          threadTs: '199.9',
+          text: 'Release is ready.',
+        },
+      },
+    );
   });
 
   it('preserves the broker inventory when deployment config disabled channel tools', async () => {
