@@ -1,5 +1,9 @@
-import { db, deleteExpiredWebhooks } from '@roomote/db/server';
-import { Env } from '@roomote/env';
+import {
+  db,
+  deleteExpiredWebhooks,
+  type DatabaseOrTransaction,
+} from '@roomote/db/server';
+import { DEFAULT_WEBHOOK_RETENTION_DAYS, Env } from '@roomote/env';
 
 const LOG_PREFIX = '[webhookCleanup]';
 
@@ -12,11 +16,14 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
  * redaction at write time (apps/api webhook-payload-redaction) covers the
  * window while rows are retained.
  */
-export async function webhookCleanupJob(): Promise<void> {
-  const retentionDays = Env.WEBHOOK_RETENTION_DAYS;
+export async function webhookCleanupJob(
+  database: DatabaseOrTransaction = db,
+): Promise<void> {
+  const retentionDays =
+    Env.WEBHOOK_RETENTION_DAYS ?? DEFAULT_WEBHOOK_RETENTION_DAYS;
   const olderThan = new Date(Date.now() - retentionDays * MS_PER_DAY);
 
-  const deleted = await deleteExpiredWebhooks(db, { olderThan });
+  const deleted = await deleteExpiredWebhooks(database, { olderThan });
 
   console.log(
     `${LOG_PREFIX} deleted ${deleted} webhook rows older than ${retentionDays} days (before ${olderThan.toISOString()})`,

@@ -14,6 +14,8 @@ import {
   resolveAppEnv,
 } from './app-env';
 
+export const DEFAULT_WEBHOOK_RETENTION_DAYS = 3;
+
 const sharedSchema = {
   NODE_ENV: z.enum(['test', 'development', 'production']),
 };
@@ -351,7 +353,11 @@ const serverSchema = {
   SLACK_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   // How long recorded webhook payloads are kept before the WebhookCleanup
   // scheduled job (apps/bullmq) deletes them.
-  WEBHOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(3),
+  WEBHOOK_RETENTION_DAYS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_WEBHOOK_RETENTION_DAYS),
   // Internal base URL of the deployment-hosted gbrain (Brain)
   // service. Unset means the feature is unavailable regardless of the
   // brain_settings row; the proxy and outbox drainer both no-op.
