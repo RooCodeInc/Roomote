@@ -497,7 +497,30 @@ describe('prReviewNotificationJob', () => {
     expect(mockSchedule).not.toHaveBeenCalled();
   });
 
+  it('logs a finalized missing provider message id as non-retryable', async () => {
+    const error = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    mockStickyFooterPost.mockResolvedValue(null);
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    const deliveryEvents = error.mock.calls
+      .map(([message]) => JSON.parse(String(message)))
+      .filter((entry) => entry.event === 'source_control_review_delivery');
+    expect(deliveryEvents).toContainEqual(
+      expect.objectContaining({
+        outcome: 'failed',
+        reason: 'provider_message_id_missing',
+        retryable: false,
+      }),
+    );
+    expect(mockFinalize).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
   it('passes triaged feedback to the Fast parent event path', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       taskId: 'task-1',
@@ -579,6 +602,23 @@ describe('prReviewNotificationJob', () => {
       route: null,
       text: 'Alice requested changes on owner/repo#42.',
     });
+    const deliveryEvents = log.mock.calls
+      .map(([message]) => {
+        try {
+          return JSON.parse(String(message));
+        } catch {
+          return null;
+        }
+      })
+      .filter((entry) => entry?.event === 'source_control_review_delivery');
+    expect(deliveryEvents).toContainEqual(
+      expect.objectContaining({
+        outcome: 'delivered',
+        reason: 'fast_parent_notified',
+        retryable: false,
+      }),
+    );
+    log.mockRestore();
   });
 
   it('notifies the Fast parent before auto-dispatching opted-in feedback', async () => {

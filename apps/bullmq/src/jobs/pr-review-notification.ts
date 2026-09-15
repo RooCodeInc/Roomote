@@ -1158,6 +1158,12 @@ ${delivery.text}`;
             route: null,
             text: delivery.text,
           });
+          logPrReviewJobEvent('info', 'source_control_review_delivery', {
+            ...deliveryFields,
+            outcome: 'delivered',
+            reason: 'fast_parent_notified',
+            retryable: false,
+          });
           return;
         }
       }
@@ -1173,6 +1179,12 @@ ${delivery.text}`;
       if (!webReviewActionDeliveryId) {
         await finalizePrReviewNotificationRequest(data);
       }
+      logPrReviewJobEvent('info', 'source_control_review_delivery', {
+        ...deliveryFields,
+        outcome: 'delivered',
+        reason: 'fast_parent_notified',
+        retryable: false,
+      });
       return;
     }
 
@@ -1338,7 +1350,7 @@ ${delivery.text}`;
           reason: messageTs
             ? 'conversation_notification_posted'
             : 'provider_message_id_missing',
-          retryable: !messageTs,
+          retryable: false,
         },
       );
       console.log(
