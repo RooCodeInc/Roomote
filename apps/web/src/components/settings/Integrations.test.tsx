@@ -52,6 +52,7 @@ const state = vi.hoisted(() => ({
   voiceConnection: null as null | {
     authStatus?: string | null;
     source?: 'environment' | 'connection';
+    enabled?: boolean;
     voiceId?: string;
   },
   grafanaConnection: null as null | {
@@ -2509,7 +2510,7 @@ describe('Integrations settings', () => {
     );
   });
 
-  it('shows Voice as connected when the environment provides the key', async () => {
+  it('shows environment-keyed Voice as connected with a deployment-level off switch', async () => {
     state.isAdmin = true;
     state.deploymentEnablements = [];
     state.userConnections = [];
@@ -2517,6 +2518,9 @@ describe('Integrations settings', () => {
       authStatus: 'authenticated',
       source: 'environment',
     };
+    mutations.setDeploymentEnabled.mockImplementation((_variables, options) => {
+      options?.onSuccess?.();
+    });
 
     render(<Integrations />);
 
@@ -2529,16 +2533,78 @@ describe('Integrations settings', () => {
         name: 'Voice',
       }),
     ).toBeInTheDocument();
+    // The key is not the admin's to edit, and where it came from is not
+    // something the card needs to say.
     expect(
-      screen.getByText(
-        'Configured by the R_VOICE_OPENAI_API_KEY environment variable.',
-      ),
-    ).toBeInTheDocument();
+      screen.queryByText(/R_VOICE_OPENAI_API_KEY/),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Disconnect Voice' }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Configure Voice' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Disable Voice' }));
+
+    expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(
+      { mcpId: 'voice', enabled: false },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(toast.success).toHaveBeenCalledWith(
+      'Voice disabled for this deployment.',
+    );
+  });
+
+  it('lets an admin turn environment-keyed Voice back on after disabling it', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [{ mcpId: 'voice', enabled: false }];
+    state.userConnections = [];
+    state.voiceConnection = {
+      authStatus: 'authenticated',
+      source: 'environment',
+      enabled: false,
+    };
+
+    render(<Integrations />);
+
+    const availableSection = (
+      await screen.findByRole('heading', { name: 'Available' })
+    ).closest('section');
+    expect(
+      within(availableSection as HTMLElement).getByRole('heading', {
+        level: 3,
+        name: 'Voice',
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enable Voice' }));
+
+    expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(
+      { mcpId: 'voice', enabled: true },
+      expect.anything(),
+    );
+  });
+
+  it('gives members no switch on environment-keyed Voice', async () => {
+    state.isAdmin = false;
+    state.deploymentEnablements = [];
+    state.userConnections = [];
+    state.voiceConnection = {
+      authStatus: 'authenticated',
+      source: 'environment',
+    };
+
+    render(<Integrations />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Disable Voice' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Enable Voice' }),
     ).not.toBeInTheDocument();
   });
 });
