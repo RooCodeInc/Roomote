@@ -18,6 +18,7 @@ import {
 import { dispatchSlackEvent } from './dispatch/events.js';
 import { handleSlackInteractivePayload } from './dispatch/interactive.js';
 import {
+  getIgnoredAutomatedSlackMentionLog,
   getSlackWebhookEventLogDetails,
   isAppAuthoredSlackEvent,
   isRoomoteAuthoredSlackEvent,
@@ -198,6 +199,15 @@ slack.post('/', async (c) => {
       (!isTopLevelAppMessageEvent ||
         isRoomoteAuthoredSlackEvent(event, slackInstallation))
     ) {
+      const ignoredMentionLog = getIgnoredAutomatedSlackMentionLog(
+        event,
+        slackInstallation,
+      );
+
+      if (ignoredMentionLog) {
+        apiLogger.info(ignoredMentionLog);
+      }
+
       return c.json({ ok: true });
     }
 
