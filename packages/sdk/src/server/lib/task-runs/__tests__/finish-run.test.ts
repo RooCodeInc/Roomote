@@ -2497,6 +2497,45 @@ describe('finishRun', () => {
       );
     }, 15_000);
 
+    it('keeps the failing check when the review summary comment no longer exists', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun(
+          { payloadKind: TaskPayloadKind.GithubPrReview },
+          { workflow: 'pr_review', surface: 'github' },
+        ),
+      );
+      mockFindManyTaskPullRequests.mockResolvedValue([reviewPrRow]);
+      mockFinalizeGithubPrReviewComment.mockResolvedValueOnce({
+        finalized: false,
+        fetchFailed: true,
+        commentId: 456,
+      });
+      // The comment was deleted (or the stored id is stale): a definitive
+      // answer from GitHub, not a transient failure.
+      mockFetchIssueCommentWithToken.mockRejectedValue(
+        Object.assign(new Error('HttpError: Not Found'), { status: 404 }),
+      );
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockFetchIssueCommentWithToken).toHaveBeenCalledTimes(1);
+      expect(mockUpdateCheckRun).toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({
+          check_run_id: 123,
+          status: 'completed',
+          conclusion: 'failure',
+          output: expect.objectContaining({
+            title: 'Roomote review result unavailable',
+          }),
+        }),
+      );
+      expect(mockUpdateCheckRun).not.toHaveBeenCalledWith(
+        'github-token',
+        expect.objectContaining({ conclusion: 'neutral' }),
+      );
+    });
+
     it('serializes ownership verification and shared cleanup with review launch', async () => {
       mockFindFirstRun.mockResolvedValue(
         makeRun(

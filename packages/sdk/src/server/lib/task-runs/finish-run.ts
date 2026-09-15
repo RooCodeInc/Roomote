@@ -913,7 +913,7 @@ async function cleanupGithubPrReviewArtifacts(
             status === RunStatus.Completed &&
             reviewSummary.commentId
           ) {
-            const body = await readReviewSummaryWithRetry({
+            const read = await readReviewSummaryWithRetry({
               token,
               owner,
               repo,
@@ -921,11 +921,13 @@ async function cleanupGithubPrReviewArtifacts(
               runId: run.id,
               signal: releaseLifecycleLock.signal,
             });
-            if (body !== undefined) {
-              reviewSummary = { finalized: false, body };
-            } else {
+            if (read.outcome === 'read') {
+              reviewSummary = { finalized: false, body: read.body };
+            } else if (read.outcome === 'unreadable') {
               summaryUnreadable = true;
             }
+            // A missing comment (deleted, or a stale id) is a real absence of
+            // a review result and keeps the failing check.
           }
 
           if (reviewSummary.finalized) {
@@ -1028,7 +1030,9 @@ const REVIEW_SUMMARY_READ_BASE_DELAY_MS = 500;
 /**
  * REST fallback for the review summary comment after the gh CLI read failed.
  * Bounded retries with backoff cover the transient GitHub errors that were
- * turning passed reviews into "review result unavailable" checks.
+ * turning passed reviews into "review result unavailable" checks. A 404 is
+ * not transient: the summary comment was deleted or the stored id is stale,
+ * and the check keeps failing because there is no result to inspect.
  */
 async function readReviewSummaryWithRetry(input: {
   token: string;
@@ -1037,7 +1041,11 @@ async function readReviewSummaryWithRetry(input: {
   commentId: number;
   runId: number;
   signal: AbortSignal;
-}): Promise<string | undefined> {
+}): Promise<
+  | { outcome: 'read'; body: string }
+  | { outcome: 'missing' }
+  | { outcome: 'unreadable' }
+> {
   for (let attempt = 1; attempt <= REVIEW_SUMMARY_READ_ATTEMPTS; attempt++) {
     input.signal.throwIfAborted();
     try {
@@ -1047,14 +1055,24 @@ async function readReviewSummaryWithRetry(input: {
         comment_id: input.commentId,
         request: { signal: input.signal },
       });
-      return data.body ?? undefined;
+      return data.body
+        ? { outcome: 'read', body: data.body }
+        : { outcome: 'missing' };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (isMissingCommentError(error)) {
+        // GitHub answered and the comment is gone: no amount of retrying
+        // brings back a review result, and the check must keep failing.
+        console.error(
+          `[finishRun] Review summary comment ${input.commentId} for run ${input.runId} no longer exists: ${message}`,
+        );
+        return { outcome: 'missing' };
+      }
       if (input.signal.aborted || attempt === REVIEW_SUMMARY_READ_ATTEMPTS) {
         console.error(
           `[finishRun] Review summary comment ${input.commentId} for run ${input.runId} could not be read after ${attempt} attempt(s): ${message}`,
         );
-        return undefined;
+        return { outcome: 'unreadable' };
       }
       const delayMs = REVIEW_SUMMARY_READ_BASE_DELAY_MS * 2 ** (attempt - 1);
       console.warn(
@@ -1063,7 +1081,19 @@ async function readReviewSummaryWithRetry(input: {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
-  return undefined;
+  return { outcome: 'unreadable' };
+}
+
+/**
+ * GitHub's definitive "this comment does not exist" answers. Everything else
+ * (network, 429, 5xx, aborted request) is treated as transient.
+ */
+function isMissingCommentError(error: unknown): boolean {
+  const status =
+    error && typeof error === 'object' && 'status' in error
+      ? (error as { status?: unknown }).status
+      : undefined;
+  return status === 404 || status === 410;
 }
 
 function getRuntimeTaskId(run: TaskRun): string | null {
