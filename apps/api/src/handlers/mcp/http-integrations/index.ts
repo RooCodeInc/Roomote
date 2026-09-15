@@ -27,6 +27,7 @@ import {
   toMcpToolResult,
 } from '../proxy-utils';
 import {
+  integrationFailureReason,
   integrationRequest,
   integrationRequestSchema,
   loadHttpIntegrationsConfig,
@@ -174,7 +175,10 @@ export function createHttpIntegrationsMcp() {
               pending,
               sessionUrl: `${Env.R_APP_URL}/sessions/${context.sessionId}#session-secrets`,
             });
-          } catch {
+          } catch (error) {
+            console.warn(
+              `[HTTP integrations] prepare_session_secret unavailable (scope=${scope}, reason=${integrationFailureReason(error)})`,
+            );
             return {
               isError: true,
               content: [
@@ -197,7 +201,10 @@ export function createHttpIntegrationsMcp() {
             return toMcpToolResult(
               await listSessionSecretApprovals(await resolveContext()),
             );
-          } catch {
+          } catch (error) {
+            console.warn(
+              `[HTTP integrations] list_session_secrets unavailable (scope=${scope}, reason=${integrationFailureReason(error)})`,
+            );
             return {
               isError: true,
               content: [

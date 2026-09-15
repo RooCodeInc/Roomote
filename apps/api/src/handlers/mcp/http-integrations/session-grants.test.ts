@@ -24,7 +24,7 @@ import {
   createSessionSecret,
   revokeSessionSecret,
 } from '@roomote/sdk/server/session-secrets';
-import { integrationRequest } from './broker';
+import { integrationFailureReason, integrationRequest } from './broker';
 
 const { destroy } = vi.hoisted(() => ({ destroy: vi.fn(async () => {}) }));
 vi.mock('undici', () => ({
@@ -626,4 +626,103 @@ it('records failure, not success, when revoked during completion-audit persisten
     sql`select outcome from session_secret_audit where secret_ref = ${secretRef}`,
   );
   expect(rows.map((row) => row.outcome).sort()).toEqual(['failed', 'started']);
+});
+
+it('logs bounded reasons for denied and failed Session requests without request details', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    await expect(
+      request({ method: 'POST', path: '/private-path-marker' }),
+    ).rejects.toThrow(/^Secret request unavailable$/);
+    vi.mocked(fetch).mockRejectedValueOnce(
+      new Error(`private-error-marker ${secret}`),
+    );
+    await expect(request({ path: '/private-path-marker' })).rejects.toThrow(
+      /^Secret request unavailable$/,
+    );
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('Session grant request denied');
+    expect(lines[0]).toContain(`secretRef=${secretRef}`);
+    expect(lines[0]).toContain('method=POST');
+    expect(lines[0]).toContain('reason=method_not_allowed');
+    expect(lines[1]).toContain('Session grant request failed');
+    expect(lines[1]).toContain('reason=Error');
+    for (const line of lines) {
+      expect(line).not.toContain('private-path-marker');
+      expect(line).not.toContain('private-error-marker');
+      expect(line).not.toContain(secret);
+      expect(line).not.toContain(origin);
+    }
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+it('carries the bounded reason on the generic rejection for callers that log', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    await revokeSessionSecret(context, { secretRef });
+    const error = await request().catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('Secret request unavailable');
+    expect(integrationFailureReason(error)).toBe('grant_not_found');
+    expect(
+      integrationFailureReason(
+        await request({}, { ...fastAuth, userId: otherId }).catch(
+          (cause: unknown) => cause,
+        ),
+      ),
+    ).toBe('session_not_bound');
+    expect(
+      integrationFailureReason(
+        await request({}, { ...runAuth, userId: null }).catch(
+          (cause: unknown) => cause,
+        ),
+      ),
+    ).toBe('actor_missing');
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+it('distinguishes the request deadline from caller cancellation in the reason', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const timeout = vi
+    .spyOn(AbortSignal, 'timeout')
+    .mockReturnValueOnce(
+      AbortSignal.abort(new DOMException('deadline', 'TimeoutError')),
+    );
+  try {
+    expect(
+      integrationFailureReason(
+        await request().catch((cause: unknown) => cause),
+      ),
+    ).toBe('request_timeout');
+    expect(
+      integrationFailureReason(
+        await integrationRequest(
+          { integrations: [] },
+          `session-test:${context.sessionId}`,
+          {
+            integrationId: `session:${secretRef}`,
+            method: 'GET',
+            path: '/v1/items',
+          },
+          ownerId,
+          AbortSignal.abort(),
+          () => resolveSessionSecretContext(fastAuth),
+        ).catch((cause: unknown) => cause),
+      ),
+    ).toBe('request_aborted');
+    expect(fetch).not.toHaveBeenCalled();
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    expect(lines.map((line) => line.split('reason=')[1])).toEqual([
+      'request_timeout)',
+      'request_aborted)',
+    ]);
+  } finally {
+    timeout.mockRestore();
+    warn.mockRestore();
+  }
 });

@@ -1985,6 +1985,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ],
     [nativeToolNames.listSessionSecrets, 'listSessionSecretApprovals', {}],
   ] as const)('sanitizes %s SDK failures', async (name, method, args) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
     mocks[method].mockRejectedValueOnce(
       new Error('sensitive SDK failure canary'),
@@ -2013,6 +2014,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(JSON.stringify(mocks.upsertMessage.mock.calls)).not.toContain(
       'sensitive SDK failure canary',
     );
+    // Operators get a class name for the reason, never the SDK message.
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    expect(lines).toContain(`[Fast Agent] ${name} unavailable (reason=Error)`);
+    expect(JSON.stringify(lines)).not.toContain('canary');
+    warn.mockRestore();
   });
 
   it.each(['openai/gpt-5.6', 'anthropic/claude-sonnet-5'])(
@@ -2122,6 +2128,56 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(JSON.stringify(mocks.captureEvent.mock.calls)).not.toContain(
         secretRef,
       );
+    },
+  );
+
+  it.each([
+    [
+      'Integration request rejected or failed. Check the allowed methods and paths; the broker never falls back to direct access.',
+      'broker_rejected',
+    ],
+    ['Secret request unavailable', 'broker_unavailable'],
+    [null, 'broker_unavailable'],
+  ] as const)(
+    'classifies broker isError text %j as %s without logging it',
+    async (upstreamText, reason) => {
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+      mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
+      mocks.callIntegration.mockRejectedValueOnce(
+        new McpToolCallError(upstreamText),
+      );
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          expect(
+            await invokeTool(nativeToolNames.requestWithSessionSecret, {
+              secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+              method: 'GET',
+              path: '/status',
+            }),
+          ).toEqual({ success: false, error: 'Secret request unavailable' });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'The approved request was unavailable.',
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: { ...baseParams.conversation, surface: 'web' },
+        adapter: callbacks(),
+      });
+      expect(mocks.callIntegration).toHaveBeenCalledOnce();
+      const lines = warn.mock.calls.map((call) => String(call[0]));
+      expect(lines).toContain(
+        `[Fast Agent] ${nativeToolNames.requestWithSessionSecret} unavailable (reason=${reason})`,
+      );
+      expect(JSON.stringify(lines)).not.toContain('allowed methods');
+      warn.mockRestore();
     },
   );
 
