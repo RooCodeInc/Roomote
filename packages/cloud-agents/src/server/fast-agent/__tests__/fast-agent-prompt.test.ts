@@ -742,6 +742,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(enabledPrompt).toContain(
       'do not launch a coding task to build a connector when an integration key would do',
     );
+    expect(enabledPrompt).toContain(
+      'Do not probe whether the service is publicly reachable and do not delegate that check to a coding task',
+    );
+    expect(enabledPrompt).toContain(
+      'Never tell the human to enable the Integration keys setting while these tools are available to you',
+    );
     expect(prompt).toContain('Settings → Experimental');
     expect(enabledPrompt).not.toContain(
       'Integration-key tools are turned off for this user',
