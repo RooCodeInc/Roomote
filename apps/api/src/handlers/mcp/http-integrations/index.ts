@@ -33,6 +33,14 @@ import {
   loadHttpIntegrationsConfig,
 } from './broker';
 
+/** Refusal reasons the caller may see; none carries a request value. */
+const SHAREABLE_INTEGRATION_REFUSALS = new Set([
+  'method_not_allowed',
+  'credential_echo',
+  'credential_echo_encoded',
+  'path_too_long',
+]);
+
 export function createHttpIntegrationsMcp() {
   // Only operator integrations require a startup manifest; integration keys are live.
   const config = Env.R_HTTP_INTEGRATIONS_ENABLED
@@ -246,13 +254,19 @@ export function createHttpIntegrationsMcp() {
                 serviceCredentialToolsEnabled ? resolveContext : undefined,
               ),
             );
-          } catch {
+          } catch (error) {
+            // A few refusal reasons are safe to name (they carry no request
+            // values) and let the caller fix the call instead of retrying.
+            const reason = integrationFailureReason(error);
+            const named = SHAREABLE_INTEGRATION_REFUSALS.has(reason)
+              ? ` (reason: ${reason})`
+              : '';
             return {
               isError: true,
               content: [
                 {
                   type: 'text' as const,
-                  text: 'Integration request rejected or failed. Check the allowed methods and paths; the broker never falls back to direct access.',
+                  text: `Integration request rejected or failed. Check the allowed methods and paths; the broker never falls back to direct access.${named}`,
                 },
               ],
             };

@@ -1891,7 +1891,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
               ? { success: true, status: 200, body: 'healthy' }
               : {
                   success: false,
-                  error: 'Secret request unavailable',
+                  error: expect.stringMatching(/^Invalid arguments: body/),
                 },
           );
           await invokeTool(nativeToolNames.sendChatReply, {
@@ -2203,6 +2203,48 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       warn.mockRestore();
     },
   );
+
+  it('turns a named broker refusal into guidance the model can act on', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
+    mocks.callIntegration.mockRejectedValueOnce(
+      new McpToolCallError(
+        'Integration request rejected or failed. Check the allowed methods and paths; the broker never falls back to direct access. (reason: credential_echo)',
+      ),
+    );
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        expect(
+          await invokeTool(nativeToolNames.requestWithServiceCredential, {
+            secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+            method: 'POST',
+            path: '/post',
+            body: '{"hello":"world"}',
+            contentType: 'application/json',
+          }),
+        ).toEqual({
+          success: false,
+          error: expect.stringContaining('contained the key itself'),
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'That endpoint echoes the key; picking another.',
+        });
+        return '';
+      },
+    );
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: { ...baseParams.conversation, surface: 'web' },
+      adapter: callbacks(),
+    });
+    expect(warn.mock.calls.map((call) => String(call[0]))).toContain(
+      `[Fast Agent] ${nativeToolNames.requestWithServiceCredential} unavailable (reason=credential_echo)`,
+    );
+    warn.mockRestore();
+  });
 
   it.each([
     'platform-event',

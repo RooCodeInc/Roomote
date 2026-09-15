@@ -1719,6 +1719,20 @@ function isSuccessfulChatReactionResult(
   );
 }
 
+/**
+ * What the model is told when the API names why an integration-key request
+ * was refused. Only reasons that carry no request values are ever named.
+ */
+const INTEGRATION_REFUSAL_GUIDANCE: Readonly<Record<string, string>> = {
+  method_not_allowed:
+    'That method is not approved for this integration. Use one of its allowed methods, or prepare a new approval that includes it.',
+  credential_echo:
+    "The service's response contained the key itself, so it was withheld. Use an endpoint that does not echo request headers.",
+  credential_echo_encoded:
+    "The service's response contained the key itself, so it was withheld. Use an endpoint that does not echo request headers.",
+  path_too_long: 'The request path is too long; shorten it.',
+};
+
 export async function answerFastAgentQuestion({
   question,
   images = [],
@@ -4750,6 +4764,21 @@ export async function answerFastAgentQuestion({
               // safe to classify (never to log); anything else is logged by
               // class name only because SDK/database messages can echo bound
               // values.
+              const named =
+                error instanceof McpToolCallError
+                  ? /\(reason: ([a-z_]+)\)$/u.exec(
+                      error.upstreamText ?? '',
+                    )?.[1]
+                  : undefined;
+              const guidance = named
+                ? INTEGRATION_REFUSAL_GUIDANCE[named]
+                : undefined;
+              if (guidance) {
+                console.warn(
+                  `[Fast Agent] ${call.name} unavailable (reason=${named})`,
+                );
+                return { success: false, error: guidance };
+              }
               return unavailable(
                 error instanceof McpToolCallError
                   ? error.upstreamText?.startsWith(

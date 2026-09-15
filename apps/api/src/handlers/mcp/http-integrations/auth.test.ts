@@ -1050,6 +1050,31 @@ it.each(['before-call', 'in-flight'] as const)(
   },
 );
 
+it('names a safe refusal reason and advertises a grant by its own methods', async () => {
+  const fixture = await sessionGrant();
+  const listed = JSON.parse(
+    (await tool(fixture.brokerToken, 'list_integrations')).content[0].text,
+  ).integrations.find(
+    (entry: { id: string }) =>
+      entry.id === `session:${fixture.grant.secretRef}`,
+  );
+  expect(listed.rules).toEqual([
+    { method: 'GET', pathPrefix: '/' },
+    { method: 'HEAD', pathPrefix: '/' },
+  ]);
+  const refused = await tool(fixture.brokerToken, 'integration_request', {
+    integrationId: `session:${fixture.grant.secretRef}`,
+    method: 'POST',
+    path: '/',
+    body: '{}',
+    contentType: 'application/json',
+  });
+  expect(refused.isError).toBe(true);
+  expect(refused.content[0].text).toMatch(/\(reason: method_not_allowed\)$/);
+  expect(refused.content[0].text).not.toContain(sessionKey);
+  expect(fetch).not.toHaveBeenCalled();
+});
+
 it.each(['broker', 'run'] as const)(
   'reads fresh approvals and grants for %s while keeping operator configuration snapshotted',
   async (kind) => {
