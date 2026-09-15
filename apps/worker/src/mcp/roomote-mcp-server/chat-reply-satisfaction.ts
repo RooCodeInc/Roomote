@@ -20,6 +20,8 @@ export type ChatReplyPurpose =
 
 interface ChatReplySatisfactionState {
   startedAtMs?: number;
+  /** Blocks opening acknowledgements and progress from automation-started tasks. */
+  suppressNonTerminalRepliesWithoutTurn?: boolean;
   /**
    * Set at launch for late-bound automation execution tasks: the Stop hook
    * blocks silent completion, and the silence hook stamps post-closeout work

@@ -1041,6 +1041,9 @@ export const runTask = async ({
           startedAtMs,
           currentTurnRequiresInitialAck:
             shouldRequireInitialAckOnInitialTurn(taskRun),
+          ...(isSilentChannelAutomationLaunch(taskRun)
+            ? { suppressNonTerminalRepliesWithoutTurn: true }
+            : {}),
           ...(initialTurnMessageTs
             ? {
                 currentTurnMessageTs: initialTurnMessageTs,
