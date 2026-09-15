@@ -509,8 +509,9 @@ async function sendTelegramThreadReply(params: {
     provider: 'telegram',
     runId: params.taskRun.id,
   });
-  const textWithQuote =
-    text && pendingQuote ? `${pendingQuote.quote}\n\n${text}` : text;
+  const textWithQuote = pendingQuote
+    ? [pendingQuote.quote, text].filter(Boolean).join('\n\n')
+    : text;
 
   // Preserve the provider-neutral reply target for routing/bookkeeping. The
   // Telegram adapter intentionally omits native reply metadata; web follow-up

@@ -892,6 +892,34 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
     );
   });
 
+  it('renders and clears a pending web-reply quote on image-only replies', async () => {
+    getLatestUserMessageForReplyQuoteMock.mockResolvedValue({
+      id: 'telegram-image-quote',
+      text: 'Show me the result',
+      userName: 'Test User',
+    });
+    buildThreadReplyImagesMock.mockResolvedValue([
+      { url: 'https://example.com/result.png', altText: 'Result' },
+    ]);
+
+    await maybeSendCommunicationThreadReply({
+      taskRun: telegramTaskRun,
+      parsedBody: { images: [{ artifactId: 'artifact-1' }] },
+    });
+
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: '> **Test User:** Show me the result\n\nCurrent task footer',
+        images: [{ url: 'https://example.com/result.png', altText: 'Result' }],
+      }),
+    );
+    expect(clearLatestUserMessageForReplyQuoteIfIdMock).toHaveBeenCalledWith(
+      'telegram',
+      42,
+      'telegram-image-quote',
+    );
+  });
+
   it('keeps ordinary Telegram replies unquoted', async () => {
     await maybeSendCommunicationThreadReply({
       taskRun: telegramTaskRun,
