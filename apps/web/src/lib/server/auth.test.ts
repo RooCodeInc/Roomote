@@ -320,6 +320,45 @@ describe('getAuth', () => {
     ).resolves.toBe(true);
   });
 
+  it('does not send a verification email to a signup already marked verified', async () => {
+    mockIsEmailChannelEnabled.mockReturnValue(true);
+    await getAuth();
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+      emailVerification?: {
+        sendVerificationEmail?: (
+          input: {
+            user: { email: string; emailVerified: boolean };
+            url: string;
+          },
+          request?: Request,
+        ) => Promise<void>;
+      };
+    };
+    const sendVerificationEmail =
+      options.emailVerification?.sendVerificationEmail;
+
+    await expect(
+      sendVerificationEmail?.(
+        {
+          user: { email: 'verified@example.com', emailVerified: true },
+          url: 'http://localhost:3000/api/auth/verify-email?token=token',
+        },
+        new Request('http://localhost:3000'),
+      ),
+    ).resolves.toBeUndefined();
+    expect(mockSendAgentMailSystemEmail).not.toHaveBeenCalled();
+
+    await sendVerificationEmail?.(
+      {
+        user: { email: 'person@example.com', emailVerified: false },
+        url: 'http://localhost:3000/api/auth/verify-email?token=token',
+      },
+      new Request('http://localhost:3000'),
+    );
+    expect(mockSendAgentMailSystemEmail).toHaveBeenCalledTimes(1);
+  });
+
   it('reports authenticated resend delivery failures without weakening public endpoint privacy', async () => {
     mockIsEmailChannelEnabled.mockReturnValue(true);
     mockSendAgentMailSystemEmail.mockResolvedValue({

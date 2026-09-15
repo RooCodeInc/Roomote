@@ -1140,6 +1140,14 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
             sendOnSignUp: true,
             autoSignInAfterVerification: true,
             sendVerificationEmail: async ({ user, url }) => {
+              // Better Auth sends on every password sign-up without checking
+              // the record it just created. A signup the create hook already
+              // marked verified (a Cloud-verified address consuming its
+              // bootstrap claim) has nothing to confirm, and the mail would
+              // be exactly the duplicate that hook exists to avoid.
+              if (user.emailVerified) {
+                return;
+              }
               const result = await sendAgentMailSystemEmail({
                 to: user.email,
                 subject: 'Verify your email for Roomote',
