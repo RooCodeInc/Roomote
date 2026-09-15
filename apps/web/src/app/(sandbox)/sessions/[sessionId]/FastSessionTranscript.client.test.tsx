@@ -91,6 +91,8 @@ const {
     speak: vi.fn(),
     setMicMuted: vi.fn(),
     setOutputMuted: vi.fn(),
+    micMuted: false,
+    outputMuted: false,
     startedAt: null as number | null,
     inputLevel: 0,
     deliveringUtterances: 0,
@@ -138,9 +140,9 @@ vi.mock('@/hooks/useLiveVoice', () => ({
       start: liveVoiceState.start,
       stop: liveVoiceState.stop,
       speak: liveVoiceState.speak,
-      micMuted: false,
+      micMuted: liveVoiceState.micMuted,
       setMicMuted: liveVoiceState.setMicMuted,
-      outputMuted: false,
+      outputMuted: liveVoiceState.outputMuted,
       setOutputMuted: liveVoiceState.setOutputMuted,
       startedAt: liveVoiceState.startedAt,
       inputLevel: liveVoiceState.inputLevel,
@@ -341,6 +343,8 @@ beforeEach(() => {
   recordVoiceCallEventMutate.mockResolvedValue({ eventId: 'voice-call:1' });
   liveVoiceState.startedAt = null;
   liveVoiceState.inputLevel = 0;
+  liveVoiceState.micMuted = false;
+  liveVoiceState.outputMuted = false;
   liveVoiceState.deliveringUtterances = 0;
   liveVoiceState.onHeardTurn = undefined;
   liveVoiceState.onSpokenTurn = undefined;
@@ -3388,11 +3392,30 @@ describe('FastSessionTranscript', () => {
       expect(
         screen.getByRole('meter', { name: 'Microphone level' }),
       ).toHaveAttribute('aria-valuenow', '60');
-      fireEvent.click(screen.getByRole('button', { name: 'Mute your voice' }));
+      const muteButton = screen.getByRole('button', {
+        name: 'Mute your voice',
+      });
+      expect(muteButton.querySelector('.lucide-audio-lines')).not.toBeNull();
+      expect(muteButton.querySelector('.lucide-x')).toBeNull();
+      fireEvent.click(muteButton);
       expect(liveVoiceState.setMicMuted).toHaveBeenCalledWith(true);
       expect(
         screen.getByRole('button', { name: 'Silence Roomote' }),
       ).toBeInTheDocument();
+
+      liveVoiceState.micMuted = true;
+      view.rerender(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      const unmuteButton = screen.getByRole('button', {
+        name: 'Unmute your voice',
+      });
+      expect(unmuteButton.querySelector('.lucide-audio-lines')).not.toBeNull();
+      expect(unmuteButton.querySelector('.lucide-x')).not.toBeNull();
 
       liveVoiceState.active = false;
       liveVoiceState.status = 'idle';

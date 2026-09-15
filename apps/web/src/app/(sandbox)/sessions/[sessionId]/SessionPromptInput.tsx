@@ -37,11 +37,11 @@ import {
   type PromptInputMessage,
 } from '@/components/ai-elements';
 import {
+  AudioLines,
   BasicTooltip,
-  CircleSlash,
-  RadioTower,
   Volume2,
   VolumeX,
+  X,
 } from '@/components/system';
 import { SessionModelSwitcher } from '@/components/tasks/SessionModelSwitcher';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
@@ -126,6 +126,15 @@ function VoiceLevel({ level, muted }: { level: number; muted: boolean }) {
   );
 }
 
+function AudioLinesX() {
+  return (
+    <span className="relative size-4">
+      <AudioLines className="size-4" />
+      <X className="absolute -right-1 -bottom-1 size-2.5 rounded-full bg-background stroke-[2.5]" />
+    </span>
+  );
+}
+
 function VoiceConversationPanel({ voice }: { voice: SessionVoiceControls }) {
   const call = voice.call;
   const connected = voice.status === 'listening' || voice.status === 'speaking';
@@ -166,7 +175,7 @@ function VoiceConversationPanel({ voice }: { voice: SessionVoiceControls }) {
                 onClick={call.onToggleMic}
                 className="rounded-full"
               >
-                {call.micMuted ? <CircleSlash /> : <RadioTower />}
+                {call.micMuted ? <AudioLinesX /> : <AudioLines />}
               </PromptInputButton>
             </BasicTooltip>
             <BasicTooltip
