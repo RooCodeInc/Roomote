@@ -1,39 +1,13 @@
 import type { ReactNode } from 'react';
 import { render, screen } from '@testing-library/react';
 
-const { framedSurfaceMock, roomoteWordmarkMock } = vi.hoisted(() => ({
-  framedSurfaceMock: vi.fn(
-    ({
-      children,
-      frameClassName,
-      surfaceClassName,
-      variant,
-      style,
-    }: {
-      children: ReactNode;
-      frameClassName?: string;
-      surfaceClassName?: string;
-      variant?: string;
-      style?: React.CSSProperties;
-    }) => (
-      <div
-        data-frame-class-name={frameClassName}
-        data-surface-class-name={surfaceClassName}
-        data-variant={variant}
-        data-height={style?.height}
-        data-min-height={style?.minHeight}
-      >
-        {children}
-      </div>
-    ),
-  ),
+const { roomoteWordmarkMock } = vi.hoisted(() => ({
   roomoteWordmarkMock: vi.fn(({ className }: { className?: string }) => (
     <div data-wordmark-class-name={className}>RoomoteWordmark</div>
   )),
 }));
 
 vi.mock('@/components/layout', () => ({
-  FramedSurface: framedSurfaceMock,
   PreSessionBackdrop: ({ children }: { children: ReactNode }) => (
     <div data-testid="pre-session-backdrop">{children}</div>
   ),
@@ -44,7 +18,6 @@ import Layout from './layout';
 
 describe('Unauthenticated layout', () => {
   beforeEach(() => {
-    framedSurfaceMock.mockClear();
     roomoteWordmarkMock.mockClear();
   });
 
@@ -59,16 +32,6 @@ describe('Unauthenticated layout', () => {
     expect(screen.getByText('child')).toBeInTheDocument();
     expect(screen.getByTestId('pre-session-backdrop')).toBeInTheDocument();
 
-    expect(framedSurfaceMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        variant: 'bold',
-        frameClassName: expect.stringContaining('h-effective-viewport'),
-        surfaceClassName: expect.stringContaining(
-          'light flex flex-col !overflow-y-auto !overflow-x-hidden',
-        ),
-      }),
-      undefined,
-    );
     const contentColumn = screen.getByText('RoomoteWordmark').parentElement;
     expect(contentColumn).toHaveClass(
       'flex',

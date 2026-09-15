@@ -50,7 +50,7 @@ export function PreSessionBackdrop({ children }: { children: ReactNode }) {
         </div>
       </div>
 
-      <div className="pointer-events-none absolute inset-0 bg-accent-bright-foreground/45" />
+      <div className="pointer-events-none absolute inset-0 bg-accent-bright-foreground/60" />
       <div className="relative z-base flex min-h-effective-viewport w-full items-center justify-center">
         {children}
       </div>

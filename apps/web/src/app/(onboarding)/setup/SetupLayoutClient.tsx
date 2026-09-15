@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 
 import { useSetupBootstrapOpen, useUser } from '@/hooks/useUser';
 import {
-  FramedSurface,
   OriginMismatchAlert,
   PreSessionBackdrop,
   RoomoteWordmark,
@@ -73,11 +72,7 @@ export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
             ref={setUserMenuPortalContainer}
             className="light text-foreground"
           />
-          <FramedSurface
-            variant="bold"
-            frameClassName="h-effective-viewport w-full scroll-minimal overflow-hidden bg-transparent p-3 sm:p-5 lg:p-8"
-            surfaceClassName="relative flex flex-col !overflow-y-auto !overflow-x-hidden border border-white/70 bg-white/90 shadow-2xl backdrop-blur-xl md:items-center"
-          >
+          <div className="relative flex h-effective-viewport w-full flex-col overflow-x-hidden overflow-y-auto p-3 scroll-minimal sm:p-5 md:items-center lg:p-8">
             {hasDocsContent ? (
               <SetupDocs
                 isOpen={isDocsOpen}
@@ -113,7 +108,7 @@ export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
                 {children}
               </div>
             </div>
-          </FramedSurface>
+          </div>
         </div>
       </PreSessionBackdrop>
     </SetupDocsContentProvider>

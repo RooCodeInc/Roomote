@@ -9,7 +9,6 @@ import { useUser } from '@/hooks/useUser';
 import { DEFAULT_SETUP_REDIRECT_PATH, requiresSetup } from '@/lib/setup-status';
 import { useTRPC } from '@/trpc/client';
 import {
-  FramedSurface,
   PreSessionBackdrop,
   RoomoteWordmark,
   UserMenu,
@@ -97,11 +96,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           ref={setUserMenuPortalContainer}
           className="light text-foreground"
         />
-        <FramedSurface
-          variant="bold"
-          frameClassName="h-effective-viewport w-full scroll-minimal overflow-hidden bg-transparent p-3 sm:p-5 lg:p-8"
-          surfaceClassName="flex flex-col !overflow-y-auto !overflow-x-hidden border border-white/70 bg-white/90 shadow-2xl backdrop-blur-xl md:items-center"
-        >
+        <div className="flex h-effective-viewport w-full flex-col overflow-x-hidden overflow-y-auto p-3 scroll-minimal sm:p-5 md:items-center lg:p-8">
           <div className="z-50 flex w-full gap-2 justify-end px-4 pt-4 md:fixed md:right-9 md:top-9 md:w-auto md:px-0 md:pt-0">
             <RoomoteWordmark className="h-8 hidden sm:block lg:hidden" />
             <UserMenu portalContainer={userMenuPortalContainer} />
@@ -112,7 +107,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               {children}
             </div>
           </div>
-        </FramedSurface>
+        </div>
       </div>
     </PreSessionBackdrop>
   );
