@@ -246,6 +246,15 @@ export async function processDiscordFastAgentMessage(
               : {}),
           })
         : [];
+    const allowSilentAmbientReply =
+      !isDirected &&
+      (needsPeerCaution ||
+        history.some(
+          (entry) =>
+            !entry.botId &&
+            Boolean(entry.user) &&
+            entry.user !== input.sender.id,
+        ));
     // Resolved ahead of the turn so replies can carry the session footer;
     // the service's own getOrCreate finds this same row.
     const session = await getOrCreateFastAgentSession({
@@ -265,6 +274,7 @@ export async function processDiscordFastAgentMessage(
         input.sender.username,
       senderExternalId: input.sender.id,
       directedAtRoomote: isDirected,
+      allowSilentAmbientReply,
       ...(agentContext ? { agentContext } : {}),
     };
     let durableTurn: FastAgentDurableTurn | null = null;
@@ -403,15 +413,7 @@ export async function processDiscordFastAgentMessage(
         input.sender.global_name ??
         input.sender.username,
       activeTasks: input.activeTasks,
-      allowSilentAmbientReply:
-        !isDirected &&
-        (needsPeerCaution ||
-          history.some(
-            (entry) =>
-              !entry.botId &&
-              Boolean(entry.user) &&
-              entry.user !== input.sender.id,
-          )),
+      allowSilentAmbientReply,
       adapter: {
         createArtifact: (artifact) =>
           createFastAgentConversationArtifact({

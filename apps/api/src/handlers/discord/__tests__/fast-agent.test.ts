@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   recordProviderMessage: vi.fn(),
   admitHumanFollowUp: vi.fn(),
   createConversationArtifact: vi.fn(),
+  persistInlineHumanTurn: vi.fn(),
   resolveSuggestionConversation: vi.fn(),
   resolveChannel: vi.fn(),
   getSession: vi.fn(),
@@ -67,7 +68,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 vi.mock('@roomote/sdk/server', () => ({
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   createFastAgentConversationArtifact: mocks.createConversationArtifact,
-  persistFastAgentInlineHumanTurn: vi.fn(async () => null),
+  persistFastAgentInlineHumanTurn: mocks.persistInlineHumanTurn,
   wakeFastAgentParentEventNow: vi.fn(async () => undefined),
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
@@ -160,6 +161,7 @@ describe('processDiscordFastAgentMessage', () => {
       kind: 'turn',
       turnLock: mocks.releaseLock,
     });
+    mocks.persistInlineHumanTurn.mockResolvedValue(null);
     mocks.releaseLock.mockResolvedValue(undefined);
     mocks.fetchHistory.mockResolvedValue([]);
     mocks.getMessage.mockReturnValue({ id: 'source-1' });
@@ -487,6 +489,50 @@ describe('processDiscordFastAgentMessage', () => {
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({ allowSilentAmbientReply: true }),
+    );
+    expect(mocks.persistInlineHumanTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          directedAtRoomote: false,
+          allowSilentAmbientReply: true,
+        }),
+      }),
+    );
+  });
+
+  it('persists an ordinary undirected single-user follow-up as response-required', async () => {
+    const provider = { editMessage: vi.fn().mockResolvedValue(undefined) };
+
+    await processDiscordFastAgentMessage({
+      event: { eventId: 'event-1' } as never,
+      question: 'Also update the tests',
+      sender: { id: 'discord-user-1', username: 'matt' } as never,
+      senderUserId: 'user-1',
+      provider: provider as never,
+      applicationId: 'application-1',
+      channel: {
+        channelId: 'channel-1',
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: true,
+      } as never,
+      metadata: {
+        communicationChannelId: 'parent-1',
+        communicationThreadId: 'channel-1',
+      } as never,
+      conversationId: 'channel-1',
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ allowSilentAmbientReply: false }),
+    );
+    expect(mocks.persistInlineHumanTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          directedAtRoomote: false,
+          allowSilentAmbientReply: false,
+        }),
+      }),
     );
   });
 

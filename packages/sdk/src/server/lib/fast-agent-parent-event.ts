@@ -2813,7 +2813,7 @@ export async function deliverFastAgentParentEventWithLock(
         humanFollowUp?.question ??
         `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
       ...(humanFollowUp?.images ? { images: humanFollowUp.images } : {}),
-      ...(humanFollowUp?.directedAtRoomote === false &&
+      ...(humanFollowUp?.allowSilentAmbientReply === true &&
       !humanFollowUp.input &&
       !humanFollowUp.turnSource
         ? { allowSilentAmbientReply: true }

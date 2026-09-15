@@ -3494,6 +3494,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
               userId: 'user-1',
               question: 'https://example.com/deploy/123',
               directedAtRoomote: false,
+              allowSilentAmbientReply: true,
             },
           },
         ])
@@ -3550,7 +3551,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('still closes out when a steered follow-up directed at Roomote goes unanswered', async () => {
+  it('still closes out when an undirected steered follow-up is not quiet-eligible', async () => {
     vi.useFakeTimers();
     try {
       mocks.getPendingHumanFollowUp
@@ -3564,8 +3565,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
               eventId: '100.4',
               currentMessageId: '100.4',
               userId: 'user-1',
-              question: '<@UBOT> can you check the deploy?',
-              directedAtRoomote: true,
+              question: 'Can you check the deploy?',
+              directedAtRoomote: false,
             },
           },
         ])

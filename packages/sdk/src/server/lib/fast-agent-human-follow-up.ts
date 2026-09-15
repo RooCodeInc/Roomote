@@ -154,7 +154,7 @@ export async function admitFastAgentInlineHumanTurn(params: {
     // An ambient aside may be ignored; it cannot replace an unfinished request.
     if (
       supersedesPendingTurns(params.event) &&
-      params.event.directedAtRoomote !== false
+      params.event.allowSilentAmbientReply !== true
     ) {
       await tx
         .update(fastAgentParentEvents)
