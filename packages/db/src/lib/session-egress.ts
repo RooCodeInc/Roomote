@@ -140,13 +140,30 @@ export async function findSessionEgressCandidateForRun(runId: number): Promise<{
   };
 }
 
+/**
+ * The owner's Session-secret-tools setting, read under a share lock so a
+ * concurrent toggle blocks until this transaction commits. Every path that
+ * mints or extends substitutes calls this inside its transaction; the
+ * controller's preflight read is planning only.
+ */
+async function ownerExperimentLocked(
+  tx: DatabaseOrTransaction,
+  ownerUserId: string,
+): Promise<boolean> {
+  const [owner] = await tx
+    .select({ metadata: users.metadata })
+    .from(users)
+    .where(and(eq(users.id, ownerUserId), isNull(users.deletedAt)))
+    .for('share');
+  return (
+    Boolean(owner) && isSessionSecretToolsExperimentEnabled(owner!.metadata)
+  );
+}
+
 /** An active workload whose run, Session, owner, and attachment are all still live. */
 async function liveWorkload(tx: DatabaseOrTransaction, workloadId: string) {
   const [row] = await tx
-    .select({
-      workload: sessionEgressWorkloads,
-      ownerMetadata: users.metadata,
-    })
+    .select({ workload: sessionEgressWorkloads })
     .from(sessionEgressWorkloads)
     .innerJoin(taskRuns, eq(taskRuns.id, sessionEgressWorkloads.taskRunId))
     .innerJoin(sessions, eq(sessions.id, sessionEgressWorkloads.sessionId))
@@ -174,7 +191,8 @@ async function liveWorkload(tx: DatabaseOrTransaction, workloadId: string) {
     .for('update', { of: sessionEgressWorkloads });
   // The owner's experiment gates the tools per request; a workload is only
   // live while it stays on, so renewals and new substitutes stop with it.
-  return row && isSessionSecretToolsExperimentEnabled(row.ownerMetadata)
+  if (!row) return null;
+  return (await ownerExperimentLocked(tx, row.workload.ownerUserId))
     ? row.workload
     : null;
 }
@@ -246,6 +264,14 @@ async function mintMissingSubstitutes(
     )
     .orderBy(asc(sessionSecrets.createdAt));
   const issued: SessionEgressSubstituteIssue[] = [];
+  // Minting is the write boundary: the owner row is already share-locked by
+  // the caller's transaction, so this re-read cannot observe a newer toggle
+  // and simply refuses to write for an owner whose tools are off.
+  if (
+    grants.length > 0 &&
+    !(await ownerExperimentLocked(tx, workload.ownerUserId))
+  )
+    return issued;
   for (const grant of grants) {
     // Withheld plaintext is unrecoverable, so denied grants must remain mintable.
     if (!isOriginAllowed(grant.origin)) continue;
@@ -301,13 +327,11 @@ export async function registerSessionEgressWorkload(
       .where(eq(taskRuns.id, input.runId))
       .for('update');
     const eligible = await eligibleRunSession(tx, input.runId);
-    // Re-checked inside the minting transaction: the controller's preflight
-    // is planning, and an owner who turned the tools off in between must not
-    // have substitutes minted for their key.
-    if (
-      !eligible ||
-      !isSessionSecretToolsExperimentEnabled(eligible.ownerMetadata)
-    )
+    // The controller's preflight is planning only. The owner row is locked
+    // here for the rest of the transaction, so a toggle that lands between
+    // this read and the mint waits for the commit and then governs the next
+    // live check; nothing is minted for an owner who already turned it off.
+    if (!eligible || !(await ownerExperimentLocked(tx, eligible.ownerUserId)))
       throw new SessionEgressRegistrationError('run_not_eligible');
 
     const [existing] = await tx
