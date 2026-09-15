@@ -3,10 +3,12 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db';
 import { users } from '../schema';
 
-export const SLACK_PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY =
+// Preserve the original key so existing Slack opt-ins enable the expanded
+// experiment without a migration or split preference state.
+export const PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY =
   'slack_peer_conversations_experiment_enabled';
 
-export function isSlackPeerConversationsExperimentEnabledInMetadata(
+export function isPeerConversationsExperimentEnabledInMetadata(
   metadata: unknown,
 ): boolean {
   return (
@@ -14,12 +16,12 @@ export function isSlackPeerConversationsExperimentEnabledInMetadata(
     typeof metadata === 'object' &&
     !Array.isArray(metadata) &&
     (metadata as Record<string, unknown>)[
-      SLACK_PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY
+      PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY
     ] === true
   );
 }
 
-export async function isSlackPeerConversationsExperimentEnabledForUser(
+export async function isPeerConversationsExperimentEnabledForUser(
   userId: string,
 ): Promise<boolean> {
   const user = await db.query.users.findFirst({
@@ -27,5 +29,5 @@ export async function isSlackPeerConversationsExperimentEnabledForUser(
     columns: { metadata: true },
   });
 
-  return isSlackPeerConversationsExperimentEnabledInMetadata(user?.metadata);
+  return isPeerConversationsExperimentEnabledInMetadata(user?.metadata);
 }

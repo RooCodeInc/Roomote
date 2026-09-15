@@ -68,8 +68,8 @@ Personal Settings also include app preferences such as:
   learning
 - **Home suggestions** under **Settings > Experimental** to offer task ideas
   based on your recent work
-- **Slack peer conversations** under **Settings > Experimental** to let an
-  established Fast Slack thread continue after another participant is mentioned
+- **Peer conversations** under **Settings > Experimental** to let an established
+  Fast Slack or Discord thread continue after another participant is mentioned
 
 Most teammates only need profile, linked accounts, and theme settings.
 
@@ -87,13 +87,22 @@ runs, and memories that have not finished ingesting. If Memory or helper-model
 generation is unavailable, Home keeps the standard non-personalized suggestions.
 Turn the experiment off at any time to stop personalized suggestion requests.
 
-### Continue Slack peer conversations
+### Continue peer conversations
 
-**Slack peer conversations** is an opt-in experiment owned by the person whose
-Fast Session is bound to the Slack thread. When enabled, eligible human replies
-can continue reaching Fast after someone mentions another participant. Fast is
-instructed to stay quiet around peer discussion unless it has a useful reason to
-participate. Direct Roomote mentions work normally with the experiment on or off.
+**Peer conversations** is an opt-in experiment owned by the person whose Fast
+Session is bound to a Slack or Discord thread. When enabled, eligible human
+replies can continue reaching Fast after someone mentions another participant.
+Fast is instructed to stay quiet around peer discussion unless Roomote is
+addressed directly or the context clearly calls for its response. Direct Roomote
+mentions work normally with the experiment on or off.
+
+The experiment does not monitor whole channels. Discord supplies messages from
+the established thread and resolved user mentions. Telegram is not included:
+bot privacy settings can prevent ambient group messages from reaching Roomote,
+and Telegram Fast conversations are isolated per linked sender. Microsoft Teams
+is also not included because its channel Fast conversations are isolated per
+linked sender; webhook delivery and delegated Graph history are not a single
+shared, owner-bound Fast conversation signal.
 
 ## Personalize how Roomote works with you
 

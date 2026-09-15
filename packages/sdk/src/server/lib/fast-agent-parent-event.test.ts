@@ -550,18 +550,22 @@ describe('deliverFastAgentParentEvent', () => {
   });
 
   it.each([false, true])(
-    'preserves queued Slack caution eligibility (directed=%s)',
-    async (directedAtRoomote) => {
+    'preserves explicit queued provider quiet eligibility (allowed=%s)',
+    async (allowSilentAmbientReply) => {
       await deliverFastAgentParentEventWithLock(
         {
-          parent,
+          parent: {
+            ...parent,
+            conversation: { ...parent.conversation, surface: 'discord' },
+          },
           event: {
             type: 'human_follow_up',
             eventId: '100.004',
             currentMessageId: '100.004',
             userId: 'user-2',
             question: 'A follow-up',
-            directedAtRoomote,
+            directedAtRoomote: false,
+            allowSilentAmbientReply,
             agentContext: 'Human-to-human discussion may be continuing',
           },
         },
@@ -572,7 +576,7 @@ describe('deliverFastAgentParentEvent', () => {
         'Human-to-human discussion may be continuing',
       );
       expect(input.allowSilentAmbientReply).toBe(
-        directedAtRoomote ? undefined : true,
+        allowSilentAmbientReply ? true : undefined,
       );
     },
   );
