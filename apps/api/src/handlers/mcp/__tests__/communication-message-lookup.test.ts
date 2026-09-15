@@ -172,6 +172,20 @@ describe('lookupCommunicationMessageContext', () => {
     },
   );
 
+  it('rejects an explicit provider that contradicts the message link', async () => {
+    await expect(
+      lookupCommunicationMessageContext({
+        actingUserId: 'user-1',
+        messageLink: 'https://acme.slack.com/archives/C123/p1710000000000100',
+        provider: 'discord',
+      }),
+    ).rejects.toThrow(
+      'The supplied message or channel link does not match the communication provider',
+    );
+    expect(lookupSlackThreadMock).not.toHaveBeenCalled();
+    expect(lookupDiscordThreadMock).not.toHaveBeenCalled();
+  });
+
   it('does not guess a provider from a raw id when the task has no channel', async () => {
     await expect(
       lookupCommunicationMessageContext({
