@@ -21,7 +21,8 @@ services, not a replacement for [connected integrations](/integrations).
 
 1. You ask for something that needs a service you hold a key for, such as
    "list my Stripe customers", or share a link into a service Roomote has no
-   connector for, such as a Figma frame or an Intercom conversation.
+   connector for but whose API accepts a key you hold, such as a Figma frame
+   or an Intercom conversation.
 2. The agent reads the service's documentation and prepares an approval with
    only nonsecret policy: a label, the exact HTTPS origin (for example
    `https://api.stripe.com`), the header that carries the key, and the HTTP
