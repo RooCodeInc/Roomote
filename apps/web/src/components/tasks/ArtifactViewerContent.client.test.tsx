@@ -379,9 +379,58 @@ describe('ArtifactViewerContent', () => {
       ).toBeVisible();
       expect(screen.getByRole('cell', { name: 'name' })).toBeVisible();
       expect(screen.getByRole('cell', { name: 'Ada' })).toBeVisible();
+      expect(screen.getByLabelText('First row is a header')).not.toBeChecked();
       expect(screen.getByText('Source')).toBeVisible();
     },
   );
+
+  it('uses the first parsed row as semantic column headers when enabled', () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/data.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 32,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/data.csv',
+          content: 'name,value\nAda,42',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+
+    expect(screen.getByRole('columnheader', { name: 'name' })).toBeVisible();
+    expect(screen.getByRole('columnheader', { name: 'value' })).toBeVisible();
+    expect(
+      screen.queryByRole('cell', { name: 'name' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'Ada' })).toBeVisible();
+    expect(screen.getByRole('rowheader', { name: '2' })).toBeVisible();
+
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+
+    expect(
+      screen.getByRole('columnheader', { name: 'Column 1' }),
+    ).toBeVisible();
+    expect(screen.getByRole('cell', { name: 'name' })).toBeVisible();
+
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+    fireEvent.click(screen.getByLabelText('Source'));
+
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === 'PRE' &&
+          element.textContent === 'name,value\nAda,42',
+      ),
+    ).toBeVisible();
+  });
 
   it('renders table values as inert text and keeps source available', () => {
     const content = 'value\n<script>window.alert(1)</script>';
@@ -417,7 +466,7 @@ describe('ArtifactViewerContent', () => {
     ).toBeVisible();
   });
 
-  it('resets table artifacts to preview when the path or version changes', () => {
+  it('resets table view options when the path or version changes', () => {
     const createTableArtifact = (path: string, version: number) => ({
       id: 'artifact-table',
       taskId: 'task-1',
@@ -437,6 +486,7 @@ describe('ArtifactViewerContent', () => {
       />,
     );
 
+    fireEvent.click(screen.getByLabelText('First row is a header'));
     fireEvent.click(screen.getByLabelText('Source'));
     rerender(
       <ArtifactViewerContent
@@ -445,7 +495,12 @@ describe('ArtifactViewerContent', () => {
       />,
     );
     expect(screen.getByRole('table')).toBeVisible();
+    expect(screen.getByLabelText('First row is a header')).not.toBeChecked();
+    expect(
+      screen.getByRole('columnheader', { name: 'Column 1' }),
+    ).toBeVisible();
 
+    fireEvent.click(screen.getByLabelText('First row is a header'));
     fireEvent.click(screen.getByLabelText('Source'));
     rerender(
       <ArtifactViewerContent
@@ -454,6 +509,58 @@ describe('ArtifactViewerContent', () => {
       />,
     );
     expect(screen.getByRole('table')).toBeVisible();
+    expect(screen.getByLabelText('First row is a header')).not.toBeChecked();
+    expect(
+      screen.getByRole('columnheader', { name: 'Column 1' }),
+    ).toBeVisible();
+  });
+
+  it('supports header-only and ragged tables without changing parsed cells', () => {
+    const { rerender } = render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/header-only.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 10,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/header-only.csv',
+          content: 'name,value',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+
+    expect(screen.getByRole('columnheader', { name: 'name' })).toBeVisible();
+    expect(screen.getAllByRole('row')).toHaveLength(1);
+
+    rerender(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/ragged.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 18,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/ragged.csv',
+          content: 'name\nAda,42',
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+
+    expect(screen.getByRole('columnheader', { name: 'name' })).toBeVisible();
+    expect(screen.getAllByRole('columnheader')).toHaveLength(3);
+    expect(screen.getByRole('cell', { name: '42' })).toBeVisible();
   });
 
   it('handles empty and malformed tables with source available', () => {
@@ -477,6 +584,8 @@ describe('ArtifactViewerContent', () => {
 
     expect(screen.getByText(/This table is empty/)).toBeVisible();
     expect(screen.getByText('Source')).toBeVisible();
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+    expect(screen.getByText(/This table is empty/)).toBeVisible();
 
     rerender(
       <ArtifactViewerContent

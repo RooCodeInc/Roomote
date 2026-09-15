@@ -136,9 +136,11 @@ interface ArtifactViewerContentProps {
 function TabularArtifactPreview({
   content,
   format,
+  firstRowIsHeader,
 }: {
   content: string;
   format: 'csv' | 'tsv';
+  firstRowIsHeader: boolean;
 }) {
   const preview = useMemo(
     () => parseTabularArtifact(content, format),
@@ -146,6 +148,8 @@ function TabularArtifactPreview({
   );
   const hasLimit =
     preview.rowsTruncated || preview.columnsTruncated || preview.cellsTruncated;
+  const headerRow = firstRowIsHeader ? preview.rows[0] : undefined;
+  const dataRows = firstRowIsHeader ? preview.rows.slice(1) : preview.rows;
 
   if (preview.rows.length === 0) {
     return (
@@ -182,7 +186,8 @@ function TabularArtifactPreview({
         <Table className="w-max min-w-full border-separate border-spacing-0 font-mono text-xs">
           <caption className="sr-only">
             {format === 'csv' ? 'CSV' : 'TSV'} preview. The first artifact row
-            is shown as data, not column headings.
+            is{' '}
+            {firstRowIsHeader ? 'shown as column headings.' : 'shown as data.'}
           </caption>
           <TableHeader>
             <TableRow>
@@ -194,19 +199,19 @@ function TabularArtifactPreview({
               </TableHead>
               {Array.from({ length: preview.columnCount }, (_, index) => (
                 <TableHead key={index} scope="col" className="bg-muted/95">
-                  Column {index + 1}
+                  {headerRow ? (headerRow[index] ?? '') : `Column ${index + 1}`}
                 </TableHead>
               ))}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {preview.rows.map((row, rowIndex) => (
+            {dataRows.map((row, rowIndex) => (
               <TableRow key={rowIndex}>
                 <TableHead
                   scope="row"
                   className="sticky left-0 z-10 border-r bg-background text-right text-muted-foreground"
                 >
-                  {rowIndex + 1}
+                  {rowIndex + (firstRowIsHeader ? 2 : 1)}
                 </TableHead>
                 {Array.from(
                   { length: preview.columnCount },
@@ -245,6 +250,7 @@ export function ArtifactViewerContent({
   const pathname = usePathname();
   const router = useRouter();
   const [isRaw, setIsRaw] = useState(false);
+  const [firstRowIsHeader, setFirstRowIsHeader] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isUrlCopied, setIsUrlCopied] = useState(false);
   const [isRawUrlCopied, setIsRawUrlCopied] = useState(false);
@@ -309,6 +315,7 @@ export function ArtifactViewerContent({
 
   useEffect(() => {
     setIsRaw(false);
+    setFirstRowIsHeader(false);
   }, [artifact?.path, artifact?.version]);
 
   const latestVersion = versions[0]?.version;
@@ -527,25 +534,40 @@ export function ArtifactViewerContent({
                 </div>
               )}
               {canRender && isTabular && (
-                <div className="flex items-center gap-2">
-                  <Label
-                    htmlFor="tabular-source-mode"
-                    className="cursor-pointer text-xs"
-                  >
-                    Preview
-                  </Label>
-                  <Switch
-                    id="tabular-source-mode"
-                    checked={isRaw}
-                    onCheckedChange={setIsRaw}
-                  />
-                  <Label
-                    htmlFor="tabular-source-mode"
-                    className="cursor-pointer text-xs"
-                  >
-                    Source
-                  </Label>
-                </div>
+                <>
+                  <div className="flex items-center gap-2">
+                    <Label
+                      htmlFor="tabular-header-row"
+                      className="cursor-pointer text-xs"
+                    >
+                      First row is a header
+                    </Label>
+                    <Switch
+                      id="tabular-header-row"
+                      checked={firstRowIsHeader}
+                      onCheckedChange={setFirstRowIsHeader}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label
+                      htmlFor="tabular-source-mode"
+                      className="cursor-pointer text-xs"
+                    >
+                      Preview
+                    </Label>
+                    <Switch
+                      id="tabular-source-mode"
+                      checked={isRaw}
+                      onCheckedChange={setIsRaw}
+                    />
+                    <Label
+                      htmlFor="tabular-source-mode"
+                      className="cursor-pointer text-xs"
+                    >
+                      Source
+                    </Label>
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -611,6 +633,7 @@ export function ArtifactViewerContent({
                 <TabularArtifactPreview
                   content={artifact.content}
                   format={tabularFormat}
+                  firstRowIsHeader={firstRowIsHeader}
                 />
               )}
 
