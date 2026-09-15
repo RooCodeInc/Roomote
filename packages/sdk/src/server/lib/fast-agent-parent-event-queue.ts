@@ -563,7 +563,7 @@ export async function drainFastAgentParentEvents(
  * time. Any later bookkeeping write (`updated_at`) also restarts the clock,
  * since it proves something is still working the row.
  */
-const queueEligibleSince = sql`GREATEST(
+const queueEligibleSince = () => sql`GREATEST(
   ${fastAgentParentEvents.createdAt},
   ${fastAgentParentEvents.updatedAt},
   COALESCE(${fastAgentParentEvents.claimedUntil}, ${fastAgentParentEvents.createdAt}),
@@ -583,7 +583,9 @@ export async function countOverdueQueuedFastAgentParentEvents(
   const [row] = await db
     .select({ count: count() })
     .from(fastAgentParentEvents)
-    .where(and(pendingPredicate(), sql`${queueEligibleSince} < ${olderThan}`));
+    .where(
+      and(pendingPredicate(), sql`${queueEligibleSince()} < ${olderThan}`),
+    );
   return row?.count ?? 0;
 }
 
