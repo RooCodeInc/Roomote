@@ -252,6 +252,7 @@ export { requireFastSuggestionOriginSessionId } from './lib/fast-automation-sugg
 export {
   buildFastAgentParentEventKey,
   drainFastAgentParentEvents,
+  countOverdueQueuedFastAgentParentEvents,
   enqueueFastAgentParentEvent,
   FastAgentParentBusyError,
   FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
@@ -499,6 +500,10 @@ export {
   type SourceControlPullRequestSummary,
 } from './lib/pull-requests/source-control-pull-request-reads';
 export {
+  readLivePullRequestStateForNotification,
+  type LivePullRequestState,
+} from './lib/task-runs/pr-review-notification-pr-state';
+export {
   writeSourceControlPullRequestForTaskRun,
   sourceControlPullRequestWriteInputSchema,
   SourceControlWriteError,
@@ -592,6 +597,6 @@ export * from './lib/brain-inference';
 export * from './lib/brain-source-availability';
 export * from './lib/home-composer-recommendations';
 export {
-  publishSessionEgressDelivery,
-  isSessionEgressBootstrapReady,
-} from './lib/session-egress-delivery';
+  publishCredentialEgressDelivery,
+  isCredentialEgressBootstrapReady,
+} from './lib/credential-egress-delivery';

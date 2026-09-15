@@ -9,7 +9,7 @@ import {
 } from '@roomote/auth';
 import { db, deploymentSettings, eq, users } from '@roomote/db/server';
 import {
-  SESSION_EGRESS_PROXY_PATH,
+  CREDENTIAL_EGRESS_PROXY_PATH,
   isRoomoteDeploymentDisabled,
 } from '@roomote/types';
 
@@ -62,10 +62,10 @@ function extractBearerToken(
 
 export const tokenAuthMiddleware = () =>
   createMiddleware(async (c: Context<{ Variables: Variables }>, next: Next) => {
-    // The session egress proxy authenticates a substitute token in the
+    // The credential egress proxy authenticates a substitute token in the
     // grant's own header slot. It is never a Roomote bearer, so validating it
     // here would only log a failed lookup on every proxied request.
-    if (c.req.path.startsWith(`${SESSION_EGRESS_PROXY_PATH}/`)) {
+    if (c.req.path.startsWith(`${CREDENTIAL_EGRESS_PROXY_PATH}/`)) {
       await next();
       return;
     }

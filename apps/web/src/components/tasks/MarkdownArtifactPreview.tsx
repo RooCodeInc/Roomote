@@ -42,10 +42,10 @@ export function MarkdownArtifactPreview({
   return (
     <span
       aria-hidden="true"
-      className={cn('markdown-artifact-preview', className)}
+      className={cn('artifact-paper-preview', className)}
     >
-      <span className="markdown-artifact-paper-shadow" />
-      <span className="markdown-artifact-paper">
+      <span className="artifact-paper-shadow" />
+      <span className="artifact-paper">
         {content ? (
           <Streamdown
             className="markdown-artifact-content"

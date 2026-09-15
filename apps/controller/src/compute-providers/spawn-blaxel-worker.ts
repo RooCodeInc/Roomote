@@ -26,7 +26,7 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
-import type { SessionEgressLifecycle } from '../session-egress';
+import type { CredentialEgressLifecycle } from '../credential-egress';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 import {
   COMPUTE_BOOTSTRAP_TIMEOUT_MS,
@@ -46,7 +46,7 @@ export async function spawnBlaxelWorker(
     deploymentSlug?: string;
     blaxelTags?: Record<string, string>;
     /** Session-egress admission; omitted in unit paths that do not exercise it. */
-    sessionEgress?: SessionEgressLifecycle;
+    credentialEgress?: CredentialEgressLifecycle;
   },
 ): Promise<{ machineId: string; sandboxCmdId?: string }> {
   if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
@@ -118,7 +118,7 @@ export async function spawnBlaxelWorker(
     launchMode: launchOptions.launchMode,
   });
 
-  const sessionEgressPlan = await config.sessionEgress?.planApiProxy({
+  const credentialEgressPlan = await config.credentialEgress?.planApiProxy({
     taskRun,
     provider: 'blaxel',
   });
@@ -204,7 +204,7 @@ export async function spawnBlaxelWorker(
         image: config.blaxelImage,
         extraEnv: {
           SANDBOX_TIMEOUT_MS: String(config.blaxelTimeoutMs),
-          ...sessionEgressPlan?.bootstrapEnv,
+          ...credentialEgressPlan?.bootstrapEnv,
         },
       }),
       detached: true,
@@ -236,7 +236,7 @@ export async function spawnBlaxelWorker(
     // The worker is waiting on the bootstrap nonce after its ordinary
     // bootstrap; an admission failure fails the spawn, as it does for Docker,
     // rather than leaving a worker that expected substitutes without them.
-    await sessionEgressPlan?.admit();
+    await credentialEgressPlan?.admit();
 
     return {
       machineId: machine.machineId,

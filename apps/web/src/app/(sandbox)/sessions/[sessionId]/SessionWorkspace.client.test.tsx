@@ -1319,6 +1319,61 @@ describe('SessionWorkspace', () => {
     );
   });
 
+  it('shows a bounded tabular thumbnail for Session artifacts', async () => {
+    artifactQueryState.dataByPath['session-1:reports/results.csv'] = {
+      id: 'session-csv',
+      taskId: null,
+      sessionId: 'session-1',
+      path: 'reports/results.csv',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/csv',
+      content: 'name,score\nAda,98',
+      size: 20,
+      createdAt: new Date('2026-01-05T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/session-csv/download',
+    };
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: {
+        artifacts: [
+          {
+            id: 'session-csv',
+            path: 'reports/results.csv',
+            version: 1,
+            artifactType: 'general',
+            contentType: 'text/csv',
+            size: 20,
+            createdAt: new Date('2026-01-05T00:00:00.000Z'),
+          },
+        ],
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Open Results from Session' }),
+    ).toBeVisible();
+    const card = screen.getByRole('button', {
+      name: 'Open Results from Session',
+    });
+    await waitFor(() => {
+      expect(artifactQueryInputs).toContainEqual({
+        sessionId: 'session-1',
+        path: 'reports/results.csv',
+        version: 1,
+        preview: true,
+      });
+      expect(card.querySelector('.tabular-artifact-grid')).toHaveAttribute(
+        'data-state',
+        'ready',
+      );
+    });
+    expect(card).not.toHaveTextContent('Ada');
+    expect(card).not.toHaveTextContent('98');
+  });
+
   it('opens a deep-linked Session artifact without a click and clears the link on back', async () => {
     artifactQueryState.dataByPath['session-1:notes/decision.md'] = {
       id: 'session-artifact',

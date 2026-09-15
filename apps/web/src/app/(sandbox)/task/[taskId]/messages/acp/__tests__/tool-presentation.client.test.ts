@@ -27,7 +27,7 @@ function toolData(
 }
 
 function toolMessage(
-  overrides: Partial<AcpToolResultPayload> = {},
+  overrides: Partial<AcpToolResultPayload> & { rawInput?: unknown } = {},
 ): AcpToolResultUiMessage {
   const data = toolData(overrides);
   return {
@@ -516,6 +516,32 @@ describe('tool presentation resolver', () => {
     ).toBe('skill capture-visual-proof');
   });
 
+  it('uses the transcript-safe result name for Fast skill loads without exposing instance IDs', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'load_skill',
+          rawInput: {
+            arguments: { id: 'instance:00000000-0000-4000-8000-000000000001' },
+          },
+          output: JSON.stringify({
+            success: true,
+            id: 'instance:00000000-0000-4000-8000-000000000001',
+            name: 'daily-brief',
+          }),
+        }),
+      ).object,
+    ).toBe('skill daily-brief');
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'load_skill',
+          rawInput: { name: 'instance:00000000-0000-4000-8000-000000000001' },
+        }),
+      ).object,
+    ).toBe('skill');
+  });
+
   it('sanitizes before truncating paths and handles malformed arguments', () => {
     const filePath = `/sandbox/repos/${'a'.repeat(100)}`;
     expect(
@@ -765,7 +791,7 @@ describe('tool presentation policy', () => {
     });
   });
 
-  it.each(['read', 'read_file', 'spill_read', 'load_skill'])(
+  it.each(['read', 'read_file', 'spill_read'])(
     'keeps ordinary %s details hidden',
     (toolName) => {
       expect(
@@ -773,6 +799,56 @@ describe('tool presentation policy', () => {
       ).toBe('none');
     },
   );
+
+  it('only expands skill receipts when they contain meaningful detail', () => {
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'skill',
+          rawInput: { name: 'implement-changes' },
+        }),
+      ).detailMode,
+    ).toBe('none');
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'load_skill',
+          rawInput: {
+            arguments: {
+              id: 'instance:00000000-0000-4000-8000-000000000001',
+            },
+          },
+          output: JSON.stringify({ success: true, name: 'daily-brief' }),
+        }),
+      ).detailMode,
+    ).toBe('none');
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'load_skill',
+          rawInput: {
+            arguments: {
+              id: 'instance:00000000-0000-4000-8000-000000000001',
+            },
+          },
+          output: JSON.stringify({
+            success: true,
+            name: 'daily-brief',
+            resource: 'SKILL.md',
+          }),
+        }),
+      ).detailMode,
+    ).toBe('expandable');
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'skill',
+          rawInput: { name: 'implement-changes' },
+          output: '# Implementation workflow',
+        }),
+      ).detailMode,
+    ).toBe('expandable');
+  });
 
   it('keeps consequential receipts outside collapsed activity', () => {
     expect(

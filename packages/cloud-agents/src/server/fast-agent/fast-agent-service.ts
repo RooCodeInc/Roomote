@@ -2,10 +2,11 @@ import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
-  listSessionSecretApprovals,
-  prepareSessionSecret,
-} from '@roomote/sdk/server/session-secrets';
+  listServiceCredentialApprovals,
+  prepareServiceCredential,
+} from '@roomote/sdk/server/service-credentials';
 import {
+  ACP_TOOL_KINDS,
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
@@ -31,9 +32,9 @@ import {
   formatErrorForLog,
   formatSingleLineLog,
   manageWakeupsInputSchema,
-  sessionSecretRequestSchema,
-  sessionSecretPrepareSchema,
-  sessionSecretPrepareToolSchema,
+  serviceCredentialRequestSchema,
+  serviceCredentialPrepareSchema,
+  serviceCredentialPrepareToolSchema,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
   truncateAcpOutputText,
@@ -55,6 +56,7 @@ import {
   and,
   appendFastAgentMemory,
   asc,
+  createChatInitiationOrder,
   db,
   eq,
   fastAgentParentEvents,
@@ -1824,6 +1826,7 @@ export async function answerFastAgentQuestion({
    * after a previous execution parked it on a temporary provider failure. */
   resumedAfterInferenceRetry?: boolean;
 }): Promise<string> {
+  const chatInitiationOrder = createChatInitiationOrder();
   const turnId = buildFastAgentTurnId({
     currentMessageId,
     conversation,
@@ -3099,6 +3102,7 @@ export async function answerFastAgentQuestion({
       getOrCreateFastAgentSession({
         userId,
         conversation: canonicalConversation ?? conversation,
+        ...(turnSource === 'human' ? { chatInitiationOrder } : {}),
       }),
       listFastAgentIntegrations(
         { userId, apiBaseUrl },
@@ -3115,7 +3119,7 @@ export async function answerFastAgentQuestion({
             displayName: null,
             githubLogin: null,
             isAdmin: false,
-            sessionSecretToolsEnabled: false,
+            serviceCredentialToolsEnabled: false,
           })
         : getFastAgentUserIdentity(userId).catch((error) => {
             degradedContextComponents.add('user_identity');
@@ -3126,7 +3130,7 @@ export async function answerFastAgentQuestion({
               displayName: null,
               githubLogin: null,
               isAdmin: false,
-              sessionSecretToolsEnabled: false,
+              serviceCredentialToolsEnabled: false,
             };
           }),
       db.query.deploymentSettings
@@ -3433,7 +3437,7 @@ export async function answerFastAgentQuestion({
       appEnv: Env.R_APP_ENV,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
-      sessionSecretToolsEnabled: currentUser.sessionSecretToolsEnabled,
+      serviceCredentialToolsEnabled: currentUser.serviceCredentialToolsEnabled,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
@@ -3757,9 +3761,9 @@ export async function answerFastAgentQuestion({
       // no extra reply. This does not bypass the live actor/grant checks.
       ...(conversation.surface === 'web'
         ? [
-            FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
-            FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret,
-            FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets,
+            FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
+            FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
+            FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
           ]
         : []),
       `${ROOMOTE_MCP_ID}_${CHAT_REACTION_EMOJI_TOOL_NAME}`,
@@ -4635,9 +4639,9 @@ export async function answerFastAgentQuestion({
             return result;
           }
 
-          case FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret:
-          case FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets:
-          case FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret: {
+          case FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential:
+          case FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials:
+          case FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential: {
             // The model only ever sees the generic message; the bounded reason
             // goes to server logs so operators can tell a disabled experiment
             // from a missing Session binding or a broker denial.
@@ -4648,16 +4652,17 @@ export async function answerFastAgentQuestion({
               return { success: false, error: 'Secret request unavailable' };
             };
             try {
-              if (!currentUser.sessionSecretToolsEnabled) {
+              if (!currentUser.serviceCredentialToolsEnabled) {
                 return unavailable('experiment_disabled');
               }
               const schema =
-                call.name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret
-                  ? sessionSecretPrepareToolSchema
+                call.name ===
+                FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential
+                  ? serviceCredentialPrepareToolSchema
                   : call.name ===
-                      FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets
+                      FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials
                     ? z.object({}).strict()
-                    : sessionSecretRequestSchema;
+                    : serviceCredentialRequestSchema;
               const args = schema.safeParse(call.args);
               if (!args.success) return unavailable('invalid_arguments');
               // Platform events carry an owner for routing, not a human actor.
@@ -4677,25 +4682,27 @@ export async function answerFastAgentQuestion({
               const sessionUrl = new URL(
                 `${Env.R_APP_URL}/sessions/${encodeURIComponent(canonicalSession.id)}`,
               );
-              sessionUrl.hash = 'session-secrets';
+              sessionUrl.hash = 'integrations';
               if (
-                call.name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret
+                call.name ===
+                FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential
               ) {
-                const pending = await prepareSessionSecret(
+                const pending = await prepareServiceCredential(
                   context,
-                  sessionSecretPrepareSchema.parse(args.data),
+                  serviceCredentialPrepareSchema.parse(args.data),
                 );
                 return { pending, sessionUrl: sessionUrl.toString() };
               }
               if (
-                call.name === FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets
+                call.name ===
+                FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials
               ) {
                 return {
-                  ...(await listSessionSecretApprovals(context)),
+                  ...(await listServiceCredentialApprovals(context)),
                   sessionUrl: sessionUrl.toString(),
                 };
               }
-              const request = sessionSecretRequestSchema.parse(args.data);
+              const request = serviceCredentialRequestSchema.parse(args.data);
               const result = await callFastAgentIntegration(
                 {
                   userId,
@@ -5290,7 +5297,8 @@ export async function answerFastAgentQuestion({
           availableIntegrations,
           {
             surface: conversation.surface,
-            sessionSecretToolsEnabled: currentUser.sessionSecretToolsEnabled,
+            serviceCredentialToolsEnabled:
+              currentUser.serviceCredentialToolsEnabled,
           },
         );
         const unbindExecutors = new Set<() => void>();
@@ -5551,6 +5559,36 @@ export async function answerFastAgentQuestion({
                               allowSpillRecovery: true,
                               skillStore,
                               spillBudget,
+                              // The bridge answers skill catalog and load
+                              // calls before this executor sees them. Record
+                              // them like every other native tool so the
+                              // transcript and turn diagnostics show whether
+                              // a skill was actually loaded.
+                              recordSkillToolCall: async (record) => {
+                                const finishRecord =
+                                  diagnostics.recordNativeToolStarted(
+                                    record.name,
+                                  );
+                                try {
+                                  const event = await beginCanonicalToolEvent({
+                                    title: record.name,
+                                    args: record.args,
+                                    nativeSessionId: openCodeSessionID,
+                                    kind:
+                                      record.name ===
+                                      FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill
+                                        ? ACP_TOOL_KINDS.read
+                                        : ACP_TOOL_KINDS.list,
+                                  });
+                                  await finishCanonicalToolEvent(
+                                    event,
+                                    record.result,
+                                    openCodeSessionID,
+                                  );
+                                } finally {
+                                  finishRecord();
+                                }
+                              },
                             },
                           ),
                         );

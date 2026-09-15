@@ -1,8 +1,8 @@
 import * as Sentry from '@sentry/nextjs';
 import {
-  filterSessionSecretTelemetry,
-  isSessionSecretRoute,
-} from '@/lib/server/session-secret-telemetry';
+  filterServiceCredentialTelemetry,
+  isServiceCredentialRoute,
+} from '@/lib/server/service-credential-telemetry';
 
 import {
   isWebSentryEnabled,
@@ -13,7 +13,7 @@ import {
 export const onRequestError: typeof Sentry.captureRequestError = async (
   ...args
 ) => {
-  if (isSessionSecretRoute(args[1].path)) return;
+  if (isServiceCredentialRoute(args[1].path)) return;
   return Sentry.captureRequestError(...args);
 };
 
@@ -61,8 +61,8 @@ export async function register() {
 
       // Increase max length for messages to prevent truncation (default is 250).
       maxValueLength: 8192,
-      beforeSend: filterSessionSecretTelemetry,
-      beforeSendTransaction: filterSessionSecretTelemetry,
+      beforeSend: filterServiceCredentialTelemetry,
+      beforeSendTransaction: filterServiceCredentialTelemetry,
     });
   }
 
@@ -77,8 +77,8 @@ export async function register() {
       tracesSampleRate: 1,
       debug: false,
       maxValueLength: 8192,
-      beforeSend: filterSessionSecretTelemetry,
-      beforeSendTransaction: filterSessionSecretTelemetry,
+      beforeSend: filterServiceCredentialTelemetry,
+      beforeSendTransaction: filterServiceCredentialTelemetry,
     });
   }
 }

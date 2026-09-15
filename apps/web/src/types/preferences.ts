@@ -19,7 +19,7 @@ export interface PersonalPreferences {
   resultsPageEnabled?: boolean;
   slackPeerConversationsExperimentEnabled?: boolean;
   homeComposerSuggestionsEnabled?: boolean;
-  sessionSecretToolsEnabled?: boolean;
+  serviceCredentialToolsEnabled?: boolean;
 }
 
 export type PersonalPreferencesUpdate = Partial<PersonalPreferences>;
@@ -31,7 +31,7 @@ export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
   resultsPageEnabled: false,
   slackPeerConversationsExperimentEnabled: false,
   homeComposerSuggestionsEnabled: false,
-  sessionSecretToolsEnabled: false,
+  serviceCredentialToolsEnabled: false,
 };
 
 export interface UserPersonalizationSettings {

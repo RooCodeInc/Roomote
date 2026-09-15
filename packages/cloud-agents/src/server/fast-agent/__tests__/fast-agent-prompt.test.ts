@@ -466,6 +466,9 @@ describe('buildFastAgentSystemPrompt', () => {
       "When a description matches the user's request, load that skill with `load_skill` using its exact ID",
     );
     expect(prompt).toContain(
+      "A skill listed here or returned by `list_skills` is not a loaded skill. Only a `load_skill` call in this conversation that returned the skill's content counts as loading it.",
+    );
+    expect(prompt).toContain(
       "The Available Skills section above already lists this deployment's instance and inline environment skills; consult it before calling `list_skills`.",
     );
   });
@@ -717,14 +720,14 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('native JSON schema');
     for (const name of [
-      'prepare_session_secret',
-      'list_session_secrets',
-      'request_with_session_secret',
+      'prepare_integration_key',
+      'list_integration_keys',
+      'request_with_integration_key',
     ]) {
       expect(prompt).not.toContain(name);
     }
     expect(prompt).toContain(
-      'Session-secret tools are temporarily unavailable',
+      'Integration-key tools are turned off for this user',
     );
     expect(prompt).toContain(
       'The runtime rejects those actions until a visible text reply has been delivered',
@@ -732,12 +735,28 @@ describe('buildFastAgentSystemPrompt', () => {
 
     const enabledPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      sessionSecretToolsEnabled: true,
+      serviceCredentialToolsEnabled: true,
     });
-    expect(enabledPrompt).toContain('`prepare_session_secret`');
-    expect(enabledPrompt).toContain('`list_session_secrets`');
+    expect(enabledPrompt).toContain('`prepare_integration_key`');
+    expect(enabledPrompt).toContain('`list_integration_keys`');
+    expect(enabledPrompt).toContain(
+      'do not launch a coding task to build a connector when an integration key would do',
+    );
+    expect(enabledPrompt).toContain(
+      'Do not probe whether the service is publicly reachable and do not delegate that check to a coding task',
+    );
+    expect(enabledPrompt).toContain(
+      'Never tell the human to enable the Integration keys setting while these tools are available to you',
+    );
+    expect(enabledPrompt).toContain(
+      'Label that link with the service, for example "Connect Figma securely"',
+    );
+    expect(prompt).toContain('Settings → Experimental');
+    expect(prompt).toContain(
+      'A human turn may begin with a Roomote-injected `<integration_saved>` block',
+    );
     expect(enabledPrompt).not.toContain(
-      'Session-secret tools are temporarily unavailable',
+      'Integration-key tools are turned off for this user',
     );
     expect(prompt).toContain(
       'On a human-authored turn, acknowledge first, then send the instruction immediately',

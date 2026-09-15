@@ -16,6 +16,11 @@ export const REDIS_KEYS = {
   SLACK_AUTO_START_CHANNEL: 'slack:auto-start-channel',
   DISCORD_AUTO_START_CHANNEL: 'discord:auto-start-channel',
   CONTROLLER_HEARTBEAT: 'controller:heartbeat',
+  /**
+   * Epoch milliseconds written by the bullmq scheduler worker every minute.
+   * Proves the job loop is draining, not just that the process is alive.
+   */
+  BULLMQ_HEARTBEAT: 'bullmq:heartbeat',
   /** Cached GitHub release notes payload keyed as `${prefix}:${version}`. */
   RELEASE_NOTES: 'release:notes',
   /**

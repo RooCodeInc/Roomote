@@ -4,6 +4,7 @@ import {
   db,
   eq,
   getSessionForTask,
+  getUserChatInitiationProvider,
   recordTaskRunLifecycleEvent,
   selectTaskStateRun,
   sql,
@@ -144,6 +145,9 @@ export async function notifyWebTaskInitiatorOnSettle(
           userId: task.initiatorUserId,
         })
       : null;
+    const preferredProvider = await getUserChatInitiationProvider(
+      task.initiatorUserId,
+    );
     const { deliveredProviders } =
       await sendUserDirectMessageBestEffortWithReceipts({
         userId: task.initiatorUserId,
@@ -151,6 +155,7 @@ export async function notifyWebTaskInitiatorOnSettle(
         logContext: 'notifyWebTaskInitiatorOnSettle',
         idempotencyKey: buildIdempotencyKey(run.id),
         ...(replyAnchor ? { replyAnchor } : {}),
+        ...(preferredProvider ? { preferredProvider } : {}),
         ...(session
           ? {
               presentation: await resolveSessionAttentionPresentation({

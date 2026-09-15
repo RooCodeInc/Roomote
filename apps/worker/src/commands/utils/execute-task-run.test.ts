@@ -52,8 +52,8 @@ const { resolveWorkerReleaseMetadataMock } = vi.hoisted(() => ({
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     mcpConnections: {
-      markSessionEgressBootstrapReady: markEgressReadyMock,
-      getSessionEgressDelivery: readEgressDeliveryMock,
+      markCredentialEgressBootstrapReady: markEgressReadyMock,
+      getCredentialEgressDelivery: readEgressDeliveryMock,
     },
     taskRuns: {
       findFirstById: findFirstByIdMock,
@@ -142,16 +142,18 @@ describe('executeTaskRun', () => {
       authToken: 'run-token-123',
       trpcUrl: 'http://api:3001',
       appEnv: 'development',
-      sessionEgressBootstrapRequired: true,
-      sessionEgressBootstrapNonce: nonce,
+      credentialEgressBootstrapRequired: true,
+      credentialEgressBootstrapNonce: nonce,
       setRuntimeEnv: vi.fn(),
       buildUserFacingEnv: vi.fn(() => ({ PATH: '/usr/bin' })),
-      acceptSessionEgressDelivery: vi.fn(() => {
+      acceptCredentialEgressDelivery: vi.fn(() => {
         admitted = true;
       }),
-      buildSessionEgressClientEnv: vi.fn(() =>
+      buildCredentialEgressClientEnv: vi.fn(() =>
         admitted
-          ? { ROOMOTE_SERVICE_BASE_URL: 'http://api:3001/api/session-egress' }
+          ? {
+              ROOMOTE_SERVICE_BASE_URL: 'http://api:3001/api/credential-egress',
+            }
           : {},
       ),
     };
@@ -188,14 +190,14 @@ describe('executeTaskRun', () => {
       expect.objectContaining({ backgroundEnvironmentSetup: false }),
     );
     expect(runFn).not.toHaveBeenCalled();
-    expect(workerEnv.acceptSessionEgressDelivery).not.toHaveBeenCalled();
+    expect(workerEnv.acceptCredentialEgressDelivery).not.toHaveBeenCalled();
     release({
       environment: {
-        ROOMOTE_SERVICE_BASE_URL: 'http://api:3001/api/session-egress',
+        ROOMOTE_SERVICE_BASE_URL: 'http://api:3001/api/credential-egress',
       },
     });
     await expect(execution).resolves.toBe(true);
-    expect(workerEnv.acceptSessionEgressDelivery).toHaveBeenCalledTimes(1);
+    expect(workerEnv.acceptCredentialEgressDelivery).toHaveBeenCalledTimes(1);
     expect(runFn).toHaveBeenCalledTimes(1);
   });
 
@@ -223,7 +225,7 @@ describe('executeTaskRun', () => {
     });
 
     workerEnvFromProcessEnvMock.mockReturnValue({
-      buildSessionEgressClientEnv: vi.fn(() => ({})),
+      buildCredentialEgressClientEnv: vi.fn(() => ({})),
       authToken: 'run-token-123',
       trpcUrl: 'https://api-example.ngrok.dev',
       appEnv: 'development',
@@ -378,7 +380,7 @@ describe('executeTaskRun', () => {
       R_VISION_MODEL: 'openai/nested-vision-model',
     }));
     workerEnvFromProcessEnvMock.mockReturnValueOnce({
-      buildSessionEgressClientEnv: vi.fn(() => ({})),
+      buildCredentialEgressClientEnv: vi.fn(() => ({})),
       authToken: 'run-token-123',
       trpcUrl: 'https://api-example.ngrok.dev',
       appEnv: 'development',
