@@ -54,7 +54,11 @@ function dependencies(): SessionEgressLifecycleDependencies {
       renewLease: vi.fn(),
       terminate: vi.fn().mockResolvedValue({ workloadId, terminated: true }),
     },
-    findCandidate: vi.fn().mockResolvedValue({ sessionId, grantCount: 1 }),
+    findCandidate: vi.fn().mockResolvedValue({
+      sessionId,
+      grantCount: 1,
+      experimentEnabled: true,
+    }),
     recordEvent: vi.fn(),
     logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
   };
@@ -250,10 +254,10 @@ describe('controller-owned Session egress lifecycle', () => {
     );
   });
 
-  it('admits connector-less providers through the API proxy once the deployment opts in', async () => {
+  it('admits connector-less providers through the API proxy without gateway configuration', async () => {
     vi.useFakeTimers();
     try {
-      const deps = { ...dependencies(), config: null, apiProxyEnabled: true };
+      const deps = { ...dependencies(), config: null };
       const lifecycle = new SessionEgressLifecycle(deps);
       expect(await lifecycle.admissionFor('modal')).toBe('api_proxy');
       expect(await lifecycle.admissionFor('roomote')).toBe('api_proxy');
@@ -303,10 +307,15 @@ describe('controller-owned Session egress lifecycle', () => {
     }
   });
 
-  it.each(['modal', 'roomote'] as const)(
-    'reports %s as disabled until the deployment enables the API proxy',
+  it.each(['modal', 'docker'] as const)(
+    'skips %s runs whose Session owner has not enabled Session secret tools',
     async (provider) => {
       const deps = dependencies();
+      vi.mocked(deps.findCandidate).mockResolvedValue({
+        sessionId,
+        grantCount: 2,
+        experimentEnabled: false,
+      });
       const lifecycle = new SessionEgressLifecycle(deps);
       expect(await lifecycle.needsBootstrapAdmission(1, provider)).toBe(false);
       await expect(
@@ -319,7 +328,7 @@ describe('controller-owned Session egress lifecycle', () => {
       expect(deps.client!.register).not.toHaveBeenCalled();
       const events = vi.mocked(deps.recordEvent).mock.calls;
       expect(events.at(-1)![0].message).toContain(
-        'has not enabled the Session egress API proxy',
+        'has not enabled Session secret tools',
       );
     },
   );

@@ -5,6 +5,7 @@ import { and, asc, eq, gt, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { getEncryptionKey } from '@roomote/env';
 import {
   activeRunStatuses,
+  isSessionSecretToolsExperimentEnabled,
   SESSION_EGRESS_SUBSTITUTE_PREFIX,
   type RunStatus,
   type SessionEgressAuthorization,
@@ -81,7 +82,11 @@ const grantPolicyColumns = {
  */
 async function eligibleRunSession(tx: DatabaseOrTransaction, runId: number) {
   const rows = await tx
-    .select({ sessionId: sessions.id, ownerUserId: users.id })
+    .select({
+      sessionId: sessions.id,
+      ownerUserId: users.id,
+      ownerMetadata: users.metadata,
+    })
     .from(taskRuns)
     .innerJoin(sessionTasks, eq(sessionTasks.taskId, taskRuns.taskId))
     .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
@@ -101,14 +106,18 @@ async function eligibleRunSession(tx: DatabaseOrTransaction, runId: number) {
 
 /**
  * Controller preflight: is this run attached to a Session that could receive
- * substitutes, and how many live grants would it get? Runs with no such
- * Session are ordinary runs and never contact the control plane; runs with a
- * Session but zero grants are reported, not registered (grants approved
- * mid-run take effect at the next start or resume).
+ * substitutes, has its owner enabled Session secret tools, and how many live
+ * grants would it get? Runs with no such Session are ordinary runs and never
+ * contact the control plane; runs with a Session but zero grants are
+ * reported, not registered (grants approved mid-run take effect at the next
+ * start or resume). The owner's experiment setting gates delivery the same
+ * way it gates the Fast and coding-run tools.
  */
-export async function findSessionEgressCandidateForRun(
-  runId: number,
-): Promise<{ sessionId: string; grantCount: number } | null> {
+export async function findSessionEgressCandidateForRun(runId: number): Promise<{
+  sessionId: string;
+  grantCount: number;
+  experimentEnabled: boolean;
+} | null> {
   const eligible = await eligibleRunSession(db, runId);
   if (!eligible) return null;
   const [row] = await db
@@ -122,7 +131,13 @@ export async function findSessionEgressCandidateForRun(
         gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
       ),
     );
-  return { sessionId: eligible.sessionId, grantCount: row?.count ?? 0 };
+  return {
+    sessionId: eligible.sessionId,
+    grantCount: row?.count ?? 0,
+    experimentEnabled: isSessionSecretToolsExperimentEnabled(
+      eligible.ownerMetadata,
+    ),
+  };
 }
 
 /** An active workload whose run, Session, owner, and attachment are all still live. */

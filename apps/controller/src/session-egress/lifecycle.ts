@@ -36,8 +36,9 @@ import {
  * Fail-closed rules:
  * - a provider whose capability is `unsupported` is never registered;
  * - a `connector` provider on a deployment without gateway/CA configuration
- *   never registers, and an `api_proxy` provider never registers unless the
- *   deployment enabled the API proxy;
+ *   never registers;
+ * - a run whose Session owner has not enabled Session secret tools never
+ *   registers, matching the gate on the Fast and coding-run tools;
  * - a control-plane error leaves the run without substitutes, never with
  *   partially provisioned ones.
  * In every one of those cases the run gets a nonsecret lifecycle event so the
@@ -188,12 +189,13 @@ export interface SessionEgressLifecycleEvent {
 export interface SessionEgressLifecycleDependencies {
   client: SessionEgressControllerClient | null;
   config: SessionEgressProvisioningConfig | null;
-  /** Deployment opted into API-proxy admission for connector-less providers. */
-  apiProxyEnabled?: boolean;
   /** Session/grant preflight; `null` for runs not attached to an owned Session. */
-  findCandidate: (
-    runId: number,
-  ) => Promise<{ sessionId: string; grantCount: number } | null>;
+  findCandidate: (runId: number) => Promise<{
+    sessionId: string;
+    grantCount: number;
+    /** The Session owner has Session secret tools enabled. */
+    experimentEnabled: boolean;
+  } | null>;
   recordEvent: (event: SessionEgressLifecycleEvent) => Promise<void>;
   issueCertificate?: typeof issueConnectorCertificate;
   connectorIdentityFor?: (runId: number) => string;
@@ -226,8 +228,7 @@ export class SessionEgressLifecycle {
     if (!this.deps.client) return null;
     const capability = getComputeProviderSessionEgressCapability(provider);
     if (capability === 'enforced') return this.deps.config ? 'connector' : null;
-    if (capability === 'api_proxy')
-      return this.deps.apiProxyEnabled ? 'api_proxy' : null;
+    if (capability === 'api_proxy') return 'api_proxy';
     return null;
   }
 
@@ -238,7 +239,7 @@ export class SessionEgressLifecycle {
   ): Promise<boolean> {
     const candidate = await this.safeFindCandidate(runId);
     if (!candidate || candidate.grantCount === 0) return false;
-    if (!this.admissionFor(provider)) {
+    if (!candidate.experimentEnabled || !this.admissionFor(provider)) {
       await this.safeRecord({
         runId,
         eventType: 'decision',
@@ -278,6 +279,22 @@ export class SessionEgressLifecycle {
       return { status: 'skipped', reason: 'no_grants' };
     }
 
+    if (!candidate.experimentEnabled) {
+      await record({
+        eventType: 'decision',
+        message:
+          'Session service tokens are unavailable: the Session owner has not enabled Session secret tools, so no substitute credentials were issued to this run.',
+        details: {
+          stage: 'session_egress',
+          status: 'disabled',
+          provider,
+          sessionId: candidate.sessionId,
+          grantCount: candidate.grantCount,
+        },
+      });
+      return { status: 'skipped', reason: 'disabled' };
+    }
+
     const capability = getComputeProviderSessionEgressCapability(provider);
     if (capability === 'unsupported') {
       await record({
@@ -299,9 +316,7 @@ export class SessionEgressLifecycle {
       await record({
         eventType: 'decision',
         message:
-          capability === 'api_proxy'
-            ? 'Session service tokens are unavailable: this deployment has not enabled the Session egress API proxy, so no substitute credentials were issued to this run.'
-            : 'Session service tokens are unavailable: this deployment has no Session egress gateway configured, so no substitute credentials were issued to this run.',
+          'Session service tokens are unavailable: this deployment has no Session egress gateway configured, so no substitute credentials were issued to this run.',
         details: {
           stage: 'session_egress',
           status: 'disabled',

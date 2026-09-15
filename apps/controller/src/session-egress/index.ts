@@ -21,32 +21,21 @@ export * from './api-proxy';
  */
 export function createSessionEgressLifecycle(): SessionEgressLifecycle {
   const config = resolveSessionEgressProvisioningConfig(Env);
-  const apiProxyEnabled = Env.R_SESSION_EGRESS_API_PROXY_ENABLED === true;
-  const client =
-    config || apiProxyEnabled
-      ? createSessionEgressControllerClient({ apiBaseUrl: Env.TRPC_URL })
-      : null;
+  // API-proxy admission needs only the control plane, so the client always
+  // exists; the per-owner experiment decides whether a run gets tokens.
+  const client = createSessionEgressControllerClient({
+    apiBaseUrl: Env.TRPC_URL,
+  });
 
-  if (config) {
-    console.log(
-      `[sessionEgress] Connector admission enabled: gateway ${config.gatewayAddr}, connector image ${config.connectorImage}, lease ${config.leaseSeconds}s`,
-    );
-  }
-  if (apiProxyEnabled) {
-    console.log(
-      '[sessionEgress] API-proxy admission enabled for connector-less compute providers.',
-    );
-  }
-  if (!config && !apiProxyEnabled) {
-    console.log(
-      '[sessionEgress] Disabled: no SESSION_EGRESS_* provisioning and no R_SESSION_EGRESS_API_PROXY_ENABLED; runs attached to Sessions with service grants will report no service tokens.',
-    );
-  }
+  console.log(
+    config
+      ? `[sessionEgress] Connector admission enabled: gateway ${config.gatewayAddr}, connector image ${config.connectorImage}, lease ${config.leaseSeconds}s; API-proxy admission available for connector-less providers.`
+      : '[sessionEgress] API-proxy admission available for connector-less providers; no SESSION_EGRESS_* connector provisioning configured.',
+  );
 
   return new SessionEgressLifecycle({
     client,
     config,
-    apiProxyEnabled,
     findCandidate: findSessionEgressCandidateForRun,
     recordEvent: async (event) => {
       await recordTaskRunLifecycleEvent(db, {

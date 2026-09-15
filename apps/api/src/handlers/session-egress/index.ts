@@ -6,7 +6,6 @@ import {
   authenticateSessionEgressPrincipal,
   authorize,
   getSessionEgressGatewayToken,
-  isSessionEgressApiProxyEnabled,
   issueSubstitutes,
   registerWorkload,
   renewLease,
@@ -48,8 +47,6 @@ export function createSessionEgressControlPlane(
   options: SessionEgressServiceOptions = {},
 ) {
   const gatewayToken = options.gatewayToken ?? getSessionEgressGatewayToken;
-  const apiProxyEnabled =
-    options.apiProxyEnabled ?? isSessionEgressApiProxyEnabled;
   const app = new Hono<Env>();
 
   app.use(
@@ -61,17 +58,19 @@ export function createSessionEgressControlPlane(
   );
 
   app.use('*', async (c, next) => {
-    // The surface exists for a gateway or for API-proxy admission; with
-    // neither configured it stays invisible. Without a gateway token only the
-    // controller principal can authenticate.
+    // The controller always has its routes: it authenticates with a signed
+    // job-auth token and needs them for API-proxy admission on any
+    // deployment. The gateway principal exists only once a gateway token is
+    // configured; without one the surface stays invisible to everyone else.
     const expected = gatewayToken();
-    if (!expected && !apiProxyEnabled())
-      return c.json({ error: 'not_found' }, 404);
     const principal = await authenticateSessionEgressPrincipal(
       c.req.header('authorization'),
       expected,
     );
-    if (!principal) return c.json({ error: 'unauthorized' }, 401);
+    if (!principal)
+      return expected
+        ? c.json({ error: 'unauthorized' }, 401)
+        : c.json({ error: 'not_found' }, 404);
     c.set('egressPrincipal', principal);
     await next();
   });
