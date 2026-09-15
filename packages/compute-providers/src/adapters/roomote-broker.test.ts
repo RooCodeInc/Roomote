@@ -2,6 +2,15 @@ import { createHash, createHmac } from 'node:crypto';
 
 import { BrokerRequestError, RoomoteBrokerClient } from './roomote-broker';
 
+const { pinModalBaseImageRefMock } = vi.hoisted(() => ({
+  pinModalBaseImageRefMock: vi.fn(),
+}));
+
+vi.mock('../modal/registry-digest', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../modal/registry-digest')>()),
+  pinModalBaseImageRef: pinModalBaseImageRefMock,
+}));
+
 const brokerUrl = 'https://broker.roomote.dev';
 const tenantId = '9d137fea-a018-4432-af24-83ce802b4ed2';
 const brokerKey = 'rbk_derived-tenant-credential';
@@ -70,6 +79,40 @@ function harness(
 }
 
 describe('RoomoteBrokerClient', () => {
+  beforeEach(() => {
+    pinModalBaseImageRefMock.mockImplementation(
+      async ({ ref }: { ref: string }) => ref,
+    );
+  });
+
+  it('pins a mutable base image tag before launching a fresh sandbox', async () => {
+    const pinned = `ghcr.io/roocodeinc/roomote-worker@sha256:${'b'.repeat(64)}`;
+    pinModalBaseImageRefMock.mockResolvedValue(pinned);
+    const requests: Array<{ body: unknown }> = [];
+    const client = new RoomoteBrokerClient({
+      brokerUrl: 'http://localhost:4100/compute-broker',
+      tenantId,
+      brokerKey,
+      baseImageRef: 'ghcr.io/roocodeinc/roomote-worker:develop',
+      fetchImpl: (async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        requests.push({ body: JSON.parse(String(init?.body ?? 'null')) });
+        return jsonResponse({ instanceId: 'sb-2', domains: {} });
+      }) as unknown as typeof fetch,
+    });
+
+    await client.createInstance({});
+
+    expect(pinModalBaseImageRefMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ref: 'ghcr.io/roocodeinc/roomote-worker:develop',
+      }),
+    );
+    expect(requests[0]?.body).toMatchObject({ imageRef: pinned });
+  });
+
   it('signs every request with the tenant HMAC scheme', async () => {
     const { client, requests } = harness(() => jsonResponse({ instances: [] }));
 

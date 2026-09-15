@@ -28,6 +28,7 @@ import type {
 } from '../types';
 import { unsupported } from '../errors';
 import { sleepWithSignal, throwIfAborted, toAbortError } from '../modal/abort';
+import { pinModalBaseImageRef } from '../modal/registry-digest';
 import { RoomoteBrokerExec } from './roomote-broker-exec';
 import {
   BrokerRequestError,
@@ -283,10 +284,16 @@ export class RoomoteBrokerClient implements ComputeProviderClient {
     throwIfAborted(input.signal);
 
     const idempotencyKey = input.idempotencyKey ?? randomUUID();
+    // Same mutable-tag pitfall as the direct Modal adapter: the broker keys
+    // its image cache on the ref string, so pin the tag to its digest first.
+    const imageRef = sourceSnapshotId
+      ? undefined
+      : await pinModalBaseImageRef({
+          ref: this.config.baseImageRef,
+          signal: input.signal,
+        });
     const body = JSON.stringify({
-      ...(sourceSnapshotId
-        ? { snapshotId: sourceSnapshotId }
-        : { imageRef: this.config.baseImageRef }),
+      ...(sourceSnapshotId ? { snapshotId: sourceSnapshotId } : { imageRef }),
       ...(input.ports?.length ? { ports: input.ports } : {}),
       ...(input.tags && Object.keys(input.tags).length > 0
         ? { tags: input.tags }
