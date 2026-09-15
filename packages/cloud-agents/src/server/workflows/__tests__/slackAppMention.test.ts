@@ -109,7 +109,7 @@ describe('slackAppMention', () => {
       'Do not use `request_user_input` as a generic opening acknowledgement; only use it when the task is already blocked on concrete input from the user.',
     );
     expect(result.harnessInstructions).toContain(
-      '`progress`: After an acknowledgement, send progress only when the update adds decision-useful state since the last Slack-visible reply: a material result, blocker, input need, changed approach, meaningful phase transition, proof artifact, or a timed update that prevents more than 10 minutes of Slack-visible silence during active work. When that timed update is warranted, keep it brief and outcome-level: say what is materially true now and what happens next in user terms instead of turning Slack into a running work log.',
+      '`progress`: After an acknowledgement, send progress only when the update adds decision-useful state since the last Slack-visible reply: a material result, blocker, input need, changed approach, meaningful phase transition, or proof artifact. Keep it brief and outcome-level: say what is materially true now and what happens next in user terms instead of turning Slack into a running work log.',
     );
     expect(result.harnessInstructions).toContain(
       'When internal review, proof, or delegated helper steps create follow-up work, keep the update parent-owned and phase-based. Describe the current phase in human terms such as reviewing, tightening follow-ups, or final checking instead of naming the internal agent, review pass, or proof run unless that mechanism is itself the blocker or the user explicitly asked for it.',
@@ -315,8 +315,9 @@ describe('slackAppMention', () => {
     expect(result.harnessInstructions).toContain(
       '`progress`: After an acknowledgement, send progress only when the update adds decision-useful state since the last Slack-visible reply',
     );
-    expect(result.harnessInstructions).toContain(
-      'prevents more than 10 minutes of Slack-visible silence during active work',
+    expect(result.harnessInstructions).not.toContain('timed update');
+    expect(result.harnessInstructions).not.toContain(
+      'minutes of Slack-visible silence',
     );
     expect(result.harnessInstructions).toContain(
       'For code-writing turns, the initial ack should say implementation is the next action when that is true and the agent already has enough inspected repository context to describe the work concretely',

@@ -39,40 +39,6 @@ const REPORTS_TO_PARENT_SESSION =
 const LIFECYCLE_TOOL_NAME = REPORTS_TO_PARENT_SESSION
   ? 'report_to_parent_session'
   : 'send_chat_reply';
-const REMINDER = REPORTS_TO_PARENT_SESSION
-  ? [
-      'The parent Session has not received a substantive update for this turn.',
-      'Your next action must be a private report using report_to_parent_session.',
-      'If the report mentions or relies on visual proof, include the relevant',
-      'screenshot artifact IDs via imageArtifactIds.',
-      'Normal assistant messages do not count. Do not run more tools first.',
-      'After reporting, continue the work you were doing.',
-    ].join(' ')
-  : [
-      'The originating ' +
-        SURFACE_LABEL +
-        ' thread has not received a visible update for this turn. Your next action',
-      'must be a ' +
-        SURFACE_LABEL +
-        '-visible update to the originating thread using',
-      'send_chat_reply',
-      'or use send_chat_reaction_emoji only when the latest user turn itself came',
-      'from ' + SURFACE_LABEL + ' and that message can receive a reaction.',
-      'If a successful visual-proof capture returned screenshot artifact IDs that',
-      'are not yet visible in the thread and the update mentions or relies on that',
-      'proof, include those IDs in the same reply via imageArtifactIds.',
-      'Use request_user_input only when you genuinely require structured input',
-      'from the user.',
-      'Normal assistant messages do not count.',
-      'Do not run more tools first.',
-      'The only exception is tool_search when the needed ' +
-        SURFACE_LABEL +
-        ' reply/post tool is',
-      'not visible.',
-      'After sending the ' +
-        SURFACE_LABEL +
-        ' update, continue the work you were doing.',
-    ].join(' ');
 const INITIAL_ACK_REMINDER = REPORTS_TO_PARENT_SESSION
   ? [
       'The parent Session needs a substantive update before more work.',
@@ -105,7 +71,6 @@ const SUBAGENT_SLACK_POST_DENIAL = [
   'Return your findings in your final report to the parent agent instead;',
   'the parent agent will relay any ' + SURFACE_LABEL + '-visible update.',
 ].join(' ');
-const MAX_SILENCE_MS = 7 * 60 * 1000;
 const HOOK_NAME = 'slack-silence';
 const HOOK_DEBUG_ENV = 'ROOMOTE_SLACK_HOOK_DEBUG';
 const SLACK_MESSAGE_TS_REGEX = /^\\d+\\.\\d+$/;
@@ -491,62 +456,6 @@ function logAllow(fields) {
   });
 }
 
-function getLastActivityMs(state) {
-  if (!state || typeof state !== 'object') {
-    return null;
-  }
-
-  const currentTurnRequiresInitialAck =
-    state.currentTurnRequiresInitialAck !== false;
-  const currentTurnMessageTs = trimString(state.currentTurnMessageTs);
-  const satisfiedTurnMessageTs = trimString(state.satisfiedTurnMessageTs);
-  const recordedAtMs = readFiniteMs(state.recordedAtMs);
-
-  if (
-    !currentTurnRequiresInitialAck &&
-    !currentTurnMessageTs &&
-    recordedAtMs === null
-  ) {
-    return null;
-  }
-
-  if (
-    currentTurnMessageTs &&
-    satisfiedTurnMessageTs !== currentTurnMessageTs &&
-    readFiniteMs(state.currentTurnStartedAtMs) !== null
-  ) {
-    return state.currentTurnStartedAtMs;
-  }
-
-  const lastNonSlackWorkAfterTerminalAtMs = readFiniteMs(
-    state.lastNonSlackWorkAfterTerminalAtMs,
-  );
-  if (lastNonSlackWorkAfterTerminalAtMs !== null) {
-    return lastNonSlackWorkAfterTerminalAtMs;
-  }
-
-  if (recordedAtMs !== null) {
-    return recordedAtMs;
-  }
-
-  const startedAtMs = readFiniteMs(state.startedAtMs);
-  if (startedAtMs !== null) {
-    return startedAtMs;
-  }
-
-  return null;
-}
-
-function writeReminderState(stateFilePath, state, nowMs) {
-  const nextState = {
-    ...(state && typeof state === 'object' ? state : {}),
-    lastSilenceReminderAtMs: nowMs,
-  };
-
-  fs.mkdirSync(path.dirname(stateFilePath), { recursive: true });
-  fs.writeFileSync(stateFilePath, JSON.stringify(nextState), 'utf8');
-}
-
 function writeInitialAckReminderState(stateFilePath, state, nowMs) {
   const nextState = {
     ...(state && typeof state === 'object' ? state : {}),
@@ -614,7 +523,7 @@ function writeInitialAckReminderState(stateFilePath, state, nowMs) {
     process.exit(0);
   }
 
-  // Delivery to the bound channel has permanently failed; ack and silence
+  // Delivery to the bound channel has permanently failed; acknowledgement
   // reminders would demand posts that cannot succeed, so stand down entirely.
   const terminalDeliveryFailureAtMs = readFiniteMs(
     state && state.terminalDeliveryFailureAtMs,
@@ -656,16 +565,12 @@ function writeInitialAckReminderState(stateFilePath, state, nowMs) {
     !isSlackSatisfactionTool(hookInput, state) &&
     !isRequestUserInputTool(hookInput) &&
     !isCloseoutBookkeepingTool(hookInput) &&
-    (hasCurrentTurnSlackAck(state) ||
+    (hasCurrentTurnTerminalCloseout(state) ||
       hasNoTurnAutomationTerminalCloseout(state))
   ) {
     state = {
       ...(state && typeof state === 'object' ? state : {}),
-      lastNonSlackWorkAfterSatisfactionAtMs: nowMs,
-      ...(hasCurrentTurnTerminalCloseout(state) ||
-      hasNoTurnAutomationTerminalCloseout(state)
-        ? { lastNonSlackWorkAfterTerminalAtMs: nowMs }
-        : {}),
+      lastNonSlackWorkAfterTerminalAtMs: nowMs,
     };
     writeState(stateFilePath, state);
   }
@@ -697,76 +602,11 @@ function writeInitialAckReminderState(stateFilePath, state, nowMs) {
     process.exit(0);
   }
 
-  const lastActivityMs = getLastActivityMs(state);
-  if (lastActivityMs === null) {
-    logAllow({
-      trigger: hookEventName,
-      reason: 'missing_activity_timestamp',
-      tool: getToolName(hookInput),
-    });
-    process.exit(0);
-  }
-
-  const silenceMs = nowMs - lastActivityMs;
-  if (silenceMs < MAX_SILENCE_MS) {
-    logAllow({
-      trigger: hookEventName,
-      reason: 'silence_below_threshold',
-      tool: getToolName(hookInput),
-      silenceMs,
-      thresholdMs: MAX_SILENCE_MS,
-    });
-    process.exit(0);
-  }
-
-  if (
-    hookEventName === 'PreToolUse' &&
-    (isSlackSatisfactionTool(hookInput, state) ||
-      isSlackReplyToolDiscoveryTool(hookInput))
-  ) {
-    logAllow({
-      trigger: hookEventName,
-      reason: isSlackReplyToolDiscoveryTool(hookInput)
-        ? 'reply_tool_discovery_allowed_while_over_threshold'
-        : 'reply_tool_allowed_while_over_threshold',
-      tool: getToolName(hookInput),
-      silenceMs,
-      thresholdMs: MAX_SILENCE_MS,
-    });
-    process.exit(0);
-  }
-
-  writeReminderState(stateFilePath, state, nowMs);
-  logDecision('INFO', {
+  logAllow({
     trigger: hookEventName,
-    decision: 'block',
     tool: getToolName(hookInput),
-    reason: 'slack_update_overdue',
-    silenceMs,
-    thresholdMs: MAX_SILENCE_MS,
-    stateFilePath,
+    reason: 'event_driven_checks_complete',
   });
-  if (hookEventName === 'PreToolUse') {
-    process.stdout.write(
-      JSON.stringify({
-        decision: 'block',
-        reason: REMINDER,
-      }),
-    );
-    process.exit(0);
-  }
-
-  process.stdout.write(
-    JSON.stringify({
-      continue: false,
-      decision: 'block',
-      reason: REMINDER,
-      stopReason: REMINDER,
-      hookSpecificOutput: {
-        hookEventName: 'PostToolUse',
-        additionalContext: REMINDER,
-      },
-    }),
-  );
+  process.exit(0);
 })();
 `;

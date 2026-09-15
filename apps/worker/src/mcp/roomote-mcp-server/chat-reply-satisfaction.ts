@@ -37,12 +37,10 @@ interface ChatReplySatisfactionState {
   replyPurpose?: ChatReplyPurpose;
   recordedAtMs?: number;
   satisfiedTurnMessageTs?: string;
-  lastNonSlackWorkAfterSatisfactionAtMs?: number;
   terminalSatisfiedTurnMessageTs?: string;
   terminalSatisfiedAtMs?: number;
   terminalSatisfactionTool?: 'send_chat_reply' | 'report_to_parent_session';
   lastNonSlackWorkAfterTerminalAtMs?: number;
-  lastSilenceReminderAtMs?: number;
   /** Failed chat delivery attempts since the last successful post this turn. */
   deliveryFailureCount?: number;
   lastDeliveryFailureAtMs?: number;
@@ -160,7 +158,6 @@ export function recordChatTurnStart(input: {
       ? {
           initialAckReminderAtMs: undefined,
           satisfiedTurnMessageTs: undefined,
-          lastNonSlackWorkAfterSatisfactionAtMs: undefined,
           terminalSatisfiedTurnMessageTs: undefined,
           terminalSatisfiedAtMs: undefined,
           terminalSatisfactionTool: undefined,
@@ -315,7 +312,6 @@ export function recordChatReplySatisfaction(input: {
     ...(satisfiesCurrentTurn
       ? {
           satisfiedTurnMessageTs: currentTurnMessageTs,
-          lastNonSlackWorkAfterSatisfactionAtMs: undefined,
         }
       : {}),
     // A clarification reply is a terminal handoff like a closeout: the turn

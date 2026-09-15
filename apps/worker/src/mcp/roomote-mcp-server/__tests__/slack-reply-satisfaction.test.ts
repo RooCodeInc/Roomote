@@ -280,37 +280,6 @@ describe('Slack reply satisfaction state', () => {
     });
   });
 
-  it('clears prior non-Slack-work markers when the current turn is satisfied again', () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-slack-'));
-    tempDirs.push(tempDir);
-    const stateFilePath = path.join(tempDir, 'reply-state.json');
-    process.env[SLACK_REPLY_SATISFACTION_STATE_FILE_ENV] = stateFilePath;
-    fs.writeFileSync(
-      stateFilePath,
-      JSON.stringify({
-        currentTurnMessageTs: '111.222',
-        currentTurnStartedAtMs: 1000,
-        lastNonSlackWorkAfterSatisfactionAtMs: 1200,
-      }),
-      'utf8',
-    );
-
-    recordSlackReplySatisfaction({
-      messageTs: '111.222',
-      tool: 'send_chat_reaction_emoji',
-      nowMs: 1234,
-    });
-
-    expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
-      currentTurnMessageTs: '111.222',
-      currentTurnStartedAtMs: 1000,
-      messageTs: '111.222',
-      tool: 'send_chat_reaction_emoji',
-      recordedAtMs: 1234,
-      satisfiedTurnMessageTs: '111.222',
-    });
-  });
-
   it('writes terminal closeout state when a current-turn closeout reply is recorded', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-slack-'));
     tempDirs.push(tempDir);
@@ -503,7 +472,6 @@ describe('Slack reply satisfaction state', () => {
         startedAtMs: 1000,
         currentTurnMessageTs: '222.333',
         currentTurnStartedAtMs: 1500,
-        lastSilenceReminderAtMs: 2000,
       }),
       'utf8',
     );
@@ -519,7 +487,6 @@ describe('Slack reply satisfaction state', () => {
       startedAtMs: 1000,
       currentTurnMessageTs: '222.333',
       currentTurnStartedAtMs: 1500,
-      lastSilenceReminderAtMs: 2000,
       messageTs: '333.444',
       tool: 'send_chat_reply',
       replyPurpose: 'progress',
