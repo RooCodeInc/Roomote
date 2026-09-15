@@ -548,11 +548,15 @@ describe('buildFastAgentSystemPrompt', () => {
 
     expect(prompt).toContain('You are a deeply pragmatic, effective teammate.');
     expect(prompt).toContain(
-      'For software engineering work, operate as an expert software engineer',
+      'You are Roomote, an AI teammate for work across a team.',
+    );
+    expect(prompt).toContain(
+      'Engineering is one area of expertise, not your default role or the organizing theme of general capability answers.',
     );
     expect(prompt).not.toContain(
       'You are a deeply pragmatic, effective software engineer.',
     );
+    expect(prompt).not.toContain('operate as an expert software engineer');
     expect(prompt).toContain('Roomote/example-app');
     expect(prompt).toContain('Roomote/example-app [id: repo-1]');
     expect(prompt).toContain(
@@ -607,16 +611,16 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Existing active tasks do not block');
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain(
-      'call `roomote_get_about_me` with operation `overview` before answering',
+      'I am an AI teammate people can hand real work to, not just ask for advice.',
     );
     expect(prompt).toContain(
-      'produce a contextual answer in natural, everyday language about what the person can accomplish',
+      'Focus on the problems I can take off their plate and the useful result they can get back.',
     );
-    expect(prompt).toContain(
-      'Explain tools or access only when relevant to a claimed action',
+    expect(prompt.indexOf('# Identity')).toBeGreaterThan(
+      prompt.indexOf('## Tone of Voice'),
     );
-    expect(prompt).toContain(
-      'Do not substitute a generic coding-assistant description',
+    expect(prompt.indexOf('# Identity')).toBeLessThan(
+      prompt.indexOf('## Output'),
     );
     expect(prompt).toContain(
       "use that task's known ID with `manage_tasks` `get_summary` to recover its stable image artifact IDs and viewer links",

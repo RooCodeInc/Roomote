@@ -165,6 +165,21 @@ async function buildAboutMePayload(options: {
     Env.RELEASE_VERSION,
     packageJson.version,
   );
+  const product = {
+    name: PRODUCT_NAME,
+    ...(version ? { version } : {}),
+    appUrl: Env.R_APP_URL,
+    docsUrl: getDefaultDocsUrl(Env.APP_ENV ?? 'development'),
+  };
+
+  if (options.operation === 'overview') {
+    return {
+      requestedOperation: options.operation,
+      product,
+      answerGuidance: ABOUT_ME_CONTENT,
+    };
+  }
+
   const [
     environmentRows,
     linearRows,
@@ -240,12 +255,7 @@ async function buildAboutMePayload(options: {
 
   return {
     requestedOperation: options.operation,
-    product: {
-      name: PRODUCT_NAME,
-      ...(version ? { version } : {}),
-      appUrl: Env.R_APP_URL,
-      docsUrl: getDefaultDocsUrl(Env.APP_ENV ?? 'development'),
-    },
+    product,
     deployment: {
       userId: options.userId,
       environmentCount: environmentRows.length,
@@ -276,29 +286,25 @@ async function buildAboutMePayload(options: {
       })),
       environmentDeclared: environmentDeclaredMcpIds,
     },
-    ...(options.operation === 'overview'
-      ? { answerGuidance: ABOUT_ME_CONTENT }
-      : {
-          gettingStarted: {
-            slack: invocationIdentities.slack?.examplePrompt
-              ? `Mention ${invocationIdentities.slack.guidanceName} in Slack with what you need. I'll figure out the right repo.`
-              : 'Use the connected Slack app in a DM or channel with what you need.',
-            teams: invocationIdentities.microsoft?.examplePrompt
-              ? `Mention ${invocationIdentities.microsoft.guidanceName} in Teams with what you need.`
-              : 'Use the connected Teams bot in a chat or channel with what you need.',
-            telegram: invocationIdentities.telegram?.deepLinkUrl
-              ? `Message ${invocationIdentities.telegram.guidanceName} on Telegram: ${invocationIdentities.telegram.deepLinkUrl}`
-              : 'Message the connected Telegram bot to start work from Telegram.',
-            linear:
-              linearRows.length > 0
-                ? 'Start a Linear Agent Session or mention Roomote in an issue comment.'
-                : 'Connect Linear to start tasks from issues.',
-            github: invocationIdentities.github?.mentionText
-              ? `Mention ${invocationIdentities.github.mentionText} on a PR for follow-up work or reviews.`
-              : 'Mention the GitHub app on a PR for follow-up work or reviews.',
-            web: 'Use the web app to start tasks, configure environments, or check on work.',
-          },
-        }),
+    gettingStarted: {
+      slack: invocationIdentities.slack?.examplePrompt
+        ? `Mention ${invocationIdentities.slack.guidanceName} in Slack with what you need. I'll figure out the right repo.`
+        : 'Use the connected Slack app in a DM or channel with what you need.',
+      teams: invocationIdentities.microsoft?.examplePrompt
+        ? `Mention ${invocationIdentities.microsoft.guidanceName} in Teams with what you need.`
+        : 'Use the connected Teams bot in a chat or channel with what you need.',
+      telegram: invocationIdentities.telegram?.deepLinkUrl
+        ? `Message ${invocationIdentities.telegram.guidanceName} on Telegram: ${invocationIdentities.telegram.deepLinkUrl}`
+        : 'Message the connected Telegram bot to start work from Telegram.',
+      linear:
+        linearRows.length > 0
+          ? 'Start a Linear Agent Session or mention Roomote in an issue comment.'
+          : 'Connect Linear to start tasks from issues.',
+      github: invocationIdentities.github?.mentionText
+        ? `Mention ${invocationIdentities.github.mentionText} on a PR for follow-up work or reviews.`
+        : 'Mention the GitHub app on a PR for follow-up work or reviews.',
+      web: 'Use the web app to start tasks, configure environments, or check on work.',
+    },
   };
 }
 

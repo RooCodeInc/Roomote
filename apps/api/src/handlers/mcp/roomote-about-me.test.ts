@@ -61,16 +61,19 @@ describe('Roomote MCP get_about_me', () => {
 
     expect(payload.requestedOperation).toBe('overview');
     expect(payload.answerGuidance).toContain(
-      'I am an AI teammate helping teams move work forward.',
+      'I am an AI teammate people can hand real work to, not just ask for advice.',
     );
     expect(payload.answerGuidance).toContain(
-      'Lead with natural, everyday language about what the person can accomplish or get unstuck',
+      'Focus on the problems I can take off their plate and the useful result they can get back.',
     );
     expect(payload.answerGuidance).toContain(
-      'Distinguish what I can execute now from what I can research, draft, or prepare',
+      'distinguish work I can carry out from material I can prepare for approval',
     );
     expect(payload).not.toHaveProperty('capabilities');
     expect(payload).not.toHaveProperty('gettingStarted');
+    expect(payload).not.toHaveProperty('deployment');
+    expect(payload).not.toHaveProperty('integrations');
+    expect(payload).not.toHaveProperty('configuredMcpServers');
   });
 
   it('keeps integration setup details on the integrations operation', async () => {
