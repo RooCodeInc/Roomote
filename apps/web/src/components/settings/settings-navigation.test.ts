@@ -8,7 +8,7 @@ import {
 describe('settings navigation', () => {
   it('shows the empty state for Experimental settings', () => {
     expect(getSettingsNavigationItem('experimental')?.description).toBe(
-      'No experimental features at the moment. Check back soon.',
+      'Try features that are still under development.',
     );
   });
 

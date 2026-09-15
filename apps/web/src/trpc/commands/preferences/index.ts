@@ -4,6 +4,8 @@ import {
   eq,
   getUserPersonalization,
   isNull,
+  isSlackPeerConversationsExperimentEnabledInMetadata,
+  SLACK_PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY,
   sql,
   updateUserPersonalization,
   UserPersonalizationConflictError,
@@ -55,6 +57,8 @@ function normalizePersonalPreferences(
       typeof metadata.results_page_enabled === 'boolean'
         ? metadata.results_page_enabled
         : DEFAULT_PERSONAL_PREFERENCES.resultsPageEnabled,
+    slackPeerConversationsExperimentEnabled:
+      isSlackPeerConversationsExperimentEnabledInMetadata(metadata),
   };
 }
 
@@ -149,6 +153,10 @@ export async function updatePersonalPreferencesCommand(
   }
   if (input.resultsPageEnabled !== undefined) {
     nextMetadataRecord.results_page_enabled = input.resultsPageEnabled;
+  }
+  if (input.slackPeerConversationsExperimentEnabled !== undefined) {
+    nextMetadataRecord[SLACK_PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY] =
+      input.slackPeerConversationsExperimentEnabled;
   }
 
   if (Object.keys(nextMetadataRecord).length === 0) {

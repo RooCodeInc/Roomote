@@ -7,7 +7,7 @@ import {
 } from '@roomote/redis';
 import {
   FastAgentDurableRetryScheduledError,
-  hasFastAgentSession,
+  getFastAgentSessionOwner,
 } from '@roomote/cloud-agents/server';
 import {
   acquireSlackFastRootBindingLock,
@@ -23,6 +23,7 @@ import {
 } from '@roomote/slack';
 import {
   getBackgroundAgentSettingsForDeployment,
+  isSlackPeerConversationsExperimentEnabledForUser,
   type SlackInstallation,
   type SlackUserMapping,
 } from '@roomote/db/server';
@@ -87,17 +88,17 @@ import {
 
 const REMOVED_EVAL_COMMAND_PATTERN = /^!eval(?:\s|$)/iu;
 
-async function hasBoundSlackFastAgentSession(params: {
+async function getBoundSlackFastAgentSessionOwner(params: {
   teamId: string;
   channelId: string;
   threadId: string;
-}): Promise<boolean> {
+}): ReturnType<typeof getFastAgentSessionOwner> {
   const releaseRootBindingLock = await acquireSlackFastRootBindingLock({
     teamId: params.teamId,
     channelId: params.channelId,
   });
   try {
-    return await hasFastAgentSession({
+    return await getFastAgentSessionOwner({
       surface: 'slack',
       workspaceId: params.teamId,
       conversationId: params.threadId,
@@ -142,6 +143,7 @@ type UnmentionedSlackThreadReplyRoutingDecision =
   | { shouldRoute: false }
   | {
       shouldRoute: true;
+      peerConversationsExperimentEnabled?: true;
       threadMessages?: SlackThreadMessage[];
       taskId?: string;
     };
@@ -206,14 +208,18 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
 
   // Fast receives the discussion and peer-mention reminders as context;
   // peer mentions remain an admission cutoff only for legacy task threads.
-  if (
-    await hasBoundSlackFastAgentSession({
-      teamId,
-      channelId: event.channel,
-      threadId: event.thread_ts,
-    })
-  ) {
-    return { shouldRoute: true };
+  const fastSessionOwner = await getBoundSlackFastAgentSessionOwner({
+    teamId,
+    channelId: event.channel,
+    threadId: event.thread_ts,
+  });
+  const peerConversationsExperimentEnabled =
+    fastSessionOwner?.kind === 'user' &&
+    (await isSlackPeerConversationsExperimentEnabledForUser(
+      fastSessionOwner.userId,
+    ));
+  if (peerConversationsExperimentEnabled) {
+    return { shouldRoute: true, peerConversationsExperimentEnabled: true };
   }
 
   if (
@@ -228,25 +234,30 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   let roomoteThreadMatch: Awaited<
     ReturnType<typeof findRoomoteOwnedSlackThread>
   > | null = null;
+  const isFastAgentThread = Boolean(fastSessionOwner);
 
   let eligibilityReason: 'roomote-owned-thread' | null = null;
 
   {
-    roomoteThreadMatch = await findRoomoteOwnedSlackThread({
-      teamId,
-      channelId: event.channel,
-      threadTs: event.thread_ts,
-    });
-
-    const taskThreadRoute = roomoteThreadMatch
+    roomoteThreadMatch = isFastAgentThread
       ? null
-      : await resolveSlackThreadFollowUpRoute({
-          threadId: event.thread_ts,
+      : await findRoomoteOwnedSlackThread({
+          teamId,
           channelId: event.channel,
-          slackTeamId: teamId,
+          threadTs: event.thread_ts,
         });
 
+    const taskThreadRoute =
+      isFastAgentThread || roomoteThreadMatch
+        ? null
+        : await resolveSlackThreadFollowUpRoute({
+            threadId: event.thread_ts,
+            channelId: event.channel,
+            slackTeamId: teamId,
+          });
+
     if (
+      isFastAgentThread ||
       roomoteThreadMatch ||
       (taskThreadRoute && taskThreadRoute.kind !== 'fresh')
     ) {
@@ -315,6 +326,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     isAutomationReportThread: Boolean(
       roomoteThreadMatch?.isAutomationReportThread,
     ),
+    isOpenConversationThread: isFastAgentThread,
     threadMessages: sharedHistory,
     compareMessageIds: compareNumericMessageIds,
   });
@@ -1042,6 +1054,7 @@ export function startFastAgentResponse(params: {
   activeTasks?: { taskId: string }[];
   resolveActiveTasks?: () => Promise<{ taskId: string }[]>;
   directedAtRoomote?: boolean;
+  peerConversationsExperimentEnabled?: boolean;
   /** Attribution for tasks Fast delegates from this turn; automation-identity
    * turns pass their automation initiator so delegated work keeps automation
    * provenance instead of appearing installer-initiated. */
@@ -1054,6 +1067,8 @@ export function startFastAgentResponse(params: {
       processFastAgentMessage({
         ...fastAgentParams,
         roomoteSlackUserId: params.slackInstallation.botUserId ?? undefined,
+        peerConversationsExperimentEnabled:
+          params.peerConversationsExperimentEnabled,
         apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
         launchTask: createFastAgentSlackLiveTaskLauncher({
           slack: params.slack,
@@ -1095,6 +1110,7 @@ async function handleSlackEntryEvent(params: {
   teamId: string;
   skipThreadFollowupHandling?: boolean;
   threadTaskId?: string;
+  peerConversationsExperimentEnabled?: boolean;
 }): Promise<void> {
   const {
     event,
@@ -1103,6 +1119,7 @@ async function handleSlackEntryEvent(params: {
     teamId,
     skipThreadFollowupHandling = false,
     threadTaskId,
+    peerConversationsExperimentEnabled,
   } = params;
 
   if (!event.user) {
@@ -1207,6 +1224,7 @@ async function handleSlackEntryEvent(params: {
           activeTaskId: activeRun?.taskId,
         }),
       directedAtRoomote: mentionsSlackBot(event, slackInstallation.botUserId),
+      peerConversationsExperimentEnabled: peerConversationsExperimentEnabled,
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
     });
 
@@ -1319,5 +1337,9 @@ export async function handleMessageOrAppMentionEvent(params: {
     threadTaskId: unmentionedThreadReplyRouting.shouldRoute
       ? unmentionedThreadReplyRouting.taskId
       : (mentionedThreadAliasTaskId ?? undefined),
+    peerConversationsExperimentEnabled:
+      unmentionedThreadReplyRouting.shouldRoute
+        ? unmentionedThreadReplyRouting.peerConversationsExperimentEnabled
+        : undefined,
   });
 }

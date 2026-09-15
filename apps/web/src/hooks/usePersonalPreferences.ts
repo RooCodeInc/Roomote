@@ -59,6 +59,10 @@ function mergeResultForUpdatedFields(
       updates.resultsPageEnabled === undefined
         ? mergedPreferences.resultsPageEnabled
         : result.resultsPageEnabled,
+    slackPeerConversationsExperimentEnabled:
+      updates.slackPeerConversationsExperimentEnabled === undefined
+        ? mergedPreferences.slackPeerConversationsExperimentEnabled
+        : result.slackPeerConversationsExperimentEnabled,
   };
 }
 
@@ -100,6 +104,12 @@ function rollbackUpdatedFields(
         optimisticPreferences.resultsPageEnabled
         ? previousPreferences.resultsPageEnabled
         : mergedPreferences.resultsPageEnabled,
+    slackPeerConversationsExperimentEnabled:
+      updates.slackPeerConversationsExperimentEnabled !== undefined &&
+      mergedPreferences.slackPeerConversationsExperimentEnabled ===
+        optimisticPreferences.slackPeerConversationsExperimentEnabled
+        ? previousPreferences.slackPeerConversationsExperimentEnabled
+        : mergedPreferences.slackPeerConversationsExperimentEnabled,
   };
 }
 

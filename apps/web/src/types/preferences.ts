@@ -18,6 +18,7 @@ export interface PersonalPreferences {
   narrationMode: boolean;
   therapistMode: boolean;
   resultsPageEnabled?: boolean;
+  slackPeerConversationsExperimentEnabled?: boolean;
 }
 
 export type PersonalPreferencesUpdate = Partial<PersonalPreferences>;
@@ -28,6 +29,7 @@ export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
   narrationMode: false,
   therapistMode: false,
   resultsPageEnabled: false,
+  slackPeerConversationsExperimentEnabled: false,
 };
 
 export interface UserPersonalizationSettings {

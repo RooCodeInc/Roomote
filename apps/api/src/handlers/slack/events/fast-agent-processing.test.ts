@@ -386,6 +386,7 @@ describe('processFastAgentMessage', () => {
       userId: 'user-1',
       teamId: 'T123',
       roomoteSlackUserId: 'UBOT',
+      peerConversationsExperimentEnabled: true,
     });
     const call = mocks.answerQuestion.mock.calls[0]?.[0];
     expect(call.question).toBe(text);
@@ -405,6 +406,32 @@ describe('processFastAgentMessage', () => {
         'Existing attachment context',
       );
     }
+  });
+
+  it('does not add peer-conversation context when the experiment is disabled', async () => {
+    const slack = {
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@U222> what do you think?',
+        ts: '100.003',
+        thread_ts: '100.001',
+        agentContext: 'Existing attachment context',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      roomoteSlackUserId: 'UBOT',
+    });
+
+    expect(mocks.answerQuestion.mock.calls[0]?.[0]).toMatchObject({
+      currentMessageAgentContext: 'Existing attachment context',
+      allowSilentAmbientReply: false,
+    });
   });
 
   it('does not reconstruct the reminder from a peer mention in history', async () => {
@@ -456,6 +483,7 @@ describe('processFastAgentMessage', () => {
       userId: 'user-1',
       teamId: 'T123',
       roomoteSlackUserId: 'UBOT',
+      peerConversationsExperimentEnabled: true,
       onAccepted,
     });
 
