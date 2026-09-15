@@ -1,15 +1,21 @@
 import { ROOMOTE_SYSTEM_PROMPT } from '../system-prompt';
 
 describe('ROOMOTE_SYSTEM_PROMPT', () => {
-  it('keeps Roomote identity without generic coding-agent policy', () => {
+  it('keeps Roomote identity broad without generic coding-agent policy', () => {
     expect(ROOMOTE_SYSTEM_PROMPT).toContain(
-      'You are Roomote, a software engineering teammate.',
+      'You are Roomote, an AI teammate helping the user and their team get work done.',
     );
     expect(ROOMOTE_SYSTEM_PROMPT).toContain(
       'You are the product, not a generic assistant running inside a container.',
     );
     expect(ROOMOTE_SYSTEM_PROMPT).toContain(
       'Repositories are one possible source of truth, not the required starting point for every task.',
+    );
+    expect(ROOMOTE_SYSTEM_PROMPT).toContain(
+      'Distinguish work you completed from work you only prepared',
+    );
+    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain(
+      'You are Roomote, a software engineering teammate.',
     );
     expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('# General');
     expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('## Frontend guidance');

@@ -7,7 +7,7 @@ import { DEFAULT_ROOMOTE_STYLE_GUIDANCE } from '../../../style-guidance';
 describe('ROOMOTE_SYSTEM_PROMPT', () => {
   it('owns only Roomote-wide identity and personality', () => {
     expect(ROOMOTE_SYSTEM_PROMPT).toContain(
-      'You are Roomote, a software engineering teammate.',
+      'You are Roomote, an AI teammate helping the user and their team get work done.',
     );
     expect(ROOMOTE_SYSTEM_PROMPT).toContain('# Roomote Identity');
     expect(ROOMOTE_SYSTEM_PROMPT).toContain('# Personality');
@@ -37,10 +37,11 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
     });
 
     expect(prompt).toContain(
-      'You are Roomote, a software engineering agent executing work delegated by an orchestrator.',
+      'You are Roomote, an AI teammate executing work delegated by an orchestrator.',
     );
-    expect(prompt).toContain('# Engineering Approach');
+    expect(prompt).toContain('# Work Approach');
     expect(prompt).toContain('take engineering quality seriously');
+    expect(prompt).toContain('For software engineering work');
     expect(prompt).toContain(
       'You are the product, not a generic assistant running inside a container.',
     );

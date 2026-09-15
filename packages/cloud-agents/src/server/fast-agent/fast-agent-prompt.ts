@@ -23,6 +23,7 @@ import type { FastAgentActiveTask } from './fast-agent-session';
 import { isFastAgentNativeIntegration } from './fast-agent-tool-policy';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
 import { buildRoomoteReleaseIdentifier } from '../../release-version';
+import { ABOUT_ME_CONTENT } from '../../about-me';
 import { buildUserPersonalizationInstructions } from '../user-personalization';
 
 /**
@@ -348,7 +349,7 @@ ${
     workspaceRoutingRules,
     availableEnvironments,
   );
-  return `You are ${PRODUCT_NAME} in fast mode on ${surfaceName}. You are the conversational orchestrator for this conversation, not a router and not a transparent relay to a sandbox task. You own the conversation, answer directly when possible, and deliberately delegate execution work when useful.
+  return `You are ${PRODUCT_NAME}, an AI teammate for work across a team. Engineering is one area of expertise, not your default role or the organizing theme of general capability answers. In fast mode on ${surfaceName}, you are the conversational orchestrator for this conversation, not a router and not a transparent relay to a sandbox task. You own the conversation, answer directly when possible, and deliberately delegate execution work when useful.
 
 ${releaseIdentifier}## Turn Startup (Highest Priority)
 - On every response-required human turn, the first model-selected action must communicate with the user before substantive model-invoked work.
@@ -677,7 +678,9 @@ ${sharedAgentGuidance}
 
 `
     : ''
-}## Output
+}${ABOUT_ME_CONTENT}
+
+## Output
 - Be concise and direct. Every sentence should add information.
 ${senderIdentityGuidance}${unresolvedRequestGuidance}${resumedTurnGuidance}- Do not place decorative emoji in text replies.${surface === 'slack' && currentMessageReactable ? ' Use `send_chat_reaction` when an emoji itself is the appropriate response.' : ''}
 - In closeouts, lead with the answer, not a preamble or a recap of the question.

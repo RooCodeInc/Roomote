@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
+import { ABOUT_ME_CONTENT } from '@roomote/cloud-agents';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import {
   and,
@@ -164,6 +165,21 @@ async function buildAboutMePayload(options: {
     Env.RELEASE_VERSION,
     packageJson.version,
   );
+  const product = {
+    name: PRODUCT_NAME,
+    ...(version ? { version } : {}),
+    appUrl: Env.R_APP_URL,
+    docsUrl: getDefaultDocsUrl(Env.APP_ENV ?? 'development'),
+  };
+
+  if (options.operation === 'overview') {
+    return {
+      requestedOperation: options.operation,
+      product,
+      answerGuidance: ABOUT_ME_CONTENT,
+    };
+  }
+
   const [
     environmentRows,
     linearRows,
@@ -239,12 +255,7 @@ async function buildAboutMePayload(options: {
 
   return {
     requestedOperation: options.operation,
-    product: {
-      name: PRODUCT_NAME,
-      ...(version ? { version } : {}),
-      appUrl: Env.R_APP_URL,
-      docsUrl: getDefaultDocsUrl(Env.APP_ENV ?? 'development'),
-    },
+    product,
     deployment: {
       userId: options.userId,
       environmentCount: environmentRows.length,
@@ -275,13 +286,6 @@ async function buildAboutMePayload(options: {
       })),
       environmentDeclared: environmentDeclaredMcpIds,
     },
-    capabilities: [
-      "I work from Slack, Linear, and the web. I figure out the right repo automatically - you usually don't need to tell me.",
-      'I implement changes, run tests, and open PRs.',
-      'I can run automations like code reviews and PR fixes on a schedule.',
-      'I use your connected integrations for context, like GitHub, Linear, and your enabled MCP tools.',
-      'I can pick up where I left off when you follow up in the same thread.',
-    ],
     gettingStarted: {
       slack: invocationIdentities.slack?.examplePrompt
         ? `Mention ${invocationIdentities.slack.guidanceName} in Slack with what you need. I'll figure out the right repo.`
