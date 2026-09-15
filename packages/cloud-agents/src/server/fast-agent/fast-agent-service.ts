@@ -226,6 +226,7 @@ import {
   type FastAgentPlatformEventHandling,
   type FastAgentPlatformEventKind,
   type FastAgentPlatformEventVisibility,
+  type FastAgentHumanTurnFraming,
   type FastAgentReply,
   type FastAgentReplyHandle,
   type FastAgentTurnAdapter,
@@ -1742,6 +1743,7 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  humanTurnFraming,
   automationReport = false,
   defaultImageArtifactIds = [],
   defaultCharts = [],
@@ -1783,6 +1785,8 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** Server-set provenance of a Roomote-framed human turn; see the type. */
+  humanTurnFraming?: FastAgentHumanTurnFraming;
   /** The settling delegated task ran for a custom automation; its closeout is
    * the run's report and may carry launchable suggestions. */
   automationReport?: boolean;
@@ -3330,6 +3334,7 @@ export async function answerFastAgentQuestion({
             ? { inputKind: FAST_AGENT_REACTION_INPUT_TYPE }
             : {}),
           ...(platformEvent ? { platformEventKind } : {}),
+          ...(!platformEvent && humanTurnFraming ? { humanTurnFraming } : {}),
           // Lineage back to the interrupted request this turn is resuming,
           // so the original still surfaces if this turn is interrupted too.
           ...(unresolvedRequest
@@ -3425,6 +3430,7 @@ export async function answerFastAgentQuestion({
       platformEventHandling,
       platformEventVisibility,
       platformEventKind,
+      humanTurnFraming,
       automationReport,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,

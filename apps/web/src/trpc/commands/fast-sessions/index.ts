@@ -11,6 +11,7 @@ import {
   FastAgentDurableRetryScheduledError,
   getOrCreateFastAgentSession,
   resolveApiBaseUrl,
+  type FastAgentHumanTurnFraming,
   type FastAgentPlatformEventKind,
   type FastAgentPlatformEventVisibility,
   type FastAgentTurnSource,
@@ -150,6 +151,8 @@ type WebFastAgentTurnInput = {
   turnSource?: FastAgentTurnSource;
   platformEventKind?: FastAgentPlatformEventKind;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
+  /** Server-set provenance of a Roomote-framed human turn. */
+  humanTurnFraming?: FastAgentHumanTurnFraming;
   /** Deterministic turn ID override. Canonical event IDs derive from it, so a
    * fixed value lets a turn be claimed idempotently across retries. */
   currentMessageId?: string;
@@ -227,6 +230,7 @@ async function runWebFastAgentTurn({
   turnSource,
   platformEventKind,
   platformEventVisibility,
+  humanTurnFraming,
   setupSnapshot,
   setupSession,
   voiceMode,
@@ -302,6 +306,9 @@ async function runWebFastAgentTurn({
                       : {}),
                   }
                 : {}),
+              ...(turnSource !== 'platform_event' && humanTurnFraming
+                ? { humanTurnFraming }
+                : {}),
               ...(setupSession ? { setupSession: true } : {}),
               ...(voiceMode ? { voiceMode: true } : {}),
               ...(setupContext ? { setupContext } : {}),
@@ -344,6 +351,9 @@ async function runWebFastAgentTurn({
             ...(platformEventKind ? { platformEventKind } : {}),
             ...(platformEventVisibility ? { platformEventVisibility } : {}),
           }
+        : {}),
+      ...(turnSource !== 'platform_event' && humanTurnFraming
+        ? { humanTurnFraming }
         : {}),
       ...(setupContext?.setupSnapshot || setupSnapshot
         ? { setupSnapshot: setupContext?.setupSnapshot ?? setupSnapshot }
@@ -735,6 +745,8 @@ export async function replyToFastSessionCommand(
     attachmentTexts?: string[];
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
+    /** Server-only: marks a turn whose text Roomote framed; never from a client. */
+    humanTurnFraming?: FastAgentHumanTurnFraming;
   },
 ): Promise<{ success: true }> {
   const session = await findAccessibleFastSession(auth, input.sessionId);
@@ -788,6 +800,9 @@ export async function replyToFastSessionCommand(
     currentMessageId: input.clientMessageId,
     durableSessionId: session.id,
     ...(input.voiceMode ? { voiceMode: true } : {}),
+    ...(input.humanTurnFraming
+      ? { humanTurnFraming: input.humanTurnFraming }
+      : {}),
     ...setupContext,
   });
 

@@ -752,9 +752,25 @@ describe('buildFastAgentSystemPrompt', () => {
       'Label that link with the service, for example "Connect Figma securely"',
     );
     expect(prompt).toContain('Settings → Experimental');
-    expect(prompt).toContain(
-      'A human turn may arrive as a Roomote-injected `<environment-instructions>` block followed by a `<request>` block',
+    expect(prompt).not.toContain('This turn arrived as a Roomote-injected');
+    expect(enabledPrompt).not.toContain(
+      'This turn arrived as a Roomote-injected',
     );
+    const framedPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      serviceCredentialToolsEnabled: true,
+      humanTurnFraming: 'integration_saved',
+    });
+    expect(framedPrompt).toContain(
+      'This turn arrived as a Roomote-injected `<environment-instructions>` block followed by a `<request>` block',
+    );
+    expect(
+      buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        turnSource: 'platform_event',
+        humanTurnFraming: 'integration_saved',
+      }),
+    ).not.toContain('This turn arrived as a Roomote-injected');
     expect(enabledPrompt).not.toContain(
       'Integration-key tools are turned off for this user',
     );

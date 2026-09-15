@@ -405,6 +405,8 @@ describe('Fast session queries', () => {
     'shows only the request text of a Roomote-framed human turn in %s',
     async (readMode) => {
       const owner = await userFactory.create();
+      const framedText =
+        '<environment-instructions>\nCall list_integration_keys and continue.\n</environment-instructions>\n<request>I added the integration, go ahead.</request>';
       const session = await createFastSession({
         userId: owner.id,
         conversationId: `framed-turn-${readMode}`,
@@ -416,13 +418,22 @@ describe('Fast session queries', () => {
         turnSeq: 0,
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         role: 'user',
+        metadata: {
+          visibleInTranscript: true,
+          turnSource: 'human',
+          humanTurnFraming: 'integration_saved',
+        },
+        contentBlocks: [{ type: 'text', text: framedText }],
+      });
+      await createFastMessage({
+        conversationId: session.id,
+        eventId: 'typed-turn',
+        turnSeq: 1,
+        ts: 2,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
         metadata: { visibleInTranscript: true, turnSource: 'human' },
-        contentBlocks: [
-          {
-            type: 'text',
-            text: '<environment-instructions>\nCall list_integration_keys and continue.\n</environment-instructions>\n<request>I added the integration, go ahead.</request>',
-          },
-        ],
+        contentBlocks: [{ type: 'text', text: framedText }],
       });
       const result =
         readMode === 'history'
@@ -431,14 +442,19 @@ describe('Fast session queries', () => {
               session.id,
             )
           : await getFastSessionMessagesSince(session.id, 0);
-      expect(result?.messages).toHaveLength(1);
+      expect(result?.messages).toHaveLength(2);
       expect(result?.messages[0]?.contentBlocks).toEqual([
         { type: 'text', text: 'I added the integration, go ahead.' },
       ]);
       expect(result?.messages[0]?.metadata).toMatchObject({
         visibleInTranscript: true,
         turnSource: 'human',
+        humanTurnFraming: 'integration_saved',
       });
+      // The same text typed into chat carries no provenance and stays as is.
+      expect(result?.messages[1]?.contentBlocks).toEqual([
+        { type: 'text', text: framedText },
+      ]);
     },
   );
 

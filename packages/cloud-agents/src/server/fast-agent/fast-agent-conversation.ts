@@ -26,6 +26,14 @@ export function getFastAgentConversationStorageWorkspaceId(
 
 export type FastAgentTurnSource = 'human' | 'platform_event';
 
+/**
+ * Provenance of a human turn Roomote framed with an `<environment-instructions>`
+ * block. Only server code sets it (the Session integration form after the
+ * owner saves a key); a block typed into chat never carries it, so neither
+ * the transcript nor the prompt treats such text as platform framing.
+ */
+export type FastAgentHumanTurnFraming = 'integration_saved';
+
 export type FastAgentPlatformEventVisibility = 'optional' | 'required';
 
 export type FastAgentPlatformEventHandling = 'default' | 'present_only';
