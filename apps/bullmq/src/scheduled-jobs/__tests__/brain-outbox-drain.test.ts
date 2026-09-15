@@ -259,7 +259,7 @@ describe('pull request fact pages', () => {
     expect(page.content).toContain(
       'At least 300 files changed (+900 / -10 so far) across apps/web.',
     );
-    expect(page.content).toContain('- … and 299 or more more');
+    expect(page.content).toContain('- … and 299 or more');
     expect(page.content).toContain('_The provider file listing was capped');
     expect(page.content).toContain('_The provider review listing was capped');
   });
