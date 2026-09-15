@@ -2,11 +2,14 @@ import {
   and,
   db,
   eq,
+  createChatInitiationOrder,
   fastAgentConversations,
   fastAgentMessages,
   fastAgentParentEvents,
+  getUserChatInitiationProvider,
   inArray,
   sessions,
+  recordUserChatInitiationProvider,
   userFactory,
   users,
 } from '@roomote/db/server';
@@ -88,6 +91,96 @@ describe('Fast conversation repository', () => {
         privacy: 'private',
       }),
     ).rejects.toThrow('user-owned web conversation');
+  });
+
+  it.each(['slack', 'teams', 'telegram', 'discord'] as const)(
+    'records %s when a human chat turn creates a Session',
+    async (surface) => {
+      const user = await createUser();
+      const conversation = {
+        surface,
+        workspaceId: `${surface}-workspace`,
+        conversationId: crypto.randomUUID(),
+        replyTarget: { channelId: `${surface}-channel` },
+      };
+
+      await getOrCreateFastAgentSession({
+        userId: user.id,
+        conversation,
+        chatInitiationOrder: createChatInitiationOrder(),
+      });
+
+      await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+        surface,
+      );
+    },
+  );
+
+  it('does not overwrite the preference for an existing Session turn', async () => {
+    const user = await createUser();
+    const conversation = {
+      ...slackConversation,
+      conversationId: crypto.randomUUID(),
+    };
+    await getOrCreateFastAgentSession({
+      userId: user.id,
+      conversation,
+    });
+    await recordUserChatInitiationProvider(
+      user.id,
+      'discord',
+      createChatInitiationOrder(),
+    );
+
+    const reused = await getOrCreateFastAgentSession({
+      userId: user.id,
+      conversation,
+      chatInitiationOrder: createChatInitiationOrder(),
+    });
+
+    expect(reused.created).toBe(false);
+    await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+      'discord',
+    );
+  });
+
+  it('does not record an automated chat-surface Session', async () => {
+    const user = await createUser();
+    await recordUserChatInitiationProvider(
+      user.id,
+      'telegram',
+      createChatInitiationOrder(),
+    );
+
+    await getOrCreateFastAgentSession({
+      userId: user.id,
+      conversation: {
+        ...slackConversation,
+        conversationId: crypto.randomUUID(),
+      },
+    });
+
+    await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+      'telegram',
+    );
+  });
+
+  it('does not let a delayed older initiation overwrite a newer preference', async () => {
+    const user = await createUser();
+    const initiatedAt = '2026-09-15T15:30:00.000Z';
+
+    await recordUserChatInitiationProvider(user.id, 'discord', {
+      initiatedAt,
+      order: '200',
+    });
+    await recordUserChatInitiationProvider(user.id, 'slack', {
+      initiatedAt,
+      order: '100',
+    });
+
+    await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+      'discord',
+    );
   });
 
   it.each([true, false])(

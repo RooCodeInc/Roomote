@@ -15,6 +15,7 @@ import { sanitizeSandboxPathString } from '@/lib';
 import { cn } from '@/lib/utils';
 
 import type { AcpActivityGroupRenderBlock } from './activity-groups';
+import { AcpMessageItem } from './AcpMessageItem';
 import type { AcpRenderBlock } from './render-blocks';
 import { resolveToolPresentation } from './tool-presentation';
 import { mcpIntegrationIconFor, toolIconForKey } from './tool-icons';
@@ -23,12 +24,14 @@ import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 interface AcpActivityGroupMessageProps {
   group: AcpActivityGroupRenderBlock;
   anchorIds?: string[];
+  showSubagentPayload?: boolean;
   children: ReactNode;
 }
 
 export function AcpActivityGroupMessage({
   group,
   anchorIds = [],
+  showSubagentPayload = false,
   children,
 }: AcpActivityGroupMessageProps) {
   const latestTool = group.latestToolMessage;
@@ -108,7 +111,16 @@ export function AcpActivityGroupMessage({
         {activityTools.length > 0 && (
           <ul className="space-y-1">
             {activityTools.map((tool) => (
-              <ActivityToolListItem key={tool.id} tool={tool} />
+              <li key={tool.id}>
+                <AcpMessageItem
+                  msg={tool}
+                  showSubagentPayload={showSubagentPayload}
+                  forceToolDetails={
+                    resolveToolPresentation(tool.data, tool.partial)
+                      .category === 'read'
+                  }
+                />
+              </li>
             ))}
           </ul>
         )}
@@ -152,39 +164,6 @@ function getActivityToolMessages(
         left.message.ts - right.message.ts || left.order - right.order,
     )
     .map(({ message }) => message);
-}
-
-function ActivityToolListItem({
-  tool,
-}: {
-  tool: AcpToolCallUiMessage | AcpToolResultUiMessage;
-}) {
-  const presentation = resolveToolPresentation(tool.data, tool.partial);
-  const ToolIcon =
-    presentation.phase === 'failed'
-      ? AlertCircle
-      : presentation.integrationIcon
-        ? mcpIntegrationIconFor(presentation.integrationIcon)
-        : toolIconForKey(presentation.iconKey);
-
-  return (
-    <li>
-      <ToolHeader
-        action={presentation.verb}
-        object={sanitizeSandboxPathString(presentation.object ?? '')}
-        suffix={presentation.providerLabel}
-        icon={ToolIcon}
-        state={
-          presentation.phase === 'failed'
-            ? 'output-error'
-            : presentation.phase === 'running'
-              ? 'input-available'
-              : 'output-available'
-        }
-        collapsible={false}
-      />
-    </li>
-  );
 }
 
 export function AcpWorkingMessage() {

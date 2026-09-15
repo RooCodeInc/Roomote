@@ -38,6 +38,7 @@ import {
   taskRunEvents,
   deploymentSettings,
   fastAgentConversations,
+  getUserChatInitiationProvider,
   users,
   environments,
   environmentRepositoryMappings,
@@ -245,6 +246,77 @@ describe('enqueueTask initiator stamping', () => {
         privacy: 'private',
       }),
     ).rejects.toThrow('linked user on the web surface');
+  });
+
+  it.each(['slack', 'teams', 'telegram', 'discord'] as const)(
+    'records %s as the authenticated user task-starting chat provider',
+    async (surface) => {
+      const userId = await createUser();
+
+      await launchFresh({
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface,
+        trigger: 'message',
+      });
+
+      await expect(getUserChatInitiationProvider(userId)).resolves.toBe(
+        surface,
+      );
+    },
+  );
+
+  it('does not let web or automation task launches overwrite the chat preference', async () => {
+    const userId = await createUser();
+    await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+    });
+
+    await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    await launchFresh({
+      initiator: {
+        kind: 'automation',
+        key: 'custom_automation',
+        actingUserId: userId,
+      },
+      workflow: 'standard',
+      surface: 'discord',
+      trigger: 'message',
+    });
+
+    await expect(getUserChatInitiationProvider(userId)).resolves.toBe('slack');
+  });
+
+  it('keeps task-starting chat preferences isolated per user', async () => {
+    const firstUserId = await createUser();
+    const secondUserId = await createUser();
+    await launchFresh({
+      initiator: { kind: 'user', userId: firstUserId },
+      workflow: 'standard',
+      surface: 'teams',
+      trigger: 'message',
+    });
+    await launchFresh({
+      initiator: { kind: 'user', userId: secondUserId },
+      workflow: 'standard',
+      surface: 'telegram',
+      trigger: 'message',
+    });
+
+    await expect(getUserChatInitiationProvider(firstUserId)).resolves.toBe(
+      'teams',
+    );
+    await expect(getUserChatInitiationProvider(secondUserId)).resolves.toBe(
+      'telegram',
+    );
   });
 
   it('blocks fresh launches when managed access is read-only', async () => {

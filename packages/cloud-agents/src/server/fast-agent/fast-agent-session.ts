@@ -1,12 +1,15 @@
 import type { ModelMessage } from 'ai';
 import {
+  type ChatInitiationOrder,
   and,
   desc,
   db,
   eq,
   inArray,
   isTaskRunFollowUpCandidate,
+  isChatInitiationProvider,
   isNull,
+  recordUserChatInitiationProvider,
   taskRuns,
   tasks,
 } from '@roomote/db/server';
@@ -52,6 +55,7 @@ export async function getOrCreateFastAgentSession({
   privacy,
   initialModel,
   initialReasoningEffort,
+  chatInitiationOrder,
 }: {
   owner?: FastAgentConversationOwner;
   userId?: string;
@@ -63,8 +67,10 @@ export async function getOrCreateFastAgentSession({
   privacy?: 'shared' | 'private';
   initialModel?: string;
   initialReasoningEffort?: ReasoningEffort;
+  /** Human turn start order; records the provider only for a new Session. */
+  chatInitiationOrder?: ChatInitiationOrder;
 }): Promise<FastAgentSessionRecord> {
-  return fastAgentConversationRepository.getOrCreate({
+  const session = await fastAgentConversationRepository.getOrCreate({
     ...(owner ? { owner } : {}),
     ...(userId ? { userId } : {}),
     conversation,
@@ -74,6 +80,23 @@ export async function getOrCreateFastAgentSession({
     ...(initialModel !== undefined ? { initialModel } : {}),
     ...(initialReasoningEffort !== undefined ? { initialReasoningEffort } : {}),
   });
+  if (
+    chatInitiationOrder &&
+    session.created &&
+    userId &&
+    isChatInitiationProvider(conversation.surface)
+  ) {
+    await recordUserChatInitiationProvider(
+      userId,
+      conversation.surface,
+      chatInitiationOrder,
+    ).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to record chat initiation provider: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  }
+  return session;
 }
 
 export async function hasFastAgentSession(

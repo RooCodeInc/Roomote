@@ -18,6 +18,7 @@ interface AcpMessageItemProps {
   msg: AcpUiMessage;
   onSuppress?: (messageId: string) => void;
   showSubagentPayload?: boolean;
+  forceToolDetails?: boolean;
   onOpenDelegatedTask?: (taskId: string) => void;
   children?: ReactNode;
 }
@@ -26,6 +27,7 @@ function AcpMessageItemBase({
   msg,
   onSuppress,
   showSubagentPayload = false,
+  forceToolDetails = false,
   onOpenDelegatedTask,
   children,
 }: AcpMessageItemProps) {
@@ -63,7 +65,11 @@ function AcpMessageItemBase({
           status={msg.data.status}
         />
       ) : (
-        <AcpToolMessage msg={msg} showSubagentPayload={showSubagentPayload}>
+        <AcpToolMessage
+          msg={msg}
+          showSubagentPayload={showSubagentPayload}
+          forceDetails={forceToolDetails}
+        >
           {children}
         </AcpToolMessage>
       );

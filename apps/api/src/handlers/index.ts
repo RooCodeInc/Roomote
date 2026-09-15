@@ -2,6 +2,7 @@
 export { apiHealth } from './health/api';
 export { apiLiveness } from './health/liveness';
 export { controllerHealth } from './health/controller';
+export { bullmqHealth } from './health/bullmq';
 
 // webhooks
 export { github } from './github';

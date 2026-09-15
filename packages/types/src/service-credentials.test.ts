@@ -2,6 +2,8 @@ import {
   isServiceCredentialToolsExperimentEnabled,
   SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY,
   serviceCredentialPrepareSchema,
+  hasLeadingIntegrationSavedBlock,
+  stripLeadingIntegrationSavedBlock,
 } from './service-credentials';
 import { isCredentialEgressCredentialHeaderName } from './credential-egress';
 
@@ -75,5 +77,47 @@ describe('credential header names', () => {
       expect(isCredentialEgressCredentialHeaderName(name), name).toBe(false);
       expect(prepare(name).success, name).toBe(false);
     }
+  });
+});
+
+describe('integration saved block', () => {
+  const envelope =
+    '<integration_saved>\nhidden instruction\n</integration_saved>\nI added the integration, go ahead.';
+
+  it('strips exactly the leading block and keeps the visible text', () => {
+    expect(hasLeadingIntegrationSavedBlock(envelope)).toBe(true);
+    expect(stripLeadingIntegrationSavedBlock(envelope)).toBe(
+      'I added the integration, go ahead.',
+    );
+    expect(stripLeadingIntegrationSavedBlock(`  ${envelope}`)).toBe(
+      'I added the integration, go ahead.',
+    );
+  });
+
+  it('leaves ordinary human text alone, even when it quotes the tag', () => {
+    for (const text of [
+      'plain text',
+      'Please render <integration_saved>example</integration_saved> verbatim',
+      '<integration_saved>unclosed',
+      '<integration_saved>a</integration_saved> then <integration_saved>b</integration_saved>',
+    ]) {
+      expect(stripLeadingIntegrationSavedBlock(text)).toBe(
+        text ===
+          '<integration_saved>a</integration_saved> then <integration_saved>b</integration_saved>'
+          ? 'then <integration_saved>b</integration_saved>'
+          : text,
+      );
+    }
+    expect(hasLeadingIntegrationSavedBlock('plain text')).toBe(false);
+    expect(hasLeadingIntegrationSavedBlock('<integration_saved>unclosed')).toBe(
+      false,
+    );
+  });
+
+  it('costs one scan on adversarial input', () => {
+    const hostile = '<integration_saved>'.repeat(10_000) + 'x'.repeat(100_000);
+    const started = performance.now();
+    expect(stripLeadingIntegrationSavedBlock(hostile)).toBe(hostile);
+    expect(performance.now() - started).toBeLessThan(50);
   });
 });
