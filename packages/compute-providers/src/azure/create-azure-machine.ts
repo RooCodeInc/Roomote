@@ -14,6 +14,11 @@ import type {
 import { loadLocalWorkerReleaseWithVersion } from '../sandbox/utils';
 import { getWorkerRelease } from '../sandbox/worker-release-cache';
 import {
+  BOOTSTRAP_RETRY_DELAY_MS,
+  isTransientBootstrapError,
+  MAX_BOOTSTRAP_ATTEMPTS,
+} from '../sandbox/bootstrap-retry';
+import {
   type LoadedSandboxBootstrapFiles,
   loadSandboxBootstrapFiles,
 } from '../sandbox/bootstrap-files';
@@ -222,320 +227,354 @@ export async function createAzureMachine(
     | { instanceId: string; domains?: Record<string, string> }
     | undefined;
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    throwIfAborted(createInstanceSignal);
+  for (
+    let bootstrapAttempt = 1;
+    bootstrapAttempt <= MAX_BOOTSTRAP_ATTEMPTS;
+    bootstrapAttempt++
+  ) {
+    createdMachine = undefined;
 
-    console.log(
-      `[createAzureMachine] Attempt ${attempt}/${MAX_RETRIES}: ${resumeHandle ? 'resumeFromStandby' : sourceSnapshotId ? 'resumeFromSnapshot' : 'createInstance'}`,
-    );
-
-    try {
-      const operation = resumeHandle
-        ? 'resume_from_standby'
-        : sourceSnapshotId
-          ? 'resume_from_snapshot'
-          : 'create_instance';
-
-      await onMutation?.({
-        provider: 'azure',
-        operation,
-        eventType: 'started',
-        message:
-          operation === 'resume_from_standby'
-            ? `Calling resumeFromStandby for Azure instance from standby handle ${resumeHandle}.`
-            : operation === 'resume_from_snapshot'
-              ? `Calling resumeFromSnapshot for Azure instance from snapshot ${sourceSnapshotId}.`
-              : 'Calling createInstance for Azure instance.',
-        details: buildComputeProviderMutationDetails(
-          { ...mutationContext, attempt },
-          {},
-        ),
-      });
-
-      const instance = resumeHandle
-        ? await computeClient.resumeFromStandby!({
-            resumeHandle,
-            ports: effectivePorts,
-            signal: createInstanceSignal,
-          })
-        : sourceSnapshotId
-          ? await computeClient.resumeFromSnapshot({
-              sourceSnapshotId,
-              ports: effectivePorts,
-              tags,
-              metadata: {
-                ...(workerReleaseTag ? { workerReleaseTag } : {}),
-                ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
-              },
-              signal: createInstanceSignal,
-            })
-          : await computeClient.createInstance({
-              ports: effectivePorts,
-              tags,
-              metadata: {
-                ...(workerReleaseTag ? { workerReleaseTag } : {}),
-                ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
-              },
-              signal: createInstanceSignal,
-            });
-
-      await onMutation?.({
-        provider: 'azure',
-        operation,
-        eventType: 'completed',
-        instanceId: instance.instanceId,
-        message: `${
-          operation === 'resume_from_standby'
-            ? 'resumeFromStandby'
-            : operation === 'resume_from_snapshot'
-              ? 'resumeFromSnapshot'
-              : 'createInstance'
-        } completed for Azure instance ${instance.instanceId}.`,
-        details: buildComputeProviderMutationDetails(
-          { ...mutationContext, attempt },
-          {},
-        ),
-      });
-
-      createdMachine = {
-        instanceId: instance.instanceId,
-        domains: instance.domains,
-      };
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      throwIfAborted(createInstanceSignal);
 
       console.log(
-        `[createAzureMachine] Instance created ${JSON.stringify({
-          instanceId: instance.instanceId,
-          domains: instance.domains,
-          sourceSnapshotId: instance.sourceSnapshotId,
-        })}`,
+        `[createAzureMachine] Attempt ${attempt}/${MAX_RETRIES}: ${resumeHandle ? 'resumeFromStandby' : sourceSnapshotId ? 'resumeFromSnapshot' : 'createInstance'}`,
       );
 
-      break;
-    } catch (error) {
-      await onMutation?.({
-        provider: 'azure',
-        operation: resumeHandle
+      try {
+        const operation = resumeHandle
           ? 'resume_from_standby'
           : sourceSnapshotId
             ? 'resume_from_snapshot'
-            : 'create_instance',
-        eventType: 'failed',
-        message: `${
-          resumeHandle
-            ? 'resumeFromStandby'
+            : 'create_instance';
+
+        await onMutation?.({
+          provider: 'azure',
+          operation,
+          eventType: 'started',
+          message:
+            operation === 'resume_from_standby'
+              ? `Calling resumeFromStandby for Azure instance from standby handle ${resumeHandle}.`
+              : operation === 'resume_from_snapshot'
+                ? `Calling resumeFromSnapshot for Azure instance from snapshot ${sourceSnapshotId}.`
+                : 'Calling createInstance for Azure instance.',
+          details: buildComputeProviderMutationDetails(
+            { ...mutationContext, attempt },
+            {},
+          ),
+        });
+
+        const instance = resumeHandle
+          ? await computeClient.resumeFromStandby!({
+              resumeHandle,
+              ports: effectivePorts,
+              signal: createInstanceSignal,
+            })
+          : sourceSnapshotId
+            ? await computeClient.resumeFromSnapshot({
+                sourceSnapshotId,
+                ports: effectivePorts,
+                tags,
+                metadata: {
+                  ...(workerReleaseTag ? { workerReleaseTag } : {}),
+                  ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
+                },
+                signal: createInstanceSignal,
+              })
+            : await computeClient.createInstance({
+                ports: effectivePorts,
+                tags,
+                metadata: {
+                  ...(workerReleaseTag ? { workerReleaseTag } : {}),
+                  ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
+                },
+                signal: createInstanceSignal,
+              });
+
+        await onMutation?.({
+          provider: 'azure',
+          operation,
+          eventType: 'completed',
+          instanceId: instance.instanceId,
+          message: `${
+            operation === 'resume_from_standby'
+              ? 'resumeFromStandby'
+              : operation === 'resume_from_snapshot'
+                ? 'resumeFromSnapshot'
+                : 'createInstance'
+          } completed for Azure instance ${instance.instanceId}.`,
+          details: buildComputeProviderMutationDetails(
+            { ...mutationContext, attempt },
+            {},
+          ),
+        });
+
+        createdMachine = {
+          instanceId: instance.instanceId,
+          domains: instance.domains,
+        };
+
+        console.log(
+          `[createAzureMachine] Instance created ${JSON.stringify({
+            instanceId: instance.instanceId,
+            domains: instance.domains,
+            sourceSnapshotId: instance.sourceSnapshotId,
+          })}`,
+        );
+
+        break;
+      } catch (error) {
+        await onMutation?.({
+          provider: 'azure',
+          operation: resumeHandle
+            ? 'resume_from_standby'
             : sourceSnapshotId
-              ? 'resumeFromSnapshot'
-              : 'createInstance'
-        } failed for Azure instance.`,
-        details: buildComputeProviderMutationDetails(
-          { ...mutationContext, attempt },
-          {
-            error: error instanceof Error ? error.message : String(error),
-          },
-        ),
-      });
-
-      const errorInfo =
-        error instanceof Error
-          ? {
-              name: error.name,
-              message: error.message,
-              stack: error.stack,
-            }
-          : { message: String(error) };
-
-      if (isAbortError(error)) {
-        console.warn(
-          `[createAzureMachine] Aborting retries after cancellation ${JSON.stringify(
+              ? 'resume_from_snapshot'
+              : 'create_instance',
+          eventType: 'failed',
+          message: `${
+            resumeHandle
+              ? 'resumeFromStandby'
+              : sourceSnapshotId
+                ? 'resumeFromSnapshot'
+                : 'createInstance'
+          } failed for Azure instance.`,
+          details: buildComputeProviderMutationDetails(
+            { ...mutationContext, attempt },
             {
-              attempt,
-              error: errorInfo,
+              error: error instanceof Error ? error.message : String(error),
             },
-          )}`,
+          ),
+        });
+
+        const errorInfo =
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+              }
+            : { message: String(error) };
+
+        if (isAbortError(error)) {
+          console.warn(
+            `[createAzureMachine] Aborting retries after cancellation ${JSON.stringify(
+              {
+                attempt,
+                error: errorInfo,
+              },
+            )}`,
+          );
+
+          throw error;
+        }
+
+        if (attempt === MAX_RETRIES) {
+          console.error(
+            `[createAzureMachine] Failed after ${MAX_RETRIES} attempts ${JSON.stringify(errorInfo)}`,
+          );
+
+          throw error;
+        }
+
+        const delayMs = INITIAL_DELAY_MS * Math.pow(2, attempt - 1);
+
+        console.warn(
+          `[createAzureMachine] Attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${delayMs}ms ${JSON.stringify(errorInfo)}`,
         );
 
-        throw error;
+        await sleepWithSignal(delayMs, createInstanceSignal);
       }
-
-      if (attempt === MAX_RETRIES) {
-        console.error(
-          `[createAzureMachine] Failed after ${MAX_RETRIES} attempts ${JSON.stringify(errorInfo)}`,
-        );
-
-        throw error;
-      }
-
-      const delayMs = INITIAL_DELAY_MS * Math.pow(2, attempt - 1);
-
-      console.warn(
-        `[createAzureMachine] Attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${delayMs}ms ${JSON.stringify(errorInfo)}`,
-      );
-
-      await sleepWithSignal(delayMs, createInstanceSignal);
     }
-  }
 
-  if (!createdMachine) {
-    throw new Error('Failed to create Azure instance');
-  }
+    if (!createdMachine) {
+      throw new Error('Failed to create Azure instance');
+    }
 
-  // Start the bootstrap timeout only after instance creation succeeds, so cold
-  // disk image pulls don't eat into the bootstrap budget.
-  const bootstrapSignal =
-    bootstrapTimeoutMs != null
-      ? AbortSignal.timeout(bootstrapTimeoutMs)
-      : legacySignal;
+    // Start the bootstrap timeout only after instance creation succeeds, so cold
+    // disk image pulls don't eat into the bootstrap budget.
+    const bootstrapSignal =
+      bootstrapTimeoutMs != null
+        ? AbortSignal.timeout(bootstrapTimeoutMs)
+        : legacySignal;
 
-  let bootstrapPhase = 'load-files';
+    let bootstrapPhase = 'load-files';
 
-  try {
-    const { files: filesToWrite } = loadAzureFiles();
+    try {
+      const { files: filesToWrite } = loadAzureFiles();
 
-    if (tarball) {
-      filesToWrite.push({ path: WORKER_TARBALL_PATH, content: tarball });
+      if (tarball) {
+        filesToWrite.push({ path: WORKER_TARBALL_PATH, content: tarball });
+        console.log(
+          `[createAzureMachine] Worker tarball added ${JSON.stringify({
+            path: WORKER_TARBALL_PATH,
+            sizeBytes: tarball.byteLength,
+          })}`,
+        );
+      }
+
+      if (filesToWrite.length > 0) {
+        bootstrapPhase = 'write-files';
+
+        await onMutation?.({
+          provider: 'azure',
+          operation: 'write_files',
+          eventType: 'started',
+          instanceId: createdMachine.instanceId,
+          message: `Calling writeFiles for Azure instance ${createdMachine.instanceId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            phase: 'bootstrap_upload',
+            fileCount: filesToWrite.length,
+            filePaths: filesToWrite.map((file) => file.path),
+          }),
+        });
+
+        await computeClient.writeFiles({
+          instanceId: createdMachine.instanceId,
+          files: filesToWrite,
+          signal: bootstrapSignal,
+        });
+
+        await onMutation?.({
+          provider: 'azure',
+          operation: 'write_files',
+          eventType: 'completed',
+          instanceId: createdMachine.instanceId,
+          message: `writeFiles completed for Azure instance ${createdMachine.instanceId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            phase: 'bootstrap_upload',
+            fileCount: filesToWrite.length,
+            filePaths: filesToWrite.map((file) => file.path),
+          }),
+        });
+      }
+
+      bootstrapPhase = 'install-worker';
+
       console.log(
-        `[createAzureMachine] Worker tarball added ${JSON.stringify({
-          path: WORKER_TARBALL_PATH,
-          sizeBytes: tarball.byteLength,
-        })}`,
+        `[createAzureMachine] Running install script: bash ${INSTALL_SCRIPT_PATH}`,
       );
-    }
-
-    if (filesToWrite.length > 0) {
-      bootstrapPhase = 'write-files';
 
       await onMutation?.({
         provider: 'azure',
-        operation: 'write_files',
+        operation: 'run_command',
         eventType: 'started',
         instanceId: createdMachine.instanceId,
-        message: `Calling writeFiles for Azure instance ${createdMachine.instanceId}.`,
+        message: `Calling runCommand for Azure instance ${createdMachine.instanceId}.`,
         details: buildComputeProviderMutationDetails(mutationContext, {
-          phase: 'bootstrap_upload',
-          fileCount: filesToWrite.length,
-          filePaths: filesToWrite.map((file) => file.path),
+          phase: 'install_worker',
+          command: 'bash',
+          args: [INSTALL_SCRIPT_PATH],
         }),
       });
 
-      await computeClient.writeFiles({
+      const installResult = await computeClient.runCommand({
         instanceId: createdMachine.instanceId,
-        files: filesToWrite,
+        cmd: 'bash',
+        args: [INSTALL_SCRIPT_PATH],
+        ...(tarball
+          ? {
+              env: {
+                // Fresh Azure boots stage the worker release under the shared
+                // sandbox files directory so the install script can reuse the
+                // same default path as Vercel sandbox.
+                WORKER_RELEASE_ARCHIVE_PATH: WORKER_TARBALL_PATH,
+              },
+            }
+          : {}),
         signal: bootstrapSignal,
       });
 
       await onMutation?.({
         provider: 'azure',
-        operation: 'write_files',
+        operation: 'run_command',
         eventType: 'completed',
         instanceId: createdMachine.instanceId,
-        message: `writeFiles completed for Azure instance ${createdMachine.instanceId}.`,
-        details: buildComputeProviderMutationDetails(mutationContext, {
-          phase: 'bootstrap_upload',
-          fileCount: filesToWrite.length,
-          filePaths: filesToWrite.map((file) => file.path),
-        }),
-      });
-    }
-
-    bootstrapPhase = 'install-worker';
-
-    console.log(
-      `[createAzureMachine] Running install script: bash ${INSTALL_SCRIPT_PATH}`,
-    );
-
-    await onMutation?.({
-      provider: 'azure',
-      operation: 'run_command',
-      eventType: 'started',
-      instanceId: createdMachine.instanceId,
-      message: `Calling runCommand for Azure instance ${createdMachine.instanceId}.`,
-      details: buildComputeProviderMutationDetails(mutationContext, {
-        phase: 'install_worker',
-        command: 'bash',
-        args: [INSTALL_SCRIPT_PATH],
-      }),
-    });
-
-    const installResult = await computeClient.runCommand({
-      instanceId: createdMachine.instanceId,
-      cmd: 'bash',
-      args: [INSTALL_SCRIPT_PATH],
-      ...(tarball
-        ? {
-            env: {
-              // Fresh Azure boots stage the worker release under the shared
-              // sandbox files directory so the install script can reuse the
-              // same default path as Vercel sandbox.
-              WORKER_RELEASE_ARCHIVE_PATH: WORKER_TARBALL_PATH,
-            },
-          }
-        : {}),
-      signal: bootstrapSignal,
-    });
-
-    await onMutation?.({
-      provider: 'azure',
-      operation: 'run_command',
-      eventType: 'completed',
-      instanceId: createdMachine.instanceId,
-      message: `runCommand completed for Azure instance ${createdMachine.instanceId}.`,
-      details: buildComputeProviderMutationDetails(mutationContext, {
-        phase: 'install_worker',
-        command: 'bash',
-        args: [INSTALL_SCRIPT_PATH],
-        exitCode: installResult.exitCode,
-      }),
-    });
-
-    if (installResult.exitCode !== 0) {
-      throw new Error(
-        `Azure worker install failed with exit code ${installResult.exitCode ?? 'null'}: ${installResult.stderr ?? installResult.stdout ?? 'no output'}`,
-      );
-    }
-  } catch (error) {
-    if (bootstrapPhase === 'write-files') {
-      await onMutation?.({
-        provider: 'azure',
-        operation: 'write_files',
-        eventType: 'failed',
-        instanceId: createdMachine.instanceId,
-        message: `writeFiles failed for Azure instance ${createdMachine.instanceId}.`,
-        details: buildComputeProviderMutationDetails(mutationContext, {
-          phase: 'bootstrap_upload',
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      });
-    } else if (bootstrapPhase === 'install-worker') {
-      await onMutation?.({
-        provider: 'azure',
-        operation: 'run_command',
-        eventType: 'failed',
-        instanceId: createdMachine.instanceId,
-        message: `runCommand failed for Azure instance ${createdMachine.instanceId}.`,
+        message: `runCommand completed for Azure instance ${createdMachine.instanceId}.`,
         details: buildComputeProviderMutationDetails(mutationContext, {
           phase: 'install_worker',
           command: 'bash',
           args: [INSTALL_SCRIPT_PATH],
-          error: error instanceof Error ? error.message : String(error),
+          exitCode: installResult.exitCode,
         }),
       });
+
+      if (installResult.exitCode !== 0) {
+        throw new Error(
+          `Azure worker install failed with exit code ${installResult.exitCode ?? 'null'}: ${installResult.stderr ?? installResult.stdout ?? 'no output'}`,
+        );
+      }
+    } catch (error) {
+      if (bootstrapPhase === 'write-files') {
+        await onMutation?.({
+          provider: 'azure',
+          operation: 'write_files',
+          eventType: 'failed',
+          instanceId: createdMachine.instanceId,
+          message: `writeFiles failed for Azure instance ${createdMachine.instanceId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            phase: 'bootstrap_upload',
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        });
+      } else if (bootstrapPhase === 'install-worker') {
+        await onMutation?.({
+          provider: 'azure',
+          operation: 'run_command',
+          eventType: 'failed',
+          instanceId: createdMachine.instanceId,
+          message: `runCommand failed for Azure instance ${createdMachine.instanceId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            phase: 'install_worker',
+            command: 'bash',
+            args: [INSTALL_SCRIPT_PATH],
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        });
+      }
+
+      await cleanupAzureInstance({
+        computeClient,
+        instanceId: createdMachine.instanceId,
+        phase: bootstrapPhase,
+        error,
+        logPrefix: 'createAzureMachine',
+        onMutation,
+        ...mutationContext,
+      });
+
+      if (
+        isAbortError(error) ||
+        bootstrapAttempt === MAX_BOOTSTRAP_ATTEMPTS ||
+        !isTransientBootstrapError(error)
+      ) {
+        throw error;
+      }
+
+      // The failed instance is already destroyed. A transport failure between
+      // the controller and the provider (a cut exec stream, a reset socket, a
+      // proxy 502) says nothing about the next instance, so start over with a
+      // fresh one instead of failing the run.
+      console.warn(
+        `[createAzureMachine] Bootstrap attempt ${bootstrapAttempt}/${MAX_BOOTSTRAP_ATTEMPTS} failed in phase ${bootstrapPhase}; retrying with a fresh instance in ${BOOTSTRAP_RETRY_DELAY_MS}ms ${JSON.stringify(
+          { error: error instanceof Error ? error.message : String(error) },
+        )}`,
+      );
+      await sleepWithSignal(BOOTSTRAP_RETRY_DELAY_MS, createInstanceSignal);
+      continue;
     }
 
-    await cleanupAzureInstance({
-      computeClient,
-      instanceId: createdMachine.instanceId,
-      phase: bootstrapPhase,
-      error,
-      logPrefix: 'createAzureMachine',
-      onMutation,
-      ...mutationContext,
-    });
-
-    throw error;
+    break;
   }
 
+  if (!createdMachine) {
+    throw new Error('Instance bootstrap did not produce a machine');
+  }
+
+  const bootstrappedMachine = createdMachine;
+
   return {
-    machineId: createdMachine.instanceId,
+    machineId: bootstrappedMachine.instanceId,
     proxyPorts,
     ...(sourceSnapshotId
       ? { sourceSnapshotId }
@@ -543,14 +582,14 @@ export async function createAzureMachine(
         ? { sourceSnapshotId: options.resumeHandle }
         : {}),
     domain: (port: number) => {
-      const fromResponse = createdMachine.domains?.[port.toString()];
+      const fromResponse = bootstrappedMachine.domains?.[port.toString()];
 
       if (fromResponse) {
         return fromResponse;
       }
 
       throw new Error(
-        `No Azure preview link resolved for port ${port} on ${createdMachine.instanceId}`,
+        `No Azure preview link resolved for port ${port} on ${bootstrappedMachine.instanceId}`,
       );
     },
   };
