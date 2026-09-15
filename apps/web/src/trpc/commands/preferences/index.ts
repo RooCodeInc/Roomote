@@ -13,7 +13,7 @@ import {
 } from '@roomote/db/server';
 import { TRPCError } from '@trpc/server';
 import { headers } from 'next/headers';
-import { SESSION_SECRET_TOOLS_EXPERIMENT_KEY } from '@roomote/types';
+import { SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 import { getAuth } from '@/lib/server/auth';
@@ -62,10 +62,10 @@ function normalizePersonalPreferences(
       typeof metadata.home_composer_suggestions_enabled === 'boolean'
         ? metadata.home_composer_suggestions_enabled
         : DEFAULT_PERSONAL_PREFERENCES.homeComposerSuggestionsEnabled,
-    sessionSecretToolsEnabled:
-      typeof metadata[SESSION_SECRET_TOOLS_EXPERIMENT_KEY] === 'boolean'
-        ? metadata[SESSION_SECRET_TOOLS_EXPERIMENT_KEY]
-        : DEFAULT_PERSONAL_PREFERENCES.sessionSecretToolsEnabled,
+    serviceCredentialToolsEnabled:
+      typeof metadata[SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY] === 'boolean'
+        ? metadata[SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY]
+        : DEFAULT_PERSONAL_PREFERENCES.serviceCredentialToolsEnabled,
   };
 }
 
@@ -205,9 +205,9 @@ export async function updatePersonalPreferencesCommand(
     nextMetadataRecord.home_composer_suggestions_enabled =
       input.homeComposerSuggestionsEnabled;
   }
-  if (input.sessionSecretToolsEnabled !== undefined) {
-    nextMetadataRecord[SESSION_SECRET_TOOLS_EXPERIMENT_KEY] =
-      input.sessionSecretToolsEnabled;
+  if (input.serviceCredentialToolsEnabled !== undefined) {
+    nextMetadataRecord[SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY] =
+      input.serviceCredentialToolsEnabled;
   }
 
   if (Object.keys(nextMetadataRecord).length === 0) {

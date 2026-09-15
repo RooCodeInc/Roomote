@@ -42,7 +42,7 @@ import {
   slackInstallations,
   slackUserMappings,
   syncTaskStateFromRuns,
-  terminateSessionEgressWorkloadsForRun,
+  terminateCredentialEgressWorkloadsForRun,
   updatePendingEnvironmentSnapshot,
   asc,
   eq,
@@ -369,7 +369,7 @@ export const finishRun = async ({
     // substitute and publish the revocation in the same transaction as the
     // terminal status. Idle keeps the sandbox (and its workload) alive.
     if (status !== RunStatus.Idle) {
-      await terminateSessionEgressWorkloadsForRun(
+      await terminateCredentialEgressWorkloadsForRun(
         id,
         status === RunStatus.Completed
           ? 'completed'

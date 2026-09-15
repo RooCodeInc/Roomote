@@ -649,12 +649,12 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret]: String.raw`
+    [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Prepare an integration approval using only nonsecret metadata from the service documentation. Call list_session_secrets first: a ready integration for the service means no approval is needed, and a pending one means re-share its link, not prepare again. Choose the HTTPS origin and the header that carries the key (authorization, x-api-key, api-key, or the service's own header), omitting headerPrefix when the key needs no scheme, then share the returned secure link so the human can enter the key privately. Once entered, the key is an integration for every Session the human owns. Omit allowedMethods for read-only access; list the exact HTTP methods only when the requested work needs writes, and say so before the human approves. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
+  description: "Prepare an integration approval using only nonsecret metadata from the service documentation. Call list_integration_keys first: a ready integration for the service means no approval is needed, and a pending one means re-share its link, not prepare again. Choose the HTTPS origin and the header that carries the key (authorization, x-api-key, api-key, or the service's own header), omitting headerPrefix when the key needs no scheme, then share the returned secure link so the human can enter the key privately. Once entered, the key is an integration for every Session the human owns. Omit allowedMethods for read-only access; list the exact HTTP methods only when the requested work needs writes, and say so before the human approves. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
   args: {
     label: z.string().trim().min(1).max(80),
     origin: z.string().min(1).max(2048),
@@ -669,26 +669,26 @@ export default {
     lifetimeHours: z.number().int().min(1).max(8760).optional().describe("Hours until the integration expires. Omit unless the human asked for a temporary key; integrations are kept until revoked."),
     allowedMethods: z.array(z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])).min(1).max(6).optional().describe("HTTP methods the approved key may be used with. Defaults to GET and HEAD."),
   },
-  execute: (args, context) => invoke("prepare_session_secret", args, context),
+  execute: (args, context) => invoke("prepare_integration_key", args, context),
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets]: String.raw`
+    [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: String.raw`
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "List the human's integrations (ready secret references with their origin, header, allowed methods, and expiry, whichever Session approved them) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval and before using a reference; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready references are usable by request_with_session_secret for reads and are delivered automatically to coding tasks launched from this Session.",
+  description: "List the human's integrations (ready secret references with their origin, header, allowed methods, and expiry, whichever Session approved them) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval and before using a reference; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready references are usable by request_with_integration_key for reads and are delivered automatically to coding tasks launched from this Session.",
   args: {},
-  execute: (args, context) => invoke("list_session_secrets", args, context),
+  execute: (args, context) => invoke("list_integration_keys", args, context),
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret]: String.raw`
+    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Make one bounded GET or HEAD request using a ready Session secret reference without exposing the credential; the server sends the request to the approved origin with the real key. Discover references with list_session_secrets; never invent one or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers. For scripts, SDKs, CLIs, repeated calls, or approved write methods, launch a coding task attached to this Session instead: it receives the approved services as substitute tokens with a base URL. Call directly without an opening acknowledgement or another confirmation, and report the actual result.",
+  description: "Make one bounded GET or HEAD request using a ready integration key reference without exposing the credential; the server sends the request to the approved origin with the real key. Discover references with list_integration_keys; never invent one or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers. For scripts, SDKs, CLIs, repeated calls, or approved write methods, launch a coding task attached to this Session instead: it receives the approved services as substitute tokens with a base URL. Call directly without an opening acknowledgement or another confirmation, and report the actual result.",
   args: {
     secretRef: z.string().uuid(),
     method: z.enum(["GET", "HEAD"]),
@@ -696,7 +696,7 @@ export default {
     accept: z.enum(["application/json", "text/plain"]).optional(),
     body: z.literal("").nullish().describe("GET/HEAD have no body. Omit, use null, or use an empty string."),
   },
-  execute: (args, context) => invoke("request_with_session_secret", args, context),
+  execute: (args, context) => invoke("request_with_integration_key", args, context),
 }
 `,
 
@@ -1457,7 +1457,7 @@ export async function getFastAgentNativeToolRuntime(
   integrations: FastAgentIntegration[],
   options: {
     surface?: FastAgentSurface;
-    sessionSecretToolsEnabled?: boolean;
+    serviceCredentialToolsEnabled?: boolean;
   } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
@@ -1514,8 +1514,8 @@ export async function getFastAgentNativeToolRuntime(
             nativeIntegrations.map((integration) => integration.id),
             {
               surface: options.surface ?? 'web',
-              sessionSecretToolsEnabled:
-                options.sessionSecretToolsEnabled === true,
+              serviceCredentialToolsEnabled:
+                options.serviceCredentialToolsEnabled === true,
             },
           ),
         },

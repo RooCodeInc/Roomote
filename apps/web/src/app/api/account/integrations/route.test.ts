@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/server/auth-context', () => ({ authorize: mocks.authorize }));
 vi.mock('@/lib/server/env', () => ({ Env: mocks.env }));
-vi.mock('@roomote/sdk/server/session-secrets', () => ({
+vi.mock('@roomote/sdk/server/service-credentials', () => ({
   createIntegration: mocks.create,
   listIntegrations: mocks.list,
   revokeIntegration: mocks.revoke,

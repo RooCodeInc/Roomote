@@ -54,7 +54,7 @@ export async function applyDeploymentEnvVarsReload(input: {
   // launcher-delivered client configuration so a reload cannot drop it.
   const nextRuntimeEnv: Record<string, string> = {
     ...freshEnvVars,
-    ...workerEnv.buildSessionEgressClientEnv(),
+    ...workerEnv.buildCredentialEgressClientEnv(),
   };
   const isEnvironmentWorkspace =
     resolveTaskWorkspace(taskRun.payload).type === 'environment';

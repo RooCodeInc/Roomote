@@ -25,14 +25,14 @@ integration tools remain available and should be used first.
 
 Operator-managed integrations are opt-in and configured by the deployment
 operator, not through the curated integration connection dialogs. The same API
-broker also serves [Session secrets](/session-secrets), which are individually
+broker also serves [Integration keys](/integration-keys), which are individually
 approved by the Session owner and do not require an operator manifest.
 
 For Session grants only, leave `R_HTTP_INTEGRATIONS_ENABLED` unset or `false` and
 `R_HTTP_INTEGRATIONS_CONFIG_PATH` unset. No per-service credential environment
 variables are needed on the Roomote API: the owner saves each key in the secure
 Session form. Existing deployment encryption and job-signing configuration remain
-required. See [dynamic-only setup](/session-secrets#dynamic-only-setup).
+required. See [dynamic-only setup](/integration-keys#dynamic-only-setup).
 
 1. Create a JSON manifest on the API server and mount it read-only. Use narrow
    paths and least-privilege upstream credentials.

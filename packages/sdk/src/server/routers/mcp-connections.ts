@@ -54,9 +54,9 @@ import {
 } from '../trpc';
 import { resolveActorScopedUserContext } from '../lib/auth';
 import {
-  readSessionEgressDelivery,
-  markSessionEgressBootstrapReady,
-} from '../lib/session-egress-delivery';
+  readCredentialEgressDelivery,
+  markCredentialEgressBootstrapReady,
+} from '../lib/credential-egress-delivery';
 import {
   HTTP_INTEGRATIONS_MCP_ID,
   HTTP_INTEGRATIONS_MCP_PATH,
@@ -274,31 +274,34 @@ export const mcpConnectionsRouter = router({
    * needs to launch the local process, which a member's plain auth token must
    * not be able to read directly.
    */
-  markSessionEgressBootstrapReady: authenticatedProcedure
+  markCredentialEgressBootstrapReady: authenticatedProcedure
     .input(z.object({ nonce: z.string().uuid() }).strict())
     .mutation(async ({ ctx, input }) => {
       try {
-        await markSessionEgressBootstrapReady(ctx.auth, input.nonce);
+        await markCredentialEgressBootstrapReady(ctx.auth, input.nonce);
         return { requested: true };
       } catch {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'Session egress bootstrap unavailable',
+          message: 'Credential egress bootstrap unavailable',
         });
       }
     }),
 
-  getSessionEgressDelivery: authenticatedProcedure
+  getCredentialEgressDelivery: authenticatedProcedure
     .input(z.object({ nonce: z.string().uuid() }).strict())
     .query(async ({ ctx, input }) => {
       try {
         return {
-          environment: await readSessionEgressDelivery(ctx.auth, input.nonce),
+          environment: await readCredentialEgressDelivery(
+            ctx.auth,
+            input.nonce,
+          ),
         };
       } catch {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'Session egress client configuration unavailable',
+          message: 'Credential egress client configuration unavailable',
         });
       }
     }),

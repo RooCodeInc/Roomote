@@ -6,18 +6,18 @@ import {
   db,
   eq,
   users,
-  resolveSessionSecretContext,
-  listOwnedSessionSecrets,
-  type SessionSecretContext,
+  resolveServiceCredentialContext,
+  listOwnedServiceCredentials,
+  type ServiceCredentialContext,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import {
-  listSessionSecretApprovals,
-  prepareSessionSecret,
-} from '@roomote/sdk/server/session-secrets';
+  listServiceCredentialApprovals,
+  prepareServiceCredential,
+} from '@roomote/sdk/server/service-credentials';
 import {
-  isSessionSecretToolsExperimentEnabled,
-  sessionSecretPrepareToolSchema,
+  isServiceCredentialToolsExperimentEnabled,
+  serviceCredentialPrepareToolSchema,
 } from '@roomote/types';
 import type { Variables } from '../../../types';
 import { resolveDeploymentMcpAuth } from '../deployment-mcp-auth';
@@ -70,12 +70,14 @@ export function createHttpIntegrationsMcp() {
         auth.tokenType === 'session-broker'
           ? auth.userId
           : await resolveActingUserIdOrNull(auth);
-      const resolveContext: (() => Promise<SessionSecretContext>) | undefined =
+      const resolveContext:
+        | (() => Promise<ServiceCredentialContext>)
+        | undefined =
         auth.tokenType === 'session-broker'
-          ? () => resolveSessionSecretContext(auth)
+          ? () => resolveServiceCredentialContext(auth)
           : auth.tokenType === 'run' && auth.runId
             ? () =>
-                resolveSessionSecretContext({
+                resolveServiceCredentialContext({
                   tokenType: 'run',
                   runId: auth.runId!,
                   userId: auth.userId,
@@ -92,9 +94,8 @@ export function createHttpIntegrationsMcp() {
           403,
           'HTTP integrations requires an active member actor',
         );
-      const sessionSecretToolsEnabled = isSessionSecretToolsExperimentEnabled(
-        user.metadata,
-      );
+      const serviceCredentialToolsEnabled =
+        isServiceCredentialToolsExperimentEnabled(user.metadata);
       const scope =
         auth.tokenType === 'run' ? `run:${auth.runId}` : `user:${user.id}`;
       server = new McpServer(
@@ -107,8 +108,8 @@ export function createHttpIntegrationsMcp() {
       server.registerTool(
         'list_integrations',
         {
-          description: sessionSecretToolsEnabled
-            ? "List allowed operator integrations and live owner-approved Session grants with their methods and paths. Credentials are never returned. Session grants need no operator manifest: use integration_request with a session: id for a GET or HEAD read, or, inside an attached coding run, the substitute token and base URL delivered for that grant (see ROOMOTE_SESSION_EGRESS_SERVICES) with any ordinary HTTP client and the grant's allowed methods."
+          description: serviceCredentialToolsEnabled
+            ? "List allowed operator integrations and live owner-approved Session grants with their methods and paths. Credentials are never returned. Session grants need no operator manifest: use integration_request with a session: id for a GET or HEAD read, or, inside an attached coding run, the substitute token and base URL delivered for that grant (see ROOMOTE_CREDENTIAL_EGRESS_SERVICES) with any ordinary HTTP client and the grant's allowed methods."
             : 'List allowed operator integrations with their methods and paths. Credentials are never returned.',
           inputSchema: {},
           annotations: {
@@ -120,9 +121,9 @@ export function createHttpIntegrationsMcp() {
         },
         async () => {
           const grants =
-            sessionSecretToolsEnabled && resolveContext
+            serviceCredentialToolsEnabled && resolveContext
               ? await resolveContext()
-                  .then(listOwnedSessionSecrets)
+                  .then(listOwnedServiceCredentials)
                   .catch(() => [])
               : [];
           return toMcpToolResult({
@@ -161,24 +162,24 @@ export function createHttpIntegrationsMcp() {
         },
       );
       const prepareSecretTool = server.registerTool(
-        'prepare_session_secret',
+        'prepare_integration_key',
         {
           description:
             'Request owner approval for an exact HTTPS origin. Supply only nonsecret policy and omit headerPrefix when the key needs no prefix. The owner enters the key outside chat in the Session UI; saving resumes the same Session.',
-          inputSchema: sessionSecretPrepareToolSchema,
+          inputSchema: serviceCredentialPrepareToolSchema,
         },
         async (args) => {
           try {
             if (!resolveContext) throw new Error();
             const context = await resolveContext();
-            const pending = await prepareSessionSecret(context, args);
+            const pending = await prepareServiceCredential(context, args);
             return toMcpToolResult({
               pending,
-              sessionUrl: `${Env.R_APP_URL}/sessions/${context.sessionId}#session-secrets`,
+              sessionUrl: `${Env.R_APP_URL}/sessions/${context.sessionId}#integrations`,
             });
           } catch (error) {
             console.warn(
-              `[HTTP integrations] prepare_session_secret unavailable (scope=${scope}, reason=${integrationFailureReason(error)})`,
+              `[HTTP integrations] prepare_integration_key unavailable (scope=${scope}, reason=${integrationFailureReason(error)})`,
             );
             return {
               isError: true,
@@ -190,7 +191,7 @@ export function createHttpIntegrationsMcp() {
         },
       );
       const listSecretsTool = server.registerTool(
-        'list_session_secrets',
+        'list_integration_keys',
         {
           description:
             "List this Session owner's nonsecret pending approvals and ready grants with origin, header, allowed HTTP methods, and expiry. A ready grant is usable through integration_request with its session: id for GET and HEAD, and is delivered to attached coding runs as a substitute token with a base URL for ordinary clients and the grant's allowed methods.",
@@ -200,11 +201,11 @@ export function createHttpIntegrationsMcp() {
           try {
             if (!resolveContext) throw new Error();
             return toMcpToolResult(
-              await listSessionSecretApprovals(await resolveContext()),
+              await listServiceCredentialApprovals(await resolveContext()),
             );
           } catch (error) {
             console.warn(
-              `[HTTP integrations] list_session_secrets unavailable (scope=${scope}, reason=${integrationFailureReason(error)})`,
+              `[HTTP integrations] list_integration_keys unavailable (scope=${scope}, reason=${integrationFailureReason(error)})`,
             );
             return {
               isError: true,
@@ -215,14 +216,14 @@ export function createHttpIntegrationsMcp() {
           }
         },
       );
-      if (!sessionSecretToolsEnabled) {
+      if (!serviceCredentialToolsEnabled) {
         prepareSecretTool.disable();
         listSecretsTool.disable();
       }
       server.registerTool(
         'integration_request',
         {
-          description: sessionSecretToolsEnabled
+          description: serviceCredentialToolsEnabled
             ? 'Make a credential-broker request using an ID from list_integrations: an operator integration ID, or a session: ID for an owner-approved Session grant. Session grants are GET and HEAD only here; for approved write methods, scripts, or SDKs inside an attached run, use the delivered substitute token with the base URL instead. Supply only integrationId, method, relative path (optional query), optional body/contentType and Session accept preference; never supply credentials, arbitrary headers, or a Session/user ID.'
             : 'Make a credential-broker request using an operator integration ID from list_integrations. Supply only integrationId, method, relative path (optional query), optional body/contentType and accept preference; never supply credentials, arbitrary headers, or a Session/user ID.',
           inputSchema: integrationRequestSchema,
@@ -242,7 +243,7 @@ export function createHttpIntegrationsMcp() {
                 args,
                 user.id,
                 c.req.raw.signal,
-                sessionSecretToolsEnabled ? resolveContext : undefined,
+                serviceCredentialToolsEnabled ? resolveContext : undefined,
               ),
             );
           } catch {

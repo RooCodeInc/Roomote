@@ -54,8 +54,8 @@ export * from './lib/tracked-suggestion-cards';
 export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
 export * from './lib/sessions';
-export * from './lib/session-secrets';
-export * from './lib/session-egress';
+export * from './lib/service-credentials';
+export * from './lib/credential-egress';
 export * from './lib/session-goals';
 export * from './lib/source-control-provider';
 export * from './lib/sync-task-state';
@@ -141,13 +141,13 @@ export {
   sessionsRelations,
   sessionTasks,
   sessionTasksRelations,
-  sessionSecrets,
-  sessionSecretApprovals,
-  sessionSecretAudit,
-  sessionEgressWorkloads,
-  sessionEgressSubstitutes,
-  sessionEgressAudit,
-  sessionEgressRevocations,
+  serviceCredentials,
+  serviceCredentialApprovals,
+  serviceCredentialAudit,
+  credentialEgressWorkloads,
+  credentialEgressSubstitutes,
+  credentialEgressAudit,
+  credentialEgressRevocations,
   sessionParticipants,
   sessionParticipantsRelations,
   sessionPins,

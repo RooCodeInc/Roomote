@@ -643,9 +643,10 @@ describe('generateOpenCodeConfig provider support', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
-        ROOMOTE_SESSION_EGRESS_API_PROXY: '1',
-        ROOMOTE_SERVICE_BASE_URL: 'https://api.example.com/api/session-egress',
-        ROOMOTE_SESSION_EGRESS_SERVICES: '[]',
+        ROOMOTE_CREDENTIAL_EGRESS_API_PROXY: '1',
+        ROOMOTE_SERVICE_BASE_URL:
+          'https://api.example.com/api/credential-egress',
+        ROOMOTE_CREDENTIAL_EGRESS_SERVICES: '[]',
         R_MODEL: 'openrouter/openai/gpt-4.1-mini',
         R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
         R_INFERENCE_GATEWAY_KEYS: 'OPENROUTER_API_KEY',
@@ -667,7 +668,7 @@ describe('generateOpenCodeConfig provider support', () => {
         allowedMethods: ['GET', 'POST'],
         expiresAt: '2030-01-01T00:00:00.000Z',
         envName: 'ROOMOTE_SERVICE_TOKEN_STRIPE',
-        baseUrl: 'https://api.example.com/api/session-egress',
+        baseUrl: 'https://api.example.com/api/credential-egress',
       },
       {
         secretRef: '44444444-4444-4444-8444-444444444444',
@@ -689,9 +690,10 @@ describe('generateOpenCodeConfig provider support', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
-        ROOMOTE_SESSION_EGRESS_API_PROXY: '1',
-        ROOMOTE_SERVICE_BASE_URL: 'https://api.example.com/api/session-egress',
-        ROOMOTE_SESSION_EGRESS_SERVICES: JSON.stringify(manifest),
+        ROOMOTE_CREDENTIAL_EGRESS_API_PROXY: '1',
+        ROOMOTE_SERVICE_BASE_URL:
+          'https://api.example.com/api/credential-egress',
+        ROOMOTE_CREDENTIAL_EGRESS_SERVICES: JSON.stringify(manifest),
         ROOMOTE_SERVICE_TOKEN_STRIPE: 'rses_secret',
         R_MODEL: 'openrouter/openai/gpt-4.1-mini',
         R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
@@ -732,10 +734,10 @@ describe('generateOpenCodeConfig provider support', () => {
       const result = generateOpenCodeConfig({
         homeDir: createHomeDir(),
         runtimeEnv: {
-          ROOMOTE_SESSION_EGRESS_API_PROXY: '1',
+          ROOMOTE_CREDENTIAL_EGRESS_API_PROXY: '1',
           ROOMOTE_SERVICE_BASE_URL:
-            'https://api.example.com/api/session-egress',
-          ROOMOTE_SESSION_EGRESS_SERVICES: services,
+            'https://api.example.com/api/credential-egress',
+          ROOMOTE_CREDENTIAL_EGRESS_SERVICES: services,
           R_MODEL: 'openrouter/openai/gpt-4.1-mini',
           R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
           R_INFERENCE_GATEWAY_KEYS: 'OPENROUTER_API_KEY',

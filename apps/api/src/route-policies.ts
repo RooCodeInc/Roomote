@@ -259,19 +259,19 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'webhook',
   },
   {
-    // Session egress control plane. Callers are the trusted controller (a
+    // Credential egress control plane. Callers are the trusted controller (a
     // job-auth-signed service token) and the credential-substituting egress
     // gateway (a shared deployment secret); the handler verifies both itself
     // and rejects run, user, MCP, and session-broker tokens. No client-keyed
     // limit: the gateway calls authorize on every proxied request and has no
     // meaningful client IP, so a shared bucket would only throttle it.
-    name: 'internal-session-egress',
-    match: { type: 'prefix', path: '/api/internal/session-egress' },
+    name: 'internal-credential-egress',
+    match: { type: 'prefix', path: '/api/internal/credential-egress' },
     policy: 'webhook',
   },
 
-  // Session egress substitution proxy: attached coding runs call an owner-
-  // approved origin through `/api/session-egress/<grant>` with a substitute
+  // Credential egress substitution proxy: attached coding runs call an owner-
+  // approved origin through `/api/credential-egress/<grant>` with a substitute
   // token in the grant's own header slot; the API injects the real credential
   // and forwards. The substitute is not a Roomote bearer, so the handler owns
   // authentication (live workload, Session, run, grant, generation, expiry)
@@ -279,8 +279,8 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   // The client-keyed limit bounds the database work an unauthenticated caller
   // can cause by spraying tokens; a sandbox's legitimate use sits far below it.
   {
-    name: 'session-egress-proxy',
-    match: { type: 'prefix', path: '/api/session-egress' },
+    name: 'credential-egress-proxy',
+    match: { type: 'prefix', path: '/api/credential-egress' },
     policy: 'webhook',
     rateLimits: [
       {

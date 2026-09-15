@@ -4,10 +4,10 @@ import {
   createIntegration,
   listIntegrations,
   revokeIntegration,
-} from '@roomote/sdk/server/session-secrets';
+} from '@roomote/sdk/server/service-credentials';
 import {
   integrationCreateSchema,
-  sessionSecretRevokeSchema,
+  serviceCredentialRevokeSchema,
 } from '@roomote/types';
 
 import { authorize } from '@/lib/server/auth-context';
@@ -15,7 +15,7 @@ import { readBoundedJsonBody } from '@/lib/server/bounded-json-body';
 import { Env } from '@/lib/server/env';
 
 /**
- * The signed-in user's integrations (owner-scoped Session secrets): metadata
+ * The signed-in user's integrations (owner-scoped Integration keys): metadata
  * only, never a credential. Listing needs only the server identity; adding
  * and revoking require a same-origin JSON body, like the Session route.
  */
@@ -89,7 +89,7 @@ export async function DELETE(request: Request) {
     if (!auth.success || !auth.userId) return error(401);
     const body = await sameOriginJson(request);
     if (!body.ok) return error(body.status);
-    const args = sessionSecretRevokeSchema.safeParse(body.value);
+    const args = serviceCredentialRevokeSchema.safeParse(body.value);
     if (!args.success) return error(400);
     await revokeIntegration(auth.userId, args.data);
     return new NextResponse(null, { status: 204, headers });

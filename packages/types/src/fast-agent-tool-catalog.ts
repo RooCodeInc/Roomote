@@ -28,9 +28,9 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   stopTask: 'stop_task',
   requestUserInput: 'request_user_input',
   offerCapability: 'offer_capability',
-  requestWithSessionSecret: 'request_with_session_secret',
-  prepareSessionSecret: 'prepare_session_secret',
-  listSessionSecrets: 'list_session_secrets',
+  requestWithServiceCredential: 'request_with_integration_key',
+  prepareServiceCredential: 'prepare_integration_key',
+  listServiceCredentials: 'list_integration_keys',
   reviewPullRequest: 'review_pull_request',
 } as const;
 
@@ -106,15 +106,15 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead, kind: ACP_TOOL_KINDS.read },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.stopTask, kind: ACP_TOOL_KINDS.task },
   {
-    name: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
     kind: ACP_TOOL_KINDS.read,
   },
   {
-    name: FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret,
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
     kind: ACP_TOOL_KINDS.tool,
   },
   {
-    name: FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets,
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
     kind: ACP_TOOL_KINDS.list,
   },
   {
