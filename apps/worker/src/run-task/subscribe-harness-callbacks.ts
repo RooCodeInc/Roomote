@@ -45,6 +45,7 @@ interface HarnessCallbackSubscription {
 export function subscribeHarnessCallbacks({
   harness,
   taskRun,
+  userAttentionNotificationsEnabled = true,
   callbacks,
   context,
   logger,
@@ -52,6 +53,7 @@ export function subscribeHarnessCallbacks({
 }: {
   harness: Harness;
   taskRun: DequeuedTaskRun['taskRun'];
+  userAttentionNotificationsEnabled?: boolean;
   callbacks: RunTaskCallbacks;
   context: RunTaskContext;
   logger: HarnessLogger;
@@ -441,6 +443,27 @@ export function subscribeHarnessCallbacks({
         }
 
         void forwardCallbackEvent(callbackTaskId, event);
+        if (
+          event.type === 'request_user_input' &&
+          userAttentionNotificationsEnabled
+        ) {
+          trackPendingTaskCompletionWork(
+            (async () => {
+              await waitForPendingPersistenceWrites();
+              try {
+                await sdk.taskRuns.notifyUserAttention({
+                  id: taskRun.id,
+                  kind: 'input_needed',
+                  eventId: event.request.requestId,
+                });
+              } catch (error) {
+                logger.warn(
+                  `[subscribeHarnessCallbacks] Failed to notify user attention for task run ${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
+            })(),
+          );
+        }
       }
     });
 

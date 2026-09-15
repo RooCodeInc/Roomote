@@ -80,7 +80,6 @@ describe('extractShowWidgetFallbackDelivery', () => {
     { mcpToolName: 'other_tool' },
     { status: 'failed' },
     { output: JSON.stringify({ success: false, textFallback: 'Nope' }) },
-    { output: JSON.stringify({ success: true, shown: true }) },
   ])('rejects non-deliverable widget payloads: %o', (payloadOverrides) => {
     expect(
       extractShowWidgetFallbackDelivery(
@@ -88,6 +87,40 @@ describe('extractShowWidgetFallbackDelivery', () => {
         'task-1',
       ),
     ).toBeNull();
+  });
+
+  it('extracts a completed widget without optional preview text', () => {
+    const originalAppUrl = process.env.R_APP_URL;
+    const originalPublicUrl = process.env.R_PUBLIC_URL;
+    process.env.R_APP_URL = 'http://internal.example.com';
+    process.env.R_PUBLIC_URL = 'https://app.example.com';
+
+    try {
+      expect(
+        extractShowWidgetFallbackDelivery(
+          buildEnvelope({
+            output: JSON.stringify({ success: true, shown: true }),
+          }),
+          'task-1',
+        ),
+      ).toEqual({
+        toolCallId: 'call-1',
+        title: null,
+        textFallback: null,
+        widgetUrl: 'https://app.example.com/task/task-1#msg-1',
+      });
+    } finally {
+      if (originalAppUrl === undefined) {
+        delete process.env.R_APP_URL;
+      } else {
+        process.env.R_APP_URL = originalAppUrl;
+      }
+      if (originalPublicUrl === undefined) {
+        delete process.env.R_PUBLIC_URL;
+      } else {
+        process.env.R_PUBLIC_URL = originalPublicUrl;
+      }
+    }
   });
 });
 

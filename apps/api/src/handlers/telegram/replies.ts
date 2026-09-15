@@ -214,10 +214,7 @@ export async function clearTelegramMessageButtonsBestEffort(input: {
 
 const TELEGRAM_ACK_REACTION = 'eyes';
 
-/**
- * Mirror Slack's inbound-message ack reaction so the sender sees the bot
- * picked the message up before a task reply lands.
- */
+/** Add a best-effort acknowledgement for task-run messages. */
 export async function ackTelegramMessageBestEffort(input: {
   chatId: string;
   messageId: string | undefined;

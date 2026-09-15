@@ -6,7 +6,20 @@ import {
 } from 'node:http';
 import { AddressInfo } from 'node:net';
 
+import { TELEGRAM_MAX_RICH_MESSAGE_LENGTH } from './telegram-format';
+
 type JsonRecord = Record<string, unknown>;
+
+function getRichMessageText(
+  richMessage: JsonRecord | undefined,
+): string | null {
+  if (!richMessage) return null;
+  return typeof richMessage.markdown === 'string' &&
+    richMessage.html === undefined &&
+    richMessage.blocks === undefined
+    ? richMessage.markdown
+    : null;
+}
 
 export type MockTelegramUser = {
   id: number;
@@ -33,6 +46,7 @@ export type MockTelegramStoredMessage = {
   date: number;
   from: MockTelegramUser;
   text?: string;
+  rich_message?: JsonRecord;
   parse_mode?: string;
   caption?: string;
   photo_url?: string;
@@ -69,15 +83,24 @@ export type MockTelegramChatAction = {
   message_thread_id?: number;
 };
 
+export type MockTelegramRichDraft = {
+  chat_id: string;
+  draft_id: number;
+  message_thread_id?: number;
+  rich_message: JsonRecord;
+};
+
 /**
  * Failure-injection knobs. Real Telegram rejects whole requests for these
- * cases; the flags let tests exercise the provider's fallback paths.
+ * cases; the flags let tests exercise provider error handling.
  */
 export type MockTelegramBehavior = {
   /** Reject `parse_mode: 'HTML'` sends with "can't parse entities". */
   rejectHtmlParseMode?: boolean;
   /** Reject `sendPhoto` as if Telegram could not fetch the photo URL. */
   rejectPhotos?: boolean;
+  /** Reject rich-message sends and edits as an older Bot API server would. */
+  rejectRichMessages?: boolean;
 };
 
 export type MockTelegramState = {
@@ -94,6 +117,7 @@ export type MockTelegramState = {
   webhook?: MockTelegramWebhookRegistration;
   callbackAnswers?: MockTelegramCallbackAnswer[];
   chatActions?: MockTelegramChatAction[];
+  richDrafts?: MockTelegramRichDraft[];
   botCommands?: Array<{ command: string; description: string }>;
   behavior?: MockTelegramBehavior;
 };
@@ -176,6 +200,7 @@ function normalizeState(state: MockTelegramState): MockTelegramState {
     })),
     callbackAnswers: [...(state.callbackAnswers ?? [])],
     chatActions: [...(state.chatActions ?? [])],
+    richDrafts: [...(state.richDrafts ?? [])],
     botCommands: [...(state.botCommands ?? [])],
   };
 }
@@ -694,6 +719,87 @@ export class MockTelegramServer {
         return;
       }
 
+      case 'sendRichMessage': {
+        if (this.state.behavior?.rejectRichMessages) {
+          apiError(response, 400, 'Bad Request: rich messages are unavailable');
+          return;
+        }
+        const richMessage = body.rich_message as JsonRecord | undefined;
+        const richMessageText = getRichMessageText(richMessage);
+        if (richMessageText === null) {
+          apiError(
+            response,
+            400,
+            'Bad Request: rich message must use Markdown formatting',
+          );
+          return;
+        }
+        if (richMessageText.length > TELEGRAM_MAX_RICH_MESSAGE_LENGTH) {
+          apiError(response, 400, 'Bad Request: rich message is too long');
+          return;
+        }
+        this.state.richDrafts = (this.state.richDrafts ?? []).filter(
+          (draft) =>
+            draft.chat_id !== String(body.chat_id) ||
+            draft.message_thread_id !== body.message_thread_id,
+        );
+        const stored = this.storeOutgoingMessage(response, body, {
+          rich_message: richMessage!,
+        });
+        if (stored) apiResult(response, this.toTelegramMessage(stored));
+        return;
+      }
+
+      case 'sendRichMessageDraft': {
+        if (this.state.behavior?.rejectRichMessages) {
+          apiError(response, 400, 'Bad Request: rich messages are unavailable');
+          return;
+        }
+        const chat = this.findChat(body.chat_id);
+        if (!chat || chat.type !== 'private') {
+          apiError(response, 400, 'Bad Request: private chat not found');
+          return;
+        }
+        const draftId = Number(body.draft_id);
+        const richMessage = body.rich_message as JsonRecord | undefined;
+        const richMessageText = getRichMessageText(richMessage);
+        if (!Number.isSafeInteger(draftId) || draftId === 0) {
+          apiError(response, 400, 'Bad Request: draft_id must be non-zero');
+          return;
+        }
+        if (richMessageText === null) {
+          apiError(
+            response,
+            400,
+            'Bad Request: rich message must use Markdown formatting',
+          );
+          return;
+        }
+        if (richMessageText.length > TELEGRAM_MAX_RICH_MESSAGE_LENGTH) {
+          apiError(response, 400, 'Bad Request: rich message is too long');
+          return;
+        }
+        const draft: MockTelegramRichDraft = {
+          chat_id: String(chat.id),
+          draft_id: draftId,
+          ...(typeof body.message_thread_id === 'number'
+            ? { message_thread_id: body.message_thread_id }
+            : {}),
+          rich_message: richMessage!,
+        };
+        this.state.richDrafts = [
+          ...(this.state.richDrafts ?? []).filter(
+            (entry) =>
+              entry.chat_id !== draft.chat_id ||
+              entry.draft_id !== draft.draft_id ||
+              entry.message_thread_id !== draft.message_thread_id,
+          ),
+          draft,
+        ];
+        apiResult(response, true);
+        return;
+      }
+
       case 'sendPhoto': {
         if (this.state.behavior?.rejectPhotos) {
           apiError(
@@ -731,10 +837,23 @@ export class MockTelegramServer {
           return;
         }
 
+        const richMessage = body.rich_message as JsonRecord | undefined;
+        if (richMessage && this.state.behavior?.rejectRichMessages) {
+          apiError(response, 400, 'Bad Request: rich messages are unavailable');
+          return;
+        }
         const messageText = String(body.text ?? '');
+        const richMessageText = getRichMessageText(richMessage);
 
-        if (!messageText) {
+        if (!messageText && richMessageText === null) {
           apiError(response, 400, 'Bad Request: message text is empty');
+          return;
+        }
+        if (
+          richMessageText !== null &&
+          richMessageText.length > TELEGRAM_MAX_RICH_MESSAGE_LENGTH
+        ) {
+          apiError(response, 400, 'Bad Request: rich message is too long');
           return;
         }
 
@@ -755,11 +874,18 @@ export class MockTelegramServer {
           return;
         }
 
-        message.text = messageText;
-        if (typeof body.parse_mode === 'string') {
-          message.parse_mode = body.parse_mode;
-        } else {
+        if (richMessage) {
+          delete message.text;
           delete message.parse_mode;
+          message.rich_message = richMessage;
+        } else {
+          message.text = messageText;
+          delete message.rich_message;
+          if (typeof body.parse_mode === 'string') {
+            message.parse_mode = body.parse_mode;
+          } else {
+            delete message.parse_mode;
+          }
         }
         message.reply_markup = body.reply_markup;
         apiResult(response, this.toTelegramMessage(message));
@@ -977,6 +1103,9 @@ export class MockTelegramServer {
       chat: chat ?? { id: Number(stored.chat_id), type: 'private' },
       from: stored.from,
       ...(stored.text !== undefined ? { text: stored.text } : {}),
+      ...(stored.rich_message !== undefined
+        ? { rich_message: stored.rich_message }
+        : {}),
       ...(stored.caption !== undefined ? { caption: stored.caption } : {}),
       ...(stored.message_thread_id !== undefined
         ? { message_thread_id: stored.message_thread_id }

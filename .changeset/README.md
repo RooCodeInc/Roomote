@@ -45,6 +45,12 @@ Chores, docs-only, and pure-internal refactors can skip a changeset; they ride a
    Candidate** workflow with pinned candidate/main commits and an independently
    approved resolution on an ordinary branch. Never push a release branch
    manually. See the [release skill](../.agents/skills/changeset-release-pr/SKILL.md#reconcile-a-frozen-candidate-with-production).
+   If a reconciled candidate must instead be replaced from `develop` without
+   changing its unpublished version, dispatch Release with the exact current
+   candidate and audited `develop` SHAs. This explicit replacement uses a
+   force-with-lease comparison against the pinned candidate, requires the
+   release bot, and invalidates all prior candidate checks and reconciliation
+   provenance.
 4. Merge the Promote PR with a **merge commit** (not squash) into `main` to tag
    `vX.Y.Z`. GHCR builds the matching images, and the GitHub Release is created
    only after those images exist so `releases/latest` never points at a missing

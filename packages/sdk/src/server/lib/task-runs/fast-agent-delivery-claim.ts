@@ -3,10 +3,14 @@ import { type SQL, sql, taskRuns } from '@roomote/db/server';
 /** How long a 'delivering:<epochMs>' claim stays exclusive. Long enough for a
  * full turn-lock wait plus an orchestrator turn; after this a crashed
  * delivery's claim can be stolen by a retry instead of stranding the event. */
-const FAST_AGENT_DELIVERY_LEASE_MS = 15 * 60 * 1000;
+const DELIVERY_LEASE_MS = 15 * 60 * 1000;
+
+export function buildDeliveryClaimMarker(): string {
+  return `delivering:${Date.now()}`;
+}
 
 export function buildFastAgentDeliveringMarker(): string {
-  return `delivering:${Date.now()}`;
+  return buildDeliveryClaimMarker();
 }
 
 export function isFastAgentDeliveringMarker(value: unknown): value is string {
@@ -20,8 +24,8 @@ export function isFastAgentDeliveringMarker(value: unknown): value is string {
  * ('delivered', a timestamp, 'skipped') never match, so a settled delivery is
  * never repeated.
  */
-export function buildFastAgentDeliveryClaimPredicate(deliveryKey: string): SQL {
-  const staleBefore = Date.now() - FAST_AGENT_DELIVERY_LEASE_MS;
+export function buildDeliveryClaimPredicate(deliveryKey: string): SQL {
+  const staleBefore = Date.now() - DELIVERY_LEASE_MS;
   return sql`(
     (${taskRuns.result} -> ${deliveryKey}) is null
     or (
@@ -33,4 +37,8 @@ export function buildFastAgentDeliveryClaimPredicate(deliveryKey: string): SQL {
       end
     ) < ${staleBefore}
   )`;
+}
+
+export function buildFastAgentDeliveryClaimPredicate(deliveryKey: string): SQL {
+  return buildDeliveryClaimPredicate(deliveryKey);
 }

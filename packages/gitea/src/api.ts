@@ -1214,13 +1214,24 @@ const giteaPullRequestDetailsSchema = z
   .object({
     number: z.number(),
     title: z.string(),
+    state: z.string().optional(),
+    merged: z.boolean().optional(),
     body: z.string().nullable().optional(),
     html_url: z.string().optional(),
     head: z
       .object({ ref: z.string().optional(), sha: z.string().optional() })
       .passthrough()
       .optional(),
-    base: z.object({ ref: z.string().optional() }).passthrough().optional(),
+    base: z
+      .object({
+        ref: z.string().optional(),
+        repo: z
+          .object({ id: z.number(), full_name: z.string() })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 
@@ -1267,6 +1278,58 @@ export async function getGiteaPullRequest({
   });
 
   return data;
+}
+
+export async function mergeGiteaPullRequest({
+  repositoryFullName,
+  pullRequestNumber,
+  expectedHeadSha,
+  mergeMethod,
+  token,
+  baseUrl,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  expectedHeadSha: string;
+  mergeMethod?: 'merge' | 'rebase' | 'rebase-merge' | 'squash';
+  token?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const giteaToken = token ?? (await resolveGiteaToken());
+  if (!giteaToken?.trim()) {
+    throw new Error('A Gitea token is required to merge pull requests.');
+  }
+  const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
+  if (!resolvedBaseUrl?.trim() && !apiBaseUrl?.trim()) {
+    throw new Error('A Gitea base URL is required to merge pull requests.');
+  }
+  const { owner, repo } = splitGiteaRepositoryFullName(repositoryFullName);
+  const response = await (fetchImpl ?? fetch)(
+    buildGiteaApiUrl(
+      apiBaseUrl ?? buildGiteaApiBaseUrl(resolvedBaseUrl!),
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${pullRequestNumber}/merge`,
+      {},
+    ),
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${giteaToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        Do: mergeMethod ?? 'merge',
+        head_commit_id: expectedHeadSha,
+      }),
+    },
+  );
+  if (![200, 204].includes(response.status))
+    throw new GiteaApiError(response.status, response.statusText);
+  await response.body?.cancel();
 }
 
 /** Replaces the body of an existing issue or pull request comment. */

@@ -287,6 +287,31 @@ WHERE to_regclass('public.fast_agent_conversation_aliases') IS NOT NULL
       AND target_column.attname = 'id'
   );
 
+INSERT INTO upgrade_ci_contract.compatibility_boundaries (name, reason)
+SELECT
+  'session-goal-ownership-cutover',
+  'Goal Mode moved from unused task-owned columns to Session-owned storage'
+WHERE (
+  SELECT count(*)
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'tasks'
+    AND column_name IN (
+      'goal_objective',
+      'goal_status',
+      'goal_max_continuations',
+      'goal_continuations_used',
+      'goal_blocked_reason',
+      'goal_completed_at',
+      'goal_last_continuation_id',
+      'goal_continuation_ids',
+      'goal_generation_ids',
+      'goal_blocker_candidate_reason',
+      'goal_blocker_candidate_count',
+      'goal_blocker_last_continuation_used'
+    )
+) = 12;
+
 -- Feature PRs use the published develop image as their CI baseline even though
 -- develop is not a supported rollback target. That image briefly shipped the
 -- v0.6 usage-table rename before this contract check existed. Allow only that
@@ -333,6 +358,30 @@ FROM (
 ) AS retired(table_name, column_name)
 CROSS JOIN upgrade_ci_contract.compatibility_boundaries AS boundary
 WHERE boundary.name = 'fast-conversation-canonical-storage-v0.41.0';
+
+INSERT INTO upgrade_ci_contract.previous_column_exceptions (
+  table_name,
+  column_name,
+  reason
+)
+SELECT 'tasks', retired.column_name, boundary.reason
+FROM (
+  VALUES
+    ('goal_objective'),
+    ('goal_status'),
+    ('goal_max_continuations'),
+    ('goal_continuations_used'),
+    ('goal_blocked_reason'),
+    ('goal_completed_at'),
+    ('goal_last_continuation_id'),
+    ('goal_continuation_ids'),
+    ('goal_generation_ids'),
+    ('goal_blocker_candidate_reason'),
+    ('goal_blocker_candidate_count'),
+    ('goal_blocker_last_continuation_used')
+) AS retired(column_name)
+CROSS JOIN upgrade_ci_contract.compatibility_boundaries AS boundary
+WHERE boundary.name = 'session-goal-ownership-cutover';
 
 CREATE TABLE upgrade_ci_contract.previous_nullability_exceptions (
   table_name text NOT NULL,

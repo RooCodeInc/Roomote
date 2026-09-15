@@ -9,6 +9,11 @@ import type { ReasoningEffort } from '@roomote/types';
 import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
 import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
+import { usePromptSubmitFocus } from '@/hooks/usePromptSubmitFocus';
+import {
+  useSessionDraft,
+  useSessionNavigationState,
+} from '@/hooks/useSessionNavigationState';
 import {
   SUGGESTION_MIN_HISTORY_MESSAGES,
   useGhostSuggestion,
@@ -152,7 +157,11 @@ export function SessionPromptInput({
 }) {
   const trpc = useTRPC();
   const trpcClient = useTRPCClient();
-  const [prompt, setPrompt] = useState('');
+  const { draft: prompt, setDraft: setPrompt } = useSessionDraft(sessionId);
+  const navigationState = useSessionNavigationState();
+  const [shouldAutoFocus] = useState(
+    () => !navigationState?.consumeSessionSwitch(sessionId),
+  );
   const [isTextareaFocused, setIsTextareaFocused] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const [model, setModel] = useState(initialModel ?? '');
@@ -161,7 +170,9 @@ export function SessionPromptInput({
   const [isUpdatingModelSelection, setIsUpdatingModelSelection] =
     useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  useAutoFocusOnce(textareaRef, !isBusy);
+  const { beginSubmit, cancelSubmit, restoreFocus } =
+    usePromptSubmitFocus(textareaRef);
+  useAutoFocusOnce(textareaRef, !isBusy && shouldAutoFocus);
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => setPrompt(text),
     getPrefix: () => prompt,
@@ -206,24 +217,56 @@ export function SessionPromptInput({
       return;
     }
 
+    beginSubmit();
     consumeSuggestion();
 
-    // Always send the current picker state: it round-trips the persisted
-    // choice and clears it when the picker is reset to the default. The
-    // draft and attachments are only cleared once the send succeeds, so a
-    // failed reply is not lost.
-    const sent = await onSend({
-      ...message,
-      model: model || null,
-      reasoningEffort,
-    });
+    const goalMatch = /^\/goal(?:\s+([\s\S]*))?$/i.exec(message.text.trim());
+    let sent: boolean;
+    if (goalMatch) {
+      const objective = goalMatch[1]?.trim();
+      if (!objective) {
+        cancelSubmit();
+        toast.error('Describe the goal after /goal.');
+        return;
+      }
+      if (message.files.length > 0) {
+        cancelSubmit();
+        toast.error('Goal Mode does not support attachments.');
+        return;
+      }
+      const result = await trpcClient.fastSessions.startGoal.mutate({
+        sessionId,
+        objective,
+      });
+      if (!result.success) {
+        cancelSubmit();
+        toast.error(result.error);
+        return;
+      }
+      toast.success(`Pursuing goal: ${objective}`);
+      sent = true;
+    } else {
+      // Always send the current picker state: it round-trips the persisted
+      // choice and clears it when the picker is reset to the default.
+      sent = await onSend({
+        ...message,
+        model: model || null,
+        reasoningEffort,
+      });
+    }
     if (sent) {
       setPrompt('');
       setIsTextareaFocused(false);
       // Remount the root to clear held attachments.
       setResetKey((previous) => previous + 1);
+    } else {
+      cancelSubmit();
     }
   };
+
+  useEffect(() => {
+    if (resetKey > 0 && !isBusy) restoreFocus();
+  }, [isBusy, resetKey, restoreFocus]);
 
   const updateModelSelection = async (
     next: { model?: string | null; reasoningEffort?: ReasoningEffort | null },

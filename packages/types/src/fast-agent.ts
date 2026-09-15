@@ -269,6 +269,7 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
   userId: z.string().min(1),
   question: z.string().min(1),
   images: z.array(z.string()).optional(),
+  attachmentTexts: z.array(z.string()).optional(),
   senderDisplayName: z.string().min(1).optional(),
   senderExternalId: z.string().min(1).optional(),
   /**
@@ -294,6 +295,8 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
       }),
     )
     .optional(),
+  /** Per-turn reply route for an explicit cross-surface notification reply. */
+  deliveryConversation: fastAgentConversationSchema.optional(),
   /**
    * Set when the message came from a source-control discussion that another
    * Session owns through a task: the answer posts there as well as on the

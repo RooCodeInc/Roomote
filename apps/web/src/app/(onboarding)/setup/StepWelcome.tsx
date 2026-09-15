@@ -48,7 +48,7 @@ export function StepWelcome({
             <ol className="list-decimal pl-5 space-y-1">
               <li>Create your admin account for this deployment</li>
               <li>Connect to your inference provider</li>
-              <li>Connect to source control (where your code lives)</li>
+              <li>Start working on something</li>
             </ol>
             <p>
               It takes 2 minutes and everything is stored securely in your

@@ -29,7 +29,7 @@ import {
   prActions,
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
-  taskGoalInputSchema,
+  sessionGoalInputSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
@@ -39,7 +39,9 @@ import {
   getFastSessionComposerSuggestionCommand,
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
+  resolveFastSessionCapabilityOfferCommand,
   replyToFastSessionCommand,
+  startFastSessionGoalCommand,
   startFastSessionCommand,
   submitFastSessionUserInputCommand,
   updateFastSessionModelSelectionCommand,
@@ -47,6 +49,7 @@ import {
 import {
   replyToFastSessionInputSchema,
   fastSessionPrReviewActionInputSchema,
+  fastSessionCapabilityOfferResponseInputSchema,
   startFastSessionInputSchema,
   updateFastSessionModelSelectionInputSchema,
 } from '../commands/fast-sessions/input';
@@ -99,6 +102,7 @@ import {
 } from '@/types';
 
 import { protectedProcedure, publicProcedure, createRouter } from '../init';
+import { getHomeComposerSuggestionsCommand } from '../commands/home/composer-suggestions';
 
 import {
   getTasksCommand,
@@ -155,7 +159,6 @@ import {
 import {
   cancelTaskRunCommand,
   retryFailedTaskStartCommand,
-  startTaskGoalCommand,
 } from '../commands/task-runs';
 import {
   exchangeSlackOAuthCodeCommand,
@@ -202,6 +205,8 @@ import {
   getPersonalAccountCapabilitiesCommand,
   getPersonalPreferencesCommand,
   acceptCookieConsentCommand,
+  acceptVoiceConsentCommand,
+  getVoiceConsentCommand,
   setPersonalPasswordCommand,
   updatePersonalPreferencesCommand,
   getUserPersonalizationCommand,
@@ -333,6 +338,7 @@ import {
   notifySetupSourceControlSynchronized,
   persistSetupRecommendationApplicationReceipt,
   reconcileSetupPlatformEvents,
+  skipSetupSourceControlCommand,
   submitSetupSessionUserInputCommand,
 } from '../commands/setup/setup-session';
 import { SETUP_STARTER_TASK_IDS } from '@/lib/setup-starter-tasks';
@@ -980,6 +986,12 @@ const automationsRouter = createRouter({
 });
 
 export const appRouter = createRouter({
+  home: createRouter({
+    composerSuggestions: protectedProcedure.query(({ ctx: { auth } }) =>
+      getHomeComposerSuggestionsCommand(auth),
+    ),
+  }),
+
   statuspage: createRouter({
     incident: publicProcedure.query(() => getStatuspageIncident()),
   }),
@@ -1169,19 +1181,6 @@ export const appRouter = createRouter({
   }),
 
   taskRuns: createRouter({
-    startGoal: protectedProcedure
-      .input(
-        z.object({
-          taskId: z.string(),
-          goal: taskGoalInputSchema,
-          clientMessageId: z.string().optional(),
-          userImageUrl: z.string().optional(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        startTaskGoalCommand(auth, input),
-      ),
-
     cancel: protectedProcedure
       .input(
         z.object({
@@ -1602,6 +1601,12 @@ export const appRouter = createRouter({
     acceptCookieConsent: protectedProcedure.mutation(({ ctx: { auth } }) =>
       acceptCookieConsentCommand(auth),
     ),
+    getVoiceConsent: protectedProcedure.query(({ ctx: { auth } }) =>
+      getVoiceConsentCommand(auth),
+    ),
+    acceptVoiceConsent: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      acceptVoiceConsentCommand(auth),
+    ),
     accountCapabilities: protectedProcedure.query(({ ctx: { auth } }) =>
       getPersonalAccountCapabilitiesCommand(auth),
     ),
@@ -1622,6 +1627,8 @@ export const appRouter = createRouter({
             narrationMode: z.boolean().optional(),
             therapistMode: z.boolean().optional(),
             resultsPageEnabled: z.boolean().optional(),
+            homeComposerSuggestionsEnabled: z.boolean().optional(),
+            sessionSecretToolsEnabled: z.boolean().optional(),
           })
           .refine(
             (input) =>
@@ -1629,7 +1636,9 @@ export const appRouter = createRouter({
               input.mindReaderMode !== undefined ||
               input.narrationMode !== undefined ||
               input.therapistMode !== undefined ||
-              input.resultsPageEnabled !== undefined,
+              input.resultsPageEnabled !== undefined ||
+              input.homeComposerSuggestionsEnabled !== undefined ||
+              input.sessionSecretToolsEnabled !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -2718,6 +2727,12 @@ export const appRouter = createRouter({
       getSetupSessionStatusCommand(auth),
     ),
 
+    skipSourceControl: protectedProcedure
+      .input(z.object({ sessionId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        skipSetupSourceControlCommand(auth, input.sessionId),
+      ),
+
     submitSessionUserInput: protectedProcedure
       .input(
         z.object({
@@ -3034,10 +3049,26 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
       ),
+    startGoal: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          objective: sessionGoalInputSchema.shape.objective,
+          clientMessageId: z.string().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        startFastSessionGoalCommand(auth, input),
+      ),
     reviewAction: protectedProcedure
       .input(fastSessionPrReviewActionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         handleFastSessionPrReviewActionCommand(auth, input),
+      ),
+    resolveCapabilityOffer: protectedProcedure
+      .input(fastSessionCapabilityOfferResponseInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        resolveFastSessionCapabilityOfferCommand(auth, input),
       ),
     updateModelSelection: protectedProcedure
       .input(updateFastSessionModelSelectionInputSchema)

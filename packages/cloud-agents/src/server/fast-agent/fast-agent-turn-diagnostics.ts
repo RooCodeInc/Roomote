@@ -51,6 +51,9 @@ type FastAgentPromptContextStats = {
   integrationCount: number;
   integrationToolCount: number;
   activeTaskCount: number;
+  /** Instance and inline environment skills listed in the system prompt;
+   * undefined when the catalog could not be loaded. */
+  promptSkillCount?: number;
 };
 
 type TokenTotals = {
@@ -447,6 +450,7 @@ export class FastAgentTurnDiagnostics {
       integrationCount: this.promptContext?.integrationCount,
       integrationToolCount: this.promptContext?.integrationToolCount,
       activeTaskCount: this.promptContext?.activeTaskCount,
+      promptSkillCount: this.promptContext?.promptSkillCount,
       openCodeServerLeaseMs: this.setupTiming?.serverLeaseMs,
       openCodeSessionValidateMs: this.setupTiming?.sessionValidateMs,
       openCodeSessionCreateMs: this.setupTiming?.sessionCreateMs,
@@ -508,6 +512,7 @@ export class FastAgentTurnDiagnostics {
       integrationCount: this.promptContext?.integrationCount,
       integrationToolCount: this.promptContext?.integrationToolCount,
       activeTaskCount: this.promptContext?.activeTaskCount,
+      promptSkillCount: this.promptContext?.promptSkillCount,
       processConcurrentTurnCountAtStart: this.processConcurrentTurnCountAtStart,
       openCodeProviderRetryEventCount: this.openCodeProviderRetryEventCount,
       firstOpenCodeProviderRetryElapsedMs:

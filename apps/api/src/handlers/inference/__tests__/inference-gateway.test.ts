@@ -44,7 +44,7 @@ vi.mock('@roomote/sdk/server', () => ({
   recordLlmUsage: mockRecordLlmUsage,
 }));
 
-import { inference } from '../index';
+import { INFERENCE_SSE_KEEPALIVE_INTERVAL_MS, inference } from '../index';
 import { resetRoomoteInferenceKeyCache } from '../registry';
 import { DevLoginInferencePlaceholderError } from '@roomote/db/server';
 
@@ -1353,6 +1353,88 @@ describe('inference gateway', () => {
     );
     expect(response.headers.get('content-type')).toBe('text/event-stream');
     expect(await response.text()).toBe(upstreamBody);
+  });
+
+  it('emits SSE keepalive comments while a streaming upstream is silent', async () => {
+    vi.useFakeTimers();
+
+    try {
+      let upstreamController!: ReadableStreamDefaultController<Uint8Array>;
+      const upstreamBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          upstreamController = controller;
+        },
+      });
+      stubUpstreamFetch(
+        new Response(upstreamBody, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        }),
+      );
+
+      const response = await postMessages(createApp(createRunToken()));
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+
+      upstreamController.enqueue(
+        new TextEncoder().encode('event: message_start\ndata: {}\n\n'),
+      );
+      expect(decoder.decode((await reader.read()).value)).toBe(
+        'event: message_start\ndata: {}\n\n',
+      );
+
+      await vi.advanceTimersByTimeAsync(INFERENCE_SSE_KEEPALIVE_INTERVAL_MS);
+      expect(decoder.decode((await reader.read()).value)).toBe(
+        ': keepalive\n\n',
+      );
+
+      upstreamController.enqueue(
+        new TextEncoder().encode('event: message_stop\ndata: {}\n\n'),
+      );
+      expect(decoder.decode((await reader.read()).value)).toBe(
+        'event: message_stop\ndata: {}\n\n',
+      );
+
+      upstreamController.close();
+      expect((await reader.read()).done).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not add keepalive comments to non-streaming responses', async () => {
+    vi.useFakeTimers();
+
+    try {
+      let upstreamController!: ReadableStreamDefaultController<Uint8Array>;
+      const upstreamBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          upstreamController = controller;
+        },
+      });
+      stubUpstreamFetch(
+        new Response(upstreamBody, {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+      const response = await postMessages(createApp(createRunToken()));
+      const reader = response.body!.getReader();
+
+      await vi.advanceTimersByTimeAsync(
+        INFERENCE_SSE_KEEPALIVE_INTERVAL_MS * 3,
+      );
+      upstreamController.enqueue(new TextEncoder().encode('{"id":"msg_1"}'));
+      expect(new TextDecoder().decode((await reader.read()).value)).toBe(
+        '{"id":"msg_1"}',
+      );
+
+      upstreamController.close();
+      expect((await reader.read()).done).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not change cache directives on non-streaming responses', async () => {

@@ -33,6 +33,7 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   sessionFactory,
+  sessionGoals,
   sessions,
   sessionTasks,
   taskFactory,
@@ -245,6 +246,15 @@ describe('MCP session routes', () => {
       sourceTrigger: 'message',
     });
     createdSessionIds.push(session.id);
+    await db.insert(sessionGoals).values({
+      sessionId: session.id,
+      objective: 'Ship the release safely',
+      status: 'active',
+      maxContinuations: 5,
+      lastContinuationId: 'goal-generation:one',
+      generationIds: ['goal-generation:one'],
+      createdByUserId: owner.id,
+    });
     const task = await taskFactory.create({
       initiatorUserId: owner.id,
       title: 'Inspect release checks',
@@ -273,6 +283,10 @@ describe('MCP session routes', () => {
         {
           id: session.id,
           title: 'Release investigation',
+          goal: {
+            objective: 'Ship the release safely',
+            status: 'active',
+          },
           tasks: [
             {
               taskId: task.id,
@@ -291,6 +305,7 @@ describe('MCP session routes', () => {
     expect(summaryResponse.status).toBe(200);
     await expect(summaryResponse.json()).resolves.toMatchObject({
       id: session.id,
+      goal: { objective: 'Ship the release safely', status: 'active' },
       tasks: [{ taskId: task.id }],
     });
 

@@ -41,13 +41,8 @@
   "navigation": {
     "groups": [
       {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "self-hosting",
-          "homelab",
-          "use-chatgpt-subscription"
-        ]
+        "group": "Getting started",
+        "pages": ["index", "self-hosting", "homelab"]
       },
       {
         "group": "Using Roomote",
@@ -55,8 +50,10 @@
           "how-roomote-works",
           "use-cases",
           "tasks",
+          "live-previews",
           "goal-mode",
           "fast-sessions",
+          "session-secrets",
           "memory",
           "file-attachments",
           "voice"
@@ -67,10 +64,10 @@
         "pages": ["cookbook/index", "cookbook/template"]
       },
       {
-        "group": "Provider Configuration",
+        "group": "Provider configuration",
         "pages": [
           {
-            "group": "Models and Inference",
+            "group": "Models and inference",
             "root": "models",
             "expanded": false,
             "pages": [
@@ -117,7 +114,7 @@
             ]
           },
           {
-            "group": "Source Control",
+            "group": "Source control",
             "root": "source-control",
             "expanded": false,
             "pages": [
@@ -151,6 +148,7 @@
         "pages": [
           "integrations/index",
           "integrations/custom-mcp-servers",
+          "integrations/http-integrations",
           "integrations/roomote-mcp",
           "integrations/asana",
           "integrations/better-stack",
@@ -179,7 +177,7 @@
         ]
       },
       {
-        "group": "Roomote Configuration",
+        "group": "Roomote configuration",
         "pages": [
           "agent-guidance",
           "anonymous-analytics",

@@ -17,6 +17,10 @@ import { DEFAULT_BOX_TIMEOUT_MS } from '@roomote/compute-providers';
 
 import { BaseController } from './BaseController';
 import {
+  createSessionEgressLifecycle,
+  type SessionEgressLifecycle,
+} from './session-egress';
+import {
   cleanupStaleDockerSandboxes,
   spawnDaytonaWorker,
   spawnDockerWorker,
@@ -30,11 +34,18 @@ import {
 
 export class RoomoteController extends BaseController {
   private dockerCleanupInterval?: NodeJS.Timeout;
+  /** Session-egress workload registration; fails closed for every provider but Docker. */
+  private readonly sessionEgress: SessionEgressLifecycle;
 
   public constructor(
     protected readonly appEnv: 'development' | 'preview' | 'production',
+    options: { sessionEgress?: SessionEgressLifecycle } = {},
   ) {
     super(appEnv);
+    // Misconfiguration (partial SESSION_EGRESS_* values, unusable CA) is a
+    // startup error: never silently run without the enforcement it implies.
+    this.sessionEgress =
+      options.sessionEgress ?? createSessionEgressLifecycle();
 
     const hasAnyModalEcrConfig = !!(
       Env.MODAL_ECR_OIDC_ROLE_ARN || Env.MODAL_ECR_REGION
@@ -85,6 +96,18 @@ export class RoomoteController extends BaseController {
       // normalizes scalars before combining them with saved string values.
       runtimeEnv: Env,
     });
+
+    // Every provider but Docker fails closed for Session egress: the run is
+    // spawned normally, receives no substitute tokens, and the Session sees
+    // a nonsecret status explaining why. `register` returns `skipped` here
+    // without contacting the control plane.
+    if (provider !== 'docker') {
+      await this.sessionEgress.register({
+        taskRun: { id: taskRun.id, taskId: taskRun.taskId },
+        provider,
+        resume: false,
+      });
+    }
 
     switch (provider) {
       // Roomote spawns with deployment-managed credentials, persisting its
@@ -232,6 +255,7 @@ export class RoomoteController extends BaseController {
             localWorkerReleasePath: this.localWorkerReleasePath,
             deploymentSlug: deploymentSlug,
             signal: abortController.signal,
+            sessionEgress: this.sessionEgress,
           });
         } finally {
           clearTimeout(timeoutId);

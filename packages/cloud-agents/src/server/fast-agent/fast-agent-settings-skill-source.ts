@@ -364,6 +364,58 @@ async function resolveSettingsSkillEnvironments(
   });
 }
 
+/** Inline `manualSkills` from environment YAML need no remote fetch, so both
+ * the full listing and the per-turn prompt catalog share this collector. */
+function collectManualSkillRecords(
+  authorizedEnvironments: SettingsSkillEnvironment[],
+  byId: Map<string, SettingsSkillRecord>,
+  warnings: string[],
+): void {
+  for (const environment of authorizedEnvironments) {
+    for (const manualSkill of environment.config.manualSkills ?? []) {
+      const content = renderManualSkillMarkdown(manualSkill);
+      if (
+        Buffer.byteLength(content, 'utf8') > FAST_AGENT_SPILL_MAX_FILE_BYTES
+      ) {
+        warnings.push(
+          `A settings skill in environment ${environment.id} exceeded the Fast document limit.`,
+        );
+        continue;
+      }
+      const id = settingsSkillId('manual', `${manualSkill.name}\0${content}`);
+      const record = byId.get(id) ?? {
+        content,
+        description: manualSkill.description,
+        environmentIds: [],
+        id,
+        invocation: manualSkill.name,
+        name: manualSkill.name,
+        resources: new Map([
+          [
+            'SKILL.md',
+            {
+              byteLength: Buffer.byteLength(content, 'utf8'),
+              path: 'SKILL.md',
+              resource: 'SKILL.md',
+            },
+          ],
+        ]),
+      };
+      record.environmentIds.push(environment.id);
+      byId.set(id, record);
+    }
+  }
+}
+
+export type FastAgentSettingsPromptCatalog = {
+  /** Marketplace sources configured per authorized environment. These are
+   * never fetched for the prompt; the model enumerates them with a scoped
+   * `list_skills` call when one looks relevant. */
+  marketplaceSources: Array<{ environmentId: string; sources: string[] }>;
+  skills: FastAgentSkillSummary[];
+  warnings: string[];
+};
+
 export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkillSource {
   private readonly allowedEnvironmentIds: Set<string>;
   private readonly loadMarketplaceSnapshot: (
@@ -411,43 +463,7 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
     const byId = new Map<string, SettingsSkillRecord>();
 
     if (sourceOffset === 0) {
-      for (const environment of authorizedEnvironments) {
-        for (const manualSkill of environment.config.manualSkills ?? []) {
-          const content = renderManualSkillMarkdown(manualSkill);
-          if (
-            Buffer.byteLength(content, 'utf8') > FAST_AGENT_SPILL_MAX_FILE_BYTES
-          ) {
-            warnings.push(
-              `A settings skill in environment ${environment.id} exceeded the Fast document limit.`,
-            );
-            continue;
-          }
-          const id = settingsSkillId(
-            'manual',
-            `${manualSkill.name}\0${content}`,
-          );
-          const record = byId.get(id) ?? {
-            content,
-            description: manualSkill.description,
-            environmentIds: [],
-            id,
-            invocation: manualSkill.name,
-            name: manualSkill.name,
-            resources: new Map([
-              [
-                'SKILL.md',
-                {
-                  byteLength: Buffer.byteLength(content, 'utf8'),
-                  path: 'SKILL.md',
-                  resource: 'SKILL.md',
-                },
-              ],
-            ]),
-          };
-          record.environmentIds.push(environment.id);
-          byId.set(id, record);
-        }
-      }
+      collectManualSkillRecords(authorizedEnvironments, byId, warnings);
     }
 
     const sourceSelections = new Map<
@@ -573,10 +589,49 @@ export class RemoteFastAgentSettingsSkillSource implements FastAgentSettingsSkil
     };
   }
 
+  /** Inline environment skills plus the names of configured marketplace
+   * sources, for the system prompt. Reads only environment rows: marketplace
+   * repositories are not fetched here because this runs on every turn. IDs
+   * match `list`, so `load_skill` resolves them through any store instance. */
+  async listPromptCatalog(): Promise<FastAgentSettingsPromptCatalog> {
+    const environmentsList = await this.resolveEnvironments({});
+    const authorizedEnvironments = environmentsList.filter((environment) =>
+      this.allowedEnvironmentIds.has(environment.id),
+    );
+    const warnings: string[] = [];
+    const byId = new Map<string, SettingsSkillRecord>();
+    collectManualSkillRecords(authorizedEnvironments, byId, warnings);
+    const skills: FastAgentSkillSummary[] = [];
+    for (const record of byId.values()) {
+      this.records.set(record.id, record);
+      skills.push({
+        description: record.description,
+        environmentIds: [...new Set(record.environmentIds)].sort(),
+        id: record.id,
+        invocation: record.invocation,
+        name: record.name,
+        source: 'settings',
+      });
+    }
+    const marketplaceSources = authorizedEnvironments.flatMap((environment) => {
+      const sources = Object.keys(environment.config.skills ?? {}).sort();
+      return sources.length > 0
+        ? [{ environmentId: environment.id, sources }]
+        : [];
+    });
+    return { marketplaceSources, skills, warnings };
+  }
+
   async read(
     id: string,
     resource = 'SKILL.md',
   ): Promise<FastAgentSkillDocument> {
+    // The system prompt lists inline environment skill IDs without going
+    // through `list`, so a fresh per-turn source must be able to resolve one
+    // directly. Inline records only need a database read to rebuild.
+    if (!this.records.has(id) && id.startsWith('settings:manual:')) {
+      await this.listPromptCatalog();
+    }
     const record = this.records.get(id);
     const selectedResource = record?.resources.get(resource);
     if (!record || !selectedResource) {

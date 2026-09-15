@@ -36,6 +36,8 @@ const mocks = vi.hoisted(() => ({
   discordTyping: vi.fn(),
   telegramTyping: vi.fn(),
   telegramEditMessage: vi.fn(),
+  telegramEditForumTopic: vi.fn(),
+  telegramResolveForumTopicIcon: vi.fn(),
   createDiscordThread: vi.fn(),
   createTeamsProvider: vi.fn(),
   teamsPostMessage: vi.fn(),
@@ -46,6 +48,7 @@ const mocks = vi.hoisted(() => ({
   agentMailPostMessage: vi.fn(),
   findTeamsConversationRoute: vi.fn(),
   recordProviderMessage: vi.fn(),
+  isManagedTelegramTopic: vi.fn(),
   enqueueTask: vi.fn(),
   getTaskUrl: vi.fn(),
   setPendingPrReviewAction: vi.fn(),
@@ -63,6 +66,7 @@ const mocks = vi.hoisted(() => ({
   updateSourceControlComment: vi.fn(),
   linearEmitResponse: vi.fn(),
   createConversationArtifact: vi.fn(),
+  isVoiceCallActive: vi.fn(),
 }));
 
 vi.mock('./fast-agent-session-videos', () => ({
@@ -172,6 +176,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       return { success: true, taskId: 'child-task-1', taskUrl };
     },
   createFastAgentWebTaskLauncher: vi.fn(() => mocks.launchTask),
+  isFastAgentVoiceCallActive: mocks.isVoiceCallActive,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -272,6 +277,7 @@ vi.mock('../automations/destination', () => ({
 
 vi.mock('./fast-agent-provider-message', () => ({
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
+  isFastAgentManagedTelegramTopic: mocks.isManagedTelegramTopic,
 }));
 
 vi.mock('../routers/mcp-connections', () => ({
@@ -307,6 +313,7 @@ import {
   deliverFastAgentParentEventWithLock,
   FastAgentParentEventDeliveryError,
 } from './fast-agent-parent-event';
+import { FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS } from './fast-agent-telegram-activity';
 
 const parent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
@@ -394,6 +401,7 @@ describe('deliverFastAgentParentEvent', () => {
       completionEmoji: 'white_check_mark',
     });
     mocks.resolveUserMcpServerConfigs.mockResolvedValue({});
+    mocks.isVoiceCallActive.mockResolvedValue(false);
     mocks.postSlackSuggestions.mockResolvedValue(undefined);
     mocks.postDiscordSuggestions.mockResolvedValue(undefined);
     mocks.postTeamsSuggestions.mockResolvedValue(undefined);
@@ -449,8 +457,12 @@ describe('deliverFastAgentParentEvent', () => {
       provider: 'telegram',
       postMessage: mocks.telegramPostMessage,
       sendChatAction: mocks.telegramTyping,
+      sendRichMessageDraft: mocks.telegramTyping,
       editMessageText: mocks.telegramEditMessage,
+      editForumTopic: mocks.telegramEditForumTopic,
+      resolveForumTopicIconCustomEmojiId: mocks.telegramResolveForumTopicIcon,
     });
+    mocks.isManagedTelegramTopic.mockResolvedValue(false);
     mocks.agentMailPostMessage.mockResolvedValue({
       provider: 'agentmail',
       channelId: 'roomote@agentmail.test',
@@ -506,17 +518,18 @@ describe('deliverFastAgentParentEvent', () => {
           userId: 'user-2',
           question: 'Use the corrected requirement.',
           images: ['data:image/png;base64,aGVsbG8='],
+          attachmentTexts: ['Attachment: plan.md\nUse the corrected value.'],
           senderDisplayName: 'Matt',
           senderExternalId: 'U123',
         },
       },
       mocks.releaseTurnLock,
     );
-
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         question: 'Use the corrected requirement.',
         images: ['data:image/png;base64,aGVsbG8='],
+        attachmentTexts: ['Attachment: plan.md\nUse the corrected value.'],
         userId: 'user-2',
         currentMessageId: '100.003',
         currentDurableHumanFollowUpEventId: '100.003',
@@ -533,6 +546,46 @@ describe('deliverFastAgentParentEvent', () => {
     await answerInput.adapter.resolveMcpServerConfigs();
     expect(mocks.resolveUserMcpServerConfigs).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-2' }),
+    );
+  });
+
+  it('restores a queued cross-surface reply route without changing the canonical Session', async () => {
+    const webParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'web' as const,
+        workspaceId: 'web',
+        conversationId: parent.sessionId,
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({ purpose: 'closeout', message: 'Continued.' }),
+    );
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent: webParent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'notification-reply-1',
+          currentMessageId: 'notification-reply-1',
+          userId: 'u1',
+          question: 'Continue from Slack.',
+          deliveryConversation: parent.conversation,
+        },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation: parent.conversation,
+        canonicalConversation: webParent.conversation,
+      }),
+    );
+    expect(mocks.findSession).toHaveBeenCalledWith({ id: parent.sessionId });
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'C123', thread_ts: '100.001' }),
     );
   });
 
@@ -743,6 +796,46 @@ describe('deliverFastAgentParentEvent', () => {
       }),
     );
     expect(mocks.answerQuestion.mock.calls[1]?.[0]).not.toHaveProperty('input');
+    expect(mocks.buildSetupAdapter).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Object),
+      expect.objectContaining({ setupSession: true }),
+    );
+  });
+
+  it('rebuilds ordinary capability context without setup Session enforcement', async () => {
+    mocks.answerQuestion.mockResolvedValue('');
+    const setupContext = {
+      sessionId: 'session-1',
+      fastConversationId: parent.sessionId,
+      setupSnapshot: '{"rail":{"source":"ready"}}',
+      starterTaskOptions: [],
+    };
+
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'ordinary-input:conversation-1',
+          currentMessageId: 'ordinary-input:conversation-1',
+          userId: 'user-2',
+          question: '<capability_offer_response>{}</capability_offer_response>',
+          turnSource: 'platform_event',
+          platformEventKind: 'input_response',
+          platformEventVisibility: 'required',
+          setupContext,
+        },
+        resumedAfterInterruption: true,
+        durableAdmission: { eventId: 'row-3' },
+      },
+      mocks.releaseTurnLock,
+    );
+
+    expect(mocks.buildSetupAdapter).toHaveBeenCalledWith(
+      setupContext,
+      expect.objectContaining({ setupSession: false }),
+    );
   });
 
   it('lets a queued web turn create artifacts in its Session', async () => {
@@ -1536,6 +1629,9 @@ describe('deliverFastAgentParentEvent', () => {
       createdByUserId: 'u1',
       suggestions,
     });
+    expect(mocks.recordCustomAutomationResult).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceTaskId: 'child-task-1' }),
+    );
   });
 
   it('posts Discord suggestions when an automation task settles', async () => {
@@ -2092,18 +2188,37 @@ describe('deliverFastAgentParentEvent', () => {
         vi.useFakeTimers();
         try {
           adapter.activity.start();
-          await vi.advanceTimersByTimeAsync(0);
-          expect(typing).toHaveBeenCalledWith(replyTarget);
           await vi.advanceTimersByTimeAsync(
-            surface === 'discord' ? 8_000 : 4_000,
+            surface === 'telegram'
+              ? FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS
+              : 0,
+          );
+          expect(typing).toHaveBeenCalledWith(
+            surface === 'telegram'
+              ? expect.objectContaining({
+                  ...replyTarget,
+                  draftId: expect.any(Number),
+                })
+              : replyTarget,
+          );
+          await vi.advanceTimersByTimeAsync(
+            surface === 'discord' ? 8_000 : 25_000,
           );
           expect(typing).toHaveBeenCalledTimes(2);
           const reply = { purpose: 'closeout', message: 'Working' };
           await adapter.postReply(reply);
-          await vi.advanceTimersByTimeAsync(0);
+          await vi.advanceTimersByTimeAsync(
+            surface === 'telegram'
+              ? FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS
+              : 0,
+          );
           expect(typing).toHaveBeenCalledTimes(3);
           await adapter.replaceReply({ messageId: '123' }, reply);
-          await vi.advanceTimersByTimeAsync(0);
+          await vi.advanceTimersByTimeAsync(
+            surface === 'telegram'
+              ? FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS
+              : 0,
+          );
           expect(typing).toHaveBeenCalledTimes(4);
           const editMessage =
             surface === 'discord'
@@ -2157,6 +2272,164 @@ describe('deliverFastAgentParentEvent', () => {
       });
     },
   );
+
+  it('syncs a generated automation title to its managed Telegram DM topic', async () => {
+    const telegramParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-dm-1',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: {
+          channelId: 'telegram-dm-1',
+          threadId: 'telegram-topic-1',
+        },
+      },
+    };
+    mocks.isManagedTelegramTopic.mockResolvedValueOnce(true);
+    mocks.findSession.mockResolvedValue({
+      id: telegramParent.sessionId,
+      userId: 'u1',
+      title: 'Generated automation title',
+      conversation: telegramParent.conversation,
+      messages: [],
+    });
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+      adapter.activity.updateTitle('Generated automation title');
+      await adapter.activity.dispose();
+    });
+
+    await deliverFastAgentParentEvent({
+      parent: telegramParent,
+      event: {
+        type: 'automation_triggered',
+        eventId: 'automation-1:occurrence-1',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find actionable regressions.',
+        trigger: 'schedule',
+      },
+    });
+
+    expect(mocks.isManagedTelegramTopic).toHaveBeenCalledWith({
+      sessionId: telegramParent.sessionId,
+      workspaceId: 'telegram-dm-1',
+      channelId: 'telegram-dm-1',
+      threadId: 'telegram-topic-1',
+    });
+    expect(mocks.telegramEditForumTopic).toHaveBeenCalledWith({
+      channelId: 'telegram-dm-1',
+      threadId: 'telegram-topic-1',
+      name: 'Generated automation title',
+    });
+  });
+
+  it.each([
+    {
+      kickoff: true,
+      eventType: 'automation_triggered' as const,
+    },
+    {
+      kickoff: false,
+      eventType: 'task_settled' as const,
+    },
+  ])(
+    'renders the automation title as a Telegram heading for $eventType messages',
+    async ({ kickoff, eventType }) => {
+      const message = kickoff
+        ? 'Starting the repository scan.'
+        : 'No issues found.';
+      const telegramParent = {
+        ...parent,
+        conversation: {
+          surface: 'telegram' as const,
+          workspaceId: 'telegram-chat-1',
+          conversationId: 'automation-1:occurrence-1',
+          replyTarget: { channelId: 'telegram-chat-1' },
+        },
+      };
+      mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+        adapter.postReply({
+          purpose: kickoff ? 'progress' : 'closeout',
+          message,
+          kickoff,
+        }),
+      );
+
+      await deliverFastAgentParentEvent({
+        parent: telegramParent,
+        event:
+          eventType === 'automation_triggered'
+            ? {
+                type: eventType,
+                eventId: 'automation-1:occurrence-1',
+                automationId: 'automation-1',
+                automationName: 'Weekly scan',
+                prompt: 'Find actionable regressions.',
+                trigger: 'schedule',
+              }
+            : {
+                type: eventType,
+                taskId: 'child-task-1',
+                runId: 42,
+                customAutomationId: 'automation-1',
+                status: 'completed',
+                taskUrl: 'https://roomote.example/task/child-task-1',
+                pullRequests: [],
+              },
+      });
+
+      expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channelId: 'telegram-chat-1',
+          text: `<h3>Weekly scan</h3>\n\n${message}`,
+          footerText: `Reply anytime · [Open in Roomote](https://api.roomote.example/sessions/${parent.sessionId}?utm_source=telegram&utm_medium=link&utm_campaign=telegram.fast_reply)`,
+          textFormat: 'markdown',
+        }),
+      );
+    },
+  );
+
+  it('renders Markdown-sensitive automation names as literal Telegram heading text', async () => {
+    const telegramParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-chat-1',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'telegram-chat-1' },
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: 'No issues found.',
+      }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: telegramParent,
+      event: {
+        type: 'automation_triggered',
+        eventId: 'automation-1:occurrence-1',
+        automationId: 'automation-1',
+        automationName:
+          'Weekly **scan** [Open](https://example.test) <b>raw</b> & more',
+        prompt: 'Find actionable regressions.',
+        trigger: 'schedule',
+      },
+    });
+
+    expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: [
+          '<h3>Weekly **scan** [Open](https://example.test) &lt;b&gt;raw&lt;/b&gt; &amp; more</h3>',
+          'No issues found.',
+        ].join('\n\n'),
+        textFormat: 'markdown',
+      }),
+    );
+  });
 
   it.each(['new report', 'existing report', 'task settled'] as const)(
     'reasserts Discord typing after %s and its suggestion messages',
@@ -2333,11 +2606,21 @@ describe('deliverFastAgentParentEvent', () => {
         expect.objectContaining({
           channelId,
           ...(threadId ? { threadId } : {}),
-          text: expect.stringMatching(
-            new RegExp(
-              `^The proof is ready\\.\\n\\nReply anytime · \\[Open in Roomote\\]\\(.*utm_source=${surface}.*\\)$`,
-            ),
-          ),
+          text:
+            surface === 'telegram'
+              ? 'The proof is ready.'
+              : expect.stringMatching(
+                  new RegExp(
+                    `^The proof is ready\\.\\n\\nReply anytime · \\[Open in Roomote\\]\\(.*utm_source=${surface}.*\\)$`,
+                  ),
+                ),
+          ...(surface === 'telegram'
+            ? {
+                footerText: expect.stringMatching(
+                  /Reply anytime · \[Open in Roomote\]\(.*utm_source=telegram.*\)/,
+                ),
+              }
+            : {}),
           textFormat: 'markdown',
           images: [
             {
@@ -2348,7 +2631,9 @@ describe('deliverFastAgentParentEvent', () => {
           ],
         }),
       );
-      const footerText = post.mock.calls[0]![0].text.split('\n\n').at(-1);
+      const footerText =
+        post.mock.calls[0]![0].footerText ??
+        post.mock.calls[0]![0].text.split('\n\n').at(-1);
       expect(
         JSON.parse(
           mocks.redisStore.get(
@@ -3347,6 +3632,189 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('delivers Telegram pull request feedback with persisted inline actions', async () => {
+    const feedbackEvent = {
+      type: 'pull_request_feedback' as const,
+      feedbackId: 'feedback-telegram',
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: 'Fix review feedback',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'open' as const,
+      },
+      summary: 'Alice requested changes.',
+      suggestedActionQuestion: 'Want me to resolve these issues?',
+      suggestedActionPrompt: 'Address the requested changes.',
+    };
+    const telegramParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-chat-1',
+        conversationId: 'telegram-chat-1:topic-7',
+        replyTarget: { channelId: 'telegram-chat-1', threadId: 'topic-7' },
+      },
+    };
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'There is new PR feedback.',
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: telegramParent,
+      event: feedbackEvent,
+    });
+
+    expect(mocks.setPendingPrReviewAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'telegram',
+        taskId: 'task-1',
+        repository: 'acme/web',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/web/pull/42',
+        channelId: 'telegram-chat-1',
+        threadId: 'topic-7',
+        followUpPrompt: 'Address the requested changes.',
+        nonce: expect.any(String),
+      }),
+    );
+    const nonce = mocks.setPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    expect(mocks.telegramPostMessage).toHaveBeenCalledWith({
+      channelId: 'telegram-chat-1',
+      threadId: 'topic-7',
+      text: 'There is new PR feedback.',
+      footerText: expect.stringMatching(
+        /^Reply anytime · \[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\) · \[Open in Roomote\]\(.*\/sessions\/.*\)$/,
+      ),
+      textFormat: 'markdown',
+      images: [],
+      buttons: [
+        [
+          {
+            text: 'Resolve these issues',
+            callbackData: `prr:y:${nonce}`,
+          },
+        ],
+        [
+          {
+            text: 'Auto-resolve on this PR',
+            callbackData: `prr:a:${nonce}`,
+          },
+          { text: 'Dismiss', callbackData: `prr:d:${nonce}` },
+        ],
+      ],
+    });
+    expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenCalledWith(
+      nonce,
+      'telegram-message-2',
+    );
+  });
+
+  it('retires a Telegram action message when attachment failure retries the post', async () => {
+    const feedbackEvent = {
+      type: 'pull_request_feedback' as const,
+      feedbackId: 'feedback-telegram-retry',
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: 'Fix review feedback',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'open' as const,
+      },
+      summary: 'Alice requested changes.',
+      suggestedActionQuestion: 'Want me to resolve these issues?',
+      suggestedActionPrompt: 'Address the requested changes.',
+    };
+    const telegramParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-chat-1',
+        conversationId: 'telegram-chat-1:topic-7',
+        replyTarget: { channelId: 'telegram-chat-1', threadId: 'topic-7' },
+      },
+    };
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'There is new PR feedback.',
+        }),
+    );
+    mocks.telegramPostMessage
+      .mockResolvedValueOnce({
+        provider: 'telegram',
+        channelId: 'telegram-chat-1',
+        messageId: 'telegram-first',
+        lastTextMessageId: 'telegram-first-actions',
+      })
+      .mockResolvedValueOnce({
+        provider: 'telegram',
+        channelId: 'telegram-chat-1',
+        messageId: 'telegram-second',
+        lastTextMessageId: 'telegram-second-actions',
+      });
+    mocks.attachPendingPrReviewActionMessage
+      .mockRejectedValueOnce(new Error('attachment failed'))
+      .mockResolvedValueOnce({ attached: true, superseded: [] });
+
+    await expect(
+      deliverFastAgentParentEvent({
+        parent: telegramParent,
+        event: feedbackEvent,
+      }),
+    ).rejects.toThrow('attachment failed');
+    await expect(
+      deliverFastAgentParentEvent({
+        parent: telegramParent,
+        event: feedbackEvent,
+      }),
+    ).resolves.toBe('delivered');
+
+    const nonce = mocks.setPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    expect(mocks.setPendingPrReviewAction).toHaveBeenCalledTimes(2);
+    expect(mocks.setPendingPrReviewAction).toHaveBeenLastCalledWith(
+      expect.objectContaining({ nonce }),
+    );
+    expect(mocks.retirePrReviewActionMessagesBestEffort).toHaveBeenCalledWith([
+      {
+        provider: 'telegram',
+        channelId: 'telegram-chat-1',
+        threadId: 'topic-7',
+        messageId: 'telegram-first-actions',
+      },
+    ]);
+    expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenLastCalledWith(
+      nonce,
+      'telegram-second-actions',
+    );
+    expect(
+      mocks.retirePrReviewActionMessagesBestEffort.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.telegramPostMessage.mock.invocationCallOrder[1]!);
+  });
+
   it('preserves Discord action callbacks when attachment failure retries the post', async () => {
     const feedbackEvent = {
       type: 'pull_request_feedback' as const,
@@ -3558,6 +4026,32 @@ describe('deliverFastAgentParentEvent', () => {
     expect(input).not.toHaveProperty('activeTasks');
   });
 
+  it('requires a visible closeout when a web parent receives task settlement', async () => {
+    await deliverFastAgentParentEvent({
+      parent: {
+        sessionId: parent.sessionId,
+        conversation: {
+          surface: 'web',
+          workspaceId: 'web',
+          conversationId: parent.sessionId,
+        },
+      },
+      event: {
+        type: 'task_settled',
+        taskId: 'task-1',
+        runId: 42,
+        title: 'Fix API',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ platformEventVisibility: 'required' }),
+    );
+  });
+
   it('skips a claimed pull request event that became terminal before delivery', async () => {
     mocks.findTaskRun.mockResolvedValueOnce({ status: 'completed' });
     const result = await deliverFastAgentParentEvent({
@@ -3715,6 +4209,34 @@ describe('deliverFastAgentParentEvent', () => {
         platformEventVisibility: 'required',
         userId: 'user-1',
       }),
+    );
+  });
+
+  it('resolves current voice activity when a scheduled wakeup runs', async () => {
+    mocks.findWakeup.mockResolvedValueOnce({ status: 'completed' });
+    mocks.findWakeupSession.mockResolvedValueOnce({ archivedAt: null });
+    mocks.isVoiceCallActive.mockResolvedValueOnce(true);
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'scheduled_wakeup',
+        eventId: 'wakeup-voice:1',
+        wakeupId: 'wakeup-voice',
+        name: 'Follow through on session tasks',
+        prompt: 'Check the tasks in this conversation.',
+        runNumber: 1,
+        maxRuns: null,
+        firedAt: '2026-09-04T17:10:00.000Z',
+        nextRunAt: null,
+        reportPolicy: 'only_when_notable',
+        createdByUserId: 'user-1',
+      },
+    });
+
+    expect(mocks.isVoiceCallActive).toHaveBeenCalledWith(parent.sessionId);
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ voiceMode: true }),
     );
   });
 

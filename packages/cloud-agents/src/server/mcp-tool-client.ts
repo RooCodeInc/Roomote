@@ -9,9 +9,16 @@
 import { parseMcpToolResult } from '@roomote/types';
 
 export class McpToolCallError extends Error {
-  constructor(readonly upstreamText: string | null) {
+  readonly upstreamText!: string | null;
+
+  constructor(upstreamText: string | null = null) {
+    // Upstream tool content can contain credentials; do not copy it into logs.
     super('MCP tool reported an error (isError: true).');
     this.name = 'McpToolCallError';
+    Object.defineProperty(this, 'upstreamText', {
+      value: upstreamText,
+      enumerable: false,
+    });
   }
 }
 

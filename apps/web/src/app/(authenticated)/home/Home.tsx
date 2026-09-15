@@ -3,8 +3,12 @@
 import Image from 'next/image';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { DiscordLogoIcon } from '@radix-ui/react-icons';
+import { useQuery } from '@tanstack/react-query';
 
 import { cn } from '@/lib/utils';
+import { useAuthorizedUser } from '@/hooks/useUser';
+import { useHomeComposerSuggestions } from '@/hooks/useHomeComposerSuggestions';
+import { useTRPC } from '@/trpc/client';
 import {
   Button,
   Calendar,
@@ -65,6 +69,7 @@ export function Home({
   const [isFeedbackPromptVisible, setIsFeedbackPromptVisible] = useState(false);
   const [isFeedbackDialogOpen, setIsFeedbackDialogOpen] = useState(false);
   const [isShortViewport, setIsShortViewport] = useState(false);
+  const [isPromptFocused, setIsPromptFocused] = useState(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(() =>
     normalizeHomePromptPlaceholderIndex(initialPlaceholderIndex),
   );
@@ -72,11 +77,68 @@ export function Home({
     number | undefined
   >(undefined);
 
-  const activePromptPlaceholder =
-    HOME_PROMPT_PLACEHOLDERS[placeholderIndex] ?? FALLBACK_PROMPT_PLACEHOLDER;
+  const { brainConfigured } = useAuthorizedUser();
+  const {
+    enabled: homeComposerSuggestionsEnabled,
+    isLoading: homeComposerSuggestionsFlagLoading,
+  } = useHomeComposerSuggestions();
+  const trpc = useTRPC();
+  const suggestionsQuery = useQuery(
+    trpc.home.composerSuggestions.queryOptions(undefined, {
+      enabled: homeComposerSuggestionsEnabled && brainConfigured === true,
+      // Recheck for newly completed memories on a later Home visit without
+      // repeatedly invoking the helper model for an unchanged memory revision.
+      staleTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+    }),
+  );
+  const isInitialSuggestionsLoading =
+    homeComposerSuggestionsEnabled &&
+    brainConfigured === true &&
+    suggestionsQuery.isPending &&
+    suggestionsQuery.data === undefined;
+  const generatedSuggestions = homeComposerSuggestionsEnabled
+    ? (suggestionsQuery.data?.suggestions ?? [])
+    : [];
+  const promptPlaceholders =
+    generatedSuggestions.length > 0
+      ? generatedSuggestions
+      : isInitialSuggestionsLoading
+        ? []
+        : HOME_PROMPT_PLACEHOLDERS;
+
+  const activePromptPlaceholder = promptPlaceholders.length
+    ? promptPlaceholders[placeholderIndex % promptPlaceholders.length]
+    : undefined;
 
   const contentColumnRef = useRef<HTMLDivElement>(null);
   const promptCardRef = useRef<HTMLDivElement>(null);
+  const hasResolvedPromptAutoFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (
+      homeComposerSuggestionsFlagLoading ||
+      hasResolvedPromptAutoFocusRef.current
+    ) {
+      return;
+    }
+
+    hasResolvedPromptAutoFocusRef.current = true;
+    if (homeComposerSuggestionsEnabled) {
+      return;
+    }
+
+    const textarea = promptCardRef.current?.querySelector('textarea');
+    if (
+      !textarea ||
+      (document.activeElement !== document.body &&
+        document.activeElement !== textarea)
+    ) {
+      return;
+    }
+
+    textarea.focus({ preventScroll: true });
+  }, [homeComposerSuggestionsEnabled, homeComposerSuggestionsFlagLoading]);
 
   useEffect(() => {
     setIsFeedbackPromptVisible(!isFeedbackPromptDismissed());
@@ -89,20 +151,27 @@ export function Home({
   }, [initialPlaceholderIndex]);
 
   useEffect(() => {
-    if (HOME_PROMPT_PLACEHOLDERS.length <= 1) {
+    if (
+      (homeComposerSuggestionsEnabled && isPromptFocused) ||
+      promptPlaceholders.length <= 1
+    ) {
       return;
     }
 
     const intervalId = window.setInterval(() => {
       setPlaceholderIndex(
-        (currentIndex) => (currentIndex + 1) % HOME_PROMPT_PLACEHOLDERS.length,
+        (currentIndex) => (currentIndex + 1) % promptPlaceholders.length,
       );
-    }, 5_000);
+    }, 10_000);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [
+    homeComposerSuggestionsEnabled,
+    isPromptFocused,
+    promptPlaceholders.length,
+  ]);
 
   // Dynamically compute the max textarea height so it can grow to fill the
   // available space without pushing the bottom-sheet tabs off screen.
@@ -203,7 +272,22 @@ export function Home({
 
             <NewTaskForm
               onTaskStarted={handleTaskStarted}
-              placeholder={activePromptPlaceholder}
+              placeholder={
+                isInitialSuggestionsLoading
+                  ? ''
+                  : homeComposerSuggestionsEnabled
+                    ? FALLBACK_PROMPT_PLACEHOLDER
+                    : activePromptPlaceholder
+              }
+              promptSuggestion={
+                homeComposerSuggestionsEnabled
+                  ? activePromptPlaceholder
+                  : undefined
+              }
+              onPromptFocusChange={
+                homeComposerSuggestionsEnabled ? setIsPromptFocused : undefined
+              }
+              autoFocus={false}
               textareaMaxHeight={textareaMaxHeight}
               promptContainerRef={promptCardRef}
             />

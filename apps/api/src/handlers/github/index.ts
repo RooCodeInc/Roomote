@@ -58,6 +58,7 @@ import { handleInstallationRepositoriesChange } from './handleInstallationReposi
 import { isFromKnownInstallation } from './isFromKnownInstallation';
 import { recordWebhook } from './recordWebhook';
 import { toHostFromUrl } from '../utils';
+import { toValidDate } from '../pull-request-fact-sync';
 import {
   enrichGitHubMergeAnnouncerEvent,
   normalizeGitHubPush,
@@ -662,7 +663,12 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           status,
-          { host: toHostFromUrl(payload.pull_request.html_url) },
+          {
+            host: toHostFromUrl(payload.pull_request.html_url),
+            ...(status === 'merged'
+              ? { mergedAt: toValidDate(payload.pull_request.merged_at) }
+              : {}),
+          },
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,

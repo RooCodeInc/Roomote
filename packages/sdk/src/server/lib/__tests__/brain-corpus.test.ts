@@ -2,13 +2,25 @@ import {
   extractBrainCorpusPages,
   extractBrainPageContent,
   readBrainCorpus,
+  readRecentBrainTaskMemories,
   resetBrainCorpusCache,
 } from '../brain-corpus';
 
-const { redisGet, redisSet, resolveBrainConnection } = vi.hoisted(() => ({
+const {
+  redisGet,
+  redisSet,
+  resolveBrainConnection,
+  listRecentUserTaskMemoryRuns,
+} = vi.hoisted(() => ({
   redisGet: vi.fn(),
   redisSet: vi.fn(),
   resolveBrainConnection: vi.fn(),
+  listRecentUserTaskMemoryRuns: vi.fn(),
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  db: {},
+  listRecentUserTaskMemoryRuns,
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -153,6 +165,8 @@ describe('readBrainCorpus', () => {
     redisGet.mockResolvedValue(null);
     redisSet.mockReset();
     redisSet.mockResolvedValue('OK');
+    listRecentUserTaskMemoryRuns.mockReset();
+    listRecentUserTaskMemoryRuns.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -436,5 +450,75 @@ describe('readBrainCorpus', () => {
     global.fetch = fetchMock as unknown as typeof fetch;
 
     expect(await readBrainCorpus()).toBeNull();
+  });
+
+  it('reads only exact task-memory pages selected for the signed-in user', async () => {
+    listRecentUserTaskMemoryRuns.mockResolvedValue([
+      { taskId: 'one', runId: 1, completedAt: new Date() },
+      { taskId: 'two', runId: 2, completedAt: new Date() },
+    ]);
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string) as {
+        params: { name: string; arguments: { slug?: string } };
+      };
+
+      return toolResponse({
+        slug: body.params.arguments.slug,
+        compiled_truth: `Memory for ${body.params.arguments.slug}`,
+      });
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(
+      readRecentBrainTaskMemories({ userId: 'user-1', limit: 2 }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        slug: 'tasks/one/runs/1',
+        content: 'Memory for tasks/one/runs/1',
+      }),
+      expect.objectContaining({
+        slug: 'tasks/two/runs/2',
+        content: 'Memory for tasks/two/runs/2',
+      }),
+    ]);
+    expect(listRecentUserTaskMemoryRuns).toHaveBeenCalledWith(
+      {},
+      {
+        userId: 'user-1',
+        limit: 2,
+      },
+    );
+    expect(listedArguments(fetchMock)).toEqual([
+      { slug: 'tasks/one/runs/1', fuzzy: false },
+      { slug: 'tasks/two/runs/2', fuzzy: false },
+    ]);
+    expect(resolveBrainConnection).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not contact Brain when the user has no owned memory candidates', async () => {
+    listRecentUserTaskMemoryRuns.mockResolvedValue([]);
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(
+      readRecentBrainTaskMemories({ userId: 'user-1' }),
+    ).resolves.toEqual([]);
+    expect(resolveBrainConnection).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns no recent memories when Brain is unavailable', async () => {
+    listRecentUserTaskMemoryRuns.mockResolvedValue([
+      { taskId: 'one', runId: 1, completedAt: new Date() },
+    ]);
+    resolveBrainConnection.mockResolvedValue(null);
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(
+      readRecentBrainTaskMemories({ userId: 'user-1' }),
+    ).resolves.toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

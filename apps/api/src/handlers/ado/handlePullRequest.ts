@@ -31,7 +31,10 @@ import {
 
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
-import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
+import {
+  scheduleSourceControlPullRequestFactSync,
+  toValidDate,
+} from '../pull-request-fact-sync';
 import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import {
   getAdoAutomationTargets,
@@ -304,12 +307,13 @@ export async function handleAdoPullRequest(
       };
     }
 
+    const mergedAt = toValidDate(pullRequest.closedDate);
     await updateTaskPrStatus(
       'ado',
       repoFullName,
       pullRequest.pullRequestId,
       'merged',
-      { host },
+      { host, ...(mergedAt ? { mergedAt } : {}) },
     );
 
     scheduleAdoPullRequestFactSync(payload, repoFullName, 'merged');

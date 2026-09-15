@@ -91,9 +91,9 @@ describe('resolveBrainSourceIdForCollector', () => {
   });
 
   it('maps the outbox-fed checkpoints back to their sources', () => {
-    expect(
-      resolveBrainSourceIdForCollector('task-memory:effective-date-v2'),
-    ).toBe('task-memories');
+    expect(resolveBrainSourceIdForCollector('task-memory:initiator-v3')).toBe(
+      'task-memories',
+    );
     expect(
       resolveBrainSourceIdForCollector('pull-request-facts:occurrence-date-v3'),
     ).toBe('pull-request-facts');

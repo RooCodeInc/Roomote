@@ -20,6 +20,7 @@ import {
   DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER,
   normalizeDeploymentModelConfig,
 } from '@roomote/types';
+import { registerExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
 
 const { envMock, mockBootstrapWebRuntimeEnv, mockIsWebServerBindExposed } =
   vi.hoisted(() => ({
@@ -50,6 +51,8 @@ vi.mock('@/lib/server/env', async () => ({
 }));
 
 import { GET } from './route';
+
+registerExclusiveAutomationSettingsDatabaseLock();
 
 function getSetCookieHeaders(response: Response): string[] {
   const headers = response.headers as Headers & {

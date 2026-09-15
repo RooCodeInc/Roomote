@@ -336,12 +336,14 @@ export function buildOpenCodeModelReasoningOptions(
  * Merges reasoning options for one model into an OpenCode `provider` config
  * subtree (`provider.<id>.models.<model>.options`). Existing entries for the
  * same model win so higher-priority roles (for example the coding model) are
- * not overridden by lower-priority roles sharing the same model.
+ * not overridden by lower-priority roles sharing the same model, unless an
+ * explicit request-scoped override is supplied.
  */
 export function mergeOpenCodeModelReasoningOptions(
   providerConfig: Record<string, unknown>,
   modelId: string,
   reasoningEffort: ReasoningEffort,
+  mergeOptions?: { overrideExisting?: boolean },
 ): Record<string, unknown> {
   const selection = splitTaskModelId(modelId);
   const options = buildOpenCodeModelReasoningOptions(modelId, reasoningEffort);
@@ -363,9 +365,22 @@ export function mergeOpenCodeModelReasoningOptions(
       ? (providerEntry.models as Record<string, unknown>)
       : {};
 
-  if (models[selection.modelID]) {
+  const existingModel = models[selection.modelID];
+  if (existingModel && !mergeOptions?.overrideExisting) {
     return providerConfig;
   }
+  const existingModelConfig =
+    existingModel &&
+    typeof existingModel === 'object' &&
+    !Array.isArray(existingModel)
+      ? (existingModel as Record<string, unknown>)
+      : {};
+  const existingOptions =
+    existingModelConfig.options &&
+    typeof existingModelConfig.options === 'object' &&
+    !Array.isArray(existingModelConfig.options)
+      ? (existingModelConfig.options as Record<string, unknown>)
+      : {};
 
   return {
     ...providerConfig,
@@ -373,7 +388,10 @@ export function mergeOpenCodeModelReasoningOptions(
       ...providerEntry,
       models: {
         ...models,
-        [selection.modelID]: { options },
+        [selection.modelID]: {
+          ...existingModelConfig,
+          options: { ...existingOptions, ...options },
+        },
       },
     },
   };

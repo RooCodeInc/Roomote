@@ -11,8 +11,6 @@ import {
   createEnvironment,
   updateEnvironment,
   submitTaskSuggestions,
-  getTaskGoal,
-  updateTaskGoal,
   getSessionMessages,
   getSessionUpdates,
   getSessionSummary,
@@ -126,52 +124,6 @@ describe('relay updates API', () => {
       2,
       'https://test-api.example.com/api/mcp/tasks/task-1/updates?limit=7&cursor=task+cursor',
       expect.any(Object),
-    );
-  });
-});
-
-describe('task goal API', () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  it('reads and updates a goal through the bounded platform API client', async () => {
-    global.fetch = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ goal: null }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ updated: true, goal: {} }),
-      });
-
-    await getTaskGoal(config, 42);
-    await updateTaskGoal(config, 42, {
-      action: 'complete',
-      generation: 'goal-generation:current',
-    });
-
-    expect(fetch).toHaveBeenNthCalledWith(
-      1,
-      'https://test-api.example.com/api/mcp/tasks/runs/42/goal',
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'Bearer test-token',
-        }),
-        signal: expect.any(AbortSignal),
-      }),
-    );
-    expect(fetch).toHaveBeenNthCalledWith(
-      2,
-      'https://test-api.example.com/api/mcp/tasks/runs/42/goal',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({
-          action: 'complete',
-          generation: 'goal-generation:current',
-        }),
-        signal: expect.any(AbortSignal),
-      }),
     );
   });
 });

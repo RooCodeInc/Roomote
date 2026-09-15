@@ -4,9 +4,10 @@ import {
   EmptyMedia,
   EmptyDescription,
   CircleX,
+  Button,
 } from '@/components/system';
 
-export function TaskCardError() {
+export function TaskCardError({ onRetry }: { onRetry: () => void }) {
   return (
     <Empty>
       <EmptyHeader>
@@ -16,6 +17,9 @@ export function TaskCardError() {
         <EmptyDescription className="text-sm">
           Failed to load tasks.
         </EmptyDescription>
+        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+          Retry
+        </Button>
       </EmptyHeader>
     </Empty>
   );

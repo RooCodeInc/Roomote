@@ -733,6 +733,38 @@ function AdminConfiguredIntegrationDialog({
   );
 }
 
+function getFieldErrorAttributes(fieldId: string, errors?: string[]) {
+  const hasError = Boolean(errors?.length);
+
+  return {
+    'aria-invalid': hasError || undefined,
+    'aria-describedby': hasError ? `${fieldId}-error` : undefined,
+    'data-invalid': hasError ? 'true' : undefined,
+  } as const;
+}
+
+function FieldError({
+  fieldId,
+  errors,
+}: {
+  fieldId: string;
+  errors?: string[];
+}) {
+  if (!errors?.length) {
+    return null;
+  }
+
+  return (
+    <p
+      id={`${fieldId}-error`}
+      className="text-sm text-destructive"
+      role="alert"
+    >
+      {errors[0]}
+    </p>
+  );
+}
+
 function SnowflakeConnectionFields({
   form,
   fieldErrors,
@@ -760,15 +792,17 @@ function SnowflakeConnectionFields({
               placeholder="xy12345.us-east-1"
               value={form.account}
               onChange={(event) => onFieldChange('account', event.target.value)}
-              data-invalid={fieldErrors.account ? 'true' : undefined}
+              {...getFieldErrorAttributes(
+                'snowflake-account',
+                fieldErrors.account,
+              )}
               className={fieldClassName}
               data-1p-ignore
             />
-            {fieldErrors.account ? (
-              <p className="text-sm text-destructive">
-                {fieldErrors.account[0]}
-              </p>
-            ) : null}
+            <FieldError
+              fieldId="snowflake-account"
+              errors={fieldErrors.account}
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="snowflake-username">Username</Label>
@@ -779,15 +813,17 @@ function SnowflakeConnectionFields({
               onChange={(event) =>
                 onFieldChange('username', event.target.value)
               }
-              data-invalid={fieldErrors.username ? 'true' : undefined}
+              {...getFieldErrorAttributes(
+                'snowflake-username',
+                fieldErrors.username,
+              )}
               className={fieldClassName}
               data-1p-ignore
             />
-            {fieldErrors.username ? (
-              <p className="text-sm text-destructive">
-                {fieldErrors.username[0]}
-              </p>
-            ) : null}
+            <FieldError
+              fieldId="snowflake-username"
+              errors={fieldErrors.username}
+            />
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label htmlFor="snowflake-private-key">Private Key (PEM)</Label>
@@ -799,7 +835,10 @@ function SnowflakeConnectionFields({
               onChange={(event) =>
                 onFieldChange('privateKey', event.target.value)
               }
-              data-invalid={fieldErrors.privateKey ? 'true' : undefined}
+              {...getFieldErrorAttributes(
+                'snowflake-private-key',
+                fieldErrors.privateKey,
+              )}
               className={fieldClassName}
               data-1p-ignore
             />
@@ -812,11 +851,10 @@ function SnowflakeConnectionFields({
                 Leave blank to keep the existing private key.
               </p>
             ) : null}
-            {fieldErrors.privateKey ? (
-              <p className="text-sm text-destructive">
-                {fieldErrors.privateKey[0]}
-              </p>
-            ) : null}
+            <FieldError
+              fieldId="snowflake-private-key"
+              errors={fieldErrors.privateKey}
+            />
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label htmlFor="snowflake-private-key-passphrase">
@@ -829,20 +867,20 @@ function SnowflakeConnectionFields({
               onChange={(event) =>
                 onFieldChange('privateKeyPassphrase', event.target.value)
               }
-              data-invalid={
-                fieldErrors.privateKeyPassphrase ? 'true' : undefined
-              }
+              {...getFieldErrorAttributes(
+                'snowflake-private-key-passphrase',
+                fieldErrors.privateKeyPassphrase,
+              )}
               className={fieldClassName}
               data-1p-ignore
             />
             <p className="text-sm text-muted-foreground">
               Only needed if your private key is encrypted.
             </p>
-            {fieldErrors.privateKeyPassphrase ? (
-              <p className="text-sm text-destructive">
-                {fieldErrors.privateKeyPassphrase[0]}
-              </p>
-            ) : null}
+            <FieldError
+              fieldId="snowflake-private-key-passphrase"
+              errors={fieldErrors.privateKeyPassphrase}
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="snowflake-role">Role</Label>
@@ -851,13 +889,11 @@ function SnowflakeConnectionFields({
               placeholder="ANALYST"
               value={form.role}
               onChange={(event) => onFieldChange('role', event.target.value)}
-              data-invalid={fieldErrors.role ? 'true' : undefined}
+              {...getFieldErrorAttributes('snowflake-role', fieldErrors.role)}
               className={fieldClassName}
               data-1p-ignore
             />
-            {fieldErrors.role ? (
-              <p className="text-sm text-destructive">{fieldErrors.role[0]}</p>
-            ) : null}
+            <FieldError fieldId="snowflake-role" errors={fieldErrors.role} />
           </div>
         </div>
       </div>
@@ -893,7 +929,10 @@ function AsanaConnectionFields({
           placeholder="0/1234567890abcdef..."
           value={form.accessToken}
           onChange={(event) => onFieldChange('accessToken', event.target.value)}
-          data-invalid={fieldErrors.accessToken ? 'true' : undefined}
+          {...getFieldErrorAttributes(
+            'asana-access-token',
+            fieldErrors.accessToken,
+          )}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -918,11 +957,10 @@ function AsanaConnectionFields({
             Leave blank to keep the existing token.
           </p>
         ) : null}
-        {fieldErrors.accessToken ? (
-          <p className="text-sm text-destructive">
-            {fieldErrors.accessToken[0]}
-          </p>
-        ) : null}
+        <FieldError
+          fieldId="asana-access-token"
+          errors={fieldErrors.accessToken}
+        />
       </div>
       {formError ? (
         <p className="text-sm text-destructive">{formError}</p>
@@ -961,9 +999,10 @@ function NotionConnectionFields({
           onChange={(event) =>
             onFieldChange('internalIntegrationSecret', event.target.value)
           }
-          data-invalid={
-            fieldErrors.internalIntegrationSecret ? 'true' : undefined
-          }
+          {...getFieldErrorAttributes(
+            'notion-internal-integration-secret',
+            fieldErrors.internalIntegrationSecret,
+          )}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -990,11 +1029,10 @@ function NotionConnectionFields({
             Leave blank to keep the existing secret.
           </p>
         ) : null}
-        {fieldErrors.internalIntegrationSecret ? (
-          <p className="text-sm text-destructive">
-            {fieldErrors.internalIntegrationSecret[0]}
-          </p>
-        ) : null}
+        <FieldError
+          fieldId="notion-internal-integration-secret"
+          errors={fieldErrors.internalIntegrationSecret}
+        />
       </div>
       {formError ? (
         <p className="text-sm text-destructive">{formError}</p>
@@ -1028,7 +1066,10 @@ function RipplingConnectionFields({
           type="password"
           value={form.apiToken}
           onChange={(event) => onFieldChange('apiToken', event.target.value)}
-          data-invalid={fieldErrors.apiToken ? 'true' : undefined}
+          {...getFieldErrorAttributes(
+            'rippling-api-token',
+            fieldErrors.apiToken,
+          )}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -1046,9 +1087,10 @@ function RipplingConnectionFields({
             Leave blank to keep and revalidate the existing token.
           </p>
         ) : null}
-        {fieldErrors.apiToken ? (
-          <p className="text-sm text-destructive">{fieldErrors.apiToken[0]}</p>
-        ) : null}
+        <FieldError
+          fieldId="rippling-api-token"
+          errors={fieldErrors.apiToken}
+        />
       </div>
       {formError ? (
         <p className="text-sm text-destructive">{formError}</p>
@@ -1083,7 +1125,10 @@ function XConnectionFields({
           placeholder="AAAAAAAAAAAAAAAAAAAAA..."
           value={form.bearerToken}
           onChange={(event) => onFieldChange('bearerToken', event.target.value)}
-          data-invalid={fieldErrors.bearerToken ? 'true' : undefined}
+          {...getFieldErrorAttributes(
+            'x-bearer-token',
+            fieldErrors.bearerToken,
+          )}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -1109,11 +1154,7 @@ function XConnectionFields({
             Leave blank to keep the existing token.
           </p>
         ) : null}
-        {fieldErrors.bearerToken ? (
-          <p className="text-sm text-destructive">
-            {fieldErrors.bearerToken[0]}
-          </p>
-        ) : null}
+        <FieldError fieldId="x-bearer-token" errors={fieldErrors.bearerToken} />
       </div>
       {formError ? (
         <p className="text-sm text-destructive">{formError}</p>
@@ -1148,7 +1189,7 @@ function GranolaConnectionFields({
           placeholder="Enter your Granola API key"
           value={form.apiKey}
           onChange={(event) => onFieldChange('apiKey', event.target.value)}
-          data-invalid={fieldErrors.apiKey ? 'true' : undefined}
+          {...getFieldErrorAttributes('granola-api-key', fieldErrors.apiKey)}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -1170,9 +1211,7 @@ function GranolaConnectionFields({
             Leave blank to keep the existing API key.
           </p>
         ) : null}
-        {fieldErrors.apiKey ? (
-          <p className="text-sm text-destructive">{fieldErrors.apiKey[0]}</p>
-        ) : null}
+        <FieldError fieldId="granola-api-key" errors={fieldErrors.apiKey} />
       </div>
       {formError ? (
         <p className="text-sm text-destructive">{formError}</p>
@@ -1238,7 +1277,7 @@ function VoiceConnectionFields({
           placeholder="Enter an OpenAI API key with GPT-Live access"
           value={form.apiKey}
           onChange={(event) => onFieldChange('apiKey', event.target.value)}
-          data-invalid={fieldErrors.apiKey ? 'true' : undefined}
+          {...getFieldErrorAttributes('voice-api-key', fieldErrors.apiKey)}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -1250,9 +1289,7 @@ function VoiceConnectionFields({
             Leave blank to keep the existing API key.
           </p>
         ) : null}
-        {fieldErrors.apiKey ? (
-          <p className="text-sm text-destructive">{fieldErrors.apiKey[0]}</p>
-        ) : null}
+        <FieldError fieldId="voice-api-key" errors={fieldErrors.apiKey} />
       </div>
       <div className="space-y-2">
         <Label htmlFor="voice-selection">Voice</Label>
@@ -1263,7 +1300,14 @@ function VoiceConnectionFields({
               onFieldChange('voiceId', value as OpenAiRealtimeVoiceId)
             }
           >
-            <SelectTrigger id="voice-selection" className="w-full sm:flex-1">
+            <SelectTrigger
+              id="voice-selection"
+              className="w-full sm:flex-1"
+              {...getFieldErrorAttributes(
+                'voice-selection',
+                fieldErrors.voiceId,
+              )}
+            >
               <span>{selectedVoice?.label ?? 'Select a voice'}</span>
             </SelectTrigger>
             <SelectContent>
@@ -1298,9 +1342,7 @@ function VoiceConnectionFields({
           Hear an AI-generated sample. OpenAI currently recommends Marin and
           Cedar for best quality.
         </p>
-        {fieldErrors.voiceId ? (
-          <p className="text-sm text-destructive">{fieldErrors.voiceId[0]}</p>
-        ) : null}
+        <FieldError fieldId="voice-selection" errors={fieldErrors.voiceId} />
         {previewError ? (
           <p
             className="text-sm text-destructive"
@@ -1344,7 +1386,7 @@ function ElevenLabsConnectionFields({
           placeholder="Enter your ElevenLabs API key"
           value={form.apiKey}
           onChange={(event) => onFieldChange('apiKey', event.target.value)}
-          data-invalid={fieldErrors.apiKey ? 'true' : undefined}
+          {...getFieldErrorAttributes('elevenlabs-api-key', fieldErrors.apiKey)}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -1362,9 +1404,7 @@ function ElevenLabsConnectionFields({
             Leave blank to keep the existing API key.
           </p>
         ) : null}
-        {fieldErrors.apiKey ? (
-          <p className="text-sm text-destructive">{fieldErrors.apiKey[0]}</p>
-        ) : null}
+        <FieldError fieldId="elevenlabs-api-key" errors={fieldErrors.apiKey} />
       </div>
       <div className="space-y-2">
         <Label htmlFor="elevenlabs-voice-id">Voice ID</Label>
@@ -1373,7 +1413,10 @@ function ElevenLabsConnectionFields({
           placeholder="e.g. 21m00Tcm4TlvDq8ikWAM"
           value={form.voiceId}
           onChange={(event) => onFieldChange('voiceId', event.target.value)}
-          data-invalid={fieldErrors.voiceId ? 'true' : undefined}
+          {...getFieldErrorAttributes(
+            'elevenlabs-voice-id',
+            fieldErrors.voiceId,
+          )}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -1383,9 +1426,10 @@ function ElevenLabsConnectionFields({
           The ElevenLabs voice used for narration. Find voice IDs in the
           ElevenLabs voice library.
         </p>
-        {fieldErrors.voiceId ? (
-          <p className="text-sm text-destructive">{fieldErrors.voiceId[0]}</p>
-        ) : null}
+        <FieldError
+          fieldId="elevenlabs-voice-id"
+          errors={fieldErrors.voiceId}
+        />
       </div>
       {formError ? (
         <p className="text-sm text-destructive">{formError}</p>
@@ -1420,7 +1464,10 @@ function GrafanaConnectionFields({
             placeholder="https://grafana.example.com"
             value={form.baseUrl}
             onChange={(event) => onFieldChange('baseUrl', event.target.value)}
-            data-invalid={fieldErrors.baseUrl ? 'true' : undefined}
+            {...getFieldErrorAttributes(
+              'grafana-base-url',
+              fieldErrors.baseUrl,
+            )}
             className={fieldClassName}
             autoCapitalize="off"
             autoCorrect="off"
@@ -1431,9 +1478,7 @@ function GrafanaConnectionFields({
             Use the base URL for the shared Grafana instance that this workspace
             should inspect.
           </p>
-          {fieldErrors.baseUrl ? (
-            <p className="text-sm text-destructive">{fieldErrors.baseUrl[0]}</p>
-          ) : null}
+          <FieldError fieldId="grafana-base-url" errors={fieldErrors.baseUrl} />
         </div>
 
         <div className="space-y-2">
@@ -1447,7 +1492,10 @@ function GrafanaConnectionFields({
             onChange={(event) =>
               onFieldChange('serviceAccountToken', event.target.value)
             }
-            data-invalid={fieldErrors.serviceAccountToken ? 'true' : undefined}
+            {...getFieldErrorAttributes(
+              'grafana-service-account-token',
+              fieldErrors.serviceAccountToken,
+            )}
             className={fieldClassName}
             autoCapitalize="off"
             autoCorrect="off"
@@ -1463,11 +1511,10 @@ function GrafanaConnectionFields({
               Leave blank to keep the existing token.
             </p>
           ) : null}
-          {fieldErrors.serviceAccountToken ? (
-            <p className="text-sm text-destructive">
-              {fieldErrors.serviceAccountToken[0]}
-            </p>
-          ) : null}
+          <FieldError
+            fieldId="grafana-service-account-token"
+            errors={fieldErrors.serviceAccountToken}
+          />
         </div>
       </div>
       {formError ? (
@@ -1505,7 +1552,10 @@ function VercelConnectionFields({
             onChange={(event) =>
               onFieldChange('accessToken', event.target.value)
             }
-            data-invalid={fieldErrors.accessToken ? 'true' : undefined}
+            {...getFieldErrorAttributes(
+              'vercel-access-token',
+              fieldErrors.accessToken,
+            )}
             className={fieldClassName}
             autoCapitalize="off"
             autoCorrect="off"
@@ -1521,11 +1571,10 @@ function VercelConnectionFields({
               Leave blank to keep the existing token.
             </p>
           ) : null}
-          {fieldErrors.accessToken ? (
-            <p className="text-sm text-destructive">
-              {fieldErrors.accessToken[0]}
-            </p>
-          ) : null}
+          <FieldError
+            fieldId="vercel-access-token"
+            errors={fieldErrors.accessToken}
+          />
         </div>
 
         <div className="space-y-2">
@@ -1539,7 +1588,10 @@ function VercelConnectionFields({
             onChange={(event) =>
               onFieldChange('defaultTeamIdOrSlug', event.target.value)
             }
-            data-invalid={fieldErrors.defaultTeamIdOrSlug ? 'true' : undefined}
+            {...getFieldErrorAttributes(
+              'vercel-default-team',
+              fieldErrors.defaultTeamIdOrSlug,
+            )}
             className={fieldClassName}
             autoCapitalize="off"
             autoCorrect="off"
@@ -1550,11 +1602,10 @@ function VercelConnectionFields({
             lookups. Leave blank to let tools work against the token&apos;s
             personal account unless a team is provided in the tool input.
           </p>
-          {fieldErrors.defaultTeamIdOrSlug ? (
-            <p className="text-sm text-destructive">
-              {fieldErrors.defaultTeamIdOrSlug[0]}
-            </p>
-          ) : null}
+          <FieldError
+            fieldId="vercel-default-team"
+            errors={fieldErrors.defaultTeamIdOrSlug}
+          />
         </div>
       </div>
       {formError ? (
@@ -1566,8 +1617,15 @@ function VercelConnectionFields({
 
 export function Integrations({
   integrationIds,
+  configurationRequest,
+  showCatalog = true,
 }: {
   integrationIds?: readonly string[];
+  configurationRequest?: {
+    integrationId: string;
+    sequence: number;
+  } | null;
+  showCatalog?: boolean;
 } = {}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -2546,6 +2604,77 @@ export function Integrations({
     highlightedIntegrationId,
   ]);
 
+  const handledConfigurationSequence = useRef<number | null>(null);
+  const integrationsUnavailable = effectiveIntegrations.data?.some(
+    (integration) => integration.status === 'unavailable',
+  );
+
+  useEffect(() => {
+    if (
+      configurationRequest == null ||
+      effectiveIntegrations.isPending ||
+      handledConfigurationSequence.current === configurationRequest.sequence
+    ) {
+      return;
+    }
+
+    const requestedItemId =
+      configurationRequest.integrationId === 'sentry'
+        ? 'sentry-mcp'
+        : configurationRequest.integrationId;
+    const requestedItem = items.find((item) => item.id === requestedItemId);
+    const requestedIntegration = effectiveIntegrations.data?.find(
+      (integration) => integration.id === configurationRequest.integrationId,
+    );
+
+    if (requestedItem?.isPending) {
+      return;
+    }
+
+    handledConfigurationSequence.current = configurationRequest.sequence;
+
+    if (integrationsUnavailable) {
+      toast.error('Integrations are disabled by the deployment operator.');
+      return;
+    }
+
+    if (requestedItem == null) {
+      toast.error('This integration cannot be configured here.');
+      return;
+    }
+
+    if (requestedIntegration?.status === 'connected') {
+      toast.success(`${requestedItem.name} is already connected.`);
+      return;
+    }
+
+    if (requestedIntegration?.status === 'needs_connection') {
+      const reconnectAction =
+        requestedItem.headerAction?.onAction ??
+        (requestedItem.secondaryAction?.ariaLabel.startsWith('Reconnect ')
+          ? requestedItem.secondaryAction.onAction
+          : undefined);
+
+      if (reconnectAction) {
+        reconnectAction();
+        return;
+      }
+    }
+
+    if (requestedItem.onAction == null) {
+      toast.error('This integration cannot be configured here.');
+      return;
+    }
+
+    requestedItem.onAction();
+  }, [
+    configurationRequest,
+    effectiveIntegrations.data,
+    effectiveIntegrations.isPending,
+    integrationsUnavailable,
+    items,
+  ]);
+
   const {
     isEnabled: customMcpEnabled,
     items: customMcpItems,
@@ -3226,11 +3355,7 @@ export function Integrations({
     });
   };
 
-  if (
-    effectiveIntegrations.data?.some(
-      (integration) => integration.status === 'unavailable',
-    )
-  ) {
+  if (integrationsUnavailable) {
     return (
       <div className="space-y-8">
         <Alert>
@@ -3524,7 +3649,7 @@ export function Integrations({
           deepLinkDialogItem.onAction?.();
         }}
       />
-      {integrationIds !== undefined ? (
+      {!showCatalog ? null : integrationIds !== undefined ? (
         <IntegrationSection
           id="selected-integrations"
           title="Integrations"

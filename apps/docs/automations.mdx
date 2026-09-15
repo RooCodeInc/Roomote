@@ -156,8 +156,8 @@ Create arbitrary scheduled agent runs with:
 - a **cadence** (`every hour`, `every 6 hours`, `daily`, or `weekly`)
 - an optional **preferred environment**: a named environment, **All
   repositories**, or **Blank slate**. Blank slate always delegates the run to a
-  sandbox without repositories; leave it as **Let Roomote decide** to route
-  normally
+  sandbox with no repositories checked out; leave it as **Let Roomote decide**
+  to route normally
 - an optional **model** override for the automation's Fast session, including
   later turns; without an override, it uses the deployment orchestration default.
   Delegated coding tasks use their own model selection or deployment coding default
@@ -170,8 +170,9 @@ Create arbitrary scheduled agent runs with:
 
 Each custom automation row summarizes its cadence, workspace target, report
 destination, creator, and most recent run. Its runs also appear as Sessions in
-the normal Session history. Blank slate runs do not clone repositories or
-require source-control credentials.
+the normal Session history. Blank slate runs clone nothing up front; when
+source control is connected the agent can still check out any active repository
+on demand, and otherwise the run needs no source-control credentials.
 
 When creating an automation through Roomote chat, ask for **suggested tasks** or
 **launchable follow-ups** if qualifying findings should become tasks that
@@ -182,8 +183,10 @@ report destination. Each suggestion can select its own named environment,
 follow-ups for different workspaces and execution modes. Repository-specific suggestions from
 **All repositories** runs start in a matching named environment when one is
 available. Choosing **All repositories** is a delegation preference, not a
-request to prepare every repository on every run. Use a named environment when
-the automation only needs a specific repository set.
+request to prepare every repository on every run: the sandbox starts with a
+`REPOSITORIES.md` index of every active repository and the agent checks out
+only the ones the task needs. Use a named environment when the automation only
+needs a specific repository set.
 
 Suggestions can accompany the Session's report after a delegated task finishes,
 not just its initial response. Accepting one keeps the follow-up in the

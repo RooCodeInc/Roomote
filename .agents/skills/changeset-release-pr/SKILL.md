@@ -412,8 +412,13 @@ Release refresh deliberately refuses that state; push-triggered Release runs
 also refuse to replace its metadata with the original version-bump SHA. Do not
 force the candidate back onto develop. Reconcile a later pinned production base
 through another reviewed run, or obtain a separately audited replacement-release
-decision if newer develop work is needed. If any pin, approval, publication, or
-scope guard fails, stop and re-audit rather than bypassing it.
+decision if newer develop work is needed. An explicitly authorized same-version
+replacement uses the Release workflow with the full current candidate SHA and
+audited develop SHA; its force-with-lease comparison is CI-owned, requires the
+release bot, and invalidates all checks, reviews, and reconciliation provenance
+from the prior candidate. Never reproduce that replacement with a manual push.
+If any pin, approval, publication, or scope guard fails, stop and re-audit
+rather than bypassing it.
 
 ## Emergency direct-to-main hotfix path
 

@@ -417,7 +417,7 @@ export function ArtifactViewerContent({
 
         <div
           className={cn(
-            'ph-no-capture flex-1 min-h-0 bg-card overflow-y-auto h-full',
+            'ph-no-capture flex-1 min-h-0 bg-background overflow-y-auto h-full',
             (isMarkdown && !isRaw) || (isHTML && !isRaw) || isPDF || isVideo
               ? 'overflow-x-hidden'
               : 'overflow-x-auto',
@@ -437,7 +437,7 @@ export function ArtifactViewerContent({
           ) : canRender ? (
             <>
               {isMarkdown && !isRaw && artifact.content && (
-                <div className="max-w-3xl p-6 text-sm">
+                <div className="mx-auto w-full max-w-4xl p-6 text-sm">
                   <Streamdown
                     className="size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
                     remarkPlugins={[
@@ -469,7 +469,12 @@ export function ArtifactViewerContent({
 
               {((isMarkdown && isRaw) || (isHTML && isRaw) || isText) &&
                 artifact.content && (
-                  <div className="min-w-0 overflow-x-auto p-2 text-sm leading-relaxed text-foreground">
+                  <div
+                    className={cn(
+                      'min-w-0 overflow-x-auto p-2 text-sm leading-relaxed text-foreground',
+                      isText && 'mx-auto w-full max-w-4xl',
+                    )}
+                  >
                     <CodeBlock
                       code={artifact.content}
                       language={language}
@@ -482,6 +487,7 @@ export function ArtifactViewerContent({
                 <MediaViewerImage
                   src={artifact.downloadUrl}
                   alt={artifact.path}
+                  viewportClassName="bg-background"
                 />
               )}
 
@@ -494,7 +500,7 @@ export function ArtifactViewerContent({
               )}
 
               {isVideo && (
-                <div className="flex h-full w-full min-w-0 items-center justify-center bg-zinc-800 p-4">
+                <div className="flex h-full w-full min-w-0 items-center justify-center bg-background p-4">
                   <video
                     src={artifact.downloadUrl}
                     controls
