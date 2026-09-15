@@ -184,9 +184,7 @@ describe('integration key route boundary', () => {
     });
     expect(mocks.reply).toHaveBeenCalledExactlyOnceWith(auth, {
       sessionId: fastConversationId,
-      text: expect.stringContaining(
-        'Credential-backed Session access is temporarily unavailable',
-      ),
+      text: expect.stringContaining('Integration keys are turned off'),
     });
     expect(mocks.create.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.findSession.mock.invocationCallOrder[0]!,
@@ -209,8 +207,12 @@ describe('integration key route boundary', () => {
 
     expect(mocks.reply).toHaveBeenCalledWith(auth, {
       sessionId: fastConversationId,
-      text: expect.stringContaining('Check list_integration_keys'),
+      text: expect.stringContaining('Call list_integration_keys'),
     });
+    const text = mocks.reply.mock.calls[0]![1].text;
+    expect(text).toMatch(
+      /^<environment-instructions>\n[^<]+\n<\/environment-instructions>\n<request>I added the integration, go ahead\.<\/request>$/u,
+    );
   });
 
   it('uses fixed nonsecret continuation text independent of the saved credential metadata', async () => {

@@ -3,7 +3,9 @@ import {
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   extractAutomationTriggeredPromptText,
   extractAcpMessageText,
+  extractVisibleAcpPromptText,
   getTextFromContentBlocks,
+  isSystemInjectedAcpPromptText,
   parsePrReviewActionOffer,
   type PrReviewActionOfferStatus,
   sanitizeEnvelopeFields,
@@ -583,6 +585,27 @@ function prepareFastSessionMessageRow<
     { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
   );
 
+  if (
+    row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+    sanitized.metadata?.visibleInTranscript !== false
+  ) {
+    // A human turn Roomote framed with an `<environment-instructions>` block
+    // (for example the continuation after the owner saves an integration key)
+    // shows only its `<request>` text, as task transcripts already do.
+    const text = getTextFromContentBlocks(sanitized.contentBlocks) ?? '';
+    if (isSystemInjectedAcpPromptText(text)) {
+      return {
+        ...row,
+        contentBlocks: [
+          { type: 'text', text: extractVisibleAcpPromptText(text) },
+          ...sanitized.contentBlocks.filter((block) => block.type !== 'text'),
+        ],
+        metadata: sanitized.metadata,
+        payload: sanitized.payload ?? {},
+      };
+    }
+  }
+
   if (sanitized.metadata?.visibleInTranscript === false) {
     if (
       row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
@@ -768,11 +791,12 @@ export async function getFastSessionSuggestableMessages(
     id: row.id,
     eventType: row.eventType,
     role: row.role,
-    text:
+    text: visibleSuggestableText(
       extractAcpMessageText(
         row.contentBlocks,
         (row.payload as Record<string, unknown> | null) ?? null,
       ) ?? null,
+    ),
   }));
 }
 
@@ -884,4 +908,10 @@ export async function getFastSessionById(
     directInferenceCostMicroUsd,
     inferenceCostMicroUsd: directInferenceCostMicroUsd,
   };
+}
+
+function visibleSuggestableText(text: string | null): string | null {
+  return text && isSystemInjectedAcpPromptText(text)
+    ? extractVisibleAcpPromptText(text)
+    : text;
 }
