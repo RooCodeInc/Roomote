@@ -390,6 +390,10 @@ function getHealthEndpoints(
       url: `http://localhost:${apiPort}/health/controller`,
     },
     {
+      name: 'bullmq health',
+      url: `http://localhost:${apiPort}/health/bullmq`,
+    },
+    {
       name: 'preview proxy',
       url: `http://localhost:${previewProxyPort}/health`,
     },

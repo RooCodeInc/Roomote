@@ -9,6 +9,7 @@ import {
 import {
   and,
   asc,
+  count,
   db,
   eq,
   fastAgentParentEvents,
@@ -552,6 +553,28 @@ export async function drainFastAgentParentEvents(
   } finally {
     await turnLock().catch(() => {});
   }
+}
+
+/**
+ * Queued (non-inline) events that have waited longer than `olderThan` for the
+ * bullmq worker. Inline-admitted rows are excluded: their live owner delivers
+ * them without the queue. A non-zero count means the queue worker is not
+ * draining, which is what `/health/bullmq` reports.
+ */
+export async function countOverdueQueuedFastAgentParentEvents(
+  olderThan: Date,
+): Promise<number> {
+  const [row] = await db
+    .select({ count: count() })
+    .from(fastAgentParentEvents)
+    .where(
+      and(
+        pendingPredicate(),
+        isNull(fastAgentParentEvents.admission),
+        lt(fastAgentParentEvents.createdAt, olderThan),
+      ),
+    );
+  return row?.count ?? 0;
 }
 
 /** Recreate BullMQ wakeups for durable rows after restarts or Redis outages. */

@@ -55,6 +55,7 @@ import { startAutomationRecommendationsQueue } from './automation-recommendation
 import { startFastAgentParentEventQueue } from './fast-agent-parent-event-queue';
 import { startAgentMailWebhookEventsQueue } from './agentmail-webhook-events-queue';
 import { readBullMqQueueHealth } from './health';
+import { startBullMqLivenessWatchdog } from './liveness-watchdog';
 import { startSessionWakeupQueue } from './session-wakeup-queue';
 import { startHomeComposerRecommendationsQueue } from './home-composer-recommendations-queue';
 import { installBullMqGracefulShutdown } from './graceful-shutdown';
@@ -415,11 +416,26 @@ app.route('/admin/queues', serverAdapter.registerPlugin());
 
 app.get('/', (c) => c.redirect('/admin/queues'));
 
+// A hung job loop looks healthy to Railway, to the Redis client, and to
+// /admin/health. The watchdog exits the process so the on-failure restart
+// policy recovers it; see liveness-watchdog.ts.
+const livenessWatchdog = startBullMqLivenessWatchdog({
+  worker: schedulerWorker,
+  redisStatus: () => redis.status,
+  onStale: ({ idleMs }) =>
+    captureBullMqMessage(
+      `bullmq scheduler worker made no progress for ${Math.round(idleMs / 1000)}s; restarting`,
+      undefined,
+      { component: 'liveness-watchdog', signal: 'scheduler-worker-stalled' },
+    ),
+});
+
 // Resumed Fast turns execute inside this process, so shutdown drains and
 // aborts them before anything else closes; see graceful-shutdown.ts.
 installBullMqGracefulShutdown({
   fastAgentWorker: fastAgentParentEventWorker,
   closeRemaining: async () => {
+    livenessWatchdog.stop();
     await schedulerWorker.close();
     await schedulerQueueEvents.close();
     await schedulerQueue.close();
