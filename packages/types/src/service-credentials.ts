@@ -4,6 +4,7 @@ import {
   CREDENTIAL_EGRESS_READ_METHODS,
   credentialEgressAllowedMethodsSchema,
   credentialEgressHeaderNameSchema,
+  credentialEgressMethodSchema,
   type CredentialEgressMethod,
 } from './credential-egress';
 
@@ -106,20 +107,37 @@ export const integrationCreateSchema = z
  * used by ordinary HTTP clients at the real service URL through the session
  * egress gateway; see `credential-egress.ts`.
  */
+export const SERVICE_CREDENTIAL_REQUEST_BODY_MAX_BYTES = 65_536;
+
 export const serviceCredentialRequestSchema = z
   .object({
     secretRef: z.string().uuid(),
-    method: z.enum(['GET', 'HEAD']),
+    /** Any method; the broker enforces the grant's approved methods. */
+    method: credentialEgressMethodSchema,
     path: z.string().min(1).max(2048),
     accept: z.enum(['application/json', 'text/plain']).optional(),
     body: z
-      .literal('')
+      .string()
+      .max(SERVICE_CREDENTIAL_REQUEST_BODY_MAX_BYTES)
       .nullish()
       .describe(
-        'GET/HEAD have no body. Omit, use null, or use an empty string.',
+        'Request body for an approved write method. GET/HEAD have no body: omit, use null, or use an empty string.',
       ),
+    contentType: z
+      .enum([
+        'application/json',
+        'text/plain',
+        'application/x-www-form-urlencoded',
+      ])
+      .optional()
+      .describe('Content type of the body; ignored for GET/HEAD.'),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      !((value.method === 'GET' || value.method === 'HEAD') && value.body),
+    { message: 'GET/HEAD requests cannot carry a body' },
+  );
 
 export type ServiceCredentialCreate = z.infer<
   typeof serviceCredentialCreateSchema

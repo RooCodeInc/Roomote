@@ -755,13 +755,14 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Make one bounded GET or HEAD request using a ready integration key reference without exposing the credential; the server sends the request to the approved origin with the real key. Discover references with list_integration_keys; never invent one or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers. For scripts, SDKs, CLIs, repeated calls, or approved write methods, launch a coding task attached to this Session instead: it receives the approved services as substitute tokens with a base URL. Call directly without an opening acknowledgement or another confirmation, and report the actual result.",
+  description: "Make one bounded request using a ready integration key reference without exposing the credential; the server sends it to the approved origin with the real key, using any method the human approved for that integration (reads, and POST/PUT/PATCH/DELETE when listed in its allowedMethods). Discover references with list_integration_keys; never invent one or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers; give a body and contentType for writes. For scripts, SDKs, CLIs, or many calls, launch a coding task attached to this Session instead: it receives the approved services as substitute tokens with a base URL. Call directly without an opening acknowledgement or another confirmation, and report the actual result.",
   args: {
     secretRef: z.string().uuid(),
-    method: z.enum(["GET", "HEAD"]),
+    method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]),
     path: z.string().min(1).max(2048),
     accept: z.enum(["application/json", "text/plain"]).optional(),
-    body: z.literal("").nullish().describe("GET/HEAD have no body. Omit, use null, or use an empty string."),
+    body: z.string().max(65536).nullish().describe("Request body for an approved write method. GET/HEAD have no body: omit, use null, or use an empty string."),
+    contentType: z.enum(["application/json", "text/plain", "application/x-www-form-urlencoded"]).optional().describe("Content type of the body; ignored for GET/HEAD."),
   },
   execute: (args, context) => invoke("request_with_integration_key", args, context),
 }

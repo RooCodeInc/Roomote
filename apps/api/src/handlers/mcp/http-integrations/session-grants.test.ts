@@ -650,6 +650,47 @@ it('records failure, not success, when revoked during completion-audit persisten
   expect(rows.map((row) => row.outcome).sort()).toEqual(['failed', 'started']);
 });
 
+it('performs an approved write method with a body and still rejects methods outside the grant', async () => {
+  const pending = await prepareServiceCredential(context, {
+    label: 'Write test credential',
+    origin,
+    headerName: 'authorization',
+    headerPrefix: 'Bearer ',
+    allowedMethods: ['GET', 'HEAD', 'POST'],
+  });
+  const writable = await createServiceCredential(context, {
+    pendingRef: pending.pendingRef,
+    secret,
+    allowedMethods: ['GET', 'HEAD', 'POST'],
+  });
+  try {
+    await request({
+      integrationId: `session:${writable.secretRef}`,
+      method: 'POST',
+      path: '/v1/search',
+      body: '{"q":"roomote"}',
+      contentType: 'application/json',
+    });
+    const [url, options] = vi.mocked(fetch).mock.lastCall!;
+    expect(String(url)).toBe(`${origin}/v1/search`);
+    expect(options).toMatchObject({ method: 'POST', body: '{"q":"roomote"}' });
+    expect((options!.headers as Record<string, string>).authorization).toBe(
+      `Bearer ${secret}`,
+    );
+    await expect(
+      request({
+        integrationId: `session:${writable.secretRef}`,
+        method: 'DELETE',
+        path: '/v1/search',
+      }),
+    ).rejects.toThrow(/^Secret request unavailable$/);
+  } finally {
+    await db.execute(
+      sql`delete from service_credential_audit where secret_ref = ${writable.secretRef}`,
+    );
+  }
+});
+
 it('logs bounded reasons for denied and failed Session requests without request details', async () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   try {

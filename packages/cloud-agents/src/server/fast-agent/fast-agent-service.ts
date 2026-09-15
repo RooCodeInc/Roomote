@@ -4721,6 +4721,7 @@ export async function answerFastAgentQuestion({
                     method: request.method,
                     path: request.path,
                     body: request.body,
+                    contentType: request.contentType,
                     accept: request.accept,
                   },
                 },

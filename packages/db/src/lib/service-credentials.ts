@@ -356,7 +356,13 @@ export async function listUserIntegrations(userId: string) {
     .from(serviceCredentials)
     .innerJoin(users, eq(users.id, serviceCredentials.ownerUserId))
     .where(
-      and(eq(serviceCredentials.ownerUserId, userId), isNull(users.deletedAt)),
+      and(
+        eq(serviceCredentials.ownerUserId, userId),
+        isNull(users.deletedAt),
+        // Revoked and expired integrations are gone for every reader: the
+        // agent's listing, the Settings page, and attached runs.
+        liveGrantWhere(),
+      ),
     )
     .orderBy(asc(serviceCredentials.createdAt));
   return rows.map(metadata);
