@@ -206,9 +206,11 @@ describe('AcpActivityGroupMessage', () => {
       } satisfies AcpActivityGroupRenderBlock;
 
       render(
-        <AcpActivityGroupMessage group={group}>
-          <div>Reasoning stays visible</div>
-        </AcpActivityGroupMessage>,
+        <AcpTranscriptBlockList
+          blocks={[group]}
+          showInternalMessages={false}
+          onSuppress={() => {}}
+        />,
       );
 
       const groupTrigger = live
@@ -233,6 +235,11 @@ describe('AcpActivityGroupMessage', () => {
       expect(document.body).toHaveTextContent('first lookup');
       expect(groupTrigger).toHaveAttribute('data-state', 'open');
       expect(firstChildTrigger).toHaveAttribute('data-state', 'open');
+      expect(document.querySelectorAll('#msg-2000')).toHaveLength(1);
+      expect(document.querySelectorAll('#msg-3000')).toHaveLength(1);
+      expect(document.getElementById('msg-2000')).not.toHaveAttribute(
+        'aria-hidden',
+      );
     },
   );
 
