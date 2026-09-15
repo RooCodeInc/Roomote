@@ -151,4 +151,66 @@ describe('deletePrivateSessionCommand', () => {
       }),
     ).resolves.toBeDefined();
   });
+
+  it('blocks concurrent artifact creation before taking the deletion snapshot', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'fast_delegation',
+    });
+    await db.insert(taskArtifacts).values({
+      taskId: task.id,
+      contentType: 'text/plain',
+      path: 'existing.txt',
+      version: 0,
+      size: 8,
+      uploaded: true,
+    });
+    let concurrentInsert: Promise<unknown> | null = null;
+    mockDeleteArtifactsBatch.mockImplementation(async () => {
+      concurrentInsert = Promise.resolve(
+        db.insert(taskArtifacts).values({
+          taskId: task.id,
+          contentType: 'text/plain',
+          path: 'too-late.txt',
+          version: 0,
+          size: 8,
+          uploaded: true,
+        }),
+      );
+      const settled = concurrentInsert.then(
+        () => true,
+        () => true,
+      );
+      await expect(
+        Promise.race([
+          settled,
+          new Promise<false>((resolve) =>
+            setTimeout(() => resolve(false), 100),
+          ),
+        ]),
+      ).resolves.toBe(false);
+      return { deleted: 0, errors: 0 };
+    });
+
+    await expect(
+      deletePrivateSessionCommand(
+        { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+        session.id,
+      ),
+    ).resolves.toEqual({ deleted: true });
+    await expect(concurrentInsert).rejects.toThrow();
+  });
 });

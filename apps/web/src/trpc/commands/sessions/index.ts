@@ -7,6 +7,7 @@ import {
 import { SESSION_STATUSES } from '@roomote/types';
 import {
   and,
+  asc,
   advanceSessionReadCursor,
   cancelSessionWakeupsForConversation,
   db,
@@ -70,7 +71,23 @@ export async function deletePrivateSessionCommand(
       .select({ taskId: sessionTasks.taskId })
       .from(sessionTasks)
       .where(eq(sessionTasks.sessionId, session.id));
-    const taskIds = linkedTasks.map(({ taskId }) => taskId);
+    const linkedTaskIds = linkedTasks.map(({ taskId }) => taskId);
+    const lockedTasks =
+      linkedTaskIds.length > 0
+        ? await tx
+            .select({ id: tasks.id })
+            .from(tasks)
+            .where(
+              and(
+                inArray(tasks.id, linkedTaskIds),
+                eq(tasks.privacy, 'private'),
+                eq(tasks.privateOwnerUserId, auth.userId),
+              ),
+            )
+            .orderBy(asc(tasks.id))
+            .for('update')
+        : [];
+    const taskIds = lockedTasks.map(({ id }) => id);
     if (taskIds.length > 0) {
       const artifacts = await tx
         .select({
