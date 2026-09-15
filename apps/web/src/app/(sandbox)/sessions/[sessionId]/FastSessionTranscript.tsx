@@ -84,6 +84,8 @@ import { SetupIntegrationsCard } from './setup/SetupIntegrationsCard';
 import { SESSION_HEADER_CONTENT_CLASS_NAME } from './session-header-layout';
 import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/setup-receipt-transcript';
 import { CapabilityOfferCard } from './CapabilityOfferCard';
+import { PendingIntegrationKeys } from '@/components/sessions/PendingIntegrationKeys';
+import { openIntegrationKeyDialog } from '@/components/sessions/integration-key-dialog';
 
 import {
   AcpMessageItem,
@@ -122,6 +124,19 @@ function getTranscriptMessageText(message: TranscriptMessage) {
   return payload?.kickoff === true
     ? text?.replace(ROOMOTE_KICKOFF_LINK, '')
     : text;
+}
+
+/** A completed `prepare_integration_key` call: the agent just asked the owner for a key. */
+function isIntegrationKeyRequest(message: TranscriptMessage) {
+  if (message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolResult) return false;
+  const payload = message.payload as {
+    toolName?: unknown;
+    status?: unknown;
+  } | null;
+  return (
+    payload?.toolName === 'prepare_integration_key' &&
+    payload?.status === 'completed'
+  );
 }
 
 function shouldSuppressTrustedInputToolMessage(
@@ -1586,6 +1601,38 @@ export function FastSessionTranscript({
   const stopLiveVoiceRef = useRef(liveVoice.stop);
   stopLiveVoiceRef.current = liveVoice.stop;
 
+  // Key requests that arrive while the owner is watching open the key dialog
+  // on their own; requests already in the history only show the pending card.
+  const latestIntegrationKeyRequestId = useMemo(() => {
+    let latest: TranscriptMessage | null = null;
+    for (const message of messages) {
+      if (
+        isIntegrationKeyRequest(message) &&
+        (latest === null || compareTranscriptOrder(message, latest) > 0)
+      ) {
+        latest = message;
+      }
+    }
+    return latest?.eventId ?? null;
+  }, [messages]);
+  const seenIntegrationKeyRequestId = useRef<string | null | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    if (!secretSessionId) return;
+    if (seenIntegrationKeyRequestId.current === undefined) {
+      seenIntegrationKeyRequestId.current = latestIntegrationKeyRequestId;
+      return;
+    }
+    if (
+      latestIntegrationKeyRequestId &&
+      latestIntegrationKeyRequestId !== seenIntegrationKeyRequestId.current
+    ) {
+      seenIntegrationKeyRequestId.current = latestIntegrationKeyRequestId;
+      openIntegrationKeyDialog();
+    }
+  }, [latestIntegrationKeyRequestId, secretSessionId]);
+
   useEffect(() => {
     if (pendingInputRequest && (liveVoiceActive || liveVoiceConnecting)) {
       stopLiveVoiceRef.current();
@@ -1726,6 +1773,12 @@ export function FastSessionTranscript({
                 }
               />
             ))}
+            {secretSessionId ? (
+              <PendingIntegrationKeys
+                sessionId={secretSessionId}
+                latestRequestId={latestIntegrationKeyRequestId}
+              />
+            ) : null}
           </ConversationContent>
           <SessionScrollRestoration sessionId={sessionId} />
           <ConversationScrollButton />

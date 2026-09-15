@@ -18,11 +18,13 @@ import {
   Skeleton,
 } from '@/components/system';
 
+import { INTEGRATION_KEY_DIALOG_HASH } from './integration-key-dialog';
+
 export function ServiceCredentials({ sessionId }: { sessionId: string }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
     const handleHash = () => {
-      if (window.location.hash === '#integrations') setOpen(true);
+      if (window.location.hash === INTEGRATION_KEY_DIALOG_HASH) setOpen(true);
     };
     handleHash();
     window.addEventListener('hashchange', handleHash);
@@ -33,7 +35,7 @@ export function ServiceCredentials({ sessionId }: { sessionId: string }) {
       open={open}
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
-        if (!nextOpen && window.location.hash === '#integrations') {
+        if (!nextOpen && window.location.hash === INTEGRATION_KEY_DIALOG_HASH) {
           const url = new URL(window.location.href);
           url.hash = '';
           window.history.replaceState(window.history.state, '', url);
