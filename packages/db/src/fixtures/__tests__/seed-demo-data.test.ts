@@ -3,6 +3,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { createEmptySetupNewState, RunStatus } from '@roomote/types';
 
 import {
+  taskMessages,
   taskRuns,
   deploymentSettings,
   environments,
@@ -24,6 +25,7 @@ import {
   demoSeedPullRequests,
   demoSeedTasks,
   demoSeedUserId,
+  demoSeedWaitingTask,
   seedDemoData,
 } from '../seed-demo-data';
 
@@ -39,6 +41,7 @@ function withoutSettings(labels: string[]) {
 }
 
 async function cleanup() {
+  await db.delete(tasks).where(eq(tasks.id, demoSeedWaitingTask.id));
   await db
     .delete(sessions)
     .where(eq(sessions.fastConversationId, demoSeedFastSession.conversationId));
@@ -97,7 +100,7 @@ describe('seedDemoData', () => {
     expect(withoutSettings(summary.created)).toHaveLength(
       // user + Fast conversation/messages/Session/participant + installation +
       // environment + repositories + tasks + task runs + PRs
-      6 +
+      10 +
         demoSeedFastSession.messages.length +
         demoSeedRepositories.length +
         demoSeedTasks.length * 2 +
@@ -124,7 +127,8 @@ describe('seedDemoData', () => {
       workspaceId: demoSeedFastSession.workspaceId,
       conversationId: demoSeedFastSession.providerConversationId,
       currentReplyChannelId: demoSeedFastSession.channelId,
-      currentReplyThreadId: demoSeedFastSession.threadId,
+      currentReplyThreadId: null,
+      replyTargetVerified: false,
       title: demoSeedFastSession.title,
     });
 
@@ -133,10 +137,15 @@ describe('seedDemoData', () => {
         fastAgentMessages.conversationId,
         demoSeedFastSession.conversationId,
       ),
-      orderBy: (message, { asc }) => [asc(message.turnSeq)],
+      orderBy: (message, { asc }) => [asc(message.ts)],
     });
     expect(fastMessages).toHaveLength(demoSeedFastSession.messages.length);
-    expect(fastMessages.map(({ role }) => role)).toEqual(['user', 'assistant']);
+    expect(fastMessages.map(({ role }) => role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+    ]);
     expect(fastMessages.map(({ contentBlocks }) => contentBlocks)).toEqual(
       demoSeedFastSession.messages.map(({ text }) => [{ type: 'text', text }]),
     );
@@ -235,6 +244,159 @@ describe('seedDemoData', () => {
     }
   });
 
+  it('refuses production before inserting data even inside a sandbox', async () => {
+    vi.stubEnv('R_APP_ENV', 'production');
+    vi.stubEnv('ROOMOTE_TASK_ID', 'demo-sandbox');
+    vi.stubEnv('ROOMOTE_SANDBOX_SERVER_HOST', 'localhost');
+    try {
+      await expect(seedDemoData()).rejects.toThrow(
+        'Refusing to seed demo data in production.',
+      );
+      expect(
+        await db.query.users.findFirst({ where: eq(users.id, demoSeedUserId) }),
+      ).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('repairs the old Fast reply target and backfills ordered turns without duplicates', async () => {
+    await seedDemoData();
+    await db
+      .update(fastAgentConversations)
+      .set({
+        currentReplyThreadId: demoSeedFastSession.threadId,
+        replyTargetVerified: true,
+      })
+      .where(eq(fastAgentConversations.id, demoSeedFastSession.conversationId));
+    await db.delete(fastAgentMessages).where(
+      inArray(
+        fastAgentMessages.id,
+        demoSeedFastSession.messages.slice(2).map(({ id }) => id),
+      ),
+    );
+
+    await seedDemoData();
+    const conversation = await db.query.fastAgentConversations.findFirst({
+      where: eq(fastAgentConversations.id, demoSeedFastSession.conversationId),
+    });
+    expect(conversation).toMatchObject({
+      currentReplyThreadId: null,
+      replyTargetVerified: false,
+    });
+    const readMessages = () =>
+      db.query.fastAgentMessages.findMany({
+        where: eq(
+          fastAgentMessages.conversationId,
+          demoSeedFastSession.conversationId,
+        ),
+        orderBy: (message, { asc }) => [asc(message.ts)],
+      });
+    const messages = await readMessages();
+    expect(messages.map(({ id }) => id)).toEqual(
+      demoSeedFastSession.messages.map(({ id }) => id),
+    );
+    expect(new Set(messages.map(({ turnId }) => turnId)).size).toBe(2);
+    await seedDemoData();
+    expect(await readMessages()).toEqual(messages);
+  });
+
+  it('seeds an isolated Standard pending request and preserves it on repeat seed', async () => {
+    await seedDemoData();
+    const task = await db.query.tasks.findFirst({
+      where: eq(tasks.id, demoSeedWaitingTask.id),
+    });
+    expect(task).toMatchObject({
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+      state: 'active',
+      visibility: 'visible',
+      deletedAt: null,
+      initiatorKind: 'user',
+      initiatorUserId: demoSeedUserId,
+      harnessSessionId: demoSeedWaitingTask.harnessSessionId,
+      repositoryName: 'roomote-demo/demo-api',
+      slackChannelId: null,
+      slackThreadTs: null,
+      linearIssueId: null,
+    });
+    const runs = await db.query.taskRuns.findMany({
+      where: eq(taskRuns.taskId, demoSeedWaitingTask.id),
+    });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      actingUserId: demoSeedUserId,
+      status: RunStatus.Running,
+      taskPhase: 'waiting_for_user_input',
+      startedAt: expect.any(Date),
+      completedAt: null,
+      sandboxServerUrl: null,
+      machineId: null,
+      sandboxCmdId: null,
+      queueScope: null,
+      vendor: null,
+      snapshotId: null,
+    });
+    const messages = await db.query.taskMessages.findMany({
+      where: eq(taskMessages.taskId, demoSeedWaitingTask.id),
+      orderBy: (message, { asc }) => [asc(message.ts)],
+    });
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({
+      id: demoSeedWaitingTask.promptMessageId,
+      runId: runs[0]!.id,
+      userId: demoSeedUserId,
+      eventType: 'roomote_runtime.user_prompt',
+      protocol: 'roomote_runtime',
+      contentBlocks: [{ type: 'text', text: demoSeedWaitingTask.title }],
+      source: 'web',
+    });
+    expect(messages[1]).toMatchObject({
+      id: demoSeedWaitingTask.requestMessageId,
+      runId: runs[0]!.id,
+      protocol: 'roomote_runtime',
+      eventType: 'roomote_runtime.request_user_input',
+      payload: {
+        requestId: demoSeedWaitingTask.requestId,
+        status: 'pending',
+        sessionId: demoSeedWaitingTask.harnessSessionId,
+        turnId: expect.any(String),
+        callId: expect.any(String),
+        questions: [
+          {
+            id: 'retry-policy',
+            header: 'Retry policy',
+            question: expect.any(String),
+            isOther: true,
+            isSecret: false,
+            options: expect.arrayContaining([
+              { label: 'Exponential backoff', description: expect.any(String) },
+            ]),
+          },
+        ],
+      },
+    });
+    const summary = await seedDemoData();
+    expect(summary.created).toEqual([]);
+    expect(
+      await db.query.tasks.findFirst({
+        where: eq(tasks.id, demoSeedWaitingTask.id),
+      }),
+    ).toEqual(task);
+    expect(
+      await db.query.taskRuns.findMany({
+        where: eq(taskRuns.taskId, demoSeedWaitingTask.id),
+      }),
+    ).toEqual(runs);
+    expect(
+      await db.query.taskMessages.findMany({
+        where: eq(taskMessages.taskId, demoSeedWaitingTask.id),
+        orderBy: (message, { asc }) => [asc(message.ts)],
+      }),
+    ).toEqual(messages);
+  });
+
   it('repairs incomplete setup without changing other deployment settings', async () => {
     const settingsBefore = await db.query.deploymentSettings.findFirst({
       where: eq(deploymentSettings.id, 'default'),
@@ -319,7 +481,7 @@ describe('seedDemoData', () => {
 
     expect(summary.created).toEqual([]);
     expect(withoutSettings(summary.skipped)).toHaveLength(
-      6 +
+      10 +
         demoSeedFastSession.messages.length +
         demoSeedRepositories.length +
         demoSeedTasks.length * 2 +
