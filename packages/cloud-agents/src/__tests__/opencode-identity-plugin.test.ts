@@ -77,7 +77,7 @@ describe('OPENCODE_IDENTITY_PLUGIN_SCRIPT', () => {
     const output = {
       system: [
         'Preserve this preface. You are OpenCode, as referenced in documentation.',
-        'You are Roomote, a software engineering teammate.',
+        'You are Roomote, an AI teammate helping teams get work done.',
       ],
     };
     const original = structuredClone(output.system);

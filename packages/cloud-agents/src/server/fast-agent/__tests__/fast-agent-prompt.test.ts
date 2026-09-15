@@ -36,8 +36,12 @@ describe.each([
       'within the user request and permissions without repeated approval',
     ],
     [
-      'decisive coding execution',
-      'Continue ordinary authorized coding work decisively through implementation, validation, and delivery',
+      'decisive authorized execution',
+      'Continue ordinary authorized work decisively through execution and verification',
+    ],
+    [
+      'decisive coding delivery',
+      'for coding work, carry it through implementation, validation, and delivery',
     ],
     [
       'mixed recipients',
@@ -542,7 +546,11 @@ describe('buildFastAgentSystemPrompt', () => {
       ],
     });
 
+    expect(prompt).toContain('You are a deeply pragmatic, effective teammate.');
     expect(prompt).toContain(
+      'For software engineering work, operate as an expert software engineer',
+    );
+    expect(prompt).not.toContain(
       'You are a deeply pragmatic, effective software engineer.',
     );
     expect(prompt).toContain('Roomote/example-app');
@@ -598,6 +606,15 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('Existing active tasks do not block');
     expect(prompt).toContain('send_chat_reply');
+    expect(prompt).toContain(
+      'call `roomote_get_about_me` with operation `overview` before answering',
+    );
+    expect(prompt).toContain(
+      'produce a contextual answer grounded in the capabilities and access available in this conversation',
+    );
+    expect(prompt).toContain(
+      'Do not substitute a generic coding-assistant description',
+    );
     expect(prompt).toContain(
       "use that task's known ID with `manage_tasks` `get_summary` to recover its stable image artifact IDs and viewer links",
     );
