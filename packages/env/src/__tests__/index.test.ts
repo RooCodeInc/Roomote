@@ -221,6 +221,9 @@ describe('Env', () => {
       createRoomoteEnv({ ...runtimeEnv, WEBHOOK_RETENTION_DAYS: '7' })
         .WEBHOOK_RETENTION_DAYS,
     ).toBe(7);
+    expect(() =>
+      createRoomoteEnv({ ...runtimeEnv, WEBHOOK_RETENTION_DAYS: 'invalid' }),
+    ).toThrow('Invalid environment variables');
   });
 
   it('parses Roomote Cloud analytics configuration', () => {
