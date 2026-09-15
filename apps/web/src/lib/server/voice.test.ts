@@ -228,6 +228,24 @@ describe('resolveVoiceOpenAiKey', () => {
     await expect(resolveVoiceOpenAiKey()).resolves.toBe('sk-env');
     expect(findConnection).not.toHaveBeenCalled();
   });
+
+  it('lets a deployment admin switch Voice off even when the environment provides the key', async () => {
+    resolveModelProviderEnvValue.mockResolvedValue(' sk-env ');
+
+    // Disabled in Settings: the environment key decides who pays, the
+    // deployment decides whether Voice is on.
+    findEnablement.mockResolvedValueOnce({ enabled: false });
+    await expect(resolveVoiceOpenAiKey()).resolves.toBeUndefined();
+
+    // Re-enabled: applies on the next call, no cache window for the toggle.
+    findEnablement.mockResolvedValueOnce({ enabled: true });
+    await expect(resolveVoiceOpenAiKey()).resolves.toBe('sk-env');
+
+    // No enablement row at all means on.
+    findEnablement.mockResolvedValueOnce(null);
+    await expect(resolveVoiceOpenAiKey()).resolves.toBe('sk-env');
+    expect(findConnection).not.toHaveBeenCalled();
+  });
 });
 
 describe('resolveVoiceId', () => {

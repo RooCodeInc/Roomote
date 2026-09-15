@@ -22,5 +22,10 @@ export function invalidateMcpIntegrationStatusQueries(
     queryClient.invalidateQueries({
       queryKey: trpc.mcpConnections.availability.queryKey(),
     }),
+    // Voice's card reads its on/off state from this query when the key comes
+    // from the environment, so a deployment toggle must refresh it too.
+    queryClient.invalidateQueries({
+      queryKey: trpc.mcpConnections.voiceConnection.queryKey(),
+    }),
   ]);
 }

@@ -15,7 +15,8 @@ separate voice-only agent.
 Voice uses OpenAI GPT-Live-1 and needs an OpenAI API key from a project with
 GPT-Live access. A deployment admin can enter one from **Settings >
 Integrations > Voice**, or a self-hosted operator can set
-`R_VOICE_OPENAI_API_KEY`; the environment variable is used when both exist.
+`R_VOICE_OPENAI_API_KEY`; the environment variable is used when both exist,
+and an admin can still turn Voice off for the deployment from the same card.
 Voice is opt-in: the deployment's general `OPENAI_API_KEY` is not used, so
 enabling OpenAI for task inference does not turn voice on. See the
 [Voice integration](/integrations/voice) page for details.
