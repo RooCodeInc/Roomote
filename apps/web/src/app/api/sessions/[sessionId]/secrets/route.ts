@@ -104,11 +104,17 @@ async function handle(
           session.ownerUserId === auth.userId &&
           !session.archivedAt
         ) {
+          // Fixed nonsecret text, chosen only by the server-side scope and
+          // the owner's tool setting; never by the saved metadata.
+          const saved =
+            secret.scope === 'account'
+              ? 'I saved an API key as an integration for every Session I own.'
+              : 'I saved an API key approval securely for this Session.';
           await replyToFastSessionCommand(auth, {
             sessionId: session.fastConversationId,
             text: isSessionSecretToolsExperimentEnabled(user?.metadata)
-              ? 'I saved an API key approval securely for this Session. Check list_session_secrets for ready approvals and continue the requested work using only the approved methods and destination. Attached coding runs may use this same approval, and a saved integration is available in my other Sessions too. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.'
-              : 'I saved an API key approval securely for this Session. Credential-backed Session access is temporarily unavailable. Explain that the approval was saved but cannot currently be used; do not attempt a credential-backed request or ask me to paste credentials into chat.',
+              ? `${saved} Check list_session_secrets for ready approvals and continue the requested work using only the approved methods and destination. Attached coding runs may use this same approval. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.`
+              : `${saved} Credential-backed Session access is temporarily unavailable. Explain that the approval was saved but cannot currently be used; do not attempt a credential-backed request or ask me to paste credentials into chat.`,
           });
           resumed = true;
         }

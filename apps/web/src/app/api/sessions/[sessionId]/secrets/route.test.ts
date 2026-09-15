@@ -214,6 +214,25 @@ describe('session secret route boundary', () => {
     });
   });
 
+  it('mentions an account-wide integration only when the saved grant has account scope', async () => {
+    await POST(request('POST', createArgs), props);
+    const sessionText = mocks.reply.mock.calls[0]![1].text as string;
+    expect(sessionText).toContain('securely for this Session');
+    expect(sessionText).not.toContain('every Session');
+
+    mocks.create.mockResolvedValueOnce({ ...metadata, scope: 'account' });
+    await POST(request('POST', { ...createArgs, scope: 'account' }), props);
+    const accountText = mocks.reply.mock.calls[1]![1].text as string;
+    expect(accountText).toContain(
+      'I saved an API key as an integration for every Session I own.',
+    );
+    expect(accountText).not.toContain('securely for this Session');
+    expect(mocks.create).toHaveBeenLastCalledWith(
+      { sessionId, userId: auth.userId },
+      { ...createArgs, scope: 'account' },
+    );
+  });
+
   it('uses fixed nonsecret continuation text independent of the saved credential metadata', async () => {
     await POST(request('POST', createArgs), props);
     const text = mocks.reply.mock.calls[0]![1].text;
