@@ -1,8 +1,10 @@
 import {
   and,
+  count,
   db,
   desc,
   eq,
+  inArray,
   isNotNull,
   isNull,
   tasks,
@@ -26,34 +28,60 @@ type RecentPullRequest = {
 
 export async function getRecentPullRequestsCommand(
   auth: UserAuthSuccess,
-): Promise<RecentPullRequest[]> {
-  // Query task_pull_requests joined with tasks for org/user filtering.
-  const rows = await db
-    .select({
-      repo: taskPullRequests.repository,
-      prNumber: taskPullRequests.prNumber,
-      prTitle: taskPullRequests.prTitle,
-      prUrl: taskPullRequests.prUrl,
-      taskId: taskPullRequests.taskId,
-      createdAt: taskPullRequests.detectedAt,
-      status: taskPullRequests.status,
-      sourceControlProvider: taskPullRequests.sourceControlProvider,
-    })
+): Promise<{ pullRequests: RecentPullRequest[]; openCount: number }> {
+  const eligiblePullRequests = and(
+    eq(tasks.initiatorUserId, auth.userId),
+    isNull(tasks.deletedAt),
+    customAutomationTaskAccess(auth),
+    isNotNull(taskPullRequests.repository),
+    isNotNull(taskPullRequests.prNumber),
+  );
+
+  const latestPullRequestStatuses = db
+    .selectDistinctOn(
+      [
+        taskPullRequests.sourceControlProvider,
+        taskPullRequests.repository,
+        taskPullRequests.prNumber,
+      ],
+      { status: taskPullRequests.status },
+    )
     .from(taskPullRequests)
     .innerJoin(tasks, eq(taskPullRequests.taskId, tasks.id))
-    .where(
-      and(
-        eq(tasks.initiatorUserId, auth.userId),
-        isNull(tasks.deletedAt),
-        customAutomationTaskAccess(auth),
-        isNotNull(taskPullRequests.repository),
-        isNotNull(taskPullRequests.prNumber),
-      ),
+    .where(eligiblePullRequests)
+    .orderBy(
+      taskPullRequests.sourceControlProvider,
+      taskPullRequests.repository,
+      taskPullRequests.prNumber,
+      desc(taskPullRequests.detectedAt),
     )
-    .orderBy(desc(taskPullRequests.detectedAt))
-    .limit(100);
+    .as('latest_pull_request_statuses');
 
-  // Deduplicate by repo#prNumber and collect up to 10 unique PRs.
+  // Query task_pull_requests joined with tasks for org/user filtering.
+  const [rows, [openCountRow]] = await Promise.all([
+    db
+      .select({
+        repo: taskPullRequests.repository,
+        prNumber: taskPullRequests.prNumber,
+        prTitle: taskPullRequests.prTitle,
+        prUrl: taskPullRequests.prUrl,
+        taskId: taskPullRequests.taskId,
+        createdAt: taskPullRequests.detectedAt,
+        status: taskPullRequests.status,
+        sourceControlProvider: taskPullRequests.sourceControlProvider,
+      })
+      .from(taskPullRequests)
+      .innerJoin(tasks, eq(taskPullRequests.taskId, tasks.id))
+      .where(eligiblePullRequests)
+      .orderBy(desc(taskPullRequests.detectedAt))
+      .limit(100),
+    db
+      .select({ count: count() })
+      .from(latestPullRequestStatuses)
+      .where(inArray(latestPullRequestStatuses.status, ['draft', 'open'])),
+  ]);
+
+  // Deduplicate by repo#prNumber and collect up to 15 unique PRs.
   const recentPullRequests: RecentPullRequest[] = [];
   const seen = new Set<string>();
 
@@ -86,5 +114,8 @@ export async function getRecentPullRequestsCommand(
     }
   }
 
-  return recentPullRequests;
+  return {
+    pullRequests: recentPullRequests,
+    openCount: openCountRow?.count ?? 0,
+  };
 }
