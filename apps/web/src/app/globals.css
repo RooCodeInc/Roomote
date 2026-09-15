@@ -1011,26 +1011,26 @@ html[data-status-banner-visible='true'] {
 [data-streamdown='subscript'] {
 }
 
-/* A static, photographed-paper treatment for Markdown gallery thumbnails. */
-.markdown-artifact-preview {
+/* A static, photographed-paper treatment for document gallery thumbnails. */
+.artifact-paper-preview {
   @apply relative flex aspect-video w-full items-start justify-center overflow-hidden bg-zinc-200 dark:bg-zinc-800;
   perspective: 520px;
   isolation: isolate;
 }
 
-.markdown-artifact-paper-shadow {
+.artifact-paper-shadow {
   @apply pointer-events-none absolute left-[3%] top-[9%] h-[118%] w-[98%] rounded-sm bg-black/25 blur-[6px];
   transform: rotateX(8deg) rotateZ(-1.75deg) skewX(-0.75deg) scale(1.03);
   transform-origin: left top;
 }
 
-.markdown-artifact-paper {
+.artifact-paper {
   @apply pointer-events-none absolute left-[2%] top-[3%] h-[150%] w-full overflow-hidden rounded-[2px] border border-zinc-300/80 bg-white px-[8%] py-[7%] text-zinc-800 shadow-[0_8px_16px_rgba(0,0,0,0.16)];
   transform-origin: left top;
   transform: rotateX(8deg) rotateZ(-1.75deg) skewX(-0.75deg) scale(1.03);
 }
 
-.markdown-artifact-preview::after {
+.artifact-paper-preview::after {
   @apply pointer-events-none absolute -inset-1 z-10 blur-[2px];
   content: '';
   background:
@@ -1084,6 +1084,34 @@ html[data-status-banner-visible='true'] {
 
 .markdown-artifact-placeholder > span {
   @apply block h-1 rounded-full bg-zinc-300;
+}
+
+.tabular-artifact-grid {
+  @apply grid w-full overflow-hidden rounded-[2px] border-l border-t border-zinc-300 bg-white;
+}
+
+.tabular-artifact-cell {
+  @apply flex h-3 min-w-0 items-center border-b border-r border-zinc-300 px-1;
+}
+
+.tabular-artifact-bar {
+  @apply block h-1 rounded-full bg-zinc-300;
+}
+
+.tabular-artifact-cell[data-length='empty'] .tabular-artifact-bar {
+  @apply hidden;
+}
+
+.tabular-artifact-cell[data-length='short'] .tabular-artifact-bar {
+  @apply w-2/5;
+}
+
+.tabular-artifact-cell[data-length='medium'] .tabular-artifact-bar {
+  @apply w-3/5;
+}
+
+.tabular-artifact-cell[data-length='long'] .tabular-artifact-bar {
+  @apply w-[85%];
 }
 
 /* ==========================================================================
