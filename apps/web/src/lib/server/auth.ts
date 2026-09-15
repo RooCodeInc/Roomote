@@ -34,8 +34,10 @@ import {
 import { hasSeatAvailable } from './license';
 import {
   extractInviteTokenFromRequest,
+  getRequestInviteToken,
   runWithInviteContext,
 } from './invite-context';
+import { isSystemInviteToken } from './invites';
 import {
   resolveAuthProviderConfig,
   type ResolvedAuthProviderConfig,
@@ -1230,7 +1232,8 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
               context?.path === '/sign-up/email' &&
               typeof user.email === 'string' &&
               user.email.trim().toLowerCase() ===
-                Env.R_PRE_VERIFIED_EMAIL?.trim().toLowerCase()
+                Env.R_PRE_VERIFIED_EMAIL?.trim().toLowerCase() &&
+              isSystemInviteToken(await getRequestInviteToken())
             ) {
               return { data: { ...user, emailVerified: true } };
             }

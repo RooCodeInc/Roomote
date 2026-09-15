@@ -11,6 +11,8 @@ import { authSessions, authUsers, db, eq } from '@roomote/db/server';
 const { mockAuthEnv } = vi.hoisted(() => ({
   mockAuthEnv: {
     R_PRE_VERIFIED_EMAIL: undefined as string | undefined,
+    requestInviteToken: null as string | null,
+    setupToken: 'setup-token',
   },
 }));
 
@@ -27,6 +29,9 @@ vi.mock('./env', () => ({
     get R_PRE_VERIFIED_EMAIL() {
       return mockAuthEnv.R_PRE_VERIFIED_EMAIL;
     },
+    get SETUP_TOKEN() {
+      return mockAuthEnv.setupToken;
+    },
   },
   getBetterAuthSecret: () => 'test-session-signing-secret-not-for-production',
   isEmailChannelEnabled: () => false,
@@ -40,6 +45,7 @@ vi.mock('./access-policy', () => ({
 vi.mock('./license', () => ({ hasSeatAvailable: async () => true }));
 vi.mock('./invite-context', () => ({
   extractInviteTokenFromRequest: () => null,
+  getRequestInviteToken: () => mockAuthEnv.requestInviteToken,
   runWithInviteContext: (_token: unknown, callback: () => unknown) =>
     callback(),
 }));
@@ -54,6 +60,7 @@ const COOKIE_NAME = '__Secure-better-auth.session_token';
 describe('browser session renewal with real Better Auth, Next cookies and Postgres', () => {
   let cookie: string;
   let userId: string;
+  let userEmail: string;
   let sessionId: string;
 
   async function sessionRow() {
@@ -95,7 +102,9 @@ describe('browser session renewal with real Better Auth, Next cookies and Postgr
   beforeEach(async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);
-    mockAuthEnv.R_PRE_VERIFIED_EMAIL = undefined;
+    userEmail = `${crypto.randomUUID()}@example.test`;
+    mockAuthEnv.R_PRE_VERIFIED_EMAIL = userEmail.toUpperCase();
+    mockAuthEnv.requestInviteToken = null;
     const auth = await getAuth();
     const response = await auth.handler(
       new Request('https://auth.example.test/api/auth/sign-up/email', {
@@ -106,7 +115,7 @@ describe('browser session renewal with real Better Auth, Next cookies and Postgr
         },
         body: JSON.stringify({
           name: 'Session Test',
-          email: `${crypto.randomUUID()}@example.test`,
+          email: userEmail,
           password: 'test-password-123',
         }),
       }),
@@ -155,6 +164,7 @@ describe('browser session renewal with real Better Auth, Next cookies and Postgr
 
     const email = `${crypto.randomUUID()}@example.test`;
     mockAuthEnv.R_PRE_VERIFIED_EMAIL = email.toUpperCase();
+    mockAuthEnv.requestInviteToken = mockAuthEnv.setupToken;
     const auth = await getAuth();
     const response = await auth.handler(
       new Request('https://auth.example.test/api/auth/sign-up/email', {

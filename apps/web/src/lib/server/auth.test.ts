@@ -10,6 +10,7 @@ const {
   mockAuthSendVerificationEmail,
   mockHasSeatAvailable,
   mockEnv,
+  mockInviteContext,
 } = vi.hoisted(() => {
   const calls: Array<{
     config: Array<{
@@ -41,6 +42,9 @@ const {
     mockHasSeatAvailable: vi.fn(),
     mockEnv: {
       R_PRE_VERIFIED_EMAIL: undefined as string | undefined,
+    },
+    mockInviteContext: {
+      isSystemInvite: false,
     },
   };
 });
@@ -130,7 +134,12 @@ vi.mock('./env', () => ({
 
 vi.mock('./invite-context', () => ({
   extractInviteTokenFromRequest: vi.fn(),
+  getRequestInviteToken: vi.fn(() => 'request-invite-token'),
   runWithInviteContext: vi.fn((_token, callback) => callback()),
+}));
+
+vi.mock('./invites', () => ({
+  isSystemInviteToken: vi.fn(() => mockInviteContext.isSystemInvite),
 }));
 
 vi.mock('./canonical-forwarded-proto', () => ({
@@ -205,6 +214,7 @@ describe('getAuth', () => {
     mockSendAgentMailSystemEmail.mockResolvedValue({ sent: true });
     mockHasSeatAvailable.mockResolvedValue(true);
     mockEnv.R_PRE_VERIFIED_EMAIL = undefined;
+    mockInviteContext.isSystemInvite = false;
   });
 
   afterEach(() => {
@@ -236,6 +246,7 @@ describe('getAuth', () => {
 
   it('marks a matching Cloud-provided credential signup email as verified', async () => {
     mockEnv.R_PRE_VERIFIED_EMAIL = ' Verified@Example.com ';
+    mockInviteContext.isSystemInvite = true;
     await getAuth();
     const user = {
       id: 'user-id',
@@ -252,12 +263,29 @@ describe('getAuth', () => {
 
   it('leaves an ordinary credential signup email unverified', async () => {
     mockEnv.R_PRE_VERIFIED_EMAIL = 'verified@example.com';
+    mockInviteContext.isSystemInvite = true;
     await getAuth();
     const user = {
       id: 'user-id',
       email: 'other@example.com',
       emailVerified: false,
     };
+
+    await expect(
+      getUserCreateBeforeHook()(user, {
+        path: '/sign-up/email',
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it('does not trust a matching email without the system invite handoff', async () => {
+    mockEnv.R_PRE_VERIFIED_EMAIL = 'verified@example.com';
+    const user = {
+      id: 'user-id',
+      email: 'verified@example.com',
+      emailVerified: false,
+    };
+    await getAuth();
 
     await expect(
       getUserCreateBeforeHook()(user, {
