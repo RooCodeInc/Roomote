@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { TaskRunErrorCode } from '@roomote/types';
 
 import { resolveFromWorkspaceRoot } from '../repo-paths';
+import { removeLegacySessionEgressHostPolicy } from '@roomote/compute-providers';
 
 const execFileAsync = promisify(execFile);
 
@@ -912,6 +913,9 @@ async function removeDockerTaskNetwork(
       allowFailure: true,
     });
   }
+
+  // Networks from before the gateway removal still hold host firewall chains.
+  if (network) await removeLegacySessionEgressHostPolicy(network, runDocker);
 
   await runDocker(['network', 'rm', taskNetwork], { allowFailure: true });
 }
