@@ -359,7 +359,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       properties: {
         label: { type: 'string', minLength: 1, maxLength: 80 },
         origin: { type: 'string', minLength: 1, maxLength: 2048 },
-        headerName: { enum: ['authorization', 'x-api-key', 'api-key'] },
+        headerName: { type: 'string', minLength: 1, maxLength: 64 },
         headerPrefix: { enum: ['Bearer ', 'Basic ', 'Token '] },
         ttlHours: { type: 'integer', minimum: 1, maximum: 720, default: 24 },
         allowedMethods: {

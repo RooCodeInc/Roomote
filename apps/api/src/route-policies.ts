@@ -270,6 +270,27 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'webhook',
   },
 
+  // Session egress substitution proxy: attached coding runs call an owner-
+  // approved origin through `/api/session-egress/<grant>` with a substitute
+  // token in the grant's own header slot; the API injects the real credential
+  // and forwards. The substitute is not a Roomote bearer, so the handler owns
+  // authentication (live workload, Session, run, grant, generation, expiry)
+  // and no bearer class applies here.
+  // The client-keyed limit bounds the database work an unauthenticated caller
+  // can cause by spraying tokens; a sandbox's legitimate use sits far below it.
+  {
+    name: 'session-egress-proxy',
+    match: { type: 'prefix', path: '/api/session-egress' },
+    policy: 'webhook',
+    rateLimits: [
+      {
+        keySource: 'client',
+        limit: 300,
+        windowSeconds: 60,
+      },
+    ],
+  },
+
   // Inference gateway: task sandboxes call model providers through this
   // proxy with their run-scoped token; the provider key is injected
   // server-side and never enters the sandbox.

@@ -6,6 +6,7 @@ import {
 } from '@roomote/auth';
 import {
   authorizeSessionEgress,
+  authorizeSessionEgressProxy,
   issueSessionEgressSubstitutes,
   listSessionEgressRevocations,
   registerSessionEgressWorkload,
@@ -17,6 +18,7 @@ import { Env } from '@roomote/env';
 import {
   SESSION_EGRESS_CONTROL_PLANE_PATH,
   sessionEgressAuthorizeSchema,
+  sessionEgressProxyAuthorizeSchema,
   sessionEgressRevocationsQuerySchema,
   sessionEgressWorkloadLeaseSchema,
   sessionEgressWorkloadRegisterSchema,
@@ -163,6 +165,15 @@ export async function authorize(
   // treat it exactly like any other refusal.
   if (!parsed.success) return { allowed: false, reason: 'malformed' };
   return authorizeSessionEgress(parsed.data, { isOriginAllowed });
+}
+
+/** Same decision surface for the API-side proxy; malformed input is a denial. */
+export async function authorizeProxy(
+  input: unknown,
+): Promise<SessionEgressAuthorization> {
+  const parsed = sessionEgressProxyAuthorizeSchema.safeParse(input);
+  if (!parsed.success) return { allowed: false, reason: 'malformed' };
+  return authorizeSessionEgressProxy(parsed.data, { isOriginAllowed });
 }
 
 function isOriginAllowed(origin: string): boolean {
