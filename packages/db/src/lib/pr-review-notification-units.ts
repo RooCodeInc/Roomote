@@ -10,6 +10,7 @@ import {
   isNull,
   lte,
   ne,
+  or,
   sql,
 } from 'drizzle-orm';
 
@@ -37,6 +38,28 @@ import {
 
 const CLAIM_LIMIT = 100;
 const DELIVERY_LEASE_MS = 10 * 60 * 1000;
+/**
+ * Claims a delivery may burn without finishing before it is retired. A
+ * deferral reclaims the delivery on purpose and is not counted; what is
+ * counted is a lease that expired or was superseded with nothing to show for
+ * it. A delivery that keeps doing that is stuck, not slow, and every fresh
+ * lease is another chance for it to fire days late.
+ */
+const DELIVERY_MAX_WASTED_CLAIMS = 12;
+/**
+ * A delivery this far past both its creation and its due time is stale
+ * however it got here. Deferrals move the due time forward, so a
+ * deliberately patient delivery is not retired; a due time set in the past
+ * to mean "immediately" is covered by the creation time.
+ */
+const DELIVERY_MAX_OVERDUE_MS = 72 * 60 * 60 * 1000;
+const LIVE_DELIVERY_STATES: CanonicalPrReviewDeliveryState[] = [
+  'pending',
+  'claimed',
+  'prepared',
+  'prompt_posting',
+  'auto_dispatch_pending',
+];
 const ROOMOTE_CI_COALESCE_WINDOW_MS = 15 * 60 * 1000;
 
 export type CanonicalPrReviewDeliveryState =
@@ -703,6 +726,7 @@ export async function claimDueCanonicalPrReviewDeliveries(
   return db.transaction(async (tx) => {
     const leaseToken = randomUUID();
     const leaseExpiresAt = new Date(now.getTime() + DELIVERY_LEASE_MS);
+    await retireStaleCanonicalPrReviewDeliveries(tx, now, scope);
     const rows = await tx.execute<{
       delivery_id: string;
       notification_unit_id: string;
@@ -895,6 +919,66 @@ export async function claimDueCanonicalPrReviewDeliveries(
     }
     return [...claims.values()];
   });
+}
+
+/**
+ * Suppresses live deliveries that have outlived their usefulness before the
+ * claim looks for candidates: either they burned through their claims
+ * without completing, or they have been due for days. One such
+ * delivery, a CI failure from a week earlier, kept being re-leased on every
+ * restart until it resumed a finished task against an already merged pull
+ * request. Only unleased rows are touched so an in-flight worker keeps its
+ * claim.
+ */
+async function retireStaleCanonicalPrReviewDeliveries(
+  tx: DatabaseOrTransaction,
+  now: Date,
+  scope: { repository?: string },
+): Promise<void> {
+  const retired = await tx
+    .update(prReviewNotificationDeliveries)
+    .set({
+      status: 'suppressed',
+      leaseToken: null,
+      leaseExpiresAt: null,
+      completedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        inArray(prReviewNotificationDeliveries.status, LIVE_DELIVERY_STATES),
+        or(
+          isNull(prReviewNotificationDeliveries.leaseExpiresAt),
+          lte(prReviewNotificationDeliveries.leaseExpiresAt, now),
+        ),
+        or(
+          sql`${prReviewNotificationDeliveries.attempt} - ${prReviewNotificationDeliveries.deferrals} >= ${DELIVERY_MAX_WASTED_CLAIMS}`,
+          sql`greatest(${prReviewNotificationDeliveries.dueAt}, ${prReviewNotificationDeliveries.createdAt}) <= ${new Date(now.getTime() - DELIVERY_MAX_OVERDUE_MS).toISOString()}::timestamp`,
+        ),
+        scope.repository
+          ? inArray(
+              prReviewNotificationDeliveries.notificationUnitId,
+              tx
+                .select({ id: prReviewNotificationUnits.id })
+                .from(prReviewNotificationUnits)
+                .where(
+                  eq(prReviewNotificationUnits.repository, scope.repository),
+                ),
+            )
+          : undefined,
+      ),
+    )
+    .returning({
+      id: prReviewNotificationDeliveries.id,
+      attempt: prReviewNotificationDeliveries.attempt,
+      deferrals: prReviewNotificationDeliveries.deferrals,
+      dueAt: prReviewNotificationDeliveries.dueAt,
+    });
+  for (const row of retired) {
+    console.warn(
+      `[PrReviewNotification] Retired stale delivery ${row.id} (attempt ${row.attempt}, deferrals ${row.deferrals}, due ${row.dueAt.toISOString()})`,
+    );
+  }
 }
 
 function canonicalClaimWhere(input: {
@@ -1124,11 +1208,13 @@ export async function releaseCanonicalPrReviewDelivery(input: {
     .where(canonicalClaimWhere(input));
 }
 
-export async function releaseSupersededCanonicalPrReviewAction(input: {
-  deliveryId: string;
-  leaseToken: string;
-}): Promise<boolean> {
-  const now = new Date();
+export async function releaseSupersededCanonicalPrReviewAction(
+  input: {
+    deliveryId: string;
+    leaseToken: string;
+  },
+  now: Date = new Date(),
+): Promise<boolean> {
   const rows = await db
     .update(prReviewNotificationDeliveries)
     .set({
