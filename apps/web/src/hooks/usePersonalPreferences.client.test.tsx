@@ -160,6 +160,7 @@ describe('usePersonalPreferences', () => {
       homeComposerSuggestionsEnabled: false,
       sessionSecretToolsEnabled: false,
       slackPeerConversationsExperimentEnabled: false,
+      privateSessionsExperimentEnabled: false,
     });
   });
 
