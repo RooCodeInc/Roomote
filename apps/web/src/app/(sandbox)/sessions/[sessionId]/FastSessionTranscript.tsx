@@ -88,6 +88,8 @@ import { CapabilityOfferCard } from './CapabilityOfferCard';
 import {
   AcpMessageItem,
   AcpTranscriptBlockList,
+  AcpWorkingMessage,
+  hasLiveActivity,
   useAcpTranscriptBlocks,
 } from '../../task/[taskId]/messages/acp';
 import { ModelBadge } from '@/components/sandbox';
@@ -331,16 +333,6 @@ export function pendingResponseReducer(
 }
 
 /** Query param that opens a session straight into a voice conversation. */
-
-function ThinkingMessage() {
-  return (
-    <Message from="assistant" className="chat-reasoning-message">
-      <MessageContent>
-        <Shimmer className="text-sm font-light">Thinking</Shimmer>
-      </MessageContent>
-    </Message>
-  );
-}
 
 function RunningTasksMessage({
   count,
@@ -1115,6 +1107,10 @@ export function FastSessionTranscript({
     streamMessages,
     liveVoiceUiMessages,
   ]);
+  const transcriptWorking =
+    isSending ||
+    conversationResponding === true ||
+    pendingResponseState.pendingAfter !== null;
   const {
     renderBlocks: renderBlocksBeforeInput,
     suppressMessage: suppressMessageBeforeInput,
@@ -1128,6 +1124,8 @@ export function FastSessionTranscript({
     hasLeadingTextBoundary: false,
     keepDelegatedTasksVisible: true,
     resetKey: `before:${messages.length}:${messages[0]?.eventId ?? ''}:${messages.at(-1)?.eventId ?? ''}`,
+    activityResetKey: `${sessionId}:before`,
+    isWorking: transcriptWorking && pendingInputRequestOrder === null,
   });
   const {
     renderBlocks: renderBlocksAfterInput,
@@ -1142,6 +1140,8 @@ export function FastSessionTranscript({
     hasLeadingTextBoundary: false,
     keepDelegatedTasksVisible: true,
     resetKey: `after:${messages.length}:${messages[0]?.eventId ?? ''}:${messages.at(-1)?.eventId ?? ''}`,
+    activityResetKey: `${sessionId}:after`,
+    isWorking: transcriptWorking && pendingInputRequestOrder !== null,
   });
 
   // Every Fast turn started by the call, keyed by its turn id (the client
@@ -1357,10 +1357,7 @@ export function FastSessionTranscript({
     });
   }, [isSending, utteranceQueueVersion, sendReply]);
 
-  const agentWorking =
-    isSending ||
-    conversationResponding === true ||
-    pendingResponseState.pendingAfter !== null;
+  const agentWorking = transcriptWorking;
   const liveVoiceActive = liveVoice.active;
   const speakRef = useRef(liveVoice.speak);
   speakRef.current = liveVoice.speak;
@@ -1699,13 +1696,17 @@ export function FastSessionTranscript({
               renderMessage={renderCapabilityOfferMessage}
             />
             {pendingResponseState.pendingAfter !== null &&
-            streamMessages.length === 0 ? (
+            streamMessages.length === 0 &&
+            !hasLiveActivity([
+              ...renderBlocksBeforeInput,
+              ...renderBlocksAfterInput,
+            ]) ? (
               pendingResponseState.pendingAfter.id === '' ? (
                 <div className="mt-4">
-                  <ThinkingMessage />
+                  <AcpWorkingMessage />
                 </div>
               ) : (
-                <ThinkingMessage />
+                <AcpWorkingMessage />
               )
             ) : !isSending &&
               conversationResponding !== true &&

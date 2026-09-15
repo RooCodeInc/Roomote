@@ -229,7 +229,7 @@ describe('buildAcpActivityRenderBlocks', () => {
     ]);
   });
 
-  it('keeps live partial reasoning and tools outside collapsed activity groups', () => {
+  it('keeps stale partial activity direct once a reply boundary exists', () => {
     const partialReasoning: AcpRenderBlock = {
       kind: 'message',
       msg: {
@@ -285,6 +285,74 @@ describe('buildAcpActivityRenderBlocks', () => {
       'message',
       'message',
     ]);
+  });
+
+  it('keeps one stable live group and exposes the latest tool call', () => {
+    const entries = buildAcpActivityRenderBlocks([
+      textBlock('text-1', 1_000),
+      messageBlock('reasoning-1', 2_000, 'reasoning'),
+      toolResultBlock({ id: 'tool-1', ts: 3_000 }),
+      toolResultBlock({
+        id: 'tool-2',
+        ts: 4_000,
+        toolName: 'search',
+        status: 'in_progress',
+      }),
+    ]);
+
+    expect(entries).toHaveLength(2);
+    expect(entries[1]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-reasoning-1',
+      live: true,
+      latestToolMessage: { id: 'tool-2' },
+      blocks: [
+        { kind: 'message', msg: { id: 'reasoning-1' } },
+        { kind: 'message', msg: { id: 'tool-1' } },
+        { kind: 'message', msg: { id: 'tool-2' } },
+      ],
+    });
+  });
+
+  it('keeps trailing settled calls in the live block while the agent is still working', () => {
+    const entries = buildAcpActivityRenderBlocks(
+      [
+        textBlock('text-1', 1_000),
+        toolResultBlock({ id: 'tool-1', ts: 2_000 }),
+      ],
+      { isWorking: true },
+    );
+
+    expect(entries[1]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-tool-1',
+      live: true,
+      latestToolMessage: { id: 'tool-1' },
+    });
+  });
+
+  it('collapses a settled single-call stretch only when it was previously live', () => {
+    const blocks = [
+      textBlock('text-1', 1_000),
+      toolResultBlock({ id: 'tool-1', ts: 2_000 }),
+      textBlock('text-2', 5_000),
+    ];
+    const unchangedHistory = buildAcpActivityRenderBlocks(blocks);
+    const settledLiveStretch = buildAcpActivityRenderBlocks(blocks, {
+      collapseSettledActivityIds: new Set(['activity-tool-1']),
+    });
+
+    expect(unchangedHistory.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+    ]);
+    expect(settledLiveStretch[1]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-tool-1',
+      live: false,
+      endTs: 5_000,
+    });
   });
 
   it('collapses mixed eligible activity blocks into one group', () => {

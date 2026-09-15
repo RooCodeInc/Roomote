@@ -3,14 +3,24 @@
 import type { ReactNode } from 'react';
 
 import {
+  Message,
+  MessageContent,
+  Shimmer,
+  ToolHeader,
+} from '@/components/ai-elements';
+import {
+  AlertCircle,
   ChevronRight,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/system';
+import { sanitizeSandboxPathString } from '@/lib';
 import { cn } from '@/lib/utils';
 
 import type { AcpActivityGroupRenderBlock } from './activity-groups';
+import { resolveToolPresentation } from './tool-presentation';
+import { mcpIntegrationIconFor, toolIconForKey } from './tool-icons';
 
 interface AcpActivityGroupMessageProps {
   group: AcpActivityGroupRenderBlock;
@@ -23,10 +33,22 @@ export function AcpActivityGroupMessage({
   anchorIds = [],
   children,
 }: AcpActivityGroupMessageProps) {
+  const latestTool = group.latestToolMessage;
+  const presentation = latestTool
+    ? resolveToolPresentation(latestTool.data, latestTool.partial)
+    : null;
+  const ToolIcon = presentation
+    ? presentation.phase === 'failed'
+      ? AlertCircle
+      : presentation.integrationIcon
+        ? mcpIntegrationIconFor(presentation.integrationIcon)
+        : toolIconForKey(presentation.iconKey)
+    : null;
+
   return (
     <Collapsible
       defaultOpen={false}
-      className="group/acp-activity my-3"
+      className="group group/acp-activity my-3"
       data-testid="acp-activity-group"
     >
       {anchorIds.map((anchorId) => (
@@ -37,25 +59,55 @@ export function AcpActivityGroupMessage({
           className="h-0 overflow-hidden"
         />
       ))}
-      <div className="flex items-center gap-3">
-        <CollapsibleTrigger
-          className={cn(
-            'flex shrink-0 cursor-pointer items-center gap-1.5 text-sm font-light text-muted-foreground/50 transition-colors hover:text-foreground',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
-          )}
-        >
-          <ChevronRight className="size-4 transition-transform group-data-[state=open]/acp-activity:rotate-90" />
-          <span>Worked for {formatWorkedDuration(group.endTs - group.ts)}</span>
-        </CollapsibleTrigger>
-        <div
-          className="h-px min-w-8 flex-1 border-t border-border/20 relative top-px"
-          aria-hidden="true"
+      {group.live && presentation && ToolIcon ? (
+        <ToolHeader
+          action={presentation.verb}
+          object={sanitizeSandboxPathString(presentation.object ?? '')}
+          suffix={presentation.providerLabel}
+          icon={ToolIcon}
+          state={
+            presentation.phase === 'failed'
+              ? 'output-error'
+              : presentation.phase === 'running'
+                ? 'input-available'
+                : 'output-available'
+          }
         />
-      </div>
+      ) : (
+        <div className="flex items-center gap-3">
+          <CollapsibleTrigger
+            className={cn(
+              'flex shrink-0 cursor-pointer items-center gap-1.5 text-sm font-light text-muted-foreground/50 transition-colors hover:text-foreground',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+            )}
+          >
+            <ChevronRight className="size-4 transition-transform group-data-[state=open]/acp-activity:rotate-90" />
+            <span>
+              {group.live
+                ? 'Working'
+                : `Worked for ${formatWorkedDuration(group.endTs - group.ts)}`}
+            </span>
+          </CollapsibleTrigger>
+          <div
+            className="h-px min-w-8 flex-1 border-t border-border/20 relative top-px"
+            aria-hidden="true"
+          />
+        </div>
+      )}
       <CollapsibleContent className="mt-4 space-y-0 border-l border-border pl-4 ml-2 data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 data-[state=closed]:animate-out data-[state=open]:animate-in">
         {children}
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+export function AcpWorkingMessage() {
+  return (
+    <Message from="assistant" className="chat-reasoning-message">
+      <MessageContent>
+        <Shimmer className="text-sm font-light">Working</Shimmer>
+      </MessageContent>
+    </Message>
   );
 }
 

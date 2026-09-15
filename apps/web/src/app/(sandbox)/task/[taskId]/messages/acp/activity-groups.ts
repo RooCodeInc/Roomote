@@ -26,6 +26,8 @@ export interface AcpActivityGroupRenderBlock {
   ts: number;
   endTs: number;
   blocks: AcpRenderBlock[];
+  live: boolean;
+  latestToolMessage?: AcpToolCallUiMessage | AcpToolResultUiMessage;
 }
 
 export type AcpConversationRenderBlock =
@@ -38,6 +40,8 @@ interface BuildAcpActivityRenderBlocksOptions {
   hasLeadingTextBoundary?: boolean;
   collapseLeadingActivity?: boolean;
   keepDelegatedTasksVisible?: boolean;
+  collapseSettledActivityIds?: ReadonlySet<string>;
+  isWorking?: boolean;
 }
 
 function isToolMessage(
@@ -101,6 +105,63 @@ function isLivePartialBlock(block: AcpRenderBlock): boolean {
   }
 
   return isToolMessage(block.msg) && block.msg.data.status === 'in_progress';
+}
+
+function isLiveActivityBlockEligible(
+  block: AcpRenderBlock,
+  artifacts?: readonly TaskArtifact[] | null,
+  keepDelegatedTasksVisible = false,
+): boolean {
+  if (!isLivePartialBlock(block)) return false;
+
+  if (block.kind === 'tool_group') {
+    return block.items.every((item) =>
+      isToolEligibleAfterSettlement(
+        item.msg,
+        artifacts,
+        keepDelegatedTasksVisible,
+      ),
+    );
+  }
+
+  if (!isToolMessage(block.msg)) return block.msg.kind === 'reasoning';
+
+  return isToolEligibleAfterSettlement(
+    block.msg,
+    artifacts,
+    keepDelegatedTasksVisible,
+  );
+}
+
+function isToolEligibleAfterSettlement(
+  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
+  artifacts?: readonly TaskArtifact[] | null,
+  keepDelegatedTasksVisible = false,
+): boolean {
+  const settledMessage = {
+    ...msg,
+    partial: false,
+    data: { ...msg.data, status: 'completed' as const },
+  } as AcpToolCallUiMessage | AcpToolResultUiMessage;
+
+  return (
+    resolveToolPresentationPolicy(settledMessage, {
+      artifacts,
+      delegatedTaskCardsEnabled: keepDelegatedTasksVisible,
+    }).activityMode === 'collapsible'
+  );
+}
+
+function getLatestToolMessage(
+  blocks: AcpRenderBlock[],
+): AcpToolCallUiMessage | AcpToolResultUiMessage | undefined {
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    const block = blocks[index]!;
+    if (block.kind === 'tool_group') return block.items.at(-1)?.msg;
+    if (isToolMessage(block.msg)) return block.msg;
+  }
+
+  return undefined;
 }
 
 function countToolCalls(blocks: AcpRenderBlock[]): number {
@@ -186,6 +247,62 @@ export function buildAcpActivityRenderBlocks(
 
     if (
       !hasLeftTextBoundary ||
+      (!isActivityCollapsibleBlock(
+        current,
+        options.artifacts,
+        options.keepDelegatedTasksVisible,
+      ) &&
+        !isLiveActivityBlockEligible(
+          current,
+          options.artifacts,
+          options.keepDelegatedTasksVisible,
+        ))
+    ) {
+      groupedBlocks.push(current);
+      hasLeftTextBoundary = false;
+      cursor += 1;
+      continue;
+    }
+
+    const activityStart = cursor;
+    let activityEnd = activityStart;
+
+    while (
+      activityEnd < blocks.length &&
+      (isActivityCollapsibleBlock(
+        blocks[activityEnd]!,
+        options.artifacts,
+        options.keepDelegatedTasksVisible,
+      ) ||
+        isLiveActivityBlockEligible(
+          blocks[activityEnd]!,
+          options.artifacts,
+          options.keepDelegatedTasksVisible,
+        ))
+    ) {
+      activityEnd += 1;
+    }
+
+    const liveActivityBlocks = blocks.slice(activityStart, activityEnd);
+    const isLive =
+      liveActivityBlocks.some(isLivePartialBlock) ||
+      (options.isWorking === true && activityEnd === blocks.length);
+    if (isLive && activityEnd === blocks.length) {
+      const firstActivity = liveActivityBlocks[0]!;
+      groupedBlocks.push({
+        kind: 'activity_group',
+        id: `activity-${getBlockId(firstActivity)}`,
+        ts: getBlockTs(firstActivity),
+        endTs: getBlockTs(liveActivityBlocks.at(-1)!),
+        blocks: liveActivityBlocks,
+        live: true,
+        latestToolMessage: getLatestToolMessage(liveActivityBlocks),
+      });
+      cursor = activityEnd;
+      continue;
+    }
+
+    if (
       !isActivityCollapsibleBlock(
         current,
         options.artifacts,
@@ -198,8 +315,7 @@ export function buildAcpActivityRenderBlocks(
       continue;
     }
 
-    const activityStart = cursor;
-    let activityEnd = activityStart;
+    activityEnd = activityStart;
 
     while (
       activityEnd < blocks.length &&
@@ -214,9 +330,11 @@ export function buildAcpActivityRenderBlocks(
 
     const activityBlocks = blocks.slice(activityStart, activityEnd);
     const next = blocks[activityEnd];
+    const activityId = `activity-${getBlockId(activityBlocks[0]!)}`;
 
     if (
-      countToolCalls(activityBlocks) > 1 &&
+      (countToolCalls(activityBlocks) > 1 ||
+        options.collapseSettledActivityIds?.has(activityId)) &&
       next &&
       isActivityBoundaryBlock(next)
     ) {
@@ -224,10 +342,12 @@ export function buildAcpActivityRenderBlocks(
 
       groupedBlocks.push({
         kind: 'activity_group',
-        id: `activity-${getBlockId(firstActivity)}`,
+        id: activityId,
         ts: getBlockTs(firstActivity),
         endTs: getBlockTs(next),
         blocks: activityBlocks,
+        live: false,
+        latestToolMessage: getLatestToolMessage(activityBlocks),
       });
       cursor = activityEnd;
       continue;

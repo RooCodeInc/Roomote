@@ -19,9 +19,6 @@ import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
-  Message,
-  MessageContent,
-  Shimmer,
 } from '@/components/ai-elements';
 import {
   MessageUiOptionsProvider,
@@ -33,7 +30,7 @@ import {
 } from '@/components/ai-elements/slack-mention-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { useMindReaderMode } from '@/hooks/useMindReaderMode';
-import { Button, Lightbulb, Skeleton } from '@/components/system';
+import { Button, Skeleton } from '@/components/system';
 import { cn } from '@/lib/utils';
 
 import {
@@ -49,6 +46,7 @@ import { SleepWakeMessages } from './messages/index';
 import {
   AcpTextMessage,
   AcpTranscriptBlockList,
+  AcpWorkingMessage,
   hasVisibleAssistantOutput,
   useAcpTranscriptBlocks,
 } from './messages/acp';
@@ -76,7 +74,7 @@ interface MessagesProps {
 const NARRATION_WORKING_REVEAL_DELAY_MS = 700;
 const OLDER_HISTORY_TRIGGER_PX = 800;
 
-function NarrationWorkingReasoningMessage() {
+function DelayedWorkingMessage() {
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
@@ -89,16 +87,7 @@ function NarrationWorkingReasoningMessage() {
 
   if (!isVisible) return null;
 
-  return (
-    <Message from="assistant" className="chat-reasoning-message">
-      <MessageContent>
-        <div className="flex items-center gap-2 text-sm font-light text-muted-foreground">
-          <Lightbulb className="size-4" />
-          <Shimmer>Thinking...</Shimmer>
-        </div>
-      </MessageContent>
-    </Message>
-  );
+  return <AcpWorkingMessage />;
 }
 
 function TranscriptSkeleton() {
@@ -312,11 +301,10 @@ const MessagesBase = ({
     showInternalMessages,
     hasLeadingTextBoundary: shouldRenderSessionPrompt,
     resetKey: session.taskId,
+    isWorking: taskPhase === 'running',
   });
-  const shouldShowNarrationWorkingReasoning =
-    resolvedMessageUiOptions.displayMode === 'narration' &&
-    taskPhase === 'running' &&
-    !hasVisibleAssistantOutput(renderBlocks);
+  const shouldShowWorking =
+    taskPhase === 'running' && !hasVisibleAssistantOutput(renderBlocks);
 
   const slackMentionScope = useMemo<SlackMentionScope>(
     () => ({ kind: 'task', taskId: session.taskId }),
@@ -346,9 +334,7 @@ const MessagesBase = ({
               onSuppress={suppressMessage}
             />
             {session.taskRun && <SleepWakeMessages taskRun={session.taskRun} />}
-            {shouldShowNarrationWorkingReasoning && (
-              <NarrationWorkingReasoningMessage />
-            )}
+            {shouldShowWorking && <DelayedWorkingMessage />}
             {footer}
           </ConversationContent>
           <ConversationScrollButton />
