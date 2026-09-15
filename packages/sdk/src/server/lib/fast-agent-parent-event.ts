@@ -2875,9 +2875,6 @@ export async function deliverFastAgentParentEventWithLock(
       ...(params.durableAdmission
         ? { durableAdmission: params.durableAdmission }
         : {}),
-      ...(humanFollowUp?.humanTurnFraming
-        ? { humanTurnFraming: humanFollowUp.humanTurnFraming }
-        : {}),
       platformEventHandling:
         params.event.type === 'pull_request_feedback' ||
         params.event.type === 'pull_request_conflict_detected'

@@ -320,12 +320,6 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
    */
   turnSource: z.literal('platform_event').optional(),
   platformEventKind: fastAgentPlatformEventKindSchema.optional(),
-  /**
-   * Set by the Session integration form when the owner saves a key: the
-   * human turn carries a Roomote-injected `<environment-instructions>` block
-   * that the transcript hides and the prompt explains. Never set from chat.
-   */
-  humanTurnFraming: z.literal('integration_saved').optional(),
   platformEventVisibility: fastAgentPlatformEventVisibilitySchema.optional(),
   setupSession: z.boolean().optional(),
   /**

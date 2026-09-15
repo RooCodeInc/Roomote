@@ -2,6 +2,8 @@ import {
   isServiceCredentialToolsExperimentEnabled,
   SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY,
   serviceCredentialPrepareSchema,
+  hasIntegrationSavedBlock,
+  stripIntegrationSavedBlocks,
 } from './service-credentials';
 import { isCredentialEgressCredentialHeaderName } from './credential-egress';
 
@@ -75,5 +77,18 @@ describe('credential header names', () => {
       expect(isCredentialEgressCredentialHeaderName(name), name).toBe(false);
       expect(prepare(name).success, name).toBe(false);
     }
+  });
+});
+
+describe('integration saved block', () => {
+  it('strips every block and keeps the visible text', () => {
+    const text =
+      '<integration_saved>\nhidden instruction\n</integration_saved>\nI added the integration, go ahead.';
+    expect(hasIntegrationSavedBlock(text)).toBe(true);
+    expect(stripIntegrationSavedBlocks(text)).toBe(
+      'I added the integration, go ahead.',
+    );
+    expect(hasIntegrationSavedBlock('plain text')).toBe(false);
+    expect(stripIntegrationSavedBlocks('plain text')).toBe('plain text');
   });
 });

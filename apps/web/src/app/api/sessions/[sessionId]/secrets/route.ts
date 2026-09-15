@@ -110,7 +110,6 @@ async function handle(
             text: buildIntegrationSavedContinuation(
               isServiceCredentialToolsExperimentEnabled(user?.metadata),
             ),
-            humanTurnFraming: 'integration_saved',
           });
           resumed = true;
         }

@@ -3,9 +3,9 @@ import {
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   extractAutomationTriggeredPromptText,
   extractAcpMessageText,
-  extractVisibleAcpPromptText,
   getTextFromContentBlocks,
-  isSystemInjectedAcpPromptText,
+  hasIntegrationSavedBlock,
+  stripIntegrationSavedBlocks,
   parsePrReviewActionOffer,
   type PrReviewActionOfferStatus,
   sanitizeEnvelopeFields,
@@ -587,19 +587,17 @@ function prepareFastSessionMessageRow<
 
   if (
     row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
-    sanitized.metadata?.visibleInTranscript !== false &&
-    sanitized.metadata?.humanTurnFraming === 'integration_saved'
+    sanitized.metadata?.visibleInTranscript !== false
   ) {
-    // A human turn Roomote framed with an `<environment-instructions>` block
-    // (the continuation after the owner saves an integration key) shows only
-    // its `<request>` text, as task transcripts already do. The server-set
-    // provenance flag gates this: the same text typed into chat stays as is.
+    // The turn Roomote sends after the owner saves an integration key carries
+    // its instruction in an `<integration_saved>` block; the transcript shows
+    // only the text after it.
     const text = getTextFromContentBlocks(sanitized.contentBlocks) ?? '';
-    if (isSystemInjectedAcpPromptText(text)) {
+    if (hasIntegrationSavedBlock(text)) {
       return {
         ...row,
         contentBlocks: [
-          { type: 'text', text: extractVisibleAcpPromptText(text) },
+          { type: 'text', text: stripIntegrationSavedBlocks(text) },
           ...sanitized.contentBlocks.filter((block) => block.type !== 'text'),
         ],
         metadata: sanitized.metadata,
@@ -769,7 +767,6 @@ export async function getFastSessionSuggestableMessages(
       role: fastAgentMessages.role,
       contentBlocks: fastAgentMessages.contentBlocks,
       payload: fastAgentMessages.payload,
-      metadata: fastAgentMessages.metadata,
     })
     .from(fastAgentMessages)
     .where(
@@ -799,7 +796,6 @@ export async function getFastSessionSuggestableMessages(
         row.contentBlocks,
         (row.payload as Record<string, unknown> | null) ?? null,
       ) ?? null,
-      (row.metadata as Record<string, unknown> | null) ?? null,
     ),
   }));
 }
@@ -914,13 +910,8 @@ export async function getFastSessionById(
   };
 }
 
-function visibleSuggestableText(
-  text: string | null,
-  metadata: Record<string, unknown> | null,
-): string | null {
-  return text &&
-    metadata?.humanTurnFraming === 'integration_saved' &&
-    isSystemInjectedAcpPromptText(text)
-    ? extractVisibleAcpPromptText(text)
+function visibleSuggestableText(text: string | null): string | null {
+  return text && hasIntegrationSavedBlock(text)
+    ? stripIntegrationSavedBlocks(text)
     : text;
 }

@@ -185,7 +185,6 @@ describe('integration key route boundary', () => {
     expect(mocks.reply).toHaveBeenCalledExactlyOnceWith(auth, {
       sessionId: fastConversationId,
       text: expect.stringContaining('Integration keys are turned off'),
-      humanTurnFraming: 'integration_saved',
     });
     expect(mocks.create.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.findSession.mock.invocationCallOrder[0]!,
@@ -209,11 +208,10 @@ describe('integration key route boundary', () => {
     expect(mocks.reply).toHaveBeenCalledWith(auth, {
       sessionId: fastConversationId,
       text: expect.stringContaining('Call list_integration_keys'),
-      humanTurnFraming: 'integration_saved',
     });
     const text = mocks.reply.mock.calls[0]![1].text;
     expect(text).toMatch(
-      /^<environment-instructions>\n[^<]+\n<\/environment-instructions>\n<request>I added the integration, go ahead\.<\/request>$/u,
+      /^<integration_saved>\n[^<]+\n<\/integration_saved>\nI added the integration, go ahead\.$/u,
     );
   });
 
@@ -245,7 +243,6 @@ describe('integration key route boundary', () => {
     expect(mocks.reply).toHaveBeenLastCalledWith(auth, {
       sessionId: fastConversationId,
       text,
-      humanTurnFraming: 'integration_saved',
     });
     for (const value of [otherRef, otherSecret, 'untrusted-label-canary'])
       expect(text).not.toContain(value);

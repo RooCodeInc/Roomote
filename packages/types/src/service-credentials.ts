@@ -165,3 +165,21 @@ export interface ServiceCredentialApprovals {
 export type ServiceCredentialRequestResult =
   | { success: true; status: number; body: string }
   | { success: false; error: 'Secret request unavailable' };
+
+/**
+ * Wraps the instruction Roomote injects into the Session turn it sends after
+ * the owner saves an integration key. The Session transcript hides every such
+ * block and shows the text that follows it.
+ */
+export const INTEGRATION_SAVED_TAG = 'integration_saved' as const;
+
+const INTEGRATION_SAVED_BLOCK =
+  /<integration_saved>[\s\S]*?<\/integration_saved>\s*/gu;
+
+export function hasIntegrationSavedBlock(text: string): boolean {
+  return text.includes(`<${INTEGRATION_SAVED_TAG}>`);
+}
+
+export function stripIntegrationSavedBlocks(text: string): string {
+  return text.replace(INTEGRATION_SAVED_BLOCK, '').trim();
+}
