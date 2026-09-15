@@ -615,6 +615,7 @@ export async function listFastAgentIntegrations(
         id: result.value.id,
         name: result.value.name,
         description: result.value.description,
+        dataPolicy: result.value.dataPolicy,
         instructions: isMemory
           ? createMemoryMcpInstructions(result.value.id, {
               primary: primaryMemory,

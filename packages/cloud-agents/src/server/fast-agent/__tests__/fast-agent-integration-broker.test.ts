@@ -29,6 +29,12 @@ const mocks = vi.hoisted(() => ({
   findMember: vi.fn(),
   findBitbucketRepository: vi.fn(),
   findNativeMergeRepository: vi.fn(),
+  getMcpIntegrationDataPolicy: vi.fn(),
+}));
+
+vi.mock('@roomote/types', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/types')>()),
+  getMcpIntegrationDataPolicy: mocks.getMcpIntegrationDataPolicy,
 }));
 
 vi.mock('@roomote/env', async (importOriginal) => ({
@@ -164,6 +170,7 @@ describe('fast-agent integration broker', () => {
       externalRepoId: 'repo-uuid',
     });
     mocks.findNativeMergeRepository.mockResolvedValue(undefined);
+    mocks.getMcpIntegrationDataPolicy.mockReturnValue('shared');
     mocks.beginIntegrationCall.mockResolvedValue({
       id: 'audit-1',
       startedAt: new Date('2026-08-16T00:00:00.000Z'),
@@ -200,6 +207,7 @@ describe('fast-agent integration broker', () => {
       'integration_request',
     ]);
     expect(Object.keys(available[0]!).sort()).toEqual([
+      'dataPolicy',
       'description',
       'endpoint',
       'id',
@@ -2110,6 +2118,54 @@ describe('fast-agent integration broker', () => {
         request,
       ),
     ).rejects.toThrow('require a private Session');
+  });
+
+  it('preserves private policy through discovery, shared rejection, and private audit scrubbing', async () => {
+    mocks.getMcpIntegrationDataPolicy.mockReturnValue('private');
+    mocks.configuredServers = {
+      'private-example': {
+        url: 'https://api.example.com/api/mcp/private-example',
+        headers: {},
+      },
+    };
+    mocks.listMcpTools.mockResolvedValue([{ name: 'read_private' }]);
+    mocks.callMcpTool.mockResolvedValue({ value: 'private canary result' });
+    const integrations = await listFastAgentIntegrations(auditContext);
+
+    expect(integrations).toEqual([
+      expect.objectContaining({
+        id: 'private-example',
+        dataPolicy: 'private',
+      }),
+    ]);
+    const request = {
+      integrationId: 'private-example',
+      toolName: 'read_private',
+      args: { query: 'private canary argument' },
+    };
+    await expect(
+      callFastAgentIntegration(auditContext, integrations, request),
+    ).rejects.toThrow('require a private Session');
+    expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
+
+    await expect(
+      callFastAgentIntegration(
+        {
+          ...auditContext,
+          privacy: 'private',
+          privateOwnerUserId: auditContext.userId,
+          privateSessionsExperimentEnabled: true,
+        },
+        integrations,
+        request,
+      ),
+    ).resolves.toEqual({ value: 'private canary result' });
+    expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({ arguments: {} }),
+    );
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({ resultPreview: null }),
+    );
   });
 
   it('does not execute a tool when its durable audit cannot be created', async () => {
