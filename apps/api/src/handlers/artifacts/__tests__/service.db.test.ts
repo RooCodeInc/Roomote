@@ -1,6 +1,11 @@
-import { db, taskArtifacts, taskFactory } from '@roomote/db/server';
+import {
+  db,
+  taskArtifacts,
+  taskFactory,
+  userFactory,
+} from '@roomote/db/server';
 
-import { getArtifactByPath } from '../service';
+import { getArtifactByPath, verifyTaskAccessForArtifact } from '../service';
 
 describe('getArtifactByPath', () => {
   let taskId: string;
@@ -58,5 +63,19 @@ describe('getArtifactByPath', () => {
     await expect(
       getArtifactByPath({ taskId, path: incompletePath, auth: {} }),
     ).resolves.toBeNull();
+  });
+
+  it('allows artifact publishing only for shared tasks', async () => {
+    await expect(verifyTaskAccessForArtifact(taskId, {})).resolves.toBe(true);
+
+    const owner = await userFactory.create();
+    const privateTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    await expect(verifyTaskAccessForArtifact(privateTask.id, {})).resolves.toBe(
+      false,
+    );
   });
 });

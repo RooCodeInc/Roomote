@@ -82,6 +82,26 @@ beforeEach(() => {
 });
 
 describe('createArtifact', () => {
+  it('does not issue upload URLs when artifact publishing is unavailable', async () => {
+    mockVerifyTaskAccessForArtifact.mockResolvedValue(false);
+
+    const response = await createApp().request('http://localhost/artifacts', {
+      method: 'POST',
+      body: JSON.stringify({
+        taskId: 'task-1',
+        artifactType: 'general',
+        contentType: 'text/plain',
+        path: 'private.txt',
+        size: 100,
+      }),
+      headers: { 'content-type': 'application/json' },
+    });
+
+    expect(response.status).toBe(404);
+    expect(mockCreateTaskArtifactRecord).not.toHaveBeenCalled();
+    expect(mockGenerateUploadUrl).not.toHaveBeenCalled();
+  });
+
   it('normalizes the public URL for view and image raw URLs', async () => {
     mockEnv.R_PUBLIC_URL = 'https://public.example.com/';
 

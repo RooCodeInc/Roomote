@@ -7,6 +7,7 @@ import {
   sessions,
   sql,
   taskArtifacts,
+  tasks,
 } from '@roomote/db/server';
 
 type ArtifactRecordOwner =
@@ -24,12 +25,24 @@ export async function createArtifactRecord(input: CreateArtifactRecordInput) {
   return await db.transaction(async (tx) => {
     const taskOwned = input.taskId !== undefined;
 
-    if (!taskOwned) {
-      const session = await tx.query.sessions.findFirst({
-        where: eq(sessions.id, input.sessionId),
-        columns: { id: true },
-      });
-      if (!session) throw new Error('Session not found.');
+    const [owner] = taskOwned
+      ? await tx
+          .select({ id: tasks.id, privacy: tasks.privacy })
+          .from(tasks)
+          .where(eq(tasks.id, input.taskId))
+          .for('key share')
+      : await tx
+          .select({ id: sessions.id, privacy: sessions.privacy })
+          .from(sessions)
+          .where(eq(sessions.id, input.sessionId))
+          .for('key share');
+    if (!owner) {
+      throw new Error(taskOwned ? 'Task not found.' : 'Session not found.');
+    }
+    if (owner.privacy === 'private') {
+      throw new Error(
+        'Artifact publishing is unavailable in private Sessions.',
+      );
     }
 
     const ownerId = taskOwned ? input.taskId : input.sessionId;
