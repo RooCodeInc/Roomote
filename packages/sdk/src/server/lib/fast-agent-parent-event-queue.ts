@@ -556,12 +556,26 @@ export async function drainFastAgentParentEvents(
 }
 
 /**
- * Events the queue worker owes a delivery that were created before
- * `olderThan`: undelivered, undiscarded, not due for a scheduled retry, and
- * without a live inline claim. An inline-admitted row counts too once its
- * owner's claim lapses, because from then on only the queue can deliver it.
- * A non-zero count means the queue worker is not draining, which is what
- * `/health/bullmq` reports.
+ * When the queue worker became responsible for a pending row. A row queued
+ * at creation has waited since then; an inline-admitted row only since its
+ * owner released the claim (`updated_at`, which the release stamps) or let
+ * it expire (`claimed_until`); a durably scheduled retry only since its due
+ * time. Any later bookkeeping write (`updated_at`) also restarts the clock,
+ * since it proves something is still working the row.
+ */
+const queueEligibleSince = sql`GREATEST(
+  ${fastAgentParentEvents.createdAt},
+  ${fastAgentParentEvents.updatedAt},
+  COALESCE(${fastAgentParentEvents.claimedUntil}, ${fastAgentParentEvents.createdAt}),
+  COALESCE(${fastAgentParentEvents.retryAt}, ${fastAgentParentEvents.createdAt})
+)`;
+
+/**
+ * Pending events the queue worker has owed a delivery since before
+ * `olderThan`: undelivered, undiscarded, not waiting on a scheduled retry,
+ * and without a live inline claim, measured from the moment the queue became
+ * responsible rather than from creation. A non-zero count means the queue
+ * worker is not draining, which is what `/health/bullmq` reports.
  */
 export async function countOverdueQueuedFastAgentParentEvents(
   olderThan: Date,
@@ -569,9 +583,7 @@ export async function countOverdueQueuedFastAgentParentEvents(
   const [row] = await db
     .select({ count: count() })
     .from(fastAgentParentEvents)
-    .where(
-      and(pendingPredicate(), lt(fastAgentParentEvents.createdAt, olderThan)),
-    );
+    .where(and(pendingPredicate(), sql`${queueEligibleSince} < ${olderThan}`));
   return row?.count ?? 0;
 }
 
