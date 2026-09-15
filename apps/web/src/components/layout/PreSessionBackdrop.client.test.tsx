@@ -16,6 +16,9 @@ describe('PreSessionBackdrop', () => {
 
     expect(preview).toHaveAttribute('aria-hidden', 'true');
     expect(preview).toHaveAttribute('inert');
+    expect(preview).toHaveTextContent("Let's cook!");
+    expect(preview).toHaveTextContent('GPT 5.6 Terra Low');
+    expect(preview).toHaveTextContent('Recent Sessions');
     expect(
       screen.getByRole('button', { name: 'Continue setup' }),
     ).toBeEnabled();

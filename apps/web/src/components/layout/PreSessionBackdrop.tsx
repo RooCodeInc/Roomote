@@ -1,6 +1,30 @@
 import type { ReactNode } from 'react';
+import Image from 'next/image';
 
-import { RoomoteWordmark } from './RoomoteWordmark';
+import {
+  ChartColumnIncreasing,
+  House,
+  MessageCirclePlus,
+  Mic,
+  NotepadText,
+  PanelLeftOpen,
+  Plus,
+  Search,
+  SendHorizontal,
+  Settings,
+  Zap,
+} from '@/components/system';
+
+const PREVIEW_NAV_ITEMS = [
+  Plus,
+  House,
+  NotepadText,
+  Zap,
+  ChartColumnIncreasing,
+  Settings,
+  Search,
+  PanelLeftOpen,
+] as const;
 
 export function PreSessionBackdrop({ children }: { children: ReactNode }) {
   return (
@@ -8,49 +32,92 @@ export function PreSessionBackdrop({ children }: { children: ReactNode }) {
       <div
         aria-hidden="true"
         inert
-        className="pointer-events-none absolute -inset-6 flex select-none bg-card opacity-70 blur-[5px] saturate-125"
+        className="pointer-events-none absolute -inset-6 flex select-none bg-card opacity-75 blur-[4px] saturate-125"
         data-slot="pre-session-product-preview"
       >
-        <aside className="hidden w-64 shrink-0 flex-col gap-6 bg-card p-6 md:flex">
-          <RoomoteWordmark className="h-8 w-fit" />
-          <div className="space-y-2">
-            <div className="h-10 rounded-full bg-foreground/10" />
-            <div className="h-10 rounded-full bg-accent-foreground/45" />
-            <div className="h-10 rounded-full bg-foreground/10" />
-            <div className="h-10 rounded-full bg-foreground/10" />
-          </div>
-          <div className="mt-auto space-y-3">
-            <div className="h-3 w-3/5 rounded-full bg-foreground/15" />
-            <div className="h-3 w-4/5 rounded-full bg-foreground/10" />
-            <div className="h-10 rounded-full bg-foreground/10" />
+        <aside className="hidden w-16 shrink-0 flex-col items-center gap-2 bg-card px-3 py-5 md:flex">
+          <Image
+            src="/logos/r.svg"
+            alt=""
+            width={28}
+            height={28}
+            className="mb-3 size-7"
+          />
+          {PREVIEW_NAV_ITEMS.map((Icon, index) => (
+            <div
+              key={index}
+              className={
+                index === 1
+                  ? 'flex size-10 items-center justify-center rounded-full bg-foreground text-accent-foreground'
+                  : 'flex size-10 items-center justify-center text-muted-foreground'
+              }
+            >
+              <Icon className="size-5" />
+            </div>
+          ))}
+          <div className="mt-auto flex size-9 items-center justify-center rounded-full bg-muted text-xs font-semibold">
+            LA
           </div>
         </aside>
 
-        <div className="flex min-w-0 flex-1 flex-col p-4 md:p-8">
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl bg-background shadow-xl">
-            <div className="flex h-20 items-center gap-4 border-b-4 border-card bg-background px-6">
-              <div className="h-9 w-36 rounded-full bg-card" />
-              <div className="h-9 w-28 rounded-full bg-card" />
-              <div className="ml-auto size-9 rounded-full bg-card" />
+        <main className="flex min-w-0 flex-1 p-2">
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl bg-background">
+            <div className="flex h-14 items-center justify-between bg-card px-4 md:hidden">
+              <Image src="/logos/r.svg" alt="" width={28} height={28} />
+              <div className="flex size-9 items-center justify-center rounded-full bg-muted text-xs font-semibold">
+                LA
+              </div>
             </div>
-            <div className="grid flex-1 gap-3 p-5 md:grid-cols-2 xl:grid-cols-3">
-              {Array.from({ length: 6 }, (_, index) => (
-                <div
-                  key={index}
-                  className="flex min-h-36 flex-col rounded-2xl bg-card p-5 shadow-sm"
-                >
-                  <div className="mb-5 h-4 w-2/3 rounded-full bg-foreground/15" />
-                  <div className="mb-2 h-3 w-full rounded-full bg-foreground/10" />
-                  <div className="h-3 w-4/5 rounded-full bg-foreground/10" />
-                  <div className="mt-auto h-7 w-20 rounded-full bg-accent-foreground/50" />
+
+            <div className="flex min-h-0 flex-1 items-center justify-center px-4 pb-16">
+              <div className="flex w-full max-w-3xl flex-col gap-3">
+                <h2 className="text-2xl font-bold tracking-tight">
+                  Let&apos;s cook!
+                </h2>
+
+                <div className="flex min-h-44 flex-col rounded-lg border-2 border-accent-foreground bg-card p-3">
+                  <p className="text-sm text-muted-foreground">
+                    Review this pull request and address the feedback
+                  </p>
+                  <div className="mt-auto flex items-center gap-2">
+                    <div className="flex size-8 items-center justify-center rounded-md">
+                      <Plus className="size-4" />
+                    </div>
+                    <div className="rounded-md px-2 py-1 text-xs text-muted-foreground">
+                      GPT 5.6 Terra Low
+                    </div>
+                    <Mic className="ml-auto size-4 text-muted-foreground" />
+                    <div className="flex size-8 items-center justify-center rounded-full bg-foreground text-card">
+                      <SendHorizontal className="size-4" />
+                    </div>
+                  </div>
                 </div>
-              ))}
+
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span>Link your GitHub account</span>
+                  <span className="rounded-full bg-foreground px-4 py-2 font-semibold text-card">
+                    Link
+                  </span>
+                  <span className="text-muted-foreground">&times;</span>
+                  <span className="ml-auto inline-flex items-center gap-1.5 font-semibold text-muted-foreground">
+                    <MessageCirclePlus className="size-4" />
+                    Feedback, please!
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="absolute bottom-0 left-1/2 flex w-[min(48rem,calc(100%-2rem))] -translate-x-1/2 overflow-hidden rounded-t-xl bg-card text-sm font-semibold text-muted-foreground">
+              <div className="border-r-2 border-background px-5 py-3">
+                Recent Sessions
+              </div>
+              <div className="px-5 py-3">Recent PRs</div>
             </div>
           </div>
-        </div>
+        </main>
       </div>
 
-      <div className="pointer-events-none absolute inset-0 bg-accent-bright-foreground/60" />
+      <div className="pointer-events-none absolute inset-0 bg-accent-bright-foreground/55" />
       <div className="relative z-base flex min-h-effective-viewport w-full items-center justify-center">
         {children}
       </div>
