@@ -438,9 +438,7 @@ describe('FastSessionTranscript', () => {
         { status: 201 },
       ),
     );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Save integration' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
     await screen.findByText(
       'Integration saved. The Session has been notified without sharing your key.',
     );
