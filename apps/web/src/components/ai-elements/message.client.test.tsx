@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 const pushMock = vi.fn();
 
@@ -11,7 +12,28 @@ vi.mock('@/app/(sandbox)/task/[taskId]/hooks/ArtifactLinkProvider', () => ({
   useArtifactLink: () => null,
 }));
 
-import { CustomParagraph, MessagePlainText, MessageResponse } from './message';
+import {
+  CustomParagraph,
+  MessagePlainText,
+  MessageResponse,
+  MessageTimestamp,
+} from './message';
+
+describe('MessageTimestamp', () => {
+  const timestamp = new Date('2026-09-14T20:02:13.906Z').getTime();
+
+  it('keeps timezone-dependent text out of server-rendered HTML', () => {
+    expect(renderToStaticMarkup(<MessageTimestamp ts={timestamp} />)).toBe(
+      '<time dateTime="2026-09-14T20:02:13.906Z" class="text-xs text-muted-foreground whitespace-nowrap select-none"></time>',
+    );
+  });
+
+  it('shows the timestamp after the client mounts', () => {
+    const { container } = render(<MessageTimestamp ts={timestamp} />);
+
+    expect(container.querySelector('time')).not.toBeEmptyDOMElement();
+  });
+});
 
 describe('message wrapping', () => {
   beforeEach(() => {
