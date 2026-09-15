@@ -20,6 +20,7 @@ import {
   getFastAgentParentFromPayload,
   getTaskReportConsumerFromPayload,
   isCommunicationProvider,
+  NESTED_DEPLOYMENT_ENV_VAR_NAME,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   SANDBOX_SERVER_PORT,
   SANDBOX_TIMEOUT_MS,
@@ -726,9 +727,14 @@ export const runTask = async ({
       githubTokenRefreshInterval: undefined,
     };
 
+    // Launcher-only source names never reach the harness process env: the
+    // sandbox OpenRouter key and the nested compute forwarding value are
+    // both consumed by setup and expanded for the nested app instead.
     const taskEnvVars = Object.fromEntries(
       Object.entries(envVars).filter(
-        ([name]) => name !== SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+        ([name]) =>
+          name !== SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME &&
+          name !== NESTED_DEPLOYMENT_ENV_VAR_NAME,
       ),
     );
     const unsanitizedEnv = workerEnv
