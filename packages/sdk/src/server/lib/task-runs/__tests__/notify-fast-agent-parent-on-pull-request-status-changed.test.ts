@@ -1,70 +1,18 @@
 import type { TaskRun } from '@roomote/db/server';
 
-const mocks = vi.hoisted(() => {
-  class FastAgentParentEventDeliveryError extends Error {
-    readonly replyPosted: boolean;
-    readonly permanent: boolean;
-
-    constructor(
-      message: string,
-      options: { replyPosted: boolean; permanent?: boolean },
-    ) {
-      super(message);
-      this.replyPosted = options.replyPosted;
-      this.permanent = options.permanent ?? false;
-    }
-  }
-
-  return {
-    claimReturning: vi.fn(),
-    findClaimRun: vi.fn(),
-    updateSet: vi.fn(),
-    recordLifecycle: vi.fn(),
-    deliverParentEvent: vi.fn(),
-    enqueueParentEvent: vi.fn(),
-    getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
-    FastAgentParentEventDeliveryError,
-  };
-});
+const mocks = vi.hoisted(() => ({
+  recordLifecycle: vi.fn(),
+  enqueueParentEvent: vi.fn(),
+  getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
+}));
 
 vi.mock('@roomote/db/server', () => ({
-  db: {
-    query: {
-      taskRuns: { findFirst: mocks.findClaimRun },
-    },
-    update: vi.fn(() => ({
-      set: vi.fn((values: unknown) => {
-        mocks.updateSet(values);
-        return {
-          where: vi.fn(() => ({ returning: mocks.claimReturning })),
-        };
-      }),
-    })),
-  },
-  and: vi.fn((...args: unknown[]) => args),
-  asc: vi.fn((value: unknown) => value),
-  desc: vi.fn((value: unknown) => value),
-  eq: vi.fn((...args: unknown[]) => args),
+  db: {},
   recordTaskRunLifecycleEvent: mocks.recordLifecycle,
-  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
-    strings: [...strings],
-    values,
-  })),
-  taskRuns: {
-    id: 'task_runs.id',
-    taskId: 'task_runs.task_id',
-    createdAt: 'task_runs.created_at',
-    result: 'task_runs.result',
-  },
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   getTaskUrl: mocks.getTaskUrl,
-}));
-
-vi.mock('../../fast-agent-parent-event', () => ({
-  deliverFastAgentParentEvent: mocks.deliverParentEvent,
-  FastAgentParentEventDeliveryError: mocks.FastAgentParentEventDeliveryError,
 }));
 
 vi.mock('../../fast-agent-parent-event-queue', () => ({
@@ -89,6 +37,7 @@ function makeRun(payload: Record<string, unknown>): TaskRun {
     id: 200,
     taskId: 'child-task',
     payload,
+    payloadKind: typeof payload.type === 'string' ? payload.type : 'standard',
     result: null,
     error: null,
   } as TaskRun;
@@ -108,9 +57,6 @@ const pullRequest = {
 describe('notifyFastAgentParentOnPullRequestStatusChanged', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
-    mocks.findClaimRun.mockResolvedValue({ id: 200 });
-    mocks.deliverParentEvent.mockResolvedValue('delivered');
     mocks.enqueueParentEvent.mockResolvedValue({
       eventKey: 'pr-status-event',
       queued: true,
@@ -168,16 +114,17 @@ describe('notifyFastAgentParentOnPullRequestStatusChanged', () => {
       actorLogin: 'alice',
     });
 
-    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
   });
 });
 
 describe('notifyFastAgentParentOnPullRequestConflict', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
-    mocks.findClaimRun.mockResolvedValue({ id: 200 });
-    mocks.deliverParentEvent.mockResolvedValue('delivered');
+    mocks.enqueueParentEvent.mockResolvedValue({
+      eventKey: 'pr-conflict-event',
+      queued: true,
+    });
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
 
@@ -197,9 +144,8 @@ describe('notifyFastAgentParentOnPullRequestConflict', () => {
     });
 
     expect(delivered).toBe(true);
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith({
       parent: fastParent,
-      lockWaitMs: 30_000,
       event: expect.objectContaining({
         type: 'pull_request_conflict_detected',
         taskId: 'child-task',
@@ -213,5 +159,49 @@ describe('notifyFastAgentParentOnPullRequestConflict', () => {
         }),
       }),
     });
+  });
+
+  it('suppresses conflict notifications from review-pipeline runs', async () => {
+    await expect(
+      notifyFastAgentParentOnPullRequestConflict({
+        run: makeRun({
+          type: 'github_pr_review_sync',
+          fastAgentParent: fastParent,
+        }),
+        pullRequest: {
+          provider: pullRequest.provider,
+          host: pullRequest.host,
+          repository: pullRequest.repository,
+          number: pullRequest.number,
+          title: pullRequest.title,
+          url: pullRequest.url,
+        },
+        conflictDetectedAt: new Date('2026-08-24T23:00:00.000Z'),
+      }),
+    ).resolves.toBe(false);
+
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('surfaces durable conflict admission failures', async () => {
+    mocks.enqueueParentEvent.mockRejectedValueOnce(
+      new Error('database offline'),
+    );
+
+    await expect(
+      notifyFastAgentParentOnPullRequestConflict({
+        run: makeRun({ fastAgentParent: fastParent }),
+        pullRequest: {
+          provider: pullRequest.provider,
+          host: pullRequest.host,
+          repository: pullRequest.repository,
+          number: pullRequest.number,
+          title: pullRequest.title,
+          url: pullRequest.url,
+        },
+        conflictDetectedAt: new Date('2026-08-24T23:00:00.000Z'),
+      }),
+    ).rejects.toThrow('database offline');
+    expect(mocks.recordLifecycle).not.toHaveBeenCalled();
   });
 });
