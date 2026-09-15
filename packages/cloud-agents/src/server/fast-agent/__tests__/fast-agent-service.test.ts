@@ -1699,14 +1699,20 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
                 ...args,
                 ...extra,
               }),
-            ).toEqual({ success: false, error: 'Secret request unavailable' });
+            ).toEqual({
+              success: false,
+              error: expect.stringMatching(/^Invalid arguments: /),
+            });
           }
           expect(mocks.prepareServiceCredential).not.toHaveBeenCalled();
           expect(
             await invokeTool(nativeToolNames.listServiceCredentials, {
               userId: 'injected-user',
             }),
-          ).toEqual({ success: false, error: 'Secret request unavailable' });
+          ).toEqual({
+            success: false,
+            error: expect.stringMatching(/^Invalid arguments: /),
+          });
           expect(mocks.listServiceCredentialApprovals).not.toHaveBeenCalled();
           const url = new URL(`${Env.R_APP_URL}/sessions/canonical-session-1`);
           url.hash = 'integrations';
@@ -1811,7 +1817,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
               sessionId: 'injected-session',
               userId: 'injected-user',
             }),
-          ).toEqual({ success: false, error: 'Secret request unavailable' });
+          ).toEqual({
+            success: false,
+            error: expect.stringMatching(/^Invalid arguments: /),
+          });
           expect(mocks.callIntegration).not.toHaveBeenCalled();
           expect(
             await mocks.nativeExecutor!({

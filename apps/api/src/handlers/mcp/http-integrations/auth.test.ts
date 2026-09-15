@@ -351,6 +351,9 @@ it('publishes a provider-safe optional header prefix schema', async () => {
 
   expect(schema.required).not.toContain('headerPrefix');
   expect(schema.properties.headerPrefix.enum).toEqual([
+    'Bearer',
+    'Basic',
+    'Token',
     'Bearer ',
     'Basic ',
     'Token ',

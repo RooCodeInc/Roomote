@@ -284,6 +284,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     expect(Object.keys(tool.args!).sort()).toEqual([
       'accept',
       'body',
+      'contentType',
       'method',
       'path',
       'secretRef',
@@ -294,10 +295,17 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       type: 'object',
       properties: {
         secretRef: { type: 'string', format: 'uuid' },
-        method: { enum: ['GET', 'HEAD'] },
+        method: { enum: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] },
         path: { type: 'string', minLength: 1, maxLength: 2048 },
         accept: { enum: ['application/json', 'text/plain'] },
         body: expect.any(Object),
+        contentType: {
+          enum: [
+            'application/json',
+            'text/plain',
+            'application/x-www-form-urlencoded',
+          ],
+        },
       },
       required: ['secretRef', 'method', 'path'],
     });
@@ -313,18 +321,28 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       ).toBe(true);
       expect(validator.compile(schema)({ ...args, body })).toBe(true);
     }
-    for (const body of ['nonempty', ' ', {}]) {
-      expect(validator.compile(schema)({ ...args, body })).toBe(false);
-    }
+    // A write with a body is valid; the broker still checks the grant's methods.
+    const write = {
+      ...args,
+      method: 'POST',
+      body: '{"q":"roomote"}',
+      contentType: 'application/json',
+    };
+    expect(serviceCredentialRequestSchema.safeParse(write).success).toBe(true);
+    expect(validator.compile(schema)(write)).toBe(true);
+    expect(validator.compile(schema)({ ...args, body: {} })).toBe(false);
+    // GET/HEAD never carry a body: the JSON schema cannot express that
+    // cross-field rule, so the runtime schema enforces it.
     for (const invalid of [
       { ...args, userId: 'caller' },
       { ...args, sessionId: 'caller' },
-      { ...args, method: 'POST' },
+      { ...args, method: 'TRACE' },
       { ...args, path: 'x'.repeat(2049) },
       { ...args, accept: 'text/html' },
       { ...args, body: 'nonempty' },
       { ...args, body: ' ' },
       { ...args, body: {} },
+      { ...write, contentType: 'application/xml' },
     ]) {
       expect(serviceCredentialRequestSchema.safeParse(invalid).success).toBe(
         false,
@@ -364,7 +382,9 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
         label: { type: 'string', minLength: 1, maxLength: 80 },
         origin: { type: 'string', minLength: 1, maxLength: 2048 },
         headerName: { type: 'string', minLength: 1, maxLength: 64 },
-        headerPrefix: { enum: ['Bearer ', 'Basic ', 'Token '] },
+        headerPrefix: {
+          enum: ['Bearer', 'Basic', 'Token', 'Bearer ', 'Basic ', 'Token '],
+        },
         lifetimeHours: { type: 'integer', minimum: 1, maximum: 8760 },
         allowedMethods: {
           type: 'array',
@@ -592,7 +612,16 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
                 label: { type: 'string' },
                 origin: { type: 'string' },
                 headerName: { enum: ['authorization', 'x-api-key', 'api-key'] },
-                headerPrefix: { enum: ['Bearer ', 'Basic ', 'Token '] },
+                headerPrefix: {
+                  enum: [
+                    'Bearer',
+                    'Basic',
+                    'Token',
+                    'Bearer ',
+                    'Basic ',
+                    'Token ',
+                  ],
+                },
                 lifetimeHours: { type: 'integer' },
                 allowedMethods: { type: 'array' },
               },

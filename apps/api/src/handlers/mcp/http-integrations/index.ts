@@ -109,7 +109,7 @@ export function createHttpIntegrationsMcp() {
         'list_integrations',
         {
           description: serviceCredentialToolsEnabled
-            ? "List allowed operator integrations and live owner-approved integration keys with their methods and paths. Credentials are never returned. integration keys need no operator manifest: use integration_request with a session: id for a GET or HEAD read, or, inside an attached coding run, the substitute token and base URL delivered for that grant (see ROOMOTE_CREDENTIAL_EGRESS_SERVICES) with any ordinary HTTP client and the grant's allowed methods."
+            ? "List allowed operator integrations and live owner-approved integration keys with their methods and paths. Credentials are never returned. integration keys need no operator manifest: use integration_request with a session: id for any of the grant's allowed methods, or, inside an attached coding run, the substitute token and base URL delivered for that grant (see ROOMOTE_CREDENTIAL_EGRESS_SERVICES) with any ordinary HTTP client and the grant's allowed methods."
             : 'List allowed operator integrations with their methods and paths. Credentials are never returned.',
           inputSchema: {},
           annotations: {
@@ -151,10 +151,10 @@ export function createHttpIntegrationsMcp() {
                   id: `session:${grant.secretRef}`,
                   description: grant.label,
                   origin: grant.origin,
-                  rules: [
-                    { method: 'GET', pathPrefix: '/' },
-                    { method: 'HEAD', pathPrefix: '/' },
-                  ],
+                  rules: grant.allowedMethods.map((method) => ({
+                    method,
+                    pathPrefix: '/',
+                  })),
                   expiresAt: grant.expiresAt,
                 })),
             ],
