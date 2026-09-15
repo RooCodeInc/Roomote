@@ -15,6 +15,8 @@ const {
   mockBeginCanonicalWebPrompt,
   mockBeginCanonicalWebAutoDispatch,
   mockDispatchCanonicalAutoFollowUp,
+  mockReadLivePullRequestState,
+  mockDbUpdate,
   mockReleaseCanonicalWebAutoDispatch,
   mockBeginCanonicalAutoDispatch,
   mockCompleteCanonicalAutoDispatch,
@@ -54,6 +56,10 @@ const {
   mockBeginCanonicalWebPrompt: vi.fn(),
   mockBeginCanonicalWebAutoDispatch: vi.fn(),
   mockDispatchCanonicalAutoFollowUp: vi.fn(),
+  mockReadLivePullRequestState: vi.fn(),
+  mockDbUpdate: vi.fn(() => ({
+    set: () => ({ where: () => Promise.resolve([]) }),
+  })),
   mockReleaseCanonicalWebAutoDispatch: vi.fn(),
   mockBeginCanonicalAutoDispatch: vi.fn(),
   mockCompleteCanonicalAutoDispatch: vi.fn(),
@@ -86,6 +92,7 @@ const {
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    update: () => mockDbUpdate(),
     query: {
       taskRuns: {
         findFirst: (...args: unknown[]) => mockFindFirstTaskRun(...args),
@@ -216,6 +223,8 @@ vi.mock('@roomote/sdk/server', () => ({
   beginCanonicalPrReviewWebAutoDispatch: mockBeginCanonicalWebAutoDispatch,
   dispatchCanonicalPrReviewAutoFollowUp: mockDispatchCanonicalAutoFollowUp,
   releaseCanonicalPrReviewWebAutoDispatch: mockReleaseCanonicalWebAutoDispatch,
+  readLivePullRequestStateForNotification: (...args: unknown[]) =>
+    mockReadLivePullRequestState(...args),
   beginCanonicalPrReviewAutoDispatch: mockBeginCanonicalAutoDispatch,
   completeCanonicalPrReviewAutoDispatch: mockCompleteCanonicalAutoDispatch,
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
@@ -1174,6 +1183,61 @@ describe('prReviewNotificationJob', () => {
         text: expect.stringContaining("New review feedback — I'm on it"),
       }),
     );
+  });
+
+  it('suppresses stale feedback instead of auto-dispatching when the provider says the PR is merged', async () => {
+    // The persisted link still says open (the merge webhook was missed), but
+    // the provider says merged. Nothing is posted and nothing is resumed.
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      status: 'open',
+      host: 'github.com',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockReadLivePullRequestState.mockResolvedValue('merged');
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockReadLivePullRequestState).toHaveBeenCalledWith({
+      provider: 'github',
+      host: 'github.com',
+      repository: 'owner/repo',
+      prNumber: 42,
+    });
+    expect(mockDispatchFollowUp).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockNotifyFastAgentParent).not.toHaveBeenCalled();
+    expect(mockDbUpdate).toHaveBeenCalled();
+    expect(mockFinalize).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 'task-1' }),
+      'suppressed',
+    );
+  });
+
+  it('auto-dispatches when the live PR state cannot be read', async () => {
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      status: 'open',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockReadLivePullRequestState.mockResolvedValue(null);
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockDispatchFollowUp).toHaveBeenCalled();
   });
 
   it('fences a reclaimed automatic dispatch before remediation starts', async () => {

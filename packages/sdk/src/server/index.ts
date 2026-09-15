@@ -500,6 +500,10 @@ export {
   type SourceControlPullRequestSummary,
 } from './lib/pull-requests/source-control-pull-request-reads';
 export {
+  readLivePullRequestStateForNotification,
+  type LivePullRequestState,
+} from './lib/task-runs/pr-review-notification-pr-state';
+export {
   writeSourceControlPullRequestForTaskRun,
   sourceControlPullRequestWriteInputSchema,
   SourceControlWriteError,

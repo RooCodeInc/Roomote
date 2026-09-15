@@ -33,6 +33,7 @@ import {
   finalizePrReviewNotificationRequest,
   isDurablePrReviewNotificationRequest,
   renewPrReviewNotificationRequestLease,
+  readLivePullRequestStateForNotification,
   releaseCanonicalPrReviewWebAutoDispatch,
   retirePrReviewActionMessagesBestEffort,
   migrateLegacyPrReviewNotificationRequest,
@@ -733,6 +734,44 @@ export const prReviewNotificationJob = async (
     const canAutoHandleWeb = webAutoDispatchKey !== null;
     const autoHandleUserId =
       autoHandleRoute || canAutoHandleWeb ? autoHandlePreference?.userId : null;
+
+    // Auto-dispatch resumes or launches work on the pull request, so it is
+    // held to the provider's live state rather than the persisted link. The
+    // link is webhook-maintained and can miss a merge; a delivery that
+    // waited long enough for that to happen would otherwise reopen a merged
+    // pull request days later (a week-old CI failure did exactly that).
+    if (followUp && autoHandlePreference && autoHandleUserId) {
+      const provider = data.sourceControlProvider ?? 'github';
+      const liveState = await readLivePullRequestStateForNotification({
+        provider,
+        host: deliveryPrLink?.host ?? data.host,
+        repository: data.repository,
+        prNumber: data.prNumber,
+      });
+      if (liveState === 'merged' || liveState === 'closed') {
+        console.log(
+          `[PrReviewNotification] PR ${data.repository}#${data.prNumber} is ${liveState} on the provider while the task link says ${deliveryPrLink?.status ?? 'unknown'}; suppressing stale review feedback instead of auto-dispatching`,
+        );
+        await db
+          .update(taskPullRequests)
+          .set({ status: liveState, updatedAt: new Date() })
+          .where(
+            and(
+              eq(taskPullRequests.taskId, data.taskId),
+              eq(taskPullRequests.sourceControlProvider, provider),
+              eq(taskPullRequests.repository, data.repository),
+              eq(taskPullRequests.prNumber, data.prNumber),
+            ),
+          )
+          .catch((error: unknown) => {
+            console.warn(
+              `[PrReviewNotification] Could not record ${data.repository}#${data.prNumber} as ${liveState}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+        await finalizePrReviewNotificationRequest(data, 'suppressed');
+        return;
+      }
+    }
 
     // Fast-parent delivery can fail and release this notification for retry.
     // Complete it before auto-dispatch so a retry cannot enqueue the same
