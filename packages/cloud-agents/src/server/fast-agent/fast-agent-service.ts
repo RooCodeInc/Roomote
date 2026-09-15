@@ -254,10 +254,7 @@ function selectFastRoomoteChannelTools(options: {
           ...integration,
           tools: integration.tools.filter(({ name }) => {
             if (name === LEGACY_SLACK_REACTION_TOOL) return false;
-            if (
-              name === CHAT_CHANNELS_TOOL.name ||
-              name === CHAT_CHANNEL_POST_TOOL_NAME
-            ) {
+            if (name === CHAT_CHANNELS_TOOL.name) {
               return slackConversation;
             }
             if (name === CHAT_REACTION_EMOJI_TOOL_NAME) {
