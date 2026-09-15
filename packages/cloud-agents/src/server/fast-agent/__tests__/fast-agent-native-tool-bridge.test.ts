@@ -18,6 +18,7 @@ import {
 import {
   bindFastAgentMcpToolExecutor,
   bindFastAgentNativeToolExecutor,
+  summarizeSkillListForRecord,
   countFastAgentModelOutputLines,
   createFastAgentSpillTurnBudget,
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -531,6 +532,34 @@ describe('Fast native OpenCode tool bridge', () => {
       list.mockRestore();
       read.mockRestore();
     }
+  });
+
+  it('summarizes a skill catalog for the transcript without warning text', () => {
+    const skills = Array.from({ length: 23 }, (_, index) => ({
+      id: `instance:${String(index).padStart(8, '0')}-0000-4000-8000-000000000000`,
+      name: `skill-${index}`,
+      description: 'A skill.',
+      source: 'instance' as const,
+    }));
+    const summary = summarizeSkillListForRecord({
+      skills,
+      warnings: [
+        'Settings skills could not be listed: ECONNREFUSED 10.0.0.5:5432',
+      ],
+      nextSourceOffset: 4,
+    });
+
+    expect(summary).toEqual({
+      success: true,
+      skillCount: 23,
+      skills: skills
+        .slice(0, 20)
+        .map(({ id, name, source }) => ({ id, name, source })),
+      omittedSkillCount: 3,
+      nextSourceOffset: 4,
+      warningCount: 1,
+    });
+    expect(JSON.stringify(summary)).not.toContain('ECONNREFUSED');
   });
 
   it('records skill catalog and load calls for the transcript without the skill body', async () => {

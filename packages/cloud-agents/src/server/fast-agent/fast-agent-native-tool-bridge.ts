@@ -189,7 +189,11 @@ export function summarizeSkillListForRecord(
     ...(catalog.nextSourceOffset !== undefined
       ? { nextSourceOffset: catalog.nextSourceOffset }
       : {}),
-    ...(catalog.warnings.length > 0 ? { warnings: catalog.warnings } : {}),
+    // Warning text interpolates caught error messages from settings and
+    // repository lookups; the transcript gets only that some were raised.
+    ...(catalog.warnings.length > 0
+      ? { warningCount: catalog.warnings.length }
+      : {}),
   };
 }
 
