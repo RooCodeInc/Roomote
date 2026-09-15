@@ -109,6 +109,7 @@ function findTaskPullRequestForNotification(data: PrReviewNotificationRequest) {
       eq(taskPullRequests.prNumber, data.prNumber),
     ),
     columns: {
+      id: true,
       sourceControlProvider: true,
       host: true,
       repository: true,
@@ -752,22 +753,20 @@ export const prReviewNotificationJob = async (
         console.log(
           `[PrReviewNotification] PR ${data.repository}#${data.prNumber} is ${liveState} on the provider while the task link says ${deliveryPrLink?.status ?? 'unknown'}; suppressing stale review feedback instead of auto-dispatching`,
         );
-        await db
-          .update(taskPullRequests)
-          .set({ status: liveState, updatedAt: new Date() })
-          .where(
-            and(
-              eq(taskPullRequests.taskId, data.taskId),
-              eq(taskPullRequests.sourceControlProvider, provider),
-              eq(taskPullRequests.repository, data.repository),
-              eq(taskPullRequests.prNumber, data.prNumber),
-            ),
-          )
-          .catch((error: unknown) => {
-            console.warn(
-              `[PrReviewNotification] Could not record ${data.repository}#${data.prNumber} as ${liveState}: ${error instanceof Error ? error.message : String(error)}`,
-            );
-          });
+        // Correct only the link row this notification resolved. The same
+        // task/provider/repository/number can name pull requests on
+        // different hosts, and those links must keep their own status.
+        if (deliveryPrLink) {
+          await db
+            .update(taskPullRequests)
+            .set({ status: liveState, updatedAt: new Date() })
+            .where(eq(taskPullRequests.id, deliveryPrLink.id))
+            .catch((error: unknown) => {
+              console.warn(
+                `[PrReviewNotification] Could not record ${data.repository}#${data.prNumber} as ${liveState}: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            });
+        }
         await finalizePrReviewNotificationRequest(data, 'suppressed');
         return;
       }

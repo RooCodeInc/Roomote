@@ -120,6 +120,7 @@ vi.mock('@roomote/db/server', () => ({
     session.respondingUntil !== null && session.respondingUntil > new Date(),
   taskRuns: { taskId: 'taskId', createdAt: 'createdAt' },
   taskPullRequests: {
+    id: 'id',
     taskId: 'taskId',
     repository: 'repository',
     prNumber: 'prNumber',
@@ -1189,6 +1190,7 @@ describe('prReviewNotificationJob', () => {
     // The persisted link still says open (the merge webhook was missed), but
     // the provider says merged. Nothing is posted and nothing is resumed.
     mockFindFirstTaskPullRequest.mockResolvedValue({
+      id: 'link-1',
       status: 'open',
       host: 'github.com',
       autoHandleFeedbackByUserId: 'user-9',
@@ -1213,7 +1215,10 @@ describe('prReviewNotificationJob', () => {
     expect(mockDispatchFollowUp).not.toHaveBeenCalled();
     expect(mockStickyFooterPost).not.toHaveBeenCalled();
     expect(mockNotifyFastAgentParent).not.toHaveBeenCalled();
-    expect(mockDbUpdate).toHaveBeenCalled();
+    // Only the resolved link row is corrected, never every link that shares
+    // the task/provider/repository/number across hosts.
+    expect(mockDbUpdate).toHaveBeenCalledTimes(1);
+    expect(mockEq).toHaveBeenCalledWith('id', 'link-1');
     expect(mockFinalize).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: 'task-1' }),
       'suppressed',
