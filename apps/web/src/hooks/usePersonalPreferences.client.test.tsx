@@ -158,7 +158,7 @@ describe('usePersonalPreferences', () => {
       narrationMode: false,
       resultsPageEnabled: false,
       homeComposerSuggestionsEnabled: false,
-      sessionSecretToolsEnabled: false,
+      serviceCredentialToolsEnabled: false,
       slackPeerConversationsExperimentEnabled: false,
     });
   });

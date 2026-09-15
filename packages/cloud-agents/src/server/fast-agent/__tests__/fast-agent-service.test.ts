@@ -54,8 +54,8 @@ const mocks = vi.hoisted(() => ({
   findActiveRetryNotice: vi.fn(),
   loadTurnAttempt: vi.fn(),
   getUnifiedSession: vi.fn(),
-  prepareSessionSecret: vi.fn(),
-  listSessionSecretApprovals: vi.fn(),
+  prepareServiceCredential: vi.fn(),
+  listServiceCredentialApprovals: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
   getPendingHumanFollowUp: vi.fn(),
@@ -111,9 +111,9 @@ const nativeToolNames = vi.hoisted(
       sendTaskMessage: 'send_task_message',
       requestUserInput: 'request_user_input',
       offerCapability: 'offer_capability',
-      requestWithSessionSecret: 'request_with_session_secret',
-      prepareSessionSecret: 'prepare_session_secret',
-      listSessionSecrets: 'list_session_secrets',
+      requestWithServiceCredential: 'request_with_integration_key',
+      prepareServiceCredential: 'prepare_integration_key',
+      listServiceCredentials: 'list_integration_keys',
       listSkills: 'list_skills',
       loadSkill: 'load_skill',
       showWidget: 'show_widget',
@@ -128,9 +128,9 @@ const fastAgentSessionPermissions = vi.hoisted(() => [
 ]);
 const fastAgentSessionToolFilter = vi.hoisted(() => ({ task: true }));
 
-vi.mock('@roomote/sdk/server/session-secrets', () => ({
-  prepareSessionSecret: mocks.prepareSessionSecret,
-  listSessionSecretApprovals: mocks.listSessionSecretApprovals,
+vi.mock('@roomote/sdk/server/service-credentials', () => ({
+  prepareServiceCredential: mocks.prepareServiceCredential,
+  listServiceCredentialApprovals: mocks.listServiceCredentialApprovals,
 }));
 
 vi.mock('@roomote/telemetry/server', () => ({
@@ -600,7 +600,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       displayName: 'Matt Rubens',
       githubLogin: 'mrubens',
       isAdmin: true,
-      sessionSecretToolsEnabled: true,
+      serviceCredentialToolsEnabled: true,
     });
     mocks.getPersonalization.mockResolvedValue(null);
     mocks.appendLearnedPreference.mockResolvedValue({ saved: true });
@@ -1640,7 +1640,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it.each(['web', 'slack'] as const)(
-    'prepares and discovers %s Session secrets without human reference copying',
+    'prepares and discovers %s Integration keys without human reference copying',
     async (surface) => {
       const args = {
         label: 'Example API',
@@ -1667,8 +1667,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ],
       };
       mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
-      mocks.prepareSessionSecret.mockResolvedValue(pending);
-      mocks.listSessionSecretApprovals.mockResolvedValue(metadata);
+      mocks.prepareServiceCredential.mockResolvedValue(pending);
+      mocks.listServiceCredentialApprovals.mockResolvedValue(metadata);
       mocks.generateText.mockImplementation(
         async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
@@ -1684,32 +1684,32 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             { userId: 'injected-user' },
             { sessionId: 'injected-session' },
             { headerName: 'cookie' },
-            { ttlHours: 721 },
+            { lifetimeHours: 8761 },
           ]) {
             expect(
-              await invokeTool(nativeToolNames.prepareSessionSecret, {
+              await invokeTool(nativeToolNames.prepareServiceCredential, {
                 ...args,
                 ...extra,
               }),
             ).toEqual({ success: false, error: 'Secret request unavailable' });
           }
-          expect(mocks.prepareSessionSecret).not.toHaveBeenCalled();
+          expect(mocks.prepareServiceCredential).not.toHaveBeenCalled();
           expect(
-            await invokeTool(nativeToolNames.listSessionSecrets, {
+            await invokeTool(nativeToolNames.listServiceCredentials, {
               userId: 'injected-user',
             }),
           ).toEqual({ success: false, error: 'Secret request unavailable' });
-          expect(mocks.listSessionSecretApprovals).not.toHaveBeenCalled();
+          expect(mocks.listServiceCredentialApprovals).not.toHaveBeenCalled();
           const url = new URL(`${Env.R_APP_URL}/sessions/canonical-session-1`);
-          url.hash = 'session-secrets';
+          url.hash = 'service-credentials';
           expect(
-            await invokeTool(nativeToolNames.prepareSessionSecret, args),
+            await invokeTool(nativeToolNames.prepareServiceCredential, args),
           ).toEqual({
             pending,
             sessionUrl: url.toString(),
           });
           expect(
-            await invokeTool(nativeToolNames.prepareSessionSecret, {
+            await invokeTool(nativeToolNames.prepareServiceCredential, {
               label: 'No-prefix API',
               origin: args.origin,
               headerName: 'x-api-key',
@@ -1719,7 +1719,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             sessionUrl: url.toString(),
           });
           expect(
-            await invokeTool(nativeToolNames.listSessionSecrets, {}),
+            await invokeTool(nativeToolNames.listServiceCredentials, {}),
           ).toEqual({ ...metadata, sessionUrl: url.toString() });
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
@@ -1733,12 +1733,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         conversation: { ...baseParams.conversation, surface },
         adapter: callbacks(),
       });
-      expect(mocks.prepareSessionSecret).toHaveBeenNthCalledWith(
+      expect(mocks.prepareServiceCredential).toHaveBeenNthCalledWith(
         1,
         { sessionId: 'canonical-session-1', userId: 'user-1' },
-        { ...args, ttlHours: 24, allowedMethods: ['GET', 'HEAD'] },
+        { ...args, allowedMethods: ['GET', 'HEAD'] },
       );
-      expect(mocks.prepareSessionSecret).toHaveBeenNthCalledWith(
+      expect(mocks.prepareServiceCredential).toHaveBeenNthCalledWith(
         2,
         { sessionId: 'canonical-session-1', userId: 'user-1' },
         {
@@ -1746,11 +1746,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           origin: args.origin,
           headerName: 'x-api-key',
           headerPrefix: '',
-          ttlHours: 24,
           allowedMethods: ['GET', 'HEAD'],
         },
       );
-      expect(mocks.listSessionSecretApprovals).toHaveBeenCalledExactlyOnceWith({
+      expect(
+        mocks.listServiceCredentialApprovals,
+      ).toHaveBeenCalledExactlyOnceWith({
         sessionId: 'canonical-session-1',
         userId: 'user-1',
       });
@@ -1758,7 +1759,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   );
 
   it.each(['web', 'slack'] as const)(
-    'dispatches %s Session-secret requests with the persisted Session and trusted turn actor only',
+    'dispatches %s Integration-key requests with the persisted Session and trusted turn actor only',
     async (surface) => {
       const args = {
         secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
@@ -1781,7 +1782,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           options.onPromptStarted?.();
           if (surface !== 'web') {
             expect(
-              await invokeTool(nativeToolNames.requestWithSessionSecret, args),
+              await invokeTool(
+                nativeToolNames.requestWithServiceCredential,
+                args,
+              ),
             ).toEqual({
               success: false,
               error:
@@ -1794,7 +1798,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             });
           }
           expect(
-            await invokeTool(nativeToolNames.requestWithSessionSecret, {
+            await invokeTool(nativeToolNames.requestWithServiceCredential, {
               ...args,
               sessionId: 'injected-session',
               userId: 'injected-user',
@@ -1803,7 +1807,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           expect(mocks.callIntegration).not.toHaveBeenCalled();
           expect(
             await mocks.nativeExecutor!({
-              name: nativeToolNames.requestWithSessionSecret,
+              name: nativeToolNames.requestWithServiceCredential,
               sessionId: 'injected-opencode-session',
               args,
             }),
@@ -1859,7 +1863,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           await options.onSessionReady('opencode-session-1');
           options.onPromptStarted?.();
           expect(
-            await invokeTool(nativeToolNames.requestWithSessionSecret, {
+            await invokeTool(nativeToolNames.requestWithServiceCredential, {
               secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
               method: 'GET',
               path: '/status',
@@ -1972,8 +1976,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
   it.each([
     [
-      nativeToolNames.prepareSessionSecret,
-      'prepareSessionSecret',
+      nativeToolNames.prepareServiceCredential,
+      'prepareServiceCredential',
       {
         label: 'API',
         origin: 'https://api.example.com',
@@ -1981,7 +1985,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         headerPrefix: 'Bearer ',
       },
     ],
-    [nativeToolNames.listSessionSecrets, 'listSessionSecretApprovals', {}],
+    [
+      nativeToolNames.listServiceCredentials,
+      'listServiceCredentialApprovals',
+      {},
+    ],
   ] as const)('sanitizes %s SDK failures', async (name, method, args) => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
@@ -2020,9 +2028,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it.each(['openai/gpt-5.6', 'anthropic/claude-sonnet-5'])(
-    'keeps Session-secret broker errors out of %s model input, tool results, and emitted telemetry',
+    'keeps Integration-key broker errors out of %s model input, tool results, and emitted telemetry',
     async (model) => {
-      const secret = 'session-secret-error-canary-7e2b9c';
+      const secret = 'service-credential-error-canary-7e2b9c';
       const secretRef = 'e9d35700-56b8-4bf0-b088-c1cb498905d9';
       const telemetry = await vi.importActual<
         typeof import('../fast-agent-context-telemetry')
@@ -2050,7 +2058,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           await options.onSessionReady('opencode-session-1');
           options.onPromptStarted?.();
           const result = await invokeTool(
-            nativeToolNames.requestWithSessionSecret,
+            nativeToolNames.requestWithServiceCredential,
             {
               secretRef,
               method: 'GET',
@@ -2073,7 +2081,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       await answerFastAgentQuestion({
         ...baseParams,
-        question: `Read /status with Session secret reference ${secretRef}.`,
+        question: `Read /status with integration key reference ${secretRef}.`,
         conversation: { ...baseParams.conversation, surface: 'web' },
         adapter,
       });
@@ -2151,7 +2159,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           await options.onSessionReady('opencode-session-1');
           options.onPromptStarted?.();
           expect(
-            await invokeTool(nativeToolNames.requestWithSessionSecret, {
+            await invokeTool(nativeToolNames.requestWithServiceCredential, {
               secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
               method: 'GET',
               path: '/status',
@@ -2172,7 +2180,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.callIntegration).toHaveBeenCalledOnce();
       const lines = warn.mock.calls.map((call) => String(call[0]));
       expect(lines).toContain(
-        `[Fast Agent] ${nativeToolNames.requestWithSessionSecret} unavailable (reason=${reason})`,
+        `[Fast Agent] ${nativeToolNames.requestWithServiceCredential} unavailable (reason=${reason})`,
       );
       expect(JSON.stringify(lines)).not.toContain('allowed methods');
       warn.mockRestore();
@@ -2186,7 +2194,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     'subagent',
     'experiment-disabled',
   ] as const)(
-    'fails closed for Session-secret requests from %s',
+    'fails closed for Integration-key requests from %s',
     async (scenario) => {
       let toolResult: unknown;
       if (scenario === 'experiment-disabled') {
@@ -2194,7 +2202,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           displayName: 'Matt Rubens',
           githubLogin: 'mrubens',
           isAdmin: true,
-          sessionSecretToolsEnabled: false,
+          serviceCredentialToolsEnabled: false,
         });
       }
       if (scenario !== 'missing-session') {
@@ -2210,7 +2218,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             options.onSubagentSessionReady('opencode-subagent-session-1');
           }
           toolResult = await invokeTool(
-            nativeToolNames.requestWithSessionSecret,
+            nativeToolNames.requestWithServiceCredential,
             {
               secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
               method: 'HEAD',
@@ -2219,7 +2227,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           );
           for (const [name, args] of [
             [
-              nativeToolNames.prepareSessionSecret,
+              nativeToolNames.prepareServiceCredential,
               {
                 label: 'API',
                 origin: 'https://api.example.com',
@@ -2227,7 +2235,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
                 headerPrefix: 'Bearer ',
               },
             ],
-            [nativeToolNames.listSessionSecrets, {}],
+            [nativeToolNames.listServiceCredentials, {}],
           ] as const) {
             expect(await invokeTool(name, args)).toMatchObject({
               success: false,
@@ -2256,8 +2264,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       expect(toolResult).toMatchObject({ success: false });
       expect(mocks.callIntegration).not.toHaveBeenCalled();
-      expect(mocks.prepareSessionSecret).not.toHaveBeenCalled();
-      expect(mocks.listSessionSecretApprovals).not.toHaveBeenCalled();
+      expect(mocks.prepareServiceCredential).not.toHaveBeenCalled();
+      expect(mocks.listServiceCredentialApprovals).not.toHaveBeenCalled();
     },
   );
   it.each([undefined, { documents: { answers: ['Notion'] } }])(
@@ -4452,6 +4460,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.launchPrReview).not.toHaveBeenCalled();
       expect(mocks.bindExecutor).toHaveBeenCalledOnce();
       expect(adapter.postReply).toHaveBeenCalledTimes(2);
+
+      // The bridge answers skill tools itself; the turn still records them
+      // in the transcript so a Session can show a skill was really loaded,
+      // without persisting the skill body.
+      const skillToolResults = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter(
+          (message) =>
+            message.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult &&
+            [nativeToolNames.listSkills, nativeToolNames.loadSkill].includes(
+              message.payload?.toolName,
+            ),
+        );
+      expect(
+        skillToolResults.map((message) => [
+          message.payload?.toolName,
+          message.payload?.status,
+          message.metadata?.visibleInTranscript,
+        ]),
+      ).toEqual([
+        [nativeToolNames.listSkills, 'completed', true],
+        [nativeToolNames.loadSkill, 'completed', true],
+      ]);
+      const loadOutput = String(skillToolResults[1]?.payload?.output ?? '');
+      expect(loadOutput).toContain(`instance:${skill.id}`);
+      expect(JSON.parse(loadOutput)).toMatchObject({
+        success: true,
+        name: 'daily-brief',
+        resource: 'SKILL.md',
+      });
+      expect(loadOutput).not.toContain('Summarize the current conversation');
     } finally {
       await bridge.revokeFastAgentMcpCapabilitiesForConversation(
         'conversation-1',
@@ -5661,7 +5700,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ id: 'github' }),
         expect.objectContaining({ id: 'roomote' }),
       ]),
-      { surface: 'slack', sessionSecretToolsEnabled: true },
+      { surface: 'slack', serviceCredentialToolsEnabled: true },
     );
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.any(Object),

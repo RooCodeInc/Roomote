@@ -82,4 +82,4 @@ export {
 
 export { validateToken } from './validate-token';
 export * from './session-broker-token';
-export * from './session-egress-token';
+export * from './credential-egress-token';

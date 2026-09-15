@@ -9,6 +9,7 @@ import {
   currentEpochSeconds,
 } from '@/lib/server';
 import { findReadableSession } from '@/lib/server/sessions';
+import { isHtmlArtifact, isTabularArtifact } from '@/lib/artifact-types';
 
 const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024; // 1MB
 const MAX_THUMBNAIL_PREVIEW_BYTES = 1024;
@@ -147,9 +148,6 @@ export async function getArtifactByPathCommand(
   ]);
   const normalizedContentType =
     artifact.contentType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
-  const extension = artifact.path.split('.').pop()?.toLowerCase();
-  const hasHtmlExtension =
-    extension === 'html' || extension === 'htm' || extension === 'xhtml';
 
   const isTextBased =
     normalizedContentType.startsWith('text/') ||
@@ -157,7 +155,8 @@ export async function getArtifactByPathCommand(
     normalizedContentType.includes('+xml') ||
     normalizedContentType.includes('+json') ||
     textBasedApplicationTypes.has(normalizedContentType) ||
-    hasHtmlExtension;
+    isHtmlArtifact(artifact.contentType, artifact.path) ||
+    isTabularArtifact(artifact.contentType, artifact.path);
 
   if (isTextBased && (preview || artifact.size <= MAX_TEXT_PREVIEW_BYTES)) {
     try {

@@ -64,13 +64,13 @@
       "import": "./src/server/lib/safe-fetch.ts",
       "require": "./src/server/lib/safe-fetch.ts"
     },
-    "./server/session-secrets": {
-      "import": "./src/server/lib/session-secrets.ts",
-      "require": "./src/server/lib/session-secrets.ts"
+    "./server/service-credentials": {
+      "import": "./src/server/lib/service-credentials.ts",
+      "require": "./src/server/lib/service-credentials.ts"
     },
-    "./server/session-egress": {
-      "import": "./src/server/lib/session-egress.ts",
-      "require": "./src/server/lib/session-egress.ts"
+    "./server/credential-egress": {
+      "import": "./src/server/lib/credential-egress.ts",
+      "require": "./src/server/lib/credential-egress.ts"
     },
     "./server/notion-api": {
       "import": "./src/server/lib/notion-api.ts",

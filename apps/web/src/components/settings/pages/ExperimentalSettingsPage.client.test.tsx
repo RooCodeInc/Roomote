@@ -42,11 +42,14 @@ vi.mock(
   }),
 );
 
-vi.mock('@/components/settings/SessionSecretToolsExperimentalSetting', () => ({
-  SessionSecretToolsExperimentalSetting: () => (
-    <div>Session secret tools setting</div>
-  ),
-}));
+vi.mock(
+  '@/components/settings/ServiceCredentialToolsExperimentalSetting',
+  () => ({
+    ServiceCredentialToolsExperimentalSetting: () => (
+      <div>Integration keys setting</div>
+    ),
+  }),
+);
 
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 
@@ -88,9 +91,7 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.getByText('Slack peer conversations setting'),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText('Session secret tools setting'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Integration keys setting')).toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental preferences.'),
     ).not.toBeInTheDocument();
@@ -121,9 +122,7 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.getByText('Slack peer conversations setting'),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText('Session secret tools setting'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Integration keys setting')).toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental preferences.'),
     ).not.toBeInTheDocument();

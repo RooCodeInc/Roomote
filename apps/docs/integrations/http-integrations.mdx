@@ -25,14 +25,14 @@ integration tools remain available and should be used first.
 
 Operator-managed integrations are opt-in and configured by the deployment
 operator, not through the curated integration connection dialogs. The same API
-broker also serves [Session secrets](/session-secrets), which are individually
+broker also serves [Integration keys](/integration-keys), which are individually
 approved by the Session owner and do not require an operator manifest.
 
-For Session grants only, leave `R_HTTP_INTEGRATIONS_ENABLED` unset or `false` and
+For integration keys only, leave `R_HTTP_INTEGRATIONS_ENABLED` unset or `false` and
 `R_HTTP_INTEGRATIONS_CONFIG_PATH` unset. No per-service credential environment
 variables are needed on the Roomote API: the owner saves each key in the secure
 Session form. Existing deployment encryption and job-signing configuration remain
-required. See [dynamic-only setup](/session-secrets#dynamic-only-setup).
+required. See [dynamic-only setup](/integration-keys#dynamic-only-setup).
 
 1. Create a JSON manifest on the API server and mount it read-only. Use narrow
    paths and least-privilege upstream credentials.
@@ -49,7 +49,7 @@ required. See [dynamic-only setup](/session-secrets#dynamic-only-setup).
     if its manifest is missing or invalid.
 
 An explicitly enabled but invalid operator configuration never falls back to
-dynamic-only mode. Disable operator mode intentionally if only Session grants
+dynamic-only mode. Disable operator mode intentionally if only integration keys
 are wanted.
 
 Example manifest, using a placeholder domain and Roomote user ID:
@@ -167,8 +167,8 @@ changes to every API replica.
 
 To disable operator-managed integrations, set `R_HTTP_INTEGRATIONS_ENABLED=false`
 on the same control-plane services and restart them. The broker remains available
-for owner-approved Session grants, but no operator manifest entries are loaded.
-This does not cancel an already-running operator request. Revoke Session grants
+for owner-approved integration keys, but no operator manifest entries are loaded.
+This does not cancel an already-running operator request. Revoke integration keys
 separately in the Session UI; those changes are checked live before dispatch and
 before returning upstream responses, without reloading the manifest or restarting.
 

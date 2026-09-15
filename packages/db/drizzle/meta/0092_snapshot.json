@@ -1,5 +1,5 @@
 {
-  "id": "41ec6f2d-8b65-4abb-857d-da579d06f242",
+  "id": "b50d48de-b52d-4e21-aac0-5256254f8033",
   "prevId": "0a840f1d-e215-468a-8a24-67dc08dee976",
   "version": "7",
   "dialect": "postgresql",
@@ -2739,12 +2739,6 @@
         },
         "setup_completed_at": {
           "name": "setup_completed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "pre_verified_email_claimed_at": {
-          "name": "pre_verified_email_claimed_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
@@ -10524,6 +10518,12 @@
           "notNull": true,
           "default": "'{GET,HEAD}'::text[]"
         },
+        "lifetime_hours": {
+          "name": "lifetime_hours",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "expires_at": {
           "name": "expires_at",
           "type": "timestamp",
@@ -10665,7 +10665,7 @@
           "name": "session_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "owner_user_id": {
           "name": "owner_user_id",
@@ -10714,7 +10714,7 @@
           "name": "expires_at",
           "type": "timestamp",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "revoked_at": {
           "name": "revoked_at",
@@ -10760,7 +10760,7 @@
           "tableTo": "sessions",
           "columnsFrom": ["session_id"],
           "columnsTo": ["id"],
-          "onDelete": "cascade",
+          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "session_secrets_owner_user_id_users_id_fk": {

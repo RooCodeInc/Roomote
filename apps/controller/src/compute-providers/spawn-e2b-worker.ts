@@ -27,7 +27,7 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
-import type { SessionEgressLifecycle } from '../session-egress';
+import type { CredentialEgressLifecycle } from '../credential-egress';
 import {
   COMPUTE_BOOTSTRAP_TIMEOUT_MS,
   COMPUTE_CREATE_INSTANCE_TIMEOUT_MS,
@@ -119,7 +119,7 @@ export async function spawnE2bWorker(
     deploymentSlug?: string;
     e2bTags?: Record<string, string>;
     /** Session-egress admission; omitted in unit paths that do not exercise it. */
-    sessionEgress?: SessionEgressLifecycle;
+    credentialEgress?: CredentialEgressLifecycle;
   },
 ): Promise<{
   machineId: string;
@@ -133,7 +133,7 @@ export async function spawnE2bWorker(
     localTarballPath,
     deploymentSlug,
     e2bTags,
-    sessionEgress,
+    credentialEgress,
   } = config;
 
   const environmentId = taskRun.payload.environmentId;
@@ -249,7 +249,7 @@ export async function spawnE2bWorker(
     );
   });
 
-  const sessionEgressPlan = await sessionEgress?.planApiProxy({
+  const credentialEgressPlan = await credentialEgress?.planApiProxy({
     taskRun,
     provider: 'e2b',
   });
@@ -345,7 +345,7 @@ export async function spawnE2bWorker(
         templateId: e2bTemplateId,
         extraEnv: {
           SANDBOX_TIMEOUT_MS: String(e2bTimeoutMs),
-          ...sessionEgressPlan?.bootstrapEnv,
+          ...credentialEgressPlan?.bootstrapEnv,
         },
       }),
       detached: true,
@@ -382,7 +382,7 @@ export async function spawnE2bWorker(
     // The worker is waiting on the bootstrap nonce after its ordinary
     // bootstrap; an admission failure fails the spawn, as it does for Docker,
     // rather than leaving a worker that expected substitutes without them.
-    await sessionEgressPlan?.admit();
+    await credentialEgressPlan?.admit();
 
     return {
       machineId: machine.machineId,

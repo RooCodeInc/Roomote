@@ -15,15 +15,15 @@ import {
   sessionFactory,
   taskFactory,
   runFactory,
-  resolveSessionSecretContext,
-  resolveOwnedSessionSecret,
-  type SessionSecretContext,
+  resolveServiceCredentialContext,
+  resolveOwnedServiceCredential,
+  type ServiceCredentialContext,
 } from '@roomote/db/server';
 import {
-  prepareSessionSecret,
-  createSessionSecret,
-  revokeSessionSecret,
-} from '@roomote/sdk/server/session-secrets';
+  prepareServiceCredential,
+  createServiceCredential,
+  revokeServiceCredential,
+} from '@roomote/sdk/server/service-credentials';
 import { integrationFailureReason, integrationRequest } from './broker';
 
 const { destroy } = vi.hoisted(() => ({ destroy: vi.fn(async () => {}) }));
@@ -38,10 +38,10 @@ vi.mock('undici', () => ({
 
 const secret = 'Test-Key/A+b=<"&>123';
 const origin = 'https://api.example.com';
-type Auth = Parameters<typeof resolveSessionSecretContext>[0];
+type Auth = Parameters<typeof resolveServiceCredentialContext>[0];
 let ownerId: string;
 let otherId: string;
-let context: SessionSecretContext;
+let context: ServiceCredentialContext;
 let secretRef: string;
 let fastAuth: Extract<Auth, { tokenType: 'session-broker' }>;
 let runAuth: Extract<Auth, { tokenType: 'run' }>;
@@ -98,7 +98,7 @@ function request(
     },
     ownerId,
     undefined,
-    () => resolveSessionSecretContext(auth),
+    () => resolveServiceCredentialContext(auth),
   );
 }
 
@@ -122,13 +122,13 @@ beforeEach(async () => {
   const attached = await run(ownerId, row.id);
   taskId = attached.taskId;
   runAuth = { tokenType: 'run', runId: attached.id, userId: ownerId };
-  const pending = await prepareSessionSecret(context, {
+  const pending = await prepareServiceCredential(context, {
     label: 'API test credential',
     origin,
     headerName: 'authorization',
     headerPrefix: 'Bearer ',
   });
-  ({ secretRef } = await createSessionSecret(context, {
+  ({ secretRef } = await createServiceCredential(context, {
     pendingRef: pending.pendingRef,
     secret,
   }));
@@ -137,7 +137,7 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.restoreAllMocks();
   await db.execute(
-    sql`delete from session_secret_audit where secret_ref = ${secretRef}`,
+    sql`delete from service_credential_audit where secret_ref = ${secretRef}`,
   );
   await db.delete(sessions).where(inArray(sessions.id, sessionIds));
   await db.delete(tasks).where(inArray(tasks.id, taskIds));
@@ -148,9 +148,9 @@ it.each(['Fast', 'run'] as const)(
   'decrypts an owner grant inside the API for trusted %s context',
   async (kind) => {
     const auth = kind === 'Fast' ? fastAuth : runAuth;
-    expect(await resolveSessionSecretContext(auth)).toMatchObject(context);
+    expect(await resolveServiceCredentialContext(auth)).toMatchObject(context);
     const stored = await db.execute<{ value: string }>(
-      sql`select value from session_secrets where id = ${secretRef}`,
+      sql`select value from service_credentials where id = ${secretRef}`,
     );
     expect(stored[0]!.value).not.toContain(secret);
     expect(await request({}, auth)).toEqual({
@@ -176,11 +176,24 @@ it.each(['Fast', 'run'] as const)(
   },
 );
 
+it.each(['Fast', 'run'] as const)(
+  'serves an owner integration from another Session of the same owner for %s context',
+  async (kind) => {
+    const elsewhere = await session(ownerId);
+    const auth: Auth =
+      kind === 'Fast'
+        ? { ...fastAuth, fastConversationId: elsewhere.fastConversationId! }
+        : { ...runAuth, runId: (await run(ownerId, elsewhere.id)).id };
+    expect(await request({}, auth)).toMatchObject({ status: 200 });
+    expect(fetch).toHaveBeenCalledOnce();
+  },
+);
+
 it.each([
   'other-Fast-user',
   'other-run-actor',
-  'unrelated-Fast',
-  'unrelated-run',
+  'other-owner-Fast',
+  'other-owner-run',
   'unattached-run',
   'actorless',
   'deleted-owner',
@@ -197,12 +210,18 @@ it.each([
         .update(taskRuns)
         .set({ actingUserId: kind === 'actorless' ? null : otherId })
         .where(eq(taskRuns.id, runAuth.runId));
-    if (kind === 'unrelated-Fast' || kind === 'unrelated-run') {
-      const unrelated = await session(ownerId);
+    if (kind === 'other-owner-Fast' || kind === 'other-owner-run') {
+      // A Session that resolves fine for its own owner still never reaches
+      // another owner's integration.
+      const foreign = await session(otherId);
       auth =
-        kind === 'unrelated-Fast'
-          ? { ...fastAuth, fastConversationId: unrelated.fastConversationId! }
-          : { ...runAuth, runId: (await run(ownerId, unrelated.id)).id };
+        kind === 'other-owner-Fast'
+          ? {
+              ...fastAuth,
+              userId: otherId,
+              fastConversationId: foreign.fastConversationId!,
+            }
+          : { ...runAuth, runId: (await run(otherId, foreign.id)).id };
     }
     if (kind === 'unattached-run')
       auth = { ...runAuth, runId: (await run(ownerId)).id };
@@ -250,10 +269,11 @@ it.each([
   async (actor, kind) => {
     const auth = actor === 'Fast' ? fastAuth : runAuth;
     const mutate = async () => {
-      if (kind === 'revoked') await revokeSessionSecret(context, { secretRef });
+      if (kind === 'revoked')
+        await revokeServiceCredential(context, { secretRef });
       if (kind === 'expired')
         await db.execute(
-          sql`update session_secrets set expires_at = clock_timestamp() - interval '1 second' where id = ${secretRef}`,
+          sql`update service_credentials set expires_at = clock_timestamp() - interval '1 second' where id = ${secretRef}`,
         );
       if (kind === 'changed-owner')
         await db
@@ -266,9 +286,10 @@ it.each([
           .set({ actingUserId: otherId })
           .where(eq(taskRuns.id, runAuth.runId));
       if (kind === 'changed-membership')
+        // Reattached to a Session the run's actor does not own.
         await db
           .update(sessionTasks)
-          .set({ sessionId: (await session(ownerId)).id })
+          .set({ sessionId: (await session(otherId)).id })
           .where(eq(sessionTasks.taskId, taskId));
       if (kind === 'archived')
         await db
@@ -486,7 +507,7 @@ it('rejects literal and encoded echoes including split chunks and allowlisted re
 
 it('bounds the deadline by grant expiry and suppresses an aborted in-flight response', async () => {
   await db.execute(
-    sql`update session_secrets set expires_at = clock_timestamp() + interval '5 seconds' where id = ${secretRef}`,
+    sql`update service_credentials set expires_at = clock_timestamp() + interval '5 seconds' where id = ${secretRef}`,
   );
   const abort = new AbortController();
   const timeout = vi
@@ -513,7 +534,7 @@ it('records only safe audit metadata for success and sensitive upstream failures
   );
   await expect(request()).rejects.toThrow(/^Secret request unavailable$/);
   const rows = await db.execute(
-    sql`select * from session_secret_audit where secret_ref = ${secretRef}`,
+    sql`select * from service_credential_audit where secret_ref = ${secretRef}`,
   );
   expect(rows.map((row) => row.outcome).sort()).toEqual([
     'failed',
@@ -583,7 +604,7 @@ it('audits malformed Session requests without retaining their arguments', async 
   ).rejects.toThrow(/^Secret request unavailable$/);
   expect(fetch).not.toHaveBeenCalled();
   const rows = await db.execute(
-    sql`select * from session_secret_audit where secret_ref = ${secretRef}`,
+    sql`select * from service_credential_audit where secret_ref = ${secretRef}`,
   );
   expect(rows.map((row) => row.outcome)).toEqual(['denied']);
   expect(JSON.stringify(rows)).not.toContain('caller-authority');
@@ -591,14 +612,14 @@ it('audits malformed Session requests without retaining their arguments', async 
 });
 
 it('does not trust a resolved run context after its live actor changes', async () => {
-  const resolved = await resolveSessionSecretContext(runAuth);
+  const resolved = await resolveServiceCredentialContext(runAuth);
   await db
     .update(taskRuns)
     .set({ actingUserId: otherId })
     .where(eq(taskRuns.id, runAuth.runId));
-  await expect(resolveOwnedSessionSecret(resolved, secretRef)).rejects.toThrow(
-    'Secret unavailable',
-  );
+  await expect(
+    resolveOwnedServiceCredential(resolved, secretRef),
+  ).rejects.toThrow('Secret unavailable');
 });
 
 it('records failure, not success, when revoked during completion-audit persistence', async () => {
@@ -615,15 +636,16 @@ it('records failure, not success, when revoked during completion-audit persisten
       undefined,
       async () => {
         const completed = await db.execute(
-          sql`select id from session_secret_audit where secret_ref = ${secretRef} and outcome = 'succeeded'`,
+          sql`select id from service_credential_audit where secret_ref = ${secretRef} and outcome = 'succeeded'`,
         );
-        if (completed.length) await revokeSessionSecret(context, { secretRef });
-        return resolveSessionSecretContext(fastAuth);
+        if (completed.length)
+          await revokeServiceCredential(context, { secretRef });
+        return resolveServiceCredentialContext(fastAuth);
       },
     ),
   ).rejects.toThrow(/^Secret request unavailable$/);
   const rows = await db.execute(
-    sql`select outcome from session_secret_audit where secret_ref = ${secretRef}`,
+    sql`select outcome from service_credential_audit where secret_ref = ${secretRef}`,
   );
   expect(rows.map((row) => row.outcome).sort()).toEqual(['failed', 'started']);
 });
@@ -642,11 +664,11 @@ it('logs bounded reasons for denied and failed Session requests without request 
     );
     const lines = warn.mock.calls.map((call) => String(call[0]));
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain('Session grant request denied');
+    expect(lines[0]).toContain('integration key request denied');
     expect(lines[0]).toContain(`secretRef=${secretRef}`);
     expect(lines[0]).toContain('method=POST');
     expect(lines[0]).toContain('reason=method_not_allowed');
-    expect(lines[1]).toContain('Session grant request failed');
+    expect(lines[1]).toContain('integration key request failed');
     expect(lines[1]).toContain('reason=Error');
     for (const line of lines) {
       expect(line).not.toContain('private-path-marker');
@@ -662,7 +684,7 @@ it('logs bounded reasons for denied and failed Session requests without request 
 it('carries the bounded reason on the generic rejection for callers that log', async () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   try {
-    await revokeSessionSecret(context, { secretRef });
+    await revokeServiceCredential(context, { secretRef });
     const error = await request().catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toBe('Secret request unavailable');
@@ -711,7 +733,7 @@ it('distinguishes the request deadline from caller cancellation in the reason', 
           },
           ownerId,
           AbortSignal.abort(),
-          () => resolveSessionSecretContext(fastAuth),
+          () => resolveServiceCredentialContext(fastAuth),
         ).catch((cause: unknown) => cause),
       ),
     ).toBe('request_aborted');
@@ -728,13 +750,13 @@ it('distinguishes the request deadline from caller cancellation in the reason', 
 });
 
 it('injects a service-specific credential header and refuses a scheme on it', async () => {
-  const pending = await prepareSessionSecret(context, {
+  const pending = await prepareServiceCredential(context, {
     label: 'GitLab',
     origin,
     headerName: 'PRIVATE-TOKEN',
     headerPrefix: '',
   });
-  const { secretRef: customRef } = await createSessionSecret(context, {
+  const { secretRef: customRef } = await createServiceCredential(context, {
     pendingRef: pending.pendingRef,
     secret,
   });
@@ -744,7 +766,7 @@ it('injects a service-specific credential header and refuses a scheme on it', as
     { integrationId: `session:${customRef}`, method: 'GET', path: '/v4/user' },
     ownerId,
     undefined,
-    () => resolveSessionSecretContext(fastAuth),
+    () => resolveServiceCredentialContext(fastAuth),
   );
   expect(fetch).toHaveBeenCalledOnce();
   const sent = vi.mocked(fetch).mock.calls[0]![1]!.headers as Record<
@@ -754,7 +776,7 @@ it('injects a service-specific credential header and refuses a scheme on it', as
   expect(sent['private-token']).toBe(secret);
   expect(sent.authorization).toBeUndefined();
   await expect(
-    prepareSessionSecret(context, {
+    prepareServiceCredential(context, {
       label: 'GitLab',
       origin,
       headerName: 'private-token',
@@ -762,7 +784,7 @@ it('injects a service-specific credential header and refuses a scheme on it', as
     }),
   ).rejects.toThrow();
   await expect(
-    prepareSessionSecret(context, {
+    prepareServiceCredential(context, {
       label: 'Cookie',
       origin,
       headerName: 'cookie',

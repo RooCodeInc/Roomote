@@ -15,7 +15,7 @@ import {
 import { type TaskRun, sdk } from '@roomote/sdk/client';
 
 import { WorkerEnv } from '../../env';
-import { waitForSessionEgressDelivery } from '../../env/session-egress-bootstrap';
+import { waitForCredentialEgressDelivery } from '../../env/credential-egress-bootstrap';
 import {
   type HarnessLogger,
   createStartupLogger,
@@ -405,8 +405,8 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
     // and repo commands all see the same ordinary-client settings. It wins
     // over deployment-provided proxy variables: with egress enforced outside
     // the sandbox, any other proxy is unreachable anyway.
-    if (!workerEnv.sessionEgressBootstrapRequired) {
-      Object.assign(envVars, workerEnv.buildSessionEgressClientEnv());
+    if (!workerEnv.credentialEgressBootstrapRequired) {
+      Object.assign(envVars, workerEnv.buildCredentialEgressClientEnv());
     }
 
     // Worker config values are read once here so their captured values
@@ -531,7 +531,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
     );
 
     const runEnvironmentSetupInBackground =
-      !workerEnv.sessionEgressBootstrapRequired &&
+      !workerEnv.credentialEgressBootstrapRequired &&
       shouldRunParallelTaskEnvironmentSetup({
         taskRun,
         jobContext,
@@ -654,15 +654,15 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       field: 'setupCompletedAt',
     });
 
-    if (workerEnv.sessionEgressBootstrapRequired) {
-      const nonce = workerEnv.sessionEgressBootstrapNonce;
-      await sdk.mcpConnections.markSessionEgressBootstrapReady(nonce);
-      const delivery = await waitForSessionEgressDelivery(
-        () => sdk.mcpConnections.getSessionEgressDelivery(nonce),
+    if (workerEnv.credentialEgressBootstrapRequired) {
+      const nonce = workerEnv.credentialEgressBootstrapNonce;
+      await sdk.mcpConnections.markCredentialEgressBootstrapReady(nonce);
+      const delivery = await waitForCredentialEgressDelivery(
+        () => sdk.mcpConnections.getCredentialEgressDelivery(nonce),
         backgroundEnvironmentSetupController.cancelSignal,
       );
-      workerEnv.acceptSessionEgressDelivery(delivery);
-      Object.assign(envVars, workerEnv.buildSessionEgressClientEnv());
+      workerEnv.acceptCredentialEgressDelivery(delivery);
+      Object.assign(envVars, workerEnv.buildCredentialEgressClientEnv());
       workerEnv.setRuntimeEnv(envVars);
       await injectEnvVars(envVars, taskRun, {
         previewProxyBaseUrl: workerEnv.previewProxyBaseUrl,

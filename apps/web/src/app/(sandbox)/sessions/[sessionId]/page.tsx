@@ -20,7 +20,7 @@ import {
 import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
 import { SessionViewers } from '@/components/sessions/SessionViewers';
-import { SessionSecrets } from '@/components/sessions/SessionSecrets';
+import { ServiceCredentials } from '@/components/sessions/ServiceCredentials';
 
 import { hasVoiceAutostartFlag } from '@/lib/voice-autostart';
 import { FastSessionTranscript } from './FastSessionTranscript';
@@ -198,7 +198,7 @@ export default async function SessionDetailPage({
                 actions={
                   <>
                     {unifiedSession.ownerUserId === authorizedUser.userId ? (
-                      <SessionSecrets sessionId={unifiedSession.id} />
+                      <ServiceCredentials sessionId={unifiedSession.id} />
                     ) : null}
                     <SessionViewers sessionId={unifiedSession.id} />
                   </>
