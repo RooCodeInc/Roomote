@@ -14,6 +14,11 @@ import type {
 import { loadLocalWorkerReleaseWithVersion } from '../sandbox/utils';
 import { getWorkerRelease } from '../sandbox/worker-release-cache';
 import {
+  BOOTSTRAP_RETRY_DELAY_MS,
+  isTransientBootstrapError,
+  MAX_BOOTSTRAP_ATTEMPTS,
+} from '../sandbox/bootstrap-retry';
+import {
   type LoadedSandboxBootstrapFiles,
   loadSandboxBootstrapFiles,
 } from '../sandbox/bootstrap-files';
@@ -207,317 +212,351 @@ export async function createModalMachine(
     | { instanceId: string; domains?: Record<string, string> }
     | undefined;
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    throwIfAborted(createInstanceSignal);
+  for (
+    let bootstrapAttempt = 1;
+    bootstrapAttempt <= MAX_BOOTSTRAP_ATTEMPTS;
+    bootstrapAttempt++
+  ) {
+    createdMachine = undefined;
 
-    console.log(
-      `[createModalMachine] Attempt ${attempt}/${MAX_RETRIES}: ${sourceSnapshotId ? 'resumeFromSnapshot' : 'createInstance'}`,
-    );
-
-    try {
-      const operation = sourceSnapshotId
-        ? 'resume_from_snapshot'
-        : 'create_instance';
-
-      await onMutation?.({
-        provider: computeClient.vendor,
-        operation,
-        eventType: 'started',
-        message:
-          operation === 'resume_from_snapshot'
-            ? `Calling resumeFromSnapshot for Modal instance from snapshot ${sourceSnapshotId}.`
-            : 'Calling createInstance for Modal instance.',
-        details: buildComputeProviderMutationDetails(
-          { ...mutationContext, attempt },
-          {},
-        ),
-      });
-
-      const instance = sourceSnapshotId
-        ? await computeClient.resumeFromSnapshot({
-            sourceSnapshotId,
-            ports: effectivePorts,
-            tags,
-            metadata: {
-              ...(workerReleaseTag ? { workerReleaseTag } : {}),
-              ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
-            },
-            signal: createInstanceSignal,
-          })
-        : await computeClient.createInstance({
-            ports: effectivePorts,
-            tags,
-            metadata: {
-              ...(workerReleaseTag ? { workerReleaseTag } : {}),
-              ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
-            },
-            signal: createInstanceSignal,
-          });
-
-      await onMutation?.({
-        provider: computeClient.vendor,
-        operation,
-        eventType: 'completed',
-        instanceId: instance.instanceId,
-        message: `${
-          operation === 'resume_from_snapshot'
-            ? 'resumeFromSnapshot'
-            : 'createInstance'
-        } completed for Modal instance ${instance.instanceId}.`,
-        details: buildComputeProviderMutationDetails(
-          { ...mutationContext, attempt },
-          {},
-        ),
-      });
-
-      createdMachine = {
-        instanceId: instance.instanceId,
-        domains: instance.domains,
-      };
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      throwIfAborted(createInstanceSignal);
 
       console.log(
-        `[createModalMachine] Instance created ${JSON.stringify({
+        `[createModalMachine] Attempt ${attempt}/${MAX_RETRIES}: ${sourceSnapshotId ? 'resumeFromSnapshot' : 'createInstance'}`,
+      );
+
+      try {
+        const operation = sourceSnapshotId
+          ? 'resume_from_snapshot'
+          : 'create_instance';
+
+        await onMutation?.({
+          provider: computeClient.vendor,
+          operation,
+          eventType: 'started',
+          message:
+            operation === 'resume_from_snapshot'
+              ? `Calling resumeFromSnapshot for Modal instance from snapshot ${sourceSnapshotId}.`
+              : 'Calling createInstance for Modal instance.',
+          details: buildComputeProviderMutationDetails(
+            { ...mutationContext, attempt },
+            {},
+          ),
+        });
+
+        const instance = sourceSnapshotId
+          ? await computeClient.resumeFromSnapshot({
+              sourceSnapshotId,
+              ports: effectivePorts,
+              tags,
+              metadata: {
+                ...(workerReleaseTag ? { workerReleaseTag } : {}),
+                ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
+              },
+              signal: createInstanceSignal,
+            })
+          : await computeClient.createInstance({
+              ports: effectivePorts,
+              tags,
+              metadata: {
+                ...(workerReleaseTag ? { workerReleaseTag } : {}),
+                ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
+              },
+              signal: createInstanceSignal,
+            });
+
+        await onMutation?.({
+          provider: computeClient.vendor,
+          operation,
+          eventType: 'completed',
+          instanceId: instance.instanceId,
+          message: `${
+            operation === 'resume_from_snapshot'
+              ? 'resumeFromSnapshot'
+              : 'createInstance'
+          } completed for Modal instance ${instance.instanceId}.`,
+          details: buildComputeProviderMutationDetails(
+            { ...mutationContext, attempt },
+            {},
+          ),
+        });
+
+        createdMachine = {
           instanceId: instance.instanceId,
           domains: instance.domains,
-          sourceSnapshotId: instance.sourceSnapshotId,
-        })}`,
-      );
+        };
 
-      break;
-    } catch (error) {
-      await onMutation?.({
-        provider: computeClient.vendor,
-        operation: sourceSnapshotId
-          ? 'resume_from_snapshot'
-          : 'create_instance',
-        eventType: 'failed',
-        message: `${
-          sourceSnapshotId ? 'resumeFromSnapshot' : 'createInstance'
-        } failed for Modal instance.`,
-        details: buildComputeProviderMutationDetails(
-          { ...mutationContext, attempt },
-          {
-            error: error instanceof Error ? error.message : String(error),
-          },
-        ),
-      });
+        console.log(
+          `[createModalMachine] Instance created ${JSON.stringify({
+            instanceId: instance.instanceId,
+            domains: instance.domains,
+            sourceSnapshotId: instance.sourceSnapshotId,
+          })}`,
+        );
 
-      const errorInfo =
-        error instanceof Error
-          ? {
-              name: error.name,
-              message: error.message,
-              code: (error as Error & { code?: string }).code,
-              details: (error as Error & { details?: string }).details,
-              stack: error.stack,
-            }
-          : { message: String(error) };
-
-      if (isAbortError(error)) {
-        console.warn(
-          `[createModalMachine] Aborting retries after cancellation ${JSON.stringify(
+        break;
+      } catch (error) {
+        await onMutation?.({
+          provider: computeClient.vendor,
+          operation: sourceSnapshotId
+            ? 'resume_from_snapshot'
+            : 'create_instance',
+          eventType: 'failed',
+          message: `${
+            sourceSnapshotId ? 'resumeFromSnapshot' : 'createInstance'
+          } failed for Modal instance.`,
+          details: buildComputeProviderMutationDetails(
+            { ...mutationContext, attempt },
             {
-              attempt,
-              error: errorInfo,
+              error: error instanceof Error ? error.message : String(error),
             },
-          )}`,
+          ),
+        });
+
+        const errorInfo =
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+                code: (error as Error & { code?: string }).code,
+                details: (error as Error & { details?: string }).details,
+                stack: error.stack,
+              }
+            : { message: String(error) };
+
+        if (isAbortError(error)) {
+          console.warn(
+            `[createModalMachine] Aborting retries after cancellation ${JSON.stringify(
+              {
+                attempt,
+                error: errorInfo,
+              },
+            )}`,
+          );
+
+          throw error;
+        }
+
+        if (attempt === MAX_RETRIES) {
+          console.error(
+            `[createModalMachine] Failed after ${MAX_RETRIES} attempts ${JSON.stringify(errorInfo)}`,
+          );
+
+          throw error;
+        }
+
+        const delayMs = INITIAL_DELAY_MS * Math.pow(2, attempt - 1);
+
+        console.warn(
+          `[createModalMachine] Attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${delayMs}ms ${JSON.stringify(errorInfo)}`,
         );
 
-        throw error;
+        await sleepWithSignal(delayMs, createInstanceSignal);
       }
-
-      if (attempt === MAX_RETRIES) {
-        console.error(
-          `[createModalMachine] Failed after ${MAX_RETRIES} attempts ${JSON.stringify(errorInfo)}`,
-        );
-
-        throw error;
-      }
-
-      const delayMs = INITIAL_DELAY_MS * Math.pow(2, attempt - 1);
-
-      console.warn(
-        `[createModalMachine] Attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${delayMs}ms ${JSON.stringify(errorInfo)}`,
-      );
-
-      await sleepWithSignal(delayMs, createInstanceSignal);
     }
-  }
 
-  if (!createdMachine) {
-    throw new Error('Failed to create modal instance');
-  }
+    if (!createdMachine) {
+      throw new Error('Failed to create modal instance');
+    }
 
-  // Start the bootstrap timeout only after instance creation succeeds, so cold
-  // image pulls don't eat into the bootstrap budget.
-  const bootstrapSignal =
-    bootstrapTimeoutMs != null
-      ? AbortSignal.timeout(bootstrapTimeoutMs)
-      : legacySignal;
+    // Start the bootstrap timeout only after instance creation succeeds, so cold
+    // image pulls don't eat into the bootstrap budget.
+    const bootstrapSignal =
+      bootstrapTimeoutMs != null
+        ? AbortSignal.timeout(bootstrapTimeoutMs)
+        : legacySignal;
 
-  let bootstrapPhase = 'load-files';
+    let bootstrapPhase = 'load-files';
 
-  try {
-    const { files: filesToWrite } = loadModalFiles();
+    try {
+      const { files: filesToWrite } = loadModalFiles();
 
-    if (tarball) {
-      filesToWrite.push({ path: WORKER_TARBALL_PATH, content: tarball });
+      if (tarball) {
+        filesToWrite.push({ path: WORKER_TARBALL_PATH, content: tarball });
+        console.log(
+          `[createModalMachine] Worker tarball added ${JSON.stringify({
+            path: WORKER_TARBALL_PATH,
+            sizeBytes: tarball.byteLength,
+          })}`,
+        );
+      }
+
+      if (filesToWrite.length > 0) {
+        bootstrapPhase = 'write-files';
+
+        await onMutation?.({
+          provider: computeClient.vendor,
+          operation: 'write_files',
+          eventType: 'started',
+          instanceId: createdMachine.instanceId,
+          message: `Calling writeFiles for Modal instance ${createdMachine.instanceId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            phase: 'bootstrap_upload',
+            fileCount: filesToWrite.length,
+            filePaths: filesToWrite.map((file) => file.path),
+          }),
+        });
+
+        await computeClient.writeFiles({
+          instanceId: createdMachine.instanceId,
+          files: filesToWrite,
+          signal: bootstrapSignal,
+        });
+
+        await onMutation?.({
+          provider: computeClient.vendor,
+          operation: 'write_files',
+          eventType: 'completed',
+          instanceId: createdMachine.instanceId,
+          message: `writeFiles completed for Modal instance ${createdMachine.instanceId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            phase: 'bootstrap_upload',
+            fileCount: filesToWrite.length,
+            filePaths: filesToWrite.map((file) => file.path),
+          }),
+        });
+      }
+
+      bootstrapPhase = 'install-worker';
+
       console.log(
-        `[createModalMachine] Worker tarball added ${JSON.stringify({
-          path: WORKER_TARBALL_PATH,
-          sizeBytes: tarball.byteLength,
-        })}`,
+        `[createModalMachine] Running install script: sh ${INSTALL_SCRIPT_PATH}`,
       );
-    }
-
-    if (filesToWrite.length > 0) {
-      bootstrapPhase = 'write-files';
 
       await onMutation?.({
         provider: computeClient.vendor,
-        operation: 'write_files',
+        operation: 'run_command',
         eventType: 'started',
         instanceId: createdMachine.instanceId,
-        message: `Calling writeFiles for Modal instance ${createdMachine.instanceId}.`,
+        message: `Calling runCommand for Modal instance ${createdMachine.instanceId}.`,
         details: buildComputeProviderMutationDetails(mutationContext, {
-          phase: 'bootstrap_upload',
-          fileCount: filesToWrite.length,
-          filePaths: filesToWrite.map((file) => file.path),
+          phase: 'install_worker',
+          command: 'bash',
+          args: [INSTALL_SCRIPT_PATH],
         }),
       });
 
-      await computeClient.writeFiles({
+      const installResult = await computeClient.runCommand({
         instanceId: createdMachine.instanceId,
-        files: filesToWrite,
+        cmd: 'bash',
+        args: [INSTALL_SCRIPT_PATH],
+        ...(tarball
+          ? {
+              env: {
+                // Fresh Modal boots stage the worker release under the shared
+                // sandbox files directory so the install script can reuse the
+                // same default path as Vercel sandbox.
+                WORKER_RELEASE_ARCHIVE_PATH: WORKER_TARBALL_PATH,
+              },
+            }
+          : {}),
         signal: bootstrapSignal,
       });
 
       await onMutation?.({
         provider: computeClient.vendor,
-        operation: 'write_files',
+        operation: 'run_command',
         eventType: 'completed',
         instanceId: createdMachine.instanceId,
-        message: `writeFiles completed for Modal instance ${createdMachine.instanceId}.`,
-        details: buildComputeProviderMutationDetails(mutationContext, {
-          phase: 'bootstrap_upload',
-          fileCount: filesToWrite.length,
-          filePaths: filesToWrite.map((file) => file.path),
-        }),
-      });
-    }
-
-    bootstrapPhase = 'install-worker';
-
-    console.log(
-      `[createModalMachine] Running install script: sh ${INSTALL_SCRIPT_PATH}`,
-    );
-
-    await onMutation?.({
-      provider: computeClient.vendor,
-      operation: 'run_command',
-      eventType: 'started',
-      instanceId: createdMachine.instanceId,
-      message: `Calling runCommand for Modal instance ${createdMachine.instanceId}.`,
-      details: buildComputeProviderMutationDetails(mutationContext, {
-        phase: 'install_worker',
-        command: 'bash',
-        args: [INSTALL_SCRIPT_PATH],
-      }),
-    });
-
-    const installResult = await computeClient.runCommand({
-      instanceId: createdMachine.instanceId,
-      cmd: 'bash',
-      args: [INSTALL_SCRIPT_PATH],
-      ...(tarball
-        ? {
-            env: {
-              // Fresh Modal boots stage the worker release under the shared
-              // sandbox files directory so the install script can reuse the
-              // same default path as Vercel sandbox.
-              WORKER_RELEASE_ARCHIVE_PATH: WORKER_TARBALL_PATH,
-            },
-          }
-        : {}),
-      signal: bootstrapSignal,
-    });
-
-    await onMutation?.({
-      provider: computeClient.vendor,
-      operation: 'run_command',
-      eventType: 'completed',
-      instanceId: createdMachine.instanceId,
-      message: `runCommand completed for Modal instance ${createdMachine.instanceId}.`,
-      details: buildComputeProviderMutationDetails(mutationContext, {
-        phase: 'install_worker',
-        command: 'bash',
-        args: [INSTALL_SCRIPT_PATH],
-        exitCode: installResult.exitCode,
-      }),
-    });
-
-    if (installResult.exitCode !== 0) {
-      throw new Error(
-        `Modal worker install failed with exit code ${installResult.exitCode ?? 'null'}: ${installResult.stderr ?? installResult.stdout ?? 'no output'}`,
-      );
-    }
-  } catch (error) {
-    if (bootstrapPhase === 'write-files') {
-      await onMutation?.({
-        provider: computeClient.vendor,
-        operation: 'write_files',
-        eventType: 'failed',
-        instanceId: createdMachine.instanceId,
-        message: `writeFiles failed for Modal instance ${createdMachine.instanceId}.`,
-        details: buildComputeProviderMutationDetails(mutationContext, {
-          phase: 'bootstrap_upload',
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      });
-    } else if (bootstrapPhase === 'install-worker') {
-      await onMutation?.({
-        provider: computeClient.vendor,
-        operation: 'run_command',
-        eventType: 'failed',
-        instanceId: createdMachine.instanceId,
-        message: `runCommand failed for Modal instance ${createdMachine.instanceId}.`,
+        message: `runCommand completed for Modal instance ${createdMachine.instanceId}.`,
         details: buildComputeProviderMutationDetails(mutationContext, {
           phase: 'install_worker',
           command: 'bash',
           args: [INSTALL_SCRIPT_PATH],
-          error: error instanceof Error ? error.message : String(error),
+          exitCode: installResult.exitCode,
         }),
       });
+
+      if (installResult.exitCode !== 0) {
+        throw new Error(
+          `Modal worker install failed with exit code ${installResult.exitCode ?? 'null'}: ${installResult.stderr ?? installResult.stdout ?? 'no output'}`,
+        );
+      }
+    } catch (error) {
+      if (bootstrapPhase === 'write-files') {
+        await onMutation?.({
+          provider: computeClient.vendor,
+          operation: 'write_files',
+          eventType: 'failed',
+          instanceId: createdMachine.instanceId,
+          message: `writeFiles failed for Modal instance ${createdMachine.instanceId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            phase: 'bootstrap_upload',
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        });
+      } else if (bootstrapPhase === 'install-worker') {
+        await onMutation?.({
+          provider: computeClient.vendor,
+          operation: 'run_command',
+          eventType: 'failed',
+          instanceId: createdMachine.instanceId,
+          message: `runCommand failed for Modal instance ${createdMachine.instanceId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            phase: 'install_worker',
+            command: 'bash',
+            args: [INSTALL_SCRIPT_PATH],
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        });
+      }
+
+      await cleanupModalInstance({
+        computeClient,
+        instanceId: createdMachine.instanceId,
+        phase: bootstrapPhase,
+        error,
+        logPrefix: 'createModalMachine',
+        onMutation,
+        ...mutationContext,
+      });
+
+      if (
+        isAbortError(error) ||
+        bootstrapAttempt === MAX_BOOTSTRAP_ATTEMPTS ||
+        !isTransientBootstrapError(error)
+      ) {
+        throw error;
+      }
+
+      // The failed instance is already destroyed. A transport failure between
+      // the controller and the provider (a cut exec stream, a reset socket, a
+      // proxy 502) says nothing about the next instance, so start over with a
+      // fresh one instead of failing the run.
+      console.warn(
+        `[createModalMachine] Bootstrap attempt ${bootstrapAttempt}/${MAX_BOOTSTRAP_ATTEMPTS} failed in phase ${bootstrapPhase}; retrying with a fresh instance in ${BOOTSTRAP_RETRY_DELAY_MS}ms ${JSON.stringify(
+          { error: error instanceof Error ? error.message : String(error) },
+        )}`,
+      );
+      await sleepWithSignal(BOOTSTRAP_RETRY_DELAY_MS, createInstanceSignal);
+      continue;
     }
 
-    await cleanupModalInstance({
-      computeClient,
-      instanceId: createdMachine.instanceId,
-      phase: bootstrapPhase,
-      error,
-      logPrefix: 'createModalMachine',
-      onMutation,
-      ...mutationContext,
-    });
-
-    throw error;
+    break;
   }
 
+  if (!createdMachine) {
+    throw new Error('Instance bootstrap did not produce a machine');
+  }
+
+  const bootstrappedMachine = createdMachine;
+
   return {
-    machineId: createdMachine.instanceId,
+    machineId: bootstrappedMachine.instanceId,
     proxyPorts,
     ...(sourceSnapshotId ? { sourceSnapshotId } : {}),
     domain: (port: number) => {
       const fromResponse =
-        createdMachine.domains?.[port.toString()] ??
-        createdMachine.domains?.[`${port}`];
+        bootstrappedMachine.domains?.[port.toString()] ??
+        bootstrappedMachine.domains?.[`${port}`];
 
       if (fromResponse) {
         return fromResponse;
       }
 
       // Fallback when Modal API does not return an explicit domain map.
-      return `https://${createdMachine.instanceId}-${port}.modal.run`;
+      return `https://${bootstrappedMachine.instanceId}-${port}.modal.run`;
     },
   };
 }

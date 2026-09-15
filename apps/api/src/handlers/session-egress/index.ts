@@ -1,19 +1,14 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { createMiddleware } from 'hono/factory';
 
 import {
   authenticateSessionEgressPrincipal,
-  authorize,
-  getSessionEgressGatewayToken,
   issueSubstitutes,
   registerWorkload,
   renewLease,
-  revocations,
   SessionEgressRequestError,
   terminateWorkload,
   type SessionEgressPrincipal,
-  type SessionEgressServiceOptions,
 } from '@roomote/sdk/server/session-egress';
 
 import type { Variables } from '../../types';
@@ -22,19 +17,19 @@ import type { Variables } from '../../types';
  * Session egress control plane: `/api/internal/session-egress`.
  *
  * Reachable only by the trusted controller (signed job-auth token with the
- * `roomote-session-egress-controller` audience) and the credential
- * substituting egress gateway (`R_SESSION_EGRESS_GATEWAY_TOKEN`). Every
- * other bearer — run tokens, user tokens, MCP tokens, session-broker
- * tokens — is rejected here regardless of what `tokenAuthMiddleware`
- * resolved. Route policy classifies the prefix as `webhook` for exactly that
- * reason: this handler owns authentication.
+ * `roomote-session-egress-controller` audience). Every other bearer — run
+ * tokens, user tokens, MCP tokens, session-broker tokens — is rejected here
+ * regardless of what `tokenAuthMiddleware` resolved. Route policy classifies
+ * the prefix as `webhook` for exactly that reason: this handler owns
+ * authentication.
  *
- * The contract, including payloads and gateway obligations, is documented in
- * ./CONTRACT.md next to this file; the schemas live in
- * `@roomote/types` (`session-egress.ts`).
+ * The contract is documented in ./CONTRACT.md next to this file; the schemas
+ * live in `@roomote/types` (`session-egress.ts`). Substitutes are used
+ * through the API-side proxy (`../session-egress-proxy`), which authorizes
+ * them in-process; there is no external gateway.
  *
- * Nothing in a request or response body is ever logged: bodies carry
- * substitute tokens (requests) and real credentials (authorize responses).
+ * Nothing in a request or response body is ever logged: registration
+ * responses carry substitute tokens.
  */
 
 const LOG_PREFIX = '[session-egress]';
@@ -43,10 +38,7 @@ type Env = {
   Variables: Variables & { egressPrincipal: SessionEgressPrincipal };
 };
 
-export function createSessionEgressControlPlane(
-  options: SessionEgressServiceOptions = {},
-) {
-  const gatewayToken = options.gatewayToken ?? getSessionEgressGatewayToken;
+export function createSessionEgressControlPlane() {
   const app = new Hono<Env>();
 
   app.use(
@@ -58,32 +50,13 @@ export function createSessionEgressControlPlane(
   );
 
   app.use('*', async (c, next) => {
-    // The controller always has its routes: it authenticates with a signed
-    // job-auth token and needs them for API-proxy admission on any
-    // deployment. The gateway principal exists only once a gateway token is
-    // configured; without one the surface stays invisible to everyone else.
-    const expected = gatewayToken();
     const principal = await authenticateSessionEgressPrincipal(
       c.req.header('authorization'),
-      expected,
     );
-    if (!principal)
-      return expected
-        ? c.json({ error: 'unauthorized' }, 401)
-        : c.json({ error: 'not_found' }, 404);
+    if (!principal) return c.json({ error: 'unauthorized' }, 401);
     c.set('egressPrincipal', principal);
     await next();
   });
-
-  const requirePrincipal = (principal: SessionEgressPrincipal) =>
-    createMiddleware<Env>(async (c, next) => {
-      if (c.get('egressPrincipal') !== principal)
-        return c.json({ error: 'forbidden_principal' }, 403);
-      await next();
-    });
-
-  const controllerOnly = requirePrincipal('controller');
-  const gatewayOnly = requirePrincipal('gateway');
 
   /** JSON body; an absent/empty body is `{}` so optional payloads stay optional. */
   async function json(c: { req: { text: () => Promise<string> } }) {
@@ -106,38 +79,21 @@ export function createSessionEgressControlPlane(
     return c.json({ error: 'internal_error' }, 500);
   });
 
-  // Controller: bind an attached run to the gateway (or rotate its generation).
-  app.post('/workloads', controllerOnly, async (c) =>
+  // Register an attached run (or rotate its generation).
+  app.post('/workloads', async (c) =>
     c.json(await registerWorkload(await json(c)), 201),
   );
-  // Controller: substitutes for grants approved after registration.
-  app.post('/workloads/:workloadId/substitutes', controllerOnly, async (c) =>
+  // Substitutes for grants approved after registration.
+  app.post('/workloads/:workloadId/substitutes', async (c) =>
     c.json(await issueSubstitutes(c.req.param('workloadId'))),
   );
-  // Controller: extend the lease while the run is alive.
-  app.post('/workloads/:workloadId/lease', controllerOnly, async (c) =>
+  // Extend the lease while the run is alive.
+  app.post('/workloads/:workloadId/lease', async (c) =>
     c.json(await renewLease(c.req.param('workloadId'), await json(c))),
   );
-  // Controller: stop, failure, resume, cleanup. Idempotent.
-  app.delete('/workloads/:workloadId', controllerOnly, async (c) =>
+  // Stop, failure, resume, cleanup. Idempotent.
+  app.delete('/workloads/:workloadId', async (c) =>
     c.json(await terminateWorkload(c.req.param('workloadId'), await json(c))),
-  );
-
-  // Gateway: live per-request / per-phase authorization + credential resolution.
-  app.post('/authorize', gatewayOnly, async (c) => {
-    let body: unknown;
-    try {
-      body = await json(c);
-    } catch {
-      body = undefined;
-    }
-    return c.json(await authorize(body), 200, { 'cache-control': 'no-store' });
-  });
-  // Gateway: revocation acceleration feed.
-  app.get('/revocations', gatewayOnly, async (c) =>
-    c.json(await revocations(c.req.query()), 200, {
-      'cache-control': 'no-store',
-    }),
   );
 
   return app;

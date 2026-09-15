@@ -1521,6 +1521,12 @@ describe('buildFastAgentSystemPrompt', () => {
       'Use calibrated language when certainty would be fake',
     );
     expect(prompt).toContain(
+      'Assume the user may know their domain better than you do',
+    );
+    expect(prompt).toContain(
+      'do not present your work as corrected, verified, reviewed, or a verdict unless the user asked for that review',
+    );
+    expect(prompt).toContain(
       'For a supported opinion, lead with a labeled provisional stance',
     );
     expect(prompt).toContain('Do not present interpretation as fact');
@@ -1615,6 +1621,9 @@ describe('buildFastAgentSystemPrompt', () => {
       'a platform event has no incoming chat message to react to',
     );
     expect(prompt).toContain('Child-message events are private updates');
+    expect(prompt).toContain(
+      `Drop the child's self-assessment framing (verdicts, "verified", "corrected", "reproducibility review")`,
+    );
     expect(prompt).toContain(
       'Call "ignore_event" only when the event is duplicate, lifecycle-only, machinery-only, or a routine log that adds nothing useful',
     );

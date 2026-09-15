@@ -1692,12 +1692,12 @@ describe('FastSessionTranscript', () => {
     expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
   });
 
-  it('shows Thinking while the initial Fast turn is awaiting output', () => {
+  it('shows Working while the initial Fast turn is awaiting output', () => {
     render(
       <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
     );
 
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
   });
 
   it('shows a staged initial prompt immediately and reconciles its canonical event', () => {
@@ -1723,7 +1723,7 @@ describe('FastSessionTranscript', () => {
     );
 
     expect(screen.getByText('Initial question')).toBeInTheDocument();
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
     const optimisticAvatarLink = screen.getByRole('link', {
       name: 'View sessions by Current User',
     });
@@ -1933,7 +1933,7 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByText('Not now: source control.')).toBeInTheDocument();
   });
 
-  it('shows Thinking after a follow-up until streamed output arrives', async () => {
+  it('shows Working after a follow-up until streamed output arrives', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(2);
     replyMutate.mockResolvedValue({ success: true });
     render(
@@ -1957,12 +1957,12 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
     const input = screen.getByPlaceholderText('Message agent');
     fireEvent.change(input, { target: { value: 'Follow up' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
-    expect(await screen.findByText('Thinking')).toBeInTheDocument();
+    expect(await screen.findByText('Working')).toBeInTheDocument();
     act(() => {
       FakeEventSource.instances[0]!.emit('messages', {
         messages: [
@@ -1983,7 +1983,7 @@ describe('FastSessionTranscript', () => {
         ],
       });
     });
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
 
     act(() => {
       FakeEventSource.instances[0]!.emit('messages', {
@@ -1998,11 +1998,11 @@ describe('FastSessionTranscript', () => {
       });
     });
 
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
     expect(screen.getByText('Follow-up answer')).toBeInTheDocument();
   });
 
-  it('clears Thinking when a follow-up send fails', async () => {
+  it('clears Working when a follow-up send fails', async () => {
     replyMutate.mockRejectedValue(new Error('turn is busy'));
     render(
       <FastSessionTranscript
@@ -2030,10 +2030,10 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     expect(await screen.findByText('turn is busy')).toBeInTheDocument();
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
   });
 
-  it('keeps Thinking for an earlier pending response when a later send fails', async () => {
+  it('keeps Working for an earlier pending response when a later send fails', async () => {
     replyMutate.mockRejectedValue(new Error('turn is busy'));
     render(
       <FastSessionTranscript
@@ -2055,7 +2055,7 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     expect(await screen.findByText('turn is busy')).toBeInTheDocument();
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
     expect(screen.getByText('Earlier pending follow-up')).toBeInTheDocument();
     expect(screen.getByRole('log')).not.toHaveTextContent('Rejected follow-up');
   });
@@ -2100,14 +2100,14 @@ describe('FastSessionTranscript', () => {
         ],
       });
     });
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
 
     await act(async () => {
       finishPreparing?.({ text: 'Later follow-up' });
     });
 
     expect(await screen.findByText('turn is busy')).toBeInTheDocument();
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
     expect(screen.getByText('Earlier response')).toBeInTheDocument();
   });
 
@@ -3149,7 +3149,7 @@ describe('FastSessionTranscript', () => {
         canReply
       />,
     );
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
 
     act(() => {
       FakeEventSource.instances[0]!.emit(
@@ -3158,7 +3158,7 @@ describe('FastSessionTranscript', () => {
       );
     });
     expect(screen.getByText('Looking')).toBeInTheDocument();
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
 
     act(() => {
       FakeEventSource.instances[0]!.emit(

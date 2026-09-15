@@ -19,6 +19,7 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import {
+  FAST_AGENT_CAPABILITY_IDS,
   ACP_ENVELOPE_EVENT_TYPES,
   AUTOMATION_RECOMMENDATION_CATALOG,
   createSetupNewSetupSession,
@@ -43,6 +44,7 @@ import {
   type AutomationRecommendationBatch,
   type FastAgentSetupTurnContext,
   type FastAgentCapabilityId,
+  type FastAgentCapabilitySnapshot,
   type SetupStarterTaskId,
 } from '@roomote/types';
 import { captureEvent } from '@roomote/telemetry/server';
@@ -495,6 +497,26 @@ async function resolveSetupSnapshot(
     initialMilestones: await readCapabilityMilestones(setupConversation),
     connectedIntegrationIds: await readConnectedSetupIntegrationIds(),
   });
+}
+
+function buildMemberSetupSnapshot(
+  setupCompleted: boolean,
+): FastAgentCapabilitySnapshot {
+  return {
+    setupCompleted,
+    recommendedNextCapability: null,
+    capabilities: Object.fromEntries(
+      FAST_AGENT_CAPABILITY_IDS.map((capability) => [
+        capability,
+        {
+          canOffer: false,
+          ready: setupCompleted,
+          unavailableReason:
+            'A deployment administrator is required to configure this capability.',
+        },
+      ]),
+    ) as FastAgentCapabilitySnapshot['capabilities'],
+  };
 }
 
 function buildSetupTurnContext(
@@ -1673,44 +1695,41 @@ export async function resolveSetupSessionTurnContext(
   ) {
     throw new Error('Only the setup Session owner can reply during setup.');
   }
-  const adminSetupSnapshot = await resolveSetupSnapshot(auth);
-  const parsedAdminSetupSnapshot = JSON.parse(adminSetupSnapshot) as {
-    recommendedNextCapability: FastAgentCapabilityId | null;
-    capabilities: Record<string, Record<string, unknown>>;
-  };
-  const sessionSetupSnapshot = isActiveSetupSession
-    ? parsedAdminSetupSnapshot
-    : {
-        ...parsedAdminSetupSnapshot,
-        recommendedNextCapability: null,
-        capabilities: {
-          ...parsedAdminSetupSnapshot.capabilities,
-          starter_work: {
-            ...parsedAdminSetupSnapshot.capabilities.starter_work,
-            canOffer: false,
-            unavailableReason:
-              'Starter work is only available in the setup Session.',
-          },
-        },
-      };
-  const setupSnapshot = auth.isAdmin
-    ? JSON.stringify(sessionSetupSnapshot)
-    : JSON.stringify({
-        ...sessionSetupSnapshot,
-        capabilities: Object.fromEntries(
-          Object.entries(sessionSetupSnapshot.capabilities).map(
-            ([capability, state]) => [
-              capability,
-              {
-                ...state,
+  let setupSnapshot: string;
+  if (auth.isAdmin) {
+    const adminSetupSnapshot = await resolveSetupSnapshot(auth);
+    const parsedAdminSetupSnapshot = JSON.parse(adminSetupSnapshot) as {
+      recommendedNextCapability: FastAgentCapabilityId | null;
+      capabilities: Record<string, Record<string, unknown>>;
+    };
+    setupSnapshot = JSON.stringify(
+      isActiveSetupSession
+        ? parsedAdminSetupSnapshot
+        : {
+            ...parsedAdminSetupSnapshot,
+            recommendedNextCapability: null,
+            capabilities: {
+              ...parsedAdminSetupSnapshot.capabilities,
+              starter_work: {
+                ...parsedAdminSetupSnapshot.capabilities.starter_work,
                 canOffer: false,
                 unavailableReason:
-                  'A deployment administrator is required to configure this capability.',
+                  'Starter work is only available in the setup Session.',
               },
-            ],
-          ),
-        ),
-      });
+            },
+          },
+    );
+  } else {
+    // The deployment status behind the admin snapshot is an admin-only
+    // command (it also carries admin-only side effects such as trial-key
+    // import), so a member's turn must never resolve it: doing so threw
+    // "Unauthorized" and killed every member web Session at its first turn.
+    // Members cannot act on any capability anyway, so they get the same
+    // readiness shape with every card unavailable.
+    setupSnapshot = JSON.stringify(
+      buildMemberSetupSnapshot(settings?.setupCompletedAt != null),
+    );
+  }
   const setupContext: FastAgentSetupTurnContext = {
     sessionId: linkedSession.id,
     fastConversationId: linkedSession.fastConversationId,

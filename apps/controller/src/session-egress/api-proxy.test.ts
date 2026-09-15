@@ -34,7 +34,6 @@ const baseUrl = 'https://api.roomote.test/api/session-egress';
 function lifecycle(
   outcome: Awaited<ReturnType<SessionEgressLifecycle['register']>> = {
     status: 'registered',
-    admission: 'api_proxy',
     workload: registration,
     connectorIdentity: 'roomote://api-proxy/run/7/abc',
   },
@@ -126,7 +125,6 @@ describe('API-proxy admission', () => {
       order.push('register');
       return {
         status: 'registered',
-        admission: 'api_proxy',
         workload: registration,
         connectorIdentity: 'roomote://api-proxy/run/7/abc',
       };
@@ -182,7 +180,7 @@ describe('API-proxy admission', () => {
     expect(silent.register).not.toHaveBeenCalled();
   });
 
-  it('retires the workload when delivery fails or the admission is not API-proxy', async () => {
+  it('retires the workload when delivery fails and refuses ineligible runs', async () => {
     const failing = lifecycle();
     await expect(
       admitSessionEgressApiProxy(
@@ -198,28 +196,6 @@ describe('API-proxy admission', () => {
       'provision_failed',
     );
     expect(failing.startLeaseRenewal).not.toHaveBeenCalled();
-
-    const mismatched = lifecycle({
-      status: 'registered',
-      admission: 'connector',
-      workload: registration,
-      connectorIdentity: 'spiffe://roomote/connector/x',
-      connector: {
-        certificatePem: 'cert',
-        privateKeyPem: 'key',
-        notAfter: new Date(),
-      } as never,
-    });
-    const d = deps();
-    await expect(
-      admitSessionEgressApiProxy(input(mismatched), d),
-    ).rejects.toThrow('admission mode mismatch');
-    expect(mismatched.terminate).toHaveBeenCalledWith(
-      7,
-      workloadId,
-      'provision_failed',
-    );
-    expect(d.publish).not.toHaveBeenCalled();
 
     const skipped = lifecycle({ status: 'skipped', reason: 'no_grants' });
     await expect(

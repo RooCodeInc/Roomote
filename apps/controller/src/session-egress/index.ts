@@ -7,36 +7,21 @@ import {
 import { createSessionEgressControllerClient } from '@roomote/sdk/server/session-egress';
 
 import { resolveSessionEgressApiProxyBaseUrl } from './api-proxy';
-import {
-  resolveSessionEgressProvisioningConfig,
-  SessionEgressLifecycle,
-} from './lifecycle';
+import { SessionEgressLifecycle } from './lifecycle';
 
 export * from './lifecycle';
 export * from './api-proxy';
 
 /**
- * Production wiring: configuration from the validated env, the typed SDK
- * control-plane client against the API origin the controller already uses,
- * and lifecycle events on the run so the Session sees a nonsecret status.
+ * Production wiring: the typed SDK control-plane client against the API
+ * origin the controller already uses, the proxy base URL sandboxes call, and
+ * lifecycle events on the run so the Session sees a nonsecret status. No
+ * deployment configuration exists; the per-owner experiment decides whether
+ * a run gets tokens.
  */
 export function createSessionEgressLifecycle(): SessionEgressLifecycle {
-  const config = resolveSessionEgressProvisioningConfig(Env);
-  // API-proxy admission needs only the control plane, so the client always
-  // exists; the per-owner experiment decides whether a run gets tokens.
-  const client = createSessionEgressControllerClient({
-    apiBaseUrl: Env.TRPC_URL,
-  });
-
-  console.log(
-    config
-      ? `[sessionEgress] Connector admission enabled: gateway ${config.gatewayAddr}, connector image ${config.connectorImage}, lease ${config.leaseSeconds}s; API-proxy admission available for connector-less providers.`
-      : '[sessionEgress] API-proxy admission available for connector-less providers; no SESSION_EGRESS_* connector provisioning configured.',
-  );
-
   return new SessionEgressLifecycle({
-    client,
-    config,
+    client: createSessionEgressControllerClient({ apiBaseUrl: Env.TRPC_URL }),
     apiProxyBaseUrl: resolveSessionEgressApiProxyBaseUrl(Env),
     findCandidate: findSessionEgressCandidateForRun,
     recordEvent: async (event) => {

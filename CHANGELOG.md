@@ -2,6 +2,27 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.9.2 (2026-09-15)
+
+Roomote 1.9.2 makes artifacts easier to inspect, restores reliable Session starts and sandbox provisioning, and improves live activity, Settings clarity, and Session-secret operations.
+
+### Highlights
+
+- Preview CSV and TSV artifacts as accessible tables while keeping the complete source available.
+- Start member web Sessions reliably and recover hosted sandboxes from transient bootstrap failures.
+- Follow live agent activity in one collapsible block and get clearer errors, labels, and accessible actions in Settings.
+- Run Session service-token traffic entirely through the API-side proxy without the former gateway and connector configuration.
+
+### Patch changes
+
+- Roomote agents now present caveats about a user's chosen method as suggestions instead of corrections and describe their own fixes and checks without unrequested verdict language.
+- Task and Session transcripts now show each live work stretch in one stable, collapsible activity block that keeps the latest action legible without hiding detailed tool history.
+- Non-admin members can start web Sessions again without an admin-only setup check rejecting the first turn as unauthorized.
+- Remove the external Session egress gateway and its Docker connector sidecar. Every sandbox provider, Docker included, now delivers Session service tokens through the API-side proxy, so no gateway image, connector certificates, host firewall rules, or `SESSION_EGRESS_*` / `R_SESSION_EGRESS_GATEWAY_TOKEN` settings are needed; those variables are no longer read. Docker runs keep their ordinary network policy and no longer require a dedicated gateway network; task networks created under the old connector path still have their host firewall chains removed at teardown.
+- Modal, Azure, and Daytona sandboxes now retry transient transport failures during bootstrap on a fresh instance while deterministic installation failures still stop immediately.
+- Settings now distinguishes custom automation load failures from an empty list, labels model metadata across desktop and mobile, and gives each communications provider setup action a distinct accessible name.
+- CSV and TSV artifacts now open as accessible, bounded table previews in task and Session artifact viewers, with source view still available for the complete loaded content and clear warnings for malformed or truncated data.
+
 ## 1.9.1 (2026-09-15)
 
 Roomote 1.9.1 brings Session secrets to every hosted sandbox, adds cross-surface chat actions and guided delegation discovery, and improves Voice, Session, provider, email, and deployment reliability.

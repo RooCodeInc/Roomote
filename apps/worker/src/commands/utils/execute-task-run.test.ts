@@ -150,7 +150,9 @@ describe('executeTaskRun', () => {
         admitted = true;
       }),
       buildSessionEgressClientEnv: vi.fn(() =>
-        admitted ? { HTTPS_PROXY: 'http://connector:3128' } : {},
+        admitted
+          ? { ROOMOTE_SERVICE_BASE_URL: 'http://api:3001/api/session-egress' }
+          : {},
       ),
     };
     workerEnvFromProcessEnvMock.mockReturnValueOnce(workerEnv);
@@ -189,7 +191,7 @@ describe('executeTaskRun', () => {
     expect(workerEnv.acceptSessionEgressDelivery).not.toHaveBeenCalled();
     release({
       environment: {
-        ROOMOTE_SESSION_EGRESS_PROXY_URL: 'http://connector:3128',
+        ROOMOTE_SERVICE_BASE_URL: 'http://api:3001/api/session-egress',
       },
     });
     await expect(execution).resolves.toBe(true);

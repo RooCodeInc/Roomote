@@ -5,7 +5,7 @@ import { DOCKER_CAPABILITIES as DOCKER_CAPABILITIES_VALUE } from '@roomote/types
 import type { ComputeProvider } from '@roomote/types';
 
 import { unsupported } from '../errors';
-import { removeDockerSessionEgressBoundary } from '../session-egress-docker-boundary';
+import { removeLegacySessionEgressHostPolicy } from '../session-egress-legacy-cleanup';
 import type {
   CommandOutputEvent,
   ComputeProviderClient,
@@ -83,7 +83,7 @@ async function removeTaskNetwork(
   let network:
     | {
         Id?: string;
-        Labels?: Record<string, string>;
+        Labels?: Record<string, string> | null;
         Options?: Record<string, string>;
       }
     | undefined;
@@ -92,7 +92,7 @@ async function removeTaskNetwork(
     const networks = JSON.parse(output) as Array<{
       Containers?: Record<string, unknown> | null;
       Id?: string;
-      Labels?: Record<string, string>;
+      Labels?: Record<string, string> | null;
       Options?: Record<string, string>;
     }>;
     network = networks[0];
@@ -109,7 +109,7 @@ async function removeTaskNetwork(
     });
   }
 
-  if (network) await removeDockerSessionEgressBoundary(network, runDocker);
+  if (network) await removeLegacySessionEgressHostPolicy(network, runDocker);
 
   await runDocker(['network', 'rm', taskNetwork], {
     signal,

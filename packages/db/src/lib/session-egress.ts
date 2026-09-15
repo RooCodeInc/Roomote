@@ -9,10 +9,8 @@ import {
   SESSION_EGRESS_SUBSTITUTE_PREFIX,
   type RunStatus,
   type SessionEgressAuthorization,
-  type SessionEgressAuthorize,
   type SessionEgressDenialReason,
   type SessionEgressProxyAuthorize,
-  type SessionEgressRevocationFeed,
   type SessionEgressSubstituteIssue,
   type SessionEgressWorkloadRegister,
   type SessionEgressWorkloadRegistration,
@@ -36,9 +34,9 @@ import { decrypt } from './encryption';
 /**
  * Session egress control plane persistence.
  *
- * Trust model: every input here arrives from an authenticated controller or
- * gateway service principal, never from a sandbox, a Fast tool argument, or a
- * request header the workload could set. Even so, nothing below treats a
+ * Trust model: every input here arrives from the authenticated controller or
+ * from the API's own substitution proxy, never from a sandbox, a Fast tool
+ * argument, or a request header the workload could set. Even so, nothing below treats a
  * caller-supplied ID as authority on its own: each decision re-joins the live
  * owner, Session, attached run, grant, workload, and generation rows.
  *
@@ -521,29 +519,6 @@ export async function terminateSessionEgressWorkloadsForRun(
   return terminated;
 }
 
-export async function listSessionEgressRevocations(
-  after: number,
-  limit: number,
-): Promise<SessionEgressRevocationFeed> {
-  const rows = await db
-    .select()
-    .from(sessionEgressRevocations)
-    .where(gt(sessionEgressRevocations.id, after))
-    .orderBy(asc(sessionEgressRevocations.id))
-    .limit(limit);
-  return {
-    events: rows.map((row) => ({
-      id: row.id,
-      kind: row.kind,
-      workloadId: row.workloadId,
-      secretRef: row.secretRef,
-      generation: row.generation,
-      createdAt: row.createdAt.toISOString(),
-    })),
-    cursor: rows.at(-1)?.id ?? after,
-  };
-}
-
 function approvedDestination(origin: string): { host: string; port: number } {
   const url = new URL(origin);
   return {
@@ -551,27 +526,6 @@ function approvedDestination(origin: string): { host: string; port: number } {
     port: url.port ? Number(url.port) : 443,
   };
 }
-
-/**
- * How a presented substitute is bound to a caller.
- *
- * - `connector`: the external gateway authenticated a connector certificate
- *   and maps it to a workload; the token must belong to exactly that workload
- *   and the CONNECT target must equal the approved origin.
- * - `proxy`: the API itself is the gateway and there is no connector. The
- *   token alone names the grant, and the destination is that grant's approved
- *   origin by construction. Possession of the substitute is the authority,
- *   bounded by the same live workload, Session, run, generation, expiry and
- *   revocation checks.
- */
-type SubstituteBinding =
-  | {
-      kind: 'connector';
-      workloadId: string;
-      connectorIdentity: string;
-      destination: { host: string; port: number };
-    }
-  | { kind: 'proxy' };
 
 /**
  * Live per-request authorization. Every phase of one HTTP exchange (request,
@@ -582,16 +536,15 @@ type SubstituteBinding =
 async function authorizeSubstitute(
   input: {
     substitute: string;
-    method: SessionEgressAuthorize['method'];
-    phase: SessionEgressAuthorize['phase'];
+    method: SessionEgressProxyAuthorize['method'];
+    phase: SessionEgressProxyAuthorize['phase'];
     authorizationId?: string;
   },
-  binding: SubstituteBinding,
   options: {
     /**
      * Current deployment egress policy for the approved origin (public
      * address, HTTPS). Approval-time validation is not enough: policy can
-     * tighten after a grant exists, and the gateway's own dial guard is a
+     * tighten after a grant exists, and the proxy's own dial guard is a
      * second line, not the only one.
      */
     isOriginAllowed?: (origin: string) => boolean;
@@ -643,12 +596,6 @@ async function authorizeSubstitute(
   ): SessionEgressDenialReason | null => {
     if (!row) return 'unknown_substitute';
     const { substitute, workload, secret, session, run } = row;
-    if (
-      binding.kind === 'connector' &&
-      (workload.id !== binding.workloadId ||
-        workload.connectorIdentity !== binding.connectorIdentity)
-    )
-      return 'workload_mismatch';
     if (workload.status !== 'active' || row.workloadExpired)
       return 'workload_inactive';
     if (substitute.generation !== workload.generation)
@@ -669,13 +616,7 @@ async function authorizeSubstitute(
       !row.attached
     )
       return 'session_unavailable';
-    const expected = approvedDestination(secret.origin);
-    if (
-      (binding.kind === 'connector' &&
-        (binding.destination.host.toLowerCase() !== expected.host ||
-          binding.destination.port !== expected.port)) ||
-      !(options.isOriginAllowed?.(secret.origin) ?? true)
-    )
+    if (!(options.isOriginAllowed?.(secret.origin) ?? true))
       return 'destination_mismatch';
     if (!(secret.allowedMethods as readonly string[]).includes(input.method))
       return 'method_not_allowed';
@@ -684,42 +625,24 @@ async function authorizeSubstitute(
 
   const [row] = await load();
   const reason = decide(row);
-  // On the proxy path an unknown token names no workload, Session, or grant,
-  // so there is nothing an audit row could attribute; the caller logs the
-  // bounded reason instead.
-  if (binding.kind === 'proxy' && !row)
-    return { allowed: false, reason: 'unknown_substitute' };
+  // An unknown token names no workload, Session, or grant, so there is
+  // nothing an audit row could attribute; the caller logs the bounded reason.
+  if (!row) return { allowed: false, reason: 'unknown_substitute' };
   const authorizationId = input.authorizationId ?? randomUUID();
-  // A token that does not belong to this binding tells the audit nothing
-  // trustworthy about a Session or grant; record only what was presented.
-  const bound =
-    row && reason !== 'unknown_substitute' && reason !== 'workload_mismatch';
-  const destination =
-    binding.kind === 'connector'
-      ? binding.destination
-      : bound
-        ? approvedDestination(row.secret.origin)
-        : null;
+  const destination = approvedDestination(row.secret.origin);
   await db.insert(sessionEgressAudit).values({
     authorizationId,
-    workloadId:
-      binding.kind === 'connector'
-        ? binding.workloadId
-        : bound
-          ? row.workload.id
-          : null,
-    sessionId: bound ? row.workload.sessionId : null,
-    actorUserId: bound ? row.workload.ownerUserId : null,
-    secretRef: bound ? row.secret.id : null,
+    workloadId: row.workload.id,
+    sessionId: row.workload.sessionId,
+    actorUserId: row.workload.ownerUserId,
+    secretRef: row.secret.id,
     phase: input.phase,
     method: input.method,
-    destination: destination
-      ? `${destination.host.toLowerCase()}:${destination.port}`
-      : null,
+    destination: `${destination.host}:${destination.port}`,
     decision: reason ? 'denied' : 'allowed',
     reason,
   });
-  if (reason || !row) return { allowed: false, reason: reason ?? 'malformed' };
+  if (reason) return { allowed: false, reason };
 
   // The audit write can wait behind a lock while any binding above changes.
   // Its row records an evaluation attempt, not a release. The final READ
@@ -755,29 +678,12 @@ async function authorizeSubstitute(
   };
 }
 
-/** Gateway path: an authenticated connector presents a substitute for a CONNECT target. */
-export async function authorizeSessionEgress(
-  input: SessionEgressAuthorize,
-  options: { isOriginAllowed?: (origin: string) => boolean } = {},
-): Promise<SessionEgressAuthorization> {
-  return authorizeSubstitute(
-    input,
-    {
-      kind: 'connector',
-      workloadId: input.workloadId,
-      connectorIdentity: input.connectorIdentity,
-      destination: input.destination,
-    },
-    options,
-  );
-}
-
-/** API proxy path: a workload presents a substitute; the token alone names the grant. */
+/** A workload presents a substitute; the token alone names the grant. */
 export async function authorizeSessionEgressProxy(
   input: SessionEgressProxyAuthorize,
   options: { isOriginAllowed?: (origin: string) => boolean } = {},
 ): Promise<SessionEgressAuthorization> {
-  return authorizeSubstitute(input, { kind: 'proxy' }, options);
+  return authorizeSubstitute(input, options);
 }
 
 /** Audit rows for one workload: bounded codes only, for tests and operator tooling. */
