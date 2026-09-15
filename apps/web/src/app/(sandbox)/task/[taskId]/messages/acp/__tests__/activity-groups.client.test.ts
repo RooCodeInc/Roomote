@@ -32,6 +32,17 @@ function textBlock(id: string, ts: number): AcpRenderBlock {
   };
 }
 
+function userTextBlock(id: string, ts: number): AcpRenderBlock {
+  const block = textBlock(id, ts);
+
+  if (block.kind !== 'message') throw new Error('Expected message block');
+
+  return {
+    ...block,
+    msg: { ...block.msg, role: 'user' },
+  };
+}
+
 function providerRetryBlock(params: {
   id: string;
   ts: number;
@@ -229,7 +240,7 @@ describe('buildAcpActivityRenderBlocks', () => {
     ]);
   });
 
-  it('keeps live partial reasoning and tools outside collapsed activity groups', () => {
+  it('keeps stale partial activity direct once a reply boundary exists', () => {
     const partialReasoning: AcpRenderBlock = {
       kind: 'message',
       msg: {
@@ -285,6 +296,183 @@ describe('buildAcpActivityRenderBlocks', () => {
       'message',
       'message',
     ]);
+  });
+
+  it('keeps one stable live group and exposes the latest tool call', () => {
+    const entries = buildAcpActivityRenderBlocks([
+      textBlock('text-1', 1_000),
+      messageBlock('reasoning-1', 2_000, 'reasoning'),
+      toolResultBlock({ id: 'tool-1', ts: 3_000 }),
+      toolResultBlock({
+        id: 'tool-2',
+        ts: 4_000,
+        toolName: 'search',
+        status: 'in_progress',
+      }),
+    ]);
+
+    expect(entries).toHaveLength(2);
+    expect(entries[1]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-reasoning-1',
+      live: true,
+      latestToolMessage: { id: 'tool-2' },
+      blocks: [
+        { kind: 'message', msg: { id: 'reasoning-1' } },
+        { kind: 'message', msg: { id: 'tool-1' } },
+        { kind: 'message', msg: { id: 'tool-2' } },
+      ],
+    });
+  });
+
+  it('keeps trailing settled calls in the live block while the agent is still working', () => {
+    const entries = buildAcpActivityRenderBlocks(
+      [
+        textBlock('text-1', 1_000),
+        toolResultBlock({ id: 'tool-1', ts: 2_000 }),
+      ],
+      { isWorking: true },
+    );
+
+    expect(entries[1]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-tool-1',
+      live: true,
+      latestToolMessage: { id: 'tool-1' },
+    });
+  });
+
+  it('pre-groups only the trailing activity segment after the latest narrative update', () => {
+    const entries = buildAcpActivityRenderBlocks(
+      [
+        userTextBlock('user-1', 1_000),
+        toolResultBlock({ id: 'tool-1', ts: 2_000 }),
+        textBlock('progress-update', 3_000),
+        toolResultBlock({ id: 'tool-2', ts: 4_000, toolName: 'search' }),
+      ],
+      { isWorking: true },
+    );
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+      'activity_group',
+    ]);
+    expect(entries[1]).toMatchObject({
+      kind: 'message',
+      msg: { id: 'tool-1' },
+    });
+    expect(entries[3]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-tool-2',
+      live: true,
+      latestToolMessage: { id: 'tool-2' },
+      blocks: [{ kind: 'message', msg: { id: 'tool-2' } }],
+    });
+  });
+
+  it('uses progress headings as segment boundaries for live tool activity', () => {
+    const entries = buildAcpActivityRenderBlocks(
+      [
+        textBlock('text-1', 1_000),
+        toolResultBlock({ id: 'tool-1', ts: 2_000 }),
+        messageBlock('todo-1', 3_000, 'todo_section'),
+        toolResultBlock({ id: 'tool-2', ts: 4_000 }),
+      ],
+      { isWorking: true },
+    );
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+      'activity_group',
+    ]);
+    expect(entries[3]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-tool-2',
+      blocks: [{ kind: 'message', msg: { id: 'tool-2' } }],
+    });
+  });
+
+  it('keeps same-type tool groups inside the current activity segment', () => {
+    const entries = buildAcpActivityRenderBlocks(
+      [
+        userTextBlock('user-1', 1_000),
+        toolGroupBlock({
+          id: 'group-1',
+          ts: 2_000,
+          items: [
+            buildToolResult({ id: 'tool-1', ts: 2_000 }),
+            buildToolResult({ id: 'tool-2', ts: 3_000 }),
+          ],
+        }),
+      ],
+      { isWorking: true },
+    );
+
+    expect(entries[1]).toMatchObject({
+      kind: 'activity_group',
+      blocks: [
+        {
+          kind: 'tool_group',
+          items: [{ msg: { id: 'tool-1' } }, { msg: { id: 'tool-2' } }],
+        },
+      ],
+    });
+  });
+
+  it('keeps the same segment grouped when live activity settles', () => {
+    const blocks = [
+      userTextBlock('user-1', 1_000),
+      toolResultBlock({ id: 'tool-1', ts: 2_000 }),
+      textBlock('progress-update', 3_000),
+      toolResultBlock({ id: 'tool-2', ts: 4_000, toolName: 'search' }),
+      textBlock('final-response', 5_000),
+    ];
+    const entries = buildAcpActivityRenderBlocks(blocks, {
+      collapseSettledActivityIds: new Set(['activity-tool-2']),
+    });
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+      'activity_group',
+      'message',
+    ]);
+    expect(entries[3]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-tool-2',
+      live: false,
+      endTs: 5_000,
+      blocks: [{ kind: 'message', msg: { id: 'tool-2' } }],
+    });
+  });
+
+  it('collapses a settled single-call stretch only when it was previously live', () => {
+    const blocks = [
+      textBlock('text-1', 1_000),
+      toolResultBlock({ id: 'tool-1', ts: 2_000 }),
+      textBlock('text-2', 5_000),
+    ];
+    const unchangedHistory = buildAcpActivityRenderBlocks(blocks);
+    const settledLiveStretch = buildAcpActivityRenderBlocks(blocks, {
+      collapseSettledActivityIds: new Set(['activity-tool-1']),
+    });
+
+    expect(unchangedHistory.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+    ]);
+    expect(settledLiveStretch[1]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-tool-1',
+      live: false,
+      endTs: 5_000,
+    });
   });
 
   it('collapses mixed eligible activity blocks into one group', () => {
@@ -493,7 +681,7 @@ describe('buildAcpActivityRenderBlocks', () => {
   it('keeps manage_artifacts rows visible and uses them as a boundary', () => {
     const manageArtifacts = toolResultBlock({
       id: 'artifact-tool',
-      ts: 3_000,
+      ts: 5_000,
       toolName: 'manage_artifacts',
     });
 
@@ -502,18 +690,48 @@ describe('buildAcpActivityRenderBlocks', () => {
     const entries = buildAcpActivityRenderBlocks([
       textBlock('text-1', 1_000),
       messageBlock('reasoning-1', 2_000, 'reasoning'),
+      toolResultBlock({ id: 'command-1', ts: 3_000, toolName: 'execute' }),
+      toolResultBlock({ id: 'command-2', ts: 4_000, toolName: 'execute' }),
       manageArtifacts,
-      messageBlock('reasoning-2', 4_000, 'reasoning'),
-      textBlock('text-2', 5_000),
+      messageBlock('reasoning-2', 6_000, 'reasoning'),
+      toolResultBlock({ id: 'command-3', ts: 7_000, toolName: 'execute' }),
+      toolResultBlock({ id: 'command-4', ts: 8_000, toolName: 'execute' }),
+      textBlock('text-2', 9_000),
     ]);
 
     expect(entries.map((entry) => entry.kind)).toEqual([
       'message',
+      'activity_group',
       'message',
-      'message',
-      'message',
+      'activity_group',
       'message',
     ]);
+    expect(entries[1]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-reasoning-1',
+      live: false,
+      endTs: 5_000,
+      blocks: [
+        { kind: 'message', msg: { id: 'reasoning-1' } },
+        { kind: 'message', msg: { id: 'command-1' } },
+        { kind: 'message', msg: { id: 'command-2' } },
+      ],
+    });
+    expect(entries[2]).toMatchObject({
+      kind: 'message',
+      msg: { id: 'artifact-tool' },
+    });
+    expect(entries[3]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-reasoning-2',
+      live: false,
+      endTs: 9_000,
+      blocks: [
+        { kind: 'message', msg: { id: 'reasoning-2' } },
+        { kind: 'message', msg: { id: 'command-3' } },
+        { kind: 'message', msg: { id: 'command-4' } },
+      ],
+    });
   });
 
   it('keeps visual-proof preview rows visible and uses them as a boundary', () => {

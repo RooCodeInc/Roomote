@@ -11,6 +11,7 @@ import {
   exists,
   fastAgentConversations,
   getSessionForFastConversation,
+  getSessionGoal,
   ilike,
   inArray,
   isSessionConversationResponding,
@@ -28,6 +29,7 @@ import { queueFastAgentSurfaceReply } from '@roomote/sdk/server';
 import {
   SESSION_STATUSES,
   type RoomoteSearchSessionsResponse,
+  type SessionGoal,
   type RoomoteSessionChildTask,
   type RoomoteSessionMessagesResponse,
   type RoomoteSessionRelayState,
@@ -169,7 +171,6 @@ async function getChildTasks(sessionIds: string[], auth: McpAuth) {
       taskId: tasks.id,
       title: tasks.title,
       state: tasks.state,
-      goalStatus: tasks.goalStatus,
       repositoryName: tasks.repositoryName,
       activityAt: tasks.activityAt,
       origin: sessionTasks.origin,
@@ -197,7 +198,6 @@ async function getChildTasks(sessionIds: string[], auth: McpAuth) {
       taskId: row.taskId,
       title: row.title,
       state: row.state,
-      goalStatus: row.goalStatus,
       repositoryName: row.repositoryName,
       activityAt: row.activityAt,
       origin: row.origin,
@@ -219,16 +219,17 @@ async function getChildTasks(sessionIds: string[], auth: McpAuth) {
 function serializeSession(
   session: typeof sessions.$inferSelect,
   childTasks: RoomoteSessionChildTask[],
+  goal: SessionGoal | null,
 ): RoomoteSessionSummary {
   return {
     id: session.id,
     title: session.title,
     status: deriveSessionStatus({
       conversationResponding: isSessionConversationResponding(session),
+      goalStatus: goal?.status ?? null,
       tasks: childTasks.map((task) => ({
         state: task.state,
         taskPhase: task.latestRun?.taskPhase ?? null,
-        goalStatus: task.goalStatus,
       })),
     }),
     sourceSurface: session.sourceSurface,
@@ -236,6 +237,12 @@ function serializeSession(
     activityAt: session.activityAt,
     createdAt: session.createdAt.toISOString(),
     fastConversationId: session.fastConversationId,
+    goal: goal
+      ? {
+          ...goal,
+          completedAt: goal.completedAt?.toISOString() ?? null,
+        }
+      : null,
     tasks: childTasks,
   };
 }
@@ -376,9 +383,21 @@ async function searchSessions(c: SessionContext): Promise<Response> {
     );
     const last = page.at(-1);
 
+    const goals = new Map(
+      await Promise.all(
+        page.map(
+          async (session) =>
+            [session.id, await getSessionGoal(session.id)] as const,
+        ),
+      ),
+    );
     const response = {
       sessions: page.map((session) =>
-        serializeSession(session, childTasks.get(session.id) ?? []),
+        serializeSession(
+          session,
+          childTasks.get(session.id) ?? [],
+          goals.get(session.id) ?? null,
+        ),
       ),
       nextCursor:
         rows.length > limit && last ? `${last.activityAt}:${last.id}` : null,
@@ -403,6 +422,7 @@ async function getSessionSummary(c: SessionContext): Promise<Response> {
     const response = serializeSession(
       session,
       childTasks.get(session.id) ?? [],
+      await getSessionGoal(session.id),
     );
     return c.json(response);
   } catch (error) {
@@ -461,16 +481,17 @@ async function getSessionUpdates(c: SessionContext): Promise<Response> {
     const serialized = serializeSession(
       session,
       childTasks.get(session.id) ?? [],
+      await getSessionGoal(session.id),
     );
     const state = {
       kind: 'session' as const,
       status: serialized.status,
+      goalStatus: serialized.goal?.status ?? null,
       tasks: serialized.tasks.map((task) => ({
         taskId: task.taskId,
         state: task.state,
         taskRunStatus: task.latestRun?.status ?? null,
         taskPhase: task.latestRun?.taskPhase ?? null,
-        goalStatus: task.goalStatus,
       })),
     } satisfies RoomoteSessionRelayState;
     const result = await getSessionRelayUpdates({

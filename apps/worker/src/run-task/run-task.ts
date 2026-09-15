@@ -106,12 +106,12 @@ import {
 } from '../workspace/repo-local-skills';
 import { resolveWorkerCodingHarness } from '../lib/resolve-worker-coding-harness';
 import { writeSharedWorkspaceAgentsFile } from './shared-workspace-agents';
+import { ON_DEMAND_REPOSITORIES_ENV_VAR } from '../workspace/on-demand-repositories';
 import {
   getFollowUpWorkflowPhase,
   getInitialWorkflowPhase,
 } from './workflow-phase';
 import { wrapCommunicationMessage } from './communication-message-prompt';
-import { buildTaskGoalContinuationPrompt } from './task-goal';
 import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
 import { isMissingSlackReplyTargetProcedureError } from './slack-reply-target';
 
@@ -667,6 +667,7 @@ export const runTask = async ({
   usesSharedWorkspaceRoot,
   repoPaths,
   repoLocalSkills,
+  onDemandRepositories,
   workspaceReadinessWarnings,
   backgroundEnvironmentSetup,
   prompt,
@@ -769,6 +770,11 @@ export const runTask = async ({
         isSilentChannelAutomationLaunch(taskRun)
           ? 'true'
           : 'false',
+      // Exposes `clone_repository` in the Roomote MCP server; the manifest at
+      // the workspace root carries the repository list itself.
+      ...(onDemandRepositories
+        ? { [ON_DEMAND_REPOSITORIES_ENV_VAR]: 'true' }
+        : {}),
       ...(unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE && {
         ROOMOTE_AUTH_BYPASS_VALUE: unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE,
       }),
@@ -865,6 +871,13 @@ export const runTask = async ({
       delete runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME];
       delete runtimeEnv[INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME];
       delete runtimeEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME];
+    }
+
+    if (workerEnv.sessionEgressBootstrapRequired) {
+      Object.assign(runtimeEnv, workerEnv.buildSessionEgressClientEnv());
+      // Substitutes are only usable through the API proxy, so nothing about
+      // the run's own networking or inference routing changes.
+      runtimeEnv.ROOMOTE_SESSION_EGRESS_API_PROXY = '1';
     }
 
     const workerHomeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
@@ -1088,6 +1101,7 @@ export const runTask = async ({
       workspacePath,
       usesSharedWorkspaceRoot,
       repoPaths,
+      onDemandRepositories,
     });
 
     const taskCancellation = new TaskCancellationController({
@@ -1453,64 +1467,6 @@ export const runTask = async ({
             });
           }
         },
-        onBeforeTaskCompletion: async (completionId: string) => {
-          if (taskCancellation.signal.aborted) {
-            return 'finalize' as const;
-          }
-
-          const claim = await sdk.taskRuns.claimGoalContinuation({
-            runId: taskRun.id,
-            continuationId: completionId,
-          });
-          if (!claim.updated) {
-            if (claim.reason === 'already_claimed') {
-              return 'ignore' as const;
-            }
-            if (!claim.goal) {
-              return 'finalize' as const;
-            }
-            await recordWorkerRuntimeEvent({
-              eventType: 'decision',
-              message: `Goal continuation stopped for task run #${taskRun.id}.`,
-              details: {
-                reason: claim.reason,
-                goalStatus: claim.goal?.status ?? null,
-              },
-            });
-            return 'finalize' as const;
-          }
-
-          const continuationEvent = (sent: boolean) => ({
-            eventType: 'decision' as const,
-            message: `Goal continuation ${sent ? 'started' : 'could not start'} for task run #${taskRun.id}.`,
-            details: {
-              reason: 'goal_continuation',
-              delivered: sent,
-              continuation: claim.goal.continuationsUsed,
-              maxContinuations: claim.goal.maxContinuations,
-            },
-          });
-          return {
-            disposition: 'continue' as const,
-            prompt: {
-              prompt: buildTaskGoalContinuationPrompt(claim.goal),
-              goalContext: claim.goal,
-              visibleInTranscript: false,
-              source: 'goal-continuation',
-              clientMessageId: `goal-continuation:${completionId}`,
-            },
-            onAccepted: () => {
-              void recordWorkerRuntimeEvent(continuationEvent(true));
-            },
-            onRejected: async () => {
-              await sdk.taskRuns.releaseGoalContinuation({
-                runId: taskRun.id,
-                continuationId: completionId,
-              });
-              await recordWorkerRuntimeEvent(continuationEvent(false));
-            },
-          };
-        },
         onStart: async (taskId: string) => {
           try {
             await sdk.taskRuns.setHarnessSessionId({
@@ -1606,11 +1562,6 @@ export const runTask = async ({
       | undefined;
     let runtimeTaskStartedForSetupNotice = false;
 
-    const getActiveGoalContext = async () => {
-      const goal = await sdk.taskRuns.getGoal({ runId: taskRun.id });
-      return goal?.status === 'active' ? goal : undefined;
-    };
-
     const deliverEnvironmentSetupNotice = async () => {
       const currentManager = harnessManager;
       const outcome = pendingEnvironmentSetupOutcome;
@@ -1642,24 +1593,12 @@ export const runTask = async ({
       // deliver the same setup outcome more than once.
       pendingEnvironmentSetupOutcome = undefined;
 
-      let goalContext;
-      try {
-        goalContext = await getActiveGoalContext();
-      } catch (error) {
-        pendingEnvironmentSetupOutcome ??= outcome;
-        logger.warn(
-          `[runTask] Delaying background environment setup notice for task run ${taskRun.id} because active goal lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return;
-      }
-
       const sent = currentManager.sendFollowUpPrompt({
         prompt: wakeFromIdle
           ? buildEnvironmentSetupSettledWakePrompt(outcome)
           : buildEnvironmentSetupSettledPrompt(outcome),
         visibleInTranscript: false,
         source: 'environment-setup',
-        goalContext,
       });
 
       if (!sent) {
@@ -1842,16 +1781,6 @@ export const runTask = async ({
 
       const workflowPhase =
         options.workflowPhase ?? getFollowUpWorkflowPhase(options.prompt);
-      let goalContext;
-      try {
-        goalContext = await getActiveGoalContext();
-      } catch (error) {
-        logger.warn(
-          `[runTask] Deferred resume prompt blocked for task run ${taskRun.id} because active goal lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        scheduleDeferredResumePromptRetry(options);
-        return false;
-      }
       const queued = harnessManager.sendFollowUpPrompt({
         prompt: options.prompt,
         images: options.images,
@@ -1861,7 +1790,6 @@ export const runTask = async ({
         clientMessageId: options.clientMessageId,
         // Attribute the turn to the identity actor-scoped routes resolve.
         userId: deferredPromptPrep.effectiveUserId ?? undefined,
-        goalContext,
       });
 
       if (queued) {
@@ -1900,18 +1828,10 @@ export const runTask = async ({
       const workflowPhase =
         options.workflowPhase ?? getFollowUpWorkflowPhase(options.prompt);
 
-      try {
-        return harnessManager.sendFollowUpPrompt({
-          ...options,
-          ...(workflowPhase ? { workflowPhase } : {}),
-          goalContext: await getActiveGoalContext(),
-        });
-      } catch (error) {
-        logger.warn(
-          `[runTask] Follow-up prompt blocked for task run ${taskRun.id} because active goal lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return false;
-      }
+      return harnessManager.sendFollowUpPrompt({
+        ...options,
+        ...(workflowPhase ? { workflowPhase } : {}),
+      });
     };
 
     const deliverQueuedSnapshotResumeSlackMessages = async (
@@ -2320,7 +2240,6 @@ export const runTask = async ({
           ? { workflowPhase: initialWorkflowPhase }
           : {}),
         visibleInTranscript: false,
-        ...(task?.goal?.status === 'active' ? { goalContext: task.goal } : {}),
       });
     } else {
       // Session mode: initialize without prompt.

@@ -272,6 +272,75 @@ export async function postSlackThreadMessageWithFooterText(params: {
   });
 }
 
+/** Post and register a new DM root as its thread's initial footer carrier. */
+export async function postSlackRootMessageWithFooterText(params: {
+  slack: Pick<
+    SlackNotifier,
+    'postMessage' | 'getMessageBlocks' | 'updateMessage'
+  > &
+    Partial<Pick<SlackNotifier, 'getWorkspaceId'>>;
+  channel: string;
+  text: string;
+  bodyBlocks: unknown[];
+  footerText: string;
+  clientMsgId?: string;
+}): Promise<string | null> {
+  const messageId = await params.slack.postMessage({
+    channel: params.channel,
+    text: params.text,
+    unfurl_links: false,
+    unfurl_media: false,
+    blocks: [
+      ...params.bodyBlocks,
+      buildSlackThreadReplyFooterBlock({ footerText: params.footerText }),
+    ],
+    ...(params.clientMsgId ? { client_msg_id: params.clientMsgId } : {}),
+  });
+  if (!messageId) return null;
+
+  try {
+    await withThreadReplyFooterLock({
+      lockKey: `${SLACK_THREAD_REPLY_FOOTER_LOCK_PREFIX}${params.channel}:${messageId}`,
+      fn: async (assertLock, lock) => {
+        const current = await getSlackThreadReplyFooterMessageTs(
+          params.channel,
+          messageId,
+        );
+        if (current && current !== messageId) {
+          await removeSlackThreadReplyFooter({
+            slack: params.slack,
+            channel: params.channel,
+            threadTs: messageId,
+            messageTs: messageId,
+            assertLock,
+          });
+          return;
+        }
+        await assertLock();
+        if (
+          !(await setSlackThreadReplyFooterMessageTs(
+            params.channel,
+            messageId,
+            messageId,
+            { lock },
+          ))
+        ) {
+          throw new Error('Thread reply footer lock lease lost');
+        }
+        await rememberSlackThreadFooterRefresh(
+          { slack: params.slack, channel: params.channel, threadTs: messageId },
+          assertLock,
+        );
+      },
+    });
+  } catch (error) {
+    console.warn(
+      `[slackThreadFooter] Failed to register root footer ${messageId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  return messageId;
+}
+
 /**
  * Rewrites an existing thread message (for example one that was streamed)
  * into its final body and makes it the sticky footer carrier, the same way a

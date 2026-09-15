@@ -13,12 +13,9 @@ import {
 
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
-import { stagePendingFastSessionLaunch } from '@/lib/pending-fast-session-launch';
-import { sessionPathWithVoiceAutostart } from '@/lib/voice-autostart';
-
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
-import { useStartFastSession } from '@/hooks/task-runs';
+import { useFastSessionLauncher } from '@/hooks/task-runs';
 import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 
 import { type PromptInputMessage } from '@/components/ai-elements';
@@ -50,6 +47,9 @@ type NewTaskFormProps = {
   onTaskStarted?: () => void;
   initialPrompt?: string;
   placeholder?: string;
+  promptSuggestion?: string;
+  onPromptFocusChange?: (focused: boolean) => void;
+  autoFocus?: boolean;
   textareaMaxHeight?: number;
   promptContainerRef?: Ref<HTMLDivElement>;
 };
@@ -59,6 +59,9 @@ export function NewTaskForm({
   onTaskStarted,
   initialPrompt = '',
   placeholder = DEFAULT_PROMPT_PLACEHOLDER,
+  promptSuggestion,
+  onPromptFocusChange,
+  autoFocus = true,
   textareaMaxHeight,
   promptContainerRef,
 }: NewTaskFormProps) {
@@ -87,58 +90,11 @@ export function NewTaskForm({
   useEffect(() => setPromptText(initialPromptText), [initialPromptText]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
-  const startFastSessionMutation = useStartFastSession();
-  const fastConversationRetryRef = useRef<{
-    conversationId: string;
-    payloadKey: string;
-  } | null>(null);
-
-  const startFastSession = useCallback(
-    async (
-      payload: FastSessionSubmission,
-      options: { voice?: boolean } = {},
-    ): Promise<void> => {
-      // A second submit while the first is in flight would mint a second
-      // session and orphan one of them.
-      if (startFastSessionMutation.isPending) {
-        return;
-      }
-      const payloadKey = JSON.stringify(payload);
-      const conversationId =
-        fastConversationRetryRef.current?.payloadKey === payloadKey
-          ? fastConversationRetryRef.current.conversationId
-          : crypto.randomUUID();
-      fastConversationRetryRef.current = { conversationId, payloadKey };
-      try {
-        const { sessionId, fastConversationId } =
-          await startFastSessionMutation.mutateAsync({
-            ...payload,
-            conversationId,
-          });
-        if (payload.text || payload.images?.length) {
-          stagePendingFastSessionLaunch(sessionId, {
-            fastConversationId: fastConversationId ?? conversationId,
-            text: payload.text,
-            images: payload.images,
-          });
-        }
-        fastConversationRetryRef.current = null;
-        onTaskStarted?.();
-        router.push(
-          options.voice
-            ? sessionPathWithVoiceAutostart(sessionId)
-            : `/sessions/${sessionId}`,
-        );
-      } catch (error) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : 'Failed to start Fast session',
-        );
-      }
-    },
-    [onTaskStarted, startFastSessionMutation, router],
-  );
+  const {
+    isPending: isFastSessionPending,
+    mutation: startFastSessionMutation,
+    startFastSession,
+  } = useFastSessionLauncher({ onSessionStarted: onTaskStarted });
   const launchTaskModels = useLaunchTaskModels();
   const defaultModelId = environmentIdParam
     ? launchTaskModels.data?.defaultModelId
@@ -202,7 +158,7 @@ export function NewTaskForm({
     ],
   );
 
-  const isBusy = startFastSessionMutation.isPending;
+  const isBusy = isFastSessionPending;
 
   const submitDisabledReason = getTaskLaunchDisabledReason(managedAccess);
 
@@ -315,7 +271,9 @@ export function NewTaskForm({
         onPromptTextChange={setPromptText}
         onSubmit={handleSubmit}
         placeholder={placeholder}
-        autoFocus
+        promptSuggestion={promptSuggestion}
+        onPromptFocusChange={onPromptFocusChange}
+        autoFocus={autoFocus}
         textareaMaxHeight={textareaMaxHeight}
         animateContainer={false}
         submitWithMetaKey={false}

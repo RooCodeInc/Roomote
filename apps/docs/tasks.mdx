@@ -42,12 +42,23 @@ work. Board and list choices remain in the URL so views are shareable.
 
 ## Attention notifications
 
-When a web Session has a new response or a task needs input while its initiator
-is away, Roomote sends a personal notification with a link back to the Session.
-Notifications go to the initiator's linked Slack, Teams, Telegram, and Discord
-chats where available; verified email is used only when no chat delivery
-succeeds. Roomote skips the notification while the initiator is present in the
-Session.
+When a manually started web Session has a new response or its task needs input
+while the initiator is away, Roomote sends a personal notification. Automation
+and scheduled results do not send these attention notifications. The first
+notification quotes the initial request, includes Roomote's response, and uses
+the standard Session footer. It goes to the first successful personal
+destination in this order: Slack, Teams, Telegram, Discord, then verified email.
+Later notifications reuse that provider thread when it remains available, and
+the standard footer moves to the latest supported message. Roomote skips the
+notification while the initiator is present in the Session.
+
+If you continue the conversation on the web and then leave again, the next
+notification in that same provider thread marks the messages that were not
+shown there. For gaps of up to four conversation messages, it also quotes the
+latest web request. Longer gaps link to the Session instead of generating a
+summary or copying the omitted conversation. Presence changes alone do not add
+this marker, and a notification that starts a new provider thread still uses
+the original request quote.
 
 Reply directly to a notification in Slack, Teams, Telegram, Discord, or email
 to continue the same Session. Use the provider's reply action so Roomote can
@@ -82,7 +93,7 @@ The task view gives you the working context for a run:
   logs when setup is still running or needs troubleshooting
 - generated artifacts
 - code diffs
-- previews for running apps
+- [Live Previews](/live-previews) for running apps
 - task metadata and links back to the surface that started the task
 
 If a task started from Slack, Teams, Telegram, Discord, Linear, or source

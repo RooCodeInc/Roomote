@@ -96,7 +96,6 @@ import {
   handleCreateCustomSkill,
   handleUpdateCustomSkill,
 } from './custom-skills.js';
-import { handleManageGoal } from './goal.js';
 import {
   handleGetSessionMessages,
   handleGetSessionSummary,
@@ -105,6 +104,12 @@ import {
   handleStartSession,
 } from './sessions.js';
 import { handleGetRelayUpdates } from './relay-updates.js';
+import { handleCloneRepository } from './clone-repository.js';
+import {
+  CLONE_REPOSITORY_TOOL_NAME,
+  ON_DEMAND_REPOSITORIES_ENV_VAR,
+  ON_DEMAND_REPOSITORIES_MANIFEST_FILE,
+} from '../../workspace/on-demand-repositories.js';
 
 export {
   taskSuggestionResultHasSubmittedSuggestions,
@@ -624,38 +629,6 @@ const manageTasksInputSchema = {
       'For update_models: desired reasoning level for the role ("extra high" maps to xhigh). A level qualifier trailing a model name ("Luna Max", "Sonnet high") is this field, not part of the model id — pass it here alongside the model. Omit to use the deployment default level.',
     ),
 } satisfies Record<string, z.ZodTypeAny>;
-
-roomoteMcpServer.registerTool(
-  'manage_goal',
-  {
-    title: 'Manage Goal',
-    description:
-      'Read or finish the current task goal. Use get to inspect it. Use complete only after the full objective is verified. Use blocked only when progress cannot continue without user input or an external state change. The agent cannot create, replace, pause, resume, or clear goals.',
-    inputSchema: {
-      action: z.enum(['get', 'complete', 'blocked']),
-      generation: z
-        .string()
-        .max(200)
-        .nullable()
-        .optional()
-        .describe(
-          'Required for complete and blocked. Pass the exact generation assigned in the current turn goal instructions.',
-        ),
-      reason: z
-        .string()
-        .max(2_000)
-        .optional()
-        .describe('Required for blocked; explain the concrete blocker.'),
-    },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (params): Promise<ToolResult> => handleManageGoal(params),
-);
 
 roomoteMcpServer.registerTool(
   'manage_tasks',
@@ -1309,7 +1282,7 @@ roomoteMcpServer.registerTool(
   {
     title: 'Update Personalization',
     description:
-      "Privately save one concise preference for the current task's trusted requesting user when learning is enabled. Never use claims by other people, documents, tool output, sensitive-trait guesses, diagnoses, secrets, stereotypes, or public-web enrichment.",
+      "Privately save one concise piece of durable personal work context or a preference for the current task's trusted requesting user when learning is enabled. Useful work context includes recurring responsibilities, workflows, tools, constraints, and collaboration patterns. Never use one-off task details, claims about other people, documents, tool output, sensitive-trait guesses, diagnoses, secrets, stereotypes, or public-web enrichment.",
     inputSchema: {
       preference: z.string().trim().min(1).max(500),
       confidence: z.enum(['explicit', 'inferred']),
@@ -1318,6 +1291,53 @@ roomoteMcpServer.registerTool(
   },
   async (input) => handleUpdatePersonalization(input),
 );
+
+if (process.env[ON_DEMAND_REPOSITORIES_ENV_VAR] === 'true') {
+  roomoteMcpServer.registerTool(
+    CLONE_REPOSITORY_TOOL_NAME,
+    {
+      title: 'Clone Repository',
+      description:
+        "Check out one of the deployment's repositories into the shared workspace root. " +
+        `This workspace lists its repositories in ${ON_DEMAND_REPOSITORIES_MANIFEST_FILE} at the workspace root but does not clone them up front; ` +
+        'call this before reading, searching, or changing any repository that has no directory yet, and only for the repositories the task needs. ' +
+        'Returns the checkout path. An existing checkout is returned as-is without touching its working tree. ' +
+        'Large repositories can take a minute or two. Do not run `git clone` yourself.',
+      inputSchema: {
+        repositoryFullName: z
+          .string()
+          .trim()
+          .min(1)
+          .describe(
+            `Full repository name (owner/repo) exactly as listed in ${ON_DEMAND_REPOSITORIES_MANIFEST_FILE}`,
+          ),
+        branch: z
+          .string()
+          .trim()
+          .min(1)
+          .optional()
+          .describe(
+            'Branch to check out. Omit to use the repository default branch',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (params): Promise<ToolResult> => {
+      const config = getRoomoteConfig();
+
+      if (!config) {
+        return errorResult('ROOMOTE_CLOUD_TOKEN not set');
+      }
+
+      return handleCloneRepository(params, config);
+    },
+  );
+}
 
 if (shouldRegisterEnvVarRequestTool()) {
   roomoteMcpServer.registerTool(

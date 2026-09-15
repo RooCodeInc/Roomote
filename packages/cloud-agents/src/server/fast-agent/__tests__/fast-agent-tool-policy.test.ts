@@ -2,10 +2,36 @@ import { ACP_TOOL_KINDS, FAST_AGENT_NATIVE_TOOL_CATALOG } from '@roomote/types';
 
 import {
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  FAST_AGENT_NATIVE_TOOL_FILTER,
+  FAST_AGENT_SUBAGENT_TOOL_FILTER,
+  buildFastAgentToolFilter,
   getFastAgentNativeAcpKind,
 } from '../fast-agent-tool-policy';
 
 describe('getFastAgentNativeAcpKind', () => {
+  it.each([
+    [
+      FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+      ACP_TOOL_KINDS.read,
+    ],
+    [FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret, ACP_TOOL_KINDS.tool],
+    [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets, ACP_TOOL_KINDS.list],
+  ])('temporarily hides %s from every Fast surface', (name, kind) => {
+    expect(FAST_AGENT_NATIVE_TOOL_FILTER[name]).toBe(false);
+    expect(buildFastAgentToolFilter([], { surface: 'web' })[name]).toBe(false);
+    expect(buildFastAgentToolFilter([], { surface: 'slack' })[name]).toBe(
+      false,
+    );
+    expect(
+      buildFastAgentToolFilter([], {
+        surface: 'web',
+        sessionSecretToolsEnabled: true,
+      })[name],
+    ).toBe(true);
+    expect(FAST_AGENT_SUBAGENT_TOOL_FILTER[name]).toBe(false);
+    expect(getFastAgentNativeAcpKind(name)).toBe(kind);
+  });
+
   it.each(FAST_AGENT_NATIVE_TOOL_CATALOG)(
     'maps every catalogued tool (%s) to its ACP kind',
     ({ name, kind }) => {

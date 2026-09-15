@@ -8,7 +8,6 @@ import type {
   GitDiffResponse,
   TaskEnvVarRequestVariable,
   TaskStatusEvent,
-  TaskGoal,
   TaskToolDispatchPayload,
 } from '@roomote/types';
 
@@ -133,8 +132,6 @@ export interface SandboxSendPromptInput {
   queueOnly?: boolean;
   /** Hide the prompt from the user-facing transcript (platform machinery). */
   visibleInTranscript?: boolean;
-  /** Trusted per-turn goal context appended only to the model prompt. */
-  goalContext?: TaskGoal;
 }
 
 export interface SandboxSteerTaskInput {
@@ -198,6 +195,19 @@ export interface SandboxApplyTaskModelSettingsResult {
    * because the harness is shutting down.
    */
   application: 'restarted' | 'deferred' | 'unavailable';
+}
+
+export interface SandboxPrepareRepositoryInput {
+  repositoryFullName: string;
+  branch?: string;
+}
+
+export interface SandboxPrepareRepositoryResult {
+  success: true;
+  repositoryFullName: string;
+  repositoryPath: string;
+  alreadyCheckedOut: boolean;
+  manifestPath: string;
 }
 
 export interface SandboxSubscriptionObserver<TData> {
@@ -279,6 +289,10 @@ export interface SandboxServerRpcClient {
     restoreScrubbedCredentials: SandboxMutation<
       undefined,
       SandboxSuccessResult
+    >;
+    prepareRepository: SandboxMutation<
+      SandboxPrepareRepositoryInput,
+      SandboxPrepareRepositoryResult
     >;
   };
 }

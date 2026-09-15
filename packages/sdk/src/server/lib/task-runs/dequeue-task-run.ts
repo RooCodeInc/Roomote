@@ -3,7 +3,6 @@ import {
   type AuthTokenContext,
   type RunTokenContext,
   type RequestedWorkKind,
-  type TaskGoal,
   RunStatus,
   TaskPayloadKind,
   taskSpecSchema,
@@ -62,7 +61,6 @@ export type DequeuedTaskContext = {
   linearSessionId: string | null;
   linearIssueId: string | null;
   linearOrganizationId: string | null;
-  goal: TaskGoal | null;
 };
 
 export function buildDequeuedTaskContext(task: Task): DequeuedTaskContext {
@@ -79,20 +77,6 @@ export function buildDequeuedTaskContext(task: Task): DequeuedTaskContext {
     linearSessionId: task.linearSessionId ?? null,
     linearIssueId: task.linearIssueId ?? null,
     linearOrganizationId: task.linearOrganizationId ?? null,
-    goal:
-      task.goalObjective &&
-      task.goalStatus &&
-      task.goalMaxContinuations !== null
-        ? {
-            objective: task.goalObjective,
-            generation: task.goalLastContinuationId,
-            status: task.goalStatus,
-            maxContinuations: task.goalMaxContinuations,
-            continuationsUsed: task.goalContinuationsUsed,
-            blockedReason: task.goalBlockedReason,
-            completedAt: task.goalCompletedAt,
-          }
-        : null,
   };
 }
 

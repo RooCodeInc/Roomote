@@ -14,6 +14,8 @@ import {
   resolveAppEnv,
 } from './app-env';
 
+export const DEFAULT_WEBHOOK_RETENTION_DAYS = 3;
+
 const sharedSchema = {
   NODE_ENV: z.enum(['test', 'development', 'production']),
 };
@@ -136,6 +138,8 @@ const serverSchema = {
   // independent of R_CURATED_INTEGRATIONS_DISABLED: operators who disable the
   // curated catalog are the primary custom-server audience.
   R_CUSTOM_MCP_DISABLED: optInBoolean(),
+  // Opt-in deployment credential mediation; transport configuration is API-only.
+  R_HTTP_INTEGRATIONS_ENABLED: optInBoolean(),
   // Comma-separated CIDR ranges the custom-MCP egress guard may connect to in
   // addition to public addresses. Self-host escape hatch for MCP servers on
   // private networks; a CIDR list rather than a boolean so opening one
@@ -349,7 +353,11 @@ const serverSchema = {
   SLACK_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   // How long recorded webhook payloads are kept before the WebhookCleanup
   // scheduled job (apps/bullmq) deletes them.
-  WEBHOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(3),
+  WEBHOOK_RETENTION_DAYS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_WEBHOOK_RETENTION_DAYS),
   // Internal base URL of the deployment-hosted gbrain (Brain)
   // service. Unset means the feature is unavailable regardless of the
   // brain_settings row; the proxy and outbox drainer both no-op.
@@ -419,6 +427,21 @@ const serverSchema = {
   // a stack brought up by hand needs no shared secret in the repo and no
   // second value for an operator to remember.
   R_BRAIN_GATEWAY_TOKEN_FILE: z.string().min(1).optional(),
+  // Shared secret the credential-substituting egress gateway presents to
+  // Optional dedicated hostname for the API-side session egress proxy. When a
+  // request arrives for this host, the API serves `/api/session-egress` at the
+  // root, so SDK clients that allow only a host override (no path prefix) can
+  // use it. Same route and checks; only the address differs. Point DNS for the
+  // name at the API service; the path form keeps working on the API host. Set
+  // the same value on the controller: it delivers the base URL to sandboxes.
+  R_SESSION_EGRESS_PROXY_HOST: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(
+      /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/,
+    )
+    .optional(),
   // Which models the Brain runs, in the configured provider's own naming
   // (`openai/gpt-5.6-luna` on OpenRouter, `gpt-5.6-luna` on OpenAI). Both are
   // substituted by the gateway, so changing the synthesis model is a restart

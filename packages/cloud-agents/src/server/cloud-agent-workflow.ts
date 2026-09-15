@@ -59,7 +59,6 @@ import {
 } from './commit-author';
 
 import { getTaskUrl } from './task-url';
-import { getTherapistModeEnabledForUser } from './therapist-mode';
 
 type StandardTaskSurface = NonNullable<
   Parameters<typeof standardTask>[0]['taskSurface']
@@ -234,14 +233,6 @@ export async function generatePrompt({
   const codeReviewsEnabled = reviewCodeSettings?.enabled ?? false;
   const codeReviewReviewOnCommit = reviewCodeSettings?.reviewOnCommit ?? true;
   const codeReviewReviewDraftPrs = reviewCodeSettings?.reviewDraftPrs ?? true;
-  const resolveTherapistMode = () =>
-    getTherapistModeEnabledForUser(taskRun.actingUserId).catch((error) => {
-      console.warn(
-        `[Cloud Agent] Personal preferences unavailable: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return false;
-    });
-
   switch (taskSpec.type) {
     // <Workflow: PR review, Trigger: GitHub>
     case TaskPayloadKind.GithubPrReview:
@@ -251,7 +242,6 @@ export async function generatePrompt({
         taskRunUrl,
         additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
-        therapistModeEnabled: await resolveTherapistMode(),
       });
     case TaskPayloadKind.GithubPrReviewSync:
       return githubPrReviewSync({
@@ -261,7 +251,6 @@ export async function generatePrompt({
         taskRunUrl,
         additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
-        therapistModeEnabled: await resolveTherapistMode(),
       });
 
     // <Workflow: PR review follow-up, Trigger: GitHub>
@@ -272,7 +261,6 @@ export async function generatePrompt({
         taskRunUrl,
         additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
-        therapistModeEnabled: await resolveTherapistMode(),
       });
 
     // <Workflow: PR conflict resolution, Trigger: GitHub>
@@ -281,7 +269,6 @@ export async function generatePrompt({
         taskSpec,
         taskRunUrl,
         attribution: commitAuthor,
-        therapistModeEnabled: await resolveTherapistMode(),
       });
 
     // <Workflow: standard, Trigger: Slack>
@@ -296,7 +283,6 @@ export async function generatePrompt({
         codeReviewReviewOnCommit,
         codeReviewReviewDraftPrs,
         prAction,
-        therapistModeEnabled: await resolveTherapistMode(),
       });
     }
 
@@ -312,7 +298,6 @@ export async function generatePrompt({
         codeReviewReviewOnCommit,
         codeReviewReviewDraftPrs,
         prAction,
-        therapistModeEnabled: await resolveTherapistMode(),
       });
 
     // <Workflow: standard, Trigger: Manual>
@@ -492,7 +477,6 @@ export async function generatePrompt({
         sourceControlProvider: targetSourceControl?.provider,
         prAction,
         reportConsumer,
-        therapistModeEnabled: await resolveTherapistMode(),
       });
 
       if (!inheritedCommunicationContext && slackChannel && slackThreadTs) {

@@ -9,7 +9,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { CommsProviderSection } from './CommsProviderSection';
 
 type CommsProviderStatus = {
-  id: 'slack' | 'microsoft' | 'telegram' | 'agentmail';
+  id: 'slack' | 'microsoft' | 'telegram' | 'discord' | 'agentmail';
   label: string;
   fields: Array<{
     envVarName: string;
@@ -569,6 +569,27 @@ function buildTelegramProvider(
   };
 }
 
+function buildDiscordProvider(): CommsProviderStatus {
+  return {
+    id: 'discord',
+    label: 'Discord',
+    fields: [
+      {
+        envVarName: 'R_DISCORD_BOT_TOKEN',
+        acceptedEnvVarNames: ['R_DISCORD_BOT_TOKEN'],
+        label: 'Discord Bot Token',
+        secret: true,
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: null,
+      },
+    ],
+    runtimeSatisfied: false,
+    savedSatisfied: false,
+    setupSatisfied: false,
+  };
+}
+
 function buildAgentMailProvider(
   overrides: Partial<CommsProviderStatus> = {},
 ): CommsProviderStatus {
@@ -641,6 +662,30 @@ describe('CommsProviderSection', () => {
     mutations.invalidateQueries.mockReset();
   });
 
+  it.each([
+    buildSlackProvider(),
+    buildMicrosoftProvider(),
+    buildTelegramProvider(),
+    buildDiscordProvider(),
+  ])(
+    'names the $label setup action without changing its visible copy',
+    (provider) => {
+      render(
+        <CommsProviderSection
+          provider={provider}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.getByRole('button', { name: `Set up ${provider.label}` }),
+      ).toHaveTextContent('Set it up');
+    },
+  );
+
   describe('numbered setup instructions', () => {
     it('shows the Slack config-token create-app screen without Back in settings', () => {
       render(
@@ -653,7 +698,7 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Slack' }));
 
       expect(
         screen.queryByRole('heading', { name: 'Create Slack app' }),
@@ -692,7 +737,7 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Slack' }));
       fireEvent.change(screen.getByLabelText('App configuration token'), {
         target: { value: 'xoxe.xoxp-config-token' },
       });
@@ -764,7 +809,7 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Slack' }));
 
       expect(screen.getByLabelText('App configuration token')).toBeDisabled();
       expect(
@@ -783,7 +828,9 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Set up Microsoft Teams' }),
+      );
 
       expect(
         screen.queryByRole('heading', {
@@ -820,7 +867,7 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Telegram' }));
 
       expect(
         screen.queryByRole('heading', { name: 'Configure Telegram bot' }),
@@ -865,7 +912,7 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Telegram' }));
       fireEvent.change(screen.getByPlaceholderText('Telegram Bot Token'), {
         target: { value: 'bot-token' },
       });
@@ -898,7 +945,7 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Telegram' }));
 
       expect(
         screen.getByText(
@@ -932,7 +979,7 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Set up Telegram' }));
 
       expect(screen.getByText('Connected to @RoomoteBot')).toBeInTheDocument();
       expect(screen.queryByText('Webhook connected')).not.toBeInTheDocument();
@@ -1370,7 +1417,9 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Set up Microsoft Teams' }),
+      );
       fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
         target: { value: 'not-a-guid' },
       });
@@ -1397,7 +1446,9 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Set up Microsoft Teams' }),
+      );
       fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
         target: { value: '00000000-0000-0000-0000-000000000001' },
       });

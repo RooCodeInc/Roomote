@@ -258,6 +258,38 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     match: { type: 'exact', path: '/api/internal/cloud/deployment-access' },
     policy: 'webhook',
   },
+  {
+    // Session egress control plane. Callers are the trusted controller (a
+    // job-auth-signed service token) and the credential-substituting egress
+    // gateway (a shared deployment secret); the handler verifies both itself
+    // and rejects run, user, MCP, and session-broker tokens. No client-keyed
+    // limit: the gateway calls authorize on every proxied request and has no
+    // meaningful client IP, so a shared bucket would only throttle it.
+    name: 'internal-session-egress',
+    match: { type: 'prefix', path: '/api/internal/session-egress' },
+    policy: 'webhook',
+  },
+
+  // Session egress substitution proxy: attached coding runs call an owner-
+  // approved origin through `/api/session-egress/<grant>` with a substitute
+  // token in the grant's own header slot; the API injects the real credential
+  // and forwards. The substitute is not a Roomote bearer, so the handler owns
+  // authentication (live workload, Session, run, grant, generation, expiry)
+  // and no bearer class applies here.
+  // The client-keyed limit bounds the database work an unauthenticated caller
+  // can cause by spraying tokens; a sandbox's legitimate use sits far below it.
+  {
+    name: 'session-egress-proxy',
+    match: { type: 'prefix', path: '/api/session-egress' },
+    policy: 'webhook',
+    rateLimits: [
+      {
+        keySource: 'client',
+        limit: 300,
+        windowSeconds: 60,
+      },
+    ],
+  },
 
   // Inference gateway: task sandboxes call model providers through this
   // proxy with their run-scoped token; the provider key is injected
@@ -320,7 +352,8 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   },
 
   // Worker/agent MCP surface. `mcpAuthMiddleware` and the per-integration
-  // resolvers apply finer-grained token-type checks per endpoint.
+  // resolvers apply finer-grained token-type checks per endpoint, including
+  // the opt-in /api/mcp/http-integrations broker (active member/run actor required).
   {
     name: 'mcp',
     match: { type: 'prefix', path: '/api/mcp' },

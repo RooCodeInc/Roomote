@@ -16,7 +16,6 @@ import {
   isExitedRunStatus,
   resolveSourceControlProviderFromPayload,
   taskToolDispatchPayloadSchema,
-  type TaskGoal,
 } from '@roomote/types';
 import { createRunToken } from '@roomote/auth';
 import {
@@ -32,7 +31,6 @@ import {
   eq,
   inArray,
   isNotNull,
-  getTaskGoalForRun,
   getCanonicalPrReviewAction,
   not,
   resolveEffectivePreviewRuntimeConfig,
@@ -328,19 +326,11 @@ export async function saveDraftPromptCommand(
 export async function sendSandboxPromptCommand(
   auth: UserAuthSuccess,
   input: z.input<typeof sendSandboxPromptInputSchema>,
-  trustedContext?: { goalContext?: TaskGoal },
 ) {
   const parsed = sendSandboxPromptInputSchema.parse(input);
   const { taskRun } = await getResolvedSandboxTaskRunByTaskId(auth, {
     taskId: parsed.taskId,
   });
-  const currentGoal = trustedContext?.goalContext
-    ? null
-    : await getTaskGoalForRun(taskRun.id);
-  const goalContext =
-    trustedContext?.goalContext ??
-    (currentGoal?.status === 'active' ? currentGoal : undefined);
-
   if (!taskRun.sandboxServerUrl) {
     throw new TRPCError({
       code: 'CONFLICT',
@@ -443,7 +433,6 @@ export async function sendSandboxPromptCommand(
       autoSteerWhenQueued: requiresActorHandoff
         ? true
         : parsed.autoSteerWhenQueued,
-      goalContext,
     });
 
     if (typeof parsed.prompt === 'string' && parsed.prompt.trim().length > 0) {

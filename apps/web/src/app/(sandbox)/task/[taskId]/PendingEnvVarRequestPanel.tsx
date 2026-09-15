@@ -13,7 +13,7 @@ import {
 
 import { useEnvVars } from '@/hooks/environment-variables';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import type { TaskMessageEnvelope } from '@/types';
+import type { TaskMessageEnvelope, TaskMessageEnvelopePage } from '@/types';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import {
@@ -34,6 +34,7 @@ import {
   useSandboxClient,
   useTaskEnvVarRequest,
 } from './hooks';
+import { updateTaskMessageEnvelopePage } from './hooks/use-task-message-envelopes';
 
 interface PendingEnvVarRequestPanelProps {
   taskId: string;
@@ -168,9 +169,12 @@ export function PendingEnvVarRequestPanel({
     const message = createHiddenEnvVarFulfillmentMessage({ taskId, event });
 
     appendAcpEvent(event);
-    queryClient.setQueryData<TaskMessageEnvelope[] | undefined>(
+    queryClient.setQueryData<TaskMessageEnvelopePage | undefined>(
       trpc.tasks.messageEnvelopes.queryKey({ taskId }),
-      (current) => (current ? [...current, message] : current),
+      (current) =>
+        updateTaskMessageEnvelopePage(current, (messages) =>
+          messages ? [...messages, message] : messages,
+        ),
     );
   };
 

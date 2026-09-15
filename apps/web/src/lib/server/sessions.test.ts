@@ -519,6 +519,55 @@ describe('unified Session queries', () => {
     expect(result.sessions.map((session) => session.id)).toEqual([included.id]);
   });
 
+  it('treats null Session statuses as ready across search and pagination', async () => {
+    const nullReady = await sessionFactory.create({
+      title: 'Ready filter match null',
+      activityAt: 400,
+      cachedStatus: null,
+    });
+    const explicitReady = await sessionFactory.create({
+      title: 'Ready filter match explicit',
+      activityAt: 300,
+      cachedStatus: 'ready',
+    });
+    const active = await sessionFactory.create({
+      title: 'Ready filter match active',
+      activityAt: 200,
+      cachedStatus: 'active',
+    });
+    const ids = [nullReady.id, explicitReady.id, active.id];
+    const auth = { userId: crypto.randomUUID(), isAdmin: true };
+
+    const firstPage = await getSessions(auth, {
+      ids,
+      status: 'ready',
+      q: 'Ready filter match',
+      limit: 1,
+    });
+    expect(firstPage.sessions.map((session) => session.id)).toEqual([
+      nullReady.id,
+    ]);
+    expect(firstPage.nextCursor).not.toBeNull();
+
+    const secondPage = await getSessions(auth, {
+      ids,
+      status: 'ready',
+      q: 'Ready filter match',
+      limit: 1,
+      before: firstPage.nextCursor,
+    });
+    expect(secondPage.sessions.map((session) => session.id)).toEqual([
+      explicitReady.id,
+    ]);
+    expect(secondPage.nextCursor).toBeNull();
+
+    await expect(
+      getSessions(auth, { ids, status: 'active', q: 'Ready filter match' }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: active.id })],
+    });
+  });
+
   it('lists only owned Sessions in descending activity order', async () => {
     const owner = await userFactory.create();
     const other = await userFactory.create();

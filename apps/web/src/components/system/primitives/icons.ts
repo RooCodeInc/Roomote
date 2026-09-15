@@ -137,7 +137,6 @@ export {
   MessageSquareWarning,
   MessagesSquare,
   Mic,
-  MicOff,
   Minus,
   MoreHorizontal,
   MoreVertical,

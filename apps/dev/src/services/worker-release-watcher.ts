@@ -86,7 +86,7 @@ export class WorkerReleaseWatcherService {
    * triggered immediately so that a separate "build worker release archive" setup
    * step is not required.
    */
-  public start(): void {
+  public async start(): Promise<void> {
     console.log('[worker-release-watcher] Starting worker release watcher');
     console.log(
       `[worker-release-watcher] Archive: ${path.relative(this.rootDir, this.workerReleasePath)} (version: ${this.version})`,
@@ -100,7 +100,7 @@ export class WorkerReleaseWatcherService {
       console.log(
         '[worker-release-watcher] Archive not found on disk -- running initial build',
       );
-      void this.rebuild();
+      await this.rebuild(true);
     }
 
     for (const relDir of WATCH_DIRS) {
@@ -202,7 +202,7 @@ export class WorkerReleaseWatcherService {
     }, DEBOUNCE_MS);
   }
 
-  private async rebuild(): Promise<void> {
+  private async rebuild(throwOnFailure = false): Promise<void> {
     // If a rebuild is already in progress, flag that another is needed.
     if (this.isRebuilding) {
       this.pendingRebuild = true;
@@ -232,6 +232,9 @@ export class WorkerReleaseWatcherService {
       console.error(
         `[worker-release-watcher] Rebuild failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+      if (throwOnFailure) {
+        throw err;
+      }
     } finally {
       this.isRebuilding = false;
 

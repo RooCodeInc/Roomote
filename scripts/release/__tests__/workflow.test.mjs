@@ -163,6 +163,10 @@ test('release workflow keeps promotion as the only automated PR gate', () => {
   assert.deepEqual(Object.keys(workflow.jobs), ['promote']);
   assert.equal(workflow.jobs.promote.needs, undefined);
   assert.equal(workflow.on.workflow_dispatch.inputs.version.required, true);
+  for (const input of ['replace_candidate_sha', 'expected_develop_sha']) {
+    assert.equal(workflow.on.workflow_dispatch.inputs[input].required, false);
+    assert.equal(workflow.on.workflow_dispatch.inputs[input].type, 'string');
+  }
   assert.equal(workflow.concurrency['cancel-in-progress'], false);
 
   const promoteScript = workflow.jobs.promote.steps.find(
@@ -175,6 +179,11 @@ test('release workflow keeps promotion as the only automated PR gate', () => {
   assert.match(promoteScript, /Tag \$tag already exists/);
   assert.match(promoteScript, /main already contains candidate/);
   assert.match(promoteScript, /has diverged from develop/);
+  assert.match(promoteScript, /full lowercase replace_candidate_sha/);
+  assert.match(promoteScript, /develop moved from expected/);
+  assert.match(promoteScript, /RELEASE_BOT_TOKEN is required/);
+  assert.match(promoteScript, /expected candidate/);
+  assert.match(promoteScript, /would regress candidate/);
   assert.match(promoteScript, /no open Promote PR targets main/);
   assert.match(promoteScript, /Cannot refresh .* with pending changesets/);
   assert.equal(
@@ -227,7 +236,17 @@ test('release workflow keeps promotion as the only automated PR gate', () => {
     promoteScript,
     /git push origin "\$\{release_sha\}:refs\/heads\/\$\{release_branch\}"/,
   );
-  assert.doesNotMatch(promoteScript, /--force(?:-with-lease)?/);
+  assert.equal(
+    promoteScript.match(
+      /--force-with-lease="refs\/heads\/\$\{release_branch\}:\$\{candidate_sha\}"/g,
+    )?.length,
+    1,
+  );
+  assert.doesNotMatch(promoteScript, /--force(?!-with-lease)/);
+  assert.match(
+    promoteScript,
+    /Prior candidate checks, reviews, and reconciliation provenance no longer apply/,
+  );
 });
 
 test('GHCR app and embedded worker use the checked-out build commit', () => {

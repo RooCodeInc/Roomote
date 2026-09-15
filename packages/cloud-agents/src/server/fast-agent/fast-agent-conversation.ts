@@ -1,5 +1,6 @@
 import type {
   DataVisualizationInput,
+  FastAgentCapabilityOfferInput,
   FastAgentConversation,
   FastAgentReactionExternalInput as SharedFastAgentReactionExternalInput,
   ReasoningEffort,
@@ -189,7 +190,10 @@ export type FastAgentInputRequest = {
   }>;
 };
 
-export type FastAgentInputPreset = 'setup_starter_tasks' | 'setup_integrations';
+export type FastAgentInputPreset =
+  | 'setup_source_control'
+  | 'setup_starter_tasks'
+  | 'setup_integrations';
 
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
@@ -223,12 +227,22 @@ export type FastAgentTurnAdapter = {
   notifyUserAttention?: (attention: {
     kind: 'result_ready' | 'input_needed';
     eventId: string;
+    message?: string;
+    manual: boolean;
   }) => Promise<void>;
   /** Resolve a trusted preset without accepting model-supplied options. */
   resolveUserInputPreset?: (
     preset: FastAgentInputPreset,
     setupIntegrationAnswers?: Record<string, { answers: string[] }>,
   ) => Promise<FastAgentInputRequest['questions']>;
+  /** Validate and normalize a trusted capability offer for this surface. */
+  offerCapability?: (
+    input: FastAgentCapabilityOfferInput,
+  ) => Promise<FastAgentCapabilityOfferInput>;
+  /** Let a scheduled wakeup deliver its final closeout after cancelling itself. */
+  onWakeupCancelled?: (wakeupId: string) => void;
+  /** Surface lifecycle callback used for server-owned post-turn reconciliation. */
+  onTurnSettled?: () => Promise<void>;
   /**
    * Called when an interrupted turn is still safe to replay and has handed
    * itself back to the durable queue; wakes the queue so recovery does not

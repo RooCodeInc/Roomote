@@ -8,6 +8,7 @@ import {
   COMMUNICATION_PROVIDER_ORDER,
   SOURCE_CONTROL_PROVIDER_ORDER,
   SETUP_INTEGRATION_CATEGORIES,
+  SETUP_INTEGRATION_RECOMMENDATIONS,
   SETUP_INTEGRATIONS,
   SETUP_INTEGRATION_EXCLUDED_PROVIDER_IDS,
   getSetupIntegrationCategories,
@@ -83,6 +84,13 @@ describe('setup integration discovery catalog', () => {
       'ado',
     ]);
     expect(ADMIN_INTEGRATION_ORDER).toContain('vercel');
+    expect(SETUP_INTEGRATION_RECOMMENDATIONS).toEqual([
+      'notion',
+      'sentry',
+      'linear',
+      'jira',
+      'vercel',
+    ]);
   });
 
   it('derives category order from eligible first appearances, not provider entries', () => {

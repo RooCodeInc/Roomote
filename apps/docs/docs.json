@@ -42,12 +42,7 @@
     "groups": [
       {
         "group": "Getting started",
-        "pages": [
-          "index",
-          "self-hosting",
-          "homelab",
-          "use-chatgpt-subscription"
-        ]
+        "pages": ["index", "self-hosting", "homelab"]
       },
       {
         "group": "Using Roomote",
@@ -55,9 +50,11 @@
           "how-roomote-works",
           "use-cases",
           "tasks",
+          "live-previews",
           "goal-mode",
           "fast-sessions",
           "private-sessions",
+          "session-secrets",
           "memory",
           "file-attachments",
           "voice"
@@ -152,6 +149,7 @@
         "pages": [
           "integrations/index",
           "integrations/custom-mcp-servers",
+          "integrations/http-integrations",
           "integrations/roomote-mcp",
           "integrations/asana",
           "integrations/better-stack",

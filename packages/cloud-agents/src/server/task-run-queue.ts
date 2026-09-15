@@ -11,7 +11,6 @@ import {
   type RunLaunchClass,
   type SourceControlProvider,
   type TaskInitiator,
-  type TaskGoalInput,
   type TaskSurface,
   type TaskTrigger,
   type TaskVisibility,
@@ -1004,7 +1003,6 @@ export type FreshTaskLaunch = {
   task: FreshTask;
   /** Reuse the durable task identity for a later PR review run. */
   existingTaskId?: string;
-  goal?: TaskGoalInput;
   /** Explicit user-facing title. Locked against all LLM title generation. */
   title?: string;
   initiator: TaskInitiator;
@@ -1558,9 +1556,6 @@ async function enqueueFreshLaunch(
   }
 
   const initialPrompt = getInitialTaskPrompt(task) ?? null;
-  const initialGoalGeneration = input.goal
-    ? `goal-generation:${randomUUID()}`
-    : null;
   const externalGithubIdentity = {
     githubLogin: 'githubLogin' in task ? task.githubLogin : null,
     githubUserId: 'githubUserId' in task ? task.githubUserId : null,
@@ -1779,13 +1774,6 @@ async function enqueueFreshLaunch(
               ? { llmTitleCheckpoint: LLM_TITLE_LOCKED_CHECKPOINT }
               : {}),
             prompt: initialPrompt,
-            goalObjective: input.goal?.objective ?? null,
-            goalStatus: input.goal ? 'active' : null,
-            goalMaxContinuations: input.goal?.maxContinuations ?? null,
-            goalLastContinuationId: initialGoalGeneration,
-            goalGenerationIds: initialGoalGeneration
-              ? [initialGoalGeneration]
-              : [],
             requestedWorkKind: requestedWorkKindDecision.kind,
             requestedWorkKindSource: requestedWorkKindDecision.source,
             requestedWorkKindConfidence: requestedWorkKindDecision.confidence,
@@ -2191,25 +2179,38 @@ async function stampWorkspaceSourceControlProviders(
   payload: FreshTask['payload'],
   workspace: ReturnType<typeof resolveTaskWorkspace>,
 ): Promise<void> {
-  if (workspace.type === 'no_repositories') {
+  // A Blank slate prepares no repositories, but when the deployment has
+  // source control connected the agent can still check any active
+  // repository out on demand, so it carries the same complete provider map
+  // (and mints the same credentials) as an all-repositories run. With no
+  // active repositories it stays credential-free.
+  const scopeWorkspace =
+    workspace.type === 'no_repositories'
+      ? ({ type: 'all_repositories' } as const)
+      : workspace;
+  const [repositoryProviders, workspaceHost] = await Promise.all([
+    resolveWorkspaceRepositoryProviders(db, scopeWorkspace),
+    resolveWorkspaceSourceControlHost(db, scopeWorkspace),
+  ]);
+
+  if (
+    workspace.type === 'no_repositories' &&
+    Object.keys(repositoryProviders).length === 0
+  ) {
     payload.repositoryProviders = undefined;
     payload.sourceControlProvider = undefined;
     payload.sourceControlHost = undefined;
     return;
   }
 
-  const [repositoryProviders, workspaceHost] = await Promise.all([
-    resolveWorkspaceRepositoryProviders(db, workspace),
-    resolveWorkspaceSourceControlHost(db, workspace),
-  ]);
   const isAggregateWorkspace =
-    workspace.type === 'repository_set' ||
-    workspace.type === 'all_repositories';
+    scopeWorkspace.type === 'repository_set' ||
+    scopeWorkspace.type === 'all_repositories';
   const requiresCompleteCoverage =
-    isAggregateWorkspace || workspace.type === 'environment';
+    isAggregateWorkspace || scopeWorkspace.type === 'environment';
   const expectedRepositoryCount =
-    workspace.type === 'repository_set'
-      ? new Set(workspace.repositories).size
+    scopeWorkspace.type === 'repository_set'
+      ? new Set(scopeWorkspace.repositories).size
       : undefined;
 
   if (requiresCompleteCoverage) {

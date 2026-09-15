@@ -16,6 +16,10 @@ const state = vi.hoisted(() => ({
   catalogQueryOptions: [] as Array<{ enabled?: boolean }>,
   queriedKeys: [] as unknown[],
   customAutomationsPending: false,
+  customAutomationsError: false,
+  customAutomationsFetching: false,
+  customAutomationsLoaded: true,
+  customAutomationsRefetch: vi.fn(),
   customAutomationRunPendingId: null as string | null,
   customAutomationTimeZone: 'UTC' as string | undefined,
   customAutomationDefaultTarget: undefined as
@@ -387,7 +391,12 @@ vi.mock('@tanstack/react-query', () => ({
     if (key1 === 'listCustomAutomations') {
       return {
         isPending: state.customAutomationsPending,
-        data: state.customAutomations,
+        isError: state.customAutomationsError,
+        isFetching: state.customAutomationsFetching,
+        data: state.customAutomationsLoaded
+          ? state.customAutomations
+          : undefined,
+        refetch: state.customAutomationsRefetch,
       };
     }
 
@@ -743,6 +752,9 @@ describe('AutomationsSettings', () => {
     state.customAutomationTimeZone = 'UTC';
     state.customAutomationDefaultTarget = undefined;
     state.customAutomationsPending = false;
+    state.customAutomationsError = false;
+    state.customAutomationsFetching = false;
+    state.customAutomationsLoaded = true;
     state.settingsQuery.isPending = false;
     state.environments = [];
     for (const key of Object.keys(
@@ -1285,6 +1297,76 @@ describe('AutomationsSettings', () => {
     );
     expect(customEmptyState.tagName).toBe('P');
     expect(customEmptyState).toHaveClass('text-sm', 'text-muted-foreground');
+  });
+
+  it('retries an initial custom automation load failure and recovers in place', async () => {
+    state.customAutomationsLoaded = false;
+    state.customAutomationsError = true;
+
+    const { rerender } = render(<AutomationsSettings />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom' }));
+
+    expect(
+      screen.getByText('Failed to load custom automations.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('No custom automations created yet.'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(state.customAutomationsRefetch).toHaveBeenCalledTimes(1);
+
+    state.customAutomationsFetching = true;
+    rerender(<AutomationsSettings />);
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled();
+
+    state.customAutomationsFetching = false;
+    rerender(<AutomationsSettings />);
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
+
+    state.customAutomationsError = false;
+    state.customAutomationsLoaded = true;
+    state.customAutomations = [];
+    rerender(<AutomationsSettings />);
+    expect(
+      screen.getByText('No custom automations created yet.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('Failed to load custom automations.'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps cached custom automations visible after a refetch failure', () => {
+    state.customAutomationsError = true;
+    state.customAutomations = [
+      {
+        id: 'automation-cached',
+        name: 'Cached automation',
+        prompt: 'Keep showing this automation.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom' }));
+
+    expect(screen.getByText('Cached automation')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Failed to load custom automations.'),
+    ).not.toBeInTheDocument();
   });
 
   it('opens a built-in automation modal from its existing hash permalink', async () => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import removeMd from 'remove-markdown';
@@ -13,7 +13,6 @@ import {
   CardContent,
   Check,
   CircleAlert,
-  CircleX,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -21,13 +20,14 @@ import {
   DialogHeader,
   DialogTitle,
   Empty,
-  EmptyDescription,
   EmptyHeader,
-  EmptyMedia,
   EmptyTitle,
+  RetryableLoadError,
   Skeleton,
+  TriangleAlert,
   X,
 } from '@/components/system';
+import { CustomLink, MessageResponse } from '@/components/ai-elements';
 import { NewTaskForm } from '@/components/tasks/NewTaskForm';
 import { TaskAutomationIcon } from '@/components/tasks/TaskAutomationIcon';
 import { formatDistanceToNowCompact } from '@/lib/formatters';
@@ -58,6 +58,39 @@ function ignoredResultToastTitle(result: ResultInboxItem) {
   return title.length > 30 ? `${title.slice(0, 30)}...` : title;
 }
 
+function ResultTextBlock({ children }: { children?: ReactNode }) {
+  return <div>{children}</div>;
+}
+
+function ResultTextInline({ children }: { children?: ReactNode }) {
+  return <span>{children}</span>;
+}
+
+function ResultImageText({ alt }: { alt?: string }) {
+  return alt ? <span>{alt}</span> : null;
+}
+
+const resultMarkdownComponents = {
+  a: CustomLink,
+  blockquote: ResultTextBlock,
+  code: ResultTextInline,
+  del: ResultTextInline,
+  em: ResultTextInline,
+  h1: ResultTextBlock,
+  h2: ResultTextBlock,
+  h3: ResultTextBlock,
+  h4: ResultTextBlock,
+  h5: ResultTextBlock,
+  h6: ResultTextBlock,
+  img: ResultImageText,
+  li: ResultTextBlock,
+  ol: ResultTextBlock,
+  p: ResultTextBlock,
+  pre: ResultTextBlock,
+  strong: ResultTextInline,
+  ul: ResultTextBlock,
+};
+
 function AutomationAvatar({ result }: { result: ResultInboxItem }) {
   return (
     <span className="flex size-5 shrink-0 items-center justify-center overflow-clip rounded-full border border-border bg-white ring-1 ring-card dark:bg-muted">
@@ -66,6 +99,80 @@ function AutomationAvatar({ result }: { result: ResultInboxItem }) {
         className="size-4"
       />
     </span>
+  );
+}
+
+function PriorityMarker({
+  priority,
+}: {
+  priority: ResultInboxItem['priority'];
+}) {
+  if (priority === 'normal') return null;
+
+  const Icon = priority === 'critical' ? TriangleAlert : CircleAlert;
+  const label = priority === 'critical' ? 'Critical priority' : 'High priority';
+
+  return (
+    <Icon
+      aria-label={label}
+      className={`size-5 ${
+        priority === 'critical' ? 'text-destructive' : 'text-warning'
+      }`}
+      strokeWidth={2}
+    />
+  );
+}
+
+function ResultContent({ result }: { result: ResultInboxItem }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [truncated, setTruncated] = useState(false);
+
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content || expanded) return;
+
+    const measure = () => {
+      setTruncated(content.scrollHeight > content.clientHeight + 1);
+    };
+    measure();
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [expanded]);
+
+  return (
+    <div className="min-w-0">
+      <div
+        ref={contentRef}
+        data-testid={`result-content-${result.id}`}
+        className={
+          expanded
+            ? 'text-sm leading-normal text-foreground'
+            : 'line-clamp-3 text-sm leading-normal text-foreground'
+        }
+      >
+        <MessageResponse
+          components={resultMarkdownComponents}
+          pullRequestRepositoryUrl={result.repositoryUrl}
+        >
+          {result.title ?? result.content.replaceAll('\\n', ' ')}
+        </MessageResponse>
+      </div>
+      {truncated && !expanded ? (
+        <button
+          type="button"
+          className="mt-0.5 block cursor-pointer bg-transparent text-sm font-medium text-primary underline underline-offset-2 hover:text-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          onClick={(event) => {
+            event.stopPropagation();
+            setExpanded(true);
+          }}
+        >
+          More
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -182,24 +289,12 @@ export function ResultsPage() {
         </header>
 
         {listQuery.isError && listQuery.data === undefined ? (
-          <Empty className="border">
-            <EmptyHeader>
-              <EmptyMedia variant="icon" className="text-destructive">
-                <CircleX />
-              </EmptyMedia>
-              <EmptyDescription className="text-sm">
-                Failed to load results.
-              </EmptyDescription>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void listQuery.refetch()}
-              >
-                Retry
-              </Button>
-            </EmptyHeader>
-          </Empty>
+          <RetryableLoadError
+            className="border"
+            message="Failed to load results."
+            isRetrying={listQuery.isFetching}
+            onRetry={() => void listQuery.refetch()}
+          />
         ) : results.length === 0 ? (
           <Empty className="border">
             <EmptyHeader>
@@ -211,10 +306,10 @@ export function ResultsPage() {
             <CardContent className="p-0!">
               <div
                 role="row"
-                className="mb-0 hidden grid-cols-[3rem_7rem_minmax(0,2fr)_minmax(0,8fr)_5rem] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
+                className="mb-0 hidden grid-cols-[3rem_5.5rem_minmax(0,2fr)_minmax(0,8fr)_5rem] gap-4 border-b border-background px-6 py-2 text-xs font-medium text-muted-foreground md:grid"
               >
                 <span aria-hidden="true" />
-                <span role="columnheader">Date</span>
+                <span role="columnheader">Produced</span>
                 <span role="columnheader">Automation</span>
                 <span role="columnheader">Result</span>
                 <span role="columnheader" className="sr-only">
@@ -226,10 +321,24 @@ export function ResultsPage() {
                   <div
                     key={`${result.kind}:${result.id}`}
                     role="row"
-                    className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 transition-colors hover:bg-accent-foreground/20 md:grid-cols-[3rem_7rem_minmax(0,2fr)_minmax(0,8fr)_5rem] md:items-center md:gap-4 md:px-6 md:py-3"
+                    className="group grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 px-4 py-3 transition-colors hover:bg-accent-foreground/20 md:grid-cols-[3rem_5.5rem_minmax(0,2fr)_minmax(0,8fr)_5rem] md:gap-4 md:px-6"
                     tabIndex={0}
-                    onClick={() => setSelected(result)}
+                    onClick={(event) => {
+                      if (
+                        event.target instanceof Element &&
+                        event.target.closest('a, button')
+                      ) {
+                        return;
+                      }
+                      setSelected(result);
+                    }}
                     onKeyDown={(event) => {
+                      if (
+                        event.target instanceof Element &&
+                        event.target.closest('a, button')
+                      ) {
+                        return;
+                      }
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
                         setSelected(result);
@@ -238,25 +347,13 @@ export function ResultsPage() {
                   >
                     <div
                       role="cell"
-                      className="col-start-1 row-start-1 flex justify-center"
+                      className="col-start-2 row-start-1 flex justify-end md:col-start-1 md:justify-center"
                     >
-                      {result.priority === 'critical' ? (
-                        <CircleAlert
-                          aria-label="Critical priority"
-                          className="size-4 text-destructive"
-                          strokeWidth={2.5}
-                        />
-                      ) : result.priority === 'high' ? (
-                        <CircleAlert
-                          aria-label="High priority"
-                          className="size-4 text-warning"
-                          strokeWidth={2.5}
-                        />
-                      ) : null}
+                      <PriorityMarker priority={result.priority} />
                     </div>
                     <div
                       role="cell"
-                      className="col-start-1 row-start-2 text-xs text-muted-foreground md:col-start-2 md:row-start-1 md:text-sm"
+                      className="col-start-1 row-start-2 pl-7 text-xs text-muted-foreground md:col-start-2 md:row-start-1 md:pl-0 md:text-sm"
                     >
                       {formatDistanceToNowCompact(result.createdAt, {
                         addSuffix: true,
@@ -264,7 +361,7 @@ export function ResultsPage() {
                     </div>
                     <div
                       role="cell"
-                      className="col-start-2 row-start-1 flex min-w-0 items-center gap-2 md:col-start-3"
+                      className="col-start-1 row-start-1 flex min-w-0 items-start gap-2 md:col-start-3"
                     >
                       <AutomationAvatar result={result} />
                       <span className="truncate text-sm font-semibold">
@@ -273,20 +370,19 @@ export function ResultsPage() {
                     </div>
                     <div
                       role="cell"
-                      className="col-span-2 col-start-1 row-start-3 min-w-0 text-sm text-muted-foreground/80 md:col-span-1 md:col-start-4 md:row-start-1"
+                      className="col-span-2 col-start-1 row-start-3 min-w-0 pl-7 text-foreground md:col-span-1 md:col-start-4 md:row-start-1 md:pl-0"
                     >
-                      <p className="line-clamp-3 break-words">
-                        {resultPreview(result)}
-                      </p>
+                      <ResultContent result={result} />
                     </div>
                     <div
                       role="cell"
-                      className="col-start-3 row-span-2 row-start-1 flex items-start justify-end gap-1 md:col-start-5 md:row-span-1 md:items-center"
+                      className="col-span-2 col-start-1 row-start-4 -ml-2 flex items-start gap-1 pl-7 md:col-span-1 md:col-start-5 md:row-start-1 md:ml-0 md:justify-end md:pl-0"
                     >
                       <BasicTooltip content="Accept">
                         <Button
                           size="icon"
                           variant="ghost"
+                          className="hover:text-accent-foreground"
                           aria-label={`Accept ${resultTitle(result)}`}
                           disabled={actionMutation.isPending}
                           onClick={(event) => {
@@ -301,6 +397,7 @@ export function ResultsPage() {
                         <Button
                           size="icon"
                           variant="ghost"
+                          className="hover:text-destructive"
                           aria-label={`Clear ${resultTitle(result)}`}
                           disabled={actionMutation.isPending}
                           onClick={(event) => {

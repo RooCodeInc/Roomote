@@ -45,6 +45,7 @@ import { decrypt, encrypt } from '@roomote/db/encryption';
 import { getValidAccessToken } from '@roomote/sdk/server';
 import { validateRipplingConnection } from '@roomote/sdk/server/rippling-api';
 
+import { isVoiceDisabledForDeployment } from '@/lib/server/voice';
 import type { UserAuthSuccess } from '@/types';
 import type { StaticOauthReadiness } from '@/lib/server/mcp-static-oauth';
 import { getDeploymentStaticOauthReadiness } from '@/lib/server/deployment-static-oauth';
@@ -725,8 +726,20 @@ export async function setDeploymentMcpEnabledCommand(
     throw new Error(`Unknown MCP integration: ${input.mcpId}`);
   }
 
+  // Voice's key can come from the environment (an operator's or a fleet-wide
+  // key) with no connection row at all. That key decides who pays for Voice;
+  // this switch still decides whether the deployment has it on. So enabling
+  // needs no stored connection, and disabling must not delete a stored key
+  // the deployment would fall back to if the environment key went away.
+  const voiceConfiguredByEnvironment =
+    input.mcpId === 'voice' &&
+    Boolean(
+      (await resolveModelProviderEnvValue(['R_VOICE_OPENAI_API_KEY']))?.trim(),
+    );
+
   if (
     input.enabled &&
+    !voiceConfiguredByEnvironment &&
     isDeploymentScopedMcpIntegration(input.mcpId) &&
     ALL_DEPLOYMENT_CONTROLLED_APP_IDS.has(input.mcpId)
   ) {
@@ -788,7 +801,7 @@ export async function setDeploymentMcpEnabledCommand(
     .returning();
 
   // When disabling, clean up all user connections for this MCP
-  if (!input.enabled) {
+  if (!input.enabled && !voiceConfiguredByEnvironment) {
     await db
       .delete(mcpConnections)
       .where(eq(mcpConnections.mcpId, input.mcpId));
@@ -1001,13 +1014,16 @@ export async function getElevenLabsConnectionCommand(auth: UserAuthSuccess) {
 /**
  * Where the deployment's voice key comes from. An `R_VOICE_OPENAI_API_KEY`
  * environment variable wins over the Settings-managed connection, so the
- * card shows as connected without anything to configure or disconnect.
+ * card shows as connected without anything to configure or disconnect. The
+ * deployment's admins can still switch Voice off; `enabled` carries that
+ * state so the card can offer the switch (no enablement row means on).
  */
 export async function getVoiceConnectionCommand(
   auth: UserAuthSuccess,
 ): Promise<{
   authStatus: 'pending' | 'authenticated' | 'error' | null;
   source: 'environment' | 'connection';
+  enabled: boolean;
   voiceId?: OpenAiRealtimeVoiceId;
 } | null> {
   assertAdmin(auth);
@@ -1017,6 +1033,7 @@ export async function getVoiceConnectionCommand(
     return {
       authStatus: 'authenticated',
       source: 'environment',
+      enabled: !(await isVoiceDisabledForDeployment()),
       voiceId: DEFAULT_OPENAI_REALTIME_VOICE_ID,
     };
   }
@@ -1039,6 +1056,7 @@ export async function getVoiceConnectionCommand(
   return {
     authStatus: connection.authStatus,
     source: 'connection',
+    enabled: !(await isVoiceDisabledForDeployment()),
     voiceId: connection.authConfig.voiceId ?? DEFAULT_OPENAI_REALTIME_VOICE_ID,
   };
 }

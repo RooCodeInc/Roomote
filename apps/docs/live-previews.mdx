@@ -1,0 +1,82 @@
+---
+title: Live Previews
+icon: window
+---
+
+Live Previews let you open a web app or API that is running inside a Roomote
+task sandbox. They are live application URLs, not screenshots: you can navigate
+the app while reviewing the task, open it in a new tab, and check desktop or
+mobile layouts without pulling the branch locally.
+
+Each preview comes from a named port in the task's
+[environment](/environments). Preview authentication protects proxied ports by
+default.
+
+## Prerequisites
+
+Live Preview is available when:
+
+- the task runs in an environment rather than directly against a repository
+- an administrator has configured the deployment's preview runtime
+- the environment exposes at least one named preview port
+- the app or API is running on the configured port
+
+For a self-hosted deployment, an administrator can configure the preview
+runtime from the **Live Preview** pane on a task. Remote deployments need a
+public preview origin, DNS records for the base and wildcard hosts, and a TLS
+certificate that covers both. Operators can manage the preview origin with
+`PREVIEW_PROXY_BASE_URL` instead; see the
+[Live previews environment variables](/environment-variables#live-previews).
+
+Configure application ports under **Settings > Environments** in the
+**Exposed Ports** section. Choose a primary port when one service should open
+first, and set an initial path when reviewers should land somewhere other than
+`/`. See the [environment definition port reference](/environments/definition#ports)
+for the equivalent YAML and all supported port options.
+
+Environment changes apply to new tasks. If ports were added after a task
+started, start a new task or put the existing task to sleep and wake it again to
+attach the preview.
+
+## Open and use a preview
+
+1. Open a task that runs in the configured environment.
+2. Select **Live Preview** in the task's right sidebar.
+3. If the environment exposes multiple services, use the **Available Services**
+   menu to switch between them.
+
+The preview toolbar lets you go back or forward, reload the page, enter a path,
+and switch between desktop and resizable mobile views. Select **Open Live
+Preview in a new tab** when you need more room or browser tools outside the task
+workspace.
+
+Fresh tasks can take a couple of minutes to start the application. While
+environment services are starting, the preview reports that state and reloads
+after setup finishes.
+
+## Recover a preview
+
+Use the state shown in the task to choose the next action:
+
+| State | What to do |
+| --- | --- |
+| **We couldn't check Live Preview availability** | Check your connection, then select **Try again** to repeat the status check. |
+| **Live previews aren't set up for this deployment yet** | Ask an administrator to complete the one-time runtime setup. Administrators can configure it directly in the pane. |
+| **doesn't expose any preview ports yet** | An administrator can select **Set up previews with an agent** or **configure ports manually**. New tasks use the updated environment. |
+| **Environment services are still starting** | Wait for setup to finish. Roomote reloads the preview when the services are ready. |
+| The preview stays blank or does not report loading | Select **Try again**. If it remains broken, select **Get help** or **Preview not working?**. An administrator can select **Fix previews with an agent**; other members can ask an administrator to repair the environment. |
+| The task is sleeping | Select **Live Preview**, then confirm **Wake up**. Roomote restores the task before making its preview available again. If waking fails, the error remains in the dialog so you can try again. |
+| The task is going to sleep | Wait for the sleep operation to finish. Live Preview remains unavailable during the transition. |
+| **This task snapshot has expired and can no longer be resumed.** | Start a new task in the same environment to create a new sandbox and preview. Snapshot retention depends on the sandbox provider. |
+
+If a preview opens but the app itself is broken, review the task's **Logs**
+panel. Common application-side causes include a server that did not start, a
+port mismatch, or host, framing, and cross-origin rules that do not allow the
+preview proxy.
+
+Tasks that run directly against a repository do not have a sandbox application
+to expose, so their task sidebar does not show **Live Preview**. Start the work
+in an environment when it needs a runnable app or preview.
+
+See [Review a task](/tasks) for the other logs, diffs, artifacts, and visual
+evidence available in the task workspace.

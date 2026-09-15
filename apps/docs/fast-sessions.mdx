@@ -38,11 +38,14 @@ supported chat providers. Choose an environment or repository explicitly when
 you already know where the work should run.
 
 When work needs a sandbox but no source code, ask Fast to delegate it to
-**Blank slate**. The delegated task starts with an empty workspace and does not
-clone repositories or require source-control credentials. This is useful for
-artifact generation, integration work, and other tasks that need command
-execution without a repository. Custom automations can also select Blank slate
-as their preferred environment.
+**Blank slate**. The delegated task starts with an empty workspace and clones
+nothing up front. This is useful for artifact generation, integration work, and
+other tasks that need command execution without a repository. When source
+control is connected, the sandbox still carries a `REPOSITORIES.md` index of the
+active repositories and the agent can check one out on demand, commit to it,
+and open pull requests; without connected source control, Blank slate needs no
+credentials at all. Custom automations can also select Blank slate as their
+preferred environment.
 
 Select **New Session** in the navigation to open the same launcher from any
 dashboard page.
@@ -214,6 +217,18 @@ the Session view and can resume the same Session directly from chat. Roomote
 verifies the provider installation, conversation, and linked user before it
 accepts the follow-up. On Slack, a longer reply streams into the thread as the
 model writes it and settles into the finished message.
+
+From any Fast surface, you can ask Roomote to read an authorized Slack or
+Discord message link or explicitly name either provider for a context lookup.
+Roomote resolves the target provider independently of the conversation you are
+using and applies the target provider's installation, linked-account, and
+channel-access checks. It does not infer access from the originating chat.
+
+Fast can also post an explicitly requested update to Slack from another chat
+surface. Outside a Slack conversation, name the Slack workspace and destination.
+Public channels require the Roomote app to be a member; private channels also
+require your linked Slack account to be a member, and direct messages require
+workspace-scoped linked identities for both participants.
 
 Follow-ups sent while Fast is responding are retained before Roomote reports
 that they were accepted. A correction from the same person can steer the active

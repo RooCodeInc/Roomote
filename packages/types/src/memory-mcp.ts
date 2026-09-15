@@ -1,5 +1,6 @@
 import { getMcpIntegration } from './mcp-oauth';
 import {
+  BRAIN_MCP_DISCLOSURE_INSTRUCTIONS,
   BRAIN_MCP_FAST_INSTRUCTIONS,
   BRAIN_MCP_ID,
   BRAIN_MCP_INSTRUCTIONS,
@@ -45,11 +46,16 @@ export function createMemoryMcpInstructions(
         ? `Save to this store only when the user requests it by name or the primary memory store has no suitable writer. Do not duplicate the same learning across memory stores. Never save secrets, credentials, conversation transcripts, transient requests, or facts easily rederived from a connected source.`
         : `At task completion, use this server's memory-writing tool only when this store was selected during the task or the primary memory store has no suitable writer. Do not duplicate the same learning across memory stores. Never save secrets, credentials, code or file dumps, task progress, conversation transcripts, or facts easily rederived from the repository.`;
 
+    const providerInstructions =
+      serverId === BRAIN_MCP_ID
+        ? `\n\n${BRAIN_MCP_DISCLOSURE_INSTRUCTIONS}`
+        : '';
+
     return `The ${displayName} MCP server is an additional persistent memory store available to this ${surface === 'conversation' ? 'conversation' : 'task'}.
 
 Another installed memory server owns the required initial recall. Do not call ${displayName} merely to repeat that preflight. Use it later when the user requests this store, when it contains distinct relevant context, or when the primary memory result leaves a specific gap.
 
-${secondaryWriteGuidance}`;
+${secondaryWriteGuidance}${providerInstructions}`;
   }
 
   if (surface === 'conversation') {

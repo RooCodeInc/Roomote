@@ -91,7 +91,10 @@ const SLACK_CHANNEL_ID = /^[A-Z0-9]+$/i;
 const SLACK_PERMALINK_TIMESTAMP = /^\d{7,}$/;
 const SLACK_TIMESTAMP = /^\d+(?:\.\d+)?$/;
 
-function parseSlackLinkSegments(raw: string): string[] | null {
+function parseSlackLink(raw: string): {
+  segments: string[];
+  teamDomain: string | null;
+} | null {
   let url: URL;
   try {
     url = new URL(raw.trim());
@@ -109,10 +112,17 @@ function parseSlackLinkSegments(raw: string): string[] | null {
   }
 
   try {
-    return url.pathname
+    const segments = url.pathname
       .split('/')
       .filter((segment) => segment.length > 0)
       .map((segment) => decodeURIComponent(segment));
+    const teamDomain = host.endsWith('.slack.com')
+      ? host.slice(0, -'.slack.com'.length)
+      : null;
+    return {
+      segments,
+      teamDomain: teamDomain && teamDomain !== 'app' ? teamDomain : null,
+    };
   } catch {
     return null;
   }
@@ -124,11 +134,13 @@ function parseSlackLinkSegments(raw: string): string[] | null {
  */
 export function parseSlackMessagePermalink(raw: string): {
   teamId: string | null;
+  teamDomain: string | null;
   channelId: string;
   messageId: string;
 } | null {
-  const segments = parseSlackLinkSegments(raw);
-  if (!segments) return null;
+  const parsedLink = parseSlackLink(raw);
+  if (!parsedLink) return null;
+  const { segments, teamDomain } = parsedLink;
 
   if (segments[0] === 'archives' && segments.length === 3) {
     const channelId = segments[1] ?? '';
@@ -142,6 +154,7 @@ export function parseSlackMessagePermalink(raw: string): {
 
     return {
       teamId: null,
+      teamDomain,
       channelId,
       messageId: `${permalinkTs.slice(0, -6)}.${permalinkTs.slice(-6)}`,
     };
@@ -166,7 +179,7 @@ export function parseSlackMessagePermalink(raw: string): {
       return null;
     }
 
-    return { teamId, channelId, messageId };
+    return { teamId, teamDomain: null, channelId, messageId };
   }
 
   return null;
@@ -175,15 +188,17 @@ export function parseSlackMessagePermalink(raw: string): {
 /** Parse Slack archive and app-client channel links without requiring a message. */
 export function parseSlackChannelPermalink(raw: string): {
   teamId: string | null;
+  teamDomain: string | null;
   channelId: string;
 } | null {
-  const segments = parseSlackLinkSegments(raw);
-  if (!segments) return null;
+  const parsedLink = parseSlackLink(raw);
+  if (!parsedLink) return null;
+  const { segments, teamDomain } = parsedLink;
 
   if (segments[0] === 'archives' && segments.length === 2) {
     const channelId = segments[1] ?? '';
     return SLACK_CHANNEL_ID.test(channelId)
-      ? { teamId: null, channelId }
+      ? { teamId: null, teamDomain, channelId }
       : null;
   }
 
@@ -191,7 +206,7 @@ export function parseSlackChannelPermalink(raw: string): {
     const teamId = segments[1] ?? '';
     const channelId = segments[2] ?? '';
     return SLACK_CHANNEL_ID.test(teamId) && SLACK_CHANNEL_ID.test(channelId)
-      ? { teamId, channelId }
+      ? { teamId, teamDomain: null, channelId }
       : null;
   }
 

@@ -1,13 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import {
-  claimTaskGoalContinuationForRun,
-  db,
-  eq,
-  getTaskGoalForRun,
-  releaseTaskGoalContinuationForRun,
-  slackInstallations,
-} from '@roomote/db/server';
+import { db, eq, slackInstallations } from '@roomote/db/server';
 
 import {
   RunStatus,
@@ -305,17 +298,6 @@ export const taskRunsRouter = router({
       completedAt: completedAt ?? undefined,
     }),
   ),
-  getGoal: runTokenOnlyScoped(z.object({ runId: z.number() }), 'runId').query(
-    ({ input }) => getTaskGoalForRun(input.runId),
-  ),
-  claimGoalContinuation: runTokenOnlyScoped(
-    z.object({ runId: z.number(), continuationId: z.string().min(1).max(200) }),
-    'runId',
-  ).mutation(({ input }) => claimTaskGoalContinuationForRun(input)),
-  releaseGoalContinuation: runTokenOnlyScoped(
-    z.object({ runId: z.number(), continuationId: z.string().min(1).max(200) }),
-    'runId',
-  ).mutation(({ input }) => releaseTaskGoalContinuationForRun(input)),
   dequeue: runScoped(
     z.object({ runId: z.number() }).merge(workerReleaseMetadataSchema),
     'runId',

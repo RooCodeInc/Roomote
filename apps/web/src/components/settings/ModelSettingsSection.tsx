@@ -2041,12 +2041,24 @@ export function ModelSettingsSection({
           {modelGroups.map((group) => (
             <div key={group.providerId} className="pt-2">
               <p className="text-base font-semibold mb-4">{group.label}</p>
+              <div className="mb-2 hidden justify-end gap-4 text-xs font-medium text-muted-foreground md:flex">
+                <span className="w-14 text-right">Context</span>
+                <span className="w-20">Inputs</span>
+                <span className="w-28 text-right">Price</span>
+                <span className="w-20 text-right">Updated</span>
+                <span aria-hidden="true" className="w-9" />
+              </div>
               <div className="divide-y divide-background">
                 {group.items.map((model) => {
                   const checked = enabledModelSet.has(model.id);
                   const isDefault = roleDrafts.coding.modelId === model.id;
                   const summary = formatMetadataSummary(model.metadata ?? null);
                   const metadata = model.metadata ?? null;
+                  const contextDetails = formatDetailedContextWindow(metadata);
+                  const inputDetails = formatInputTypes(metadata);
+                  const priceDetails = formatDetailedPrice(metadata);
+                  const refreshedDetails =
+                    formatDetailedLastRefreshed(metadata);
 
                   return (
                     <div
@@ -2075,67 +2087,112 @@ export function ModelSettingsSection({
                         </div>
                       </div>
 
-                      <div className="flex shrink-0 items-center gap-4 text-xs text-muted-foreground">
-                        <div className="flex w-14 justify-end">
-                          <BasicTooltip
-                            content={
-                              <div className="max-w-64 text-wrap">
-                                {formatDetailedContextWindow(metadata)}
-                              </div>
-                            }
-                            side="top"
-                          >
-                            <span className="cursor-help">
-                              {summary.context}
-                            </span>
-                          </BasicTooltip>
-                        </div>
-                        <div className="flex w-20 items-center gap-1">
-                          <BasicTooltip
-                            content={
-                              <div className="max-w-64 text-wrap">
-                                {formatInputTypes(metadata)}
-                              </div>
-                            }
-                            side="top"
-                          >
-                            <span className="inline-flex cursor-help items-center gap-1">
-                              {summary.inputTypeIcons.length > 0 ? (
-                                summary.inputTypeIcons.map((Icon, index) => (
-                                  <Icon key={index} className="size-4" />
-                                ))
-                              ) : (
-                                <span>-</span>
-                              )}
-                            </span>
-                          </BasicTooltip>
-                        </div>
-                        <div className="w-28 text-right">
-                          <BasicTooltip
-                            content={
-                              <div className="max-w-64 text-wrap">
-                                {formatDetailedPrice(metadata)}
-                              </div>
-                            }
-                            side="top"
-                          >
-                            <span className="cursor-help">{summary.price}</span>
-                          </BasicTooltip>
-                        </div>
-                        <div className="w-20 text-right">
-                          <BasicTooltip
-                            content={
-                              <div className="max-w-64 text-wrap">
-                                {formatDetailedLastRefreshed(metadata)}
-                              </div>
-                            }
-                            side="top"
-                          >
-                            <span className="cursor-help">
-                              {summary.lastRefreshed}
-                            </span>
-                          </BasicTooltip>
-                        </div>
+                      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_2.25rem] items-end gap-3 text-xs text-muted-foreground md:flex md:shrink-0 md:items-center md:gap-4">
+                        <dl
+                          aria-label={`${model.displayName} metadata`}
+                          className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-2 md:flex md:items-center md:gap-4"
+                        >
+                          <div className="min-w-0 md:flex md:w-14 md:justify-end">
+                            <dt className="font-medium text-foreground md:sr-only">
+                              Context
+                            </dt>
+                            <dd>
+                              <BasicTooltip
+                                content={
+                                  <div className="max-w-64 text-wrap">
+                                    {contextDetails}
+                                  </div>
+                                }
+                                side="top"
+                              >
+                                <span
+                                  aria-label={contextDetails}
+                                  className="inline-block cursor-help focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                  tabIndex={0}
+                                >
+                                  {summary.context}
+                                </span>
+                              </BasicTooltip>
+                            </dd>
+                          </div>
+                          <div className="min-w-0 md:w-20">
+                            <dt className="font-medium text-foreground md:sr-only">
+                              Inputs
+                            </dt>
+                            <dd>
+                              <BasicTooltip
+                                content={
+                                  <div className="max-w-64 text-wrap">
+                                    {inputDetails}
+                                  </div>
+                                }
+                                side="top"
+                              >
+                                <span
+                                  aria-label={inputDetails}
+                                  className="inline-flex cursor-help items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                  tabIndex={0}
+                                >
+                                  {summary.inputTypeIcons.length > 0 ? (
+                                    summary.inputTypeIcons.map(
+                                      (Icon, index) => (
+                                        <Icon key={index} className="size-4" />
+                                      ),
+                                    )
+                                  ) : (
+                                    <span>-</span>
+                                  )}
+                                </span>
+                              </BasicTooltip>
+                            </dd>
+                          </div>
+                          <div className="min-w-0 md:w-28 md:text-right">
+                            <dt className="font-medium text-foreground md:sr-only">
+                              Price
+                            </dt>
+                            <dd>
+                              <BasicTooltip
+                                content={
+                                  <div className="max-w-64 text-wrap">
+                                    {priceDetails}
+                                  </div>
+                                }
+                                side="top"
+                              >
+                                <span
+                                  aria-label={priceDetails}
+                                  className="inline-block cursor-help focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                  tabIndex={0}
+                                >
+                                  {summary.price}
+                                </span>
+                              </BasicTooltip>
+                            </dd>
+                          </div>
+                          <div className="min-w-0 md:w-20 md:text-right">
+                            <dt className="font-medium text-foreground md:sr-only">
+                              Updated
+                            </dt>
+                            <dd>
+                              <BasicTooltip
+                                content={
+                                  <div className="max-w-64 text-wrap">
+                                    {refreshedDetails}
+                                  </div>
+                                }
+                                side="top"
+                              >
+                                <span
+                                  aria-label={refreshedDetails}
+                                  className="inline-block cursor-help focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                  tabIndex={0}
+                                >
+                                  {summary.lastRefreshed}
+                                </span>
+                              </BasicTooltip>
+                            </dd>
+                          </div>
+                        </dl>
                         {recommendedModelIds.has(model.id) ? (
                           <span className="inline-flex w-9 justify-center">
                             <BasicTooltip content="Recommended models stay listed while their provider is connected. Turn the model off to stop using it.">

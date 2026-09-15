@@ -25,7 +25,7 @@ import type {
   TaskTrigger,
   TaskVisibility,
   TaskState,
-  TaskGoalStatus,
+  SessionGoalStatus,
   TaskInitiatorKind,
   CommitAuthorKind,
   RunKind,
@@ -74,6 +74,10 @@ import type {
   TrackedMessageKind,
   McpConnectionRole,
   SourceControlProvider,
+  SessionEgressDenialReason,
+  SessionEgressMethod,
+  SessionEgressPhase,
+  SessionEgressRevocationKind,
   TaskModelSettings,
   WorkspaceRoutingSettings,
   TaskRunErrorCode,
@@ -780,30 +784,6 @@ export const tasks = pgTable(
     model: text('model').notNull(),
     // Initial task prompt. Per-attempt/resume prompts stay on runs.
     prompt: text('prompt'),
-    goalObjective: text('goal_objective'),
-    goalStatus: text('goal_status').$type<TaskGoalStatus>(),
-    goalMaxContinuations: integer('goal_max_continuations'),
-    goalContinuationsUsed: integer('goal_continuations_used')
-      .notNull()
-      .default(0),
-    goalBlockedReason: text('goal_blocked_reason'),
-    goalCompletedAt: timestamp('goal_completed_at'),
-    goalLastContinuationId: text('goal_last_continuation_id'),
-    goalContinuationIds: text('goal_continuation_ids')
-      .array()
-      .notNull()
-      .default(sql`'{}'::text[]`),
-    goalGenerationIds: text('goal_generation_ids')
-      .array()
-      .notNull()
-      .default(sql`'{}'::text[]`),
-    goalBlockerCandidateReason: text('goal_blocker_candidate_reason'),
-    goalBlockerCandidateCount: integer('goal_blocker_candidate_count')
-      .notNull()
-      .default(0),
-    goalBlockerLastContinuationUsed: integer(
-      'goal_blocker_last_continuation_used',
-    ),
     /**
      * Draft prompt text the user was composing when the sandbox went to
      * sleep. Saved periodically while typing so it can be restored after
@@ -888,18 +868,6 @@ export const tasks = pgTable(
     check(
       'tasks_state_check',
       sql`${table.state} in ('active', 'completed', 'failed', 'canceled')`,
-    ),
-    check(
-      'tasks_goal_status_check',
-      sql`${table.goalStatus} IS NULL OR ${table.goalStatus} in ('active', 'complete', 'blocked', 'budget_limited')`,
-    ),
-    check(
-      'tasks_goal_continuations_check',
-      sql`${table.goalContinuationsUsed} >= 0 AND (${table.goalMaxContinuations} IS NULL OR ${table.goalMaxContinuations} > 0)`,
-    ),
-    check(
-      'tasks_goal_blocker_candidate_count_check',
-      sql`${table.goalBlockerCandidateCount} >= 0`,
     ),
     check('tasks_harness_check', sql`${table.harness} in ('opencode-server')`),
     check(
@@ -1112,6 +1080,9 @@ export const taskPullRequests = pgTable(
 
     // Status
     status: text('status').$type<import('@roomote/types').PullRequestStatus>(),
+    // Provider-reported merge time. Kept on the association so report
+    // publication can reconcile merges that arrived before the report.
+    mergedAt: timestamp('merged_at'),
     mergeabilityStatus: text('mergeability_status')
       .notNull()
       .default('unknown')
@@ -3733,9 +3704,9 @@ export const fastAgentProviderMessages = pgTable(
 /**
  * session_attention_notifications
  *
- * Durable, per-attention-event delivery claims. A single user-facing event may
- * fan out to several linked chat providers, while this row owns deduplication
- * and presence suppression across retries.
+ * Durable, per-attention-event delivery claims. A single user-facing event is
+ * delivered through the first successful personal provider, while this row
+ * owns deduplication and presence suppression across retries.
  */
 export const sessionAttentionNotifications = pgTable(
   'session_attention_notifications',
@@ -3797,6 +3768,10 @@ export const sessionAttentionNotificationMessages = pgTable(
     channelId: text('channel_id').notNull(),
     threadId: text('thread_id'),
     messageId: text('message_id').notNull(),
+    fastMessageId: uuid('fast_message_id').references(
+      () => fastAgentMessages.id,
+      { onDelete: 'set null' },
+    ),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
@@ -4348,6 +4323,261 @@ export const sessions = pgTable(
   ],
 );
 
+/** Owner-bound credentials are additive and leave N-1 readers/writers untouched. */
+export const sessionSecrets = pgTable(
+  'session_secrets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    origin: text('origin').notNull(),
+    // Any lowercase RFC 7230 token; validated by the shared credential header
+    // schema at prepare time, never constrained here.
+    headerName: text('header_name').notNull(),
+    headerPrefix: text('header_prefix')
+      .notNull()
+      .$type<'' | 'Bearer ' | 'Basic ' | 'Token '>(),
+    // Method policy enforced by the egress gateway authorize path. Additive
+    // with a read-only default so grants approved before it existed stay
+    // GET/HEAD-only; N-1 code ignores the column.
+    allowedMethods: text('allowed_methods')
+      .array()
+      .notNull()
+      .default(sql`'{GET,HEAD}'::text[]`)
+      .$type<SessionEgressMethod[]>(),
+    value: encryptedText('value'),
+    expiresAt: timestamp('expires_at').notNull(),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('session_secrets_session_owner_idx').on(
+      table.sessionId,
+      table.ownerUserId,
+    ),
+  ],
+);
+
+export const sessionSecretApprovals = pgTable(
+  'session_secret_approvals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    origin: text('origin').notNull(),
+    // Any lowercase RFC 7230 token; validated by the shared credential header
+    // schema at prepare time, never constrained here.
+    headerName: text('header_name').notNull(),
+    headerPrefix: text('header_prefix')
+      .notNull()
+      .$type<'' | 'Bearer ' | 'Basic ' | 'Token '>(),
+    allowedMethods: text('allowed_methods')
+      .array()
+      .notNull()
+      .default(sql`'{GET,HEAD}'::text[]`)
+      .$type<SessionEgressMethod[]>(),
+    expiresAt: timestamp('expires_at').notNull(),
+    consumedAt: timestamp('consumed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('session_secret_approvals_session_owner_idx').on(
+      table.sessionId,
+      table.ownerUserId,
+    ),
+  ],
+);
+
+// No payload, URL query/path, headers, or error detail belongs in this audit.
+export const sessionSecretAudit = pgTable('session_secret_audit', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  actorUserId: text('actor_user_id'),
+  secretRef: uuid('secret_ref'),
+  method: text('method').$type<'GET' | 'HEAD'>(),
+  destination: text('destination'),
+  outcome: text('outcome')
+    .notNull()
+    .$type<'started' | 'succeeded' | 'denied' | 'failed'>(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+/**
+ * Session egress control plane (additive, N-1 safe: previous releases never
+ * read these tables). One row per attached run that a trusted controller
+ * registered with the credential-substituting egress gateway. The
+ * `connectorIdentity` is what the gateway authenticates at connection time;
+ * it is never derived from anything the sandbox sends.
+ */
+export const sessionEgressWorkloads = pgTable(
+  'session_egress_workloads',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    taskRunId: integer('task_run_id')
+      .notNull()
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    connectorIdentity: text('connector_identity').notNull(),
+    // Bumped on re-registration (resume, actor change, connector rotation).
+    // Substitutes are bound to the generation they were minted in.
+    generation: integer('generation').notNull().default(1),
+    status: text('status')
+      .notNull()
+      .default('active')
+      .$type<'active' | 'terminated'>(),
+    // Controller-renewed lease; never extended on a sandbox's say-so.
+    expiresAt: timestamp('expires_at').notNull(),
+    terminatedAt: timestamp('terminated_at'),
+    terminationReason: text('termination_reason'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_egress_workloads_active_run_unique')
+      .on(table.taskRunId)
+      .where(sql`${table.status} = 'active'`),
+    uniqueIndex('session_egress_workloads_active_connector_unique')
+      .on(table.connectorIdentity)
+      .where(sql`${table.status} = 'active'`),
+    index('session_egress_workloads_session_idx').on(table.sessionId),
+    check(
+      'session_egress_workloads_status_check',
+      sql`${table.status} in ('active', 'terminated')`,
+    ),
+  ],
+);
+
+/**
+ * Session-owned Goal Mode state. Child tasks are execution units and never
+ * own or advance this lifecycle. The legacy tasks.goal_* columns remain for
+ * N-1 rollback only and are intentionally not read or written by new code.
+ */
+export const sessionGoals = pgTable(
+  'session_goals',
+  {
+    sessionId: uuid('session_id')
+      .primaryKey()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    objective: text('objective').notNull(),
+    status: text('status').notNull().$type<SessionGoalStatus>(),
+    maxContinuations: integer('max_continuations').notNull(),
+    continuationsUsed: integer('continuations_used').notNull().default(0),
+    blockedReason: text('blocked_reason'),
+    completedAt: timestamp('completed_at'),
+    lastContinuationId: text('last_continuation_id').notNull(),
+    continuationIds: text('continuation_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    generationIds: text('generation_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    blockerCandidateReason: text('blocker_candidate_reason'),
+    blockerCandidateCount: integer('blocker_candidate_count')
+      .notNull()
+      .default(0),
+    blockerLastContinuationUsed: integer('blocker_last_continuation_used'),
+    startedAt: timestamp('started_at').notNull().defaultNow(),
+    endedAt: timestamp('ended_at'),
+    createdByUserId: text('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'session_goals_status_check',
+      sql`${table.status} in ('active', 'complete', 'blocked', 'budget_limited', 'canceled')`,
+    ),
+    check(
+      'session_goals_continuations_check',
+      sql`${table.continuationsUsed} >= 0 AND ${table.maxContinuations} > 0`,
+    ),
+    check(
+      'session_goals_blocker_candidate_count_check',
+      sql`${table.blockerCandidateCount} >= 0`,
+    ),
+  ],
+);
+
+/** Only a keyed hash of each substitute token is ever stored. */
+export const sessionEgressSubstitutes = pgTable(
+  'session_egress_substitutes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workloadId: uuid('workload_id')
+      .notNull()
+      .references(() => sessionEgressWorkloads.id, { onDelete: 'cascade' }),
+    secretId: uuid('secret_id')
+      .notNull()
+      .references(() => sessionSecrets.id, { onDelete: 'cascade' }),
+    generation: integer('generation').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_egress_substitutes_token_hash_unique').on(
+      table.tokenHash,
+    ),
+    uniqueIndex(
+      'session_egress_substitutes_workload_secret_generation_unique',
+    ).on(table.workloadId, table.secretId, table.generation),
+  ],
+);
+
+// Evaluation attempts, not proof of credential/byte release: an allowed
+// evaluation can still be denied by the final live read after this insert.
+// Each id identifies one attempt; authorizationId is caller-controlled
+// correlation only, never authority or a unique/final exchange outcome.
+// Bounded codes only: never paths, query strings, headers, tokens, upstream
+// errors, or credential material.
+export const sessionEgressAudit = pgTable('session_egress_audit', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  authorizationId: uuid('authorization_id'),
+  workloadId: uuid('workload_id'),
+  sessionId: uuid('session_id'),
+  actorUserId: text('actor_user_id'),
+  secretRef: uuid('secret_ref'),
+  phase: text('phase').notNull().$type<SessionEgressPhase>(),
+  method: text('method').$type<SessionEgressMethod>(),
+  destination: text('destination'),
+  decision: text('decision').notNull().$type<'allowed' | 'denied'>(),
+  reason: text('reason').$type<SessionEgressDenialReason>(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+/**
+ * Append-only acceleration feed the gateway polls to cancel in-flight
+ * streams early. Live per-request authorization stays the source of truth;
+ * missing an event here never grants access.
+ */
+export const sessionEgressRevocations = pgTable('session_egress_revocations', {
+  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+  kind: text('kind').notNull().$type<SessionEgressRevocationKind>(),
+  workloadId: uuid('workload_id'),
+  secretRef: uuid('secret_ref'),
+  generation: integer('generation'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
 /** Additive task linkage retained independently for N-1 rollback safety. */
 export const sessionTasks = pgTable(
   'session_tasks',
@@ -4616,6 +4846,9 @@ export const automationResults = pgTable(
       .$type<AutomationResultPriority>(),
     dedupeKey: text('dedupe_key').notNull(),
     acceptedAt: timestamp('accepted_at'),
+    acceptanceReason: text('acceptance_reason').$type<
+      'manual' | 'pull_request_merged'
+    >(),
     ignoredAt: timestamp('ignored_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),

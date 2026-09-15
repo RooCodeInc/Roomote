@@ -14,8 +14,13 @@ import {
 import { isSessionUserPresent } from '@roomote/redis';
 import { getFastAgentParentFromPayload, RunStatus } from '@roomote/types';
 
-import { sendUserDirectMessageBestEffort } from '../user-direct-message';
-import { hasTaskRunAttentionNotification } from '../session-attention-notification';
+import { sendUserDirectMessageBestEffortWithReceipts } from '../user-direct-message';
+import {
+  findLatestSessionAttentionReceipt,
+  findTaskAttentionMessage,
+  hasTaskRunAttentionNotification,
+  resolveSessionAttentionPresentation,
+} from '../session-attention-notification';
 import { buildDeterministicMessageId } from '../deterministic-message-id';
 import {
   buildDeliveryClaimMarker,
@@ -40,14 +45,14 @@ function buildIdempotencyKey(runId: number): string {
   return buildDeterministicMessageId(`web-task-settlement:${runId}`);
 }
 
-function statusLabel(status: SettledStatus): string {
+function statusText(status: SettledStatus): string {
   switch (status) {
     case RunStatus.Completed:
-      return 'completed';
+      return 'The task completed.';
     case RunStatus.Failed:
-      return 'failed';
+      return 'The task failed.';
     case RunStatus.Canceled:
-      return 'was canceled';
+      return 'The task was canceled.';
   }
 }
 
@@ -63,7 +68,9 @@ export async function notifyWebTaskInitiatorOnSettle(
       initiatorUserId: true,
       state: true,
       surface: true,
-      title: true,
+      trigger: true,
+      initiatorKind: true,
+      prompt: true,
     },
     with: {
       runs: {
@@ -77,6 +84,8 @@ export async function notifyWebTaskInitiatorOnSettle(
   if (
     !task ||
     task.surface !== 'web' ||
+    task.trigger !== 'manual' ||
+    task.initiatorKind !== 'user' ||
     !task.initiatorUserId ||
     task.state === 'active' ||
     stateRun?.id !== run.id ||
@@ -124,12 +133,35 @@ export async function notifyWebTaskInitiatorOnSettle(
       return 'skipped';
     }
 
-    const deliveredProviders = await sendUserDirectMessageBestEffort({
-      userId: task.initiatorUserId,
-      text: `**${task.title}** ${statusLabel(status)}.\n\n[View the task](${getTaskUrl({ taskId: task.id, utm: { source: 'web', campaign: 'task-settlement-notification' } })})`,
-      logContext: 'notifyWebTaskInitiatorOnSettle',
-      idempotencyKey: buildIdempotencyKey(run.id),
-    });
+    const responseText = await findTaskAttentionMessage(
+      run.id,
+      'result_ready',
+      `settlement:${run.id}`,
+    );
+    const replyAnchor = session
+      ? await findLatestSessionAttentionReceipt({
+          sessionId: session.id,
+          userId: task.initiatorUserId,
+        })
+      : null;
+    const { deliveredProviders } =
+      await sendUserDirectMessageBestEffortWithReceipts({
+        userId: task.initiatorUserId,
+        text: `${responseText?.trim() || statusText(status)}\n\n[View the task](${getTaskUrl({ taskId: task.id, utm: { source: 'web', campaign: 'task-settlement-notification' } })})`,
+        logContext: 'notifyWebTaskInitiatorOnSettle',
+        idempotencyKey: buildIdempotencyKey(run.id),
+        ...(replyAnchor ? { replyAnchor } : {}),
+        ...(session
+          ? {
+              presentation: await resolveSessionAttentionPresentation({
+                sessionId: session.id,
+                userId: task.initiatorUserId,
+                taskPrompt: task.prompt,
+                includeInitialMessage: !replyAnchor,
+              }),
+            }
+          : {}),
+      });
 
     if (deliveredProviders.length === 0) {
       await releaseDelivery(run.id);

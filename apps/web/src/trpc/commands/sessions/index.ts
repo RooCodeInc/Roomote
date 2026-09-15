@@ -12,7 +12,9 @@ import {
   db,
   eq,
   fastAgentConversations,
+  getSessionGoal,
   inArray,
+  markSessionGoal,
   sessions,
   sessionTasks,
   tasks,
@@ -232,6 +234,14 @@ export async function archiveSessionCommand(
       archivedAt: new Date(),
     });
     if (archived) {
+      const goal = await getSessionGoal(sessionId);
+      if (goal?.status === 'active') {
+        await markSessionGoal({
+          sessionId,
+          generation: goal.generation,
+          status: 'canceled',
+        });
+      }
       if (archived.fastConversationId) {
         // An archived session must not wake itself up later.
         await cancelSessionWakeupsForConversation(

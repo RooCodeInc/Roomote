@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
+  listSessionSecretApprovals,
+  prepareSessionSecret,
+} from '@roomote/sdk/server/session-secrets';
+import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
@@ -17,15 +21,20 @@ import {
   INFERENCE_PROVIDER_MAX_RETRIES,
   NO_REPOSITORIES,
   ROOMOTE_MCP_ID,
+  HTTP_INTEGRATIONS_MCP_ID,
   REASONING_EFFORT_VALUES,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
   buildDataVisualizationBlocks,
   dataVisualizationInputsSchema,
   fastAgentHumanFollowUpEventSchema,
+  fastAgentCapabilityOfferInputSchema,
   formatErrorForLog,
   formatSingleLineLog,
   manageWakeupsInputSchema,
+  sessionSecretRequestSchema,
+  sessionSecretPrepareSchema,
+  sessionSecretPrepareToolSchema,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
   truncateAcpOutputText,
@@ -35,6 +44,9 @@ import {
   INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE,
   matchIntegrationTools,
+  parseDiscordMessagePermalink,
+  parseSlackChannelPermalink,
+  parseSlackMessagePermalink,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
@@ -47,12 +59,16 @@ import {
   db,
   eq,
   fastAgentParentEvents,
+  claimSessionGoalContinuation,
+  getSessionGoalForConversation,
   getDeploymentTaskModelOptions,
   getSessionForFastConversation,
   getSessionForTask,
   inArray,
   isBrainEnabled,
   isNull,
+  markSessionGoalForConversation,
+  releaseSessionGoalContinuation,
   sql,
   touchSessionActivity,
 } from '@roomote/db/server';
@@ -68,6 +84,8 @@ import packageJson from '../../../../../package.json';
 import { appendAttachmentTextsToPromptText } from '../../file-attachments';
 import {
   ensureOwnTaskFollowThroughWakeup,
+  ensureSessionGoalContinuationWakeup,
+  cancelSessionGoalContinuationWakeups,
   handleManageWakeupsToolCall,
   normalizeManageWakeupsArgs,
 } from '../session-wakeups';
@@ -89,7 +107,6 @@ import {
 } from './fast-agent-constants';
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
-import { getTherapistModeEnabledForUser } from '../therapist-mode';
 import {
   enqueueUserPersonalizationUpdate,
   resolveFastAgentPersonalizationContext,
@@ -132,6 +149,10 @@ import {
 } from './fast-agent-reply-stream';
 import { createFastAgentSurfaceReplyStreamer } from './fast-agent-surface-reply-stream';
 import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-source';
+import {
+  createFastAgentPromptSkillCatalogSources,
+  loadFastAgentPromptSkillCatalog,
+} from './fast-agent-prompt-skill-catalog';
 import { RemoteFastAgentInstanceSkillSource } from './fast-agent-instance-skill-source';
 import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
 import {
@@ -171,6 +192,7 @@ import {
   type FastAgentIntegration,
 } from './fast-agent-integration-broker';
 import { McpToolCallError } from '../mcp-tool-client';
+import { describeUnknownIntegrationArguments } from './fast-agent-integration-args';
 import {
   cancelFastAgentTask,
   launchFastAgentPrReview,
@@ -190,6 +212,7 @@ import {
 import {
   captureFastAgentInferenceAttemptOutcome,
   captureFastAgentInferenceContext,
+  captureFastAgentCapabilityOffer,
   type FastAgentPromptKind,
 } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
@@ -231,10 +254,7 @@ function selectFastRoomoteChannelTools(options: {
           ...integration,
           tools: integration.tools.filter(({ name }) => {
             if (name === LEGACY_SLACK_REACTION_TOOL) return false;
-            if (
-              name === CHAT_CHANNELS_TOOL.name ||
-              name === CHAT_CHANNEL_POST_TOOL_NAME
-            ) {
+            if (name === CHAT_CHANNELS_TOOL.name) {
               return slackConversation;
             }
             if (name === CHAT_REACTION_EMOJI_TOOL_NAME) {
@@ -498,6 +518,10 @@ const taskIdArgsSchema = z.object({
 const stopTaskArgsSchema = taskIdArgsSchema.extend({
   userInitiated: z.boolean(),
 });
+const manageGoalArgsSchema = z.object({
+  action: z.enum(['get', 'complete', 'blocked', 'canceled']),
+  reason: z.string().trim().min(1).optional(),
+});
 const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
 const findIntegrationToolsArgsSchema = z.object(
   FIND_INTEGRATION_TOOLS_TOOL.inputSchema,
@@ -554,7 +578,7 @@ const saveMemoryArgsSchema = z.object({
 });
 const requestUserInputQuestionSchema = z.object({
   id: z.string().trim().min(1).max(80),
-  header: z.string().trim().min(1).max(60),
+  header: z.string().trim().min(1).max(60).optional().default('Question'),
   question: z.string().trim().min(1).max(500),
   isOther: z.boolean().optional().default(false),
   isSecret: z.boolean().optional().default(false),
@@ -562,7 +586,13 @@ const requestUserInputQuestionSchema = z.object({
     .array(
       z.object({
         label: z.string().trim().min(1).max(140),
-        description: z.string().trim().min(1).max(500),
+        description: z
+          .string()
+          .trim()
+          .min(1)
+          .max(500)
+          .optional()
+          .default('Select this option.'),
       }),
     )
     .min(1)
@@ -571,6 +601,7 @@ const requestUserInputQuestionSchema = z.object({
   multiple: z.boolean().optional(),
 });
 const fastAgentInputPresetSchema = z.enum([
+  'setup_source_control',
   'setup_starter_tasks',
   'setup_integrations',
 ]);
@@ -586,7 +617,10 @@ const requestUserInputArgsSchema = z.preprocess(
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
 
     const input = raw as Record<string, unknown>;
-    if (input.preset === 'setup_starter_tasks') {
+    if (
+      input.preset === 'setup_source_control' ||
+      input.preset === 'setup_starter_tasks'
+    ) {
       // A trusted preset owns its questions. Models sometimes serialize
       // optional fields as placeholders or null; discard them before schema
       // validation so those fields cannot make the preset call fail.
@@ -594,16 +628,28 @@ const requestUserInputArgsSchema = z.preprocess(
     }
     if (input.preset === 'setup_integrations') {
       // Integration answers are meaningful for this preset, but questions
-      // are still server-owned. Treat a model-emitted null as omitted.
+      // are still server-owned. Treat model-emitted placeholders as omitted.
       return {
         preset: input.preset,
         ...(input.setupIntegrationAnswers !== undefined &&
-        input.setupIntegrationAnswers !== null
+        input.setupIntegrationAnswers !== null &&
+        !Array.isArray(input.setupIntegrationAnswers)
           ? { setupIntegrationAnswers: input.setupIntegrationAnswers }
           : {}),
       };
     }
-    return raw;
+    // Models can serialize unused optional arguments as null or an empty
+    // array. Generic questions do not accept integration answers, so discard
+    // those placeholders instead of rejecting an otherwise usable question.
+    const {
+      preset,
+      setupIntegrationAnswers: _setupIntegrationAnswers,
+      ...rest
+    } = input;
+    return {
+      ...rest,
+      ...(preset !== null && preset !== undefined ? { preset } : {}),
+    };
   },
   z
     .object({
@@ -681,6 +727,30 @@ function buildIntegrationCallSignature({
     toolName,
     canonicalizeIntegrationCallValue(args),
   ]);
+}
+
+function resolveFastAgentChatLookupProvider(
+  args: Record<string, unknown>,
+  conversation: FastAgentConversation,
+): 'slack' | 'discord' | undefined {
+  if (args.provider === 'slack' || args.provider === 'discord') {
+    return args.provider;
+  }
+
+  for (const reference of [args.messageLink, args.channel]) {
+    if (typeof reference !== 'string') continue;
+    if (
+      parseSlackMessagePermalink(reference) ||
+      parseSlackChannelPermalink(reference)
+    ) {
+      return 'slack';
+    }
+    if (parseDiscordMessagePermalink(reference)) return 'discord';
+  }
+
+  return conversation.surface === 'slack' || conversation.surface === 'discord'
+    ? conversation.surface
+    : undefined;
 }
 
 export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
@@ -2381,6 +2451,7 @@ export async function answerFastAgentQuestion({
           question: followUp.question,
           threadContext: [],
           compatibilityMessages: [],
+          currentMessageAgentContext: followUp.agentContext,
           currentMessageTs: followUp.currentMessageId,
           currentMessageSender: {
             slackUserId: followUp.senderExternalId,
@@ -3008,7 +3079,19 @@ export async function answerFastAgentQuestion({
   let userAttention: {
     kind: 'result_ready' | 'input_needed';
     eventId: string;
-  } = { kind: 'result_ready', eventId: turnId };
+    message?: string;
+    manual: boolean;
+  } = {
+    kind: 'result_ready',
+    eventId: turnId,
+    // Human web turns and their delegated-task results are manual attention;
+    // automation and scheduler platform events must never notify an absent user.
+    manual:
+      turnSource === 'human' ||
+      (turnSource === 'platform_event' &&
+        platformEventKind === 'delegated_task' &&
+        !automationReport),
+  };
   let userAttentionReady = false;
   const notifyUserAttention = async () => {
     if (!userAttentionReady) return;
@@ -3045,7 +3128,6 @@ export async function answerFastAgentQuestion({
       session,
       discoveredIntegrations,
       currentUser,
-      therapistModeEnabled,
       agentBehaviorSettings,
     ] = await Promise.all([
       getAvailableEnvironments(),
@@ -3075,20 +3157,20 @@ export async function answerFastAgentQuestion({
             displayName: null,
             githubLogin: null,
             isAdmin: false,
+            sessionSecretToolsEnabled: false,
           })
         : getFastAgentUserIdentity(userId).catch((error) => {
             degradedContextComponents.add('user_identity');
             console.warn(
               `[Fast Agent] User identity unavailable: ${formatErrorForLog(error)}`,
             );
-            return { displayName: null, githubLogin: null, isAdmin: false };
+            return {
+              displayName: null,
+              githubLogin: null,
+              isAdmin: false,
+              sessionSecretToolsEnabled: false,
+            };
           }),
-      getTherapistModeEnabledForUser(userId).catch((error) => {
-        console.warn(
-          `[Fast Agent] Personal preferences unavailable: ${formatErrorForLog(error)}`,
-        );
-        return false;
-      }),
       db.query.deploymentSettings
         .findFirst({
           columns: {
@@ -3104,17 +3186,44 @@ export async function answerFastAgentQuestion({
           return undefined;
         }),
     ]);
-    const personalizationContext = platformEvent
-      ? null
-      : await resolveFastAgentPersonalizationContext({
-          conversationId: session.id,
+    const [personalizationContext, availableSkills] = await Promise.all([
+      platformEvent
+        ? null
+        : resolveFastAgentPersonalizationContext({
+            conversationId: session.id,
+            userId,
+          }).catch((error) => {
+            console.warn(
+              `[Fast Agent] User personalization unavailable: ${formatErrorForLog(error)}`,
+            );
+            return null;
+          }),
+      // Instance and inline environment skills go into the prompt so the
+      // model can recognize a relevant playbook without guessing that
+      // `list_skills` is worth a call. Marketplace and repository skills stay
+      // on demand: they need a git fetch.
+      loadFastAgentPromptSkillCatalog(
+        createFastAgentPromptSkillCatalogSources({
+          allowedEnvironmentIds: availableEnvironments.map(
+            (environment) => environment.id,
+          ),
           userId,
-        }).catch((error) => {
+        }),
+      )
+        .then((catalog) => {
+          for (const warning of catalog.warnings) {
+            console.warn(`[Fast Agent] Prompt skill catalog: ${warning}`);
+          }
+          return catalog;
+        })
+        .catch((error) => {
+          degradedContextComponents.add('skill_catalog');
           console.warn(
-            `[Fast Agent] User personalization unavailable: ${formatErrorForLog(error)}`,
+            `[Fast Agent] Prompt skill catalog unavailable: ${formatErrorForLog(error)}`,
           );
           return null;
-        });
+        }),
+    ]);
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
@@ -3320,6 +3429,7 @@ export async function answerFastAgentQuestion({
       );
     }
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
+    const sessionGoal = await getSessionGoalForConversation(session.id);
     const resolvedActiveTasks = [
       ...new Map(
         [...activeTasks, ...sessionActiveTasks].map((task) => [
@@ -3371,10 +3481,12 @@ export async function answerFastAgentQuestion({
     );
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
+      availableSkills,
       availableTaskModels: taskModelOptions.models,
       defaultTaskModelId: taskModelOptions.defaultModelId,
       availableIntegrations,
       activeTasks: resolvedActiveTasks,
+      sessionGoal,
       surface: conversation.surface,
       turnSource,
       input: humanInput,
@@ -3390,7 +3502,7 @@ export async function answerFastAgentQuestion({
       appEnv: Env.R_APP_ENV,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
-      therapistModeEnabled,
+      sessionSecretToolsEnabled: currentUser.sessionSecretToolsEnabled,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
@@ -3405,6 +3517,7 @@ export async function answerFastAgentQuestion({
         0,
       ),
       activeTaskCount: resolvedActiveTasks.length,
+      promptSkillCount: availableSkills?.skills.length,
     });
     const resumedWithDeliveredAcknowledgement = Boolean(
       previousAttempt?.events.some(
@@ -3493,6 +3606,8 @@ export async function answerFastAgentQuestion({
               ? 'input_needed'
               : 'result_ready',
           eventId: turnId,
+          message: replyWithImages.message,
+          manual: userAttention.manual,
         };
         userAttentionReady = true;
         closedInstructionVersions.add(instructionVersion);
@@ -3694,6 +3809,7 @@ export async function answerFastAgentQuestion({
     // ones allowed to precede that communication.
     const acknowledgementExemptToolIds = new Set<string>([
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
+      FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
       FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
       // Scheduling or cancelling a wakeup is instant and its own confirmation
@@ -3706,6 +3822,15 @@ export async function answerFastAgentQuestion({
       // Reading an attachment the user just sent is part of understanding
       // the request, not an action taken on their behalf.
       FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages,
+      // Web already shows tool activity; an approved bounded secret read needs
+      // no extra reply. This does not bypass the live actor/grant checks.
+      ...(conversation.surface === 'web'
+        ? [
+            FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+            FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret,
+            FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets,
+          ]
+        : []),
       `${ROOMOTE_MCP_ID}_${CHAT_REACTION_EMOJI_TOOL_NAME}`,
     ]);
     const authorizeToolStart = (toolId: string) =>
@@ -3748,17 +3873,31 @@ export async function answerFastAgentQuestion({
           };
         }
 
+        // Reject undeclared top-level keys instead of letting the MCP server
+        // strip them silently: a model that wraps arguments in an `args`
+        // field would otherwise get a successful default result and repeat
+        // the shape for the rest of the session.
+        const unknownArgumentsError = describeUnknownIntegrationArguments(
+          call,
+          call.args,
+          availableIntegrations
+            .find((integration) => integration.id === call.integrationId)
+            ?.tools.find((tool) => tool.name === call.toolName)?.inputSchema,
+        );
+        if (unknownArgumentsError) {
+          return { success: false, error: unknownArgumentsError };
+        }
+
         const chatLookupProvider =
           call.integrationId === ROOMOTE_MCP_ID &&
           (call.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name ||
-            call.toolName === CHAT_MESSAGE_CONTEXT_TOOL.name) &&
-          isFastAgentCommunicationConversation(conversation)
-            ? conversation.surface
+            call.toolName === CHAT_MESSAGE_CONTEXT_TOOL.name)
+            ? resolveFastAgentChatLookupProvider(call.args, conversation)
             : undefined;
         const integrationArguments =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name &&
-          conversation.surface === 'slack' &&
+          chatLookupProvider === 'slack' &&
           (typeof call.args.oldest !== 'string' ||
             call.args.oldest.trim().length === 0)
             ? {
@@ -3780,6 +3919,7 @@ export async function answerFastAgentQuestion({
           : undefined;
         const chatLookupArguments =
           chatLookupProvider &&
+          chatLookupProvider === conversation.surface &&
           currentChatChannel &&
           (typeof integrationArguments.channel !== 'string' ||
             integrationArguments.channel.trim().length === 0) &&
@@ -3845,6 +3985,7 @@ export async function answerFastAgentQuestion({
             sessionId: session.id,
             privacy: currentSessionPrivacy,
             privateOwnerUserId: currentPrivateOwnerUserId,
+            humanTurn: !platformEvent,
             conversation,
             messageId: currentMessageId ?? conversation.conversationId,
           },
@@ -4582,6 +4723,109 @@ export async function answerFastAgentQuestion({
             return result;
           }
 
+          case FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret:
+          case FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets:
+          case FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret: {
+            // The model only ever sees the generic message; the bounded reason
+            // goes to server logs so operators can tell a disabled experiment
+            // from a missing Session binding or a broker denial.
+            const unavailable = (reason: string) => {
+              console.warn(
+                `[Fast Agent] ${call.name} unavailable (reason=${reason})`,
+              );
+              return { success: false, error: 'Secret request unavailable' };
+            };
+            try {
+              if (!currentUser.sessionSecretToolsEnabled) {
+                return unavailable('experiment_disabled');
+              }
+              const schema =
+                call.name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret
+                  ? sessionSecretPrepareToolSchema
+                  : call.name ===
+                      FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets
+                    ? z.object({}).strict()
+                    : sessionSecretRequestSchema;
+              const args = schema.safeParse(call.args);
+              if (!args.success) return unavailable('invalid_arguments');
+              // Platform events carry an owner for routing, not a human actor.
+              if (platformEvent) return unavailable('platform_event');
+              if (!userId) return unavailable('actor_missing');
+              const canonicalSession = await getSessionForFastConversation(
+                db,
+                session.id,
+              );
+              if (!canonicalSession) return unavailable('session_not_bound');
+              throwIfTurnCancelled();
+              const context = { sessionId: canonicalSession.id, userId };
+              // The secure entry link is nonsecret and the same for every
+              // approval in the Session, so both tools return it: Fast can
+              // re-share it for a pending approval on a later turn without
+              // preparing a duplicate.
+              const sessionUrl = new URL(
+                `${Env.R_APP_URL}/sessions/${encodeURIComponent(canonicalSession.id)}`,
+              );
+              sessionUrl.hash = 'session-secrets';
+              if (
+                call.name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret
+              ) {
+                const pending = await prepareSessionSecret(
+                  context,
+                  sessionSecretPrepareSchema.parse(args.data),
+                );
+                return { pending, sessionUrl: sessionUrl.toString() };
+              }
+              if (
+                call.name === FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets
+              ) {
+                return {
+                  ...(await listSessionSecretApprovals(context)),
+                  sessionUrl: sessionUrl.toString(),
+                };
+              }
+              const request = sessionSecretRequestSchema.parse(args.data);
+              const result = await callFastAgentIntegration(
+                {
+                  userId,
+                  apiBaseUrl,
+                  sessionId: session.id,
+                  humanTurn: true,
+                  conversation,
+                  messageId: currentMessageId ?? conversation.conversationId,
+                },
+                availableIntegrations,
+                {
+                  integrationId: HTTP_INTEGRATIONS_MCP_ID,
+                  toolName: 'integration_request',
+                  args: {
+                    integrationId: `session:${request.secretRef}`,
+                    method: request.method,
+                    path: request.path,
+                    body: request.body,
+                    accept: request.accept,
+                  },
+                },
+              );
+              return { success: true, ...(result as Record<string, unknown>) };
+            } catch (error) {
+              // The broker's isError text is our own constant copy, so it is
+              // safe to classify (never to log); anything else is logged by
+              // class name only because SDK/database messages can echo bound
+              // values.
+              return unavailable(
+                error instanceof McpToolCallError
+                  ? error.upstreamText?.startsWith(
+                      'Integration request rejected',
+                    )
+                    ? 'broker_rejected'
+                    : 'broker_unavailable'
+                  : error instanceof Error
+                    ? error.name || 'Error'
+                    : 'unknown',
+              );
+            }
+          }
+
           case FAST_AGENT_NATIVE_TOOL_NAMES.stopTask: {
             const args = stopTaskArgsSchema.parse(call.args);
             const target = selectActiveTaskId(args.taskId, currentTasks);
@@ -4627,11 +4871,50 @@ export async function answerFastAgentQuestion({
 
             throwIfTurnCancelled();
 
-            return await handleManageWakeupsToolCall(
+            const result = await handleManageWakeupsToolCall(
               { conversationId: session.id, userId },
-
               args,
             );
+            if (
+              args.action === 'cancel' &&
+              args.wakeupId &&
+              result.success === true &&
+              result.cancelled === true
+            ) {
+              adapter.onWakeupCancelled?.(args.wakeupId);
+            }
+            return result;
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.manageGoal: {
+            const args = manageGoalArgsSchema.parse(call.args);
+            throwIfTurnCancelled();
+            if (args.action === 'get') {
+              const goal = await getSessionGoalForConversation(session.id);
+              return { success: true, goal };
+            }
+            if (!sessionGoal?.generation) {
+              return {
+                success: false,
+                error: 'There is no active Session goal.',
+              };
+            }
+            if (args.action === 'blocked' && !args.reason) {
+              return {
+                success: false,
+                error: 'A concrete blocker reason is required.',
+              };
+            }
+            const result = await markSessionGoalForConversation({
+              conversationId: session.id,
+              generation: sessionGoal.generation,
+              status: args.action,
+              ...(args.reason ? { reason: args.reason } : {}),
+            });
+            if (result.updated || result.reason === 'not_active') {
+              await cancelSessionGoalContinuationWakeups(session.id);
+            }
+            return { success: result.updated, ...result };
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart: {
@@ -4702,6 +4985,98 @@ export async function answerFastAgentQuestion({
                 };
           }
 
+          case FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability: {
+            if (conversation.surface !== 'web' || !adapter.offerCapability) {
+              return {
+                success: false,
+                error:
+                  'Trusted capability cards are available only to administrators in web Sessions.',
+              };
+            }
+            const requestedArgs = fastAgentCapabilityOfferInputSchema.parse(
+              call.args,
+            );
+            captureFastAgentCapabilityOffer({
+              userId,
+              capability: requestedArgs.capability,
+              outcome: 'requested',
+              advancedInitialSetup: setupSession,
+            });
+            let args;
+            try {
+              args = await adapter.offerCapability(requestedArgs);
+            } catch (error) {
+              captureFastAgentCapabilityOffer({
+                userId,
+                capability: requestedArgs.capability,
+                outcome: 'unavailable',
+                advancedInitialSetup: setupSession,
+              });
+              throw error;
+            }
+            const [pending] = canonicalConversationId
+              ? await db.execute<{ offer_id: string }>(sql`
+                  select offer.payload ->> 'offerId' as offer_id
+                  from fast_agent_messages offer
+                  where offer.conversation_id = ${canonicalConversationId}
+                    and offer.event_type = ${ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer}
+                    and offer.payload ->> 'capability' = ${args.capability}
+                    and not exists (
+                      select 1 from fast_agent_messages response
+                      where response.conversation_id = offer.conversation_id
+                        and response.event_type = ${ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse}
+                        and response.payload ->> 'offerId' = offer.payload ->> 'offerId'
+                    )
+                  order by offer.ts desc
+                  limit 1
+                `)
+              : [];
+            if (pending?.offer_id) {
+              captureFastAgentCapabilityOffer({
+                userId,
+                capability: args.capability,
+                outcome: 'deduplicated',
+                advancedInitialSetup: setupSession,
+              });
+              visibleUpdatePosted = true;
+              closedInstructionVersions.add(instructionVersion);
+              return {
+                success: true,
+                duplicate: true,
+                offerId: pending.offer_id,
+                closed: true,
+              };
+            }
+            const offerEvent = allocateCanonicalEvent(
+              `capability_offer:${nextTurnSeq++}`,
+            );
+            const offerId = `cap:${offerEvent.eventId}`;
+            await persistCanonicalMessage(
+              {
+                ...offerEvent,
+                turnId,
+                ts: Date.now(),
+                eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+                role: 'assistant',
+                contentBlocks: [{ type: 'text', text: args.message }],
+                metadata: { visibleInTranscript: true },
+                payload: { offerId, status: 'pending', ...args },
+                source: conversation.surface,
+                nativeSessionId: activeOpenCodeSessionId,
+              },
+              true,
+            );
+            captureFastAgentCapabilityOffer({
+              userId,
+              capability: args.capability,
+              outcome: 'shown',
+              advancedInitialSetup: setupSession,
+            });
+            visibleUpdatePosted = true;
+            closedInstructionVersions.add(instructionVersion);
+            return { success: true, offerId, closed: true };
+          }
+
           case FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput: {
             if (conversation.surface !== 'web') {
               return {
@@ -4716,7 +5091,21 @@ export async function answerFastAgentQuestion({
                 error: 'Pass either questions to ask or a trusted preset name.',
               };
             }
-            const preset = 'preset' in args ? args.preset : undefined;
+            const genericQuestions =
+              'questions' in args ? args.questions : undefined;
+            let preset = 'preset' in args ? args.preset : undefined;
+            // Older setup guidance asked the model to create category questions.
+            // Keep an in-flight model call from reviving that UI: route it to
+            // the trusted compact integration offer instead.
+            if (
+              !preset &&
+              setupSession &&
+              genericQuestions?.some((question) =>
+                question.id.startsWith('setup-tools-'),
+              )
+            ) {
+              preset = 'setup_integrations';
+            }
             if (preset && (!setupSession || !adapter.resolveUserInputPreset)) {
               return {
                 success: false,
@@ -4724,15 +5113,18 @@ export async function answerFastAgentQuestion({
                   'That trusted input preset is unavailable in this session.',
               };
             }
-            const questions =
-              'questions' in args
-                ? args.questions
-                : args.setupIntegrationAnswers !== undefined
-                  ? await adapter.resolveUserInputPreset!(
-                      args.preset,
-                      args.setupIntegrationAnswers,
-                    )
-                  : await adapter.resolveUserInputPreset!(args.preset);
+            const setupIntegrationAnswers =
+              'setupIntegrationAnswers' in args
+                ? args.setupIntegrationAnswers
+                : undefined;
+            const questions = preset
+              ? setupIntegrationAnswers !== undefined
+                ? await adapter.resolveUserInputPreset!(
+                    preset,
+                    setupIntegrationAnswers,
+                  )
+                : await adapter.resolveUserInputPreset!(preset)
+              : genericQuestions!;
             // Trusted setup presets may complete entirely server-side. In
             // that case no pending request or browser response is needed.
             if (preset && questions.length === 0) {
@@ -4796,7 +5188,14 @@ export async function answerFastAgentQuestion({
               ...(preset ? { preset } : {}),
               questions,
             });
-            userAttention = { kind: 'input_needed', eventId: requestId };
+            userAttention = {
+              kind: 'input_needed',
+              eventId: requestId,
+              message: questions
+                .map((question) => question.question)
+                .join('\n'),
+              manual: userAttention.manual,
+            };
             userAttentionReady = true;
             visibleUpdatePosted = true;
             closedInstructionVersions.add(instructionVersion);
@@ -4927,6 +5326,8 @@ export async function answerFastAgentQuestion({
               ? 'input_needed'
               : 'result_ready',
           eventId: turnId,
+          message: recordedCloseout.text,
+          manual: userAttention.manual,
         };
         userAttentionReady = true;
       } else {
@@ -4983,7 +5384,10 @@ export async function answerFastAgentQuestion({
         const nativeRuntime = await getFastAgentNativeToolRuntime(
           session.id,
           availableIntegrations,
-          { surface: conversation.surface },
+          {
+            surface: conversation.surface,
+            sessionSecretToolsEnabled: currentUser.sessionSecretToolsEnabled,
+          },
         );
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();
@@ -5512,6 +5916,37 @@ export async function answerFastAgentQuestion({
       }
     }
     await settleDurableTurn();
+    const settledGoal = await getSessionGoalForConversation(session.id);
+    if (settledGoal?.status === 'active') {
+      const activeGoalTasks = await getActiveFastAgentTasks(session.id);
+      if (activeGoalTasks.length > 0) {
+        await cancelSessionGoalContinuationWakeups(session.id);
+      } else {
+        const continuationId = `${turnId}:goal-continuation`;
+        const claim = await claimSessionGoalContinuation({
+          conversationId: session.id,
+          continuationId,
+        });
+        if (claim.updated) {
+          try {
+            await ensureSessionGoalContinuationWakeup({
+              conversationId: session.id,
+              userId,
+            });
+          } catch (error) {
+            await releaseSessionGoalContinuation({
+              conversationId: session.id,
+              continuationId,
+            }).catch(() => undefined);
+            console.warn(
+              `[Fast Agent] Failed to schedule Session goal continuation: ${formatErrorForLog(error)}`,
+            );
+          }
+        }
+      }
+    } else {
+      await cancelSessionGoalContinuationWakeups(session.id);
+    }
     await mirrorPendingMessages();
     await notifyUserAttention();
     return lastVisibleMessage;
@@ -5687,6 +6122,7 @@ export async function answerFastAgentQuestion({
         inferenceRetryMessageIndex = undefined;
         inferenceRetryCanonicalEvent = undefined;
         lastVisibleMessage = message;
+        userAttention = { ...userAttention, message };
         userAttentionReady = true;
       } catch (postError) {
         console.error(

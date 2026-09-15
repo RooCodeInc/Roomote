@@ -38,14 +38,18 @@ import {
  * instructions and credentials live in a dialog so they do not overwhelm the
  * conversation card.
  */
-function SetupSessionSourceControlCardBody({
+export function SetupSessionSourceControlCardBody({
   sourceControlSetup,
   explicitlySelectedProvider,
   sessionId,
+  preferredProvider,
+  onDismiss,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   explicitlySelectedProvider: SourceControlProvider | null;
   sessionId: string;
+  preferredProvider?: SourceControlProvider;
+  onDismiss?: () => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -53,7 +57,7 @@ function SetupSessionSourceControlCardBody({
   const [stage, setStage] = useState<SourceControlCardStage>(() =>
     getInitialSourceControlCardStage(
       sourceControlSetup,
-      explicitlySelectedProvider,
+      preferredProvider ?? explicitlySelectedProvider,
       searchParams,
     ),
   );
@@ -73,9 +77,20 @@ function SetupSessionSourceControlCardBody({
       onError: (error) => toast.error(error.message),
     }),
   );
+  const skipSourceControl = useMutation(
+    trpc.setup.skipSourceControl.mutationOptions({
+      onSuccess: async () => {
+        await queryClient.invalidateQueries({
+          queryKey: trpc.setupNew.status.queryKey(),
+        });
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
 
   const provider =
     activeProvider ??
+    preferredProvider ??
     explicitlySelectedProvider ??
     sourceControlSetup.runtimeConfiguredProvider ??
     sourceControlSetup.preselectedProvider;
@@ -163,6 +178,20 @@ function SetupSessionSourceControlCardBody({
           returnPath={returnPath}
         />
       )}
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        disabled={
+          saveSourceControlProviderChoice.isPending ||
+          skipSourceControl.isPending
+        }
+        onClick={() =>
+          onDismiss ? onDismiss() : skipSourceControl.mutate({ sessionId })
+        }
+      >
+        Not now
+      </Button>
     </SetupSessionActionCard>
   );
 }
@@ -182,8 +211,15 @@ export function SetupSessionSourceControlCard({
   const hasSynchronizedRepository = sourceControlSetup?.providers.some(
     (provider) => provider.connected && (provider.repositoryCount ?? 0) > 0,
   );
+  const sourceControlSkipped = Boolean(
+    statusQuery.data?.setupNewState.setupSession?.sourceControlSkippedAt,
+  );
 
-  if (!sourceControlSetup || hasSynchronizedRepository) {
+  if (
+    !sourceControlSetup ||
+    hasSynchronizedRepository ||
+    sourceControlSkipped
+  ) {
     return null;
   }
 

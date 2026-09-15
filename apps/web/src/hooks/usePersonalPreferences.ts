@@ -51,14 +51,22 @@ function mergeResultForUpdatedFields(
       updates.narrationMode === undefined
         ? mergedPreferences.narrationMode
         : result.narrationMode,
-    therapistMode:
-      updates.therapistMode === undefined
-        ? mergedPreferences.therapistMode
-        : result.therapistMode,
     resultsPageEnabled:
       updates.resultsPageEnabled === undefined
         ? mergedPreferences.resultsPageEnabled
         : result.resultsPageEnabled,
+    slackPeerConversationsExperimentEnabled:
+      updates.slackPeerConversationsExperimentEnabled === undefined
+        ? mergedPreferences.slackPeerConversationsExperimentEnabled
+        : result.slackPeerConversationsExperimentEnabled,
+    homeComposerSuggestionsEnabled:
+      updates.homeComposerSuggestionsEnabled === undefined
+        ? mergedPreferences.homeComposerSuggestionsEnabled
+        : result.homeComposerSuggestionsEnabled,
+    sessionSecretToolsEnabled:
+      updates.sessionSecretToolsEnabled === undefined
+        ? mergedPreferences.sessionSecretToolsEnabled
+        : result.sessionSecretToolsEnabled,
   };
 }
 
@@ -89,17 +97,30 @@ function rollbackUpdatedFields(
       mergedPreferences.narrationMode === optimisticPreferences.narrationMode
         ? previousPreferences.narrationMode
         : mergedPreferences.narrationMode,
-    therapistMode:
-      updates.therapistMode !== undefined &&
-      mergedPreferences.therapistMode === optimisticPreferences.therapistMode
-        ? previousPreferences.therapistMode
-        : mergedPreferences.therapistMode,
     resultsPageEnabled:
       updates.resultsPageEnabled !== undefined &&
       mergedPreferences.resultsPageEnabled ===
         optimisticPreferences.resultsPageEnabled
         ? previousPreferences.resultsPageEnabled
         : mergedPreferences.resultsPageEnabled,
+    slackPeerConversationsExperimentEnabled:
+      updates.slackPeerConversationsExperimentEnabled !== undefined &&
+      mergedPreferences.slackPeerConversationsExperimentEnabled ===
+        optimisticPreferences.slackPeerConversationsExperimentEnabled
+        ? previousPreferences.slackPeerConversationsExperimentEnabled
+        : mergedPreferences.slackPeerConversationsExperimentEnabled,
+    homeComposerSuggestionsEnabled:
+      updates.homeComposerSuggestionsEnabled !== undefined &&
+      mergedPreferences.homeComposerSuggestionsEnabled ===
+        optimisticPreferences.homeComposerSuggestionsEnabled
+        ? previousPreferences.homeComposerSuggestionsEnabled
+        : mergedPreferences.homeComposerSuggestionsEnabled,
+    sessionSecretToolsEnabled:
+      updates.sessionSecretToolsEnabled !== undefined &&
+      mergedPreferences.sessionSecretToolsEnabled ===
+        optimisticPreferences.sessionSecretToolsEnabled
+        ? previousPreferences.sessionSecretToolsEnabled
+        : mergedPreferences.sessionSecretToolsEnabled,
   };
 }
 
@@ -176,8 +197,12 @@ export function usePersonalPreferences(
 
   return {
     preferences: preferencesQuery.data ?? DEFAULT_PERSONAL_PREFERENCES,
+    error: preferencesQuery.error,
+    hasLoadedPreferences: preferencesQuery.data !== undefined,
+    isFetching: preferencesQuery.isFetching,
     isLoading: preferencesQuery.isPending,
     isUpdating: updatePreferences.isPending,
+    refetch: preferencesQuery.refetch,
     setPreferences,
   };
 }

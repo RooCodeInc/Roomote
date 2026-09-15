@@ -26,6 +26,7 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
+import type { SessionEgressLifecycle } from '../session-egress';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 import {
   COMPUTE_BOOTSTRAP_TIMEOUT_MS,
@@ -44,6 +45,8 @@ export async function spawnBlaxelWorker(
     localTarballPath?: string;
     deploymentSlug?: string;
     blaxelTags?: Record<string, string>;
+    /** Session-egress admission; omitted in unit paths that do not exercise it. */
+    sessionEgress?: SessionEgressLifecycle;
   },
 ): Promise<{ machineId: string; sandboxCmdId?: string }> {
   if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
@@ -114,6 +117,12 @@ export async function spawnBlaxelWorker(
     field: 'provisionStartedAt',
     launchMode: launchOptions.launchMode,
   });
+
+  const sessionEgressPlan = await config.sessionEgress?.planApiProxy({
+    taskRun,
+    provider: 'blaxel',
+  });
+
   const machine = await createBlaxelMachine({
     blaxelApiKey: config.blaxelApiKey,
     blaxelWorkspace: config.blaxelWorkspace,
@@ -193,7 +202,10 @@ export async function spawnBlaxelWorker(
         deploymentSlug: config.deploymentSlug,
         environmentId,
         image: config.blaxelImage,
-        extraEnv: { SANDBOX_TIMEOUT_MS: String(config.blaxelTimeoutMs) },
+        extraEnv: {
+          SANDBOX_TIMEOUT_MS: String(config.blaxelTimeoutMs),
+          ...sessionEgressPlan?.bootstrapEnv,
+        },
       }),
       detached: true,
       signal: AbortSignal.timeout(60_000),
@@ -221,6 +233,11 @@ export async function spawnBlaxelWorker(
         .set({ sandboxCmdId: result.commandId })
         .where(eq(taskRuns.id, taskRun.id));
     }
+    // The worker is waiting on the bootstrap nonce after its ordinary
+    // bootstrap; an admission failure fails the spawn, as it does for Docker,
+    // rather than leaving a worker that expected substitutes without them.
+    await sessionEgressPlan?.admit();
+
     return {
       machineId: machine.machineId,
       ...(result.commandId ? { sandboxCmdId: result.commandId } : {}),

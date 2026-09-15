@@ -20,7 +20,22 @@ export interface ComputeProviderCapabilities {
   supportsFileWrite: boolean;
   /** Can run customer-owned Docker Compose and Dockerfile projects. */
   supportsDockerProjects: boolean;
+  /**
+   * How the provider can hold a Session-egress workload.
+   *
+   * - `api_proxy`: the workload receives substitutes and calls the API-side
+   *   substitution proxy over the route it already uses for the API;
+   *   possession of the substitute is the authority, bounded by the live
+   *   workload, run, Session, and grant state.
+   * - `unsupported`: fails closed; no workload is registered and no
+   *   substitute is ever delivered.
+   */
+  sessionEgress: ComputeProviderSessionEgressCapability;
 }
+
+export type ComputeProviderSessionEgressCapability =
+  | 'api_proxy'
+  | 'unsupported';
 
 export type ComputeProviderCommandOutputSource =
   | 'central'
@@ -38,6 +53,9 @@ export const DOCKER_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: false,
   supportsDockerProjects: true,
+  // The worker reaches the API over the task network; substitutes are used
+  // through the API-side session egress proxy like every other provider.
+  sessionEgress: 'api_proxy',
 };
 
 export const MODAL_CAPABILITIES: ComputeProviderCapabilities = {
@@ -51,6 +69,9 @@ export const MODAL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
+  // Sandboxes reach the API over HTTPS already; substitutes are used through
+  // the API-side session egress proxy, so no connector is needed.
+  sessionEgress: 'api_proxy',
 };
 
 export const DAYTONA_CAPABILITIES: ComputeProviderCapabilities = {
@@ -64,6 +85,9 @@ export const DAYTONA_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
+  // Substitutes are used through the API-side session egress proxy; see
+  // MODAL_CAPABILITIES.
+  sessionEgress: 'api_proxy',
 };
 
 export const E2B_CAPABILITIES: ComputeProviderCapabilities = {
@@ -77,6 +101,9 @@ export const E2B_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
+  // Substitutes are used through the API-side session egress proxy; see
+  // MODAL_CAPABILITIES.
+  sessionEgress: 'api_proxy',
 };
 
 export const BLAXEL_CAPABILITIES: ComputeProviderCapabilities = {
@@ -90,6 +117,9 @@ export const BLAXEL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
+  // Substitutes are used through the API-side session egress proxy; see
+  // MODAL_CAPABILITIES.
+  sessionEgress: 'api_proxy',
 };
 
 export const BOX_CAPABILITIES: ComputeProviderCapabilities = {
@@ -104,6 +134,9 @@ export const BOX_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
+  // Substitutes are used through the API-side session egress proxy; see
+  // MODAL_CAPABILITIES.
+  sessionEgress: 'api_proxy',
 };
 
 export const AZURE_CAPABILITIES: ComputeProviderCapabilities = {
@@ -120,6 +153,9 @@ export const AZURE_CAPABILITIES: ComputeProviderCapabilities = {
   supportsFileWrite: true,
   // dockerd runs inside the ACA microVM (verified against the worker image).
   supportsDockerProjects: true,
+  // Substitutes are used through the API-side session egress proxy; see
+  // MODAL_CAPABILITIES.
+  sessionEgress: 'api_proxy',
 };
 
 export function getComputeProviderCapabilities(
@@ -158,4 +194,15 @@ export function getComputeProviderCommandOutputSource(
   return getComputeProviderCapabilities(provider).supportsCommandOutputLookup
     ? 'provider'
     : 'none';
+}
+
+/**
+ * Session-egress gate. Providers whose sandboxes can reach the API-side proxy
+ * receive substitute tokens; any other provider fails closed with an explicit
+ * status.
+ */
+export function getComputeProviderSessionEgressCapability(
+  provider: ComputeProvider,
+): ComputeProviderSessionEgressCapability {
+  return getComputeProviderCapabilities(provider).sessionEgress;
 }

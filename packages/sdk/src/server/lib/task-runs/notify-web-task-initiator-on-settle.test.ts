@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   returning: vi.fn(),
   selectTaskStateRun: vi.fn(),
   sendPersonalNotification: vi.fn(),
+  findLatestReceipt: vi.fn(),
+  findTaskMessage: vi.fn(),
+  resolvePresentation: vi.fn(),
 }));
 
 function updateChain() {
@@ -42,10 +45,13 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     `https://roomote.test/task/${taskId}`,
 }));
 vi.mock('../user-direct-message', () => ({
-  sendUserDirectMessageBestEffort: mocks.sendPersonalNotification,
+  sendUserDirectMessageBestEffortWithReceipts: mocks.sendPersonalNotification,
 }));
 vi.mock('../session-attention-notification', () => ({
+  findLatestSessionAttentionReceipt: mocks.findLatestReceipt,
+  findTaskAttentionMessage: mocks.findTaskMessage,
   hasTaskRunAttentionNotification: mocks.hasAttention,
+  resolveSessionAttentionPresentation: mocks.resolvePresentation,
 }));
 vi.mock('./fast-agent-delivery-claim', () => ({
   buildDeliveryClaimMarker: () => 'delivering:1',
@@ -60,6 +66,9 @@ const eligibleTask = {
   initiatorUserId: 'user-1',
   state: 'completed',
   surface: 'web',
+  trigger: 'manual',
+  initiatorKind: 'user',
+  prompt: 'Please ship the notification fallback.',
   title: 'Ship notification fallback',
   runs: [{ id: 42, status: RunStatus.Completed, startedAt: new Date() }],
 };
@@ -73,7 +82,13 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
     mocks.getSessionForTask.mockResolvedValue({ id: 'session-1' });
     mocks.hasAttention.mockResolvedValue(false);
     mocks.isPresent.mockResolvedValue(false);
-    mocks.sendPersonalNotification.mockResolvedValue(['slack']);
+    mocks.findLatestReceipt.mockResolvedValue(null);
+    mocks.findTaskMessage.mockResolvedValue('The actual task response.');
+    mocks.resolvePresentation.mockResolvedValue({ sessionId: 'session-1' });
+    mocks.sendPersonalNotification.mockResolvedValue({
+      deliveredProviders: ['slack'],
+      receipts: [],
+    });
     mocks.recordEvent.mockResolvedValue(undefined);
   });
 
@@ -83,7 +98,7 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
     [RunStatus.Canceled, 'was canceled'],
   ] as const)(
     'delivers a %s settle through the personal waterfall',
-    async (status, label) => {
+    async (status, _label) => {
       mocks.findTask.mockResolvedValue({
         ...eligibleTask,
         state: status,
@@ -97,14 +112,18 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
 
       expect(mocks.sendPersonalNotification).toHaveBeenCalledWith({
         userId: 'user-1',
-        text: expect.stringContaining(
-          `**Ship notification fallback** ${label}.`,
-        ),
+        text: expect.stringContaining('The actual task response.'),
         logContext: 'notifyWebTaskInitiatorOnSettle',
         idempotencyKey: expect.stringMatching(
           /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/,
         ),
+        presentation: { sessionId: 'session-1' },
       });
+      expect(mocks.sendPersonalNotification).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining('Ship notification fallback'),
+        }),
+      );
     },
   );
 
@@ -128,6 +147,8 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
     ['non-web origin', { surface: 'slack' }],
     ['missing initiating user', { initiatorUserId: null }],
     ['task still active', { state: 'active' }],
+    ['scheduled task', { trigger: 'schedule' }],
+    ['automation initiator', { initiatorKind: 'automation' }],
   ])('suppresses %s', async (_label, override) => {
     mocks.findTask.mockResolvedValue({ ...eligibleTask, ...override });
 
@@ -186,7 +207,10 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
   });
 
   it('releases a failed delivery claim so a later finalization can retry', async () => {
-    mocks.sendPersonalNotification.mockResolvedValue([]);
+    mocks.sendPersonalNotification.mockResolvedValue({
+      deliveredProviders: [],
+      receipts: [],
+    });
 
     await notifyWebTaskInitiatorOnSettle(run, RunStatus.Completed);
     await notifyWebTaskInitiatorOnSettle(run, RunStatus.Completed);

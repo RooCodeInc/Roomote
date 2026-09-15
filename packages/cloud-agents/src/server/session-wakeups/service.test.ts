@@ -13,6 +13,8 @@ import {
 import { enqueueSessionWakeupFireBestEffort } from './queue';
 import {
   ensureOwnTaskFollowThroughWakeup,
+  ensureSessionGoalContinuationWakeup,
+  cancelSessionGoalContinuationWakeups,
   handleManageWakeupsToolCall,
   refreshOwnTaskFollowThroughWakeupCadence,
   type SessionWakeupActor,
@@ -122,6 +124,24 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
       expect(enqueueSessionWakeupFireBestEffort).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('schedules and cancels the internal Session goal continuation', async () => {
+    const created = await ensureSessionGoalContinuationWakeup(actor);
+
+    expect(created).toMatchObject({
+      duplicate: false,
+      wakeup: {
+        name: 'Continue pursuing session goal',
+        internal: true,
+        reportPolicy: 'only_when_notable',
+        schedule: { mode: 'once', inMinutes: 1 },
+      },
+    });
+    await cancelSessionGoalContinuationWakeups(actor.conversationId);
+    await expect(
+      listSessionWakeups(actor.conversationId),
+    ).resolves.toHaveLength(0);
+  });
 
   it('deduplicates equivalent seconds and minutes schedules', async () => {
     const nextRunAt = new Date(now.getTime() + 60_000);

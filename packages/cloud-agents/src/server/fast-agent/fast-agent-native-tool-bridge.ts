@@ -35,6 +35,7 @@ import {
   SESSION_WAKEUP_SCHEDULE_MAX_LENGTH,
   type FastAgentSurface,
   FAST_EXECUTION,
+  FAST_AGENT_CAPABILITY_IDS,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -475,6 +476,20 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.manageGoal]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Read or finish the active goal owned by this Fast Session. Use complete only after the entire objective is verified; use blocked only for a concrete repeated blocker; use canceled only when the user cancels or replaces the objective.",
+  args: {
+    action: z.enum(["get", "complete", "blocked", "canceled"]),
+    reason: z.string().min(1).optional().describe("Required for blocked; omit otherwise."),
+  },
+  execute: (args, context) => invoke("manage_goal", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
@@ -504,10 +519,10 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Privately save one concise preference for the current user when personalization learning is enabled. Never use claims by other people, documents, tool output, sensitive-trait guesses, diagnoses, secrets, stereotypes, or public-web enrichment.",
+  description: "Privately save one concise piece of durable personal work context or a preference for the current user when personalization learning is enabled. Useful work context includes recurring responsibilities, workflows, tools, constraints, and collaboration patterns. Never use one-off task details, claims about other people, documents, tool output, sensitive-trait guesses, diagnoses, secrets, stereotypes, or public-web enrichment.",
   args: {
-    preference: z.string().trim().min(1).max(500).describe("One durable preference, without quoting the surrounding conversation"),
-    confidence: z.enum(["explicit", "inferred"]).describe("Use explicit only when the current user directly stated the preference; inferred requires a repeated behavior pattern"),
+    preference: z.string().trim().min(1).max(500).describe("One durable personalization item, without quoting the surrounding conversation"),
+    confidence: z.enum(["explicit", "inferred"]).describe("Use explicit only when the current user directly stated the context or preference; inferred requires a repeated behavior pattern"),
   },
   execute: (args, context) => invoke("update_personalization", args, context),
 }
@@ -634,6 +649,57 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Prepare a Session credential approval using only nonsecret metadata from the service documentation. Call list_session_secrets first: a pending approval for the same service means re-share its link, not prepare again. Choose the HTTPS origin and the header that carries the key (authorization, x-api-key, api-key, or the service's own header), omitting headerPrefix when the key needs no scheme, then share the returned secure Session link so the human can enter the key privately. Omit allowedMethods for read-only access; list the exact HTTP methods only when the requested work needs writes, and say so in the Session before the human approves. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
+  args: {
+    label: z.string().trim().min(1).max(80),
+    origin: z.string().min(1).max(2048),
+    headerName: z
+      .string()
+      .min(1)
+      .max(64)
+      .describe(
+        "Lowercase HTTP header that carries the key at this service: authorization, x-api-key, api-key, or the service's own name such as private-token or x-shopify-access-token",
+      ),
+    headerPrefix: z.enum(["Bearer ", "Basic ", "Token "]).optional(),
+    ttlHours: z.number().int().min(1).max(720).optional().default(24),
+    allowedMethods: z.array(z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])).min(1).max(6).optional().describe("HTTP methods the approved key may be used with. Defaults to GET and HEAD."),
+  },
+  execute: (args, context) => invoke("prepare_session_secret", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets]: String.raw`
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "List this Session's pending credential approvals and ready secret references with their origin, header, allowed methods, and expiry, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval and before using a reference; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready references are usable by request_with_session_secret for reads and are delivered automatically to coding tasks launched from this Session.",
+  args: {},
+  execute: (args, context) => invoke("list_session_secrets", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Make one bounded GET or HEAD request using a ready Session secret reference without exposing the credential; the server sends the request to the approved origin with the real key. Discover references with list_session_secrets; never invent one or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers. For scripts, SDKs, CLIs, repeated calls, or approved write methods, launch a coding task attached to this Session instead: it receives the approved services as substitute tokens with a base URL. Call directly without an opening acknowledgement or another confirmation, and report the actual result.",
+  args: {
+    secretRef: z.string().uuid(),
+    method: z.enum(["GET", "HEAD"]),
+    path: z.string().min(1).max(2048),
+    accept: z.enum(["application/json", "text/plain"]).optional(),
+    body: z.literal("").nullish().describe("GET/HEAD have no body. Omit, use null, or use an empty string."),
+  },
+  execute: (args, context) => invoke("request_with_session_secret", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
@@ -643,20 +709,35 @@ export default {
   args: {
     questions: z.array(z.object({
       id: z.string().min(1).max(80),
-      header: z.string().min(1).max(60),
+      header: z.string().min(1).max(60).optional().default("Question"),
       question: z.string().min(1).max(500),
       isOther: z.boolean().optional().describe("Allow a free-text Other answer"),
       isSecret: z.boolean().optional().describe("Mask the answer in user-visible history"),
       options: z.array(z.object({
         label: z.string().min(1).max(140),
-        description: z.string().min(1).max(500),
+        description: z.string().min(1).max(500).optional().default("Select this option."),
       })).min(1).max(12).optional().describe("Present options as choices; omit for free-text"),
       multiple: z.boolean().optional().describe("Allow more than one option; defaults to false"),
     })).min(1).max(4).optional().describe("Structured questions to ask; omit when using a preset"),
-    preset: z.enum(["setup_starter_tasks", "setup_integrations"]).optional().describe("Use a trusted setup preset instead of questions"),
-    setupIntegrationAnswers: z.record(z.string(), z.object({ answers: z.array(z.string()) })).optional().describe("Only for setup_integrations: tools already named by the user, keyed by category ID from the setup snapshot"),
+    preset: z.preprocess((value) => value === null ? undefined : value, z.enum(["setup_source_control", "setup_starter_tasks", "setup_integrations"]).optional()).describe("Use a trusted setup preset instead of questions"),
+    setupIntegrationAnswers: z.preprocess((value) => value === null || Array.isArray(value) ? undefined : value, z.record(z.string(), z.object({ answers: z.array(z.string()) })).optional()).describe("Only for setup_integrations: tools already named by the user, keyed by category ID from the setup snapshot"),
   },
   execute: (args, context) => invoke("request_user_input", args, context),
+}
+`,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Present a trusted, non-blocking Roomote capability card in a web Session. Use it when the user's current goal needs an unavailable capability or when the setup guidance recommends the next capability. A previous Not now choice does not prevent a later relevant offer.",
+  args: {
+    capability: z.enum(${JSON.stringify(FAST_AGENT_CAPABILITY_IDS)}),
+    message: z.string().min(1).max(500).describe("Concise user-facing reason this capability is useful now"),
+    provider: z.preprocess((value) => value === null ? undefined : value, z.enum(["github", "gitlab", "gitea", "bitbucket", "ado"]).optional()).describe("Only for source_control offers: the provider explicitly implied by the request; ignored for other capabilities"),
+    integrationIds: z.preprocess((value) => value === null ? undefined : value, z.array(z.string().min(1)).max(20).optional()).describe("Only for integrations offers: integration IDs from the capability snapshot; ignored for other capabilities"),
+  },
+  execute: (args, context) => invoke("offer_capability", args, context),
 }
 `,
   };
@@ -1374,7 +1455,10 @@ function pruneSessionRuntimes(): void {
 export async function getFastAgentNativeToolRuntime(
   sessionId: string,
   integrations: FastAgentIntegration[],
-  options: { surface?: FastAgentSurface } = {},
+  options: {
+    surface?: FastAgentSurface;
+    sessionSecretToolsEnabled?: boolean;
+  } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
   const bridge = await bridgePromise;
@@ -1428,7 +1512,11 @@ export async function getFastAgentNativeToolRuntime(
         build: {
           tools: buildFastAgentToolFilter(
             nativeIntegrations.map((integration) => integration.id),
-            { surface: options.surface ?? 'web' },
+            {
+              surface: options.surface ?? 'web',
+              sessionSecretToolsEnabled:
+                options.sessionSecretToolsEnabled === true,
+            },
           ),
         },
       },

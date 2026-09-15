@@ -30,6 +30,7 @@ describe('lookupCommunicationMessageContext', () => {
 
   it('uses the task communication provider without exposing a provider input', async () => {
     lookupSlackThreadMock.mockResolvedValueOnce({
+      slackTeamId: 'T123',
       channelId: 'C123',
       requestedMessageTs: '1710000000.000100',
       threadTs: '1710000000.000000',
@@ -94,6 +95,7 @@ describe('lookupCommunicationMessageContext', () => {
 
   it('infers Slack from a message link for a web-started task', async () => {
     lookupSlackThreadMock.mockResolvedValueOnce({
+      slackTeamId: 'T123',
       channelId: 'C123',
       requestedMessageTs: '1710000000.000100',
       threadTs: '1710000000.000000',
@@ -110,7 +112,7 @@ describe('lookupCommunicationMessageContext', () => {
     });
 
     const taskRun = { payload: {}, actingUserId: 'user-1' };
-    await lookupCommunicationMessageContext({
+    const result = await lookupCommunicationMessageContext({
       messageLink: 'https://acme.slack.com/archives/C123/p1710000000000100',
       taskRun,
     });
@@ -118,8 +120,44 @@ describe('lookupCommunicationMessageContext', () => {
     expect(lookupSlackThreadMock).toHaveBeenCalledWith({
       channel: 'C123',
       messageTs: '1710000000.000100',
+      slackTeamDomain: 'acme',
       taskRun: { ...taskRun, slackThreadTs: null },
     });
+    expect(result.slackTeamId).toBe('T123');
+  });
+
+  it('carries the workspace id from a Slack client link', async () => {
+    lookupSlackThreadMock.mockResolvedValueOnce({
+      slackTeamId: 'T123',
+      channelId: 'C123',
+      requestedMessageTs: '1710000000.000100',
+      threadTs: '1710000000.000000',
+      matchedMessageIndex: 0,
+      messageCount: 0,
+      messages: [],
+    });
+
+    await lookupCommunicationMessageContext({
+      messageLink:
+        'https://app.slack.com/client/T123/C123/thread/C123-1710000000.000100',
+      taskRun: { payload: {}, actingUserId: 'user-1' },
+    });
+
+    expect(lookupSlackThreadMock).toHaveBeenCalledWith(
+      expect.objectContaining({ slackTeamId: 'T123' }),
+    );
+  });
+
+  it('rejects Slack references with different workspace ids', async () => {
+    await expect(
+      lookupCommunicationMessageContext({
+        channel: 'https://app.slack.com/client/T2/C123',
+        messageLink:
+          'https://app.slack.com/client/T1/C123/thread/C123-1710000000.000100',
+        taskRun: { payload: {}, actingUserId: 'user-1' },
+      }),
+    ).rejects.toThrow('channel and messageLink refer to different messages');
+    expect(lookupSlackThreadMock).not.toHaveBeenCalled();
   });
 
   it('accepts a Slack channel link with a separate message id', async () => {
@@ -141,6 +179,7 @@ describe('lookupCommunicationMessageContext', () => {
     expect(lookupSlackThreadMock).toHaveBeenCalledWith({
       channel: 'C123',
       messageTs: '1710000000.000100',
+      slackTeamDomain: 'acme',
       taskRun: { payload: {}, slackThreadTs: null },
     });
   });
@@ -171,6 +210,20 @@ describe('lookupCommunicationMessageContext', () => {
       });
     },
   );
+
+  it('rejects an explicit provider that contradicts the message link', async () => {
+    await expect(
+      lookupCommunicationMessageContext({
+        actingUserId: 'user-1',
+        messageLink: 'https://acme.slack.com/archives/C123/p1710000000000100',
+        provider: 'discord',
+      }),
+    ).rejects.toThrow(
+      'The supplied message or channel link does not match the communication provider',
+    );
+    expect(lookupSlackThreadMock).not.toHaveBeenCalled();
+    expect(lookupDiscordThreadMock).not.toHaveBeenCalled();
+  });
 
   it('does not guess a provider from a raw id when the task has no channel', async () => {
     await expect(
@@ -227,6 +280,7 @@ describe('lookupCommunicationChannelMessages', () => {
 
     expect(lookupSlackChannelMessagesMock).toHaveBeenCalledWith({
       channel: 'C123',
+      slackTeamDomain: 'acme',
       taskRun: { ...taskRun, slackThreadTs: null },
     });
   });
@@ -271,6 +325,40 @@ describe('lookupCommunicationChannelMessages', () => {
       });
     },
   );
+
+  it('truncates oversized results to the newest messages', async () => {
+    const messages = Array.from({ length: 150 }, (_, index) => ({
+      ts: `${1_700_000_000 + index}.000000`,
+      user: `U${index}`,
+      text: 'x'.repeat(800),
+      fileCount: 0,
+    }));
+    lookupSlackChannelMessagesMock.mockResolvedValueOnce({
+      channelId: 'C123',
+      messageCount: messages.length,
+      messages,
+    });
+    const taskRun = {
+      payload: {
+        communicationProvider: 'slack',
+        communicationChannelId: 'C123',
+      },
+      actingUserId: 'user-1',
+    };
+
+    const result = await lookupCommunicationChannelMessages({ taskRun });
+
+    expect(result.truncated).toBe(true);
+    expect(result.messages.length).toBeLessThan(messages.length);
+    expect(result.messages.at(-1)?.id).toBe(messages.at(-1)?.ts);
+    expect(result.nextLatest).toBe(
+      messages[messages.length - result.messages.length - 1]?.ts,
+    );
+    expect(result.omittedMessageCount).toBe(
+      messages.length - result.messages.length,
+    );
+    expect(JSON.stringify(result, null, 2).length).toBeLessThanOrEqual(36_000);
+  });
 
   it('does not guess a provider from a raw channel when the task has none', async () => {
     await expect(

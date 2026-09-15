@@ -4,12 +4,14 @@ import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 import type { Variables } from '../../../types';
 
 const {
+  findActiveSlackInstallationForChannelMock,
   fetchChannelMessagesMock,
   resolveChannelIdMock,
   isAppInChannelMock,
   isUserInChannelMock,
   isPublicChannelMock,
 } = vi.hoisted(() => ({
+  findActiveSlackInstallationForChannelMock: vi.fn(),
   fetchChannelMessagesMock: vi.fn(),
   resolveChannelIdMock: vi.fn(),
   isAppInChannelMock: vi.fn(),
@@ -18,6 +20,8 @@ const {
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  findActiveSlackInstallationForChannel:
+    findActiveSlackInstallationForChannelMock,
   db: {
     query: {
       taskRuns: { findFirst: vi.fn() },
@@ -90,6 +94,7 @@ import { slackMcp } from '../slack';
 
 type JsonBody = {
   error?: string;
+  slackTeamId?: string;
   channelId?: string;
   requestedOldest?: string;
   requestedLatest?: string;
@@ -169,6 +174,11 @@ describe('slack channel messages MCP endpoint', () => {
       botAccessToken: 'xoxb-test',
       teamId: 'T123',
     } as never);
+    findActiveSlackInstallationForChannelMock.mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+      teamId: 'T123',
+      isActive: true,
+    });
     vi.mocked(db.query.slackUserMappings.findFirst).mockResolvedValue({
       slackUserId: 'UACTOR',
     } as never);
@@ -231,6 +241,7 @@ describe('slack channel messages MCP endpoint', () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
+      slackTeamId: 'T123',
       channelId: 'CENG',
       requestedOldest: '2026-04-01T00:00:00Z',
       requestedLatest: '2026-04-02T00:00:00Z',
@@ -459,7 +470,7 @@ describe('slack channel messages MCP endpoint', () => {
 
     expect(response.status).toBe(502);
     expect(body.error).toBe(
-      'Slack channel CENG could not be fetched from Slack',
+      'Slack channel CENG could not be fetched from Slack: rate_limited',
     );
   });
 });

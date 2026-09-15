@@ -52,6 +52,7 @@ const state = vi.hoisted(() => ({
   voiceConnection: null as null | {
     authStatus?: string | null;
     source?: 'environment' | 'connection';
+    enabled?: boolean;
     voiceId?: string;
   },
   grafanaConnection: null as null | {
@@ -656,6 +657,106 @@ describe('Integrations settings', () => {
     expect(screen.getByLabelText('Internal integration secret')).toHaveValue(
       '',
     );
+  });
+
+  it('opens requested configuration directly without rendering the catalog or confirmation', async () => {
+    render(
+      <Integrations
+        integrationIds={['notion']}
+        configurationRequest={{ integrationId: 'notion', sequence: 1 }}
+        showCatalog={false}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: 'Connect Notion' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Internal integration secret'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Integrations' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Enable Notion?' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('opens requested Linear setup directly without navigating through integration settings', async () => {
+    state.pathname = '/sessions/setup-session';
+    state.linearInstallation = null;
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
+
+    render(
+      <Integrations
+        integrationIds={['linear']}
+        configurationRequest={{ integrationId: 'linear', sequence: 1 }}
+        showCatalog={false}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: 'Set up Linear' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Create the app' }),
+    ).toBeInTheDocument();
+    expect(state.linearRedirectPath).toBe('/sessions/setup-session');
+    expect(
+      screen.queryByRole('heading', { name: 'Integrations' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Enable Linear?' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('starts requested OAuth configuration from the embedded pathname', async () => {
+    state.pathname = '/sessions/setup-session';
+
+    render(
+      <Integrations
+        integrationIds={['pylon']}
+        configurationRequest={{ integrationId: 'pylon', sequence: 1 }}
+        showCatalog={false}
+      />,
+    );
+
+    expect(mutations.connectMcp).toHaveBeenCalledWith(
+      { mcpId: 'pylon', redirectTo: '/sessions/setup-session' },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(
+      screen.queryByRole('heading', { name: 'Enable Pylon?' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('reconnects an enabled integration that still needs authentication', () => {
+    state.pathname = '/sessions/setup-session';
+    state.deploymentEnablements = [{ mcpId: 'sentry', enabled: true }];
+    state.userConnections = [{ mcpId: 'sentry', authStatus: 'pending' }];
+
+    render(
+      <Integrations
+        integrationIds={['sentry']}
+        configurationRequest={{ integrationId: 'sentry', sequence: 1 }}
+        showCatalog={false}
+      />,
+    );
+
+    expect(mutations.connectMcp).toHaveBeenCalledWith(
+      { mcpId: 'sentry', redirectTo: '/sessions/setup-session' },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(toast.success).not.toHaveBeenCalledWith(
+      'Sentry is already connected.',
+    );
+    expect(mutations.setDeploymentEnabled).not.toHaveBeenCalled();
   });
 
   it('uses the settings action for missing Linear OAuth setup', () => {
@@ -1571,6 +1672,69 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
   });
 
+  it('links Snowflake validation errors to each invalid field and clears corrected state', () => {
+    render(<Integrations />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Snowflake' }),
+    );
+    const submitButton = screen.getByRole('button', {
+      name: 'Connect Snowflake',
+    });
+    submitButton.focus();
+    fireEvent.click(submitButton);
+
+    expect(submitButton).toHaveFocus();
+
+    const invalidFields = [
+      ['Account identifier', 'Account identifier is required'],
+      ['Username', 'Username is required'],
+      ['Role', 'Role is required'],
+    ] as const;
+
+    for (const [label, error] of invalidFields) {
+      const field = screen.getByLabelText(label);
+      expect(field).toHaveAttribute('aria-invalid', 'true');
+      expect(field).toHaveAccessibleDescription(error);
+      expect(screen.getByText(error)).toHaveAttribute('role', 'alert');
+    }
+    expect(mutations.saveSnowflakeConnection).not.toHaveBeenCalled();
+
+    const accountInput = screen.getByLabelText('Account identifier');
+    fireEvent.change(accountInput, {
+      target: { value: 'xy12345.us-east-1' },
+    });
+
+    expect(accountInput).not.toHaveAttribute('aria-invalid');
+    expect(accountInput).not.toHaveAttribute('aria-describedby');
+    expect(
+      screen.queryByText('Account identifier is required'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Username')).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+
+    fireEvent.change(screen.getByLabelText('Username'), {
+      target: { value: 'roomote_user' },
+    });
+    fireEvent.change(screen.getByLabelText('Role'), {
+      target: { value: 'ANALYST' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Snowflake' }));
+
+    const privateKeyInput = screen.getByLabelText('Private Key (PEM)');
+    expect(privateKeyInput).toHaveAttribute('aria-invalid', 'true');
+    expect(privateKeyInput).toHaveAccessibleDescription(
+      'Private key is required',
+    );
+    expect(screen.getByText('Private key is required')).toHaveAttribute(
+      'role',
+      'alert',
+    );
+    expect(mutations.saveSnowflakeConnection).not.toHaveBeenCalled();
+  });
+
   it('opens the Asana credential dialog from the integrations page', () => {
     render(<Integrations />);
 
@@ -1652,9 +1816,14 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Notion' }));
 
+    const secretInput = screen.getByLabelText('Internal integration secret');
+    expect(secretInput).toHaveAttribute('aria-invalid', 'true');
+    expect(secretInput).toHaveAccessibleDescription(
+      'Internal integration secret is required',
+    );
     expect(
       screen.getByText('Internal integration secret is required'),
-    ).toBeInTheDocument();
+    ).toHaveAttribute('role', 'alert');
     expect(mutations.saveNotionConnection).not.toHaveBeenCalled();
   });
 
@@ -2341,7 +2510,7 @@ describe('Integrations settings', () => {
     );
   });
 
-  it('shows Voice as connected when the environment provides the key', async () => {
+  it('shows environment-keyed Voice as connected with a deployment-level off switch', async () => {
     state.isAdmin = true;
     state.deploymentEnablements = [];
     state.userConnections = [];
@@ -2349,6 +2518,9 @@ describe('Integrations settings', () => {
       authStatus: 'authenticated',
       source: 'environment',
     };
+    mutations.setDeploymentEnabled.mockImplementation((_variables, options) => {
+      options?.onSuccess?.();
+    });
 
     render(<Integrations />);
 
@@ -2361,16 +2533,78 @@ describe('Integrations settings', () => {
         name: 'Voice',
       }),
     ).toBeInTheDocument();
+    // The key is not the admin's to edit, and where it came from is not
+    // something the card needs to say.
     expect(
-      screen.getByText(
-        'Configured by the R_VOICE_OPENAI_API_KEY environment variable.',
-      ),
-    ).toBeInTheDocument();
+      screen.queryByText(/R_VOICE_OPENAI_API_KEY/),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Disconnect Voice' }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Configure Voice' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Disable Voice' }));
+
+    expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(
+      { mcpId: 'voice', enabled: false },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(toast.success).toHaveBeenCalledWith(
+      'Voice disabled for this deployment.',
+    );
+  });
+
+  it('lets an admin turn environment-keyed Voice back on after disabling it', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [{ mcpId: 'voice', enabled: false }];
+    state.userConnections = [];
+    state.voiceConnection = {
+      authStatus: 'authenticated',
+      source: 'environment',
+      enabled: false,
+    };
+
+    render(<Integrations />);
+
+    const availableSection = (
+      await screen.findByRole('heading', { name: 'Available' })
+    ).closest('section');
+    expect(
+      within(availableSection as HTMLElement).getByRole('heading', {
+        level: 3,
+        name: 'Voice',
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enable Voice' }));
+
+    expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(
+      { mcpId: 'voice', enabled: true },
+      expect.anything(),
+    );
+  });
+
+  it('gives members no switch on environment-keyed Voice', async () => {
+    state.isAdmin = false;
+    state.deploymentEnablements = [];
+    state.userConnections = [];
+    state.voiceConnection = {
+      authStatus: 'authenticated',
+      source: 'environment',
+    };
+
+    render(<Integrations />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Disable Voice' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Enable Voice' }),
     ).not.toBeInTheDocument();
   });
 });

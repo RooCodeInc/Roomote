@@ -1,6 +1,6 @@
 import { appRouter } from '../../routers';
 import type { Context } from '../../trpc';
-import type { RunTokenContext, TaskGoal } from '@roomote/types';
+import type { RunTokenContext } from '@roomote/types';
 
 const { mockPrepareActorScopedTurn } = vi.hoisted(() => ({
   mockPrepareActorScopedTurn: vi.fn(),
@@ -12,7 +12,6 @@ function createCaller(options?: {
     images?: string[];
     workflowPhase?: string;
     autoSteerWhenQueued?: boolean;
-    goalContext?: TaskGoal;
     userId?: string;
   }) => boolean;
   status?: {
@@ -114,32 +113,6 @@ describe('sendPrompt procedure', () => {
       expect.objectContaining({
         prompt: 'review the newest commits next',
         queueOnly: true,
-      }),
-    );
-  });
-
-  it('forwards trusted goal generation context to the harness', async () => {
-    const { caller, sendFollowUpPrompt } = createCaller();
-
-    await caller.commands.sendPrompt({
-      prompt: 'finish the replacement goal',
-      goalContext: {
-        objective: 'Finish the replacement goal',
-        generation: 'goal-generation:replacement',
-        status: 'active',
-        maxContinuations: 5,
-        continuationsUsed: 0,
-        blockedReason: null,
-        completedAt: null,
-      },
-    });
-
-    expect(sendFollowUpPrompt).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: 'finish the replacement goal',
-        goalContext: expect.objectContaining({
-          generation: 'goal-generation:replacement',
-        }),
       }),
     );
   });

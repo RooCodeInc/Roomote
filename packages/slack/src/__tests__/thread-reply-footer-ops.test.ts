@@ -44,6 +44,7 @@ vi.mock('../thread-footer', () => ({
 import {
   isSlackThreadReplyFooterBlock,
   postSlackThreadMessageWithStickyFooter,
+  postSlackRootMessageWithFooterText,
   removeSlackThreadReplyFooter,
   updateSlackThreadMessageWithFooterText,
 } from '../thread-reply-footer-ops';
@@ -190,6 +191,52 @@ describe('thread-reply-footer-ops', () => {
         linkedPrs: [],
         livePreviewUrl: null,
       }),
+    );
+  });
+
+  it('registers a new root so a later footer relocation can clear it', async () => {
+    mockGetFooterTs
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('100.000');
+    const slack = {
+      postMessage: vi
+        .fn()
+        .mockResolvedValueOnce('100.000')
+        .mockResolvedValueOnce('200.000'),
+      getMessageBlocks: vi.fn().mockResolvedValue([
+        { type: 'markdown', text: 'root body' },
+        {
+          type: 'context',
+          block_id: 'roomote_thread_reply_footer',
+          elements: [{ type: 'mrkdwn', text: 'footer' }],
+        },
+      ]),
+      updateMessage: vi.fn().mockResolvedValue(true),
+    };
+    await postSlackRootMessageWithFooterText({
+      slack,
+      channel: 'D1',
+      text: 'root body',
+      bodyBlocks: [{ type: 'markdown', text: 'root body' }],
+      footerText: 'footer',
+    });
+    await postSlackThreadMessageWithStickyFooter({
+      slack,
+      channel: 'D1',
+      threadTs: '100.000',
+      taskId: 'task-1',
+      text: 'later body',
+    });
+
+    expect(mockSetFooterTs).toHaveBeenNthCalledWith(
+      1,
+      'D1',
+      '100.000',
+      '100.000',
+      { lock: expect.any(Object) },
+    );
+    expect(slack.updateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ ts: '100.000' }),
     );
   });
 

@@ -15,7 +15,8 @@ separate voice-only agent.
 Voice uses OpenAI GPT-Live-1 and needs an OpenAI API key from a project with
 GPT-Live access. A deployment admin can enter one from **Settings >
 Integrations > Voice**, or a self-hosted operator can set
-`R_VOICE_OPENAI_API_KEY`; the environment variable is used when both exist.
+`R_VOICE_OPENAI_API_KEY`; the environment variable is used when both exist,
+and an admin can still turn Voice off for the deployment from the same card.
 Voice is opt-in: the deployment's general `OPENAI_API_KEY` is not used, so
 enabling OpenAI for task inference does not turn voice on. See the
 [Voice integration](/integrations/voice) page for details.
@@ -27,6 +28,14 @@ connections default to Marin, one of OpenAI's recommended voices.
 When the voice key is not configured the voice button does not appear. The key
 stays on the control plane. The browser sends its WebRTC connection offer to Roomote
 and receives only the negotiated session answer; it never receives the API key.
+
+On Roomote Cloud, each user must accept the experimental Voice data flow before
+their first call. The confirmation explains that microphone audio, Voice
+transcripts, and workspace context such as repository and integration names are
+sent to OpenAI. Roomote saves acceptance for that user across browsers and
+Sessions. Canceling or dismissing the confirmation does not start microphone
+capture or contact OpenAI. Self-hosted deployments keep their existing Voice
+flow and do not show this Cloud consent step.
 
 ## Using voice
 

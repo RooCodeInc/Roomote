@@ -1,6 +1,5 @@
 import {
   activeRunStatuses,
-  type TaskGoal,
   RunStatus,
   isExitedRunStatus,
 } from '@roomote/types';
@@ -12,82 +11,12 @@ import {
   eq,
   inArray,
   markTaskStartParallelCountEndedAt,
-  prepareTaskGoalActivation,
   taskRuns,
 } from '@roomote/db/server';
 import { settleLiveTaskMessageOnExit, stopTaskRun } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
-import { sendSandboxPromptCommand } from '../sandbox-session';
-import { resolveTaskByIdAccessCommand } from '../tasks/by-id';
-
-export async function startTaskGoalCommand(
-  auth: UserAuthSuccess,
-  input: {
-    taskId: string;
-    goal: { objective: string; maxContinuations: number };
-    clientMessageId?: string;
-    userImageUrl?: string;
-  },
-): Promise<
-  { success: true; goal: TaskGoal } | { success: false; error: string }
-> {
-  const taskAccess = await resolveTaskByIdAccessCommand(auth, {
-    taskId: input.taskId,
-  });
-
-  if (taskAccess.kind !== 'resolved') {
-    return { success: false, error: 'Task not found' };
-  }
-
-  const activation = await prepareTaskGoalActivation({
-    taskId: input.taskId,
-    goal: input.goal,
-  });
-  if (!activation) {
-    return { success: false, error: 'Goal Mode activation is already pending' };
-  }
-
-  try {
-    await sendSandboxPromptCommand(
-      auth,
-      {
-        taskId: input.taskId,
-        prompt: input.goal.objective,
-        source: 'web',
-        clientMessageId: input.clientMessageId,
-        userImageUrl: input.userImageUrl,
-        autoSteerWhenQueued: true,
-      },
-      {
-        goalContext: {
-          ...input.goal,
-          generation: activation.generation,
-          status: 'active',
-          continuationsUsed: 0,
-          blockedReason: null,
-          completedAt: null,
-        },
-      },
-    );
-  } catch (error) {
-    try {
-      await activation.rollback();
-    } catch (rollbackError) {
-      console.error('Failed to roll back Goal Mode activation:', rollbackError);
-    }
-    throw error;
-  }
-
-  const goal = await activation.commit();
-  if (!goal) {
-    await activation.rollback();
-    return { success: false, error: 'Goal Mode activation was superseded' };
-  }
-
-  return { success: true, goal };
-}
 
 export async function cancelTaskRunCommand(
   auth: UserAuthSuccess,

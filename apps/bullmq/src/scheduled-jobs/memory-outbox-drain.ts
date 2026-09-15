@@ -28,6 +28,7 @@ export type MemoryOutboxOperations<TEvent extends MemoryOutboxEvent, TPage> = {
   ) => Promise<'settled' | 'superseded'>;
   classifyBackpressure: (error: unknown) => 'rate-limited' | 'not-ready' | null;
   onSettled: (
+    event: TEvent,
     prepared: PreparedMemoryPage<TPage>,
     result: 'settled' | 'superseded',
   ) => void;
@@ -62,7 +63,7 @@ export async function drainMemoryOutboxBatch<
 
       await operations.write(prepared.page);
       const result = await operations.settle(event.id, event.revision, 'done');
-      operations.onSettled(prepared, result);
+      operations.onSettled(event, prepared, result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const backpressure = operations.classifyBackpressure(error);

@@ -1,4 +1,5 @@
 export * from './types';
+export * from './session-egress-legacy-cleanup';
 export * from './command-output-transcript';
 export * from './docker-environment-validation';
 export * from './mutation-events';

@@ -16,6 +16,7 @@ import type {
 
 import type { WorkerEnv } from '../env';
 import type { HarnessLogger } from '../logging';
+import type { OnDemandRepository } from '../workspace/on-demand-repositories';
 import type { RepoLocalSkill } from '../workspace/repo-local-skills';
 import type {
   ActorMismatchPolicy,
@@ -65,7 +66,6 @@ type TaskChannelBindings = Pick<
   DequeuedTaskRun['task'],
   'slackChannelId' | 'slackThreadTs' | 'linearSessionId'
 > & {
-  goal?: DequeuedTaskRun['task']['goal'];
   surface?: DequeuedTaskRun['task']['surface'];
   initiatorUserId?: DequeuedTaskRun['task']['initiatorUserId'];
 };
@@ -197,6 +197,11 @@ export type RunTaskOptions = {
   usesSharedWorkspaceRoot?: boolean;
   repoPaths?: Record<string, string>;
   repoLocalSkills?: RepoLocalSkill[];
+  /**
+   * Repositories available through the `clone_repository` tool instead of
+   * being cloned during setup (all-repositories workspaces).
+   */
+  onDemandRepositories?: OnDemandRepository[];
   workspaceReadinessWarnings?: string[];
   /**
    * Observer for environment setup still finishing in the background. Used to

@@ -1863,10 +1863,7 @@ async function generateTrackedNonTaskObjectWithSdk<
       system: params.system,
       format: {
         type: 'json_schema',
-        schema: zodToJsonSchema(params.schema, {
-          $refStrategy: 'none',
-          target: 'jsonSchema7',
-        }) as Record<string, unknown>,
+        schema: buildNonTaskStructuredOutputJsonSchema(params.schema),
         retryCount:
           params.structuredOutputRetryCount ??
           DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
@@ -1894,6 +1891,15 @@ async function generateTrackedNonTaskObjectWithSdk<
   const object = params.schema.parse(structured) as z.output<TSchema>;
 
   return { object };
+}
+
+export function buildNonTaskStructuredOutputJsonSchema(
+  schema: z.ZodTypeAny,
+): Record<string, unknown> {
+  return zodToJsonSchema(schema, {
+    $refStrategy: 'none',
+    target: 'jsonSchema7',
+  }) as Record<string, unknown>;
 }
 
 export async function generateTrackedNonTaskObject<
