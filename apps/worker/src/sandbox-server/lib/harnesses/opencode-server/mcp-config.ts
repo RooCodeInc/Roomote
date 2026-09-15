@@ -1,4 +1,5 @@
 import { asRecord, asString } from '@roomote/types';
+import { HTTP_INTEGRATIONS_BROKER } from '../../../../mcp-provenance';
 
 import type { DirectMcpConfig } from '../direct-mcp-config';
 
@@ -19,7 +20,14 @@ export function parseDirectMcpConfig(config: unknown): DirectMcpConfig | null {
       ),
     );
 
-    return { type, url, headers };
+    return {
+      type,
+      url,
+      headers,
+      ...(record?.roomoteManaged === HTTP_INTEGRATIONS_BROKER
+        ? { roomoteManaged: HTTP_INTEGRATIONS_BROKER }
+        : {}),
+    };
   }
 
   if (type === 'stdio') {

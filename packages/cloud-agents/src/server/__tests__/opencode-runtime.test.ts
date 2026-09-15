@@ -234,6 +234,7 @@ describe('buildOpenCodeCliEnv', () => {
           task: false,
           roomote_manage_custom_automations: false,
           roomote_create_custom_skill: false,
+          roomote_update_custom_skill: false,
           send_chat_reply: false,
         },
       });

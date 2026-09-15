@@ -63,17 +63,55 @@ export function escapeAgentMailHtml(text: string): string {
  */
 const SAFE_LINK_PATTERN = /^(https?:\/\/|mailto:)/i;
 
+function replaceMarkdownLinks(
+  text: string,
+  render: (label: string, url: string, source: string) => string,
+): string {
+  let result = '';
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    const open = text.indexOf('[', cursor);
+    if (open < 0) {
+      result += text.slice(cursor);
+      break;
+    }
+    const labelEnd = text.indexOf('](', open + 1);
+    const urlEnd = labelEnd < 0 ? -1 : text.indexOf(')', labelEnd + 2);
+    if (labelEnd < 0 || urlEnd < 0) {
+      result += text.slice(cursor);
+      break;
+    }
+    const label = text.slice(open + 1, labelEnd);
+    const url = text.slice(labelEnd + 2, urlEnd);
+    if (
+      !label ||
+      label.includes('\n') ||
+      label.includes(']') ||
+      !url ||
+      /\s/.test(url)
+    ) {
+      result += text.slice(cursor, open + 1);
+      cursor = open + 1;
+      continue;
+    }
+    result += text.slice(cursor, open);
+    const source = text.slice(open, urlEnd + 1);
+    result += render(label, url, source);
+    cursor = urlEnd + 1;
+  }
+
+  return result;
+}
+
 function convertInlineMarkdown(escaped: string): string {
   return (
-    escaped
+    replaceMarkdownLinks(escaped, (label, url, source) =>
+      SAFE_LINK_PATTERN.test(url) ? `<a href="${url}">${label}</a>` : source,
+    )
       // Links first so their URLs are not touched by emphasis rules. The
       // text was already escaped, so `&` inside URLs appears as `&amp;`,
       // which is the correct encoding for an href attribute.
-      .replace(
-        /\[([^\]\n]+)\]\(([^\s)]+)\)/g,
-        (match, label: string, url: string) =>
-          SAFE_LINK_PATTERN.test(url) ? `<a href="${url}">${label}</a>` : match,
-      )
       .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
       .replace(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/g, '<em>$1</em>')
       // Underscore italics only when they wrap a whole line, so snake_case
@@ -144,25 +182,11 @@ const BLOCKQUOTE_PATTERN = /^>\s?(.*)$/;
 
 function parseHeading(line: string): { level: number; text: string } | null {
   let level = 0;
-
-  while (line[level] === '#') {
-    level += 1;
-  }
-
-  if (level === 0 || level > 6 || !/\s/.test(line[level] ?? '')) {
-    return null;
-  }
-
-  let textStart = level + 1;
-
-  while (/\s/.test(line[textStart] ?? '')) {
-    textStart += 1;
-  }
-
-  return {
-    level,
-    text: line.slice(textStart).replace(/\r$/, ''),
-  };
+  while (level < 6 && line[level] === '#') level += 1;
+  if (level === 0 || (line[level] !== ' ' && line[level] !== '\t')) return null;
+  let textStart = level;
+  while (line[textStart] === ' ' || line[textStart] === '\t') textStart += 1;
+  return { level, text: line.slice(textStart) };
 }
 
 function splitBlocks(
@@ -321,7 +345,7 @@ export function renderAgentMailHtml(markdown: string): string {
 }
 
 function stripInlineMarkdown(text: string): string {
-  return replaceMarkdownLinksWithText(text)
+  return replaceMarkdownLinks(text, (label, url) => `${label} (${url})`)
     .replace(/\*\*([^*\n]+)\*\*/g, '$1')
     .replace(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/g, '$1')
     .replace(/^_([^_\n](?:[^\n]*[^_\n])?)_$/gm, '$1')

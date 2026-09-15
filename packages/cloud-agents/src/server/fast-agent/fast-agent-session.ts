@@ -77,6 +77,14 @@ export async function hasFastAgentSession(
   return fastAgentConversationRepository.exists(conversation);
 }
 
+export async function getFastAgentSessionOwner(
+  conversation: FastAgentConversation,
+): Promise<FastAgentConversationOwner | null> {
+  const session =
+    await fastAgentConversationRepository.findByConversation(conversation);
+  return session?.owner ?? null;
+}
+
 export async function getActiveFastAgentTasks(
   sessionId: string,
 ): Promise<FastAgentActiveTask[]> {

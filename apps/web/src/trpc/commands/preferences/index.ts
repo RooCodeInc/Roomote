@@ -4,6 +4,8 @@ import {
   eq,
   getUserPersonalization,
   isNull,
+  isSlackPeerConversationsExperimentEnabledInMetadata,
+  SLACK_PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY,
   sql,
   updateUserPersonalization,
   UserPersonalizationConflictError,
@@ -11,6 +13,7 @@ import {
 } from '@roomote/db/server';
 import { TRPCError } from '@trpc/server';
 import { headers } from 'next/headers';
+import { SESSION_SECRET_TOOLS_EXPERIMENT_KEY } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 import { getAuth } from '@/lib/server/auth';
@@ -31,6 +34,8 @@ function normalizeMetadata(value: unknown): UserMetadataRecord {
 
   return { ...(value as UserMetadataRecord) };
 }
+
+const VOICE_CONSENT_METADATA_KEY = 'voice_consent_accepted';
 
 function normalizePersonalPreferences(
   metadata: UserMetadataRecord,
@@ -55,6 +60,16 @@ function normalizePersonalPreferences(
       typeof metadata.results_page_enabled === 'boolean'
         ? metadata.results_page_enabled
         : DEFAULT_PERSONAL_PREFERENCES.resultsPageEnabled,
+    slackPeerConversationsExperimentEnabled:
+      isSlackPeerConversationsExperimentEnabledInMetadata(metadata),
+    homeComposerSuggestionsEnabled:
+      typeof metadata.home_composer_suggestions_enabled === 'boolean'
+        ? metadata.home_composer_suggestions_enabled
+        : DEFAULT_PERSONAL_PREFERENCES.homeComposerSuggestionsEnabled,
+    sessionSecretToolsEnabled:
+      typeof metadata[SESSION_SECRET_TOOLS_EXPERIMENT_KEY] === 'boolean'
+        ? metadata[SESSION_SECRET_TOOLS_EXPERIMENT_KEY]
+        : DEFAULT_PERSONAL_PREFERENCES.sessionSecretToolsEnabled,
   };
 }
 
@@ -126,6 +141,45 @@ export async function acceptCookieConsentCommand(
   return existingUser.cookieConsentedAt;
 }
 
+export async function getVoiceConsentCommand(
+  auth: UserAuthSuccess,
+): Promise<boolean> {
+  const storedUser = await db.query.users.findFirst({
+    where: eq(users.id, auth.userId),
+    columns: { metadata: true },
+  });
+
+  return (
+    normalizeMetadata(storedUser?.metadata)[VOICE_CONSENT_METADATA_KEY] === true
+  );
+}
+
+export async function acceptVoiceConsentCommand(
+  auth: UserAuthSuccess,
+): Promise<boolean> {
+  if (!auth.cloudEnabled) {
+    throw new Error('Voice consent is only available on Roomote Cloud.');
+  }
+
+  const [updatedUser] = await db
+    .update(users)
+    .set({
+      metadata: sql`${users.metadata} || ${JSON.stringify({ [VOICE_CONSENT_METADATA_KEY]: true })}::jsonb`,
+      lastSyncAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, auth.userId))
+    .returning({ metadata: users.metadata });
+
+  if (!updatedUser) {
+    throw new Error('Unable to record voice consent for the active user.');
+  }
+
+  return (
+    normalizeMetadata(updatedUser.metadata)[VOICE_CONSENT_METADATA_KEY] === true
+  );
+}
+
 export async function updatePersonalPreferencesCommand(
   auth: UserAuthSuccess,
   input: PersonalPreferencesUpdate,
@@ -149,6 +203,18 @@ export async function updatePersonalPreferencesCommand(
   }
   if (input.resultsPageEnabled !== undefined) {
     nextMetadataRecord.results_page_enabled = input.resultsPageEnabled;
+  }
+  if (input.slackPeerConversationsExperimentEnabled !== undefined) {
+    nextMetadataRecord[SLACK_PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY] =
+      input.slackPeerConversationsExperimentEnabled;
+  }
+  if (input.homeComposerSuggestionsEnabled !== undefined) {
+    nextMetadataRecord.home_composer_suggestions_enabled =
+      input.homeComposerSuggestionsEnabled;
+  }
+  if (input.sessionSecretToolsEnabled !== undefined) {
+    nextMetadataRecord[SESSION_SECRET_TOOLS_EXPERIMENT_KEY] =
+      input.sessionSecretToolsEnabled;
   }
 
   if (Object.keys(nextMetadataRecord).length === 0) {

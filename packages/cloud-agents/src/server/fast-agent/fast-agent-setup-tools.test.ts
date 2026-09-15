@@ -54,7 +54,7 @@ describe('setup prompt guidance and snapshot injection', () => {
     );
     expect(prompt).toContain("Hi, I'm Roomote");
     expect(prompt).toContain(
-      'To get started, I need access to your source code.',
+      'I can start by connecting to your source code, or we can skip that and focus on your other tools.',
     );
     expect(prompt).toContain(
       'always refer to Roomote in the first person: use "I", "me", and "my"',
@@ -66,7 +66,7 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(prompt).toContain("Describe launched work in the user's terms");
     expect(prompt).toContain('<setup_snapshot>');
     expect(prompt).toContain('request_user_input');
-    expect(prompt).toContain('setup_starter_tasks');
+    expect(prompt).toContain('offer_capability');
     expect(prompt).toContain('launch_task');
     expect(prompt).toContain('The renderer owns trusted controls');
     expect(prompt).toContain(
@@ -78,8 +78,8 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(prompt).toContain(
       'I need a workspace where I can run the work you selected',
     );
-    expect(prompt).toContain('Starter work is optional');
-    expect(prompt).toContain('use the trusted `setup_starter_tasks` preset');
+    expect(prompt).toContain('offer optional source control');
+    expect(prompt).toContain('offer `starter_work`');
     expect(prompt).not.toContain('exactly once');
     expect(prompt).not.toContain(
       'Direct the administrator to the relevant card',
@@ -93,22 +93,29 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(prompt).not.toContain('update_plan');
   });
 
-  it('keeps discovery optional, resumable, reorderable, and server-resolved', () => {
+  it('keeps setup adaptive while enforcing trusted offer ordering and no-source branching', () => {
     const prompt = buildFastAgentSystemPrompt({
       ...baseInput,
       setupSession: true,
     });
     for (const rule of [
-      'Optional integration discovery never gates setup completion',
-      'ordered categories as suggestions, not a questionnaire',
-      'reorder the agenda',
-      'setup-tools-<id>',
-      'carrying prose answers by category ID',
-      'completes an empty match set without browser input',
-      'Do not restart answered discovery categories',
+      'always offer integrations after source control is synchronized or explicitly skipped',
+      'accept information supplied early',
+      'Never make a setup offer in prose alone',
+      'With synchronized repositories and completed integration selection',
+      'renderer supplies the compact recommended connector list',
+      'do not ask a preliminary integration questionnaire',
+      'If the administrator already named tools',
+      'Without synchronized repositories, never offer starter tasks',
+      'do not launch a task or ask for a sandbox',
+      'attempt every selected catalog prompt',
+      'Automation decisions never gate setup completion',
       'Setup state-change events are coalesced current facts',
     ])
       expect(prompt).toContain(rule);
+    expect(prompt).toContain(
+      'What are you working on these days? Pretty sure I can help.',
+    );
     expect(prompt).not.toContain('Naturally ask about communication');
   });
 
@@ -117,6 +124,25 @@ describe('setup prompt guidance and snapshot injection', () => {
 
     expect(prompt).not.toContain('## Conversational Setup');
     expect(prompt).not.toContain('<setup_snapshot>');
+  });
+
+  it('keeps trusted dependency-driven offers available after setup', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      ...baseInput,
+      setupSession: false,
+      setupSnapshot: JSON.stringify({
+        setupCompleted: true,
+        recommendedNextCapability: null,
+        capabilities: {},
+      }),
+    });
+
+    expect(prompt).not.toContain('## Conversational Setup');
+    expect(prompt).toContain('## Trusted Capability Offers');
+    expect(prompt).toContain(
+      're-offer only when a new user goal materially depends on or benefits from it',
+    );
+    expect(prompt).toContain("capability's canOffer is true");
   });
 
   it('provides trusted lifecycle guidance for setup and input-response platform events', () => {

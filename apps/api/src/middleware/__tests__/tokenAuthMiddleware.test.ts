@@ -174,6 +174,15 @@ describe('tokenAuthMiddleware token extraction', () => {
     expect(authContext).toEqual(RUN_TOKEN_CONTEXT);
   });
 
+  it('accepts the run token from api-key on the inference gateway', async () => {
+    const authContext = await requestAuthContext(
+      '/api/inference/azure/v1/responses',
+      { 'api-key': 'valid-run-token' },
+    );
+
+    expect(authContext).toEqual(RUN_TOKEN_CONTEXT);
+  });
+
   it('accepts the run token from x-goog-api-key on the inference gateway', async () => {
     const authContext = await requestAuthContext(
       '/api/inference/google/v1beta/models/gemini-2.5-pro:generateContent',
@@ -196,11 +205,13 @@ describe('tokenAuthMiddleware token extraction', () => {
   });
 
   it('ignores provider key headers outside the inference gateway', async () => {
-    const authContext = await requestAuthContext('/api/task-runs/1', {
-      'x-api-key': 'valid-run-token',
-    });
+    for (const headerName of ['x-api-key', 'api-key', 'x-goog-api-key']) {
+      const authContext = await requestAuthContext('/api/task-runs/1', {
+        [headerName]: 'valid-run-token',
+      });
 
-    expect(authContext).toBeNull();
+      expect(authContext).toBeNull();
+    }
     expect(mockValidateRunToken).not.toHaveBeenCalled();
   });
 

@@ -5,12 +5,15 @@ import { buildFastAgentSetupAdapter } from '@roomote/cloud-agents/server';
 import {
   and,
   db,
+  deploymentMcpEnablements,
   deploymentSettings,
   ensureSessionForFastConversation,
   eq,
   fastAgentConversations,
   fastAgentMessages,
   gte,
+  inArray,
+  or,
   sessions,
   sql,
   taskRuns,
@@ -19,6 +22,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   AUTOMATION_RECOMMENDATION_CATALOG,
   createSetupNewSetupSession,
+  formatErrorForLog,
   normalizeSetupNewState,
   normalizeSetupNewSetupSession,
   RunStatus,
@@ -31,10 +35,15 @@ import {
   matchSetupIntegrationAnswers,
   parseAcpRequestUserInputPayload,
   parseAcpRequestUserInputResponsePayload,
+  parseFastAgentCapabilitySnapshot,
+  parseFastAgentCapabilityOfferPayload,
+  parseFastAgentCapabilityOfferResponsePayload,
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
   type AutomationRecommendationBatch,
   type FastAgentSetupTurnContext,
+  type FastAgentCapabilityId,
+  type SetupStarterTaskId,
 } from '@roomote/types';
 import { captureEvent } from '@roomote/telemetry/server';
 
@@ -65,10 +74,12 @@ type SetupPlatformEventKind =
   | 'session_creation'
   | 'provider_selection'
   | 'source_connection'
+  | 'source_skipped'
   | 'starter_request'
   | 'compute_readiness'
   | 'starter_selection'
-  | 'recommendation_readiness';
+  | 'recommendation_readiness'
+  | 'capability_milestone_correction';
 
 type SetupSessionConversation = {
   fastConversationId: string;
@@ -214,6 +225,14 @@ function buildSetupSnapshot(input: {
   integrationDiscovery: Awaited<
     ReturnType<typeof readSetupIntegrationDiscovery>
   >;
+  attemptedStarterTaskIds: SetupStarterTaskId[];
+  initialMilestones?: Partial<
+    Record<
+      FastAgentCapabilityId,
+      'offered' | 'completed' | 'declined' | 'deferred'
+    >
+  >;
+  connectedIntegrationIds?: string[];
 }): string {
   const state = normalizeSetupNewState(input.status.setupNewState);
   const setupSession = normalizeSetupNewSetupSession(state.setupSession);
@@ -221,9 +240,125 @@ function buildSetupSnapshot(input: {
     (total, provider) => total + (provider.repositoryCount ?? 0),
     0,
   );
+  const sourceControlSkipped =
+    repositoryCount === 0 && Boolean(setupSession?.sourceControlSkippedAt);
+  const sourceControlInitiallySkipped = Boolean(
+    setupSession?.sourceControlSkippedAt,
+  );
+  const integrationDiscoveryCompleted =
+    setupSession?.integrationDiscoveryCompletedAt !== null;
+  const starterDecisionCompleted = Boolean(setupSession?.starterTaskSelection);
+  const computeReady = input.status.computeSetup.setupSatisfied;
+  const recommendationsReady =
+    state.automationRecommendations?.status === 'ready' &&
+    (state.automationRecommendations.applicationState ?? 'pending') ===
+      'pending';
+  const connectedIntegrationIds = input.connectedIntegrationIds ?? [];
+  const offerableIntegrationIds = SETUP_INTEGRATIONS.map(
+    (integration) => integration.id,
+  ).filter((id) => !connectedIntegrationIds.includes(id));
+  const recommendedNextCapability =
+    repositoryCount === 0 && !sourceControlSkipped
+      ? 'source_control'
+      : !integrationDiscoveryCompleted
+        ? 'integrations'
+        : repositoryCount > 0 && !starterDecisionCompleted
+          ? 'starter_work'
+          : Boolean(setupSession?.starterTaskSelection?.taskIds.length) &&
+              !computeReady
+            ? 'sandbox'
+            : recommendationsReady && starterDecisionCompleted
+              ? 'automation_recommendations'
+              : null;
+  const initialMilestones = {
+    source_control: sourceControlInitiallySkipped
+      ? ('declined' as const)
+      : (input.initialMilestones?.source_control ??
+        (repositoryCount > 0 ? ('completed' as const) : undefined)),
+    integrations: integrationDiscoveryCompleted
+      ? ('completed' as const)
+      : input.initialMilestones?.integrations,
+    starter_work: setupSession?.starterTaskSelection
+      ? setupSession.starterTaskSelection.taskIds.length
+        ? ('completed' as const)
+        : ('deferred' as const)
+      : input.initialMilestones?.starter_work,
+    sandbox:
+      input.initialMilestones?.sandbox ??
+      (computeReady ? ('completed' as const) : undefined),
+    automation_recommendations:
+      input.initialMilestones?.automation_recommendations ??
+      ((state.automationRecommendations?.applicationState ?? 'pending') !==
+      'pending'
+        ? ('completed' as const)
+        : undefined),
+  };
 
   return JSON.stringify({
+    setupCompleted: input.status.setupCompletedAt !== null,
+    recommendedNextCapability,
+    initialMilestones: Object.fromEntries(
+      Object.entries(initialMilestones).filter(
+        ([, value]) => value !== undefined,
+      ),
+    ),
+    capabilities: {
+      source_control: {
+        ready: repositoryCount > 0,
+        canOffer: input.status.sourceControlSetup.providers.some(
+          (provider) =>
+            !provider.connected || (provider.repositoryCount ?? 0) === 0,
+        ),
+        ...(input.status.sourceControlSetup.providers.some(
+          (provider) =>
+            !provider.connected || (provider.repositoryCount ?? 0) === 0,
+        )
+          ? {}
+          : {
+              unavailableReason:
+                'Every available source-control provider already has repositories ready.',
+            }),
+      },
+      integrations: {
+        ready: connectedIntegrationIds.length > 0,
+        canOffer: offerableIntegrationIds.length > 0,
+        ...(offerableIntegrationIds.length > 0
+          ? {}
+          : { unavailableReason: 'All supported integrations are connected.' }),
+      },
+      starter_work: {
+        ready: starterDecisionCompleted,
+        canOffer: repositoryCount > 0,
+        ...(repositoryCount > 0
+          ? {}
+          : {
+              unavailableReason:
+                'Connect source control before offering starter work.',
+            }),
+      },
+      sandbox: {
+        ready: computeReady,
+        canOffer: !computeReady,
+        ...(computeReady
+          ? { unavailableReason: 'A sandbox is already ready.' }
+          : {}),
+      },
+      automation_recommendations: {
+        ready: recommendationsReady,
+        canOffer: recommendationsReady,
+        ...(recommendationsReady
+          ? {}
+          : {
+              unavailableReason:
+                'Automation recommendations are not ready to present.',
+            }),
+      },
+    },
     integrationDiscovery: input.integrationDiscovery,
+    integrationAvailability: {
+      connectedIntegrationIds,
+      offerableIntegrationIds,
+    },
     rail: deriveSetupRailMilestones(input.status),
     sourceControl: {
       selectedProvider: state.sourceControlProvider,
@@ -231,10 +366,17 @@ function buildSetupSnapshot(input: {
         .filter((provider) => provider.connected)
         .map((provider) => provider.provider),
       repositoryCount,
+      skipped: sourceControlSkipped,
+      providers: input.status.sourceControlSetup.providers.map((provider) => ({
+        provider: provider.provider,
+        connected: provider.connected,
+        repositoryCount: provider.repositoryCount ?? 0,
+      })),
     },
     starterSelection: setupSession?.starterTaskSelection ?? null,
     starterLaunch: {
       hasSuccessfulLaunch: input.hasSuccessfulStarterLaunch,
+      attemptedTaskIds: input.attemptedStarterTaskIds,
     },
     recommendations: state.automationRecommendations
       ? {
@@ -249,6 +391,76 @@ function buildSetupSnapshot(input: {
   });
 }
 
+async function readConnectedSetupIntegrationIds(): Promise<string[]> {
+  const integrationIds = SETUP_INTEGRATIONS.map(
+    (integration) => integration.id,
+  );
+  if (integrationIds.length === 0) return [];
+  const rows = await db
+    .select({ mcpId: deploymentMcpEnablements.mcpId })
+    .from(deploymentMcpEnablements)
+    .where(
+      and(
+        eq(deploymentMcpEnablements.enabled, true),
+        inArray(deploymentMcpEnablements.mcpId, integrationIds),
+      ),
+    );
+  return rows.map((row) => row.mcpId);
+}
+
+async function readCapabilityMilestones(
+  conversation: SetupSessionConversation | null,
+): Promise<
+  Partial<
+    Record<
+      FastAgentCapabilityId,
+      'offered' | 'completed' | 'declined' | 'deferred'
+    >
+  >
+> {
+  if (!conversation) return {};
+  const rows = await db
+    .select({
+      eventType: fastAgentMessages.eventType,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversation.fastConversationId),
+        sql`${fastAgentMessages.eventType} in (${ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer}, ${ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse})`,
+      ),
+    )
+    .orderBy(fastAgentMessages.ts);
+  const milestones: Partial<
+    Record<
+      FastAgentCapabilityId,
+      'offered' | 'completed' | 'declined' | 'deferred'
+    >
+  > = {};
+  const offerCapabilities = new Map<string, FastAgentCapabilityId>();
+  for (const row of rows) {
+    if (row.eventType === ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer) {
+      const offer = parseFastAgentCapabilityOfferPayload(row.payload);
+      if (!offer) continue;
+      offerCapabilities.set(offer.offerId, offer.capability);
+      milestones[offer.capability] ??= 'offered';
+      continue;
+    }
+    const response = parseFastAgentCapabilityOfferResponsePayload(row.payload);
+    if (
+      !response ||
+      offerCapabilities.get(response.offerId) !== response.capability ||
+      milestones[response.capability] !== 'offered'
+    ) {
+      continue;
+    }
+    milestones[response.capability] =
+      response.resolution === 'completed' ? 'completed' : 'deferred';
+  }
+  return milestones;
+}
+
 async function resolveSetupSnapshot(
   auth: UserAuthSuccess,
   conversation?: SetupSessionConversation,
@@ -257,6 +469,14 @@ async function resolveSetupSnapshot(
   const setupSession = normalizeSetupNewSetupSession(
     status.setupNewState.setupSession,
   );
+  const setupConversation =
+    conversation ?? (await findSetupSessionConversation(auth));
+  const attemptedStarterTaskIds = setupSession?.starterTaskSelection
+    ? await readSetupStarterLaunchAttempts(
+        setupConversation,
+        setupSession.starterTaskSelection.selectedAt,
+      )
+    : [];
   return buildSetupSnapshot({
     status,
     integrationDiscovery: await readSetupIntegrationDiscovery(
@@ -268,9 +488,12 @@ async function resolveSetupSnapshot(
       ? await hasSuccessfulSetupSessionTaskLaunch(
           auth,
           setupSession.starterTaskSelection.selectedAt,
-          conversation,
+          setupConversation ?? undefined,
         )
       : false,
+    attemptedStarterTaskIds,
+    initialMilestones: await readCapabilityMilestones(setupConversation),
+    connectedIntegrationIds: await readConnectedSetupIntegrationIds(),
   });
 }
 
@@ -417,6 +640,39 @@ async function hasSuccessfulSetupSessionTaskLaunch(
   return Boolean(run);
 }
 
+async function readSetupStarterLaunchAttempts(
+  conversation: SetupSessionConversation | null | undefined,
+  selectedAt: string,
+): Promise<SetupStarterTaskId[]> {
+  if (!conversation) return [];
+  const rows = await db
+    .select({ payload: fastAgentMessages.payload })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversation.fastConversationId),
+        eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.ToolCall),
+        gte(fastAgentMessages.ts, new Date(selectedAt).getTime()),
+      ),
+    );
+  const attempted = new Set<SetupStarterTaskId>();
+  for (const { payload } of rows) {
+    if (payload?.toolName !== 'launch_task') continue;
+    const rawInput = payload.rawInput;
+    if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput))
+      continue;
+    const args = (rawInput as Record<string, unknown>).arguments;
+    if (!args || typeof args !== 'object' || Array.isArray(args)) continue;
+    const prompt = (args as Record<string, unknown>).prompt;
+    if (typeof prompt !== 'string') continue;
+    const task = SETUP_STARTER_TASKS.find(
+      (candidate) => candidate.prompt === prompt,
+    );
+    if (task) attempted.add(task.id);
+  }
+  return [...attempted];
+}
+
 function deriveSetupRailMilestones(
   status: Awaited<ReturnType<typeof getSetupNewStatusCommand>>,
 ) {
@@ -436,6 +692,8 @@ function deriveSetupRailMilestones(
     : null;
   const computeReady = status.computeSetup.setupSatisfied;
   const sourceConnected = hasSynchronizedSourceControl(status);
+  const sourceSkipped =
+    !sourceConnected && Boolean(setupSession?.sourceControlSkippedAt);
 
   return {
     account: 'ready' as const,
@@ -447,11 +705,15 @@ function deriveSetupRailMilestones(
       : provisioning?.status === 'building'
         ? ('preparing' as const)
         : ('pending' as const),
-    source: sourceConnected ? ('ready' as const) : ('pending' as const),
+    source: sourceConnected
+      ? ('ready' as const)
+      : sourceSkipped
+        ? ('skipped' as const)
+        : ('pending' as const),
     firstWork: setupSession?.starterTaskSelection
       ? ('ready' as const)
       : ('pending' as const),
-    open: !sourceConnected,
+    open: !sourceConnected && !sourceSkipped,
   };
 }
 
@@ -489,6 +751,9 @@ async function buildSetupPlatformEventTurn(
   const setupSnapshot =
     prepared?.setupSnapshot ?? (await resolveSetupSnapshot(auth));
   const setupContext = buildSetupTurnContext(conversation, setupSnapshot);
+  const launchTask = (
+    await import('@roomote/cloud-agents/server')
+  ).createFastAgentWebTaskLauncher({ userId: auth.userId });
   const currentMessageId = buildSetupEventTurnId({
     sessionId: conversation.sessionId,
     workflowVersion: conversation.workflowVersion,
@@ -507,11 +772,22 @@ async function buildSetupPlatformEventTurn(
         createArtifact: buildFastAgentArtifactCreator(
           conversation.fastConversationId,
         ),
-        launchTask: (
-          await import('@roomote/cloud-agents/server')
-        ).createFastAgentWebTaskLauncher({
-          userId: auth.userId,
-        }),
+        launchTask: async (launchInput) => {
+          try {
+            return await launchTask(launchInput);
+          } finally {
+            try {
+              await attemptSetupCompletionAfterStarterLaunch(
+                auth,
+                conversation,
+              );
+            } catch (error) {
+              console.error(
+                `[Setup] Failed to reconcile completion after a starter launch: ${formatErrorForLog(error)}`,
+              );
+            }
+          }
+        },
         postReply: async () => {},
       },
     },
@@ -533,9 +809,60 @@ async function buildSetupPlatformEventTurn(
       onIntegrationDiscoveryCompleted: async () => {
         await reconcileSetupPlatformEvents(auth);
       },
+      onTurnSettled: async () => {
+        await reconcileMissedInitialCapabilityOffer(auth, conversation);
+      },
     }),
     durableSessionId: conversation.fastConversationId,
   };
+}
+
+async function reconcileMissedInitialCapabilityOffer(
+  auth: UserAuthSuccess,
+  conversation: SetupSessionConversation,
+): Promise<void> {
+  const snapshot = parseFastAgentCapabilitySnapshot(
+    await resolveSetupSnapshot(auth, conversation),
+  );
+  const capability = snapshot?.recommendedNextCapability;
+  if (!capability || !snapshot.capabilities[capability]?.canOffer) return;
+
+  const fingerprint = `v${conversation.workflowVersion}:${capability}`;
+  const correctionTurnId = buildSetupEventTurnId({
+    sessionId: conversation.sessionId,
+    workflowVersion: conversation.workflowVersion,
+    kind: 'capability_milestone_correction',
+    fingerprint,
+  });
+  const [existing] = await db
+    .select({ id: fastAgentMessages.id })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversation.fastConversationId),
+        sql`(
+          (${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer}
+            AND ${fastAgentMessages.payload}->>'capability' = ${capability})
+          OR ${fastAgentMessages.turnId} = ${correctionTurnId}
+        )`,
+      ),
+    )
+    .limit(1);
+  if (existing) return;
+
+  void captureEvent('capability_offer_missed_initial_milestone', {
+    userId: auth.userId,
+    properties: { capability, advanced_initial_setup: false },
+  });
+  await scheduleSetupPlatformEvent(auth, {
+    kind: 'capability_milestone_correction',
+    fingerprint,
+    payload: {
+      capability,
+      reason:
+        'The applicable initial capability was not presented or resolved in the previous turn.',
+    },
+  });
 }
 
 /**
@@ -554,9 +881,6 @@ export async function reconcileSetupPlatformEvents(
   const conversation =
     options.conversation ?? (await findSetupSessionConversation(auth));
   if (!conversation) return status.setupCompletedAt != null;
-  const setupCompleted =
-    status.setupCompletedAt != null ||
-    (await completeConversationalSetupIfReady(auth, status));
   const hasSuccessfulStarterLaunch = setupSession.starterTaskSelection
     ? await hasSuccessfulSetupSessionTaskLaunch(
         auth,
@@ -564,15 +888,31 @@ export async function reconcileSetupPlatformEvents(
         conversation,
       )
     : false;
+  const attemptedStarterTaskIds = setupSession.starterTaskSelection
+    ? await readSetupStarterLaunchAttempts(
+        conversation,
+        setupSession.starterTaskSelection.selectedAt,
+      )
+    : [];
   const integrationDiscovery = await readSetupIntegrationDiscovery(
     auth,
     {},
     conversation,
   );
+  const setupCompleted =
+    status.setupCompletedAt != null ||
+    (await completeConversationalSetupIfReady(
+      auth,
+      status,
+      attemptedStarterTaskIds,
+    ));
   const setupSnapshot = buildSetupSnapshot({
     status,
     hasSuccessfulStarterLaunch,
     integrationDiscovery,
+    attemptedStarterTaskIds,
+    initialMilestones: await readCapabilityMilestones(conversation),
+    connectedIntegrationIds: await readConnectedSetupIntegrationIds(),
   });
 
   const connected = status.sourceControlSetup.providers.filter(
@@ -609,6 +949,21 @@ export async function reconcileSetupPlatformEvents(
             repositoryCount: provider.repositoryCount ?? 0,
           })),
         },
+      },
+      conversation,
+    );
+  } else if (setupSession.sourceControlSkippedAt) {
+    await persistSetupSessionReceipt(
+      auth,
+      {
+        kind: 'source_skipped',
+        fingerprint: setupSession.sourceControlSkippedAt,
+        presentation: {
+          label: 'Skipped source control',
+          iconKey: 'git-branch',
+        },
+        text: 'Skipped source control.',
+        payload: {},
       },
       conversation,
     );
@@ -674,11 +1029,21 @@ export async function reconcileSetupPlatformEvents(
         })),
       },
     });
+  } else if (setupSession.sourceControlSkippedAt) {
+    events.push({
+      kind: 'source_skipped',
+      fingerprint: setupSession.sourceControlSkippedAt,
+      payload: { skippedAt: setupSession.sourceControlSkippedAt },
+    });
   }
   // The source-connection turn may already have closed without requesting the
   // trusted starter choices. A dedicated, stable event both owns that action
   // for new sessions and repairs existing sessions on their next reconcile.
-  if (synchronized.length > 0 && !setupSession.starterTaskSelection) {
+  if (
+    synchronized.length > 0 &&
+    integrationDiscovery.completed &&
+    !setupSession.starterTaskSelection
+  ) {
     events.push({
       kind: 'starter_request',
       fingerprint: `v${setupSession.workflowVersion}:setup_starter_tasks`,
@@ -695,7 +1060,10 @@ export async function reconcileSetupPlatformEvents(
   // available without allowing a task to enter the queue with no worker
   // backend. A later compute save/provisioning completion re-runs reconciliation
   // and emits this same event once the provider is ready.
-  if (setupSession.starterTaskSelection && status.computeSetup.setupSatisfied) {
+  if (
+    setupSession.starterTaskSelection?.taskIds.length &&
+    status.computeSetup.setupSatisfied
+  ) {
     events.push({
       kind: 'starter_selection',
       fingerprint: setupSession.starterTaskSelection.requestId,
@@ -711,7 +1079,9 @@ export async function reconcileSetupPlatformEvents(
     });
   }
   if (
-    hasSuccessfulStarterLaunch &&
+    synchronized.length > 0 &&
+    integrationDiscovery.completed &&
+    setupSession.starterTaskSelection &&
     state.automationRecommendations?.status === 'ready'
   ) {
     events.push({
@@ -788,6 +1158,70 @@ export async function reconcileSetupPlatformEvents(
   return setupCompleted;
 }
 
+async function attemptSetupCompletionAfterStarterLaunch(
+  auth: UserAuthSuccess,
+  conversation: SetupSessionConversation,
+): Promise<void> {
+  const status = await getSetupNewStatusCommand(auth);
+  const setupSession = normalizeSetupNewSetupSession(
+    status.setupNewState.setupSession,
+  );
+  if (!setupSession?.starterTaskSelection) return;
+  const attemptedStarterTaskIds = await readSetupStarterLaunchAttempts(
+    conversation,
+    setupSession.starterTaskSelection.selectedAt,
+  );
+  await completeConversationalSetupIfReady(
+    auth,
+    status,
+    attemptedStarterTaskIds,
+  );
+}
+
+export async function skipSetupSourceControlCommand(
+  auth: UserAuthSuccess,
+  sessionId: string,
+): Promise<{ success: true }> {
+  assertAdmin(auth);
+  const conversation = await findSetupSessionConversation(auth);
+  if (!conversation || conversation.sessionId !== sessionId) {
+    throw new Error('This action does not belong to the setup Session.');
+  }
+
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${SETUP_SESSION_ADVISORY_LOCK}))`,
+    );
+    const [settings] = await tx
+      .select({ setupNewState: deploymentSettings.setupNewState })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, 'default'))
+      .limit(1);
+    const state = normalizeSetupNewState(settings?.setupNewState ?? {});
+    const setupSession = normalizeSetupNewSetupSession(state.setupSession);
+    if (!setupSession || setupSession.sessionId !== sessionId) {
+      throw new Error('This action does not belong to the setup Session.');
+    }
+    if (setupSession.sourceControlSkippedAt) return;
+    await tx
+      .update(deploymentSettings)
+      .set({
+        setupNewState: {
+          ...state,
+          setupSession: {
+            ...setupSession,
+            sourceControlSkippedAt: new Date().toISOString(),
+          },
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(deploymentSettings.id, 'default'));
+  });
+
+  await reconcileSetupPlatformEvents(auth, { conversation });
+  return { success: true };
+}
+
 export async function notifySetupSourceControlSynchronized(
   auth: UserAuthSuccess,
 ): Promise<void> {
@@ -835,13 +1269,6 @@ export async function persistSetupRecommendationApplicationReceipt(
       ),
     },
   });
-}
-
-export async function findDeploymentSetupSessionId(): Promise<string | null> {
-  return (
-    normalizeSetupNewSetupSession((await readSetupNewState()).setupSession)
-      ?.sessionId ?? null
-  );
 }
 
 export async function getSetupSessionStatusCommand(auth: UserAuthSuccess) {
@@ -1038,9 +1465,6 @@ async function persistSetupPresetResponse(input: {
         }) ?? [],
       ),
     ];
-    if (preset === 'setup_starter_tasks' && taskIds.length === 0) {
-      throw new Error('Select at least one starter task.');
-    }
     const selectedAt = new Date();
     const nextState = {
       ...state,
@@ -1119,12 +1543,16 @@ async function persistSetupPresetResponse(input: {
               label: 'Suggested initial tasks',
               iconKey: 'list-checks',
             },
-            text: formatStarterSelectionReceipt(
-              taskIds.map(
-                (taskId) =>
-                  SETUP_STARTER_TASKS.find((task) => task.id === taskId)!.title,
-              ),
-            ),
+            text:
+              taskIds.length > 0
+                ? formatStarterSelectionReceipt(
+                    taskIds.map(
+                      (taskId) =>
+                        SETUP_STARTER_TASKS.find((task) => task.id === taskId)!
+                          .title,
+                    ),
+                  )
+                : "I'll type it myself.",
             payload: { taskIds },
             ts: now.getTime(),
           }),
@@ -1145,10 +1573,10 @@ async function persistSetupPresetResponse(input: {
             fingerprint: input.request.payload.requestId,
             requestId: input.request.payload.requestId,
             presentation: {
-              label: 'Suggested integrations',
+              label: 'Asked about integrations',
               iconKey: 'plug',
             },
-            text: 'Suggested integrations.',
+            text: 'Asked about integrations.',
             payload: {},
             ts: now.getTime(),
           }),
@@ -1217,34 +1645,108 @@ export async function resolveSetupSessionTurnContext(
     .from(deploymentSettings)
     .where(eq(deploymentSettings.id, 'default'))
     .limit(1);
-  if (settings?.setupCompletedAt) return null;
   const state = normalizeSetupNewState(settings?.setupNewState ?? {});
   const setupSession = normalizeSetupNewSetupSession(state.setupSession);
-  if (!setupSession) return null;
   const [linkedSession] = await db
-    .select({ fastConversationId: sessions.fastConversationId })
+    .select({
+      id: sessions.id,
+      fastConversationId: sessions.fastConversationId,
+      ownerUserId: sessions.ownerUserId,
+    })
     .from(sessions)
-    .where(eq(sessions.id, setupSession.sessionId))
+    .where(
+      or(
+        eq(sessions.id, sessionId),
+        eq(sessions.fastConversationId, sessionId),
+      ),
+    )
     .limit(1);
+  if (!linkedSession?.fastConversationId) return null;
+  const isActiveSetupSession =
+    auth.isAdmin &&
+    settings?.setupCompletedAt == null &&
+    setupSession?.sessionId === linkedSession.id;
   if (
-    setupSession.sessionId !== sessionId &&
-    linkedSession?.fastConversationId !== sessionId
-  )
-    return null;
-  const conversation = await findSetupSessionConversation(auth);
-  if (!conversation)
+    settings?.setupCompletedAt == null &&
+    setupSession?.sessionId === linkedSession.id &&
+    linkedSession.ownerUserId !== auth.userId
+  ) {
     throw new Error('Only the setup Session owner can reply during setup.');
-  assertAdmin(auth);
-  const setupSnapshot = await resolveSetupSnapshot(auth);
-  const setupContext = buildSetupTurnContext(conversation, setupSnapshot);
+  }
+  const adminSetupSnapshot = await resolveSetupSnapshot(auth);
+  const parsedAdminSetupSnapshot = JSON.parse(adminSetupSnapshot) as {
+    recommendedNextCapability: FastAgentCapabilityId | null;
+    capabilities: Record<string, Record<string, unknown>>;
+  };
+  const sessionSetupSnapshot = isActiveSetupSession
+    ? parsedAdminSetupSnapshot
+    : {
+        ...parsedAdminSetupSnapshot,
+        recommendedNextCapability: null,
+        capabilities: {
+          ...parsedAdminSetupSnapshot.capabilities,
+          starter_work: {
+            ...parsedAdminSetupSnapshot.capabilities.starter_work,
+            canOffer: false,
+            unavailableReason:
+              'Starter work is only available in the setup Session.',
+          },
+        },
+      };
+  const setupSnapshot = auth.isAdmin
+    ? JSON.stringify(sessionSetupSnapshot)
+    : JSON.stringify({
+        ...sessionSetupSnapshot,
+        capabilities: Object.fromEntries(
+          Object.entries(sessionSetupSnapshot.capabilities).map(
+            ([capability, state]) => [
+              capability,
+              {
+                ...state,
+                canOffer: false,
+                unavailableReason:
+                  'A deployment administrator is required to configure this capability.',
+              },
+            ],
+          ),
+        ),
+      });
+  const setupContext: FastAgentSetupTurnContext = {
+    sessionId: linkedSession.id,
+    fastConversationId: linkedSession.fastConversationId,
+    setupSnapshot,
+    starterTaskOptions: SETUP_STARTER_TASKS.map((task) => ({
+      id: task.id,
+      label: task.title,
+      description: task.description,
+    })),
+  };
+  if (!auth.isAdmin) {
+    return {
+      setupSnapshot,
+      setupContext,
+      setupSession: false,
+    };
+  }
   return {
     adapterExtensions: buildFastAgentSetupAdapter(setupContext, {
+      setupSession: isActiveSetupSession,
       onIntegrationDiscoveryCompleted: async () => {
         await reconcileSetupPlatformEvents(auth);
       },
+      ...(isActiveSetupSession
+        ? {
+            onTurnSettled: async () => {
+              const conversation = await findSetupSessionConversation(auth);
+              if (conversation) {
+                await reconcileMissedInitialCapabilityOffer(auth, conversation);
+              }
+            },
+          }
+        : {}),
     }),
     setupSnapshot,
     setupContext,
-    setupSession: true as const,
+    setupSession: isActiveSetupSession,
   };
 }

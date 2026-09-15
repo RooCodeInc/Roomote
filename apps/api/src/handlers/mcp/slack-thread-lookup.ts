@@ -3,10 +3,14 @@ import {
   and,
   db,
   eq,
+  findActiveSlackInstallationForChannel,
   slackInstallations,
   slackUserMappings,
 } from '@roomote/db/server';
 import {
+  getCommunicationTeamDomainFromTaskPayload,
+  getCommunicationTeamIdFromTaskPayload,
+  getCommunicationProviderFromTaskPayload,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
 } from '@roomote/types';
@@ -38,6 +42,7 @@ type SlackThreadMessage = {
 };
 
 type SlackThreadLookupPayload = {
+  slackTeamId: string;
   channelId: string;
   requestedMessageTs: string;
   threadTs: string;
@@ -61,6 +66,7 @@ type SlackThreadLookupPayload = {
 };
 
 type SlackChannelMessagesPayload = {
+  slackTeamId: string;
   channelId: string;
   requestedOldest?: string;
   requestedLatest?: string;
@@ -195,7 +201,13 @@ export function getSlackReplyTarget(
 
 export async function resolveVerifiedSlackChannel(options: {
   channel: string;
-  slack: SlackNotifier;
+  slack: Pick<
+    SlackNotifier,
+    | 'resolveChannelId'
+    | 'isAppInChannel'
+    | 'isPublicChannel'
+    | 'isUserInChannel'
+  >;
   slackTeamId: string;
   actingSlackMembershipUserId?: string | null;
 }): Promise<string> {
@@ -292,14 +304,77 @@ export async function resolveVerifiedSlackChannel(options: {
   return resolvedChannelId;
 }
 
+async function resolveSlackInstallationByDomain(options: {
+  teamDomain: string;
+  expectedTeamId?: string | null;
+}): Promise<{
+  slackInstallation: { botAccessToken: string; teamId: string };
+  slack: SlackNotifier;
+}> {
+  const installations = await db.query.slackInstallations.findMany({
+    columns: { botAccessToken: true, teamId: true },
+    where: and(
+      eq(slackInstallations.isActive, true),
+      options.expectedTeamId
+        ? eq(slackInstallations.teamId, options.expectedTeamId)
+        : undefined,
+    ),
+  });
+  const candidates = await Promise.all(
+    installations.map(async (slackInstallation) => {
+      const slack = new SlackNotifier(slackInstallation.botAccessToken);
+      const identity = await slack.getWorkspaceIdentity();
+      return {
+        slackInstallation,
+        slack,
+        identity,
+        matches:
+          identity?.teamId === slackInstallation.teamId &&
+          identity.teamDomain === options.teamDomain,
+      };
+    }),
+  );
+
+  if (
+    candidates.some(
+      ({ identity, slackInstallation }) =>
+        !identity || identity.teamId !== slackInstallation.teamId,
+    )
+  ) {
+    throw new McpProxyError(503, 'Slack link workspace could not be verified');
+  }
+
+  const matches = candidates.filter(({ matches }) => matches);
+  if (matches.length > 1) {
+    throw new McpProxyError(
+      409,
+      'Slack workspace could not be resolved unambiguously from the supplied link',
+    );
+  }
+  if (matches.length === 0) {
+    throw new McpProxyError(
+      404,
+      'No active Slack installation matches the supplied Slack link workspace',
+    );
+  }
+
+  return matches[0]!;
+}
+
 async function resolveSlackLookupChannel(options: {
   channel?: string;
+  slackTeamId?: string;
+  slackTeamDomain?: string;
   taskRun?: SlackReplyTargetTaskRun | null;
   actingSlackMembershipUserId?: string | null;
   missingChannelError: string;
   missingLinkedAccountErrorMessage?: string;
   unlinkedUserPublicChannelErrorMessage?: string;
-}): Promise<{ channelId: string; slack: SlackNotifier }> {
+}): Promise<{
+  channelId: string;
+  slack: SlackNotifier;
+  slackTeamId: string;
+}> {
   const slackOriginChannel = options.taskRun
     ? (getSlackReplyTarget(options.taskRun)?.channel ?? null)
     : null;
@@ -314,10 +389,66 @@ async function resolveSlackLookupChannel(options: {
     throw new McpProxyError(400, options.missingChannelError);
   }
 
-  const slackInstallation = await db.query.slackInstallations.findFirst({
-    columns: { botAccessToken: true, teamId: true },
-    where: eq(slackInstallations.isActive, true),
-  });
+  const taskIsSlack =
+    options.taskRun &&
+    getCommunicationProviderFromTaskPayload(options.taskRun.payload) ===
+      'slack';
+  const taskTeamId = taskIsSlack
+    ? getCommunicationTeamIdFromTaskPayload(options.taskRun!.payload)
+    : null;
+  const taskTeamDomain = taskIsSlack
+    ? getCommunicationTeamDomainFromTaskPayload(options.taskRun!.payload)
+    : null;
+  const requestedTeamId = options.slackTeamId?.trim() || null;
+  const requestedTeamDomain =
+    options.slackTeamDomain?.trim().toLowerCase() || null;
+
+  if (requestedTeamId && taskTeamId && requestedTeamId !== taskTeamId) {
+    throw new McpProxyError(
+      400,
+      'The supplied Slack link does not match the task workspace',
+    );
+  }
+
+  const expectedTeamId = requestedTeamId ?? taskTeamId;
+  const expectedTeamDomain =
+    requestedTeamDomain ?? (expectedTeamId ? null : taskTeamDomain);
+  let slackInstallation;
+  let slack;
+  if (expectedTeamDomain) {
+    const resolved = await resolveSlackInstallationByDomain({
+      teamDomain: expectedTeamDomain.toLowerCase(),
+      expectedTeamId,
+    });
+    slackInstallation = resolved.slackInstallation;
+    slack = resolved.slack;
+  } else if (expectedTeamId) {
+    const installations = await db.query.slackInstallations.findMany({
+      columns: { botAccessToken: true, teamId: true },
+      where: and(
+        eq(slackInstallations.isActive, true),
+        eq(slackInstallations.teamId, expectedTeamId),
+      ),
+      limit: 2,
+    });
+    slackInstallation = installations[0];
+    if (!slackInstallation && taskTeamId) {
+      throw new McpProxyError(
+        400,
+        'The supplied Slack link does not match the task workspace',
+      );
+    }
+  } else {
+    slackInstallation = await findActiveSlackInstallationForChannel(
+      options.channel ?? slackOriginChannel!,
+    );
+    if (!slackInstallation) {
+      throw new McpProxyError(
+        409,
+        'Slack workspace could not be resolved unambiguously for this channel',
+      );
+    }
+  }
 
   if (!slackInstallation?.botAccessToken) {
     throw new McpProxyError(
@@ -326,7 +457,7 @@ async function resolveSlackLookupChannel(options: {
     );
   }
 
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
+  slack ??= new SlackNotifier(slackInstallation.botAccessToken);
   let lookupChannel = slackOriginChannel;
 
   if (options.channel) {
@@ -367,7 +498,11 @@ async function resolveSlackLookupChannel(options: {
     throw new McpProxyError(500, 'Slack lookup channel could not be resolved');
   }
 
-  return { channelId: lookupChannel, slack };
+  return {
+    channelId: lookupChannel,
+    slack,
+    slackTeamId: slackInstallation.teamId,
+  };
 }
 
 function normalizeSlackTimeBoundary(
@@ -411,6 +546,8 @@ function normalizeSlackTimeBoundary(
 export async function lookupSlackThread(options: {
   messageTs: string;
   channel?: string;
+  slackTeamId?: string;
+  slackTeamDomain?: string;
   taskRun?: SlackReplyTargetTaskRun | null;
   actingSlackMembershipUserId?: string | null;
 }): Promise<SlackThreadLookupPayload> {
@@ -419,8 +556,14 @@ export async function lookupSlackThread(options: {
     throw new McpProxyError(400, 'messageTs is required');
   }
 
-  const { channelId: lookupChannel, slack } = await resolveSlackLookupChannel({
+  const {
+    channelId: lookupChannel,
+    slack,
+    slackTeamId,
+  } = await resolveSlackLookupChannel({
     channel: options.channel,
+    slackTeamId: options.slackTeamId,
+    slackTeamDomain: options.slackTeamDomain,
     taskRun: options.taskRun,
     actingSlackMembershipUserId: options.actingSlackMembershipUserId,
     missingChannelError:
@@ -468,6 +611,7 @@ export async function lookupSlackThread(options: {
   }
 
   return {
+    slackTeamId,
     channelId: lookupChannel,
     requestedMessageTs,
     threadTs,
@@ -479,6 +623,8 @@ export async function lookupSlackThread(options: {
 
 export async function lookupSlackChannelMessages(options: {
   channel?: string;
+  slackTeamId?: string;
+  slackTeamDomain?: string;
   oldest?: string;
   latest?: string;
   taskRun?: SlackReplyTargetTaskRun | null;
@@ -500,8 +646,10 @@ export async function lookupSlackChannelMessages(options: {
     throw new McpProxyError(400, 'oldest must be less than or equal to latest');
   }
 
-  const { channelId, slack } = await resolveSlackLookupChannel({
+  const { channelId, slack, slackTeamId } = await resolveSlackLookupChannel({
     channel,
+    slackTeamId: options.slackTeamId,
+    slackTeamDomain: options.slackTeamDomain,
     taskRun: options.taskRun,
     actingSlackMembershipUserId: options.actingSlackMembershipUserId,
     missingChannelError:
@@ -515,16 +663,18 @@ export async function lookupSlackChannelMessages(options: {
       ...(oldestBoundary ? { oldest: oldestBoundary.slackTs } : {}),
       ...(latestBoundary ? { latest: latestBoundary.slackTs } : {}),
     });
-  } catch {
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
     throw new McpProxyError(
       502,
-      `Slack channel ${channelId} could not be fetched from Slack`,
+      `Slack channel ${channelId} could not be fetched from Slack: ${reason}`,
     );
   }
 
   const normalizedMessages = normalizeSlackChannelMessages(messages);
 
   return {
+    slackTeamId,
     channelId,
     ...(oldestBoundary ? { requestedOldest: oldestBoundary.requested } : {}),
     ...(latestBoundary ? { requestedLatest: latestBoundary.requested } : {}),

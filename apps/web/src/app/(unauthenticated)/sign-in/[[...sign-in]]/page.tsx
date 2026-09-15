@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
 import { getDeploymentAccountLinkHelpText } from '@roomote/db/server';
 
 import {
@@ -7,6 +8,7 @@ import {
 } from '@/lib/server/access-policy';
 import { getSignedInAuthContext } from '@/lib/server/auth-context';
 import { resolveAuthProviderConfig } from '@/lib/server/auth-provider-config';
+import { getSafeSignInRedirectPath } from '@/lib/auth-redirect';
 import { PAGE_METADATA } from '@/lib/metadata';
 
 import { type AuthProvider } from '../../auth-form';
@@ -50,6 +52,11 @@ export default async function Page(props: {
       getSignedInAuthContext(),
       getDeploymentAccountLinkHelpText(),
     ]);
+
+  if (authContext.success) {
+    redirect(getSafeSignInRedirectPath(searchParams.redirect_url, '/'));
+  }
+
   // A visitor bounced here by the seat gate still holds their Better Auth
   // session cookie, so re-running the auth evaluation identifies them and
   // lets the form explain the rejection instead of silently offering

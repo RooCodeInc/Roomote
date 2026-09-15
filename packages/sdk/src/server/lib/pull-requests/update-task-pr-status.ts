@@ -9,6 +9,7 @@ import {
   inArray,
   ne,
   or,
+  reconcileAutomationResultAcceptance,
   requeueBrainMemoryEventsForTasks,
   syncTaskStateFromRuns,
 } from '@roomote/db/server';
@@ -101,10 +102,20 @@ export async function updateTaskPrStatus(
   repository: string,
   prNumber: number,
   status: PullRequestStatus,
-  scope: { host: string | null | undefined; repositoryId?: string },
+  scope: {
+    host: string | null | undefined;
+    repositoryId?: string;
+    mergedAt?: Date | null;
+  },
 ): Promise<void> {
   const host = normalizeHost(scope?.host);
   if (!host && !scope?.repositoryId) return;
+  const mergedAt =
+    status === 'merged' &&
+    scope.mergedAt &&
+    !Number.isNaN(scope.mergedAt.getTime())
+      ? scope.mergedAt
+      : null;
 
   const matchingPullRequest = and(
     eq(taskPullRequests.sourceControlProvider, provider),
@@ -160,13 +171,20 @@ export async function updateTaskPrStatus(
             or(
               isNull(taskPullRequests.status),
               ne(taskPullRequests.status, status),
+              ...(status === 'merged' && mergedAt
+                ? [isNull(taskPullRequests.mergedAt)]
+                : []),
             ),
           ]
         : []),
     );
     let originatingTaskId: string | null = null;
+    let linkedTasks: Array<{
+      taskId: string;
+      createdByRoomote: boolean;
+    }> = [];
     if (status === 'merged') {
-      const linkedTasks = await tx
+      linkedTasks = await tx
         .select({
           taskId: taskPullRequests.taskId,
           createdByRoomote: taskPullRequests.createdByRoomote,
@@ -189,12 +207,20 @@ export async function updateTaskPrStatus(
 
     const updatedRows = await tx
       .update(taskPullRequests)
-      .set({ status, updatedAt: new Date() })
+      .set({ status, ...(mergedAt ? { mergedAt } : {}), updatedAt: new Date() })
       .where(matchingStatus)
       .returning({
         taskId: taskPullRequests.taskId,
         createdByRoomote: taskPullRequests.createdByRoomote,
       });
+
+    if (status === 'merged' && mergedAt) {
+      for (const taskId of [
+        ...new Set(linkedTasks.map((row) => row.taskId)),
+      ].sort()) {
+        await reconcileAutomationResultAcceptance(taskId, tx);
+      }
+    }
 
     return { updated: updatedRows, originatingTaskId };
   });

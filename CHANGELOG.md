@@ -2,6 +2,91 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.9.0 (2026-09-13)
+
+Roomote 1.9 adds a native Telegram Fast experience, Session-owned Goal Mode, direct pull request merging, and more adaptive setup and workspace flows.
+
+### Highlights
+
+- Work with Fast natively in Telegram, keep Goal Mode running across Session turns, and reply to personal Session notifications while away from the web app.
+- Complete deployment setup conversationally and start all-repositories work without cloning every repository up front.
+- Merge pull requests, maintain shared custom skills, and opt into memory-informed Home suggestions directly through Fast.
+
+### Minor changes
+
+- Fast can now update shared custom skills by exact catalog ID, with atomic exact-text or full-content edits and version protection that prevents stale changes from overwriting newer work.
+- Fast can now merge pull requests directly across supported source-control providers after an explicit request, while preserving provider checks, permissions, head-version safeguards, and post-merge verification.
+- Telegram now delivers Fast replies, edits, private-chat drafts, and compact Session footers as native rich messages, with live streaming and links back to active work.
+- Telegram users can now start Goal Mode for an active task with `/goal`, keeping goal-directed work in the same chat or topic without switching to the web app.
+- Telegram now shows Fast-delegated coding work in one compact, editable live message with topic-aware routing, expandable progress, elapsed status, and a direct link to the selected task.
+- Users who leave the web app can now receive a personal notification when a web-started task completes, fails, or is canceled, with a direct link back to the task.
+- Automation Results now automatically leave the unread inbox when their sole Roomote-created deliverable pull request merges, with consistent behavior across supported source-control providers and event ordering.
+- Deployment setup is now conversational and agent-led, with trusted in-thread cards for source control, integrations, sandboxes, starter work, and automation recommendations that adapt to completed or skipped choices without blocking the conversation.
+- All-repositories coding workspaces now start from a repository index and check out only the repositories a task needs, avoiding slow or stalled startup caused by cloning every active repository in advance.
+- Users can opt into experimental Home suggestions generated from their own recent completed task memories, with privacy-filtered sources, background precomputation, resilient static fallbacks, and support across configured helper-model providers.
+- Web Session notifications now arrive when an absent user needs to review a response or provide input, carry the actual reply into one personal provider thread, and accept replies that continue the same Session or pending task without duplicate or stale notifications.
+- Goal Mode now belongs to the Fast Session instead of one child task, so Roomote can pursue an objective across turns and delegated tasks, continue automatically within a bounded budget, and preserve goal state across web, Telegram, and Discord conversations.
+- Session owners can now approve narrowly scoped API keys through a secure form without placing credentials in chat or agent context. Fast and attached Docker coding runs can use approved keys only for the selected public HTTPS origin, allowed methods, and lifetime, with revocation and expiry enforced before requests and responses.
+- Cloud users now explicitly accept the experimental Voice data flow before their first call, before microphone capture or OpenAI contact begins. The consent explains that audio, transcripts, and workspace context are sent to OpenAI, is stored per user, and does not change self-hosted Voice behavior.
+
+### Patch changes
+
+- Roomote Cloud hides managed Email configuration that members cannot change, while continuing to show the deployment-provided address and connection state.
+- Deployment setup rejects malformed domain names before they can produce invalid routing or certificate configuration.
+- Fast now handles incomplete skill lookup arguments and unavailable skill sources without hiding valid skills, and integration discovery reports exact filter misses instead of returning an ambiguous empty result.
+- Mobile navigation makes recent Sessions easier to reach and moves Session switching into a responsive left rail that keeps the current conversation usable.
+- Telegram replies now preserve paragraphs, lists, reply context, and supported Markdown consistently, split long responses without losing content, and avoid adding redundant reply quotes.
+- Session history is clearer: internal timer receipts and redundant failed-tool labels stay hidden, task memories identify their initiating member, and the Experimental Results setting accurately describes its available features.
+- Tasks launch in the intended environment more reliably, and task-list failures now offer a retry instead of leaving users stranded on an error state.
+- Telegram conversations are more reliable across attachments, voice messages, topics, automations, reviews, mentions, and interactive prompts, with stable titles and icons, correctly threaded reports, clearer automation headings, durable review actions, and stale controls removed when they are no longer usable.
+- Telegram live coding progress stays stable through short and resumed Fast turns, and successful tasks keep their last useful update instead of being replaced with a generic completion message.
+- Voice conversations follow active coding tasks more consistently during calls and render transcript whitespace cleanly.
+- Automation reports use consistent default destinations across communication providers, while Fast widgets and their shareable links remain available across providers and resumed background turns.
+- Automation Results are easier to scan and act on across desktop and mobile, with clearer priority markers, accessible in-place expansion, restrained Markdown styling, and safe links for URLs and repository-backed pull request references.
+- Task prompts now reject attachments that failed to download instead of silently launching work without the requested file.
+- Results, Analytics, Environments, recent Sessions, Memory settings, and sandbox provider status now distinguish failed initial loads from empty data and offer an in-place retry while preserving already loaded content.
+- Signed-in users no longer remain on the login page, and safe local return paths now resume the requested page without allowing external, protocol-relative, or sign-in-loop redirects.
+- Custom automations can now run for discoverable Slack channels even when the local channel cache has no row, while ambiguous, inaccessible, or unverified workspace matches continue to fail closed.
+- The web app now preserves composer focus after sends, announces integration validation errors to assistive technology, stabilizes optimistic avatars, labels collapsed navigation actions, and keeps rendered text artifacts readable on wide screens.
+- Fast sessions now reject integration tool calls that pass undeclared argument keys, such as chat history bounds wrapped in a stringified `args` field, with an error naming the accepted arguments. Previously the MCP server silently dropped those keys, so the default 24-hour history window applied and the model kept repeating the malformed shape.
+- Fast Sessions now see the names and descriptions of instance skills and inline environment skills in every turn, so Roomote recognizes a matching playbook from the request and loads it without being asked. Previously skills were only discoverable after the model chose to call `list_skills`, so custom skills from Settings > Skills went unused unless a user typed `$skill-name`. Marketplace and repository skills stay on demand; the prompt names each environment's marketplace sources so the model knows when to look them up.
+- Closed agent panels now stay dismissed when users navigate away from a Session and return, while explicitly reopening or deep-linking a task still restores its panel. Thanks to @PierrunoYT for contributing this improvement.
+- Chat channel history results are now bounded to the newest messages that fit a fixed size, with a note telling the agent how to page further back, instead of being cut mid-JSON by the agent's output limit.
+- Long reasoning turns now stay connected through silent inference-provider gaps instead of resetting the stream, aborting in-flight tools, and regenerating the same work. The inference gateway sends standards-compatible SSE keepalives without changing model events or non-streaming responses.
+- Conversational setup no longer stalls when a model carries a qualifier from the previous capability into the next offer. Roomote now ignores qualifiers that do not apply while continuing to validate source-control providers and integration choices when they do apply.
+- Blank slate workspaces now configure Git for every run and, when the deployment has active repositories, can check out authorized repositories on demand and deliver pull requests without switching workspace types. Blank slates remain credential-free when no repositories are available.
+- Normal Sessions can now start tasks regardless of onboarding's starter-work state. Setup-only recommendations, launch gates, and onboarding state changes remain confined to the canonical setup Session, while ordinary integration connection cards continue to work.
+- MinIO and the MinIO client are now pulled from quay.io instead of Docker Hub, where the images were removed. The pinned versions and digests are unchanged, so existing artifact volumes are unaffected.
+- Coding tasks now retry within the existing bounded provider-recovery flow when a provider interrupts an in-flight tool call and leaves the turn idle, instead of incorrectly settling as complete with an aborted edit or other unfinished work.
+- Session composers now keep focus when task panels expand automatically or become ready later, so users can continue typing without focus jumping into a delegated task. Deliberately selecting a task still focuses its prompt as expected.
+- Temporarily hide Session-secret tools behind a default-off user experiment while hosted credential access is unavailable. Existing configured integrations remain available.
+
+## 1.8.2 (2026-09-14)
+
+Roomote 1.8.2 restores reliable Slack channel history reads in busy channels.
+
+### Highlights
+
+- Read recent Slack channel history without scanning the channel's entire backlog or reporting misleading permission errors.
+
+### Patch changes
+
+- Fix Slack channel history reads failing in busy channels. Time-bounded reads now pass the bound to Slack instead of paging through the whole channel, and the error returned to the agent names the underlying Slack failure.
+
+## 1.8.1 (2026-09-14)
+
+Roomote 1.8.1 restores Azure-backed delegated coding tasks and reliable Fast skill lookups on OpenAI models.
+
+### Highlights
+
+- Run delegated coding tasks through Azure providers without inference-gateway authentication failures.
+- List and load Fast skills reliably when OpenAI models supply optional tool arguments.
+
+### Patch changes
+
+- Delegated coding tasks using Azure OpenAI or Azure AI Foundry now authenticate through the inference gateway instead of failing before the provider request begins.
+- Fast `list_skills` and `load_skill` now tolerate null and filler optional arguments, return useful validation errors, and keep packaged and instance skills available when an optional scoped source fails.
+
 ## 1.8.0 (2026-09-11)
 
 Roomote 1.8 adds a durable automation results inbox, private personalization, more flexible setup and environments, and faster independent delegated work.

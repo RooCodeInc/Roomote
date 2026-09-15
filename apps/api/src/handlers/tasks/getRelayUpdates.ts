@@ -286,7 +286,7 @@ function buildResponse(params: {
 
 async function getTaskState(taskId: string, auth: McpAuth) {
   const [task] = await db
-    .select({ id: tasks.id, state: tasks.state, goalStatus: tasks.goalStatus })
+    .select({ id: tasks.id, state: tasks.state })
     .from(tasks)
     .where(
       and(
@@ -304,7 +304,6 @@ async function getTaskState(taskId: string, auth: McpAuth) {
     taskState: task.state,
     taskRunStatus: latestRun?.status ?? null,
     taskPhase: (latestRun?.taskPhase as TaskPhase | null | undefined) ?? null,
-    goalStatus: task.goalStatus,
   } satisfies RoomoteRelayState;
   return {
     state,

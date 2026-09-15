@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 
 import { useTRPCClient } from '@/trpc/client';
 import { playVoiceCue } from '@/lib/voice-cues';
+import { useVoiceConsent } from '@/components/layout/VoiceConsentProvider';
 import {
   chunkSpeakableText,
   stripVoiceAnnotations,
@@ -147,6 +148,7 @@ export function useLiveVoice({
   disabled = false,
 }: UseLiveVoiceOptions): UseLiveVoiceReturn {
   const trpcClient = useTRPCClient();
+  const requestVoiceConsent = useVoiceConsent();
   const [active, setActive] = useState(false);
   const [status, setStatus] = useState<LiveVoiceStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -489,6 +491,9 @@ export function useLiveVoice({
   const start = useCallback(async () => {
     if (activeRef.current || connectingRef.current || disabled) return;
 
+    if (!(await requestVoiceConsent())) return;
+    if (activeRef.current || connectingRef.current || disabled) return;
+
     const generation = ++startGenerationRef.current;
     const isStale = () => startGenerationRef.current !== generation;
     connectingRef.current = true;
@@ -651,6 +656,7 @@ export function useLiveVoice({
     disabled,
     handleServerEvent,
     release,
+    requestVoiceConsent,
     stop,
     trpcClient,
   ]);

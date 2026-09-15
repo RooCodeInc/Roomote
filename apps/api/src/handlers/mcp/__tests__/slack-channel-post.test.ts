@@ -7,6 +7,8 @@ const {
   postMessageMock,
   resolveChannelIdMock,
   isAppInChannelMock,
+  isPublicChannelMock,
+  isUserInChannelMock,
   getDirectMessageUserIdMock,
   openConversationMock,
   getCommunicationProviderAdapterMock,
@@ -17,6 +19,8 @@ const {
   postMessageMock: vi.fn(),
   resolveChannelIdMock: vi.fn(),
   isAppInChannelMock: vi.fn(),
+  isPublicChannelMock: vi.fn(),
+  isUserInChannelMock: vi.fn(),
   getDirectMessageUserIdMock: vi.fn(),
   openConversationMock: vi.fn(),
   getCommunicationProviderAdapterMock: vi.fn(),
@@ -39,6 +43,7 @@ vi.mock('@roomote/db/server', () => ({
   tasks: { id: 'id' },
   slackInstallations: { orgId: 'orgId', isActive: 'isActive' },
   slackUserMappings: {
+    userId: 'userId',
     slackUserId: 'slackUserId',
     slackTeamId: 'slackTeamId',
   },
@@ -56,6 +61,8 @@ vi.mock('@roomote/slack', () => ({
       postMessage = postMessageMock;
       resolveChannelId = resolveChannelIdMock;
       isAppInChannel = isAppInChannelMock;
+      isPublicChannel = isPublicChannelMock;
+      isUserInChannel = isUserInChannelMock;
       getDirectMessageUserId = getDirectMessageUserIdMock;
       openConversation = openConversationMock;
     },
@@ -168,10 +175,13 @@ describe('slack channel post MCP endpoint', () => {
     postMessageMock.mockResolvedValue('999.888');
     resolveChannelIdMock.mockResolvedValue('C123');
     isAppInChannelMock.mockResolvedValue(true);
+    isPublicChannelMock.mockResolvedValue(true);
+    isUserInChannelMock.mockResolvedValue(true);
     getDirectMessageUserIdMock.mockResolvedValue('U123ABC456');
     openConversationMock.mockResolvedValue('D123ABC456');
     vi.mocked(db.query.slackUserMappings.findFirst).mockResolvedValue({
       userId: 'linked-user',
+      slackUserId: 'U123ABC456',
     } as never);
     slackAdapterPostMessageMock.mockImplementation(
       async (input: {
@@ -215,6 +225,8 @@ describe('slack channel post MCP endpoint', () => {
       teamId: 'T123ABC456',
       resolveChannelId: resolveChannelIdMock,
       isAppInChannel: isAppInChannelMock,
+      isPublicChannel: isPublicChannelMock,
+      isUserInChannel: isUserInChannelMock,
       getDirectMessageUserId: getDirectMessageUserIdMock,
       openConversation: openConversationMock,
       postMessage: slackAdapterPostMessageMock,
@@ -356,9 +368,9 @@ describe('slack channel post MCP endpoint', () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockTaskRun() as never,
     );
-    vi.mocked(db.query.slackUserMappings.findFirst).mockResolvedValue(
-      undefined,
-    );
+    vi.mocked(db.query.slackUserMappings.findFirst)
+      .mockResolvedValueOnce({ slackUserId: 'UACTING123' } as never)
+      .mockResolvedValueOnce(undefined);
 
     const response = await postChannelMessage(runToken, {
       channel: 'U999ABC456',
@@ -374,6 +386,30 @@ describe('slack channel post MCP endpoint', () => {
     expect(postMessageMock).not.toHaveBeenCalled();
     expect(eq).toHaveBeenCalledWith('slackUserId', 'U999ABC456');
     expect(eq).toHaveBeenCalledWith('slackTeamId', 'T123ABC456');
+  });
+
+  it('rejects DM posts when the acting user is not linked to the selected workspace', async () => {
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
+    );
+    vi.mocked(db.query.slackUserMappings.findFirst).mockResolvedValueOnce(
+      undefined,
+    );
+
+    const response = await postChannelMessage(runToken, {
+      channel: 'U123ABC456',
+      text: 'hello',
+    });
+    const body = (await response.json()) as JsonBody;
+
+    expect(response.status).toBe(403);
+    expect(body.error).toBe(
+      'Slack DM posts require the acting user to have a linked Slack account in this workspace',
+    );
+    expect(eq).toHaveBeenCalledWith('userId', 'user-1');
+    expect(eq).toHaveBeenCalledWith('slackTeamId', 'T123ABC456');
+    expect(openConversationMock).not.toHaveBeenCalled();
+    expect(postMessageMock).not.toHaveBeenCalled();
   });
 
   it('selects the Slack installation from the task workspace', async () => {
@@ -645,6 +681,51 @@ describe('slack channel post MCP endpoint', () => {
 
     expect(response.status).toBe(403);
     expect(body.error).toBe('Slack app is not a member of channel #eng.');
+  });
+
+  it('rejects private channels when the acting Slack user is not a member', async () => {
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
+    );
+    vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+    } as never);
+    isPublicChannelMock.mockResolvedValue(false);
+    isUserInChannelMock.mockResolvedValue(false);
+
+    const response = await postChannelMessage(runToken, {
+      channel: '#private-room',
+      text: 'hello',
+    });
+    const body = (await response.json()) as JsonBody;
+
+    expect(response.status).toBe(403);
+    expect(body.error).toBe(
+      'Linked Slack user is not a member of channel #private-room.',
+    );
+    expect(postMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('allows private channels when the acting Slack user is a member', async () => {
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
+    );
+    vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+    } as never);
+    isPublicChannelMock.mockResolvedValue(false);
+
+    const response = await postChannelMessage(runToken, {
+      channel: '#private-room',
+      text: 'hello',
+    });
+
+    expect(response.status).toBe(200);
+    expect(isUserInChannelMock).toHaveBeenCalledWith({
+      channelId: 'C123',
+      userId: 'U123ABC456',
+    });
+    expect(postMessageMock).toHaveBeenCalled();
   });
 
   it('posts top-level messages to resolved channels', async () => {

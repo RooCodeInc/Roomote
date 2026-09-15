@@ -267,6 +267,88 @@ describe('WorkerEnv', () => {
     });
   });
 
+  describe('session egress delivery', () => {
+    const base = {
+      HOME: '/home/worker',
+      PATH: '/usr/bin',
+      LC_ALL: 'C.UTF-8',
+      AUTH_TOKEN: 'my-auth-token',
+      TRPC_URL: 'https://trpc.example.com',
+      R_APP_URL: 'https://api.example.com',
+    } as NodeJS.ProcessEnv;
+    const services = JSON.stringify([
+      {
+        label: 'Stripe',
+        origin: 'https://api.stripe.com',
+        envName: 'ROOMOTE_SERVICE_TOKEN_STRIPE',
+        baseUrl: 'https://api.example.com/api/session-egress',
+      },
+    ]);
+
+    it('accepts an API-proxy delivery and exposes base URL, manifest, and substitutes only', () => {
+      const env = WorkerEnv.fromProcessEnv({
+        ...base,
+        ROOMOTE_SERVICE_BASE_URL: 'https://api.example.com/api/session-egress',
+        ROOMOTE_SESSION_EGRESS_SERVICES: services,
+        ROOMOTE_SERVICE_TOKEN_STRIPE: `rses_${'c'.repeat(43)}`,
+        ROOMOTE_SERVICE_TOKEN_BAD: 'sk_live_not_a_substitute',
+      });
+      expect(env.sessionEgressMode).toBe('api_proxy');
+      expect(env.buildSessionEgressClientEnv()).toEqual({
+        ROOMOTE_SERVICE_BASE_URL: 'https://api.example.com/api/session-egress',
+        ROOMOTE_SERVICE_TOKEN_STRIPE: `rses_${'c'.repeat(43)}`,
+        ROOMOTE_SESSION_EGRESS_SERVICES: services,
+      });
+      expect(env.sessionEgressServices[0]!.baseUrl).toBe(
+        'https://api.example.com/api/session-egress',
+      );
+      // Delivery keys are stripped from every child env except the client set.
+      expect(env.buildUserFacingEnv()).not.toHaveProperty(
+        'ROOMOTE_SERVICE_TOKEN_STRIPE',
+      );
+    });
+
+    it('accepts a deferred API-proxy delivery after bootstrap', () => {
+      const env = WorkerEnv.fromProcessEnv({
+        ...base,
+        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
+        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE:
+          '44444444-4444-4444-8444-444444444444',
+      });
+      expect(env.sessionEgressBootstrapRequired).toBe(true);
+      expect(env.sessionEgressMode).toBeUndefined();
+      expect(env.buildSessionEgressClientEnv()).toEqual({});
+      env.acceptSessionEgressDelivery({
+        ROOMOTE_SERVICE_BASE_URL: 'https://api.example.com/api/session-egress',
+        ROOMOTE_SESSION_EGRESS_SERVICES: services,
+        ROOMOTE_SERVICE_TOKEN_STRIPE: `rses_${'d'.repeat(43)}`,
+      });
+      expect(env.sessionEgressMode).toBe('api_proxy');
+      const client = env.buildSessionEgressClientEnv();
+      expect(client.ROOMOTE_SERVICE_TOKEN_STRIPE).toBe(
+        `rses_${'d'.repeat(43)}`,
+      );
+      expect(client).not.toHaveProperty('HTTPS_PROXY');
+    });
+
+    it('still recognizes a connector delivery', () => {
+      const env = WorkerEnv.fromProcessEnv({
+        ...base,
+        ROOMOTE_SESSION_EGRESS_PROXY_URL: 'http://connector:3128',
+        ROOMOTE_SESSION_EGRESS_CA_FILE: '/etc/roomote/ca.pem',
+        ROOMOTE_SESSION_EGRESS_NO_PROXY: 'api',
+        ROOMOTE_SESSION_EGRESS_SERVICES: '[]',
+      });
+      expect(env.sessionEgressMode).toBe('connector');
+      expect(env.buildSessionEgressClientEnv().HTTPS_PROXY).toBe(
+        'http://connector:3128',
+      );
+      expect(env.buildSessionEgressClientEnv()).not.toHaveProperty(
+        'ROOMOTE_SERVICE_BASE_URL',
+      );
+    });
+  });
+
   describe('fromProcessEnv', () => {
     it('should capture worker secrets from process env', () => {
       const env = WorkerEnv.fromProcessEnv({

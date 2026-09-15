@@ -29,6 +29,22 @@ export {
   notifyWebTaskInitiatorOnSettle,
   type WebTaskInitiatorSettleNotificationResult,
 } from './lib/task-runs/notify-web-task-initiator-on-settle';
+export { continueDirectTaskAttentionReply } from './lib/task-runs/continue-direct-task-attention-reply';
+export {
+  findSessionAttentionNotificationReply,
+  hasTaskRunAttentionNotification,
+  notifyDirectWebTaskAttention,
+  notifyFastWebSessionAttention,
+  processSessionAttentionNotificationJob,
+  resolveSessionAttentionFastConversation,
+  type SessionAttentionKind,
+  type SessionAttentionNotificationResult,
+} from './lib/session-attention-notification';
+export {
+  SESSION_ATTENTION_NOTIFICATION_JOB,
+  enqueueSessionAttentionNotification,
+  type SessionAttentionNotificationJob,
+} from './lib/enqueue-session-attention-notification';
 export {
   AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
   AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
@@ -227,6 +243,7 @@ export { refreshCurrentThreadFooters } from './lib/thread-footer-refresh';
 export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/teams-communication';
 
 export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib/telegram-communication';
+export { retireTelegramRequestUserInputPromptBestEffort } from './lib/communication-request-user-input';
 
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
 export { syncFastAgentSlackTitleBestEffort } from './lib/fast-agent-slack-title-sync';
@@ -339,10 +356,13 @@ export {
   findSlackUserDirectMessageDestination,
   findUserDirectMessageDestination,
   hasUserDirectMessageIdentity,
+  hasAnyUserDirectMessageIdentity,
   sendUserDirectMessage,
   sendUserDirectMessageBestEffort,
+  sendUserDirectMessageBestEffortWithReceipts,
   type UserDirectMessageDestination,
   type UserDirectMessageProvider,
+  type UserDirectMessageReceipt,
 } from './lib/user-direct-message';
 
 export {
@@ -570,3 +590,8 @@ export * from './lib/brain-github';
 export * from './lib/brain-linear';
 export * from './lib/brain-inference';
 export * from './lib/brain-source-availability';
+export * from './lib/home-composer-recommendations';
+export {
+  publishSessionEgressDelivery,
+  isSessionEgressBootstrapReady,
+} from './lib/session-egress-delivery';

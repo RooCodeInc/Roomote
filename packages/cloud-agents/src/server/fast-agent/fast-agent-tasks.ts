@@ -132,14 +132,15 @@ function withSyntheticLaunchTargets(
       {
         id: NO_REPOSITORIES,
         name: 'Blank slate',
-        description: 'Start a sandbox without repositories.',
+        description:
+          'Start a sandbox with no repositories checked out; any active repository can still be checked out on demand.',
         repositories: [],
       },
       {
         id: ALL_REPOSITORIES,
         name: 'All repositories',
         description:
-          'Use this target to run the task against all active repositories.',
+          'Use this target when the task may need any active repository; repositories are checked out on demand, not cloned up front.',
         repositories: [],
       },
       ...environments.filter(
@@ -344,7 +345,7 @@ export function createFastAgentTaskTools(
           environmentId: nonEmptyTrimmedStringSchema
             .optional()
             .describe(
-              `Optional launch target ID. Pass "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories, pass "${ALL_REPOSITORIES}" or omit it for all repositories, or pass an exact environment ID`,
+              `Optional launch target ID. Pass "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories checked out (any active repository can still be checked out on demand), pass "${ALL_REPOSITORIES}" or omit it for all repositories, or pass an exact environment ID`,
             ),
           type: fastAgentTaskTypeSchema
             .optional()

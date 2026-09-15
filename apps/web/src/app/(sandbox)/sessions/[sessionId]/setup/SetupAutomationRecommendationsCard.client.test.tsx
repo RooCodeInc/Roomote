@@ -4,10 +4,21 @@ import { SetupAutomationRecommendationsCard } from './SetupAutomationRecommendat
 
 const { setupStatus } = vi.hoisted(() => ({
   setupStatus: {
-    automationRecommendations: {
-      status: 'ready',
-      dismissed: false,
-      applicationState: 'pending',
+    setupNewState: {
+      automationRecommendations: {
+        status: 'ready',
+        dismissed: false,
+        applicationState: 'pending',
+      },
+      setupSession: {
+        integrationDiscoveryCompletedAt: '2026-01-01T00:00:00.000Z' as
+          | string
+          | null,
+        starterTaskSelection: { taskIds: [] } as { taskIds: string[] } | null,
+      },
+    },
+    sourceControlSetup: {
+      providers: [{ connected: true, repositoryCount: 1 }],
     },
   },
 }));
@@ -21,17 +32,11 @@ vi.mock('@/trpc/client', () => ({
     setupNew: {
       status: { queryOptions: () => ({ query: 'status' }) },
     },
-    fastSessions: {
-      tasks: { queryOptions: () => ({ query: 'tasks' }) },
-    },
   }),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: ({ query }: { query: string }) =>
-    query === 'status'
-      ? { data: { setupNewState: setupStatus } }
-      : { data: [{ taskId: 'task-1' }] },
+  useQuery: () => ({ data: setupStatus }),
 }));
 
 vi.mock('./AutomationRecommendations', () => ({
@@ -48,12 +53,21 @@ vi.mock('./AutomationRecommendations', () => ({
 
 describe('SetupAutomationRecommendationsCard', () => {
   beforeEach(() => {
-    setupStatus.automationRecommendations.dismissed = false;
-    setupStatus.automationRecommendations.applicationState = 'pending';
+    setupStatus.setupNewState.automationRecommendations.dismissed = false;
+    setupStatus.setupNewState.automationRecommendations.applicationState =
+      'pending';
+    setupStatus.setupNewState.setupSession.integrationDiscoveryCompletedAt =
+      '2026-01-01T00:00:00.000Z';
+    setupStatus.setupNewState.setupSession.starterTaskSelection = {
+      taskIds: [],
+    };
+    setupStatus.sourceControlSetup.providers = [
+      { connected: true, repositoryCount: 1 },
+    ];
   });
 
   it('dismisses after the selected automations are enabled', () => {
-    render(<SetupAutomationRecommendationsCard sessionId="session-1" />);
+    render(<SetupAutomationRecommendationsCard />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
 
@@ -63,9 +77,28 @@ describe('SetupAutomationRecommendationsCard', () => {
   });
 
   it('stays hidden after the recommendation batch was applied', () => {
-    setupStatus.automationRecommendations.applicationState = 'applied';
+    setupStatus.setupNewState.automationRecommendations.applicationState =
+      'applied';
 
-    render(<SetupAutomationRecommendationsCard sessionId="session-1" />);
+    render(<SetupAutomationRecommendationsCard />);
+
+    expect(screen.queryByRole('button', { name: 'Enable' })).toBeNull();
+  });
+
+  it('stays hidden until integrations and starter work are decided', () => {
+    setupStatus.setupNewState.setupSession.integrationDiscoveryCompletedAt =
+      null;
+    setupStatus.setupNewState.setupSession.starterTaskSelection = null;
+
+    render(<SetupAutomationRecommendationsCard />);
+
+    expect(screen.queryByRole('button', { name: 'Enable' })).toBeNull();
+  });
+
+  it('stays hidden without synchronized repositories', () => {
+    setupStatus.sourceControlSetup.providers = [];
+
+    render(<SetupAutomationRecommendationsCard />);
 
     expect(screen.queryByRole('button', { name: 'Enable' })).toBeNull();
   });

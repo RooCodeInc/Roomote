@@ -154,7 +154,9 @@ export async function findFastAgentSessionForProviderReply(
   });
   return session &&
     (!input.userId || session.userId === input.userId) &&
-    matchesProviderRoute(session, input, !matchedProviderMessage)
+    (matchedProviderMessage && input.userId
+      ? true
+      : matchesProviderRoute(session, input, !matchedProviderMessage))
     ? session
     : null;
 }

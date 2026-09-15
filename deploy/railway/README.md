@@ -110,7 +110,7 @@ follow the image.
 | --------------- | ------------------------------ | -------------------------------------------------- | -------------------------- | ------------------ |
 | `Postgres`      | Railway managed PostgreSQL     | —                                                  | no                         | managed            |
 | `Redis`         | Railway managed Redis          | —                                                  | no                         | managed            |
-| `minio`         | pinned `minio/minio` + `/data` | `minio server /data --console-address :9001`       | yes (HTTP proxy port 9000) | —                  |
+| `minio`         | pinned `roomote-minio` + `/data` | `minio server /data --console-address :9001`       | yes (HTTP proxy port 9000) | —                  |
 | `gbrain`        | `roomote-gbrain:<channel>` + `/data` | image entrypoint                               | no                         | `/health`          |
 | `web`           | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh web`           | yes (HTTP proxy port 8080) | `/health`          |
 | `api`           | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh api`           | yes (HTTP proxy port 8080) | `/health/liveness` |
@@ -124,8 +124,8 @@ form is required — a bare `web` fails with ``The executable `web` could not
 be found``. The same applies to minio (`minio server ...`, not `server ...`)
 and to the api pre-deploy command below.
 
-- Rename the minio service to exactly **`minio`**: the default `minio/minio`
-  name breaks `${{minio.RAILWAY_PRIVATE_DOMAIN}}` references.
+- Rename the minio service to exactly **`minio`**: the image-derived default
+  name contains a slash, which breaks `${{minio.RAILWAY_PRIVATE_DOMAIN}}` references.
 - Set the api service's **pre-deploy command** to
   `/roomote/.docker/app/entrypoint.sh db-migrate` so schema migrations run
   before each new deploy starts serving. On a fresh project the other app

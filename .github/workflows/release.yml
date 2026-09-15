@@ -10,6 +10,14 @@ on:
         description: Unshipped product version to refresh from develop
         required: true
         type: string
+      replace_candidate_sha:
+        description: Exact current candidate SHA to replace (leave empty for a fast-forward refresh)
+        required: false
+        type: string
+      expected_develop_sha:
+        description: Exact develop SHA for a replacement candidate
+        required: false
+        type: string
 
 # Every push re-checks the live develop version. Tagged versions are no-ops;
 # an untagged version means a maintainer merged a release PR and is ready for
@@ -39,18 +47,39 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
           REQUESTED_VERSION: ${{ inputs.version }}
+          REPLACE_CANDIDATE_SHA: ${{ inputs.replace_candidate_sha }}
+          EXPECTED_DEVELOP_SHA: ${{ inputs.expected_develop_sha }}
         shell: bash
         run: |
           set -euo pipefail
 
           current_version="$(node -p "require('./package.json').version")"
           version="$current_version"
+          replace_candidate_sha="${REPLACE_CANDIDATE_SHA:-}"
+          expected_develop_sha="${EXPECTED_DEVELOP_SHA:-}"
+          replace_candidate=false
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             version="${REQUESTED_VERSION#v}"
             if [ "$version" != "$current_version" ]; then
               echo "Cannot refresh ${version}: develop is currently version ${current_version}."
               exit 1
+            fi
+            if [ -n "$replace_candidate_sha" ] || [ -n "$expected_develop_sha" ]; then
+              if ! [[ "$replace_candidate_sha" =~ ^[0-9a-f]{40}$ ]] || ! [[ "$expected_develop_sha" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "Candidate replacement requires full lowercase replace_candidate_sha and expected_develop_sha values."
+                exit 1
+              fi
+              if [ "$(git rev-parse HEAD)" != "$expected_develop_sha" ]; then
+                echo "Cannot replace ${version}: develop moved from expected ${expected_develop_sha} to $(git rev-parse HEAD)."
+                exit 1
+              fi
+              if [ -z "$RELEASE_BOT_TOKEN" ]; then
+                echo "Cannot replace ${version}: RELEASE_BOT_TOKEN is required to trigger fresh candidate checks."
+                exit 1
+              fi
+              replace_candidate=true
             fi
           fi
           : "${version:?missing package.json version}"
@@ -84,7 +113,20 @@ jobs:
               echo "Cannot refresh ${tag}: main already contains candidate ${candidate_sha}."
               exit 1
             fi
-            if ! git merge-base --is-ancestor "$candidate_sha" HEAD; then
+            if [ "$replace_candidate" = true ]; then
+              if [ "$candidate_sha" != "$replace_candidate_sha" ]; then
+                echo "Cannot replace ${tag}: expected candidate ${replace_candidate_sha}, found ${candidate_sha}."
+                exit 1
+              fi
+              if [ "$candidate_sha" = "$expected_develop_sha" ]; then
+                echo "Cannot replace ${tag}: candidate already matches expected develop."
+                exit 1
+              fi
+              if git merge-base --is-ancestor "$expected_develop_sha" "$candidate_sha"; then
+                echo "Cannot replace ${tag}: expected develop ${expected_develop_sha} would regress candidate ${candidate_sha}."
+                exit 1
+              fi
+            elif ! git merge-base --is-ancestor "$candidate_sha" HEAD; then
               echo "Cannot refresh ${tag}: ${release_branch} has diverged from develop."
               exit 1
             fi
@@ -117,9 +159,15 @@ jobs:
 
             release_sha="$(git rev-parse HEAD)"
             shipping_guard_sha="$candidate_sha"
-            git push origin "${release_sha}:refs/heads/${release_branch}"
-            candidate_status="Candidate refreshed to \`${release_sha}\` from \`develop\`."
-            echo "Refreshed ${release_branch} to ${release_sha}"
+            if [ "$replace_candidate" = true ]; then
+              git push --force-with-lease="refs/heads/${release_branch}:${candidate_sha}" origin "${release_sha}:refs/heads/${release_branch}"
+              candidate_status="Candidate replaced from \`${candidate_sha}\` with \`${release_sha}\` from \`develop\` by [this authorized workflow run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}). Prior candidate checks, reviews, and reconciliation provenance no longer apply."
+              echo "Replaced ${release_branch} at ${candidate_sha} with ${release_sha}"
+            else
+              git push origin "${release_sha}:refs/heads/${release_branch}"
+              candidate_status="Candidate refreshed to \`${release_sha}\` from \`develop\`."
+              echo "Refreshed ${release_branch} to ${release_sha}"
+            fi
           else
             # Freeze the release at the commit that introduced this version (the
             # release PR merge), not at the moving develop tip. Later commits are

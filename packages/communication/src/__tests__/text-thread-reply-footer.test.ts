@@ -145,6 +145,70 @@ describe('text provider current carriers', () => {
     ).toBe('2');
   });
 
+  it('Teams refresh cannot restore the initial footer after a later root reply relocates it', async () => {
+    const postMessage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        provider: 'teams',
+        channelId: 'C',
+        messageId: 'first',
+      })
+      .mockResolvedValueOnce({
+        provider: 'teams',
+        channelId: 'C',
+        messageId: 'second',
+      });
+    const updateMessage = vi.fn().mockResolvedValue(undefined);
+    const provider = {
+      provider: 'teams',
+      postMessage,
+      updateMessage,
+    } as unknown as TeamsCommunicationProvider;
+
+    await postTextThreadReplyWithFooter({
+      provider,
+      input: { channelId: 'C', text: 'Initial notification' },
+      footerText: 'standard footer',
+    });
+    await postTextThreadReplyWithFooter({
+      provider,
+      input: {
+        channelId: 'C',
+        replyToMessageId: 'first',
+        text: 'Later reply',
+      },
+      footerText: 'standard footer',
+    });
+    expect(updateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'first',
+        text: 'Initial notification',
+      }),
+    );
+
+    mocks.resolve.mockResolvedValue('refreshed footer');
+    await refreshManagedThreadReplyFooter({
+      provider: 'teams',
+      channelId: 'C',
+      threadId: 'root',
+      edit: (record, text) =>
+        editTextThreadFooterMessage(provider, record, text),
+    });
+
+    expect(updateMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messageId: 'second',
+        text: 'Later reply\n\nrefreshed footer',
+      }),
+    );
+    expect(
+      updateMessage.mock.calls.filter(([input]) => input.messageId === 'first'),
+    ).toHaveLength(1);
+    await expect(
+      getThreadReplyFooterRecord('teams', 'C', 'first'),
+    ).resolves.toBeNull();
+  });
+
   it('Telegram records the final text chunk and preserves its buttons on refresh', async () => {
     const postMessage = vi.fn().mockResolvedValue({
       provider: 'telegram',
@@ -165,10 +229,17 @@ describe('text provider current carriers', () => {
       input: { channelId: 'C', text: body, buttons },
       footerText: 'old footer',
     });
+    expect(postMessage).toHaveBeenCalledWith({
+      channelId: 'C',
+      text: body,
+      footerText: 'old footer',
+      buttons,
+      textFormat: 'markdown',
+    });
     expect(posted.messageId).toBe('last');
     const record = await getThreadReplyFooterRecord('telegram', 'C', 'root');
     expect(record?.textWithoutFooter.endsWith('Final paragraph')).toBe(true);
-    expect(record?.textWithoutFooter.length).toBeLessThan(body.length);
+    expect(record?.textWithoutFooter).toBe(body);
     expect(record?.buttons).toEqual(buttons);
     mocks.resolve.mockResolvedValue('No running tasks');
     await refreshManagedThreadReplyFooter({
@@ -181,7 +252,8 @@ describe('text provider current carriers', () => {
     expect(editMessageText).toHaveBeenCalledWith({
       channelId: 'C',
       messageId: 'last',
-      text: `${record?.textWithoutFooter}\n\nNo running tasks`,
+      text: record?.textWithoutFooter,
+      footerText: 'No running tasks',
       textFormat: 'markdown',
       buttons,
     });

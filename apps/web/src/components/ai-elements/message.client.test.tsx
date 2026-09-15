@@ -117,4 +117,22 @@ describe('message wrapping', () => {
       container.querySelector('a[href="https://example.com/docs%5D%5Bdocs"]'),
     ).toBeNull();
   });
+
+  it('links pull request mentions only with repository context', () => {
+    const { rerender } = render(
+      <MessageResponse pullRequestRepositoryUrl="https://github.com/roomote/example">
+        Review PR #2343 before release.
+      </MessageResponse>,
+    );
+
+    expect(screen.getByRole('link', { name: 'PR #2343' })).toHaveAttribute(
+      'href',
+      'https://github.com/roomote/example/pull/2343',
+    );
+
+    rerender(
+      <MessageResponse>Review PR #2343 before release.</MessageResponse>,
+    );
+    expect(screen.queryByRole('link', { name: 'PR #2343' })).toBeNull();
+  });
 });

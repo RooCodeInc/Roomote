@@ -401,9 +401,11 @@ function isMatchingBotCommand(
 
   const botUsername = normalizeTelegramBotUsername(options.botUsername);
 
-  if (!botUsername || isTelegramPrivateChat(message)) {
+  if (isTelegramPrivateChat(message)) {
     return true;
   }
+
+  if (!botUsername) return false;
 
   return parseTelegramBotCommand(entityText)?.botSuffix === botUsername;
 }
@@ -418,9 +420,7 @@ function isMatchingBotMention(
     return false;
   }
 
-  if (!botUsername) {
-    return true;
-  }
+  if (!botUsername) return false;
 
   return entityText.slice(1).toLowerCase() === botUsername;
 }
@@ -610,18 +610,15 @@ export function isTelegramTaskEntryUpdate(
   );
 }
 
-export const TELEGRAM_NEW_TASK_COMMANDS = ['new'] as const;
-
 export type TelegramNewTaskCommand = {
-  command: (typeof TELEGRAM_NEW_TASK_COMMANDS)[number];
+  command: 'new';
   text: string;
 };
 
-function isNewTaskCommandName(
-  command: string,
-): command is TelegramNewTaskCommand['command'] {
-  return (TELEGRAM_NEW_TASK_COMMANDS as readonly string[]).includes(command);
-}
+export type TelegramGoalCommand = {
+  command: 'goal';
+  objective: string;
+};
 
 /**
  * Detects an explicit `/new` command and returns the command name plus the task
@@ -642,6 +639,23 @@ export function getTelegramNewTaskCommand(
   update: TelegramUpdate,
   options: TelegramBotMentionOptions = {},
 ): TelegramNewTaskCommand | null {
+  const command = getTelegramLeadingCommand(update, 'new', options);
+  return command ? { command: 'new', text: command.argument } : null;
+}
+
+export function getTelegramGoalCommand(
+  update: TelegramUpdate,
+  options: TelegramBotMentionOptions = {},
+): TelegramGoalCommand | null {
+  const command = getTelegramLeadingCommand(update, 'goal', options);
+  return command ? { command: 'goal', objective: command.argument } : null;
+}
+
+function getTelegramLeadingCommand<T extends 'new' | 'goal'>(
+  update: TelegramUpdate,
+  commandName: T,
+  options: TelegramBotMentionOptions,
+): { command: T; argument: string } | null {
   const message = getTelegramUpdateMessage(update);
   const text = message?.text;
 
@@ -650,6 +664,9 @@ export function getTelegramNewTaskCommand(
   }
 
   const botUsername = normalizeTelegramBotUsername(options.botUsername);
+  if (!botUsername && !isTelegramPrivateChat(message)) {
+    return null;
+  }
   const entities = message.entities ?? [];
 
   for (const entity of entities) {
@@ -659,12 +676,12 @@ export function getTelegramNewTaskCommand(
 
     const parsed = parseTelegramBotCommand(readEntityText(text, entity));
 
-    if (!parsed || !isNewTaskCommandName(parsed.command)) {
+    if (!parsed || parsed.command !== commandName) {
       continue;
     }
 
     if (botUsername && parsed.botSuffix && parsed.botSuffix !== botUsername) {
-      // `/new@some_other_bot` is addressed to another bot.
+      // A command suffixed for another bot is not addressed to this bot.
       continue;
     }
 
@@ -682,8 +699,8 @@ export function getTelegramNewTaskCommand(
       options,
     );
 
-    // In groups the command must target this bot, via either the
-    // `/new@<botUsername>` suffix or a leading bot mention.
+    // In groups the command must target this bot, via either a bot suffix or
+    // a leading bot mention.
     if (
       botUsername &&
       !isTelegramPrivateChat(message) &&
@@ -694,8 +711,8 @@ export function getTelegramNewTaskCommand(
     }
 
     return {
-      command: parsed.command,
-      text: normalizeWhitespace(text.slice(entity.offset + entity.length)),
+      command: commandName,
+      argument: normalizeWhitespace(text.slice(entity.offset + entity.length)),
     };
   }
 

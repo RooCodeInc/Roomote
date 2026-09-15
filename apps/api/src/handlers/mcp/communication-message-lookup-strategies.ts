@@ -96,15 +96,32 @@ const slackLookupStrategy: CommunicationLookupStrategy = {
   parseReference(raw) {
     const message = parseSlackMessagePermalink(raw);
     if (message) {
-      return { channelId: message.channelId, messageId: message.messageId };
+      return {
+        channelId: message.channelId,
+        messageId: message.messageId,
+        ...(message.teamId ? { workspaceId: message.teamId } : {}),
+        ...(message.teamDomain ? { workspaceDomain: message.teamDomain } : {}),
+      };
     }
     const channel = parseSlackChannelPermalink(raw);
-    return channel ? { channelId: channel.channelId } : null;
+    return channel
+      ? {
+          channelId: channel.channelId,
+          ...(channel.teamId ? { workspaceId: channel.teamId } : {}),
+          ...(channel.teamDomain
+            ? { workspaceDomain: channel.teamDomain }
+            : {}),
+        }
+      : null;
   },
   async getMessageContext(options) {
     const result = await lookupSlackThread({
       ...(options.channel ? { channel: options.channel } : {}),
       messageTs: options.messageId,
+      ...(options.workspaceId ? { slackTeamId: options.workspaceId } : {}),
+      ...(options.workspaceDomain
+        ? { slackTeamDomain: options.workspaceDomain }
+        : {}),
       ...(options.taskRun
         ? { taskRun: toSlackLookupTaskRun(options.taskRun) }
         : {}),
@@ -115,6 +132,7 @@ const slackLookupStrategy: CommunicationLookupStrategy = {
 
     return {
       provider: 'slack',
+      slackTeamId: result.slackTeamId,
       channelId: result.channelId,
       requestedMessageId: result.requestedMessageTs,
       threadId: result.threadTs,
@@ -148,6 +166,10 @@ const slackLookupStrategy: CommunicationLookupStrategy = {
       ...(options.channel ? { channel: options.channel } : {}),
       ...(options.oldest ? { oldest: options.oldest } : {}),
       ...(options.latest ? { latest: options.latest } : {}),
+      ...(options.workspaceId ? { slackTeamId: options.workspaceId } : {}),
+      ...(options.workspaceDomain
+        ? { slackTeamDomain: options.workspaceDomain }
+        : {}),
       ...(options.taskRun
         ? { taskRun: toSlackLookupTaskRun(options.taskRun) }
         : {}),
@@ -158,6 +180,7 @@ const slackLookupStrategy: CommunicationLookupStrategy = {
 
     return {
       provider: 'slack',
+      slackTeamId: result.slackTeamId,
       channelId: result.channelId,
       ...(result.requestedOldest
         ? { requestedOldest: result.requestedOldest }

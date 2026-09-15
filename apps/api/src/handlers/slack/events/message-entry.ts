@@ -7,7 +7,7 @@ import {
 } from '@roomote/redis';
 import {
   FastAgentDurableRetryScheduledError,
-  hasFastAgentSession,
+  getFastAgentSessionOwner,
 } from '@roomote/cloud-agents/server';
 import {
   acquireSlackFastRootBindingLock,
@@ -23,6 +23,7 @@ import {
 } from '@roomote/slack';
 import {
   getBackgroundAgentSettingsForDeployment,
+  isSlackPeerConversationsExperimentEnabledForUser,
   type SlackInstallation,
   type SlackUserMapping,
 } from '@roomote/db/server';
@@ -33,8 +34,10 @@ import {
   type TaskInitiator,
   isDeploymentReadOnlyError,
 } from '@roomote/types';
+import { findSessionAttentionNotificationReply } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../../logging.js';
+import { continueSessionAttentionReply } from '../../tasks/continue-session-attention-reply.js';
 import {
   ROUTING_LOCK_TTL_SECONDS,
   SLACK_ROUTING_LOCK_PREFIX,
@@ -87,17 +90,17 @@ import {
 
 const REMOVED_EVAL_COMMAND_PATTERN = /^!eval(?:\s|$)/iu;
 
-async function hasBoundSlackFastAgentSession(params: {
+async function getBoundSlackFastAgentSessionOwner(params: {
   teamId: string;
   channelId: string;
   threadId: string;
-}): Promise<boolean> {
+}): ReturnType<typeof getFastAgentSessionOwner> {
   const releaseRootBindingLock = await acquireSlackFastRootBindingLock({
     teamId: params.teamId,
     channelId: params.channelId,
   });
   try {
-    return await hasFastAgentSession({
+    return await getFastAgentSessionOwner({
       surface: 'slack',
       workspaceId: params.teamId,
       conversationId: params.threadId,
@@ -142,7 +145,8 @@ type UnmentionedSlackThreadReplyRoutingDecision =
   | { shouldRoute: false }
   | {
       shouldRoute: true;
-      threadMessages: SlackThreadMessage[];
+      peerConversationsExperimentEnabled?: true;
+      threadMessages?: SlackThreadMessage[];
       taskId?: string;
     };
 
@@ -204,6 +208,22 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     return { shouldRoute: false };
   }
 
+  // Opted-in Fast owners receive the discussion and peer-mention reminder as
+  // context. Otherwise the existing peer-mention cutoff remains unchanged.
+  const fastSessionOwner = await getBoundSlackFastAgentSessionOwner({
+    teamId,
+    channelId: event.channel,
+    threadId: event.thread_ts,
+  });
+  const peerConversationsExperimentEnabled =
+    fastSessionOwner?.kind === 'user' &&
+    (await isSlackPeerConversationsExperimentEnabledForUser(
+      fastSessionOwner.userId,
+    ));
+  if (peerConversationsExperimentEnabled) {
+    return { shouldRoute: true, peerConversationsExperimentEnabled: true };
+  }
+
   if (
     mentionsSlackUserOtherThanBotWithoutMentioningBot(
       event,
@@ -216,17 +236,11 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   let roomoteThreadMatch: Awaited<
     ReturnType<typeof findRoomoteOwnedSlackThread>
   > | null = null;
-  let isFastAgentThread = false;
+  const isFastAgentThread = Boolean(fastSessionOwner);
 
   let eligibilityReason: 'roomote-owned-thread' | null = null;
 
   {
-    isFastAgentThread = await hasBoundSlackFastAgentSession({
-      teamId,
-      channelId: event.channel,
-      threadId: event.thread_ts,
-    });
-
     roomoteThreadMatch = isFastAgentThread
       ? null
       : await findRoomoteOwnedSlackThread({
@@ -1042,10 +1056,12 @@ export function startFastAgentResponse(params: {
   activeTasks?: { taskId: string }[];
   resolveActiveTasks?: () => Promise<{ taskId: string }[]>;
   directedAtRoomote?: boolean;
+  peerConversationsExperimentEnabled?: boolean;
   /** Attribution for tasks Fast delegates from this turn; automation-identity
    * turns pass their automation initiator so delegated work keeps automation
    * provenance instead of appearing installer-initiated. */
   delegatedTaskInitiator?: TaskInitiator;
+  originSessionId?: string;
   errorLogPrefix: string;
 }): Promise<FastAgentStartResult> {
   const { errorLogPrefix, delegatedTaskInitiator, ...fastAgentParams } = params;
@@ -1054,6 +1070,8 @@ export function startFastAgentResponse(params: {
       processFastAgentMessage({
         ...fastAgentParams,
         roomoteSlackUserId: params.slackInstallation.botUserId ?? undefined,
+        peerConversationsExperimentEnabled:
+          params.peerConversationsExperimentEnabled,
         apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
         launchTask: createFastAgentSlackLiveTaskLauncher({
           slack: params.slack,
@@ -1095,6 +1113,7 @@ async function handleSlackEntryEvent(params: {
   teamId: string;
   skipThreadFollowupHandling?: boolean;
   threadTaskId?: string;
+  peerConversationsExperimentEnabled?: boolean;
 }): Promise<void> {
   const {
     event,
@@ -1103,6 +1122,7 @@ async function handleSlackEntryEvent(params: {
     teamId,
     skipThreadFollowupHandling = false,
     threadTaskId,
+    peerConversationsExperimentEnabled,
   } = params;
 
   if (!event.user) {
@@ -1136,6 +1156,38 @@ async function handleSlackEntryEvent(params: {
   }
 
   const threadId = event.thread_ts || event.ts;
+  const attentionResolution = event.thread_ts
+    ? await findSessionAttentionNotificationReply({
+        provider: 'slack',
+        workspaceId: teamId,
+        channelId: event.channel,
+        userId: userMapping.userId,
+        replyToMessageId: event.thread_ts,
+      })
+    : ({ status: 'none' } as const);
+  const attentionReply =
+    attentionResolution.status === 'owned'
+      ? attentionResolution.attention
+      : null;
+  if (attentionReply?.taskId) {
+    await continueSessionAttentionReply({
+      attention: attentionReply,
+      userId: userMapping.userId,
+      senderDisplayName: null,
+      question: (event.authoredText ?? event.text).trim(),
+      currentMessageId: event.ts,
+      deliveryConversation: {
+        surface: 'slack',
+        workspaceId: teamId,
+        conversationId: threadId,
+        replyTarget: { channelId: event.channel, threadId },
+      },
+    });
+    return;
+  }
+  if (attentionResolution.status === 'foreign') {
+    return;
+  }
 
   if (event.type === 'app_mention') {
     apiLogger.debug(
@@ -1207,6 +1259,8 @@ async function handleSlackEntryEvent(params: {
           activeTaskId: activeRun?.taskId,
         }),
       directedAtRoomote: mentionsSlackBot(event, slackInstallation.botUserId),
+      peerConversationsExperimentEnabled: peerConversationsExperimentEnabled,
+      ...(attentionReply ? { originSessionId: attentionReply.sessionId } : {}),
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
     });
 
@@ -1319,5 +1373,9 @@ export async function handleMessageOrAppMentionEvent(params: {
     threadTaskId: unmentionedThreadReplyRouting.shouldRoute
       ? unmentionedThreadReplyRouting.taskId
       : (mentionedThreadAliasTaskId ?? undefined),
+    peerConversationsExperimentEnabled:
+      unmentionedThreadReplyRouting.shouldRoute
+        ? unmentionedThreadReplyRouting.peerConversationsExperimentEnabled
+        : undefined,
   });
 }

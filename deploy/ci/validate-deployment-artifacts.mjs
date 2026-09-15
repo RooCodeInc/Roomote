@@ -123,6 +123,30 @@ assert(
     ),
   'upgrade compatibility: startup failures must report Compose state and service logs',
 );
+assert(
+  upgradeCompatibility.includes("'session-goal-ownership-cutover'") &&
+    upgradeCompatibility.includes(
+      "'Goal Mode moved from unused task-owned columns to Session-owned storage'",
+    ) &&
+    upgradeCompatibility.includes(
+      "WHERE boundary.name = 'session-goal-ownership-cutover'",
+    ) &&
+    [
+      'goal_objective',
+      'goal_status',
+      'goal_max_continuations',
+      'goal_continuations_used',
+      'goal_blocked_reason',
+      'goal_completed_at',
+      'goal_last_continuation_id',
+      'goal_continuation_ids',
+      'goal_generation_ids',
+      'goal_blocker_candidate_reason',
+      'goal_blocker_candidate_count',
+      'goal_blocker_last_continuation_used',
+    ].every((column) => upgradeCompatibility.includes(`'${column}'`)),
+  'upgrade compatibility: Session goal cutover must exempt only the complete legacy task-goal shape',
+);
 
 function commandText(command) {
   if (Array.isArray(command)) return command.join(' ');
@@ -646,7 +670,6 @@ const imageLocations = {
     'deploy/railway/template.yaml',
     'render.yaml',
   ],
-  minioClient: ['docker-compose.yml', 'deploy/compose/docker-compose.prod.yml'],
   caddy: [
     'docker-compose.yml',
     'docker-compose.production.yml',
@@ -660,6 +683,24 @@ for (const [imageName, locations] of Object.entries(imageLocations)) {
     assert(
       read(location).includes(pinnedImage),
       `${location}: ${imageName} must match deployment-catalog.json`,
+    );
+  }
+}
+
+// The substring check above only proves the catalog image appears somewhere
+// in each file. The compose stacks also run minio-init, which bootstraps the
+// artifact bucket with the mc bundled in the minio image; pin both services
+// to exactly the catalog image so an edit cannot leave minio-init on a
+// different or unpinned client.
+for (const location of [
+  'docker-compose.yml',
+  'deploy/compose/docker-compose.prod.yml',
+]) {
+  const compose = YAML.parse(read(location));
+  for (const service of ['minio', 'minio-init']) {
+    assert(
+      compose.services?.[service]?.image === catalog.criticalImages.minio,
+      `${location}: ${service} must use the catalog minio image`,
     );
   }
 }
@@ -700,6 +741,56 @@ for (const directory of ['.github/workflows', '.github/actions']) {
       );
     }
   }
+}
+
+// The published roomote-minio image and the sandbox MinIO bootstrap must build
+// the same binary: one set of upstream pins (release, module version, Go
+// checksum-database sums, per-arch binary SHA-256), read from both files and
+// compared literally.
+{
+  const dockerfile = read('.docker/minio/Dockerfile');
+  const sandbox = read('apps/api/scripts/setup-sandbox-minio.ts');
+  const dockerArg = (name) => {
+    const match = dockerfile.match(new RegExp(`^ARG ${name}=(\\S+)$`, 'm'));
+    assert(match, `.docker/minio/Dockerfile: missing ARG ${name}`);
+    return match[1];
+  };
+  const sandboxConst = (name) => {
+    const match = sandbox.match(
+      new RegExp(`^const ${name} = '([^']+)';$`, 'm'),
+    );
+    assert(match, `setup-sandbox-minio.ts: missing const ${name}`);
+    return match[1];
+  };
+  const sandboxSha = (arch) => {
+    const match = sandbox.match(
+      new RegExp(
+        `${arch}: \\{\\s*goarch: '[a-z0-9]+',\\s*sha256: '([0-9a-f]{64})'`,
+      ),
+    );
+    assert(match, `setup-sandbox-minio.ts: missing ${arch} sha256`);
+    return match[1];
+  };
+  for (const [arg, value] of [
+    ['MINIO_RELEASE', sandboxConst('release')],
+    ['MINIO_MODULE_VERSION', sandboxConst('sourceVersion')],
+    ['MINIO_MODULE_SUM', sandboxConst('sourceSum')],
+    ['MINIO_GOMOD_SUM', sandboxConst('sourceGoModSum')],
+    ['MINIO_SHA256_AMD64', sandboxSha('x64')],
+    ['MINIO_SHA256_ARM64', sandboxSha('arm64')],
+  ]) {
+    assert(
+      dockerArg(arg) === value,
+      `.docker/minio/Dockerfile: ${arg} must match apps/api/scripts/setup-sandbox-minio.ts (${value})`,
+    );
+  }
+  // The Go toolchain the sandbox script asserts is the one the image builds with.
+  const goVersion = sandbox.match(/go version go([0-9.]+) linux/)?.[1];
+  assert(goVersion, 'setup-sandbox-minio.ts: missing pinned Go version');
+  assert(
+    dockerArg('GO_IMAGE').startsWith(`golang:${goVersion}-`),
+    `.docker/minio/Dockerfile: GO_IMAGE must be golang:${goVersion}-* to reproduce the sandbox build`,
+  );
 }
 
 console.log('deployment artifacts match the shared catalog');

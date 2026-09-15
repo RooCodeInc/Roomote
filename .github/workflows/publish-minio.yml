@@ -1,0 +1,198 @@
+name: Publish MinIO Image
+
+# Builds ghcr.io/<owner>/roomote-minio from .docker/minio (MinIO server and mc
+# client compiled from the final community source releases) and publishes a
+# multi-arch manifest. Independent of the app image pipeline: the image only
+# changes when its Dockerfile does, and deployments pin it by digest through
+# deploy/deployment-catalog.json rather than tracking a channel.
+#
+# Tags:
+#   <MINIO_RELEASE>-<sha8>  immutable, every run
+#   <MINIO_RELEASE>         moved by main pushes only (the release name alone
+#                           is what operators expect to see)
+# The publish job prints the exact `image@sha256:` pin to copy into the
+# deployment catalog.
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - '.docker/minio/**'
+      - '.github/workflows/publish-minio.yml'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: roomote-minio
+
+concurrency:
+  group: publish-minio-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Resolve image metadata
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    outputs:
+      owner: ${{ steps.vars.outputs.owner }}
+      version: ${{ steps.vars.outputs.version }}
+      release: ${{ steps.vars.outputs.release }}
+      extra_tag: ${{ steps.vars.outputs.extra_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Resolve image metadata
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+
+          # The Dockerfile is the single source of truth for which upstream
+          # release is built; the tag is derived from it, never typed twice.
+          release="$(sed -n 's/^ARG MINIO_RELEASE=//p' .docker/minio/Dockerfile | head -n1)"
+          case "$release" in
+            RELEASE.[0-9]*) ;;
+            *)
+              echo "Could not read MINIO_RELEASE from .docker/minio/Dockerfile: '$release'" >&2
+              exit 1
+              ;;
+          esac
+
+          version="${release}-${GITHUB_SHA:0:8}"
+          extra_tag=""
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "${GITHUB_REF_NAME:-}" = "main" ]; then
+            extra_tag="$release"
+          fi
+
+          echo "owner=$owner" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "extra_tag=$extra_tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.arch }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      # Native per-arch builds pushed by digest, merged into one manifest
+      # below, matching publish-ghcr.yml. Each build also asserts the compiled
+      # binaries against the pinned SHA-256 for its architecture, so a
+      # toolchain or module drift fails here rather than shipping.
+      matrix:
+        include:
+          - arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Docker builder
+        uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (${{ matrix.arch }}) by digest
+        id: build
+        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
+        with:
+          context: .docker/minio
+          file: .docker/minio/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: digests-minio-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish manifest
+    needs: [prepare, build]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: digests-minio-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        shell: bash
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/${{ env.IMAGE_NAME }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          EXTRA_TAG: ${{ needs.prepare.outputs.extra_tag }}
+        run: |
+          set -euo pipefail
+          cd /tmp/digests
+
+          tag_args=(-t "$IMAGE:$VERSION")
+          if [ -n "$EXTRA_TAG" ]; then
+            tag_args+=(-t "$IMAGE:$EXTRA_TAG")
+          fi
+
+          digest_refs=()
+          for digest in *; do
+            digest_refs+=("$IMAGE@sha256:$digest")
+          done
+          [ "${#digest_refs[@]}" -eq 2 ] || {
+            echo "Expected 2 arch digests, found ${#digest_refs[@]}" >&2
+            exit 1
+          }
+
+          docker buildx imagetools create "${tag_args[@]}" "${digest_refs[@]}"
+          docker buildx imagetools inspect "$IMAGE:$VERSION"
+
+          # The manifest-list digest is what deployment-catalog.json pins.
+          manifest_digest="$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{.Manifest.Digest}}')"
+          {
+            echo "## roomote-minio published"
+            echo
+            echo "Pin for \`deploy/deployment-catalog.json\`:"
+            echo
+            echo '```'
+            echo "$IMAGE:$VERSION@$manifest_digest"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

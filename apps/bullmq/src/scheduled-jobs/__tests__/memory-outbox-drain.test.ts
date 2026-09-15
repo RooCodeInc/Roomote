@@ -46,6 +46,7 @@ describe('shared memory outbox drain', () => {
     expect(operations.write).toHaveBeenCalledWith(page);
     expect(operations.settle).toHaveBeenCalledWith('event-1', 3, 'done');
     expect(operations.onSettled).toHaveBeenCalledWith(
+      event,
       expect.objectContaining({ page }),
       'settled',
     );

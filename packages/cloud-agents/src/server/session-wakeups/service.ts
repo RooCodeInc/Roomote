@@ -40,6 +40,12 @@ const OWN_TASK_FOLLOW_THROUGH_SCHEDULE = {
   voice: 'in 1m',
   text: 'in 10m',
 } as const;
+const SESSION_GOAL_CONTINUATION_WAKEUP = {
+  name: 'Continue pursuing session goal',
+  prompt:
+    'Continue pursuing the active Session Goal. Take a concrete next action, delegate execution if needed, or use manage_goal to complete, block, or cancel it.',
+  reportPolicy: 'only_when_notable' as const,
+};
 
 function isOwnTaskFollowThroughInput(input: CreateSessionWakeupInput): boolean {
   return (
@@ -133,6 +139,32 @@ export async function ensureOwnTaskFollowThroughWakeup(
     actor,
     await isFastAgentVoiceCallActive(actor.conversationId),
   ))!;
+}
+
+export async function ensureSessionGoalContinuationWakeup(
+  actor: SessionWakeupActor,
+): Promise<CreateSessionWakeupResult> {
+  return createSessionWakeup(actor, {
+    ...SESSION_GOAL_CONTINUATION_WAKEUP,
+    schedule: 'in 1m',
+    internal: true,
+  });
+}
+
+export async function cancelSessionGoalContinuationWakeups(
+  conversationId: string,
+): Promise<void> {
+  const active = await listSessionWakeups(conversationId);
+  await Promise.all(
+    active
+      .filter(
+        (wakeup) =>
+          wakeup.internal &&
+          wakeup.name === SESSION_GOAL_CONTINUATION_WAKEUP.name &&
+          wakeup.prompt === SESSION_GOAL_CONTINUATION_WAKEUP.prompt,
+      )
+      .map((wakeup) => cancelSessionWakeup({ id: wakeup.id, conversationId })),
+  );
 }
 
 export async function refreshOwnTaskFollowThroughWakeupCadence(

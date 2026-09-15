@@ -70,11 +70,11 @@ describe('Telegram live task stream', () => {
     expect(mocks.postMessage).toHaveBeenCalledWith({
       channelId: '-1001',
       threadId: '77',
-      text: expect.stringMatching(
-        /^Starting task…\n\nOpen in Roomote: .*task=task-1/,
-      ),
-      htmlText: expect.stringMatching(
-        /^<blockquote expandable>Starting task…<\/blockquote>\n\n<a href=".*task=task-1.*">Open in Roomote<\/a>/,
+      text: 'Starting task…',
+      htmlText: 'Starting task…',
+      footerText: expect.stringMatching(/^Open in Roomote: .*task=task-1/),
+      footerHtmlText: expect.stringMatching(
+        /^<a href=".*task=task-1.*">Open in Roomote<\/a>/,
       ),
     });
 
@@ -82,7 +82,7 @@ describe('Telegram live task stream', () => {
     expect(mocks.postMessage).toHaveBeenCalledOnce();
   });
 
-  it('edits running progress with expandable HTML and a plain fallback', async () => {
+  it('edits running progress with details HTML and a plain fallback', async () => {
     await start();
 
     await renderTelegramLiveTaskStream({
@@ -95,12 +95,11 @@ describe('Telegram live task stream', () => {
       expect.objectContaining({
         channelId: '-1001',
         messageId: '88',
-        text: expect.stringMatching(
-          /^Running tests\.\n\nChecking Telegram fallback behavior\.\n\nOpen in Roomote:/,
-        ),
-        htmlText: expect.stringMatching(
-          /^<blockquote expandable>Running tests\.\n\nChecking Telegram fallback behavior\.<\/blockquote>\n\n<a href=/,
-        ),
+        text: 'Running tests.\n\nChecking Telegram fallback behavior.',
+        htmlText:
+          '<details><summary>Running tests.</summary>\n\nChecking Telegram fallback behavior.\n\n</details>',
+        footerText: expect.stringMatching(/^Open in Roomote:/),
+        footerHtmlText: expect.stringMatching(/^<a href=/),
       }),
     );
   });
@@ -117,39 +116,69 @@ describe('Telegram live task stream', () => {
 
     expect(mocks.editMessageText).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: expect.stringMatching(
-          /^Waiting for your input…\n\nOpen in Roomote:/,
-        ),
+        text: 'Waiting for your input…',
+        footerText: expect.stringMatching(/^Open in Roomote:/),
+      }),
+    );
+  });
+
+  it('leaves the live message untouched on completion and resumes editing it later', async () => {
+    await start();
+    mocks.editMessageText.mockClear();
+    mocks.createProvider.mockClear();
+
+    await expect(
+      renderTelegramLiveTaskStream({
+        taskId: 'task-1',
+        status: 'complete',
+        output: 'Authoritative final response.',
+      }),
+    ).resolves.toEqual({ card: true, updated: true });
+
+    expect(mocks.createProvider).not.toHaveBeenCalled();
+    expect(mocks.editMessageText).not.toHaveBeenCalled();
+
+    await renderTelegramLiveTaskStream({
+      taskId: 'task-1',
+      status: 'in_progress',
+      details: 'A resumed run is working.',
+    });
+
+    expect(mocks.editMessageText).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        channelId: '-1001',
+        messageId: '88',
+        text: 'A resumed run is working.',
+        footerText: expect.stringMatching(/^Open in Roomote:/),
       }),
     );
   });
 
   it.each([
-    ['complete', 'Authoritative final response.', 'Completed'],
-    ['error', 'Stopped because of an error.', 'Failed'],
-    ['error', 'Stopped.', 'Stopped'],
+    ['Stopped because of an error.', 'Failed'],
+    ['Stopped.', 'Stopped'],
   ] as const)(
-    'renders %s as a terminal status-only edit',
-    async (status, output, label) => {
+    'renders an error as a %s terminal status-only edit',
+    async (output, label) => {
       await start();
       mocks.editMessageText.mockClear();
 
       await renderTelegramLiveTaskStream({
         taskId: 'task-1',
-        status,
-        ...(output ? { output } : {}),
+        status: 'error',
+        output,
       });
 
       const edit = mocks.editMessageText.mock.calls[0]?.[0] as {
         text: string;
         htmlText: string;
+        footerText: string;
       };
-      expect(edit.text).toMatch(
+      expect(`${edit.text}\n\n${edit.footerText}`).toMatch(
         new RegExp(
-          `^${label === 'Completed' ? 'Completed\\.' : label === 'Failed' ? 'Task failed\\.' : 'Stopped\\.'}\\n\\nOpen in Roomote:`,
+          `^${label === 'Failed' ? 'Task failed\\.' : 'Stopped\\.'}\\n\\nOpen in Roomote:`,
         ),
       );
-      expect(edit.text).not.toContain('Authoritative final response.');
       expect(edit.text).not.toContain('Stopped because of an error.');
     },
   );

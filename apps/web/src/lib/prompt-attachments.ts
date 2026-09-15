@@ -26,6 +26,11 @@ async function resolveAttachmentFiles(
       .filter((attachment) => attachment.url)
       .map(async (attachment) => {
         const response = await fetch(attachment.url!);
+        if (!response.ok) {
+          throw new Error(
+            `Failed to download "${attachment.filename || 'attachment'}" (HTTP ${response.status}).`,
+          );
+        }
         const blob = await response.blob();
 
         return new File([blob], attachment.filename || 'attachment', {

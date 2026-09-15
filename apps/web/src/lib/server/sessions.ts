@@ -11,6 +11,7 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   gte,
+  getSessionGoal,
   gt,
   ilike,
   inArray,
@@ -413,7 +414,11 @@ function listConditions(
     eq(sessions.visibility, 'visible'),
     isNull(sessions.archivedAt),
     input.ids ? inArray(sessions.id, input.ids) : undefined,
-    input.status ? eq(sessions.cachedStatus, input.status) : undefined,
+    input.status === 'ready'
+      ? or(eq(sessions.cachedStatus, 'ready'), isNull(sessions.cachedStatus))
+      : input.status
+        ? eq(sessions.cachedStatus, input.status)
+        : undefined,
     input.user ? sessionCreatorCondition(input.user) : undefined,
     input.source
       ? eq(sessions.sourceSurface, input.source as never)
@@ -849,7 +854,6 @@ async function getSessionTasks(sessionId: string) {
       title: tasks.title,
       workflow: tasks.workflow,
       state: tasks.state,
-      goalStatus: tasks.goalStatus,
       repositoryName: tasks.repositoryName,
       model: tasks.model,
       activityAt: tasks.activityAt,
@@ -1004,9 +1008,10 @@ export async function getSessionById(auth: SessionAuth, sessionId: string) {
   if (!session) return null;
   // Fetch the task rollups once and feed them into hydration; this endpoint
   // is polled, so the duplicate linked-tasks join was pure waste.
-  const [sessionTaskDetails, artifacts] = await Promise.all([
+  const [sessionTaskDetails, artifacts, goal] = await Promise.all([
     getSessionTasks(session.id),
     getSessionArtifacts(session.id),
+    getSessionGoal(session.id),
   ]);
   const [hydrated] = await hydrateSessionRows(auth, [session], {
     preloadedLinkedTasks: sessionTaskDetails.map((task) => ({
@@ -1025,13 +1030,14 @@ export async function getSessionById(auth: SessionAuth, sessionId: string) {
     tasks: sessionTaskDetails.map((task) => ({
       state: task.state,
       taskPhase: task.latestRun?.taskPhase ?? null,
-      goalStatus: task.goalStatus,
     })),
+    goalStatus: goal?.status ?? null,
   });
   return {
     ...hydrated!,
     tasks: sessionTaskDetails,
     artifacts,
+    goal,
     status: liveStatus,
   };
 }
@@ -1058,7 +1064,6 @@ export async function getSessionTimeline(
     title: task.title,
     workflow: task.workflow,
     state: task.state,
-    goalStatus: task.goalStatus,
     repositoryName: task.repositoryName,
     activityAt: task.activityAt,
     attachedAt: task.attachedAt,

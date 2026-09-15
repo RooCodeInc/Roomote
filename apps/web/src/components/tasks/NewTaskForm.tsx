@@ -48,6 +48,9 @@ type NewTaskFormProps = {
   onTaskStarted?: () => void;
   initialPrompt?: string;
   placeholder?: string;
+  promptSuggestion?: string;
+  onPromptFocusChange?: (focused: boolean) => void;
+  autoFocus?: boolean;
   textareaMaxHeight?: number;
   promptContainerRef?: Ref<HTMLDivElement>;
 };
@@ -57,6 +60,9 @@ export function NewTaskForm({
   onTaskStarted,
   initialPrompt = '',
   placeholder = DEFAULT_PROMPT_PLACEHOLDER,
+  promptSuggestion,
+  onPromptFocusChange,
+  autoFocus = true,
   textareaMaxHeight,
   promptContainerRef,
 }: NewTaskFormProps) {
@@ -110,9 +116,14 @@ export function NewTaskForm({
             ...payload,
             conversationId,
           });
-        if (payload.text || payload.images?.length) {
+        if (
+          payload.text ||
+          payload.images?.length ||
+          payload.attachmentTexts?.length
+        ) {
           stagePendingFastSessionLaunch(sessionId, {
             fastConversationId: fastConversationId ?? conversationId,
+            presenceClientId: conversationId,
             text: payload.text,
             images: payload.images,
           });
@@ -308,7 +319,9 @@ export function NewTaskForm({
         onPromptTextChange={setPromptText}
         onSubmit={handleSubmit}
         placeholder={placeholder}
-        autoFocus
+        promptSuggestion={promptSuggestion}
+        onPromptFocusChange={onPromptFocusChange}
+        autoFocus={autoFocus}
         textareaMaxHeight={textareaMaxHeight}
         animateContainer={false}
         submitWithMetaKey={false}

@@ -3,6 +3,7 @@ import {
   type PrAction,
   type SourceControlProvider,
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   getSourceControlProviderLabel,
   isCommunicationProvider,
   isSourceControlTaskSurface,
@@ -149,8 +150,11 @@ export function standardTask({
 }) {
   const hintedDescription = description;
   const isAllRepositoriesSelection = repo === ALL_REPOSITORIES;
+  const isBlankSlateSelection = repo === NO_REPOSITORIES;
   const usesSharedWorkspaceRoot =
-    isAllRepositoriesSelection || (repoFullNames?.length ?? 0) > 0;
+    isAllRepositoriesSelection ||
+    isBlankSlateSelection ||
+    (repoFullNames?.length ?? 0) > 0;
   const attributionSurface = isCommunicationProvider(sourceProvider)
     ? sourceProvider
     : taskSurface;
@@ -224,7 +228,7 @@ export function standardTask({
   const taskRepoFullNames =
     repoFullNames && repoFullNames.length > 0
       ? repoFullNames
-      : isAllRepositoriesSelection
+      : isAllRepositoriesSelection || isBlankSlateSelection
         ? []
         : [repo];
   const skippedGitHubRepoFullNames =
@@ -451,8 +455,8 @@ ${buildGitHubMessageInstructions()}`
   <overview>You are a skill-driven workflow orchestrator. Your job is to understand the request, route the initial work through the correct core packaged skill, execute through that skill, and adapt when the conversation shifts to a different kind of work.</overview>
 
   <task_context>
-    <repository>${isAllRepositoriesSelection ? 'Repositories available in the workspace' : repo}</repository>
-    <workspace_context>${usesSharedWorkspaceRoot ? getWorkspaceInstructions(repoFullNames, conflictResolverLabel) : 'Single repository workspace.'}</workspace_context>
+    <repository>${isAllRepositoriesSelection ? 'Repositories available in the workspace' : isBlankSlateSelection ? 'No repository checked out (Blank slate)' : repo}</repository>
+    <workspace_context>${usesSharedWorkspaceRoot ? getWorkspaceInstructions(repoFullNames, conflictResolverLabel, { repositoriesOnDemand: isAllRepositoriesSelection, blankSlate: isBlankSlateSelection }) : 'Single repository workspace.'}</workspace_context>
   </task_context>
 
   ${taskSurfaceContext}

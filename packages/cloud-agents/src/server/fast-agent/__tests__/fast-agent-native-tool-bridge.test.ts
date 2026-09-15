@@ -196,11 +196,18 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(showWidgetSource).toContain('invoke("show_widget"');
     expect(showWidgetSource).toContain('textFallback: z.string().max(4000)');
     expect(showWidgetSource).toContain(
-      'On Slack or Discord, textFallback is posted as a chat preview with a link to open the rendered widget',
+      'Create and share a rendered visual in the Session transcript',
     );
     expect(showWidgetSource).toContain(
-      'Optional chat preview shown on Slack or Discord with a link to open the rendered widget',
+      'Use it proactively to show, mock up, preview, or visualize an interface or interaction',
     );
+    expect(showWidgetSource).toContain(
+      'Optional short plain-text preview of the rendered visual',
+    );
+    expect(showWidgetSource).not.toContain('On Slack');
+    expect(showWidgetSource).not.toContain('communication provider');
+    expect(showWidgetSource).not.toContain('link to open');
+    expect(showWidgetSource).not.toContain('HTML inline');
     expect(showWidgetSource).not.toContain('textFallback is posted instead');
     expect(showWidgetSource).toContain(SHOW_WIDGET_THEME_GUIDANCE);
     expect(showWidgetSource).toContain(SHOW_WIDGET_FIXED_CANVAS_GUIDANCE);
@@ -249,7 +256,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(requestUserInputSource).not.toContain('z.union');
     expect(requestUserInputSource).toContain('questions: z.array');
     expect(requestUserInputSource).toContain('.max(4).optional()');
-    expect(requestUserInputSource).toContain('preset: z.enum');
+    expect(requestUserInputSource).toContain(
+      'z.enum(["setup_source_control", "setup_starter_tasks", "setup_integrations"])',
+    );
     expect(requestUserInputSource).toContain(
       'questions are ignored when a preset is set',
     );
@@ -286,6 +295,7 @@ describe('Fast native OpenCode tool bridge', () => {
       task: false,
       roomote_manage_custom_automations: false,
       roomote_create_custom_skill: false,
+      roomote_update_custom_skill: false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: false,
     });
     for (const rawFilesystemTool of [
@@ -862,6 +872,7 @@ describe('Fast native OpenCode tool bridge', () => {
       task: false,
       roomote_manage_custom_automations: false,
       roomote_create_custom_skill: false,
+      roomote_update_custom_skill: false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: false,
     });
     const unbind = bindFastAgentMcpToolExecutor(
@@ -1729,11 +1740,76 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
-  it('rejects unauthenticated and inactive-session calls', async () => {
+  it.each([undefined, null, ''] as const)(
+    'preserves the opaque Session request reference and empty body through the native bridge: %j',
+    async (body) => {
+      const runtime = await getFastAgentNativeToolRuntime(
+        'session-secret-bridge',
+        [],
+      );
+      const executor = vi.fn(async () => ({
+        success: true,
+        status: 200,
+        body: 'healthy',
+      }));
+      const unbind = bindFastAgentNativeToolExecutor(
+        'opencode-secret-session',
+        'persisted-conversation',
+        executor,
+        { allowSpillRecovery: false },
+      );
+      const args = {
+        secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+        method: 'GET',
+        path: '/status',
+        ...(body === undefined ? {} : { body }),
+      };
+      try {
+        const response = await fetch(
+          runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!,
+          {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              sessionID: 'opencode-secret-session',
+              tool: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+              args,
+            }),
+          },
+        );
+        expect(response.status).toBe(200);
+        expect(executor).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            sessionId: 'opencode-secret-session',
+            name: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+            args,
+          }),
+        );
+        expect(await response.json()).toMatchObject({
+          ok: true,
+          metadata: {
+            roomoteResult: { success: true, status: 200, body: 'healthy' },
+          },
+        });
+      } finally {
+        unbind();
+      }
+    },
+  );
+
+  it.each([
+    FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+    FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret,
+    FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets,
+    FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+  ])('rejects unauthenticated and inactive-session %s calls', async (tool) => {
     const runtime = await getFastAgentNativeToolRuntime('native-auth', []);
     const body = JSON.stringify({
       sessionID: 'missing-session',
-      tool: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+      tool,
       args: { reason: 'duplicate' },
     });
 
@@ -1756,5 +1832,14 @@ describe('Fast native OpenCode tool bridge', () => {
       body,
     });
     expect(inactive.status).toBe(409);
+    const contextless = await fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ tool, args: {} }),
+    });
+    expect(contextless.status).toBe(400);
   });
 });

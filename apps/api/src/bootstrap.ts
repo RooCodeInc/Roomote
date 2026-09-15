@@ -20,11 +20,16 @@ type EnsureArtifactsBucketModule = {
   ensureArtifactsBucketAtBoot: () => Promise<void>;
 };
 
+type TelegramCommandRegistrationModule = {
+  refreshTelegramCommandMenuAtBoot: () => Promise<void>;
+};
+
 type RunApiServerOptions = {
   loadStartApiServer?: () => Promise<StartApiServerModule>;
   loadAuthKeypairsBootstrap?: () => Promise<AuthKeypairsModule>;
   loadDeclarativeEnvironmentsBootstrap?: () => Promise<DeclarativeEnvironmentsModule>;
   loadEnsureArtifactsBucket?: () => Promise<EnsureArtifactsBucketModule>;
+  loadTelegramCommandRegistration?: () => Promise<TelegramCommandRegistrationModule>;
   captureException?: typeof captureApiException;
   flushSentry?: typeof flushApiSentry;
   logError?: (...args: Parameters<typeof console.error>) => void;
@@ -37,6 +42,8 @@ export async function runApiServer({
   loadDeclarativeEnvironmentsBootstrap = () => import('@roomote/db/server'),
   loadEnsureArtifactsBucket = () =>
     import('./handlers/artifacts/ensure-bucket'),
+  loadTelegramCommandRegistration = () =>
+    import('./handlers/telegram/command-registration'),
   captureException = captureApiException,
   flushSentry = flushApiSentry,
   logError = (...args) => console.error(...args),
@@ -83,6 +90,15 @@ export async function runApiServer({
 
     const { startApiServer } = await loadStartApiServer();
     await startApiServer();
+
+    try {
+      const { refreshTelegramCommandMenuAtBoot } =
+        await loadTelegramCommandRegistration();
+      await refreshTelegramCommandMenuAtBoot();
+    } catch (error) {
+      captureException(error, undefined, { phase: 'telegram-commands' });
+      logError('Failed to refresh Telegram command menu', error);
+    }
   } catch (error) {
     captureException(error, undefined, { phase: 'startup' });
     logError('Failed to start API server', error);

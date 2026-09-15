@@ -1,4 +1,7 @@
-import { createLoggedProxyResponseBody } from '../proxy-response-stream';
+import {
+  createLoggedProxyResponseBody,
+  createSseKeepaliveProxyBody,
+} from '../proxy-response-stream';
 
 function createFailingBodyStream(error: Error): ReadableStream<Uint8Array> {
   let emittedInitialChunk = false;
@@ -85,5 +88,170 @@ describe('createLoggedProxyResponseBody', () => {
       'causeCode="UND_ERR_BODY_TIMEOUT"',
     );
     expect(debugSpy).not.toHaveBeenCalled();
+  });
+});
+
+function createControlledBodyStream(): {
+  stream: ReadableStream<Uint8Array>;
+  push: (text: string) => void;
+  close: () => void;
+  fail: (error: Error) => void;
+  cancelled: () => unknown;
+} {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  let cancelReason: unknown = undefined;
+  const stream = new ReadableStream<Uint8Array>({
+    start(ctrl) {
+      controller = ctrl;
+    },
+    cancel(reason) {
+      cancelReason = reason;
+    },
+  });
+  const encoder = new TextEncoder();
+
+  return {
+    stream,
+    push: (text) => controller.enqueue(encoder.encode(text)),
+    close: () => controller.close(),
+    fail: (error) => controller.error(error),
+    cancelled: () => cancelReason,
+  };
+}
+
+async function readChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<string> {
+  const { done, value } = await reader.read();
+  return done ? '<done>' : new TextDecoder().decode(value);
+}
+
+describe('createSseKeepaliveProxyBody', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('returns null without a body', () => {
+    expect(createSseKeepaliveProxyBody({ body: null, intervalMs: 10 })).toBe(
+      null,
+    );
+  });
+
+  it('emits comment lines while the upstream is silent and forwards events in order', async () => {
+    const upstream = createControlledBodyStream();
+    const reader = createSseKeepaliveProxyBody({
+      body: upstream.stream,
+      intervalMs: 1_000,
+    })!.getReader();
+
+    upstream.push('event: a\ndata: 1\n\n');
+    expect(await readChunk(reader)).toBe('event: a\ndata: 1\n\n');
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await readChunk(reader)).toBe(': keepalive\n\n');
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await readChunk(reader)).toBe(': keepalive\n\n');
+
+    upstream.push('event: b\ndata: 2\n\n');
+    expect(await readChunk(reader)).toBe('event: b\ndata: 2\n\n');
+
+    upstream.close();
+    expect(await readChunk(reader)).toBe('<done>');
+  });
+
+  it('does not emit a comment when upstream bytes arrive within the interval', async () => {
+    const upstream = createControlledBodyStream();
+    const reader = createSseKeepaliveProxyBody({
+      body: upstream.stream,
+      intervalMs: 1_000,
+    })!.getReader();
+
+    await vi.advanceTimersByTimeAsync(900);
+    upstream.push('data: 1\n\n');
+    expect(await readChunk(reader)).toBe('data: 1\n\n');
+
+    await vi.advanceTimersByTimeAsync(900);
+    upstream.push('data: 2\n\n');
+    expect(await readChunk(reader)).toBe('data: 2\n\n');
+
+    upstream.close();
+    expect(await readChunk(reader)).toBe('<done>');
+  });
+
+  it('does not read ahead of a slow downstream consumer', async () => {
+    const reads: string[] = [];
+    const encoder = new TextEncoder();
+    const observed = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const text of ['1', '2', '3', '4', '5']) {
+          controller.enqueue(encoder.encode(text));
+        }
+        controller.close();
+      },
+    });
+    const observedReader = observed.getReader();
+    const spyingUpstream = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        const { done, value } = await observedReader.read();
+        if (done) {
+          controller.close();
+          return;
+        }
+        reads.push(new TextDecoder().decode(value));
+        controller.enqueue(value);
+      },
+    });
+    const stream = createSseKeepaliveProxyBody({
+      body: spyingUpstream,
+      intervalMs: 1_000,
+    })!;
+    const reader = stream.getReader();
+
+    // Nobody has read yet: the wrapper only fills its own queue (one chunk)
+    // plus at most one in-flight upstream read.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(reads.length).toBeLessThanOrEqual(2);
+
+    expect(await readChunk(reader)).toBe('1');
+    expect(await readChunk(reader)).toBe('2');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(reads.length).toBeLessThanOrEqual(4);
+
+    expect(await readChunk(reader)).toBe('3');
+    expect(await readChunk(reader)).toBe('4');
+    expect(await readChunk(reader)).toBe('5');
+    expect(await readChunk(reader)).toBe('<done>');
+  });
+
+  it('propagates upstream failures', async () => {
+    const upstream = createControlledBodyStream();
+    const reader = createSseKeepaliveProxyBody({
+      body: upstream.stream,
+      intervalMs: 1_000,
+    })!.getReader();
+
+    upstream.fail(new Error('upstream gone'));
+
+    await expect(reader.read()).rejects.toThrow('upstream gone');
+  });
+
+  it('cancels the upstream when the client disconnects and stops emitting', async () => {
+    const upstream = createControlledBodyStream();
+    const stream = createSseKeepaliveProxyBody({
+      body: upstream.stream,
+      intervalMs: 1_000,
+    })!;
+    const reader = stream.getReader();
+
+    await reader.cancel('client closed');
+
+    expect(upstream.cancelled()).toBe('client closed');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await readChunk(reader)).toBe('<done>');
   });
 });

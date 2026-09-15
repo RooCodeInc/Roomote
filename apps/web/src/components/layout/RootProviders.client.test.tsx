@@ -42,6 +42,12 @@ vi.mock('./StatusBanner', () => ({
   StatusBanner: () => null,
 }));
 
+vi.mock('./VoiceConsentProvider', () => ({
+  VoiceConsentProvider: ({ children }: React.PropsWithChildren) => (
+    <>{children}</>
+  ),
+}));
+
 import { RootProviders } from './RootProviders';
 
 describe('RootProviders', () => {

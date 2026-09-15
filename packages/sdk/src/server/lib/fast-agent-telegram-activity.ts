@@ -6,10 +6,7 @@ import type {
   FastAgentReplyStream,
   FastAgentTurnActivity,
 } from '@roomote/cloud-agents/server';
-import {
-  TELEGRAM_MAX_MESSAGE_LENGTH,
-  type TelegramCommunicationProvider,
-} from '@roomote/communication';
+import type { TelegramCommunicationProvider } from '@roomote/communication';
 
 import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 
@@ -20,6 +17,17 @@ export const FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS = 300;
 // Pace draft updates independently of model token cadence.
 export const FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS = 800;
 const FAST_AGENT_TELEGRAM_THINKING_TEXT = 'Roomote is working...';
+
+export async function runWithFastAgentTelegramActivityReassertion<T>(
+  activity: { reassert: () => void },
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } finally {
+    activity.reassert();
+  }
+}
 
 function isTelegramPrivateChatId(channelId: string): boolean {
   const parsed = Number(channelId);
@@ -36,7 +44,7 @@ export function createFastAgentTelegramActivity({
 }: {
   provider: Pick<
     TelegramCommunicationProvider,
-    'sendChatAction' | 'sendMessageDraft'
+    'sendChatAction' | 'sendRichMessageDraft'
   >;
   replyTarget: { channelId: string; threadId?: string };
 }): FastAgentTurnActivity & {
@@ -55,13 +63,15 @@ export function createFastAgentTelegramActivity({
     sendTyping: async () => {
       if (nativeDraftAvailable) {
         try {
-          await provider.sendMessageDraft({
+          await provider.sendRichMessageDraft({
             ...replyTarget,
             draftId: draftId!,
-            text: (draftText || FAST_AGENT_TELEGRAM_THINKING_TEXT).slice(
-              0,
-              TELEGRAM_MAX_MESSAGE_LENGTH,
-            ),
+            text: draftText || FAST_AGENT_TELEGRAM_THINKING_TEXT,
+            ...(draftText
+              ? { textFormat: 'markdown' as const }
+              : {
+                  htmlText: '<tg-thinking>Roomote is working...</tg-thinking>',
+                }),
           });
           lastDraftWriteAtMs = Date.now();
           return;
@@ -162,8 +172,8 @@ export function createFastAgentTelegramActivity({
           try {
             return (await deliver(reply)) ?? undefined;
           } finally {
-            // The ordinary final message clears the draft. Resume Thinking
-            // only if this turn continues into more tool or model work.
+            // The durable rich message clears the draft. Resume Thinking only
+            // if this turn continues into more tool or model work.
             schedulePostMessageReassertion();
           }
         },

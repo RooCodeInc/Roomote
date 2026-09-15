@@ -17,10 +17,12 @@ import { SetupSessionActionCard } from './SetupSessionActionCard';
  * the card. Optional: never blocks activation or launched tasks.
  */
 export function SetupAutomationRecommendationsCard({
-  sessionId,
+  forceVisible = false,
+  onResolved,
 }: {
-  sessionId: string;
-}) {
+  forceVisible?: boolean;
+  onResolved?: () => void;
+} = {}) {
   const trpc = useTRPC();
   const { user } = useUser();
   const [dismissed, setDismissed] = useState(false);
@@ -41,16 +43,27 @@ export function SetupAutomationRecommendationsCard({
       },
     }),
   );
-  const tasks = useQuery(trpc.fastSessions.tasks.queryOptions({ sessionId }));
   const recommendations = status.data?.setupNewState.automationRecommendations;
+  const setupSession = status.data?.setupNewState.setupSession;
+  const hasSynchronizedRepository =
+    status.data?.sourceControlSetup.providers.some(
+      (provider) => provider.connected && (provider.repositoryCount ?? 0) > 0,
+    );
+  const integrationDiscoveryComplete = Boolean(
+    setupSession && setupSession.integrationDiscoveryCompletedAt !== null,
+  );
+  const starterDecisionComplete = Boolean(setupSession?.starterTaskSelection);
 
   if (
     dismissed ||
     user?.isAdmin !== true ||
+    (!forceVisible &&
+      (!hasSynchronizedRepository ||
+        !integrationDiscoveryComplete ||
+        !starterDecisionComplete)) ||
     recommendations?.status !== 'ready' ||
     recommendations.dismissed ||
-    (recommendations.applicationState ?? 'pending') !== 'pending' ||
-    !tasks.data?.length
+    (recommendations.applicationState ?? 'pending') !== 'pending'
   ) {
     return null;
   }
@@ -61,7 +74,12 @@ export function SetupAutomationRecommendationsCard({
       icon={<Zap />}
       intro="Looking at your repos, I recommend enabling these to run in the background and do work on your behalf."
     >
-      <AutomationRecommendations onContinue={() => setDismissed(true)} />
+      <AutomationRecommendations
+        onContinue={() => {
+          setDismissed(true);
+          onResolved?.();
+        }}
+      />
     </SetupSessionActionCard>
   );
 }

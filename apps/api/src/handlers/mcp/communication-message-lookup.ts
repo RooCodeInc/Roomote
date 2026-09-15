@@ -5,12 +5,15 @@ import {
 
 import { COMMUNICATION_LOOKUP_STRATEGIES } from './communication-message-lookup-strategies';
 import type {
-  CommunicationChannelMessagesPayload,
   CommunicationLookupTaskRun,
   CommunicationMessageContextPayload,
   ParsedCommunicationReference,
   SupportedCommunicationLookupProvider,
 } from './communication-message-lookup-types';
+import {
+  applyChannelMessagesResultBudget,
+  type BudgetedCommunicationChannelMessagesPayload,
+} from './communication-channel-messages-budget';
 import { McpProxyError } from './proxy-utils';
 
 export type { CommunicationLookupTaskRun } from './communication-message-lookup-types';
@@ -46,7 +49,13 @@ function assertMatchingReferences(
   if (
     left.provider !== right.provider ||
     left.channelId !== right.channelId ||
-    (left.messageId && right.messageId && left.messageId !== right.messageId)
+    (left.messageId && right.messageId && left.messageId !== right.messageId) ||
+    (left.workspaceId &&
+      right.workspaceId &&
+      left.workspaceId !== right.workspaceId) ||
+    (left.workspaceDomain &&
+      right.workspaceDomain &&
+      left.workspaceDomain !== right.workspaceDomain)
   ) {
     throw new McpProxyError(
       400,
@@ -148,6 +157,10 @@ export async function lookupCommunicationMessageContext(options: {
         ? { channel }
         : {}),
     messageId,
+    ...(reference?.workspaceId ? { workspaceId: reference.workspaceId } : {}),
+    ...(reference?.workspaceDomain
+      ? { workspaceDomain: reference.workspaceDomain }
+      : {}),
     ...(options.taskRun ? { taskRun: options.taskRun } : {}),
     ...(options.actingUserId ? { actingUserId: options.actingUserId } : {}),
   });
@@ -160,7 +173,7 @@ export async function lookupCommunicationChannelMessages(options: {
   provider?: SupportedCommunicationLookupProvider;
   taskRun?: CommunicationLookupTaskRun | null;
   actingUserId?: string | null;
-}): Promise<CommunicationChannelMessagesPayload> {
+}): Promise<BudgetedCommunicationChannelMessagesPayload> {
   const channel = options.channel?.trim();
   const reference = channel ? parseReference(channel) : null;
   const provider = resolveLookupProvider({
@@ -175,7 +188,9 @@ export async function lookupCommunicationChannelMessages(options: {
     );
   }
 
-  return COMMUNICATION_LOOKUP_STRATEGIES[provider].getChannelMessages({
+  const payload = await COMMUNICATION_LOOKUP_STRATEGIES[
+    provider
+  ].getChannelMessages({
     ...(reference?.channelId
       ? { channel: reference.channelId }
       : channel
@@ -183,7 +198,13 @@ export async function lookupCommunicationChannelMessages(options: {
         : {}),
     ...(options.oldest ? { oldest: options.oldest } : {}),
     ...(options.latest ? { latest: options.latest } : {}),
+    ...(reference?.workspaceId ? { workspaceId: reference.workspaceId } : {}),
+    ...(reference?.workspaceDomain
+      ? { workspaceDomain: reference.workspaceDomain }
+      : {}),
     ...(options.taskRun ? { taskRun: options.taskRun } : {}),
     ...(options.actingUserId ? { actingUserId: options.actingUserId } : {}),
   });
+
+  return applyChannelMessagesResultBudget(payload);
 }
