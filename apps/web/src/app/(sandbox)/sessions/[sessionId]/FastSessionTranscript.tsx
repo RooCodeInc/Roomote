@@ -1221,6 +1221,9 @@ export function FastSessionTranscript({
           ...(prepared.attachmentTexts?.length
             ? { attachmentTexts: prepared.attachmentTexts }
             : {}),
+          ...(message.integrationIds?.length
+            ? { integrationIds: message.integrationIds }
+            : {}),
           model: message.model ?? null,
           reasoningEffort: message.reasoningEffort ?? null,
         });

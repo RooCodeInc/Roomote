@@ -10,6 +10,7 @@ import {
   createFastAgentWebTaskLauncher,
   FastAgentDurableRetryScheduledError,
   getOrCreateFastAgentSession,
+  listFastAgentIntegrations,
   resolveApiBaseUrl,
   type FastAgentPlatformEventKind,
   type FastAgentPlatformEventVisibility,
@@ -60,6 +61,8 @@ import {
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
   type FastAgentSetupTurnContext,
+  HTTP_INTEGRATIONS_MCP_ID,
+  ROOMOTE_MCP_ID,
   type ReasoningEffort,
 } from '@roomote/types';
 import type { FastAgentTurnAdapter } from '@roomote/cloud-agents/server';
@@ -144,6 +147,7 @@ type WebFastAgentTurnInput = {
   question: string;
   images?: string[];
   attachmentTexts?: string[];
+  currentMessageAgentContext?: string;
   model?: string;
   reasoningEffort?: ReasoningEffort;
   senderDisplayName?: string;
@@ -218,6 +222,7 @@ async function runWebFastAgentTurn({
   question,
   images,
   attachmentTexts,
+  currentMessageAgentContext,
   model,
   reasoningEffort,
   senderDisplayName,
@@ -292,6 +297,9 @@ async function runWebFastAgentTurn({
               userId,
               question,
               ...(images?.length ? { images } : {}),
+              ...(currentMessageAgentContext
+                ? { agentContext: currentMessageAgentContext }
+                : {}),
               ...(senderDisplayName ? { senderDisplayName } : {}),
               ...(turnSource === 'platform_event'
                 ? {
@@ -325,6 +333,7 @@ async function runWebFastAgentTurn({
       question,
       images,
       attachmentTexts,
+      currentMessageAgentContext,
       userId,
       apiBaseUrl,
       conversation,
@@ -419,12 +428,94 @@ export function scheduleWebFastAgentTurn(input: WebFastAgentTurnInput): void {
   // A detached promise can be suspended between a retry notice and its timer.
   after(() => runWebFastAgentTurn(input));
 }
+
+export type FastSessionIntegrationMention = {
+  id: string;
+  name: string;
+  description: string;
+};
+
+const SESSION_INTEGRATION_MENTION_DESCRIPTION_MAX_CHARS = 280;
+
+function summarizeIntegrationDescription(description: string): string {
+  const summary = description.replace(/\s+/gu, ' ').trim();
+  return summary.length > SESSION_INTEGRATION_MENTION_DESCRIPTION_MAX_CHARS
+    ? `${summary.slice(0, SESSION_INTEGRATION_MENTION_DESCRIPTION_MAX_CHARS - 1).trimEnd()}…`
+    : summary;
+}
+
+async function listAuthorizedSessionIntegrationMentions(
+  userId: string,
+): Promise<FastSessionIntegrationMention[]> {
+  const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
+  const integrations = await listFastAgentIntegrations(
+    { userId, apiBaseUrl },
+    () =>
+      resolveUserMcpServerConfigs({
+        userId,
+        apiBaseUrl,
+        includeRoomoteMemberTools: true,
+      }),
+  );
+
+  return integrations
+    .filter(
+      (integration) =>
+        integration.id !== ROOMOTE_MCP_ID &&
+        integration.id !== HTTP_INTEGRATIONS_MCP_ID,
+    )
+    .map((integration) => ({
+      id: integration.id,
+      name: integration.name.trim(),
+      description: summarizeIntegrationDescription(integration.description),
+    }))
+    .filter((integration) => integration.name && integration.description)
+    .toSorted((left, right) => left.name.localeCompare(right.name));
+}
+
+export async function getFastSessionIntegrationMentionsCommand(
+  auth: UserAuthSuccess,
+  input: { sessionId?: string },
+): Promise<{ integrations: FastSessionIntegrationMention[] }> {
+  if (input.sessionId) {
+    const session = await findAccessibleFastSession(auth, input.sessionId);
+    if (!session) throw new Error('Fast session not found');
+  }
+
+  return {
+    integrations: await listAuthorizedSessionIntegrationMentions(auth.userId),
+  };
+}
+
+async function resolveSelectedIntegrationContext(
+  userId: string,
+  integrationIds: string[] | undefined,
+): Promise<string | undefined> {
+  if (!integrationIds?.length) return undefined;
+
+  const selectedIds = new Set(integrationIds);
+  const integrations = (
+    await listAuthorizedSessionIntegrationMentions(userId)
+  ).filter((integration) => selectedIds.has(integration.id));
+  if (integrations.length === 0) return undefined;
+
+  return [
+    'The user selected these available integrations as context for this message:',
+    ...integrations.map(
+      (integration) =>
+        `- ${integration.name} [id: ${integration.id}]: ${integration.description}`,
+    ),
+    'Use this metadata to understand the reference. Selection does not by itself require an integration call.',
+  ].join('\n');
+}
+
 export async function startFastSessionCommand(
   auth: UserAuthSuccess,
   input: {
     text: string;
     images?: string[];
     attachmentTexts?: string[];
+    integrationIds?: string[];
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
     conversationId?: string;
@@ -512,6 +603,15 @@ export async function startFastSessionCommand(
       auth,
       unifiedSession.id,
     );
+    const currentMessageAgentContext = await resolveSelectedIntegrationContext(
+      auth.userId,
+      input.integrationIds,
+    ).catch((error) => {
+      console.warn(
+        `[Fast Web] Selected integration context unavailable: ${formatErrorForLog(error)}`,
+      );
+      return undefined;
+    });
 
     scheduleWebFastAgentTurn({
       userId: auth.userId,
@@ -531,6 +631,7 @@ export async function startFastSessionCommand(
       question: input.text,
       images: input.images,
       attachmentTexts: input.attachmentTexts,
+      ...(currentMessageAgentContext ? { currentMessageAgentContext } : {}),
       model: settings.model,
       reasoningEffort: settings.reasoningEffort,
       durableSessionId: session.id,
@@ -733,6 +834,7 @@ export async function replyToFastSessionCommand(
     text: string;
     images?: string[];
     attachmentTexts?: string[];
+    integrationIds?: string[];
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
   },
@@ -747,7 +849,7 @@ export async function replyToFastSessionCommand(
 
   const senderDisplayName =
     getUserDisplayName({ name: auth.name, email: auth.primaryEmail }) ?? null;
-  const [settings, delivery] = await Promise.all([
+  const [settings, delivery, currentMessageAgentContext] = await Promise.all([
     resolveSessionModelSettings(session.id, input, {
       model: session.model,
       reasoningEffort: session.reasoningEffort,
@@ -758,6 +860,14 @@ export async function replyToFastSessionCommand(
       senderDisplayName,
       question: input.text,
     }),
+    resolveSelectedIntegrationContext(auth.userId, input.integrationIds).catch(
+      (error) => {
+        console.warn(
+          `[Fast Web] Selected integration context unavailable: ${formatErrorForLog(error)}`,
+        );
+        return undefined;
+      },
+    ),
   ]);
   if (!delivery) {
     throw new Error(
@@ -782,6 +892,7 @@ export async function replyToFastSessionCommand(
     question: input.text,
     images: input.images,
     attachmentTexts: input.attachmentTexts,
+    ...(currentMessageAgentContext ? { currentMessageAgentContext } : {}),
     model: settings.model,
     reasoningEffort: settings.reasoningEffort,
     ...(senderDisplayName ? { senderDisplayName } : {}),

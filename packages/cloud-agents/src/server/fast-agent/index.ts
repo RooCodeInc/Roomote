@@ -1,6 +1,10 @@
 export * from './fast-agent-constants';
 export * from './fast-agent-conversation';
 export * from './fast-agent-conversation-repository';
+export {
+  listFastAgentIntegrations,
+  type FastAgentIntegration,
+} from './fast-agent-integration-broker';
 export * from './fast-agent-prompt';
 export * from './fast-agent-reply-stream';
 export * from './fast-agent-surface-reply-stream';
