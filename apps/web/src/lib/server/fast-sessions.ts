@@ -4,8 +4,8 @@ import {
   extractAutomationTriggeredPromptText,
   extractAcpMessageText,
   getTextFromContentBlocks,
-  hasIntegrationSavedBlock,
-  stripIntegrationSavedBlocks,
+  hasLeadingIntegrationSavedBlock,
+  stripLeadingIntegrationSavedBlock,
   parsePrReviewActionOffer,
   type PrReviewActionOfferStatus,
   sanitizeEnvelopeFields,
@@ -589,15 +589,16 @@ function prepareFastSessionMessageRow<
     row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
     sanitized.metadata?.visibleInTranscript !== false
   ) {
-    // The turn Roomote sends after the owner saves an integration key carries
-    // its instruction in an `<integration_saved>` block; the transcript shows
-    // only the text after it.
+    // The turn Roomote sends after the owner saves an integration key starts
+    // with one `<integration_saved>` block; the transcript shows only the text
+    // after it. Only that exact leading envelope is recognized, so a block
+    // quoted or pasted anywhere else in a human message stays as written.
     const text = getTextFromContentBlocks(sanitized.contentBlocks) ?? '';
-    if (hasIntegrationSavedBlock(text)) {
+    if (hasLeadingIntegrationSavedBlock(text)) {
       return {
         ...row,
         contentBlocks: [
-          { type: 'text', text: stripIntegrationSavedBlocks(text) },
+          { type: 'text', text: stripLeadingIntegrationSavedBlock(text) },
           ...sanitized.contentBlocks.filter((block) => block.type !== 'text'),
         ],
         metadata: sanitized.metadata,
@@ -911,7 +912,7 @@ export async function getFastSessionById(
 }
 
 function visibleSuggestableText(text: string | null): string | null {
-  return text && hasIntegrationSavedBlock(text)
-    ? stripIntegrationSavedBlocks(text)
+  return text && hasLeadingIntegrationSavedBlock(text)
+    ? stripLeadingIntegrationSavedBlock(text)
     : text;
 }

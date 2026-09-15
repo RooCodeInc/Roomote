@@ -168,18 +168,36 @@ export type ServiceCredentialRequestResult =
 
 /**
  * Wraps the instruction Roomote injects into the Session turn it sends after
- * the owner saves an integration key. The Session transcript hides every such
- * block and shows the text that follows it.
+ * the owner saves an integration key. The Session transcript hides that
+ * leading block and shows the text that follows it.
  */
 export const INTEGRATION_SAVED_TAG = 'integration_saved' as const;
 
-const INTEGRATION_SAVED_BLOCK =
-  /<integration_saved>[\s\S]*?<\/integration_saved>\s*/gu;
+const INTEGRATION_SAVED_OPEN = `<${INTEGRATION_SAVED_TAG}>`;
+const INTEGRATION_SAVED_CLOSE = `</${INTEGRATION_SAVED_TAG}>`;
 
-export function hasIntegrationSavedBlock(text: string): boolean {
-  return text.includes(`<${INTEGRATION_SAVED_TAG}>`);
+/**
+ * Locate the envelope Roomote sends: exactly one block at the very start of
+ * the text, closed once. Index lookups only, so arbitrary human text costs
+ * one scan; a block anywhere else, or an unclosed one, is ordinary text.
+ */
+function leadingIntegrationSavedBlockEnd(text: string): number {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith(INTEGRATION_SAVED_OPEN)) return -1;
+  const close = trimmed.indexOf(
+    INTEGRATION_SAVED_CLOSE,
+    INTEGRATION_SAVED_OPEN.length,
+  );
+  return close === -1
+    ? -1
+    : text.length - trimmed.length + close + INTEGRATION_SAVED_CLOSE.length;
 }
 
-export function stripIntegrationSavedBlocks(text: string): string {
-  return text.replace(INTEGRATION_SAVED_BLOCK, '').trim();
+export function hasLeadingIntegrationSavedBlock(text: string): boolean {
+  return leadingIntegrationSavedBlockEnd(text) !== -1;
+}
+
+export function stripLeadingIntegrationSavedBlock(text: string): string {
+  const end = leadingIntegrationSavedBlockEnd(text);
+  return end === -1 ? text : text.slice(end).trim();
 }
