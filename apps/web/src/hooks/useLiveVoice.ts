@@ -30,8 +30,9 @@ const UNSPOKEN_DELEGATION_EXPIRY_MS = 3_000;
 const SPOKEN_TURN_SETTLE_MS = 1_200;
 const SESSION_START_TIMEOUT_MS = 15_000;
 const PEER_DISCONNECT_GRACE_MS = 3_000;
+const INPUT_LEVEL_SAMPLE_MS = 100;
 
-type LiveVoiceStatus =
+export type LiveVoiceStatus =
   | 'idle'
   | 'connecting'
   | 'listening'
@@ -82,6 +83,8 @@ interface UseLiveVoiceReturn {
   setOutputMuted: (muted: boolean) => void;
   /** Milliseconds since the conversation connected, 0 when idle. */
   startedAt: number | null;
+  /** Current microphone level from 0 to 1 for the in-call meter. */
+  inputLevel: number;
   /**
    * Utterances that have ended but not yet reached `onUtterance` (transcript
    * cleanup in flight). Callers use it to keep spoken replies ordered after
@@ -155,6 +158,7 @@ export function useLiveVoice({
   const [micMuted, setMicMutedState] = useState(false);
   const [outputMuted, setOutputMutedState] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [inputLevel, setInputLevel] = useState(0);
   const [deliveringUtterances, setDeliveringUtterances] = useState(0);
   const onSpokenTurnRef = useRef(onSpokenTurn);
   onSpokenTurnRef.current = onSpokenTurn;
@@ -179,6 +183,52 @@ export function useLiveVoice({
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const outputAudioRef = useRef<HTMLAudioElement | null>(null);
+  const inputAudioContextRef = useRef<AudioContext | null>(null);
+  const inputLevelFrameRef = useRef<number | null>(null);
+  const lastInputLevelSampleRef = useRef(0);
+
+  const stopInputLevelMeter = useCallback(() => {
+    if (inputLevelFrameRef.current !== null) {
+      window.cancelAnimationFrame(inputLevelFrameRef.current);
+      inputLevelFrameRef.current = null;
+    }
+    const context = inputAudioContextRef.current;
+    inputAudioContextRef.current = null;
+    if (context) void context.close();
+    setInputLevel(0);
+  }, []);
+
+  const startInputLevelMeter = useCallback(
+    (stream: MediaStream) => {
+      stopInputLevelMeter();
+      if (!window.AudioContext) return;
+
+      const context = new AudioContext();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+      context.createMediaStreamSource(stream).connect(analyser);
+      const samples = new Uint8Array(analyser.frequencyBinCount);
+      inputAudioContextRef.current = context;
+
+      const measure = (now: number) => {
+        if (now - lastInputLevelSampleRef.current >= INPUT_LEVEL_SAMPLE_MS) {
+          lastInputLevelSampleRef.current = now;
+          analyser.getByteTimeDomainData(samples);
+          let sumSquares = 0;
+          for (const sample of samples) {
+            const normalized = (sample - 128) / 128;
+            sumSquares += normalized * normalized;
+          }
+          setInputLevel(
+            Math.min(1, Math.sqrt(sumSquares / samples.length) * 4),
+          );
+        }
+        inputLevelFrameRef.current = window.requestAnimationFrame(measure);
+      };
+      inputLevelFrameRef.current = window.requestAnimationFrame(measure);
+    },
+    [stopInputLevelMeter],
+  );
   const activeRef = useRef(false);
   const connectingRef = useRef(false);
   const startGenerationRef = useRef(0);
@@ -404,6 +454,7 @@ export function useLiveVoice({
         case 'error':
           console.error('[voice] GPT-Live reported an error', event);
           setError(event.error?.message ?? 'Voice conversation error');
+          setStatus('error');
           break;
         default:
           break;
@@ -445,6 +496,7 @@ export function useLiveVoice({
       connectingRef.current = false;
       activeRef.current = false;
       clearPeerDisconnectTimer();
+      stopInputLevelMeter();
 
       if (delegationTimerRef.current !== null) {
         window.clearTimeout(delegationTimerRef.current);
@@ -485,8 +537,20 @@ export function useLiveVoice({
       setOutputMutedState(false);
       if (wasActive && !options?.silent) playVoiceCue('stop');
     },
-    [clearPeerDisconnectTimer, clearSilenceTimer, flushSpokenTurn, release],
+    [
+      clearPeerDisconnectTimer,
+      clearSilenceTimer,
+      flushSpokenTurn,
+      release,
+      stopInputLevelMeter,
+    ],
   );
+
+  useEffect(() => {
+    if (status === 'error' && (activeRef.current || connectingRef.current)) {
+      stop();
+    }
+  }, [status, stop]);
 
   const start = useCallback(async () => {
     if (activeRef.current || connectingRef.current || disabled) return;
@@ -518,6 +582,7 @@ export function useLiveVoice({
         return;
       }
       micStreamRef.current = mic;
+      startInputLevelMeter(mic);
 
       peer = new RTCPeerConnection();
       audio = new Audio();
@@ -637,6 +702,7 @@ export function useLiveVoice({
     } catch (caught) {
       console.error('[voice] Could not start the voice conversation', caught);
       release(peer, channel, mic, audio);
+      stopInputLevelMeter();
       if (isStale()) return;
       if (peerRef.current === peer) peerRef.current = null;
       if (dataChannelRef.current === channel) dataChannelRef.current = null;
@@ -657,6 +723,8 @@ export function useLiveVoice({
     handleServerEvent,
     release,
     requestVoiceConsent,
+    startInputLevelMeter,
+    stopInputLevelMeter,
     stop,
     trpcClient,
   ]);
@@ -703,6 +771,7 @@ export function useLiveVoice({
     outputMuted,
     setOutputMuted,
     startedAt,
+    inputLevel,
     deliveringUtterances,
   };
 }

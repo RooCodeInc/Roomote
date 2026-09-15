@@ -8,6 +8,7 @@ import type { ReasoningEffort } from '@roomote/types';
 
 import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
+import type { LiveVoiceStatus } from '@/hooks/useLiveVoice';
 import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
 import { usePromptSubmitFocus } from '@/hooks/usePromptSubmitFocus';
 import {
@@ -37,8 +38,8 @@ import {
 } from '@/components/ai-elements';
 import {
   BasicTooltip,
-  Mic,
-  MicOff,
+  CircleSlash,
+  RadioTower,
   Volume2,
   VolumeX,
 } from '@/components/system';
@@ -63,10 +64,12 @@ type SessionVoiceControls = {
   enabled: boolean;
   /** Whether a voice conversation is currently running. */
   active: boolean;
+  status: LiveVoiceStatus;
   onToggle: () => void;
   /** In-call controls, present while the call is connected. */
   call?: {
     startedAt: number | null;
+    inputLevel: number;
     micMuted: boolean;
     onToggleMic: () => void;
     outputMuted: boolean;
@@ -95,6 +98,98 @@ function CallTimer({ startedAt }: { startedAt: number }) {
     >
       {formatCallTimer(now - startedAt)}
     </span>
+  );
+}
+
+function VoiceLevel({ level, muted }: { level: number; muted: boolean }) {
+  const bars = [0.45, 0.7, 1, 0.75, 0.5];
+  return (
+    <div
+      role="meter"
+      aria-label="Microphone level"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={muted ? 0 : Math.round(level * 100)}
+      className="flex h-8 items-center gap-1"
+    >
+      {bars.map((weight, index) => (
+        <span
+          key={index}
+          className="w-1 rounded-full bg-primary transition-[height,opacity] duration-100"
+          style={{
+            height: `${Math.max(4, (muted ? 0 : level) * weight * 28)}px`,
+            opacity: muted ? 0.25 : 0.45 + level * 0.55,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function VoiceConversationPanel({ voice }: { voice: SessionVoiceControls }) {
+  const call = voice.call;
+  const connected = voice.status === 'listening' || voice.status === 'speaking';
+
+  return (
+    <div className="flex min-h-20 w-full items-center justify-between gap-3 px-4 py-3 sm:min-h-24 sm:px-6">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">
+          {voice.status === 'connecting'
+            ? 'Connecting voice...'
+            : voice.status === 'speaking'
+              ? 'Roomote is speaking'
+              : 'Listening'}
+        </p>
+        {call?.startedAt != null ? (
+          <CallTimer startedAt={call.startedAt} />
+        ) : (
+          <span className="text-xs text-muted-foreground">Starting call</span>
+        )}
+      </div>
+      <div className="flex flex-1 items-center justify-center">
+        <VoiceLevel
+          level={call?.inputLevel ?? 0}
+          muted={!connected || Boolean(call?.micMuted)}
+        />
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {call && connected ? (
+          <>
+            <BasicTooltip
+              content={call.micMuted ? 'Unmute your voice' : 'Mute your voice'}
+            >
+              <PromptInputButton
+                aria-label={
+                  call.micMuted ? 'Unmute your voice' : 'Mute your voice'
+                }
+                aria-pressed={call.micMuted}
+                onClick={call.onToggleMic}
+                className="rounded-full"
+              >
+                {call.micMuted ? <CircleSlash /> : <RadioTower />}
+              </PromptInputButton>
+            </BasicTooltip>
+            <BasicTooltip
+              content={
+                call.outputMuted ? 'Unsilence Roomote' : 'Silence Roomote'
+              }
+            >
+              <PromptInputButton
+                aria-label={
+                  call.outputMuted ? 'Unsilence Roomote' : 'Silence Roomote'
+                }
+                aria-pressed={call.outputMuted}
+                onClick={call.onToggleOutput}
+                className="rounded-full"
+              >
+                {call.outputMuted ? <VolumeX /> : <Volume2 />}
+              </PromptInputButton>
+            </BasicTooltip>
+          </>
+        ) : null}
+        <LiveVoiceButton active onClick={voice.onToggle} />
+      </div>
+    </div>
   );
 }
 
@@ -176,8 +271,13 @@ export function SessionPromptInput({
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => setPrompt(text),
     getPrefix: () => prompt,
-    disabled: isBusy,
+    disabled: isBusy || Boolean(voice?.active),
   });
+
+  const handleVoiceToggle = () => {
+    if (!voice?.active) voiceDictation.stop();
+    voice?.onToggle();
+  };
 
   const composerSuggestionQuery = useQuery(
     trpc.fastSessions.composerSuggestion.queryOptions(
@@ -333,140 +433,95 @@ export function SessionPromptInput({
         clearOnSubmit={false}
         multiple
       >
-        <AttachmentsDisplay />
+        {!voice?.active ? <AttachmentsDisplay /> : null}
         <PromptInputBody>
-          <div className="flex items-start">
-            <PromptInputTextarea
-              className="min-w-0 flex-1"
-              ref={textareaRef}
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              onFocus={() => setIsTextareaFocused(true)}
-              onBlur={() => setIsTextareaFocused(false)}
-              onKeyDown={(event) => {
-                handleSuggestionKeyDown(event);
-              }}
-              placeholder={ghostSuggestion ?? 'Message agent'}
-              aria-describedby={ghostSuggestion ? suggestionHintId : undefined}
-              disabled={isBusy}
+          {voice?.active ? (
+            <VoiceConversationPanel
+              voice={{ ...voice, onToggle: handleVoiceToggle }}
             />
-            {ghostSuggestion && (
-              <>
-                <span id={suggestionHintId} className="sr-only">
-                  Suggested message: {ghostSuggestion}. Press Tab to accept or
-                  Escape to dismiss.
-                </span>
-                {isTextareaFocused && (
-                  <button
-                    type="button"
-                    aria-label="Insert suggested message"
-                    onPointerDown={(event) => event.preventDefault()}
-                    onClick={acceptGhostSuggestion}
-                    className="mt-4 mr-4 shrink-0 whitespace-nowrap rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
-                  >
-                    <span className="md:hidden">Accept</span>
-                    <span className="hidden md:inline">Tab to accept</span>
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        </PromptInputBody>
-        <PromptInputFooter className="px-4 pt-0 pb-4">
-          <PromptInputTools>
-            <PromptInputActionMenu>
-              <BasicTooltip content="Add to session">
-                <PromptInputActionMenuTrigger
-                  aria-label="Add to session"
-                  className="hover:bg-secondary"
-                />
-              </BasicTooltip>
-              <PromptInputActionMenuContent>
-                <PromptInputActionAddAttachments />
-              </PromptInputActionMenuContent>
-            </PromptInputActionMenu>
-            <SessionModelSwitcher
-              model={model}
-              onModelChange={handleModelChange}
-              reasoningEffort={reasoningEffort}
-              onReasoningEffortChange={handleReasoningEffortChange}
-              defaultModelId={defaultModelId}
-              defaultReasoningEffort={defaultReasoningEffort}
-              disabled={controlsDisabled}
-            />
-          </PromptInputTools>
-          <div className="flex items-center gap-2">
-            {voice?.enabled && voice.active && voice.call ? (
-              <>
-                {voice.call.startedAt !== null ? (
-                  <CallTimer startedAt={voice.call.startedAt} />
-                ) : null}
-                <BasicTooltip
-                  content={
-                    voice.call.micMuted
-                      ? 'Unmute microphone'
-                      : 'Mute microphone'
-                  }
-                >
-                  <PromptInputButton
-                    aria-label={
-                      voice.call.micMuted
-                        ? 'Unmute microphone'
-                        : 'Mute microphone'
-                    }
-                    aria-pressed={voice.call.micMuted}
-                    onClick={voice.call.onToggleMic}
-                    className="rounded-full"
-                  >
-                    {voice.call.micMuted ? (
-                      <MicOff className="size-4" />
-                    ) : (
-                      <Mic className="size-4" />
-                    )}
-                  </PromptInputButton>
-                </BasicTooltip>
-                <BasicTooltip
-                  content={
-                    voice.call.outputMuted
-                      ? 'Unsilence Roomote'
-                      : 'Silence Roomote'
-                  }
-                >
-                  <PromptInputButton
-                    aria-label={
-                      voice.call.outputMuted
-                        ? 'Unsilence Roomote'
-                        : 'Silence Roomote'
-                    }
-                    aria-pressed={voice.call.outputMuted}
-                    onClick={voice.call.onToggleOutput}
-                    className="rounded-full"
-                  >
-                    {voice.call.outputMuted ? (
-                      <VolumeX className="size-4" />
-                    ) : (
-                      <Volume2 className="size-4" />
-                    )}
-                  </PromptInputButton>
-                </BasicTooltip>
-              </>
-            ) : null}
-            {voice?.enabled ? (
-              <LiveVoiceButton
-                active={voice.active}
-                onClick={voice.onToggle}
-                disabled={isBusy && !voice.active}
+          ) : (
+            <div className="flex items-start">
+              <PromptInputTextarea
+                className="min-w-0 flex-1"
+                ref={textareaRef}
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                onFocus={() => setIsTextareaFocused(true)}
+                onBlur={() => setIsTextareaFocused(false)}
+                onKeyDown={(event) => {
+                  handleSuggestionKeyDown(event);
+                }}
+                placeholder={ghostSuggestion ?? 'Message agent'}
+                aria-describedby={
+                  ghostSuggestion ? suggestionHintId : undefined
+                }
+                disabled={isBusy}
               />
-            ) : null}
-            <VoiceDictationButton
-              isRecording={voiceDictation.isRecording}
-              isSupported={voiceDictation.isSupported}
-              onClick={voiceDictation.toggle}
-              disabled={isBusy}
-            />
-            <SessionSubmit sending={controlsDisabled} prompt={prompt} />
-          </div>
-        </PromptInputFooter>
+              {ghostSuggestion && (
+                <>
+                  <span id={suggestionHintId} className="sr-only">
+                    Suggested message: {ghostSuggestion}. Press Tab to accept or
+                    Escape to dismiss.
+                  </span>
+                  {isTextareaFocused && (
+                    <button
+                      type="button"
+                      aria-label="Insert suggested message"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={acceptGhostSuggestion}
+                      className="mt-4 mr-4 shrink-0 whitespace-nowrap rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
+                    >
+                      <span className="md:hidden">Accept</span>
+                      <span className="hidden md:inline">Tab to accept</span>
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </PromptInputBody>
+        {!voice?.active ? (
+          <PromptInputFooter className="px-4 pt-0 pb-4">
+            <PromptInputTools>
+              <PromptInputActionMenu>
+                <BasicTooltip content="Add to session">
+                  <PromptInputActionMenuTrigger
+                    aria-label="Add to session"
+                    className="hover:bg-secondary"
+                  />
+                </BasicTooltip>
+                <PromptInputActionMenuContent>
+                  <PromptInputActionAddAttachments />
+                </PromptInputActionMenuContent>
+              </PromptInputActionMenu>
+              <SessionModelSwitcher
+                model={model}
+                onModelChange={handleModelChange}
+                reasoningEffort={reasoningEffort}
+                onReasoningEffortChange={handleReasoningEffortChange}
+                defaultModelId={defaultModelId}
+                defaultReasoningEffort={defaultReasoningEffort}
+                disabled={controlsDisabled}
+              />
+            </PromptInputTools>
+            <div className="flex items-center gap-2">
+              {voice?.enabled ? (
+                <LiveVoiceButton
+                  active={voice.active}
+                  onClick={handleVoiceToggle}
+                  disabled={isBusy && !voice.active}
+                />
+              ) : null}
+              <VoiceDictationButton
+                isRecording={voiceDictation.isRecording}
+                isSupported={voiceDictation.isSupported}
+                onClick={voiceDictation.toggle}
+                disabled={isBusy}
+              />
+              <SessionSubmit sending={controlsDisabled} prompt={prompt} />
+            </div>
+          </PromptInputFooter>
+        ) : null}
       </PromptInputRoot>
     </div>
   );
