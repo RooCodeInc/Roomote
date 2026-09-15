@@ -32,7 +32,7 @@ For integration keys only, leave `R_HTTP_INTEGRATIONS_ENABLED` unset or `false` 
 `R_HTTP_INTEGRATIONS_CONFIG_PATH` unset. No per-service credential environment
 variables are needed on the Roomote API: the owner saves each key in the secure
 Session form. Existing deployment encryption and job-signing configuration remain
-required. See [dynamic-only setup](/integration-keys#dynamic-only-setup).
+required. See [Integration keys self-hosting](/integration-keys#self-hosting).
 
 1. Create a JSON manifest on the API server and mount it read-only. Use narrow
    paths and least-privilege upstream credentials.
@@ -169,8 +169,9 @@ To disable operator-managed integrations, set `R_HTTP_INTEGRATIONS_ENABLED=false
 on the same control-plane services and restart them. The broker remains available
 for owner-approved integration keys, but no operator manifest entries are loaded.
 This does not cancel an already-running operator request. Revoke integration keys
-separately in the Session UI; those changes are checked live before dispatch and
-before returning upstream responses, without reloading the manifest or restarting.
+separately under **Settings → Integrations → Your integrations**; those changes
+are checked live before dispatch and before returning upstream responses, without
+reloading the manifest or restarting.
 
 ## Verify and troubleshoot
 

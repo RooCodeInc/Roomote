@@ -2,6 +2,31 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.9.3 (2026-09-15)
+
+Roomote 1.9.3 makes integration keys personal and reusable, improves artifact and activity inspection, and strengthens background delivery and pull-request review workflows.
+
+### Highlights
+
+- Add, reuse, and revoke personal integration keys across every Session and coding task you own.
+- Scan tabular artifacts more easily and inspect the skills, reasoning, and tool details behind agent activity.
+- Keep background Session delivery moving with deadlock prevention, worker recovery, and queue health diagnostics.
+- Get more reliable Roomote review checks and cleaner automatic review confirmations in Telegram.
+
+### Patch changes
+
+- Background Session delivery is more resilient: review-feedback dispatch no longer stalls BullMQ through a database lock cycle, and operators get a queue-processing watchdog plus `/health/bullmq` diagnostics when a worker is alive but no longer processing jobs.
+- After an integration key is saved through a Session, the transcript now shows a short, friendly continuation instead of exposing the technical instruction used to resume Fast.
+- Expanded activity groups now preserve reasoning and nested Session details while letting users inspect each tool call through the same shared detail view used elsewhere in task and Fast Session transcripts.
+- Fast now prepares an integration key directly when a linked SaaS resource needs one, without first probing public access or delegating that probe to a coding task. The secure approval link opens the integration-key dialog correctly, and Fast no longer asks users to enable a setting that is already available.
+- Fast now recognizes when a request needs a service with no connected integration and offers to use an owner-provided integration key instead of asking for screenshots, requiring an administrator-installed connector, or launching work to build one. When integration keys are disabled, Fast points to the correct Experimental setting.
+- Integration keys now belong to their owner instead of one Session, so every Session and coding task that owner starts can use them until they expire or are revoked. Users can add, review, and revoke keys directly under Settings > Integrations without first asking an agent to prepare an approval.
+- Session secrets are now called integration keys throughout Roomote and live under Settings > Integrations for every user. Self-hosted deployments using the optional dedicated proxy hostname should replace `R_SESSION_EGRESS_PROXY_HOST` with `R_CREDENTIAL_EGRESS_PROXY_HOST`; the API path and worker settings now use the credential-egress name as well.
+- Roomote code-review checks now recover from transient GitHub summary-read failures and report a neutral, linked diagnostic when the summary remains unavailable instead of incorrectly failing as though no review result was published.
+- CSV and TSV artifacts are easier to scan: gallery cards show abstract table previews, wide tables scroll without clipping columns, and users can choose whether the first row should be treated as column headers.
+- Telegram now resolves automatic pull-request review offers in place, removing stale controls and keeping the confirmation with the original review summary instead of posting a separate reply.
+- Fast Session and coding-task transcripts now show which skills were actually loaded, keep skill instructions private, and prevent agents from claiming that a listed but unloaded skill was used.
+
 ## 1.9.2 (2026-09-15)
 
 Roomote 1.9.2 makes artifacts easier to inspect, restores reliable Session starts and sandbox provisioning, and improves live activity, Settings clarity, and Session-secret operations.

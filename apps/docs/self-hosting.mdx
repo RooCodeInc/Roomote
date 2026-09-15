@@ -122,6 +122,13 @@ share a documented consistency point. If object storage is external, the
 bundle records its endpoint and bucket but does not copy its objects; keep a
 provider-level backup of that bucket.
 
+Roomote exposes `/health/bullmq` for queue-processing health. A healthy response
+means the background worker has recently processed its heartbeat job and reports
+how many Session events have remained queued for more than five minutes. Use it
+alongside container liveness and `roomote logs`: a stale heartbeat or growing
+backlog can reveal a worker process that is still running but no longer draining
+jobs.
+
 Restore only after installing Roomote on the replacement host:
 
 ```sh
