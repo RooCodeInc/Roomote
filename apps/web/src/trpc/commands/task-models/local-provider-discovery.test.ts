@@ -144,6 +144,24 @@ describe('discoverProviderModels', () => {
     );
   });
 
+  it('preserves blocking Ollama failures when its fallback also fails', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+
+    await expect(
+      discoverProviderModels({
+        provider: 'ollama',
+        baseUrl: 'http://ollama.example',
+      }),
+    ).resolves.toMatchObject({
+      models: [],
+      failureReason: 'invalid_credentials',
+      error: expect.stringContaining('rejected the API key'),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('discovers vLLM models from the OpenAI-compatible models endpoint', async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ data: [{ id: 'qwen3' }] }), {

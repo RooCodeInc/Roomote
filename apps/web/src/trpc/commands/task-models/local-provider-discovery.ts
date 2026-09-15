@@ -402,6 +402,11 @@ async function fetchLocalProviderModels(
     provider === 'ollama' ? ['/api/tags', '/v1/models'] : ['/v1/models'];
   let lastError: string | null = null;
   let lastFailureReason: LocalProviderDiscoveryResult['failureReason'] = null;
+  let blockingError: string | null = null;
+  let blockingFailureReason: Extract<
+    LocalProviderDiscoveryResult['failureReason'],
+    'invalid_credentials' | 'insufficient_credits'
+  > | null = null;
 
   for (const path of paths) {
     try {
@@ -415,6 +420,13 @@ async function fetchLocalProviderModels(
       if (!response.ok) {
         lastError = getLocalProviderError(provider, response);
         lastFailureReason = getLocalProviderFailureReason(response);
+        if (
+          lastFailureReason === 'invalid_credentials' ||
+          lastFailureReason === 'insufficient_credits'
+        ) {
+          blockingError = lastError;
+          blockingFailureReason = lastFailureReason;
+        }
         continue;
       }
 
@@ -487,8 +499,9 @@ async function fetchLocalProviderModels(
     models: [],
     modelCount: 0,
     recommendedModels: [],
-    error: lastError ?? getLocalProviderNetworkError(provider),
-    failureReason: lastFailureReason ?? 'endpoint_unreachable',
+    error: blockingError ?? lastError ?? getLocalProviderNetworkError(provider),
+    failureReason:
+      blockingFailureReason ?? lastFailureReason ?? 'endpoint_unreachable',
   };
 }
 
