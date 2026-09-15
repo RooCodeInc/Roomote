@@ -67,6 +67,7 @@ import {
   getSessions,
   getSessionTimeline,
   archiveSessionCommand,
+  deletePrivateSessionCommand,
   listSessionPins,
   markSessionReadCommand,
   sessionIdInputSchema,
@@ -1639,6 +1640,7 @@ export const appRouter = createRouter({
             resultsPageEnabled: z.boolean().optional(),
             slackPeerConversationsExperimentEnabled: z.boolean().optional(),
             homeComposerSuggestionsEnabled: z.boolean().optional(),
+            privateSessionsExperimentEnabled: z.boolean().optional(),
             serviceCredentialToolsEnabled: z.boolean().optional(),
           })
           .refine(
@@ -1649,6 +1651,7 @@ export const appRouter = createRouter({
               input.resultsPageEnabled !== undefined ||
               input.slackPeerConversationsExperimentEnabled !== undefined ||
               input.homeComposerSuggestionsEnabled !== undefined ||
+              input.privateSessionsExperimentEnabled !== undefined ||
               input.serviceCredentialToolsEnabled !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
@@ -3232,6 +3235,11 @@ export const appRouter = createRouter({
       .input(sessionIdInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         archiveSessionCommand(auth, input.sessionId),
+      ),
+    deletePrivate: protectedProcedure
+      .input(sessionIdInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        deletePrivateSessionCommand(auth, input.sessionId),
       ),
     unarchive: protectedProcedure
       .input(sessionIdInputSchema)

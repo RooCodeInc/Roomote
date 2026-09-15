@@ -4,13 +4,25 @@ import {
   acquireFastAgentTurnLock,
   fastAgentConversationRepository,
 } from '@roomote/cloud-agents/server';
-import { SESSION_STATUSES } from '@roomote/types';
 import {
+  ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
+  SESSION_STATUSES,
+} from '@roomote/types';
+import {
+  and,
+  asc,
   advanceSessionReadCursor,
   cancelSessionWakeupsForConversation,
   db,
+  eq,
+  fastAgentConversations,
   getSessionGoal,
+  inArray,
   markSessionGoal,
+  sessions,
+  sessionTasks,
+  taskArtifacts,
+  tasks,
 } from '@roomote/db/server';
 import { captureEvent } from '@roomote/telemetry/server';
 
@@ -30,11 +42,130 @@ import {
   currentEpochSeconds,
   signArtifactId,
 } from '@/lib/server/artifact-signature';
+import { deleteArtifactsBatch } from '@/lib/server/s3-client';
 
 // Keep polled session payloads stable for the raw route's one-hour cache lifetime.
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
 
 export const sessionIdInputSchema = z.object({ sessionId: z.string().uuid() });
+
+export async function deletePrivateSessionCommand(
+  auth: UserAuthSuccess,
+  sessionId: string,
+) {
+  return db.transaction(async (tx) => {
+    const [session] = await tx
+      .select({
+        id: sessions.id,
+        fastConversationId: sessions.fastConversationId,
+      })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.id, sessionId),
+          eq(sessions.privacy, 'private'),
+          eq(sessions.privateOwnerUserId, auth.userId),
+        ),
+      )
+      .for('update');
+    if (!session) return { deleted: false };
+
+    const linkedTasks = await tx
+      .select({ taskId: sessionTasks.taskId })
+      .from(sessionTasks)
+      .where(eq(sessionTasks.sessionId, session.id));
+    const linkedTaskIds = linkedTasks.map(({ taskId }) => taskId);
+    const lockedTasks =
+      linkedTaskIds.length > 0
+        ? await tx
+            .select({ id: tasks.id })
+            .from(tasks)
+            .where(
+              and(
+                inArray(tasks.id, linkedTaskIds),
+                eq(tasks.privacy, 'private'),
+                eq(tasks.privateOwnerUserId, auth.userId),
+              ),
+            )
+            .orderBy(asc(tasks.id))
+            .for('update')
+        : [];
+    const taskIds = lockedTasks.map(({ id }) => id);
+    if (taskIds.length > 0) {
+      const artifacts = await tx
+        .select({
+          id: taskArtifacts.id,
+          taskId: taskArtifacts.taskId,
+          path: taskArtifacts.path,
+          version: taskArtifacts.version,
+          uploadUrlExpiresAt: taskArtifacts.uploadUrlExpiresAt,
+        })
+        .from(taskArtifacts)
+        .where(inArray(taskArtifacts.taskId, taskIds));
+      const now = new Date();
+      const legacyExpiry = new Date(
+        now.getTime() + ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS * 1_000,
+      );
+      const legacyArtifactIds = artifacts
+        .filter((artifact) => artifact.uploadUrlExpiresAt === null)
+        .map((artifact) => artifact.id);
+      if (legacyArtifactIds.length > 0) {
+        await tx
+          .update(taskArtifacts)
+          .set({ uploadUrlExpiresAt: legacyExpiry, updatedAt: now })
+          .where(inArray(taskArtifacts.id, legacyArtifactIds));
+      }
+      const latestExpiry = artifacts.reduce((latest, artifact) => {
+        const expiry = artifact.uploadUrlExpiresAt ?? legacyExpiry;
+        return expiry > latest ? expiry : latest;
+      }, now);
+      if (latestExpiry > now) {
+        return {
+          deleted: false,
+          retryAfter: latestExpiry.toISOString(),
+          reason: 'artifact_uploads_pending' as const,
+        };
+      }
+      if (artifacts.length > 0) {
+        const result = await deleteArtifactsBatch(
+          artifacts.map((artifact) => ({
+            taskId: artifact.taskId!,
+            artifactId: artifact.id,
+            path: artifact.path,
+            version: artifact.version,
+          })),
+        );
+        if (result.errors > 0) {
+          throw new Error(
+            `Failed to delete ${result.errors} private Session artifact object(s).`,
+          );
+        }
+      }
+      await tx
+        .delete(tasks)
+        .where(
+          and(
+            inArray(tasks.id, taskIds),
+            eq(tasks.privacy, 'private'),
+            eq(tasks.privateOwnerUserId, auth.userId),
+          ),
+        );
+    }
+    await tx.delete(sessions).where(eq(sessions.id, session.id));
+    if (session.fastConversationId) {
+      await tx
+        .delete(fastAgentConversations)
+        .where(
+          and(
+            eq(fastAgentConversations.id, session.fastConversationId),
+            eq(fastAgentConversations.privacy, 'private'),
+            eq(fastAgentConversations.privateOwnerUserId, auth.userId),
+          ),
+        );
+    }
+    return { deleted: true };
+  });
+}
 const sessionTimelineCursorSchema = z.object({
   at: z.number().nonnegative(),
   seenIdsAtTimestamp: z.array(z.string()),

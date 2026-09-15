@@ -29,6 +29,8 @@ type FastAgentSessionRecord = {
   id: string;
   userId: string | null;
   owner: FastAgentConversationOwner;
+  privacy?: 'shared' | 'private';
+  privateOwnerUserId?: string | null;
   title: string | null;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
@@ -50,6 +52,7 @@ export async function getOrCreateFastAgentSession({
   conversation,
   sessionId,
   initialTitle,
+  privacy,
   initialModel,
   initialReasoningEffort,
   chatInitiationOrder,
@@ -61,6 +64,7 @@ export async function getOrCreateFastAgentSession({
   sessionId?: string;
   /** Title to seed only when this call creates the conversation. */
   initialTitle?: string;
+  privacy?: 'shared' | 'private';
   initialModel?: string;
   initialReasoningEffort?: ReasoningEffort;
   /** Human turn start order; records the provider only for a new Session. */
@@ -72,6 +76,7 @@ export async function getOrCreateFastAgentSession({
     conversation,
     ...(sessionId ? { sessionId } : {}),
     ...(initialTitle ? { initialTitle } : {}),
+    ...(privacy ? { privacy } : {}),
     ...(initialModel !== undefined ? { initialModel } : {}),
     ...(initialReasoningEffort !== undefined ? { initialReasoningEffort } : {}),
   });

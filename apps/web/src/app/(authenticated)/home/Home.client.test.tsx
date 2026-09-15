@@ -23,6 +23,7 @@ let currentEnvironmentsPending = false;
 let currentBrainConfigured = false;
 let currentHomeComposerSuggestionsEnabled = false;
 let currentHomeComposerSuggestionsFlagLoading = false;
+let currentPrivateSessionsExperimentEnabled = false;
 let currentHomeSuggestions: string[] = [];
 let currentHomeSuggestionsHasData = true;
 let currentHomeSuggestionsPending = false;
@@ -152,6 +153,12 @@ vi.mock('@/hooks/task-runs/useStartFastSession', () => ({
 
 vi.mock('@/hooks/useVoiceEnabled', () => ({
   useVoiceEnabled: () => voiceState.enabled,
+}));
+
+vi.mock('@/hooks/usePrivateSessionsExperiment', () => ({
+  usePrivateSessionsExperiment: () => ({
+    enabled: currentPrivateSessionsExperimentEnabled,
+  }),
 }));
 
 vi.mock('@/hooks/useLiveVoice', () => ({
@@ -342,6 +349,7 @@ describe('Home', () => {
     currentBrainConfigured = false;
     currentHomeComposerSuggestionsEnabled = false;
     currentHomeComposerSuggestionsFlagLoading = false;
+    currentPrivateSessionsExperimentEnabled = false;
     currentHomeSuggestions = [];
     currentHomeSuggestionsHasData = true;
     currentHomeSuggestionsPending = false;
@@ -412,7 +420,12 @@ describe('Home', () => {
       .getByRole('button', { name: 'Add attachments' })
       .parentElement?.querySelectorAll('button');
     expect(toolbarButtons?.[0]).toHaveAccessibleName('Add attachments');
-    expect(toolbarButtons?.[1]).toHaveAccessibleName('Model for this session');
+    expect(
+      screen.queryByRole('switch', { name: 'Start a private Session' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Model for this session' }),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
@@ -438,6 +451,24 @@ describe('Home', () => {
         text: 'Test prompt',
       }),
     );
+  });
+
+  it('shows private Session creation only after experimental opt-in', async () => {
+    currentPrivateSessionsExperimentEnabled = true;
+    render(<Home initialHeading="Let's cook!" initialPlaceholderIndex={0} />);
+
+    const toggle = screen.getByRole('switch', {
+      name: 'Start a private Session',
+    });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith(
+        expect.objectContaining({ privacy: 'private' }),
+      );
+    });
   });
 
   it('starts a new Fast session with the selected non-default model', async () => {

@@ -61,6 +61,38 @@ afterEach(async () => {
 });
 
 describe('Fast conversation repository', () => {
+  it('creates private web conversations with an immutable matching owner', async () => {
+    const owner = await createUser();
+    const conversation = {
+      surface: 'web' as const,
+      workspaceId: owner.id,
+      conversationId: crypto.randomUUID(),
+    };
+
+    const created = await getOrCreateFastAgentSession({
+      owner: { kind: 'user', userId: owner.id },
+      conversation,
+      privacy: 'private',
+    });
+    expect(created).toMatchObject({ privacy: 'private', created: true });
+    await expect(
+      getOrCreateFastAgentSession({
+        owner: { kind: 'user', userId: owner.id },
+        conversation,
+      }),
+    ).rejects.toThrow('privacy does not match');
+    await expect(
+      getOrCreateFastAgentSession({
+        owner: { kind: 'user', userId: owner.id },
+        conversation: {
+          ...slackConversation,
+          conversationId: crypto.randomUUID(),
+        },
+        privacy: 'private',
+      }),
+    ).rejects.toThrow('user-owned web conversation');
+  });
+
   it.each(['slack', 'teams', 'telegram', 'discord'] as const)(
     'records %s when a human chat turn creates a Session',
     async (surface) => {

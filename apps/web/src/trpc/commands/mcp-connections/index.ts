@@ -17,6 +17,7 @@ import {
   getMcpIntegration,
   getMcpIntegrationConnectionMode,
   getMcpIntegrationConnectionScope,
+  getMcpIntegrationDataPolicy,
   getMcpIntegrationDefaultDisabledTools,
   type McpConnectionRole,
   type OpenAiRealtimeVoiceId,
@@ -2317,15 +2318,30 @@ export async function disconnectMcpCommand(
     assertAdmin(auth);
   }
 
+  const ownerCondition =
+    connectionScope === 'deployment'
+      ? isNull(mcpConnections.userId)
+      : eq(mcpConnections.userId, auth.userId);
+  if (getMcpIntegrationDataPolicy(integration) === 'private') {
+    await db
+      .update(mcpConnections)
+      .set({ enabled: false, authStatus: 'pending', updatedAt: new Date() })
+      .where(
+        and(
+          eq(mcpConnections.mcpId, input.mcpId),
+          eq(mcpConnections.connectionRole, connectionRole),
+          ownerCondition,
+        ),
+      );
+  }
+
   const [deleted] = await db
     .delete(mcpConnections)
     .where(
       and(
         eq(mcpConnections.mcpId, input.mcpId),
         eq(mcpConnections.connectionRole, connectionRole),
-        connectionScope === 'deployment'
-          ? isNull(mcpConnections.userId)
-          : eq(mcpConnections.userId, auth.userId),
+        ownerCondition,
       ),
     )
     .returning();

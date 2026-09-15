@@ -57,7 +57,7 @@ export async function getArtifactById({
   artifactId: string;
   auth: ArtifactAuth;
 }) {
-  if (!auth.userId) return null;
+  if (!(await canReadTask(auth, taskId))) return null;
   const result = await db
     .select()
     .from(taskArtifacts)
@@ -153,7 +153,7 @@ export async function getArtifactVersionsByPath({
   path: string;
   auth: ArtifactAuth;
 }) {
-  if (!auth.userId) return [];
+  if (!(await canReadTask(auth, taskId))) return [];
   const result = await db
     .select({
       id: taskArtifacts.id,
@@ -187,7 +187,7 @@ export async function getArtifactsForTask({
   auth: ArtifactAuth;
   uploadedOnly?: boolean;
 }) {
-  if (!auth.userId) return [];
+  if (!(await canReadTask(auth, taskId))) return [];
   const artifactConditions = [eq(taskArtifacts.taskId, taskId)];
 
   if (uploadedOnly) {

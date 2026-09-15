@@ -395,6 +395,7 @@ export const dequeueResumeTaskRun = async (
     const sourceControlToken = await createSourceControlTokenForTaskRun(
       result.taskRun,
       tag,
+      { readOnly: result.task.privacy === 'private' },
     );
 
     if (!sourceControlToken) {

@@ -19,6 +19,7 @@ export interface PersonalPreferences {
   resultsPageEnabled?: boolean;
   slackPeerConversationsExperimentEnabled?: boolean;
   homeComposerSuggestionsEnabled?: boolean;
+  privateSessionsExperimentEnabled?: boolean;
   serviceCredentialToolsEnabled?: boolean;
 }
 
@@ -31,6 +32,7 @@ export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
   resultsPageEnabled: false,
   slackPeerConversationsExperimentEnabled: false,
   homeComposerSuggestionsEnabled: false,
+  privateSessionsExperimentEnabled: false,
   serviceCredentialToolsEnabled: false,
 };
 

@@ -1013,6 +1013,7 @@ export type FreshTaskLaunch = {
   surface: TaskSurface;
   trigger: TaskTrigger;
   visibility?: TaskVisibility;
+  privacy?: 'shared' | 'private';
   channels?: TaskChannelBindings;
   /** Required when workflow is 'pr_review' or 'pr_conflict_resolve'. */
   prLinkage?: TaskPrLinkage;
@@ -1416,8 +1417,12 @@ async function enqueueFreshLaunch(
 ): Promise<TaskRun> {
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
+  const privacy = input.privacy ?? 'shared';
   const linkedUserId = getTaskInitiatorLinkedUserId(initiator);
   await assertUserIsNotDeleted(linkedUserId);
+  if (privacy === 'private' && (!linkedUserId || surface !== 'web')) {
+    throw new Error('Private tasks require a linked user on the web surface.');
+  }
 
   const requestedExistingTask = input.existingTaskId
     ? await db.query.tasks.findFirst({
@@ -1760,6 +1765,8 @@ async function enqueueFreshLaunch(
             surface,
             trigger,
             visibility,
+            privacy,
+            privateOwnerUserId: privacy === 'private' ? linkedUserId : null,
             state: 'active',
             ...initiatorColumns,
             ...commitAuthor,

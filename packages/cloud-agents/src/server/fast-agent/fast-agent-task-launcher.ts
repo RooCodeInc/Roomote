@@ -124,6 +124,9 @@ export function createFastAgentTaskLauncher(
         workflow: 'standard',
         surface: params.surface,
         trigger: params.trigger ?? 'message',
+        ...(parent.privacy === 'private'
+          ? { privacy: 'private' as const }
+          : {}),
         ...(params.channels ? { channels: params.channels } : {}),
         ...(params.prLinkage ? { prLinkage: params.prLinkage } : {}),
       },

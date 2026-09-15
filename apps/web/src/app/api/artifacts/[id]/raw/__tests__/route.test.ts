@@ -137,6 +137,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
       contentType: 'text/markdown',
       size: 100,
       uploaded: true,
+      uploadUrlExpiresAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -170,6 +171,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
       contentType: 'video/webm',
       size: 100,
       uploaded: true,
+      uploadUrlExpiresAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -214,6 +216,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
       contentType: 'image/png',
       size: 4,
       uploaded: true,
+      uploadUrlExpiresAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -271,6 +274,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
       contentType: 'image/png',
       size: 100,
       uploaded: true,
+      uploadUrlExpiresAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -311,6 +315,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
         contentType,
         size: 4,
         uploaded: true,
+        uploadUrlExpiresAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -353,6 +358,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
       contentType: 'application/pdf',
       size: 1000,
       uploaded: true,
+      uploadUrlExpiresAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });

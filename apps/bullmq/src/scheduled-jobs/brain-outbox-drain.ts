@@ -802,6 +802,11 @@ async function drainOneBatch(connection: {
           return null;
         }
 
+        if (run.task.privacy === 'private') {
+          await markBrainMemoryEvent(db, event.id, 'skipped', 'private task');
+          return null;
+        }
+
         // An agent can save its memory before its run finishes (the tool call
         // is part of wrapping up), which creates this row while the run is
         // still in flight. Only a run that settled somewhere other than
@@ -986,6 +991,7 @@ async function drainOneFastMemoryBatch(connection: {
             surface: fastAgentConversations.surface,
             userId: fastAgentConversations.userId,
             userName: users.name,
+            privacy: fastAgentConversations.privacy,
           })
           .from(fastAgentConversations)
           .leftJoin(users, eq(users.id, fastAgentConversations.userId))
@@ -998,6 +1004,16 @@ async function drainOneFastMemoryBatch(connection: {
             event.id,
             'skipped',
             'conversation no longer exists',
+          );
+          return null;
+        }
+
+        if (conversation.privacy === 'private') {
+          await markFastAgentMemoryEvent(
+            db,
+            event.id,
+            'skipped',
+            'private conversation',
           );
           return null;
         }

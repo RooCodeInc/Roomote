@@ -29,10 +29,12 @@ import {
 import { resolveGitLabInstanceHost } from '@roomote/gitlab';
 import {
   createMemoryMcpInstructions,
+  BRAIN_MCP_ID,
   MCP_INTEGRATION_PROXY_PATH_PREFIX,
   MCP_ROUTING_PROXY_PATH_PREFIX,
   ROOMOTE_MCP_ID,
   getMcpIntegration,
+  getMcpIntegrationDataPolicy,
   getMemoryMcpDisplayName,
   formatErrorForLog,
   isMemoryMcpServer,
@@ -55,6 +57,7 @@ export type FastAgentIntegration = {
   id: string;
   name: string;
   description: string;
+  dataPolicy?: 'shared' | 'private';
   instructions?: string;
   tools: McpToolDefinition[];
   endpoint?: {
@@ -80,6 +83,9 @@ type IntegrationAuditContext = BrokerContext & {
   sessionId: string;
   conversation: FastAgentConversation;
   messageId: string;
+  privacy?: 'shared' | 'private';
+  privateOwnerUserId?: string | null;
+  privateSessionsExperimentEnabled?: boolean;
 };
 
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
@@ -272,7 +278,10 @@ function integrationProxyUrl(baseUrl: string, integrationId: string): string {
 
 function describeMcpServer(
   id: string,
-): Pick<FastAgentIntegration, 'name' | 'description' | 'instructions'> {
+): Pick<
+  FastAgentIntegration,
+  'name' | 'description' | 'instructions' | 'dataPolicy'
+> {
   if (id === HTTP_INTEGRATIONS_MCP_ID) {
     return {
       name: 'HTTP integrations',
@@ -304,6 +313,7 @@ function describeMcpServer(
       integration?.description ??
       'Use tools from this deployment-configured MCP server.',
     instructions: integration?.instructions,
+    dataPolicy: getMcpIntegrationDataPolicy(integration),
   };
 }
 
@@ -605,6 +615,7 @@ export async function listFastAgentIntegrations(
         id: result.value.id,
         name: result.value.name,
         description: result.value.description,
+        dataPolicy: result.value.dataPolicy,
         instructions: isMemory
           ? createMemoryMcpInstructions(result.value.id, {
               primary: primaryMemory,
@@ -644,6 +655,29 @@ export async function callFastAgentIntegration(
   if (!integration.tools.some((tool) => tool.name === request.toolName)) {
     throw new Error('That integration tool is not available to fast mode.');
   }
+  const privateBrainRead =
+    context.privacy === 'private' && request.integrationId === BRAIN_MCP_ID;
+  const privateIntegrationCall = integration.dataPolicy === 'private';
+  if (
+    privateIntegrationCall &&
+    (context.privateSessionsExperimentEnabled !== true ||
+      context.privacy !== 'private' ||
+      context.privateOwnerUserId !== context.userId)
+  ) {
+    throw new Error(
+      'Private integrations require a private Session owned by the current user.',
+    );
+  }
+  if (
+    context.privacy === 'private' &&
+    isMemoryMcpServer(request.integrationId) &&
+    request.integrationId !== BRAIN_MCP_ID
+  ) {
+    throw new Error('Private Sessions cannot write to shared memory.');
+  }
+  if (privateBrainRead && request.toolName === 'synthesize') {
+    throw new Error('Brain synthesis is unavailable in private Sessions.');
+  }
   if (
     request.integrationId === ROOMOTE_MCP_ID &&
     request.toolName === 'manage_tasks' &&
@@ -671,9 +705,11 @@ export async function callFastAgentIntegration(
     integrationId: integration.id,
     toolName: request.toolName,
     arguments:
-      integration.id === HTTP_INTEGRATIONS_MCP_ID
-        ? { toolName: request.toolName }
-        : request.args,
+      privateBrainRead || privateIntegrationCall
+        ? {}
+        : integration.id === HTTP_INTEGRATIONS_MCP_ID
+          ? { toolName: request.toolName }
+          : request.args,
   });
 
   try {
@@ -731,9 +767,11 @@ export async function callFastAgentIntegration(
         id: audit.id,
         status: 'succeeded',
         resultPreview:
-          integration.id === HTTP_INTEGRATIONS_MCP_ID
-            ? '[Broker result omitted]'
-            : serializeAuditPreview(result, 30_000),
+          privateBrainRead || privateIntegrationCall
+            ? null
+            : integration.id === HTTP_INTEGRATIONS_MCP_ID
+              ? '[Broker result omitted]'
+              : serializeAuditPreview(result, 30_000),
         startedAt: audit.startedAt,
       });
     } catch (error) {
@@ -748,7 +786,9 @@ export async function callFastAgentIntegration(
       await completeSlackFastIntegrationCall({
         id: audit.id,
         status: 'failed',
-        error: formatErrorForLog(error).slice(0, 10_000),
+        error: privateIntegrationCall
+          ? 'Private integration call failed'
+          : formatErrorForLog(error).slice(0, 10_000),
         startedAt: audit.startedAt,
       });
     } catch (auditError) {

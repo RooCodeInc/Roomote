@@ -12,6 +12,9 @@ export type ReservedTaskArtifactType = Exclude<
 >;
 
 export const DEFAULT_TASK_ARTIFACT_TYPE: TaskArtifactType = 'general';
+
+/** Upload URLs are bearer capabilities and cannot be revoked after issuance. */
+export const ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS = 60 * 60;
 export const INVALID_TASK_ARTIFACT_TYPE_ERROR =
   'Missing or invalid artifactType';
 

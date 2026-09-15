@@ -94,7 +94,7 @@ export async function verifyTaskAccessForArtifact(
   const result = await db
     .select({ id: tasks.id })
     .from(tasks)
-    .where(eq(tasks.id, taskId))
+    .where(and(eq(tasks.id, taskId), eq(tasks.privacy, 'shared')))
     .limit(1);
 
   return result.length > 0;
