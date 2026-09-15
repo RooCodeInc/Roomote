@@ -519,6 +519,7 @@ export async function prepareDockerTaskNetwork(
     sessionEgressPolicyPlatform?: string;
     autoRemove: boolean;
     createdAtMs?: number;
+    shouldRemoveTaskRun?: (taskRunId: number) => Promise<boolean>;
   },
   runDocker: DockerCommand = docker,
 ): Promise<string> {
@@ -527,7 +528,7 @@ export async function prepareDockerTaskNetwork(
 
   await removeDockerSandboxResources({ containerName, taskNetwork }, runDocker);
 
-  await runDocker([
+  const createNetworkArgs = [
     'network',
     'create',
     '--driver',
@@ -554,7 +555,49 @@ export async function prepareDockerTaskNetwork(
         ]
       : []),
     taskNetwork,
-  ]);
+  ];
+
+  try {
+    await runDocker(createNetworkArgs);
+  } catch (error) {
+    const message = formatSpawnWorkerError(error);
+
+    if (
+      classifyDockerSpawnError(message) !==
+      TaskRunErrorCode.DockerAddressPoolExhausted
+    ) {
+      throw error;
+    }
+
+    console.warn(
+      `[prepareDockerTaskNetwork] Docker address pool exhausted; pruning stale Roomote sandboxes before retrying task run #${params.taskRunId}`,
+    );
+    await cleanupStaleDockerSandboxes(
+      {
+        controlNetwork: params.controlNetwork,
+        shouldRemoveTaskRun: params.shouldRemoveTaskRun,
+      },
+      runDocker,
+    );
+
+    try {
+      await runDocker(createNetworkArgs);
+    } catch (retryError) {
+      const retryMessage = formatSpawnWorkerError(retryError);
+
+      if (
+        classifyDockerSpawnError(retryMessage) ===
+        TaskRunErrorCode.DockerAddressPoolExhausted
+      ) {
+        throw new DockerBootError(
+          TaskRunErrorCode.DockerAddressPoolExhausted,
+          retryMessage,
+        );
+      }
+
+      throw retryError;
+    }
+  }
 
   try {
     if (params.controlNetwork) {
@@ -821,7 +864,11 @@ export async function removeDockerSandboxResources(
 }
 
 export async function cleanupStaleDockerSandboxes(
-  options: { nowMs?: number; controlNetwork?: string } = {},
+  options: {
+    nowMs?: number;
+    controlNetwork?: string;
+    shouldRemoveTaskRun?: (taskRunId: number) => Promise<boolean>;
+  } = {},
   runDocker: DockerCommand = docker,
 ): Promise<void> {
   const output = await runDocker(
@@ -847,6 +894,7 @@ export async function cleanupStaleDockerSandboxes(
         options.controlNetwork,
         nowMs,
         runDocker,
+        options.shouldRemoveTaskRun,
       );
     } catch (error) {
       // One unreconcilable network must not stop the sweep: skip it and let
@@ -863,6 +911,7 @@ async function reconcileTaskNetwork(
   controlNetwork: string | undefined,
   nowMs: number,
   runDocker: DockerCommand,
+  shouldRemoveTaskRun?: (taskRunId: number) => Promise<boolean>,
 ): Promise<void> {
   const network = await inspectNetwork(taskNetwork, runDocker);
   const labels = network?.Labels ?? {};
@@ -871,6 +920,11 @@ async function reconcileTaskNetwork(
   const isPastProvisioningTimeout =
     !Number.isFinite(createdAtMs) ||
     nowMs - createdAtMs >= STALE_PROVISIONING_TIMEOUT_MS;
+  const taskRunId = Number(labels[TASK_RUN_ID_LABEL]);
+  const shouldRemove =
+    Number.isInteger(taskRunId) && shouldRemoveTaskRun
+      ? await shouldRemoveTaskRun(taskRunId)
+      : false;
 
   if (!containerName) {
     await removeDockerTaskNetwork(taskNetwork, runDocker);
@@ -878,6 +932,14 @@ async function reconcileTaskNetwork(
   }
 
   const container = await inspectContainer(containerName, runDocker);
+
+  if (shouldRemove) {
+    await removeDockerSandboxResources(
+      { containerName, taskNetwork },
+      runDocker,
+    );
+    return;
+  }
 
   if (!container) {
     // A concurrent spawn creates and wires the network immediately before
@@ -913,8 +975,6 @@ async function reconcileTaskNetwork(
 
   // Fail open from here: never force-remove a running container whose task
   // run we cannot positively identify as finished.
-  const taskRunId = Number(labels[TASK_RUN_ID_LABEL]);
-
   if (!Number.isInteger(taskRunId)) {
     return;
   }

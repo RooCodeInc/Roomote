@@ -211,4 +211,15 @@ describe('refreshSnapshotsJob launch pacing', () => {
 
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
+
+  it('does not enqueue snapshot runs for a provider without snapshot support', async () => {
+    mockResolveDefaultComputeProvider.mockResolvedValue('docker');
+    mockEnvironmentsFindMany.mockResolvedValue([makeEnvironment('env-1')]);
+
+    await refreshSnapshotsJob();
+
+    expect(mockEnvironmentSnapshotsFindMany).not.toHaveBeenCalled();
+    expect(mockEnvironmentsFindMany).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
 });
