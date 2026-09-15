@@ -3,7 +3,7 @@ import { PACKAGED_AUTOMATION_SKILL_INVOCATIONS } from '../skillInvocationRouting
 import { buildStructuredTaskRequest } from '../utils';
 
 describe('Standard Task explicit invocation routing', () => {
-  it('skips the four-workflow initial routing step when the request already starts with a packaged-skill invocation', () => {
+  it('skips natural-language initial routing when the request already starts with a packaged-skill invocation', () => {
     const { prompt, harnessInstructions } = standardTask({
       description:
         '$review-code\n\n<active_appendix_path>review-github-pr</active_appendix_path>',
@@ -17,13 +17,13 @@ describe('Standard Task explicit invocation routing', () => {
       "If the user's request begins with an explicit Roomote-shipped packaged-skill invocation, treat that invocation as the authoritative initial skill selection and execute that exact skill first.",
     );
     expect(harnessInstructions).toContain(
-      'skip the four-workflow initial routing step entirely',
+      'skip the natural-language initial routing step entirely',
     );
     expect(harnessInstructions).toContain(
       'Roomote-shipped packaged skills take precedence for ordinary natural-language first-hop routing, even when repo-local skills are discoverable in the current workspace.',
     );
     expect(harnessInstructions).toContain(
-      'If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through the four first-hop workflows.',
+      'If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through natural-language first-hop routing.',
     );
   });
 
@@ -50,6 +50,26 @@ describe('Standard Task explicit invocation routing', () => {
     );
     expect(harnessInstructions).toContain(
       '`explain-repo-code` for questions specifically about source behavior, architecture, code location, or implementation rationale',
+    );
+  });
+
+  it('routes natural-language requests for help finding work to delegation discovery', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'What can Roomote do for me?',
+      repo: 'Roomote/example-app',
+    });
+
+    expect(harnessInstructions).toContain(
+      '`explore-delegation` when the user asks what Roomote can do for them, how Roomote could help with their work, or for help identifying work to hand off',
+    );
+    expect(harnessInstructions).toContain(
+      'route requests to discover how Roomote could help the user to `explore-delegation`',
+    );
+    expect(harnessInstructions).toContain(
+      'Do not use `explore-delegation` for a factual question about a specific Roomote feature or integration, or for a concrete request the user already wants executed.',
+    );
+    expect(harnessInstructions).toContain(
+      'transition to `explore-delegation` when a later user message asks what Roomote can do for them',
     );
   });
 
@@ -283,7 +303,7 @@ describe('Standard Task explicit invocation routing', () => {
       true,
     );
     expect(harnessInstructions).toContain(
-      'If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through the four first-hop workflows.',
+      'If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through natural-language first-hop routing.',
     );
   });
 

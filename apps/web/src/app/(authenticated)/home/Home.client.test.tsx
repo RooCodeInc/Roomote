@@ -143,7 +143,7 @@ vi.mock('@/hooks/environments', () => ({
   }),
 }));
 
-vi.mock('@/hooks/task-runs', () => ({
+vi.mock('@/hooks/task-runs/useStartFastSession', () => ({
   useStartFastSession: () => ({
     isPending: false,
     mutateAsync: mockStartFastSession,

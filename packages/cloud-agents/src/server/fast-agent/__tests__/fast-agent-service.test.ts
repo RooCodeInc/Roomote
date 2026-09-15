@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   isBrainEnabled: vi.fn(),
   generateText: vi.fn(),
   generateHelperText: vi.fn(),
+  generateTrackedObject: vi.fn(),
   resolveImageDelivery: vi.fn(),
   classifyInferenceError: vi.fn(),
   invalidateSession: vi.fn(),
@@ -236,6 +237,7 @@ vi.mock('../../non-task-provider-usage', () => ({
   },
   NonTaskInputModalityUnsupportedError,
   classifyNonTaskInferenceError: mocks.classifyInferenceError,
+  generateTrackedNonTaskObject: mocks.generateTrackedObject,
   generateTrackedNonTaskText: mocks.generateHelperText,
   generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
   resolveNonTaskInputModalityDelivery: mocks.resolveImageDelivery,
@@ -602,6 +604,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     mocks.getPersonalization.mockResolvedValue(null);
     mocks.appendLearnedPreference.mockResolvedValue({ saved: true });
+    mocks.generateTrackedObject.mockImplementation(
+      ({ prompt }: { prompt: string }) => {
+        const preference =
+          /<new_personalization confidence="[^"]+">\n([\s\S]*?)\n<\/new_personalization>/u.exec(
+            prompt,
+          )?.[1] ?? '';
+        return Promise.resolve({
+          object: { action: 'append', preference, supersedes: [] },
+        });
+      },
+    );
     mocks.classifyInferenceError.mockImplementation((error: unknown) => {
       const detail = error instanceof Error ? error.message.toLowerCase() : '';
 
