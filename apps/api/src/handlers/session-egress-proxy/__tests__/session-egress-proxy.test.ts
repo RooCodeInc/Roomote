@@ -278,13 +278,24 @@ it('is a handler-authenticated public surface with one shared base URL', () => {
   ).toBe('https://egress.roomote.test');
 });
 
-it('serves the same route at the root of a dedicated hostname', async () => {
+it('serves the same route at the root of a dedicated hostname through the full middleware chain', async () => {
   const proxy = createSessionEgressProxy();
   app = new Hono<{ Variables: Variables }>();
-  app.use('*', sessionEgressProxyHostAlias(proxy, 'Egress.Roomote.Test'));
+  const policyPasses: string[] = [];
+  app.use(
+    '*',
+    sessionEgressProxyHostAlias(
+      (request) => app.fetch(request),
+      'Egress.Roomote.Test',
+    ),
+  );
   // Registered ahead of the default-deny policy gate, like the real health routes.
   app.get('/health', (c) => c.text('ok'));
   app.use('*', tokenAuthMiddleware());
+  app.use('*', async (c, next) => {
+    policyPasses.push(new URL(c.req.url).pathname);
+    await next();
+  });
   app.use('*', routePolicyMiddleware);
   app.route(base, proxy);
   const aliased = await app.request(
@@ -295,6 +306,9 @@ it('serves the same route at the root of a dedicated hostname', async () => {
   expect(String(vi.mocked(fetch).mock.calls[0]![0])).toBe(
     'https://api.example.com/v1/items?x=1',
   );
+  // The aliased request reached the policy gate exactly once, on the
+  // re-rooted path, so rate limits and policy apply as on the path form.
+  expect(policyPasses).toEqual([`${base}/v1/items`]);
   // Other hosts and other paths are untouched.
   const other = await app.request('https://api.roomote.test/health');
   expect(await other.text()).toBe('ok');

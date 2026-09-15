@@ -171,19 +171,21 @@ export function createApiApp(): ApiApp {
   // Uncomment this to enable verbose per-request logging.
   // app.use(logger());
 
-  app.use('*', requestObservabilityMiddleware);
-
   // A deployment may serve the session egress proxy at the root of its own
-  // hostname so host-only SDK clients need no path prefix. Same route and
-  // checks as `/api/session-egress`; the proxy authenticates its own callers.
+  // hostname so host-only SDK clients need no path prefix. The alias
+  // re-dispatches through the app, so the request still passes observability,
+  // token handling, route policy, and rate limits exactly once before it
+  // reaches the same route as `/api/session-egress`.
   if (Env.R_SESSION_EGRESS_PROXY_HOST)
     app.use(
       '*',
       sessionEgressProxyHostAlias(
-        sessionEgressProxy,
+        (request) => app.fetch(request),
         Env.R_SESSION_EGRESS_PROXY_HOST,
       ),
     );
+
+  app.use('*', requestObservabilityMiddleware);
 
   const corsOptions = {
     origin: resolveApiCorsOrigin,

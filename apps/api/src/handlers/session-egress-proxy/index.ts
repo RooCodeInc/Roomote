@@ -471,13 +471,15 @@ export const sessionEgressProxy = createSessionEgressProxy();
 
 /**
  * Serve the proxy at the root of a dedicated hostname. A request whose host
- * is `proxyHost` is re-addressed onto the proxy path and handed to the same
- * app, so there is exactly one route and one set of checks; only the address
- * a client uses differs. Lets SDK clients with a host-only override use the
- * proxy without a path prefix.
+ * is `proxyHost` is re-addressed onto the proxy path and dispatched through
+ * the whole application again, so it passes the same middleware chain (token
+ * handling, route policy, rate limits) and the same route as a path-form
+ * request; only the address a client uses differs. Register it first, ahead
+ * of observability, so the re-dispatch is the one pass that gets recorded.
+ * Lets SDK clients with a host-only override use the proxy without a prefix.
  */
 export function sessionEgressProxyHostAlias(
-  proxy: Hono<{ Variables: Variables }>,
+  dispatch: (request: Request) => Response | Promise<Response>,
   proxyHost: string,
 ): MiddlewareHandler<{ Variables: Variables }> {
   const host = proxyHost.toLowerCase();
@@ -490,6 +492,6 @@ export function sessionEgressProxyHostAlias(
     )
       return next();
     url.pathname = `${SESSION_EGRESS_PROXY_PATH}${url.pathname}`;
-    return proxy.fetch(new Request(url, c.req.raw));
+    return dispatch(new Request(url, c.req.raw));
   };
 }
