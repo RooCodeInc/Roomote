@@ -360,9 +360,13 @@ describe('session wakeup helpers', () => {
     const cancelled = await cancelSessionWakeup({
       id: row.id,
       conversationId: conversation.id,
+      cancelledByParentEventId: '11111111-1111-4111-8111-111111111112',
     });
     expect(cancelled?.status).toBe('cancelled');
     expect(cancelled?.nextRunAt).toBeNull();
+    expect(cancelled?.cancelledByParentEventId).toBe(
+      '11111111-1111-4111-8111-111111111112',
+    );
     expect(
       await cancelSessionWakeup({
         id: row.id,

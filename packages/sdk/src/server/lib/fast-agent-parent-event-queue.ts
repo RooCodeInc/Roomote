@@ -450,6 +450,7 @@ export async function drainFastAgentParentEvents(
           {
             parent: row.parent,
             event: row.event,
+            parentEventId: row.id,
             ...(retryTaskStart ? { retryTaskStart } : {}),
             // An inline-admitted row only reaches the queue after its owner
             // was interrupted or parked it for a scheduled retry, so this

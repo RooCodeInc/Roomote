@@ -179,7 +179,11 @@ export async function insertSessionWakeup(
  * another conversation, or had already reached a terminal state.
  */
 export async function cancelSessionWakeup(
-  params: { id: string; conversationId: string },
+  params: {
+    id: string;
+    conversationId: string;
+    cancelledByParentEventId?: string;
+  },
   tx: DatabaseOrTransaction = db,
 ): Promise<SessionWakeup | null> {
   const now = new Date();
@@ -188,6 +192,7 @@ export async function cancelSessionWakeup(
     .set({
       status: 'cancelled',
       nextRunAt: null,
+      cancelledByParentEventId: params.cancelledByParentEventId ?? null,
       completedAt: now,
       updatedAt: now,
     })

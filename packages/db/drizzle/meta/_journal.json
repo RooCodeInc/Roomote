@@ -645,6 +645,13 @@
       "when": 1789384172188,
       "tag": "0091_cold_inertia",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1789446881596,
+      "tag": "0092_panoramic_bruce_banner",
+      "breakpoints": true
     }
   ]
 }

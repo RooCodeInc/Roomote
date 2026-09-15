@@ -5011,12 +5011,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).not.toHaveBeenCalled();
   });
 
-  it('reports a successful wakeup cancellation to the turn adapter', async () => {
+  it('passes durable parent-event identity to wakeup cancellation', async () => {
     mocks.handleManageWakeups.mockResolvedValueOnce({
       success: true,
       cancelled: true,
     });
-    const onWakeupCancelled = vi.fn();
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -5032,10 +5031,17 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ...baseParams,
       turnSource: 'platform_event',
       platformEventKind: 'scheduled_wakeup',
-      adapter: callbacks({ onWakeupCancelled }),
+      adapter: callbacks({ parentEventId: 'parent-event-1' }),
     });
 
-    expect(onWakeupCancelled).toHaveBeenCalledWith('wakeup-1');
+    expect(mocks.handleManageWakeups).toHaveBeenCalledWith(
+      {
+        conversationId: 'conversation-1',
+        userId: 'user-1',
+        parentEventId: 'parent-event-1',
+      },
+      { action: 'cancel', wakeupId: 'wakeup-1' },
+    );
   });
 
   it('rejects ignore_event for directed human turns', async () => {
