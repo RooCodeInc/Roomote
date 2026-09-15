@@ -3099,6 +3099,7 @@ export async function answerFastAgentQuestion({
       getOrCreateFastAgentSession({
         userId,
         conversation: canonicalConversation ?? conversation,
+        recordChatInitiation: turnSource === 'human',
       }),
       listFastAgentIntegrations(
         { userId, apiBaseUrl },

@@ -8,6 +8,7 @@ import {
   teamsUserMappings,
   telegramUserMappings,
 } from '@roomote/db/server';
+import type { ChatInitiationProvider } from '@roomote/db/server';
 import type { CommunicationProvider } from '@roomote/types';
 import {
   buildFastSessionUrl,
@@ -825,6 +826,7 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
   replyAnchor,
   presentation,
   replyPresentation,
+  preferredProvider,
 }: {
   userId: string;
   text: string;
@@ -834,15 +836,21 @@ export async function sendUserDirectMessageBestEffortWithReceipts({
   replyAnchor?: UserDirectMessageReceipt;
   presentation?: UserDirectMessagePresentation;
   replyPresentation?: UserDirectMessagePresentation;
+  preferredProvider?: ChatInitiationProvider;
 }): Promise<{
   deliveredProviders: UserDirectMessageProvider[];
   receipts: UserDirectMessageReceipt[];
 }> {
-  const providers: UserDirectMessageProvider[] = [
-    ...(replyAnchor ? [replyAnchor.provider] : []),
-    ...(['slack', 'teams', 'telegram', 'discord', 'agentmail'] as const).filter(
-      (provider) => provider !== replyAnchor?.provider,
-    ),
+  const providers = [
+    ...new Set<UserDirectMessageProvider>([
+      ...(replyAnchor ? [replyAnchor.provider] : []),
+      ...(preferredProvider ? [preferredProvider] : []),
+      'slack',
+      'teams',
+      'telegram',
+      'discord',
+      'agentmail',
+    ]),
   ];
 
   for (const provider of providers) {

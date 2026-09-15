@@ -6,7 +6,9 @@ import {
   eq,
   inArray,
   isTaskRunFollowUpCandidate,
+  isChatInitiationProvider,
   isNull,
+  recordUserChatInitiationProvider,
   taskRuns,
   tasks,
 } from '@roomote/db/server';
@@ -49,6 +51,7 @@ export async function getOrCreateFastAgentSession({
   initialTitle,
   initialModel,
   initialReasoningEffort,
+  recordChatInitiation,
 }: {
   owner?: FastAgentConversationOwner;
   userId?: string;
@@ -59,8 +62,10 @@ export async function getOrCreateFastAgentSession({
   initialTitle?: string;
   initialModel?: string;
   initialReasoningEffort?: ReasoningEffort;
+  /** Record the provider only when this human turn creates a new Session. */
+  recordChatInitiation?: boolean;
 }): Promise<FastAgentSessionRecord> {
-  return fastAgentConversationRepository.getOrCreate({
+  const session = await fastAgentConversationRepository.getOrCreate({
     ...(owner ? { owner } : {}),
     ...(userId ? { userId } : {}),
     conversation,
@@ -69,6 +74,21 @@ export async function getOrCreateFastAgentSession({
     ...(initialModel !== undefined ? { initialModel } : {}),
     ...(initialReasoningEffort !== undefined ? { initialReasoningEffort } : {}),
   });
+  if (
+    recordChatInitiation &&
+    session.created &&
+    userId &&
+    isChatInitiationProvider(conversation.surface)
+  ) {
+    await recordUserChatInitiationProvider(userId, conversation.surface).catch(
+      (error) => {
+        console.warn(
+          `[Fast Agent] Failed to record chat initiation provider: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      },
+    );
+  }
+  return session;
 }
 
 export async function hasFastAgentSession(

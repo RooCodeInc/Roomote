@@ -53,6 +53,8 @@ import {
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
   projectPendingPrReviewEventsForAssociation,
+  isChatInitiationProvider,
+  recordUserChatInitiationProvider,
   recordTaskStartParallelCount,
   syncTaskStateFromRuns,
   taskPullRequests,
@@ -1779,6 +1781,13 @@ async function enqueueFreshLaunch(
           },
           { db: tx },
         );
+        if (
+          initiator.kind === 'user' &&
+          linkedUserId &&
+          isChatInitiationProvider(surface)
+        ) {
+          await recordUserChatInitiationProvider(linkedUserId, surface, tx);
+        }
         taskId = createdTask.id;
       }
 

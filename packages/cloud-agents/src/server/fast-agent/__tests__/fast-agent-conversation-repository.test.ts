@@ -5,8 +5,10 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   fastAgentParentEvents,
+  getUserChatInitiationProvider,
   inArray,
   sessions,
+  recordUserChatInitiationProvider,
   userFactory,
   users,
 } from '@roomote/db/server';
@@ -58,6 +60,71 @@ afterEach(async () => {
 });
 
 describe('Fast conversation repository', () => {
+  it.each(['slack', 'teams', 'telegram', 'discord'] as const)(
+    'records %s when a human chat turn creates a Session',
+    async (surface) => {
+      const user = await createUser();
+      const conversation = {
+        surface,
+        workspaceId: `${surface}-workspace`,
+        conversationId: crypto.randomUUID(),
+        replyTarget: { channelId: `${surface}-channel` },
+      };
+
+      await getOrCreateFastAgentSession({
+        userId: user.id,
+        conversation,
+        recordChatInitiation: true,
+      });
+
+      await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+        surface,
+      );
+    },
+  );
+
+  it('does not overwrite the preference for an existing Session turn', async () => {
+    const user = await createUser();
+    const conversation = {
+      ...slackConversation,
+      conversationId: crypto.randomUUID(),
+    };
+    await getOrCreateFastAgentSession({
+      userId: user.id,
+      conversation,
+    });
+    await recordUserChatInitiationProvider(user.id, 'discord');
+
+    const reused = await getOrCreateFastAgentSession({
+      userId: user.id,
+      conversation,
+      recordChatInitiation: true,
+    });
+
+    expect(reused.created).toBe(false);
+    await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+      'discord',
+    );
+  });
+
+  it('does not record an automated chat-surface Session', async () => {
+    const user = await createUser();
+    await recordUserChatInitiationProvider(user.id, 'telegram');
+
+    await getOrCreateFastAgentSession({
+      userId: user.id,
+      conversation: {
+        ...slackConversation,
+        conversationId: crypto.randomUUID(),
+      },
+      recordChatInitiation: false,
+    });
+
+    await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+      'telegram',
+    );
+  });
+
   it.each([true, false])(
     'seeds model settings only on insert (initial overrides: %s)',
     async (withOverrides) => {

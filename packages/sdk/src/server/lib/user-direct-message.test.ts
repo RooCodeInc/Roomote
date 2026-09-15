@@ -527,6 +527,99 @@ describe('sendUserDirectMessageBestEffort', () => {
     warnSpy.mockRestore();
   });
 
+  it('tries the preferred task-starting chat provider before the default order', async () => {
+    const result = await sendUserDirectMessageBestEffortWithReceipts({
+      userId: 'user-1',
+      text: 'hello',
+      logContext: 'test',
+      preferredProvider: 'discord',
+    });
+
+    expect(result.deliveredProviders).toEqual(['discord']);
+    expect(mockDiscordPostMessage).toHaveBeenCalledOnce();
+    expect(mockOpenConversation).not.toHaveBeenCalled();
+    expect(mockPostDirectMessage).not.toHaveBeenCalled();
+    expect(mockTelegramPostMessage).not.toHaveBeenCalled();
+  });
+
+  it('falls back without retrying a failed preferred provider', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockDiscordPostMessage.mockRejectedValueOnce(new Error('discord is down'));
+
+    const result = await sendUserDirectMessageBestEffortWithReceipts({
+      userId: 'user-1',
+      text: 'hello',
+      logContext: 'test',
+      preferredProvider: 'discord',
+    });
+
+    expect(result.deliveredProviders).toEqual(['slack']);
+    expect(mockDiscordPostMessage).toHaveBeenCalledOnce();
+    expect(mockSlackPostMessage).toHaveBeenCalledOnce();
+    expect(mockPostDirectMessage).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('falls back when the preferred provider is unavailable', async () => {
+    mockDiscordUserMappingsFindFirst.mockResolvedValue(undefined);
+
+    const result = await sendUserDirectMessageBestEffortWithReceipts({
+      userId: 'user-1',
+      text: 'hello',
+      logContext: 'test',
+      preferredProvider: 'discord',
+    });
+
+    expect(result.deliveredProviders).toEqual(['slack']);
+    expect(mockDiscordPostMessage).not.toHaveBeenCalled();
+    expect(mockSlackPostMessage).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the existing Session thread ahead of a different preference', async () => {
+    const result = await sendUserDirectMessageBestEffortWithReceipts({
+      userId: 'user-1',
+      text: 'hello',
+      logContext: 'test',
+      preferredProvider: 'discord',
+      replyAnchor: {
+        provider: 'slack',
+        workspaceId: 'T123',
+        channelId: 'D123',
+        messageId: '1720000000.000100',
+        threadId: '1720000000.000100',
+      },
+    });
+
+    expect(result.deliveredProviders).toEqual(['slack']);
+    expect(mockSlackPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ thread_ts: '1720000000.000100' }),
+    );
+    expect(mockDiscordPostMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not duplicate an attempt when the preference matches the existing thread', async () => {
+    mockSlackPostMessage.mockRejectedValueOnce(
+      new Error('slack thread is unavailable'),
+    );
+
+    const result = await sendUserDirectMessageBestEffortWithReceipts({
+      userId: 'user-1',
+      text: 'hello',
+      logContext: 'test',
+      preferredProvider: 'slack',
+      replyAnchor: {
+        provider: 'slack',
+        workspaceId: 'T123',
+        channelId: 'D123',
+        messageId: '1720000000.000100',
+      },
+    });
+
+    expect(result.deliveredProviders).toEqual(['teams']);
+    expect(mockSlackPostMessage).toHaveBeenCalledOnce();
+    expect(mockPostDirectMessage).toHaveBeenCalledOnce();
+  });
+
   it('reuses a successful provider thread for the next Session notification', async () => {
     const first = await sendUserDirectMessageBestEffortWithReceipts({
       userId: 'user-1',
