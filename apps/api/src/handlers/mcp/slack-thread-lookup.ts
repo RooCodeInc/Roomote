@@ -304,6 +304,63 @@ export async function resolveVerifiedSlackChannel(options: {
   return resolvedChannelId;
 }
 
+async function resolveSlackInstallationByDomain(options: {
+  teamDomain: string;
+  expectedTeamId?: string | null;
+}): Promise<{
+  slackInstallation: { botAccessToken: string; teamId: string };
+  slack: SlackNotifier;
+}> {
+  const installations = await db.query.slackInstallations.findMany({
+    columns: { botAccessToken: true, teamId: true },
+    where: and(
+      eq(slackInstallations.isActive, true),
+      options.expectedTeamId
+        ? eq(slackInstallations.teamId, options.expectedTeamId)
+        : undefined,
+    ),
+  });
+  const candidates = await Promise.all(
+    installations.map(async (slackInstallation) => {
+      const slack = new SlackNotifier(slackInstallation.botAccessToken);
+      const identity = await slack.getWorkspaceIdentity();
+      return {
+        slackInstallation,
+        slack,
+        identity,
+        matches:
+          identity?.teamId === slackInstallation.teamId &&
+          identity.teamDomain === options.teamDomain,
+      };
+    }),
+  );
+
+  if (
+    candidates.some(
+      ({ identity, slackInstallation }) =>
+        !identity || identity.teamId !== slackInstallation.teamId,
+    )
+  ) {
+    throw new McpProxyError(503, 'Slack link workspace could not be verified');
+  }
+
+  const matches = candidates.filter(({ matches }) => matches);
+  if (matches.length > 1) {
+    throw new McpProxyError(
+      409,
+      'Slack workspace could not be resolved unambiguously from the supplied link',
+    );
+  }
+  if (matches.length === 0) {
+    throw new McpProxyError(
+      404,
+      'No active Slack installation matches the supplied Slack link workspace',
+    );
+  }
+
+  return matches[0]!;
+}
+
 async function resolveSlackLookupChannel(options: {
   channel?: string;
   slackTeamId?: string;
@@ -346,12 +403,7 @@ async function resolveSlackLookupChannel(options: {
   const requestedTeamDomain =
     options.slackTeamDomain?.trim().toLowerCase() || null;
 
-  if (
-    (requestedTeamId && taskTeamId && requestedTeamId !== taskTeamId) ||
-    (requestedTeamDomain &&
-      taskTeamDomain &&
-      requestedTeamDomain !== taskTeamDomain.toLowerCase())
-  ) {
+  if (requestedTeamId && taskTeamId && requestedTeamId !== taskTeamId) {
     throw new McpProxyError(
       400,
       'The supplied Slack link does not match the task workspace',
@@ -360,39 +412,30 @@ async function resolveSlackLookupChannel(options: {
 
   const expectedTeamId = requestedTeamId ?? taskTeamId;
   const expectedTeamDomain =
-    requestedTeamDomain ?? taskTeamDomain?.toLowerCase() ?? null;
+    requestedTeamDomain ?? (expectedTeamId ? null : taskTeamDomain);
   let slackInstallation;
-  if (expectedTeamId || expectedTeamDomain) {
+  let slack;
+  if (expectedTeamDomain) {
+    const resolved = await resolveSlackInstallationByDomain({
+      teamDomain: expectedTeamDomain.toLowerCase(),
+      expectedTeamId,
+    });
+    slackInstallation = resolved.slackInstallation;
+    slack = resolved.slack;
+  } else if (expectedTeamId) {
     const installations = await db.query.slackInstallations.findMany({
       columns: { botAccessToken: true, teamId: true },
       where: and(
         eq(slackInstallations.isActive, true),
-        expectedTeamId
-          ? eq(slackInstallations.teamId, expectedTeamId)
-          : undefined,
-        expectedTeamDomain
-          ? eq(slackInstallations.teamDomain, expectedTeamDomain)
-          : undefined,
+        eq(slackInstallations.teamId, expectedTeamId),
       ),
       limit: 2,
     });
-    if (installations.length > 1) {
-      throw new McpProxyError(
-        409,
-        'Slack workspace could not be resolved unambiguously from the supplied link',
-      );
-    }
     slackInstallation = installations[0];
-    if (!slackInstallation && (taskTeamId || taskTeamDomain)) {
+    if (!slackInstallation && taskTeamId) {
       throw new McpProxyError(
         400,
         'The supplied Slack link does not match the task workspace',
-      );
-    }
-    if (!slackInstallation) {
-      throw new McpProxyError(
-        404,
-        'No active Slack installation matches the supplied Slack link workspace',
       );
     }
   } else {
@@ -414,7 +457,7 @@ async function resolveSlackLookupChannel(options: {
     );
   }
 
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
+  slack ??= new SlackNotifier(slackInstallation.botAccessToken);
   let lookupChannel = slackOriginChannel;
 
   if (options.channel) {
