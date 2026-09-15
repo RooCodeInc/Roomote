@@ -2187,6 +2187,20 @@ export function createIssueComment(
   return getOctokit(token).issues.createComment(params);
 }
 
+type GetIssueCommentByToken = Issues['getComment'];
+
+/**
+ * Read one issue comment with an already-minted token, the same way
+ * updateIssueComment writes one. Used as the REST fallback when the `gh`
+ * CLI read of a review summary fails.
+ */
+export function fetchIssueCommentWithToken(
+  token: string,
+  params: GetIssueCommentByToken['parameters'],
+): Promise<GetIssueCommentByToken['response']> {
+  return getOctokit(token).issues.getComment(params);
+}
+
 type UpdateIssueComment = Issues['updateComment'];
 
 export function updateIssueComment(

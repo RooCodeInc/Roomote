@@ -63,6 +63,7 @@ import {
   createTaskRunGitHubToken,
   createIssueComment,
   deleteReaction,
+  fetchIssueCommentWithToken,
   getCheckRun,
   updateCheckRun,
 } from '@roomote/github';
@@ -857,9 +858,15 @@ async function cleanupGithubPrReviewArtifacts(
       // a real agent completion (it only patches comments still showing an
       // in-progress status line).
       if (status !== RunStatus.Idle) {
-        let reviewSummary: { finalized: boolean; body?: string } = {
-          finalized: false,
-        };
+        let reviewSummary: {
+          finalized: boolean;
+          body?: string;
+          fetchFailed?: boolean;
+          commentId?: number;
+        } = { finalized: false };
+        // GitHub would not return the summary comment even on retry; the
+        // review's result exists but cannot be read right now.
+        let summaryUnreadable = false;
 
         try {
           releaseLifecycleLock.signal.throwIfAborted();
@@ -896,6 +903,31 @@ async function cleanupGithubPrReviewArtifacts(
           });
           releaseLifecycleLock.signal.throwIfAborted();
 
+          // The finalizer reads the summary through the gh CLI. A transient
+          // GitHub failure there used to be indistinguishable from a review
+          // that never published anything, and the check reported "result
+          // unavailable" for a review that had in fact passed. Read it again
+          // over REST before deciding anything.
+          if (
+            reviewSummary.fetchFailed &&
+            status === RunStatus.Completed &&
+            reviewSummary.commentId
+          ) {
+            const body = await readReviewSummaryWithRetry({
+              token,
+              owner,
+              repo,
+              commentId: reviewSummary.commentId,
+              runId: run.id,
+              signal: releaseLifecycleLock.signal,
+            });
+            if (body !== undefined) {
+              reviewSummary = { finalized: false, body };
+            } else {
+              summaryUnreadable = true;
+            }
+          }
+
           if (reviewSummary.finalized) {
             console.log(
               `[finishRun] Finalized stale PR review summary comment for run ${run.id} on ${prRow.repository}#${prRow.prNumber}`,
@@ -913,19 +945,38 @@ async function cleanupGithubPrReviewArtifacts(
           try {
             releaseLifecycleLock.signal.throwIfAborted();
             token ??= await createTaskRunGitHubToken(run);
-            const checkResult = getGithubPrReviewCheckResult({
-              runStatus: status,
-              reviewSummaryBody: reviewSummary.body,
-              safetyNetFinalized: reviewSummary.finalized,
-              expectedHeadSha:
-                'latestObservedHeadSha' in run.payload &&
-                typeof run.payload.latestObservedHeadSha === 'string'
-                  ? run.payload.latestObservedHeadSha
-                  : 'headSha' in run.payload &&
-                      typeof run.payload.headSha === 'string'
-                    ? run.payload.headSha
-                    : undefined,
-            });
+            const checkResult: {
+              conclusion: 'success' | 'failure' | 'cancelled' | 'neutral';
+              title: string;
+              summary: string;
+            } = summaryUnreadable
+              ? {
+                  // Not a failure of the review: the run completed and its
+                  // summary comment exists, GitHub just would not serve it.
+                  // A failure here would block merges on a GitHub hiccup.
+                  conclusion: 'neutral',
+                  title: 'Roomote review result could not be read',
+                  summary:
+                    'The review finished, but GitHub did not return the review summary comment while this check was being finalized. Open the Roomote summary comment on the pull request for the result.',
+                }
+              : getGithubPrReviewCheckResult({
+                  runStatus: status,
+                  reviewSummaryBody: reviewSummary.body,
+                  safetyNetFinalized: reviewSummary.finalized,
+                  expectedHeadSha:
+                    'latestObservedHeadSha' in run.payload &&
+                    typeof run.payload.latestObservedHeadSha === 'string'
+                      ? run.payload.latestObservedHeadSha
+                      : 'headSha' in run.payload &&
+                          typeof run.payload.headSha === 'string'
+                        ? run.payload.headSha
+                        : undefined,
+                });
+            if (summaryUnreadable) {
+              console.error(
+                `[finishRun] Completing PR review check for run ${run.id} on ${prRow.repository}#${prRow.prNumber} as neutral: the review summary comment could not be read`,
+              );
+            }
             const taskUrl = getTaskUrl({
               taskId: run.taskId,
               utm: {
@@ -969,6 +1020,50 @@ async function cleanupGithubPrReviewArtifacts(
       await releaseLifecycleLock();
     }
   }
+}
+
+const REVIEW_SUMMARY_READ_ATTEMPTS = 3;
+const REVIEW_SUMMARY_READ_BASE_DELAY_MS = 500;
+
+/**
+ * REST fallback for the review summary comment after the gh CLI read failed.
+ * Bounded retries with backoff cover the transient GitHub errors that were
+ * turning passed reviews into "review result unavailable" checks.
+ */
+async function readReviewSummaryWithRetry(input: {
+  token: string;
+  owner: string;
+  repo: string;
+  commentId: number;
+  runId: number;
+  signal: AbortSignal;
+}): Promise<string | undefined> {
+  for (let attempt = 1; attempt <= REVIEW_SUMMARY_READ_ATTEMPTS; attempt++) {
+    input.signal.throwIfAborted();
+    try {
+      const { data } = await fetchIssueCommentWithToken(input.token, {
+        owner: input.owner,
+        repo: input.repo,
+        comment_id: input.commentId,
+        request: { signal: input.signal },
+      });
+      return data.body ?? undefined;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (input.signal.aborted || attempt === REVIEW_SUMMARY_READ_ATTEMPTS) {
+        console.error(
+          `[finishRun] Review summary comment ${input.commentId} for run ${input.runId} could not be read after ${attempt} attempt(s): ${message}`,
+        );
+        return undefined;
+      }
+      const delayMs = REVIEW_SUMMARY_READ_BASE_DELAY_MS * 2 ** (attempt - 1);
+      console.warn(
+        `[finishRun] Review summary comment ${input.commentId} for run ${input.runId} read attempt ${attempt}/${REVIEW_SUMMARY_READ_ATTEMPTS} failed; retrying in ${delayMs}ms: ${message}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return undefined;
 }
 
 function getRuntimeTaskId(run: TaskRun): string | null {
