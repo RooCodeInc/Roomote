@@ -732,7 +732,7 @@ export default {
       .describe(
         "Lowercase HTTP header that carries the key at this service: authorization, x-api-key, api-key, or the service's own name such as private-token or x-shopify-access-token",
       ),
-    headerPrefix: z.enum(["Bearer ", "Basic ", "Token "]).optional(),
+    headerPrefix: z.enum(["Bearer", "Basic", "Token", "Bearer ", "Basic ", "Token "]).optional().describe("Scheme before the key, with or without the trailing space; omit when the header takes the bare key"),
     lifetimeHours: z.number().int().min(1).max(8760).optional().describe("Hours until the integration expires. Omit unless the human asked for a temporary key; integrations are kept until revoked."),
     allowedMethods: z.array(z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])).min(1).max(6).optional().describe("HTTP methods the approved key may be used with. Defaults to GET and HEAD."),
   },
@@ -744,7 +744,7 @@ export default {
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List the human's integrations (ready secret references with their origin, header, allowed methods, and expiry, whichever Session approved them) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval and before using a reference; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready references are usable by request_with_integration_key for reads and are delivered automatically to coding tasks launched from this Session.",
+  description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List the human's integrations (ready secret references with their origin, header, allowed methods, and expiry, whichever Session approved them) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval and before using a reference; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready references are usable by request_with_integration_key with any of their allowed methods and are delivered automatically to coding tasks launched from this Session.",
   args: {},
   execute: (args, context) => invoke("list_integration_keys", args, context),
 }
@@ -755,13 +755,14 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Make one bounded GET or HEAD request using a ready integration key reference without exposing the credential; the server sends the request to the approved origin with the real key. Discover references with list_integration_keys; never invent one or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers. For scripts, SDKs, CLIs, repeated calls, or approved write methods, launch a coding task attached to this Session instead: it receives the approved services as substitute tokens with a base URL. Call directly without an opening acknowledgement or another confirmation, and report the actual result.",
+  description: "Make one bounded request using a ready integration key reference without exposing the credential; the server sends it to the approved origin with the real key, using any method the human approved for that integration (reads, and POST/PUT/PATCH/DELETE when listed in its allowedMethods). Discover references with list_integration_keys; never invent one or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers; give a body and contentType for writes. For scripts, SDKs, CLIs, or many calls, launch a coding task attached to this Session instead: it receives the approved services as substitute tokens with a base URL. Call directly without an opening acknowledgement or another confirmation, and report the actual result.",
   args: {
     secretRef: z.string().uuid(),
-    method: z.enum(["GET", "HEAD"]),
+    method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]),
     path: z.string().min(1).max(2048),
     accept: z.enum(["application/json", "text/plain"]).optional(),
-    body: z.literal("").nullish().describe("GET/HEAD have no body. Omit, use null, or use an empty string."),
+    body: z.string().max(65536).nullish().describe("Request body for an approved write method. GET/HEAD have no body: omit, use null, or use an empty string."),
+    contentType: z.enum(["application/json", "text/plain", "application/x-www-form-urlencoded"]).optional().describe("Content type of the body; ignored for GET/HEAD."),
   },
   execute: (args, context) => invoke("request_with_integration_key", args, context),
 }

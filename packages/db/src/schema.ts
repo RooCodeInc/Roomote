@@ -4361,7 +4361,9 @@ export const serviceCredentialAudit = pgTable('service_credential_audit', {
   id: uuid('id').primaryKey().defaultRandom(),
   actorUserId: text('actor_user_id'),
   secretRef: uuid('secret_ref'),
-  method: text('method').$type<'GET' | 'HEAD'>(),
+  method: text('method').$type<
+    'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  >(),
   destination: text('destination'),
   outcome: text('outcome')
     .notNull()

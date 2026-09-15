@@ -416,7 +416,8 @@ it('blocks creation and use after archive while retaining owner list and revoke 
   );
   expect(await listServiceCredentials(context)).toHaveLength(1);
   await revokeServiceCredential(context, { secretRef });
-  expect((await listServiceCredentials(context))[0]!.revokedAt).not.toBeNull();
+  // A revoked integration leaves every listing.
+  expect(await listServiceCredentials(context)).toHaveLength(0);
 });
 
 it('rejects unsafe origins with the real egress validator and normalizes default HTTPS ports', async () => {
