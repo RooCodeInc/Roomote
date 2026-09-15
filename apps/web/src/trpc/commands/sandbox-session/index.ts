@@ -365,14 +365,21 @@ export async function sendSandboxPromptCommand(
   const previousActingUserId = taskRun.actingUserId;
   const requiresActorHandoff = previousActingUserId !== auth.userId;
   const promptUserName = getAuthenticatedPromptUserName(auth);
-  const shouldTrackDiscordReplyQuote =
+  const communicationProvider = getCommunicationProviderFromTaskPayload(
+    taskRun.payload,
+  );
+  const replyQuoteProvider =
+    communicationProvider === 'discord' || communicationProvider === 'telegram'
+      ? communicationProvider
+      : null;
+  const shouldTrackCommunicationReplyQuote =
     parsed.source === 'web' &&
     typeof parsed.prompt === 'string' &&
     parsed.prompt.trim().length > 0 &&
-    getCommunicationProviderFromTaskPayload(taskRun.payload) === 'discord' &&
+    replyQuoteProvider !== null &&
     Boolean(getCommunicationChannelFromTaskPayload(taskRun.payload));
   let didSwitchActingUser = false;
-  let discordReplyQuoteId: string | null = null;
+  let communicationReplyQuoteId: string | null = null;
 
   try {
     await touchTaskActivity(db, parsed.taskId);
@@ -398,20 +405,24 @@ export async function sendSandboxPromptCommand(
       ],
     });
 
-    if (shouldTrackDiscordReplyQuote && typeof parsed.prompt === 'string') {
+    if (
+      shouldTrackCommunicationReplyQuote &&
+      replyQuoteProvider &&
+      typeof parsed.prompt === 'string'
+    ) {
       try {
         const quote = await setLatestUserMessageForReplyQuote(
-          'discord',
+          replyQuoteProvider,
           taskRun.id,
           {
             text: parsed.prompt,
             userName: promptUserName ?? 'Someone',
           },
         );
-        discordReplyQuoteId = quote.id;
+        communicationReplyQuoteId = quote.id;
       } catch (error) {
         console.warn(
-          `[sendSandboxPromptCommand] Failed to persist Discord reply quote for task run ${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
+          `[sendSandboxPromptCommand] Failed to persist ${replyQuoteProvider} reply quote for task run ${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
@@ -454,11 +465,11 @@ export async function sendSandboxPromptCommand(
 
     return result;
   } catch (error) {
-    if (discordReplyQuoteId) {
+    if (communicationReplyQuoteId && replyQuoteProvider) {
       await clearLatestUserMessageForReplyQuoteIfId(
-        'discord',
+        replyQuoteProvider,
         taskRun.id,
-        discordReplyQuoteId,
+        communicationReplyQuoteId,
       );
     }
 

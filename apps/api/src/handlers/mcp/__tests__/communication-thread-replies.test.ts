@@ -825,6 +825,8 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
     resolveTelegramRuntimeCredentialsMock.mockResolvedValue({ botToken: 't' });
     buildThreadReplyImagesMock.mockResolvedValue([]);
     getLatestInboundMessageIdMock.mockResolvedValue(null);
+    getLatestUserMessageForReplyQuoteMock.mockResolvedValue(null);
+    clearLatestUserMessageForReplyQuoteIfIdMock.mockResolvedValue(true);
     postMessageMock.mockResolvedValue({ messageId: '999' });
     sendChatActionMock.mockResolvedValue(undefined);
     vi.mocked(buildThreadReplyFooterText).mockReturnValue(
@@ -847,6 +849,63 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
         replyToMessageId: '200',
       }),
     );
+  });
+
+  it('prepends a pending web-reply quote and clears it after a successful post', async () => {
+    getLatestUserMessageForReplyQuoteMock.mockResolvedValue({
+      id: 'telegram-quote-1',
+      text: "It's already enabled",
+      userName: 'Daniel Riccio',
+    });
+
+    await maybeSendCommunicationThreadReply({
+      taskRun: {
+        ...telegramTaskRun,
+        payload: {
+          ...telegramTaskRun.payload,
+          communicationThreadId: '77',
+        },
+      },
+      parsedBody: {
+        text: "I'll check the connection status and generate the link.",
+        images: [],
+      },
+    });
+
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '222',
+        threadId: '77',
+        text: [
+          "> **Daniel Riccio:** It's already enabled",
+          '',
+          "I'll check the connection status and generate the link.",
+          '',
+          'Current task footer',
+        ].join('\n'),
+      }),
+    );
+    expect(clearLatestUserMessageForReplyQuoteIfIdMock).toHaveBeenCalledWith(
+      'telegram',
+      42,
+      'telegram-quote-1',
+    );
+  });
+
+  it('keeps ordinary Telegram replies unquoted', async () => {
+    await maybeSendCommunicationThreadReply({
+      taskRun: telegramTaskRun,
+      parsedBody: { text: 'done', images: [] },
+    });
+
+    expect(getLatestUserMessageForReplyQuoteMock).toHaveBeenCalledWith(
+      'telegram',
+      42,
+    );
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'done\n\nCurrent task footer' }),
+    );
+    expect(clearLatestUserMessageForReplyQuoteIfIdMock).not.toHaveBeenCalled();
   });
 
   it('falls back to the launch communicationMessageId when no follow-up is recorded', async () => {

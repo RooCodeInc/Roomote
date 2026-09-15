@@ -47,18 +47,18 @@ const LOG_CONTEXT = 'communicationThreadReplies';
 const TEAMS_THREAD_REPLY_FOOTER_LOCK_PREFIX = 'teams:thread_reply_footer_lock:';
 const DISCORD_THREAD_REPLY_FOOTER_LOCK_PREFIX =
   'discord:thread_reply_footer_lock:';
-const DISCORD_THREAD_REPLY_QUOTE_MAX_LENGTH = 280;
+const MARKDOWN_THREAD_REPLY_QUOTE_MAX_LENGTH = 280;
 
 // Telegram clears a chat action after ~5s; re-send inside that window so the
 // "typing…" indicator spans the whole reply delivery (chunks, photo fetch,
 // message delivery) instead of lapsing partway through.
 const TELEGRAM_TYPING_HEARTBEAT_MS = 4_000;
 
-function normalizeDiscordQuoteText(text: string): string {
+function normalizeMarkdownQuoteText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-function escapeDiscordMarkdownText(text: string): string {
+function escapeMarkdownQuoteText(text: string): string {
   return text
     .replaceAll('\\', '\\\\')
     .replaceAll('*', '\\*')
@@ -69,30 +69,30 @@ function escapeDiscordMarkdownText(text: string): string {
     .replaceAll('>', '\\>');
 }
 
-function truncateDiscordQuoteText(text: string): string {
-  if (text.length <= DISCORD_THREAD_REPLY_QUOTE_MAX_LENGTH) {
+function truncateMarkdownQuoteText(text: string): string {
+  if (text.length <= MARKDOWN_THREAD_REPLY_QUOTE_MAX_LENGTH) {
     return text;
   }
 
-  return `${text.slice(0, DISCORD_THREAD_REPLY_QUOTE_MAX_LENGTH).trimEnd()}...`;
+  return `${text.slice(0, MARKDOWN_THREAD_REPLY_QUOTE_MAX_LENGTH).trimEnd()}...`;
 }
 
-function buildDiscordThreadReplyQuote(params: {
+function buildMarkdownThreadReplyQuote(params: {
   username: string;
   text: string;
 }): string | null {
-  const username = escapeDiscordMarkdownText(
-    normalizeDiscordQuoteText(params.username),
+  const username = escapeMarkdownQuoteText(
+    normalizeMarkdownQuoteText(params.username),
   );
-  const text = escapeDiscordMarkdownText(
-    truncateDiscordQuoteText(normalizeDiscordQuoteText(params.text)),
+  const text = escapeMarkdownQuoteText(
+    truncateMarkdownQuoteText(normalizeMarkdownQuoteText(params.text)),
   );
 
   if (!username || !text) {
     return null;
   }
 
-  // Discord markdown blockquote — matches Slack's ">*name:* text" shape.
+  // Provider-rendered Markdown blockquote matching Slack's ">*name:* text".
   return `> **${username}:** ${text}`;
 }
 
@@ -112,13 +112,16 @@ function getDiscordFooterlessFinalChunk(params: {
     : finalChunk;
 }
 
-async function peekDiscordThreadReplyQuote(params: { runId: number }): Promise<{
+async function peekMarkdownThreadReplyQuote(params: {
+  provider: 'discord' | 'telegram';
+  runId: number;
+}): Promise<{
   pendingUserMessage: { id: string; text: string; userName: string };
   quote: string;
 } | null> {
   try {
     const latestUserMessage = await getLatestUserMessageForReplyQuote(
-      'discord',
+      params.provider,
       params.runId,
     );
 
@@ -126,7 +129,7 @@ async function peekDiscordThreadReplyQuote(params: { runId: number }): Promise<{
       return null;
     }
 
-    const quote = buildDiscordThreadReplyQuote({
+    const quote = buildMarkdownThreadReplyQuote({
       username: latestUserMessage.userName,
       text: latestUserMessage.text,
     });
@@ -141,7 +144,7 @@ async function peekDiscordThreadReplyQuote(params: { runId: number }): Promise<{
     };
   } catch (error) {
     console.error(
-      `[${LOG_CONTEXT}] Failed to build Discord reply quote: ${
+      `[${LOG_CONTEXT}] Failed to build ${params.provider} reply quote: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -502,9 +505,16 @@ async function sendTelegramThreadReply(params: {
     );
   }
 
-  // Prefer the most recent inbound user message id so the reply quotes the
-  // latest user message rather than the original launch message. Falls back
-  // to the launch communicationMessageId when no follow-up has arrived.
+  const pendingQuote = await peekMarkdownThreadReplyQuote({
+    provider: 'telegram',
+    runId: params.taskRun.id,
+  });
+  const textWithQuote =
+    text && pendingQuote ? `${pendingQuote.quote}\n\n${text}` : text;
+
+  // Preserve the provider-neutral reply target for routing/bookkeeping. The
+  // Telegram adapter intentionally omits native reply metadata; web follow-up
+  // quotes are rendered explicitly through textWithQuote above.
   let replyToMessageId = messageId;
   try {
     const latestInboundMessageId = await getLatestInboundMessageId(
@@ -542,13 +552,29 @@ async function sendTelegramThreadReply(params: {
       channelId,
       ...(threadId ? { threadId } : {}),
       replyToMessageId: replyToMessageId ?? undefined,
-      ...(text ? { text } : {}),
+      ...(textWithQuote ? { text: textWithQuote } : {}),
       textFormat: 'markdown' as const,
       images,
     };
     reply = footerText
       ? await postTextThreadReplyWithFooter({ provider, input, footerText })
       : await provider.postMessage(input);
+
+    if (pendingQuote) {
+      try {
+        await clearLatestUserMessageForReplyQuoteIfId(
+          'telegram',
+          params.taskRun.id,
+          pendingQuote.pendingUserMessage.id,
+        );
+      } catch (error) {
+        console.error(
+          `[${LOG_CONTEXT}] Failed to clear Telegram reply quote for task run ${params.taskRun.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
   } finally {
     stopTyping();
   }
@@ -713,7 +739,8 @@ async function sendDiscordThreadReply(params: {
     );
   }
 
-  const pendingQuote = await peekDiscordThreadReplyQuote({
+  const pendingQuote = await peekMarkdownThreadReplyQuote({
+    provider: 'discord',
     runId: params.taskRun.id,
   });
   const textWithQuote =
