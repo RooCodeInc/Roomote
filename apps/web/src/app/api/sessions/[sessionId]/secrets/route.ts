@@ -15,6 +15,7 @@ import {
 } from '@roomote/types';
 
 import { authorize } from '@/lib/server/auth-context';
+import { readBoundedJsonBody } from '@/lib/server/bounded-json-body';
 import { Env } from '@/lib/server/env';
 
 export const runtime = 'nodejs';
@@ -70,45 +71,12 @@ async function handle(
       return error(415);
     }
 
-    const reader = request.body?.getReader();
-    if (!reader) return error(400);
-    const decoder = new TextDecoder('utf-8', { fatal: true });
-    let body = '';
-    let bytes = 0;
-    let timedOut = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        timedOut = true;
-        reject(new Error('Request unavailable'));
-        void reader.cancel().catch(() => {});
-      }, 10_000);
+    const body = await readBoundedJsonBody(request, {
+      maxBytes: maxBodyBytes,
+      timeoutMs: 10_000,
     });
-    try {
-      for (;;) {
-        const { done, value } = await Promise.race([reader.read(), deadline]);
-        if (done) break;
-        bytes += value.byteLength;
-        if (bytes > maxBodyBytes) {
-          void reader.cancel().catch(() => {});
-          return error(413);
-        }
-        body += decoder.decode(value, { stream: true });
-      }
-      body += decoder.decode();
-    } catch {
-      return error(timedOut ? 408 : 400);
-    } finally {
-      clearTimeout(timer!);
-      reader.releaseLock();
-    }
-
-    let rawArgs: unknown;
-    try {
-      rawArgs = JSON.parse(body);
-    } catch {
-      return error(400);
-    }
+    if (!body.ok) return error(body.status);
+    const rawArgs = body.value;
     if (method === 'POST') {
       const args = sessionSecretCreateSchema.safeParse(rawArgs);
       if (!args.success) return error(400);
@@ -139,7 +107,7 @@ async function handle(
           await replyToFastSessionCommand(auth, {
             sessionId: session.fastConversationId,
             text: isSessionSecretToolsExperimentEnabled(user?.metadata)
-              ? 'I saved an API key approval securely for this Session. Check list_session_secrets for ready approvals and continue the requested work using only the approved methods and destination. Attached coding runs may use this same approval. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.'
+              ? 'I saved an API key approval securely for this Session. Check list_session_secrets for ready approvals and continue the requested work using only the approved methods and destination. Attached coding runs may use this same approval, and a saved integration is available in my other Sessions too. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.'
               : 'I saved an API key approval securely for this Session. Credential-backed Session access is temporarily unavailable. Explain that the approval was saved but cannot currently be used; do not attempt a credential-backed request or ask me to paste credentials into chat.',
           });
           resumed = true;

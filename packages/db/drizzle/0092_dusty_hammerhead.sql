@@ -1,0 +1,1 @@
+ALTER TABLE "session_secrets" ADD COLUMN "scope" text DEFAULT 'session' NOT NULL;

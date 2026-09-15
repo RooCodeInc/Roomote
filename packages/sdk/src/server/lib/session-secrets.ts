@@ -2,7 +2,9 @@ import {
   insertSessionSecretApproval,
   finalizeSessionSecret,
   listOwnedSessionSecretApprovals,
+  listAccountSessionSecrets,
   listOwnedSessionSecrets,
+  revokeAccountSessionSecret,
   revokeOwnedSessionSecret,
   type SessionSecretContext,
 } from '@roomote/db/server';
@@ -207,6 +209,24 @@ export async function revokeSessionSecret(
   try {
     const { secretRef } = sessionSecretRevokeSchema.parse(rawArgs);
     await revokeOwnedSessionSecret(context, secretRef);
+  } catch {
+    throw new Error(ERROR);
+  }
+}
+
+/** Saved integrations (account-scoped grants) for Settings; metadata only. */
+export async function listAccountSecrets(userId: string) {
+  try {
+    return await listAccountSessionSecrets(userId);
+  } catch {
+    throw new Error(ERROR);
+  }
+}
+
+export async function revokeAccountSecret(userId: string, rawArgs: unknown) {
+  try {
+    const { secretRef } = sessionSecretRevokeSchema.parse(rawArgs);
+    await revokeAccountSessionSecret(userId, secretRef);
   } catch {
     throw new Error(ERROR);
   }

@@ -72,7 +72,8 @@ it('prefills a single-key consent flow and reports server-scheduled continuation
   expect(
     screen.getByRole('button', { name: 'Allow for this Session' }),
   ).toHaveAccessibleDescription('For https://api.example.com:8443 - GET, HEAD');
-  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  // The only checkbox is the human's own "save" choice, off by default.
+  expect(screen.getByRole('checkbox')).not.toBeChecked();
   expect(
     screen.queryByText(
       /Review access details|I approve this service|All paths|Only you/,
@@ -112,6 +113,7 @@ it('prefills a single-key consent flow and reports server-scheduled continuation
         pendingRef,
         secret: credential,
         allowedMethods: policy.allowedMethods,
+        scope: 'session',
       }),
     }),
   );
@@ -171,6 +173,7 @@ it.each([
       pendingRef,
       secret: credential,
       allowedMethods,
+      scope: 'session',
     });
     expect(destination).toBe(
       `For ${policy.origin} - ${allowedMethods.join(', ')}${scope}`,
@@ -246,7 +249,8 @@ it.each([
     expect(
       screen.queryByRole('button', { name: /info|How it is used|Review/i }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    // The only checkbox is the human's own "save" choice, off by default.
+    expect(screen.getByRole('checkbox')).not.toBeChecked();
     expect(
       screen.queryByText(/Review access details|GET and HEAD|with no prefix/),
     ).not.toBeInTheDocument();
@@ -432,4 +436,32 @@ it('opens only from approval links and clears the hash when closed', async () =>
   window.location.hash = '#session-secrets';
   fireEvent(window, new HashChangeEvent('hashchange'));
   await screen.findByLabelText('API key');
+});
+
+it('saves the key as an account integration when the human ticks the box', async () => {
+  await open();
+  fill();
+  fireEvent.click(screen.getByRole('checkbox'));
+  expect(
+    screen.getByRole('button', { name: 'Save integration' }),
+  ).toBeEnabled();
+  fetchMock.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        secret: { ...metadata, scope: 'account' },
+        resumed: true,
+      }),
+      { status: 201 },
+    ),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
+  expect(await screen.findByRole('status')).toHaveTextContent(
+    'API key saved as an integration for all your Sessions.',
+  );
+  expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toEqual({
+    pendingRef,
+    secret: credential,
+    allowedMethods: policy.allowedMethods,
+    scope: 'account',
+  });
 });

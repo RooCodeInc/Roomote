@@ -57,6 +57,14 @@ export const sessionSecretPrepareToolSchema = z
   })
   .strict();
 
+/**
+ * `session`: the grant is usable only from the Session it was approved in.
+ * `account`: a saved integration, usable from every Session and coding run
+ * the owner has until it expires or is revoked from Settings.
+ */
+export const SESSION_SECRET_SCOPES = ['session', 'account'] as const;
+export type SessionSecretScope = (typeof SESSION_SECRET_SCOPES)[number];
+
 export const sessionSecretCreateSchema = z
   .object({
     pendingRef: z.string().uuid(),
@@ -67,6 +75,8 @@ export const sessionSecretCreateSchema = z
      * show and echo the method policy cannot approve a write-capable grant.
      */
     allowedMethods: sessionEgressAllowedMethodsSchema.optional(),
+    /** Chosen by the human at entry ("Save integration"); never by an agent. */
+    scope: z.enum(SESSION_SECRET_SCOPES).default('session'),
   })
   .strict();
 
@@ -109,6 +119,7 @@ export interface SessionSecretMetadata {
   headerName: SessionSecretPrepare['headerName'];
   headerPrefix: SessionSecretPrepare['headerPrefix'];
   allowedMethods: SessionEgressMethod[];
+  scope: SessionSecretScope;
   expiresAt: string;
   revokedAt: string | null;
   createdAt: string;
@@ -116,7 +127,7 @@ export interface SessionSecretMetadata {
 
 export interface SessionSecretPendingMetadata extends Omit<
   SessionSecretMetadata,
-  'secretRef' | 'revokedAt'
+  'secretRef' | 'revokedAt' | 'scope'
 > {
   pendingRef: string;
 }

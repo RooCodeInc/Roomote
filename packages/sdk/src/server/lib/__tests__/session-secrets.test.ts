@@ -14,8 +14,10 @@ import {
 import {
   createSessionSecret,
   prepareSessionSecret,
+  listAccountSecrets,
   listSessionSecretApprovals,
   listSessionSecrets,
+  revokeAccountSecret,
   revokeSessionSecret,
 } from '../session-secrets';
 
@@ -213,6 +215,7 @@ it('encrypts SQL storage, lists metadata only and wipes ciphertext on revoke', a
     'label',
     'origin',
     'revokedAt',
+    'scope',
     'secretRef',
   ]);
   expect(JSON.stringify(listed)).not.toContain(secret);
@@ -290,6 +293,62 @@ it('binds references to the Session even for the same owner and rejects unknown 
       revokeSessionSecret(actor, { secretRef: ref }),
     ).rejects.toThrow('Secret request unavailable');
   }
+});
+
+it('shares a saved integration with every Session of its owner and nobody else', async () => {
+  const pending = await prepareSessionSecret(context, {
+    ...policy,
+    label: 'Saved service',
+  });
+  const saved = await createSessionSecret(context, {
+    pendingRef: pending.pendingRef,
+    secret,
+    scope: 'account',
+  });
+  expect(saved.scope).toBe('account');
+  expect((await listSessionSecrets(context)).map((item) => item.scope)).toEqual(
+    ['session', 'account'],
+  );
+
+  // Another Session of the same owner sees and can use only the saved one.
+  const other = { ...context, sessionId: await session(context.userId!) };
+  expect(
+    (await listSessionSecrets(other)).map((item) => item.secretRef),
+  ).toEqual([saved.secretRef]);
+  expect((await resolveOwnedSessionSecret(other, saved.secretRef)).value).toBe(
+    secret,
+  );
+  await expect(resolveOwnedSessionSecret(other, secretRef)).rejects.toThrow(
+    'Secret unavailable',
+  );
+
+  // Another owner never sees it, in a Session or in Settings.
+  const stranger = await userFactory.create();
+  userIds.push(stranger.id);
+  const foreign = {
+    userId: stranger.id,
+    sessionId: await session(stranger.id),
+  };
+  expect(await listSessionSecrets(foreign)).toEqual([]);
+  expect(await listAccountSecrets(stranger.id)).toEqual([]);
+  await expect(
+    revokeAccountSecret(stranger.id, { secretRef: saved.secretRef }),
+  ).rejects.toThrow('Secret request unavailable');
+
+  // Settings lists only saved integrations and revokes them everywhere.
+  expect(
+    (await listAccountSecrets(context.userId!)).map((item) => item.secretRef),
+  ).toEqual([saved.secretRef]);
+  await expect(
+    revokeAccountSecret(context.userId!, { secretRef }),
+  ).rejects.toThrow('Secret request unavailable');
+  await revokeAccountSecret(context.userId!, { secretRef: saved.secretRef });
+  await expect(
+    resolveOwnedSessionSecret(other, saved.secretRef),
+  ).rejects.toThrow('Secret unavailable');
+  expect(
+    (await listAccountSecrets(context.userId!))[0]!.revokedAt,
+  ).not.toBeNull();
 });
 
 it('uses SQL expiry to deny decryption', async () => {

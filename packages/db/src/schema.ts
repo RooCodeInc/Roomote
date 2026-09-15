@@ -78,6 +78,7 @@ import type {
   SessionEgressMethod,
   SessionEgressPhase,
   SessionEgressRevocationKind,
+  SessionSecretScope,
   TaskModelSettings,
   WorkspaceRoutingSettings,
   TaskRunErrorCode,
@@ -4301,6 +4302,14 @@ export const sessionSecrets = pgTable(
       .notNull()
       .default(sql`'{GET,HEAD}'::text[]`)
       .$type<SessionEgressMethod[]>(),
+    // `session`: usable only from `session_id`. `account`: a saved integration
+    // usable from every Session the owner has; `session_id` then records
+    // where it was approved. Additive with a default so N-1 code, which
+    // filters by `session_id`, keeps working.
+    scope: text('scope')
+      .notNull()
+      .default('session')
+      .$type<SessionSecretScope>(),
     value: encryptedText('value'),
     expiresAt: timestamp('expires_at').notNull(),
     revokedAt: timestamp('revoked_at'),

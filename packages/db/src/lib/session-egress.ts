@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 
-import { and, asc, eq, gt, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 
 import { getEncryptionKey } from '@roomote/env';
 import {
@@ -123,8 +123,12 @@ export async function findSessionEgressCandidateForRun(runId: number): Promise<{
     .from(sessionSecrets)
     .where(
       and(
-        eq(sessionSecrets.sessionId, eligible.sessionId),
         eq(sessionSecrets.ownerUserId, eligible.ownerUserId),
+        // Grants approved in this Session plus the owner's saved integrations.
+        or(
+          eq(sessionSecrets.sessionId, eligible.sessionId),
+          eq(sessionSecrets.scope, 'account'),
+        ),
         isNull(sessionSecrets.revokedAt),
         gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
       ),
@@ -247,8 +251,11 @@ async function mintMissingSubstitutes(
     .from(sessionSecrets)
     .where(
       and(
-        eq(sessionSecrets.sessionId, workload.sessionId),
         eq(sessionSecrets.ownerUserId, workload.ownerUserId),
+        or(
+          eq(sessionSecrets.sessionId, workload.sessionId),
+          eq(sessionSecrets.scope, 'account'),
+        ),
         isNull(sessionSecrets.revokedAt),
         gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
         sql`not exists (
@@ -607,7 +614,7 @@ async function authorizeSubstitute(
       session.ownerKind !== 'user' ||
       session.ownerUserId !== workload.ownerUserId ||
       secret.ownerUserId !== workload.ownerUserId ||
-      secret.sessionId !== workload.sessionId ||
+      (secret.scope !== 'account' && secret.sessionId !== workload.sessionId) ||
       session.archivedAt ||
       row.ownerDeletedAt ||
       !isSessionSecretToolsExperimentEnabled(row.ownerMetadata) ||

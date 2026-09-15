@@ -677,7 +677,7 @@ export default {
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "List this Session's pending credential approvals and ready secret references with their origin, header, allowed methods, and expiry, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval and before using a reference; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready references are usable by request_with_session_secret for reads and are delivered automatically to coding tasks launched from this Session.",
+  description: "List this Session's pending credential approvals and ready secret references with their origin, header, allowed methods, scope, and expiry, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Scope account means an integration the human saved for all their Sessions; it is ready here without any new approval. Call this before preparing a new approval and before using a reference; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready references are usable by request_with_session_secret for reads and are delivered automatically to coding tasks launched from this Session.",
   args: {},
   execute: (args, context) => invoke("list_session_secrets", args, context),
 }

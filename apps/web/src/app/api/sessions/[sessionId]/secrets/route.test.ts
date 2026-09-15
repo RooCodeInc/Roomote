@@ -45,6 +45,7 @@ const createArgs = {
   pendingRef: secretRef,
   secret: plaintext,
   allowedMethods: ['GET', 'POST'],
+  scope: 'session',
 };
 const metadata = { secretRef, label: 'API' };
 const auth = { success: true, userId: 'cookie-user' };
@@ -283,7 +284,7 @@ describe('session secret route boundary', () => {
       expect(mocks.create).toHaveBeenCalledWith(
         { sessionId, userId: auth.userId },
         allowedMethods === undefined
-          ? { pendingRef: secretRef, secret: plaintext }
+          ? { pendingRef: secretRef, secret: plaintext, scope: 'session' }
           : args,
       );
       expect(mocks.findSession).not.toHaveBeenCalled();

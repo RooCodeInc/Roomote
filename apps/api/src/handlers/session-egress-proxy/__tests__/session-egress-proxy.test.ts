@@ -486,6 +486,61 @@ it.each([
   },
 );
 
+it("delivers a saved integration to runs of the owner's other Sessions but not to other owners", async () => {
+  const pending = await prepareSessionSecret(context, {
+    label: 'Saved API',
+    origin,
+    headerName: 'authorization',
+    headerPrefix: 'Bearer ',
+  });
+  const saved = await createSessionSecret(context, {
+    pendingRef: pending.pendingRef,
+    secret,
+    scope: 'account',
+  });
+  // A run attached to a different Session of the same owner receives it.
+  const elsewhere = await session(ownerId);
+  const otherRun = await run(ownerId, elsewhere.id);
+  const registration = await registerSessionEgressWorkload({
+    runId: otherRun.id,
+    provider: 'modal',
+    connectorIdentity: `roomote://api-proxy/${randomBytes(12).toString('hex')}`,
+    leaseSeconds: 3600,
+  });
+  for (const issue of registration.substitutes) minted.push(issue.substitute);
+  expect(registration.substitutes.map((issue) => issue.secretRef)).toEqual([
+    saved.secretRef,
+  ]);
+  vi.mocked(fetch).mockResolvedValueOnce(
+    new Response('{"ok":true}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }) as never,
+  );
+  const response = await app.request(`${base}/v1/items`, {
+    headers: {
+      authorization: `Bearer ${registration.substitutes[0]!.substitute}`,
+    },
+  });
+  expect(response.status).toBe(200);
+  // A different owner's run gets nothing from it.
+  const stranger = (
+    await userFactory.create({
+      metadata: { session_secret_tools_enabled: true },
+    })
+  ).id;
+  userIds.push(stranger);
+  const foreign = await session(stranger);
+  const foreignRun = await run(stranger, foreign.id);
+  const empty = await registerSessionEgressWorkload({
+    runId: foreignRun.id,
+    provider: 'modal',
+    connectorIdentity: `roomote://api-proxy/${randomBytes(12).toString('hex')}`,
+    leaseSeconds: 3600,
+  });
+  expect(empty.substitutes).toEqual([]);
+});
+
 it('denies an unknown substitute without attributing an audit row', async () => {
   const response = await request('/v1/items', {
     token: `${SESSION_EGRESS_SUBSTITUTE_PREFIX}${'z'.repeat(43)}`,

@@ -47,8 +47,8 @@ export function SessionSecrets({ sessionId }: { sessionId: string }) {
         <DialogHeader>
           <DialogTitle>Approve API key</DialogTitle>
           <DialogDescription>
-            Enter it here, never in chat. It will only be available to this
-            Session.
+            Enter it here, never in chat. It stays with this Session unless you
+            save it as an integration for every Session you own.
           </DialogDescription>
         </DialogHeader>
         {open ? (
@@ -68,11 +68,13 @@ function SessionSecretsForm({ sessionId }: { sessionId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [inputVersion, setInputVersion] = useState(0);
+  const [save, setSave] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const endpoint = `/api/sessions/${encodeURIComponent(sessionId)}/secrets`;
   const selected = pending.find((item) => item.pendingRef === selectedRef);
   function clearForm() {
     formRef.current?.reset();
+    setSave(false);
     // Also reset the shared secret input's reveal state and retained value.
     setInputVersion((version) => version + 1);
   }
@@ -158,6 +160,8 @@ function SessionSecretsForm({ sessionId }: { sessionId: string }) {
                   pendingRef: selected.pendingRef,
                   secret: new FormData(event.currentTarget).get('secret'),
                   allowedMethods: selected.allowedMethods,
+                  // Scope is the human's choice on this form, never the agent's.
+                  scope: save ? 'account' : 'session',
                 });
                 if (
                   !parsed.success ||
@@ -192,9 +196,12 @@ function SessionSecretsForm({ sessionId }: { sessionId: string }) {
                   setPending(remaining);
                   setSelectedRef(remaining[0]?.pendingRef ?? '');
                   setNotice(
-                    data.resumed
-                      ? 'API key saved. The Session has been notified without sharing your key.'
-                      : 'API key saved. The Session could not be notified. Ask the agent to check list_session_secrets and continue.',
+                    (parsed.data.scope === 'account'
+                      ? 'API key saved as an integration for all your Sessions. '
+                      : 'API key saved. ') +
+                      (data.resumed
+                        ? 'The Session has been notified without sharing your key.'
+                        : 'The Session could not be notified. Ask the agent to check list_session_secrets and continue.'),
                   );
                 } catch {
                   clearForm();
@@ -237,12 +244,25 @@ function SessionSecretsForm({ sessionId }: { sessionId: string }) {
                     className="ph-no-capture ph-mask sentry-mask"
                   />
                 </div>
+                <div className="flex items-start gap-2">
+                  <input
+                    id="session-secret-save"
+                    type="checkbox"
+                    className="mt-1 size-4 accent-primary"
+                    checked={save}
+                    onChange={(event) => setSave(event.target.checked)}
+                  />
+                  <Label htmlFor="session-secret-save" className="leading-snug">
+                    Save integration for all my Sessions, not just this one. You
+                    can revoke it under Settings → Personal.
+                  </Label>
+                </div>
                 <Button
                   type="submit"
                   disabled={busy}
                   aria-describedby="session-secret-destination"
                 >
-                  Allow for this Session
+                  {save ? 'Save integration' : 'Allow for this Session'}
                 </Button>
               </fieldset>
             </form>
