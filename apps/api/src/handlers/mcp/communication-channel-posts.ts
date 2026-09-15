@@ -123,14 +123,31 @@ async function resolveSlackTarget(params: {
       );
     }
 
-    const linkedUser = await db.query.slackUserMappings.findFirst({
+    const actingUserId = params.taskRun.actingUserId?.trim();
+    const actingSlackUser = actingUserId
+      ? await db.query.slackUserMappings.findFirst({
+          columns: { slackUserId: true },
+          where: and(
+            eq(slackUserMappings.userId, actingUserId),
+            eq(slackUserMappings.slackTeamId, params.provider.teamId),
+          ),
+        })
+      : null;
+    if (!actingSlackUser) {
+      throw new McpProxyError(
+        403,
+        'Slack DM posts require the acting user to have a linked Slack account in this workspace',
+      );
+    }
+
+    const linkedRecipient = await db.query.slackUserMappings.findFirst({
       columns: { userId: true },
       where: and(
         eq(slackUserMappings.slackUserId, slackUserId),
         eq(slackUserMappings.slackTeamId, params.provider.teamId),
       ),
     });
-    if (!linkedUser) {
+    if (!linkedRecipient) {
       throw new McpProxyError(
         403,
         'Slack DM recipient must have a linked Roomote account in this workspace',

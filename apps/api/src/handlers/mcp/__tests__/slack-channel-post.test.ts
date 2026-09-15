@@ -368,9 +368,9 @@ describe('slack channel post MCP endpoint', () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockTaskRun() as never,
     );
-    vi.mocked(db.query.slackUserMappings.findFirst).mockResolvedValue(
-      undefined,
-    );
+    vi.mocked(db.query.slackUserMappings.findFirst)
+      .mockResolvedValueOnce({ slackUserId: 'UACTING123' } as never)
+      .mockResolvedValueOnce(undefined);
 
     const response = await postChannelMessage(runToken, {
       channel: 'U999ABC456',
@@ -386,6 +386,30 @@ describe('slack channel post MCP endpoint', () => {
     expect(postMessageMock).not.toHaveBeenCalled();
     expect(eq).toHaveBeenCalledWith('slackUserId', 'U999ABC456');
     expect(eq).toHaveBeenCalledWith('slackTeamId', 'T123ABC456');
+  });
+
+  it('rejects DM posts when the acting user is not linked to the selected workspace', async () => {
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
+    );
+    vi.mocked(db.query.slackUserMappings.findFirst).mockResolvedValueOnce(
+      undefined,
+    );
+
+    const response = await postChannelMessage(runToken, {
+      channel: 'U123ABC456',
+      text: 'hello',
+    });
+    const body = (await response.json()) as JsonBody;
+
+    expect(response.status).toBe(403);
+    expect(body.error).toBe(
+      'Slack DM posts require the acting user to have a linked Slack account in this workspace',
+    );
+    expect(eq).toHaveBeenCalledWith('userId', 'user-1');
+    expect(eq).toHaveBeenCalledWith('slackTeamId', 'T123ABC456');
+    expect(openConversationMock).not.toHaveBeenCalled();
+    expect(postMessageMock).not.toHaveBeenCalled();
   });
 
   it('selects the Slack installation from the task workspace', async () => {
