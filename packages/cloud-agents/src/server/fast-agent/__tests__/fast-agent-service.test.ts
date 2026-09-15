@@ -4460,6 +4460,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.launchPrReview).not.toHaveBeenCalled();
       expect(mocks.bindExecutor).toHaveBeenCalledOnce();
       expect(adapter.postReply).toHaveBeenCalledTimes(2);
+
+      // The bridge answers skill tools itself; the turn still records them
+      // in the transcript so a Session can show a skill was really loaded,
+      // without persisting the skill body.
+      const skillToolResults = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter(
+          (message) =>
+            message.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult &&
+            [nativeToolNames.listSkills, nativeToolNames.loadSkill].includes(
+              message.payload?.toolName,
+            ),
+        );
+      expect(
+        skillToolResults.map((message) => [
+          message.payload?.toolName,
+          message.payload?.status,
+          message.metadata?.visibleInTranscript,
+        ]),
+      ).toEqual([
+        [nativeToolNames.listSkills, 'completed', true],
+        [nativeToolNames.loadSkill, 'completed', true],
+      ]);
+      const loadOutput = String(skillToolResults[1]?.payload?.output ?? '');
+      expect(loadOutput).toContain(`instance:${skill.id}`);
+      expect(JSON.parse(loadOutput)).toMatchObject({
+        success: true,
+        name: 'daily-brief',
+        resource: 'SKILL.md',
+      });
+      expect(loadOutput).not.toContain('Summarize the current conversation');
     } finally {
       await bridge.revokeFastAgentMcpCapabilitiesForConversation(
         'conversation-1',

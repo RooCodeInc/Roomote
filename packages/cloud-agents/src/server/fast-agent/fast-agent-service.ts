@@ -6,6 +6,7 @@ import {
   prepareServiceCredential,
 } from '@roomote/sdk/server/service-credentials';
 import {
+  ACP_TOOL_KINDS,
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
@@ -5555,6 +5556,36 @@ export async function answerFastAgentQuestion({
                               allowSpillRecovery: true,
                               skillStore,
                               spillBudget,
+                              // The bridge answers skill catalog and load
+                              // calls before this executor sees them. Record
+                              // them like every other native tool so the
+                              // transcript and turn diagnostics show whether
+                              // a skill was actually loaded.
+                              recordSkillToolCall: async (record) => {
+                                const finishRecord =
+                                  diagnostics.recordNativeToolStarted(
+                                    record.name,
+                                  );
+                                try {
+                                  const event = await beginCanonicalToolEvent({
+                                    title: record.name,
+                                    args: record.args,
+                                    nativeSessionId: openCodeSessionID,
+                                    kind:
+                                      record.name ===
+                                      FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill
+                                        ? ACP_TOOL_KINDS.read
+                                        : ACP_TOOL_KINDS.list,
+                                  });
+                                  await finishCanonicalToolEvent(
+                                    event,
+                                    record.result,
+                                    openCodeSessionID,
+                                  );
+                                } finally {
+                                  finishRecord();
+                                }
+                              },
                             },
                           ),
                         );
