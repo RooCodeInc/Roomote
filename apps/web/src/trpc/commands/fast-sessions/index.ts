@@ -429,7 +429,7 @@ export function scheduleWebFastAgentTurn(input: WebFastAgentTurnInput): void {
   after(() => runWebFastAgentTurn(input));
 }
 
-export type FastSessionIntegrationMention = {
+type FastSessionIntegrationMention = {
   id: string;
   name: string;
   description: string;
