@@ -543,7 +543,11 @@ export async function createAzureMachine(
         ...mutationContext,
       });
 
+      // A standby resume bootstraps the retained sandbox itself, and the
+      // cleanup above just deleted it, so the same handle cannot be resumed
+      // again. Only launches that mint a fresh instance can start over.
       if (
+        resumeHandle !== undefined ||
         isAbortError(error) ||
         bootstrapAttempt === MAX_BOOTSTRAP_ATTEMPTS ||
         !isTransientBootstrapError(error)
