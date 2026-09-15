@@ -186,7 +186,7 @@ export function resolveToolPresentation(
     toolName,
     phase,
     readToolArguments(data),
-    toolName === 'manage_wakeups' ? readToolResult(data) : null,
+    readToolResult(data),
     category,
     serverName,
     providerKind === 'native'
@@ -449,7 +449,7 @@ function resolveReceiptLanguage(
       object: 'Images',
     };
   if (nativeToolName === 'skill' || nativeToolName === 'load_skill') {
-    const name = stringArgument(args, 'name');
+    const name = humanReadableSkillName(args) ?? humanReadableSkillName(result);
     return {
       verb: byPhase('Loading', 'Loaded', 'Failed to Load'),
       object: name ? `skill ${name}` : 'skill',
@@ -503,6 +503,11 @@ function resolveReceiptLanguage(
         'file',
     };
   return null;
+}
+
+function humanReadableSkillName(args: ToolArguments | null): string | null {
+  const name = stringArgument(args, 'name');
+  return name && !/^instance:[0-9a-f-]{36}$/i.test(name) ? name : null;
 }
 
 export function readToolArguments(data: ToolData): ToolArguments | null {
