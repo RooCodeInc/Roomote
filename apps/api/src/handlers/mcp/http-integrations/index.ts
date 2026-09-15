@@ -34,7 +34,7 @@ import {
 } from './broker';
 
 export function createHttpIntegrationsMcp() {
-  // Only operator integrations require a startup manifest; Session grants are live.
+  // Only operator integrations require a startup manifest; integration keys are live.
   const config = Env.R_HTTP_INTEGRATIONS_ENABLED
     ? loadHttpIntegrationsConfig()
     : { integrations: [] };
@@ -109,7 +109,7 @@ export function createHttpIntegrationsMcp() {
         'list_integrations',
         {
           description: serviceCredentialToolsEnabled
-            ? "List allowed operator integrations and live owner-approved Session grants with their methods and paths. Credentials are never returned. Session grants need no operator manifest: use integration_request with a session: id for a GET or HEAD read, or, inside an attached coding run, the substitute token and base URL delivered for that grant (see ROOMOTE_CREDENTIAL_EGRESS_SERVICES) with any ordinary HTTP client and the grant's allowed methods."
+            ? "List allowed operator integrations and live owner-approved integration keys with their methods and paths. Credentials are never returned. integration keys need no operator manifest: use integration_request with a session: id for a GET or HEAD read, or, inside an attached coding run, the substitute token and base URL delivered for that grant (see ROOMOTE_CREDENTIAL_EGRESS_SERVICES) with any ordinary HTTP client and the grant's allowed methods."
             : 'List allowed operator integrations with their methods and paths. Credentials are never returned.',
           inputSchema: {},
           annotations: {
@@ -224,7 +224,7 @@ export function createHttpIntegrationsMcp() {
         'integration_request',
         {
           description: serviceCredentialToolsEnabled
-            ? 'Make a credential-broker request using an ID from list_integrations: an operator integration ID, or a session: ID for an owner-approved Session grant. Session grants are GET and HEAD only here; for approved write methods, scripts, or SDKs inside an attached run, use the delivered substitute token with the base URL instead. Supply only integrationId, method, relative path (optional query), optional body/contentType and Session accept preference; never supply credentials, arbitrary headers, or a Session/user ID.'
+            ? 'Make a credential-broker request using an ID from list_integrations: an operator integration ID, or a session: ID for an owner-approved integration key. integration keys are GET and HEAD only here; for approved write methods, scripts, or SDKs inside an attached run, use the delivered substitute token with the base URL instead. Supply only integrationId, method, relative path (optional query), optional body/contentType and Session accept preference; never supply credentials, arbitrary headers, or a Session/user ID.'
             : 'Make a credential-broker request using an operator integration ID from list_integrations. Supply only integrationId, method, relative path (optional query), optional body/contentType and accept preference; never supply credentials, arbitrary headers, or a Session/user ID.',
           inputSchema: integrationRequestSchema,
           annotations: {

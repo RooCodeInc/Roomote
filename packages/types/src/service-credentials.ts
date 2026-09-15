@@ -100,7 +100,7 @@ export const integrationCreateSchema = z
   .strict();
 
 /**
- * @deprecated Mediated Session-grant requests (`request_with_integration_key`
+ * @deprecated Mediated integration-key requests (`request_with_integration_key`
  * / `integration_request` with a `session:` ID) are a GET/HEAD-only
  * compatibility path, not the required resource path. Grants are meant to be
  * used by ordinary HTTP clients at the real service URL through the session

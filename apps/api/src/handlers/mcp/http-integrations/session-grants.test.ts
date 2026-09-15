@@ -664,11 +664,11 @@ it('logs bounded reasons for denied and failed Session requests without request 
     );
     const lines = warn.mock.calls.map((call) => String(call[0]));
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain('Session grant request denied');
+    expect(lines[0]).toContain('integration key request denied');
     expect(lines[0]).toContain(`secretRef=${secretRef}`);
     expect(lines[0]).toContain('method=POST');
     expect(lines[0]).toContain('reason=method_not_allowed');
-    expect(lines[1]).toContain('Session grant request failed');
+    expect(lines[1]).toContain('integration key request failed');
     expect(lines[1]).toContain('reason=Error');
     for (const line of lines) {
       expect(line).not.toContain('private-path-marker');

@@ -203,7 +203,7 @@ export const integrationRequestSchema = z
     accept: z
       .enum(['application/json', 'text/plain'])
       .nullish()
-      .describe('Optional response preference for Session grants only.'),
+      .describe('Optional response preference for integration keys only.'),
   })
   .strict();
 
@@ -361,7 +361,7 @@ export async function integrationRequest(
     // Bounded metadata only: the audit row and this line carry no path,
     // query, header, body, credential or upstream error text.
     console.warn(
-      `[HTTP integrations] Session grant request ${outcome} (scope=${scope}, secretRef=${secretRef.data}, method=${parsed.success ? parsed.data.method : 'invalid'}, reason=${integrationFailureReason(error)})`,
+      `[HTTP integrations] integration key request ${outcome} (scope=${scope}, secretRef=${secretRef.data}, method=${parsed.success ? parsed.data.method : 'invalid'}, reason=${integrationFailureReason(error)})`,
     );
     await recordServiceCredentialAudit({
       ...audit,

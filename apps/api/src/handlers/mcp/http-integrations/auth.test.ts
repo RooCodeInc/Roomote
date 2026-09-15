@@ -685,7 +685,7 @@ async function tool(
 }
 
 it.each(['broker', 'run'] as const)(
-  'lists and calls real Session grants through signed %s auth, middleware and MCP',
+  'lists and calls real integration keys through signed %s auth, middleware and MCP',
   async (kind) => {
     // Neither a manifest nor per-service API environment credentials are required.
     enabled.value = false;
@@ -861,7 +861,7 @@ it.each(['broker', 'run'] as const)(
 );
 
 it.each(['internal', 'public'] as const)(
-  'denies %s user-only auth access to Session grants even with the owner identity and caller Session ID',
+  'denies %s user-only auth access to integration keys even with the owner identity and caller Session ID',
   async (kind) => {
     const fixture = await sessionGrant();
     if (kind === 'public')
