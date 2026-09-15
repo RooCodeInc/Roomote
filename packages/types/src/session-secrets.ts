@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   SESSION_EGRESS_READ_METHODS,
   sessionEgressAllowedMethodsSchema,
+  sessionEgressHeaderNameSchema,
   type SessionEgressMethod,
 } from './session-egress';
 
@@ -25,7 +26,7 @@ export function isSessionSecretToolsExperimentEnabled(
 const sessionSecretPrepareFields = {
   label: z.string().trim().min(1).max(80),
   origin: z.string().min(1).max(2048),
-  headerName: z.enum(['authorization', 'x-api-key', 'api-key']),
+  headerName: sessionEgressHeaderNameSchema,
   ttlHours: z.number().int().min(1).max(720).default(24),
   /**
    * Methods ordinary clients may use through the egress gateway. Omitting

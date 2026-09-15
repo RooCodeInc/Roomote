@@ -149,10 +149,12 @@ vi.mock('@/components/ai-elements', () => {
   return {
     PromptInput: ({
       children,
+      keepFocusOnSubmit: _keepFocusOnSubmit,
       onSubmit,
       ...props
     }: Omit<ComponentPropsWithoutRef<'form'>, 'onSubmit'> & {
       children: ReactNode;
+      keepFocusOnSubmit?: boolean;
       onSubmit?: (message: {
         text: string;
         files?: Array<{
@@ -1021,94 +1023,6 @@ describe('PromptInput', () => {
     expect(directSandboxSendPromptMock).not.toHaveBeenCalled();
   });
 
-  it.each(['keyboard', 'button'] as const)(
-    'keeps focus in the task composer after %s submission completes',
-    async (submissionMethod) => {
-      let resolveSend: (() => void) | undefined;
-      sandboxSendPromptMutateMock.mockReturnValueOnce(
-        new Promise<void>((resolve) => {
-          resolveSend = resolve;
-        }),
-      );
-      useSandboxConnectedMock.mockReturnValue(true);
-      useSandboxConnectionStatusMock.mockReturnValue({
-        connected: true,
-        connectionError: false,
-        reconnect: vi.fn(),
-      });
-      useSandboxClientMock.mockReturnValue({
-        commands: {
-          touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
-        },
-      });
-
-      render(
-        <PromptInput
-          taskRun={createTaskRun(42, { taskId: 'task-focus' })}
-          onFileSearchOpen={() => {}}
-          onCommandSearchOpen={() => {}}
-        />,
-      );
-
-      const textarea = screen.getByPlaceholderText(/Message agent/i);
-      textarea.focus();
-      fireEvent.change(textarea, { target: { value: 'keep going' } });
-      if (submissionMethod === 'keyboard') {
-        fireEvent.submit(textarea.closest('form')!);
-      } else {
-        fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-      }
-
-      await waitFor(() => expect(textarea).toBeDisabled());
-      await act(async () => resolveSend?.());
-
-      await waitFor(() => expect(textarea).toHaveFocus());
-    },
-  );
-
-  it('does not restore task composer focus after focus moves elsewhere while sending', async () => {
-    let resolveSend: (() => void) | undefined;
-    sandboxSendPromptMutateMock.mockReturnValueOnce(
-      new Promise<void>((resolve) => {
-        resolveSend = resolve;
-      }),
-    );
-    useSandboxConnectedMock.mockReturnValue(true);
-    useSandboxConnectionStatusMock.mockReturnValue({
-      connected: true,
-      connectionError: false,
-      reconnect: vi.fn(),
-    });
-    useSandboxClientMock.mockReturnValue({
-      commands: {
-        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
-      },
-    });
-
-    render(
-      <>
-        <PromptInput
-          taskRun={createTaskRun(42, { taskId: 'task-focus' })}
-          onFileSearchOpen={() => {}}
-          onCommandSearchOpen={() => {}}
-        />
-        <button type="button">Other control</button>
-      </>,
-    );
-
-    const textarea = screen.getByPlaceholderText(/Message agent/i);
-    textarea.focus();
-    fireEvent.change(textarea, { target: { value: 'keep going' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    await waitFor(() => expect(textarea).toBeDisabled());
-
-    const otherControl = screen.getByRole('button', { name: 'Other control' });
-    otherControl.focus();
-    await act(async () => resolveSend?.());
-
-    await waitFor(() => expect(otherControl).toHaveFocus());
-  });
-
   it('directs /goal users to the owning Session instead of the task', () => {
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
@@ -1680,14 +1594,17 @@ describe('PromptInput ghost suggestion', () => {
       {
         eventType: 'roomote_runtime.user_prompt',
         text: 'Fix the login redirect',
+        ts: 100,
       },
       {
         eventType: 'roomote_runtime.assistant_message',
         text: 'The redirect is fixed',
+        ts: 200,
       },
       {
         eventType: 'roomote_runtime.tool_call',
         text: 'This UI-only event must not advance the cache',
+        ts: 300,
       },
     ];
     useTaskMessageEnvelopesMock.mockImplementation(() => ({ data: history }));
@@ -1700,7 +1617,7 @@ describe('PromptInput ghost suggestion', () => {
     const { rerender } = render(<PromptInput {...props} />);
 
     expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
-      input: { historyRevision: 1 },
+      input: { historyRevision: 200 },
     });
 
     // A user message alone must not advance the revision: only a completed
@@ -1710,12 +1627,13 @@ describe('PromptInput ghost suggestion', () => {
       {
         eventType: 'roomote_runtime.user_prompt',
         text: 'Please add a regression test',
+        ts: 400,
       },
     ];
     rerender(<PromptInput {...props} />);
 
     expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
-      input: { historyRevision: 1 },
+      input: { historyRevision: 200 },
     });
 
     history = [
@@ -1723,12 +1641,13 @@ describe('PromptInput ghost suggestion', () => {
       {
         eventType: 'roomote_runtime.assistant_message',
         text: 'The regression test now passes',
+        ts: 500,
       },
     ];
     rerender(<PromptInput {...props} />);
 
     expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
-      input: { historyRevision: 2 },
+      input: { historyRevision: 500 },
     });
   });
 

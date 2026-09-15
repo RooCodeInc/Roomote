@@ -64,11 +64,12 @@ Personal Settings also include app preferences such as:
 - **Mind Reader Mode** to expand LLM thoughts by default in task conversations;
   you can still collapse or expand individual thought messages
 - **Narration Mode** for a more streamlined task conversation view
-- **Therapist Mode** to explain which remembered fact informed a Session or task
 - **How to work with me** for private personal instructions and conversational
   learning
 - **Home suggestions** under **Settings > Experimental** to offer task ideas
   based on your recent work
+- **Slack peer conversations** under **Settings > Experimental** to let an
+  established Fast Slack thread continue after another participant is mentioned
 
 Most teammates only need profile, linked accounts, and theme settings.
 
@@ -86,28 +87,31 @@ runs, and memories that have not finished ingesting. If Memory or helper-model
 generation is unavailable, Home keeps the standard non-personalized suggestions.
 Turn the experiment off at any time to stop personalized suggestion requests.
 
-### Understand Therapist Mode
+### Continue Slack peer conversations
 
-Therapist Mode is an opt-in disclosure setting. When a specific fact returned
-by [Memory](/memory) materially informs Roomote's answer or work, Roomote names
-that remembered fact in human terms and explains how it was used. It does not
-narrate unrelated retrievals or expose internal memory identifiers, storage
-paths, metadata, or provenance fields.
+**Slack peer conversations** is an opt-in experiment owned by the person whose
+Fast Session is bound to the Slack thread. When enabled, eligible human replies
+can continue reaching Fast after someone mentions another participant. Fast is
+instructed to stay quiet around peer discussion unless it has a useful reason to
+participate. Direct Roomote mentions work normally with the experiment on or off.
 
 ## Personalize how Roomote works with you
 
-Use **How to work with me** for durable preferences such as your preferred
-name, language, formality, answer length, use of examples, directness, update
-frequency, or accessibility and presentation preferences you choose to share.
-These instructions apply to conversations with you; they do not silently
-rewrite code or customer-facing deliverables.
+Use **How to work with me** for durable context and preferences that can help
+Roomote work with you in the future. This can include recurring
+responsibilities, workflows, tools, constraints, and collaboration patterns,
+along with your preferred name, language, formality, answer length, use of
+examples, directness, update frequency, or accessibility and presentation
+preferences you choose to share. These instructions apply to conversations
+with you; they do not silently rewrite code or customer-facing deliverables.
 
-**Learn from conversations** is on by default. Roomote may save a preference
-you state explicitly and may form modest, revisable style preferences from
-repeated behavior. Turning learning off stops new automatic updates but keeps
-the instructions already shown in the text box active. **Reset** clears both
-edited and learned instructions. A reset does not rebuild them from older
-conversation history.
+**Learn from conversations** is on by default. Roomote may save durable work
+context or a preference you state explicitly and may form modest, revisable
+style preferences from repeated behavior. It does not save one-off task
+details or facts about other people as personal context. Turning learning off
+stops new automatic updates but keeps the instructions already shown in the
+text box active. **Reset** clears both edited and learned instructions. A reset
+does not rebuild them from older conversation history.
 
 Fast captures each participant's personalization when they first speak in a
 conversation and keeps that private snapshot for their later turns in the same

@@ -1749,9 +1749,11 @@ export function FastSessionTranscript({
                       enabled: true,
                       active:
                         liveVoice.active || liveVoice.status === 'connecting',
+                      status: liveVoice.status,
                       onToggle: handleVoiceToggle,
                       call: {
                         startedAt: liveVoice.startedAt,
+                        inputLevel: liveVoice.inputLevel,
                         micMuted: liveVoice.micMuted,
                         onToggleMic: () =>
                           liveVoice.setMicMuted(!liveVoice.micMuted),

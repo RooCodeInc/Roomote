@@ -47,6 +47,9 @@ describe('memory MCP task guidance', () => {
       'first normal context or work tool call and remain visible in the session',
     );
     expect(instructions.endsWith(BRAIN_MCP_INSTRUCTIONS)).toBe(true);
+    expect(instructions).toContain(
+      'which remembered fact you retrieved and how you used it',
+    );
   });
 
   it('keeps provider-neutral instructions for non-Brain memory servers', () => {
@@ -73,6 +76,26 @@ describe('memory MCP task guidance', () => {
       'Do not duplicate the same learning across memory stores',
     );
   });
+
+  it.each(['task', 'conversation'] as const)(
+    'keeps Brain disclosure guidance when Brain is a secondary %s store',
+    (surface) => {
+      const instructions = createMemoryMcpInstructions('gbrain', {
+        primary: false,
+        surface,
+      });
+
+      expect(instructions).toContain(
+        'which remembered fact you retrieved and how you used it',
+      );
+      expect(instructions).toContain(
+        'Never expose internal memory IDs, page slugs, storage paths, raw metadata, source fields, or other internal provenance',
+      );
+      expect(instructions).not.toContain(
+        'Treat Brain recall as a sequential preflight',
+      );
+    },
+  );
 });
 
 describe('memory MCP conversation guidance', () => {
@@ -109,6 +132,9 @@ describe('memory MCP conversation guidance', () => {
     });
 
     expect(instructions.endsWith(BRAIN_MCP_FAST_INSTRUCTIONS)).toBe(true);
+    expect(instructions).toContain(
+      'which remembered fact you retrieved and how you used it',
+    );
     expect(instructions).not.toContain('save_task_memory');
   });
 

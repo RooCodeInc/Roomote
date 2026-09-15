@@ -5,11 +5,13 @@ import { and, asc, eq, gt, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { getEncryptionKey } from '@roomote/env';
 import {
   activeRunStatuses,
+  isSessionSecretToolsExperimentEnabled,
   SESSION_EGRESS_SUBSTITUTE_PREFIX,
   type RunStatus,
   type SessionEgressAuthorization,
   type SessionEgressAuthorize,
   type SessionEgressDenialReason,
+  type SessionEgressProxyAuthorize,
   type SessionEgressRevocationFeed,
   type SessionEgressSubstituteIssue,
   type SessionEgressWorkloadRegister,
@@ -80,7 +82,11 @@ const grantPolicyColumns = {
  */
 async function eligibleRunSession(tx: DatabaseOrTransaction, runId: number) {
   const rows = await tx
-    .select({ sessionId: sessions.id, ownerUserId: users.id })
+    .select({
+      sessionId: sessions.id,
+      ownerUserId: users.id,
+      ownerMetadata: users.metadata,
+    })
     .from(taskRuns)
     .innerJoin(sessionTasks, eq(sessionTasks.taskId, taskRuns.taskId))
     .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
@@ -100,14 +106,18 @@ async function eligibleRunSession(tx: DatabaseOrTransaction, runId: number) {
 
 /**
  * Controller preflight: is this run attached to a Session that could receive
- * substitutes, and how many live grants would it get? Runs with no such
- * Session are ordinary runs and never contact the control plane; runs with a
- * Session but zero grants are reported, not registered (grants approved
- * mid-run take effect at the next start or resume).
+ * substitutes, has its owner enabled Session secret tools, and how many live
+ * grants would it get? Runs with no such Session are ordinary runs and never
+ * contact the control plane; runs with a Session but zero grants are
+ * reported, not registered (grants approved mid-run take effect at the next
+ * start or resume). The owner's experiment setting gates delivery the same
+ * way it gates the Fast and coding-run tools.
  */
-export async function findSessionEgressCandidateForRun(
-  runId: number,
-): Promise<{ sessionId: string; grantCount: number } | null> {
+export async function findSessionEgressCandidateForRun(runId: number): Promise<{
+  sessionId: string;
+  grantCount: number;
+  experimentEnabled: boolean;
+} | null> {
   const eligible = await eligibleRunSession(db, runId);
   if (!eligible) return null;
   const [row] = await db
@@ -121,7 +131,33 @@ export async function findSessionEgressCandidateForRun(
         gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
       ),
     );
-  return { sessionId: eligible.sessionId, grantCount: row?.count ?? 0 };
+  return {
+    sessionId: eligible.sessionId,
+    grantCount: row?.count ?? 0,
+    experimentEnabled: isSessionSecretToolsExperimentEnabled(
+      eligible.ownerMetadata,
+    ),
+  };
+}
+
+/**
+ * The owner's Session-secret-tools setting, read under a share lock so a
+ * concurrent toggle blocks until this transaction commits. Every path that
+ * mints or extends substitutes calls this inside its transaction; the
+ * controller's preflight read is planning only.
+ */
+async function ownerExperimentLocked(
+  tx: DatabaseOrTransaction,
+  ownerUserId: string,
+): Promise<boolean> {
+  const [owner] = await tx
+    .select({ metadata: users.metadata })
+    .from(users)
+    .where(and(eq(users.id, ownerUserId), isNull(users.deletedAt)))
+    .for('share');
+  return (
+    Boolean(owner) && isSessionSecretToolsExperimentEnabled(owner!.metadata)
+  );
 }
 
 /** An active workload whose run, Session, owner, and attachment are all still live. */
@@ -153,7 +189,12 @@ async function liveWorkload(tx: DatabaseOrTransaction, workloadId: string) {
       ),
     )
     .for('update', { of: sessionEgressWorkloads });
-  return row?.workload ?? null;
+  // The owner's experiment gates the tools per request; a workload is only
+  // live while it stays on, so renewals and new substitutes stop with it.
+  if (!row) return null;
+  return (await ownerExperimentLocked(tx, row.workload.ownerUserId))
+    ? row.workload
+    : null;
 }
 
 /** Authorization for controller-to-worker delivery of substitute-only client config. */
@@ -223,6 +264,14 @@ async function mintMissingSubstitutes(
     )
     .orderBy(asc(sessionSecrets.createdAt));
   const issued: SessionEgressSubstituteIssue[] = [];
+  // Minting is the write boundary: the owner row is already share-locked by
+  // the caller's transaction, so this re-read cannot observe a newer toggle
+  // and simply refuses to write for an owner whose tools are off.
+  if (
+    grants.length > 0 &&
+    !(await ownerExperimentLocked(tx, workload.ownerUserId))
+  )
+    return issued;
   for (const grant of grants) {
     // Withheld plaintext is unrecoverable, so denied grants must remain mintable.
     if (!isOriginAllowed(grant.origin)) continue;
@@ -278,7 +327,12 @@ export async function registerSessionEgressWorkload(
       .where(eq(taskRuns.id, input.runId))
       .for('update');
     const eligible = await eligibleRunSession(tx, input.runId);
-    if (!eligible) throw new SessionEgressRegistrationError('run_not_eligible');
+    // The controller's preflight is planning only. The owner row is locked
+    // here for the rest of the transaction, so a toggle that lands between
+    // this read and the mint waits for the commit and then governs the next
+    // live check; nothing is minted for an owner who already turned it off.
+    if (!eligible || !(await ownerExperimentLocked(tx, eligible.ownerUserId)))
+      throw new SessionEgressRegistrationError('run_not_eligible');
 
     const [existing] = await tx
       .select()
@@ -499,13 +553,40 @@ function approvedDestination(origin: string): { host: string; port: number } {
 }
 
 /**
- * Live per-request authorization for the gateway. Every phase of one HTTP
- * exchange (request, buffered response release, each stream emission) calls
- * this again; nothing here is cached. Plaintext is decrypted only after the
- * whole decision is `allowed`, and only for the `request` phase.
+ * How a presented substitute is bound to a caller.
+ *
+ * - `connector`: the external gateway authenticated a connector certificate
+ *   and maps it to a workload; the token must belong to exactly that workload
+ *   and the CONNECT target must equal the approved origin.
+ * - `proxy`: the API itself is the gateway and there is no connector. The
+ *   token alone names the grant, and the destination is that grant's approved
+ *   origin by construction. Possession of the substitute is the authority,
+ *   bounded by the same live workload, Session, run, generation, expiry and
+ *   revocation checks.
  */
-export async function authorizeSessionEgress(
-  input: SessionEgressAuthorize,
+type SubstituteBinding =
+  | {
+      kind: 'connector';
+      workloadId: string;
+      connectorIdentity: string;
+      destination: { host: string; port: number };
+    }
+  | { kind: 'proxy' };
+
+/**
+ * Live per-request authorization. Every phase of one HTTP exchange (request,
+ * buffered response release, each stream emission) calls this again; nothing
+ * here is cached. Plaintext is decrypted only after the whole decision is
+ * `allowed`, and only for the `request` phase.
+ */
+async function authorizeSubstitute(
+  input: {
+    substitute: string;
+    method: SessionEgressAuthorize['method'];
+    phase: SessionEgressAuthorize['phase'];
+    authorizationId?: string;
+  },
+  binding: SubstituteBinding,
   options: {
     /**
      * Current deployment egress policy for the approved origin (public
@@ -514,7 +595,7 @@ export async function authorizeSessionEgress(
      * second line, not the only one.
      */
     isOriginAllowed?: (origin: string) => boolean;
-  } = {},
+  },
 ): Promise<SessionEgressAuthorization> {
   const load = () =>
     db
@@ -528,6 +609,7 @@ export async function authorizeSessionEgress(
           archivedAt: sessions.archivedAt,
         },
         ownerDeletedAt: users.deletedAt,
+        ownerMetadata: users.metadata,
         run: { actingUserId: taskRuns.actingUserId, status: taskRuns.status },
         attached: sql<boolean>`exists (
         select 1 from ${sessionTasks}
@@ -562,8 +644,9 @@ export async function authorizeSessionEgress(
     if (!row) return 'unknown_substitute';
     const { substitute, workload, secret, session, run } = row;
     if (
-      workload.id !== input.workloadId ||
-      workload.connectorIdentity !== input.connectorIdentity
+      binding.kind === 'connector' &&
+      (workload.id !== binding.workloadId ||
+        workload.connectorIdentity !== binding.connectorIdentity)
     )
       return 'workload_mismatch';
     if (workload.status !== 'active' || row.workloadExpired)
@@ -580,6 +663,7 @@ export async function authorizeSessionEgress(
       secret.sessionId !== workload.sessionId ||
       session.archivedAt ||
       row.ownerDeletedAt ||
+      !isSessionSecretToolsExperimentEnabled(row.ownerMetadata) ||
       run.actingUserId !== workload.ownerUserId ||
       !ELIGIBLE_RUN_STATUSES.includes(run.status) ||
       !row.attached
@@ -587,8 +671,9 @@ export async function authorizeSessionEgress(
       return 'session_unavailable';
     const expected = approvedDestination(secret.origin);
     if (
-      input.destination.host.toLowerCase() !== expected.host ||
-      input.destination.port !== expected.port ||
+      (binding.kind === 'connector' &&
+        (binding.destination.host.toLowerCase() !== expected.host ||
+          binding.destination.port !== expected.port)) ||
       !(options.isOriginAllowed?.(secret.origin) ?? true)
     )
       return 'destination_mismatch';
@@ -599,20 +684,38 @@ export async function authorizeSessionEgress(
 
   const [row] = await load();
   const reason = decide(row);
+  // On the proxy path an unknown token names no workload, Session, or grant,
+  // so there is nothing an audit row could attribute; the caller logs the
+  // bounded reason instead.
+  if (binding.kind === 'proxy' && !row)
+    return { allowed: false, reason: 'unknown_substitute' };
   const authorizationId = input.authorizationId ?? randomUUID();
-  // A token that does not belong to this workload tells the audit nothing
-  // trustworthy about a Session or grant; record only the presented workload.
+  // A token that does not belong to this binding tells the audit nothing
+  // trustworthy about a Session or grant; record only what was presented.
   const bound =
     row && reason !== 'unknown_substitute' && reason !== 'workload_mismatch';
+  const destination =
+    binding.kind === 'connector'
+      ? binding.destination
+      : bound
+        ? approvedDestination(row.secret.origin)
+        : null;
   await db.insert(sessionEgressAudit).values({
     authorizationId,
-    workloadId: input.workloadId,
+    workloadId:
+      binding.kind === 'connector'
+        ? binding.workloadId
+        : bound
+          ? row.workload.id
+          : null,
     sessionId: bound ? row.workload.sessionId : null,
     actorUserId: bound ? row.workload.ownerUserId : null,
     secretRef: bound ? row.secret.id : null,
     phase: input.phase,
     method: input.method,
-    destination: `${input.destination.host.toLowerCase()}:${input.destination.port}`,
+    destination: destination
+      ? `${destination.host.toLowerCase()}:${destination.port}`
+      : null,
     decision: reason ? 'denied' : 'allowed',
     reason,
   });
@@ -650,6 +753,31 @@ export async function authorizeSessionEgress(
         }
       : {}),
   };
+}
+
+/** Gateway path: an authenticated connector presents a substitute for a CONNECT target. */
+export async function authorizeSessionEgress(
+  input: SessionEgressAuthorize,
+  options: { isOriginAllowed?: (origin: string) => boolean } = {},
+): Promise<SessionEgressAuthorization> {
+  return authorizeSubstitute(
+    input,
+    {
+      kind: 'connector',
+      workloadId: input.workloadId,
+      connectorIdentity: input.connectorIdentity,
+      destination: input.destination,
+    },
+    options,
+  );
+}
+
+/** API proxy path: a workload presents a substitute; the token alone names the grant. */
+export async function authorizeSessionEgressProxy(
+  input: SessionEgressProxyAuthorize,
+  options: { isOriginAllowed?: (origin: string) => boolean } = {},
+): Promise<SessionEgressAuthorization> {
+  return authorizeSubstitute(input, { kind: 'proxy' }, options);
 }
 
 /** Audit rows for one workload: bounded codes only, for tests and operator tooling. */

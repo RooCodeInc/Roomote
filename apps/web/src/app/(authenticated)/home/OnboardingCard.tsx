@@ -22,6 +22,7 @@ import { useAuthenticateGitHubAccount } from '@/hooks/github';
 import { useAuthenticateSlackAccount } from '@/hooks/slack';
 import { useAuthenticateLinearAccount } from '@/hooks/linear';
 import { useEnvironments } from '@/hooks/environments';
+import { useFastSessionLauncher } from '@/hooks/task-runs';
 import {
   useAuthenticateAdoAccount,
   useAuthenticateBitbucketAccount,
@@ -40,6 +41,7 @@ import {
   DialogHeader,
   DialogTitle,
   Github,
+  Lightbulb,
   LinearLogo,
   Slack,
   X,
@@ -56,6 +58,8 @@ const DISMISSED_KEY = 'OnboardingCardsDismissedByOrg';
 const DISMISSED_DEPLOYMENT_KEY = 'deployment';
 
 const PERSONAL_MCP_INTEGRATION_ORDER = ['monday', 'supabase'] as const;
+const DELEGATION_DISCOVERY_PROMPT =
+  '$explore-delegation Find something to take off my plate.';
 
 const CARD_EXIT_TRANSITION = {
   duration: 0.4,
@@ -134,6 +138,7 @@ export function OnboardingCard() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const trpc = useTRPC();
+  const delegationSession = useFastSessionLauncher();
   const environments = useEnvironments({ enabled: isAdmin });
   const shouldShowSuggestedTasksCard =
     searchParams.get('link_suggested') === 'true';
@@ -405,6 +410,23 @@ export function OnboardingCard() {
   };
 
   const cards: CardConfig[] = [
+    {
+      id: 'explore-delegation',
+      icon: (
+        <Lightbulb
+          className="size-4 shrink-0 text-muted-foreground"
+          strokeWidth={1}
+        />
+      ),
+      label: 'Find something to take off your plate',
+      buttonLabel: 'Explore',
+      onClick: () =>
+        void delegationSession.startFastSession({
+          text: DELEGATION_DISCOVERY_PROMPT,
+        }),
+      disabled: delegationSession.isPending,
+      visible: true,
+    },
     {
       id: 'create-environment',
       icon: (

@@ -5,6 +5,7 @@ import {
   createGuardedConnectOptions,
 } from '@roomote/sdk/server/safe-fetch';
 import {
+  integrationFailureReason,
   integrationRequest,
   loadHttpIntegrationsConfig,
   type HttpIntegrationsConfig,
@@ -646,4 +647,90 @@ it('wires the DNS guard into the Agent and pins only vetted public answers', asy
   callback.mockClear();
   wired.lookup('api.example.com', {}, callback);
   expect(callback).toHaveBeenCalledWith(expect.any(Error), '', 4);
+});
+
+it('logs one bounded reason per operator failure without upstream or request details', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    const cause = Object.assign(
+      new Error('connect ECONNREFUSED 203.0.113.9:443 private-error-marker'),
+      { code: 'ECONNREFUSED' },
+    );
+    vi.mocked(fetch).mockRejectedValueOnce(
+      new TypeError('fetch failed private-error-marker', { cause }),
+    );
+    await expect(
+      integrationRequest(config, 'run:log', args, 'actor'),
+    ).rejects.toThrow('Integration request failed');
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(null, {
+        status: 302,
+        headers: { location: 'https://elsewhere.example.com/private' },
+      }) as never,
+    );
+    await expect(
+      integrationRequest(config, 'run:log', args, 'actor'),
+    ).rejects.toThrow('Integration request failed');
+    await expect(
+      integrationRequest(
+        config,
+        'run:log',
+        { ...args, integrationId: 'missing private-id-marker' },
+        'actor',
+      ),
+    ).rejects.toThrow('Unknown integration');
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    expect(lines).toEqual(
+      [
+        'integration_request failed (scope=run:log, integration=example, method=GET, reason=TypeError:ECONNREFUSED)',
+        'integration_request failed (scope=run:log, integration=example, method=GET, reason=redirect_refused)',
+        'integration_request failed (scope=run:log, integration=invalid, method=GET, reason=unknown_integration)',
+      ].map((line) => `[HTTP integrations] ${line}`),
+    );
+    for (const line of lines) {
+      expect(line).not.toContain('private-');
+      expect(line).not.toContain('203.0.113.9');
+      expect(line).not.toContain('/v1/items');
+    }
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+it('describes failures by bounded reason or class name, never by message', () => {
+  const secret = 'private-secret-marker';
+  const aborted = new DOMException(`aborted ${secret}`, 'AbortError');
+  const timedOut = new DOMException(`timed out ${secret}`, 'TimeoutError');
+  const coded = new TypeError(`fetch failed ${secret}`, {
+    cause: Object.assign(new Error(secret), {
+      code: 'UND_ERR_CONNECT_TIMEOUT',
+    }),
+  });
+  const named = new TypeError(`fetch failed ${secret}`, {
+    cause: Object.assign(new Error(secret), { name: 'ConnectTimeoutError' }),
+  });
+  const lowercase = new TypeError(secret, {
+    cause: Object.assign(new Error(secret), { code: `bad ${secret}` }),
+  });
+  const described = [
+    aborted,
+    timedOut,
+    coded,
+    named,
+    lowercase,
+    new RangeError(secret),
+    secret,
+    null,
+  ].map(integrationFailureReason);
+  expect(described).toEqual([
+    'request_aborted',
+    'request_timeout',
+    'TypeError:UND_ERR_CONNECT_TIMEOUT',
+    'TypeError:ConnectTimeoutError',
+    'TypeError',
+    'RangeError',
+    'unknown',
+    'unknown',
+  ]);
+  expect(JSON.stringify(described)).not.toContain(secret);
 });

@@ -286,7 +286,7 @@ export async function spawnDockerWorker(
   let sessionEgressRequired = false;
   const sessionEgressBootstrapNonce = randomUUID();
   let sessionEgressOutcome:
-    | Extract<SessionEgressRegistrationOutcome, { status: 'registered' }>
+    | Extract<SessionEgressRegistrationOutcome, { admission: 'connector' }>
     | undefined;
 
   /**
@@ -697,6 +697,8 @@ export async function spawnDockerWorker(
           });
           if (outcome.status !== 'registered')
             throw new Error('Session egress admission is no longer eligible');
+          if (outcome.admission !== 'connector')
+            throw new Error('Docker requires connector admission');
           sessionEgressRegistration = outcome.workload;
           sessionEgressOutcome = outcome;
           await provisionSessionEgress();

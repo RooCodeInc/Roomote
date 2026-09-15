@@ -499,7 +499,7 @@ describe('custom automation task history access', () => {
       });
       await expect(
         getTaskMessageEnvelopesCommand(auth, { taskId: task.id }),
-      ).resolves.toHaveLength(1);
+      ).resolves.toMatchObject({ messages: [{ taskId: task.id }] });
       await expect(
         getTaskRunEventsCommand(auth, { taskId: task.id }),
       ).resolves.toMatchObject({ events: [{ message: 'Private diagnostic' }] });
@@ -593,7 +593,7 @@ describe('custom automation task history access', () => {
     ).resolves.toMatchObject({ id: ordinary.id });
     await expect(
       getTaskMessageEnvelopesCommand(otherAuth, { taskId: ordinary.id }),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual({ messages: [], nextCursor: null });
     await expect(
       getTaskRunEventsCommand(otherAuth, { taskId: ordinary.id }),
     ).resolves.toEqual({ events: [] });

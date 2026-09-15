@@ -6,12 +6,14 @@ import {
 } from '@roomote/db/server';
 import { createSessionEgressControllerClient } from '@roomote/sdk/server/session-egress';
 
+import { resolveSessionEgressApiProxyBaseUrl } from './api-proxy';
 import {
   resolveSessionEgressProvisioningConfig,
   SessionEgressLifecycle,
 } from './lifecycle';
 
 export * from './lifecycle';
+export * from './api-proxy';
 
 /**
  * Production wiring: configuration from the validated env, the typed SDK
@@ -20,23 +22,22 @@ export * from './lifecycle';
  */
 export function createSessionEgressLifecycle(): SessionEgressLifecycle {
   const config = resolveSessionEgressProvisioningConfig(Env);
-  const client = config
-    ? createSessionEgressControllerClient({ apiBaseUrl: Env.TRPC_URL })
-    : null;
+  // API-proxy admission needs only the control plane, so the client always
+  // exists; the per-owner experiment decides whether a run gets tokens.
+  const client = createSessionEgressControllerClient({
+    apiBaseUrl: Env.TRPC_URL,
+  });
 
-  if (config) {
-    console.log(
-      `[sessionEgress] Enabled: gateway ${config.gatewayAddr}, connector image ${config.connectorImage}, lease ${config.leaseSeconds}s`,
-    );
-  } else {
-    console.log(
-      '[sessionEgress] Disabled: no SESSION_EGRESS_* provisioning configured; runs attached to Sessions with service grants will report no service tokens.',
-    );
-  }
+  console.log(
+    config
+      ? `[sessionEgress] Connector admission enabled: gateway ${config.gatewayAddr}, connector image ${config.connectorImage}, lease ${config.leaseSeconds}s; API-proxy admission available for connector-less providers.`
+      : '[sessionEgress] API-proxy admission available for connector-less providers; no SESSION_EGRESS_* connector provisioning configured.',
+  );
 
   return new SessionEgressLifecycle({
     client,
     config,
+    apiProxyBaseUrl: resolveSessionEgressApiProxyBaseUrl(Env),
     findCandidate: findSessionEgressCandidateForRun,
     recordEvent: async (event) => {
       await recordTaskRunLifecycleEvent(db, {

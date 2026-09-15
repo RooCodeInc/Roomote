@@ -9,9 +9,73 @@ import { z } from 'zod';
 import {
   recordSessionSecretAudit,
   resolveOwnedSessionSecret,
+  SessionSecretUnavailableError,
   type SessionSecretContext,
 } from '@roomote/db/server';
 import { redactEcho } from '@roomote/sdk/server/session-secrets';
+import { isSessionEgressCredentialHeaderName } from '@roomote/types';
+
+/**
+ * Fail-closed broker errors keep their client-facing message but carry a
+ * bounded, nonsecret `reason` for server logs. A reason never includes a
+ * destination, path, header, body, credential or upstream error text.
+ */
+class IntegrationRequestError extends Error {
+  readonly reason: string;
+
+  constructor(reason: string, message = 'Integration request failed') {
+    super(message);
+    this.name = 'IntegrationRequestError';
+    this.reason = reason;
+  }
+}
+
+const abortReasons: Record<string, string> = {
+  AbortError: 'request_aborted',
+  TimeoutError: 'request_timeout',
+};
+
+/**
+ * Log-safe failure description: the bounded reason of a known fail-closed
+ * error, otherwise only error class names plus an uppercase transport code
+ * (ENOTFOUND, UND_ERR_CONNECT_TIMEOUT, ...) when undici exposes one. Never a
+ * message: undici and database errors can echo destinations, credentials or
+ * bound values.
+ */
+export function integrationFailureReason(error: unknown): string {
+  if (error instanceof IntegrationRequestError) return error.reason;
+  if (error instanceof SessionSecretUnavailableError) return error.reason;
+  if (!(error instanceof Error)) return 'unknown';
+  const name = error.name || 'Error';
+  if (abortReasons[name]) return abortReasons[name];
+  const cause: unknown = error.cause;
+  const code =
+    cause && typeof cause === 'object' && 'code' in cause
+      ? cause.code
+      : undefined;
+  if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(code))
+    return `${name}:${code}`;
+  if (cause instanceof Error && cause.name && cause.name !== 'Error')
+    return `${name}:${cause.name}`;
+  return name;
+}
+
+const SAFE_INTEGRATION_ID = /^(?:[a-z][a-z0-9-]{0,63}|session:[0-9a-f-]{36})$/;
+
+function logIntegrationFailure(
+  scope: string,
+  integrationId: unknown,
+  method: unknown,
+  error: unknown,
+) {
+  const id =
+    typeof integrationId === 'string' && SAFE_INTEGRATION_ID.test(integrationId)
+      ? integrationId
+      : 'invalid';
+  console.warn(
+    `[HTTP integrations] integration_request failed (scope=${scope}, integration=${id}, method=${typeof method === 'string' ? method : 'invalid'}, reason=${integrationFailureReason(error)})`,
+  );
+}
 
 const methods = z.enum(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const maxBody = 1024 * 1024;
@@ -169,14 +233,13 @@ let active = 0;
 const scopes = new Map<string, number>();
 
 /**
- * Operator-manifest requests are the supported product of this broker.
+ * Operator-manifest requests and `session:` grant reads share this broker.
  *
- * @deprecated for `session:` IDs only. Routing a Session grant through this
- * mediated request tool is a GET/HEAD-only compatibility path kept until
- * ordinary HTTP clients at the real service URL (attached runs through the
- * session egress gateway, `apps/api/src/handlers/session-egress`) reach
- * parity. It is not the required way to consume a Session grant and is never
- * widened: `allowedMethods` on a grant applies to the gateway path only.
+ * For `session:` IDs this is the read-only floor: a GET or HEAD made by the
+ * API itself, available on every compute provider and to Fast. It is never
+ * widened; a grant's `allowedMethods` apply to the session egress proxy
+ * (`apps/api/src/handlers/session-egress-proxy`), where attached runs use
+ * ordinary clients with a delivered substitute token.
  */
 export async function integrationRequest(
   config: HttpIntegrationsConfig,
@@ -200,23 +263,41 @@ export async function integrationRequest(
         ? rawId.slice(8)
         : undefined,
     );
-  if (!secretRef.success)
-    return performIntegrationRequest(config, scope, input, userId, signal);
+  if (!secretRef.success) {
+    try {
+      return await performIntegrationRequest(
+        config,
+        scope,
+        input,
+        userId,
+        signal,
+      );
+    } catch (error) {
+      logIntegrationFailure(
+        scope,
+        rawId,
+        parsed.success ? parsed.data.method : undefined,
+        error,
+      );
+      throw error;
+    }
+  }
   let audit: Parameters<typeof recordSessionSecretAudit>[0] = {
     secretRef: secretRef.data,
     outcome: 'denied',
   };
   const completionId = randomUUID();
   try {
-    if (!resolveContext || !parsed.success) throw new Error();
+    if (!resolveContext)
+      throw new IntegrationRequestError('context_unavailable');
+    if (!parsed.success) throw new IntegrationRequestError('malformed_request');
     const context = await resolveContext();
     const grant = await resolveOwnedSessionSecret(context, secretRef.data);
     const args = parsed.data;
-    if (
-      (args.method !== 'GET' && args.method !== 'HEAD') ||
-      args.path.length > 2048
-    )
-      throw new Error();
+    if (args.method !== 'GET' && args.method !== 'HEAD')
+      throw new IntegrationRequestError('method_not_allowed');
+    if (args.path.length > 2048)
+      throw new IntegrationRequestError('path_too_long');
     audit = {
       ...audit,
       actorUserId: context.userId,
@@ -227,18 +308,18 @@ export async function integrationRequest(
     if (
       origin.protocol !== 'https:' ||
       origin.origin !== grant.origin ||
-      !['authorization', 'x-api-key', 'api-key'].includes(grant.headerName) ||
+      !isSessionEgressCredentialHeaderName(grant.headerName) ||
       !['', 'Bearer ', 'Basic ', 'Token '].includes(grant.headerPrefix) ||
       (grant.headerName !== 'authorization' && grant.headerPrefix !== '')
     )
-      throw new Error();
+      throw new IntegrationRequestError('grant_policy_invalid');
     const revalidate = async () => {
       const live = await resolveContext();
       if (
         live.sessionId !== context.sessionId ||
         live.userId !== context.userId
       )
-        throw new Error();
+        throw new IntegrationRequestError('binding_changed');
       await resolveOwnedSessionSecret(live, secretRef.data);
     };
     await recordSessionSecretAudit({ ...audit, outcome: 'started' });
@@ -275,13 +356,22 @@ export async function integrationRequest(
     // Audit persistence can yield too. Do not release data after an in-flight revocation.
     await revalidate();
     return result;
-  } catch {
+  } catch (error) {
+    const outcome = audit.destination ? 'failed' : 'denied';
+    // Bounded metadata only: the audit row and this line carry no path,
+    // query, header, body, credential or upstream error text.
+    console.warn(
+      `[HTTP integrations] Session grant request ${outcome} (scope=${scope}, secretRef=${secretRef.data}, method=${parsed.success ? parsed.data.method : 'invalid'}, reason=${integrationFailureReason(error)})`,
+    );
     await recordSessionSecretAudit({
       ...audit,
       id: completionId,
-      outcome: audit.destination ? 'failed' : 'denied',
+      outcome,
     }).catch(() => {});
-    throw new Error('Secret request unavailable');
+    throw new IntegrationRequestError(
+      integrationFailureReason(error),
+      'Secret request unavailable',
+    );
   }
 }
 
@@ -298,14 +388,22 @@ async function performIntegrationRequest(
   },
 ) {
   const parsed = integrationRequestSchema.safeParse(input);
-  if (!parsed.success) throw new Error('Invalid integration request');
+  if (!parsed.success)
+    throw new IntegrationRequestError(
+      'malformed_request',
+      'Invalid integration request',
+    );
   const args = parsed.data;
   const integration = config.integrations.find(
     (item) =>
       item.id === args.integrationId &&
       (!item.allowedUserIds || item.allowedUserIds.includes(userId)),
   );
-  if (!integration) throw new Error('Unknown integration');
+  if (!integration)
+    throw new IntegrationRequestError(
+      'unknown_integration',
+      'Unknown integration',
+    );
   const url = new URL(args.path, integration.origin);
   if (
     url.origin !== new URL(integration.origin).origin ||
@@ -317,12 +415,21 @@ async function performIntegrationRequest(
           url.pathname.startsWith(`${rule.pathPrefix}/`)),
     )
   )
-    throw new Error('Integration destination or method is not allowed');
+    throw new IntegrationRequestError(
+      'destination_not_allowed',
+      'Integration destination or method is not allowed',
+    );
   const bodyless = args.method === 'GET' || args.method === 'HEAD';
   if (bodyless && args.body != null && args.body !== '')
-    throw new Error('This method does not accept a body');
+    throw new IntegrationRequestError(
+      'body_not_allowed',
+      'This method does not accept a body',
+    );
   if (active >= 32 || (scopes.get(scope) ?? 0) >= 4)
-    throw new Error('Integration request concurrency limit reached');
+    throw new IntegrationRequestError(
+      'concurrency_limit',
+      'Integration request concurrency limit reached',
+    );
   active++;
   scopes.set(scope, (scopes.get(scope) ?? 0) + 1);
   let agent: Agent | undefined;
@@ -341,14 +448,14 @@ async function performIntegrationRequest(
       !/^[\x20-\x7e]+$/.test(secret) ||
       credential.length > (sessionGrant ? 4103 : 4096)
     )
-      throw new Error();
+      throw new IntegrationRequestError('credential_invalid');
     agent = new Agent({
       connect: createGuardedConnectOptions({ allowedPrivateCidrs: undefined }),
     });
     const timeoutMs = sessionGrant
       ? Math.min(10_000, Date.parse(sessionGrant.expiresAt) - Date.now())
       : 30_000;
-    if (timeoutMs <= 0) throw new Error();
+    if (timeoutMs <= 0) throw new IntegrationRequestError('grant_expired');
     const timeout = AbortSignal.timeout(timeoutMs);
     const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
     // Bound every upstream await even when a stream does not honor abort itself.
@@ -357,7 +464,16 @@ async function performIntegrationRequest(
       return new Promise<T>((resolve, reject) => {
         const abort = () => {
           requestSignal.removeEventListener('abort', abort);
-          reject(new Error('Secret request unavailable'));
+          // The composite signal carries the source's reason: the deadline
+          // aborts with a TimeoutError, the caller with an AbortError.
+          const cause: unknown = requestSignal.reason;
+          reject(
+            new IntegrationRequestError(
+              (cause instanceof Error && abortReasons[cause.name]) ||
+                'request_aborted',
+              'Secret request unavailable',
+            ),
+          );
         };
         requestSignal.addEventListener('abort', abort, { once: true });
         if (requestSignal.aborted) abort();
@@ -396,7 +512,8 @@ async function performIntegrationRequest(
         () => {},
       );
     response = await wait(pendingResponse);
-    if (response.status >= 300 && response.status < 400) throw new Error();
+    if (response.status >= 300 && response.status < 400)
+      throw new IntegrationRequestError('redirect_refused');
     const contentType = response.headers
       .get('content-type')
       ?.split(';')[0]
@@ -412,14 +529,14 @@ async function performIntegrationRequest(
           /^application\/[a-z0-9.+-]+\+json$/.test(contentType)
         ))
     )
-      throw new Error();
+      throw new IntegrationRequestError('content_type_rejected');
     const responseLimit = sessionGrant ? 64 * 1024 : maxResponse;
     const length = response.headers.get('content-length');
     if (
       (sessionGrant && length && !/^\d+$/.test(length)) ||
       Number(length) > responseLimit
     )
-      throw new Error();
+      throw new IntegrationRequestError('content_length_rejected');
     reader = response.body?.getReader();
     let size = 0;
     const chunks: Uint8Array[] = [];
@@ -428,7 +545,8 @@ async function performIntegrationRequest(
         const chunk = await wait(reader.read());
         if (chunk.done) break;
         size += chunk.value.byteLength;
-        if (size > responseLimit) throw new Error();
+        if (size > responseLimit)
+          throw new IntegrationRequestError('response_too_large');
         chunks.push(chunk.value);
       }
     }
@@ -445,21 +563,23 @@ async function performIntegrationRequest(
         (value) => value.includes(secret) || value.includes(credential),
       )
     )
-      throw new Error();
+      throw new IntegrationRequestError('credential_echo');
     if (
       sessionGrant &&
       [body, ...Object.values(headers)].some(
         (value) => redactEcho(value, secret, credential) === '[REDACTED]',
       )
     )
-      throw new Error();
+      throw new IntegrationRequestError('credential_echo_encoded');
     await wait(Promise.resolve(sessionGrant?.revalidate()));
     requestSignal.throwIfAborted();
     complete = true;
     return { status: response.status, headers, body };
-  } catch {
-    // Undici errors can include destinations or request credentials. Never relay them.
-    throw new Error(
+  } catch (error) {
+    // Undici errors can include destinations or request credentials. Never
+    // relay them; keep only the bounded reason for the caller's log line.
+    throw new IntegrationRequestError(
+      integrationFailureReason(error),
       'Integration request failed: upstream unavailable or response rejected',
     );
   } finally {

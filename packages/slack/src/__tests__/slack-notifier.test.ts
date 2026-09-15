@@ -54,6 +54,38 @@ describe('SlackNotifier', () => {
     process.env.SLACK_API_BASE_URL = originalBaseUrl;
   });
 
+  describe('getWorkspaceIdentity', () => {
+    it('returns the authenticated team id and workspace domain', async () => {
+      getGlobalWithFetch().fetch.mockResolvedValue(
+        Response.json({
+          ok: true,
+          team_id: 'T123',
+          user_id: 'U123',
+          bot_id: 'B123',
+          url: 'https://Roomote-Dev.slack.com/',
+        }),
+      );
+
+      await expect(notifier.getWorkspaceIdentity()).resolves.toEqual({
+        teamId: 'T123',
+        teamDomain: 'roomote-dev',
+      });
+    });
+
+    it('fails closed when auth.test omits a workspace domain', async () => {
+      getGlobalWithFetch().fetch.mockResolvedValue(
+        Response.json({
+          ok: true,
+          team_id: 'T123',
+          user_id: 'U123',
+          bot_id: 'B123',
+        }),
+      );
+
+      await expect(notifier.getWorkspaceIdentity()).resolves.toBeNull();
+    });
+  });
+
   describe('stopMessageStream', () => {
     it('passes explicit processing to Slack without changing unspecified caller defaults', async () => {
       chatStopStreamMock.mockResolvedValue({ ok: true });

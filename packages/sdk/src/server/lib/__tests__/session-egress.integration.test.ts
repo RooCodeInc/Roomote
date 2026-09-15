@@ -50,7 +50,9 @@ let taskId: string;
 let connectorIdentity: string;
 
 beforeEach(async () => {
-  const owner = await userFactory.create();
+  const owner = await userFactory.create({
+    metadata: { session_secret_tools_enabled: true },
+  });
   const session = await sessionFactory.create({
     ownerKind: 'user',
     ownerUserId: owner.id,

@@ -21,6 +21,7 @@ const CORE_PACKAGED_SKILL_INVOCATIONS = [
   'issue-fixer',
   'environment-setup',
   'explain-repo-code',
+  'explore-delegation',
   'feature-demo',
   'fix-pr',
   'github-management',

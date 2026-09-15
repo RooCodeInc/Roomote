@@ -274,28 +274,6 @@ describe('buildFastAgentSystemPrompt', () => {
     },
   );
 
-  it('adds safe memory disclosure guidance only when therapist mode is enabled', () => {
-    const enabledPrompt = buildFastAgentSystemPrompt({
-      availableEnvironments: [],
-      therapistModeEnabled: true,
-    });
-    const disabledPrompt = buildFastAgentSystemPrompt({
-      availableEnvironments: [],
-    });
-
-    expect(enabledPrompt).toContain('<therapist_mode>');
-    expect(enabledPrompt).toContain(
-      'which remembered fact you retrieved and how you used it',
-    );
-    expect(enabledPrompt).toContain(
-      'Never expose internal memory IDs, page slugs, storage paths, raw metadata, source fields, or other internal provenance',
-    );
-    expect(disabledPrompt).not.toContain('<therapist_mode>');
-    expect(disabledPrompt).not.toContain(
-      'which remembered fact you retrieved and how you used it',
-    );
-  });
-
   it('includes a resolved release identifier before turn startup and environments', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -489,6 +467,20 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       "The Available Skills section above already lists this deployment's instance and inline environment skills; consult it before calling `list_skills`.",
+    );
+  });
+
+  it('loads delegation discovery for natural-language requests about how Roomote can help', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'When the user asks what Roomote can do for them, how Roomote could help with their work, or for help identifying work to hand off',
+    );
+    expect(prompt).toContain(
+      'call `list_skills` with the exact name `explore-delegation`, load the returned packaged skill, and follow it before answering',
+    );
+    expect(prompt).toContain(
+      'Do not require the user to invoke the skill by name or arrive through an onboarding offer.',
     );
   });
 

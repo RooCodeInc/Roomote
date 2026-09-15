@@ -13,18 +13,19 @@ import {
 } from '@roomote/types';
 
 /**
- * Session-egress delivery captured from the launcher. Substitute tokens,
- * the connector proxy address, the PUBLIC gateway CA bundle path, and the
- * nonsecret service manifest: never a real credential or a private key.
+ * Session-egress delivery captured from the launcher. Substitute tokens and
+ * the nonsecret service manifest, plus either the connector proxy address and
+ * the PUBLIC gateway CA bundle path (connector admission) or the API proxy
+ * base URL (API-proxy admission): never a real credential or a private key.
  */
-interface WorkerSessionEgressConfig {
-  proxyUrl: string;
-  caFile: string;
-  noProxy: string;
+type WorkerSessionEgressConfig = {
   services: SessionEgressWorkloadServiceManifestEntry[];
   /** `ROOMOTE_SERVICE_TOKEN_<LABEL_SLUG>` -> `rses_…` */
   tokens: Record<string, string>;
-}
+} & (
+  | { mode: 'connector'; proxyUrl: string; caFile: string; noProxy: string }
+  | { mode: 'api_proxy'; baseUrl: string }
+);
 
 /**
  * Worker infrastructure secrets. NEVER passed to child processes.
@@ -463,6 +464,11 @@ export class WorkerEnv {
     return this.workerConfig.sessionEgressBootstrapRequired === true;
   }
 
+  /** Which admission delivered the configuration, once accepted. */
+  get sessionEgressMode(): 'connector' | 'api_proxy' | undefined {
+    return this.workerConfig.sessionEgress?.mode;
+  }
+
   get sessionEgressBootstrapNonce(): string {
     if (!this.workerConfig.sessionEgressBootstrapNonce)
       throw new Error('Session egress bootstrap identity missing');
@@ -487,14 +493,25 @@ export class WorkerEnv {
     if (!config) {
       return {};
     }
+    const shared = {
+      ...config.tokens,
+      [SESSION_EGRESS_WORKLOAD_ENV.SERVICES]: JSON.stringify(config.services),
+    };
+    if (config.mode === 'api_proxy') {
+      // No proxy and no trust changes: clients call the API proxy base URL
+      // over the same HTTPS route the worker already uses.
+      return {
+        [SESSION_EGRESS_WORKLOAD_ENV.BASE_URL]: config.baseUrl,
+        ...shared,
+      };
+    }
     return {
       ...buildSessionEgressClientEnv({
         proxyUrl: config.proxyUrl,
         caFile: config.caFile,
         noProxy: config.noProxy,
       }),
-      ...config.tokens,
-      [SESSION_EGRESS_WORKLOAD_ENV.SERVICES]: JSON.stringify(config.services),
+      ...shared,
     };
   }
 }
@@ -504,7 +521,14 @@ function captureSessionEgressConfig(
 ): WorkerSessionEgressConfig | undefined {
   const proxyUrl = processEnv[SESSION_EGRESS_WORKLOAD_ENV.PROXY_URL]?.trim();
   const caFile = processEnv[SESSION_EGRESS_WORKLOAD_ENV.CA_FILE]?.trim();
-  if (!proxyUrl || !caFile) {
+  const baseUrl = processEnv[SESSION_EGRESS_WORKLOAD_ENV.BASE_URL]?.trim();
+  const mode: WorkerSessionEgressConfig['mode'] | undefined =
+    proxyUrl && caFile
+      ? 'connector'
+      : baseUrl && /^https?:\/\//.test(baseUrl)
+        ? 'api_proxy'
+        : undefined;
+  if (!mode) {
     return undefined;
   }
 
@@ -531,9 +555,13 @@ function captureSessionEgressConfig(
     }
   }
 
+  if (mode === 'api_proxy') {
+    return { mode, baseUrl: baseUrl!, services, tokens };
+  }
   return {
-    proxyUrl,
-    caFile,
+    mode,
+    proxyUrl: proxyUrl!,
+    caFile: caFile!,
     noProxy: processEnv[SESSION_EGRESS_WORKLOAD_ENV.NO_PROXY]?.trim() ?? '',
     services,
     tokens,

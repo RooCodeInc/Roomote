@@ -82,7 +82,21 @@ type SlackAuthTestResponse = {
   user_id?: string;
   bot_id?: string;
   team_id?: string;
+  url?: string;
 };
+
+function getSlackWorkspaceDomain(rawUrl: string | undefined): string | null {
+  if (!rawUrl) return null;
+
+  try {
+    const host = new URL(rawUrl).hostname.toLowerCase();
+    if (!host.endsWith('.slack.com')) return null;
+    const domain = host.slice(0, -'.slack.com'.length);
+    return domain && domain !== 'app' ? domain : null;
+  } catch {
+    return null;
+  }
+}
 
 type SlackUsersListResponse = {
   ok: boolean;
@@ -358,6 +372,7 @@ export class SlackNotifier {
     userId?: string;
     botId?: string;
     teamId?: string;
+    teamDomain?: string;
   } | null> {
     if (!this.ownBotIdentityPromise) {
       this.ownBotIdentityPromise = (async () => {
@@ -394,6 +409,7 @@ export class SlackNotifier {
             userId: result.user_id,
             botId: result.bot_id,
             teamId: result.team_id,
+            teamDomain: getSlackWorkspaceDomain(result.url) ?? undefined,
           };
         } catch (error) {
           console.error(
@@ -416,6 +432,17 @@ export class SlackNotifier {
   /** Non-secret routing identity for durable, control-plane message refresh. */
   async getWorkspaceId(): Promise<string | null> {
     return (await this.getOwnBotIdentity())?.teamId ?? null;
+  }
+
+  /** Authenticated workspace identity for resolving links without stored domain metadata. */
+  async getWorkspaceIdentity(): Promise<{
+    teamId: string;
+    teamDomain: string;
+  } | null> {
+    const identity = await this.getOwnBotIdentity();
+    return identity?.teamId && identity.teamDomain
+      ? { teamId: identity.teamId, teamDomain: identity.teamDomain }
+      : null;
   }
 
   private async normalizeFetchedMessages(

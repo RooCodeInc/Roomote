@@ -29,6 +29,7 @@ import {
 } from '@roomote/compute-providers';
 
 import { primeEnvironmentOidcForMachine } from '../sandbox-oidc';
+import type { SessionEgressLifecycle } from '../session-egress';
 import {
   getNamedPortsForTaskRun,
   shouldEnableAuthBypassForTaskRun,
@@ -240,6 +241,8 @@ export async function spawnModalWorker(
       launchDiagnostics?: string;
     }) => Promise<'ignore' | 'restart' | 'failed'>;
     onWorkerRestart?: () => void;
+    /** Session-egress admission; omitted in unit paths that do not exercise it. */
+    sessionEgress?: SessionEgressLifecycle;
   },
 ): Promise<{
   machineId: string;
@@ -267,8 +270,13 @@ export async function spawnModalWorker(
     modalTags,
     onWorkerExit,
     onWorkerRestart,
+    sessionEgress,
   } = config;
   const parsedModalRegions = parseModalRegions(modalRegions);
+  const sessionEgressPlan = await sessionEgress?.planApiProxy({
+    taskRun,
+    provider: vendor,
+  });
   const environmentId = taskRun.payload.environmentId;
 
   const { namedPorts, environmentSnapshotId, environmentConfig } =
@@ -555,6 +563,7 @@ export async function spawnModalWorker(
         baseImageRef: modalBaseImageRef,
         extraEnv: {
           SANDBOX_TIMEOUT_MS: String(modalTimeoutMs),
+          ...sessionEgressPlan?.bootstrapEnv,
         },
       }),
       detached: true,
@@ -692,6 +701,11 @@ export async function spawnModalWorker(
         .set({ sandboxCmdId: result.commandId })
         .where(eq(taskRuns.id, taskRun.id));
     }
+
+    // The worker is waiting on the bootstrap nonce after its ordinary
+    // bootstrap; an admission failure fails the spawn, as it does for Docker,
+    // rather than leaving a worker that expected substitutes without them.
+    await sessionEgressPlan?.admit();
 
     return {
       machineId: machine.machineId,

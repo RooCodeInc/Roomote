@@ -27,6 +27,7 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
+import type { SessionEgressLifecycle } from '../session-egress';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 import {
   COMPUTE_BOOTSTRAP_TIMEOUT_MS,
@@ -119,6 +120,8 @@ export async function spawnDaytonaWorker(
     localTarballPath?: string;
     deploymentSlug?: string;
     daytonaTags?: Record<string, string>;
+    /** Session-egress admission; omitted in unit paths that do not exercise it. */
+    sessionEgress?: SessionEgressLifecycle;
   },
 ): Promise<{
   machineId: string;
@@ -133,6 +136,7 @@ export async function spawnDaytonaWorker(
     localTarballPath,
     deploymentSlug,
     daytonaTags,
+    sessionEgress,
   } = config;
 
   const environmentId = taskRun.payload.environmentId;
@@ -250,6 +254,11 @@ export async function spawnDaytonaWorker(
     );
   });
 
+  const sessionEgressPlan = await sessionEgress?.planApiProxy({
+    taskRun,
+    provider: 'daytona',
+  });
+
   const machine = await createDaytonaMachine({
     daytonaApiKey,
     daytonaApiUrl,
@@ -340,6 +349,7 @@ export async function spawnDaytonaWorker(
         snapshotName: daytonaSnapshotName,
         extraEnv: {
           SANDBOX_TIMEOUT_MS: String(daytonaTimeoutMs),
+          ...sessionEgressPlan?.bootstrapEnv,
         },
       }),
       detached: true,
@@ -372,6 +382,11 @@ export async function spawnDaytonaWorker(
         .set({ sandboxCmdId: result.commandId })
         .where(eq(taskRuns.id, taskRun.id));
     }
+
+    // The worker is waiting on the bootstrap nonce after its ordinary
+    // bootstrap; an admission failure fails the spawn, as it does for Docker,
+    // rather than leaving a worker that expected substitutes without them.
+    await sessionEgressPlan?.admit();
 
     return {
       machineId: machine.machineId,

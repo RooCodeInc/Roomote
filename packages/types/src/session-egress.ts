@@ -27,6 +27,76 @@ export const SESSION_EGRESS_METHODS = [
   'DELETE',
 ] as const;
 export const sessionEgressMethodSchema = z.enum(SESSION_EGRESS_METHODS);
+
+export const SESSION_EGRESS_HEADER_NAME_MAX_LENGTH = 64;
+
+/**
+ * Headers that can never carry a Session credential: they shape the request
+ * itself, route it, frame its body, or carry other credentials, so injecting
+ * a key there would change what the origin sees rather than authenticate it.
+ */
+const RESERVED_CREDENTIAL_HEADER_NAMES = new Set([
+  'accept',
+  'accept-encoding',
+  'accept-language',
+  'cache-control',
+  'connection',
+  'content-encoding',
+  'content-length',
+  'content-type',
+  'cookie',
+  'cookie2',
+  'date',
+  'expect',
+  'forwarded',
+  'host',
+  'if-match',
+  'if-modified-since',
+  'if-none-match',
+  'if-range',
+  'if-unmodified-since',
+  'keep-alive',
+  'location',
+  'origin',
+  'pragma',
+  'range',
+  'referer',
+  'set-cookie',
+  'set-cookie2',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+  'user-agent',
+  'via',
+  'www-authenticate',
+  'x-real-ip',
+]);
+
+/**
+ * Any RFC 7230 token can name the header that carries a grant's key:
+ * `authorization`, `x-api-key`, `api-key`, or a service-specific name such as
+ * `private-token` or `x-shopify-access-token`. Names compare lowercase.
+ */
+export function isSessionEgressCredentialHeaderName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower.length <= SESSION_EGRESS_HEADER_NAME_MAX_LENGTH &&
+    /^[a-z0-9!#$%&'*+.^_`|~-]+$/.test(lower) &&
+    !RESERVED_CREDENTIAL_HEADER_NAMES.has(lower) &&
+    !lower.startsWith('proxy-') &&
+    !lower.startsWith('x-forwarded-') &&
+    !lower.startsWith('sec-')
+  );
+}
+
+export const sessionEgressHeaderNameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .refine(isSessionEgressCredentialHeaderName, {
+    message: 'unsupported credential header',
+  });
 export type SessionEgressMethod = z.infer<typeof sessionEgressMethodSchema>;
 
 /** Grants prepared before method policy existed, and grants that omit it, stay read-only. */
@@ -109,15 +179,17 @@ export const sessionEgressWorkloadTerminateSchema = z
 export const SESSION_EGRESS_PHASES = ['request', 'response', 'stream'] as const;
 export type SessionEgressPhase = (typeof SESSION_EGRESS_PHASES)[number];
 
+const substituteSchema = z
+  .string()
+  .min(SESSION_EGRESS_SUBSTITUTE_PREFIX.length + 32)
+  .max(128)
+  .regex(/^[A-Za-z0-9_-]+$/);
+
 export const sessionEgressAuthorizeSchema = z
   .object({
     workloadId: z.string().uuid(),
     connectorIdentity: connectorIdentitySchema,
-    substitute: z
-      .string()
-      .min(SESSION_EGRESS_SUBSTITUTE_PREFIX.length + 32)
-      .max(128)
-      .regex(/^[A-Za-z0-9_-]+$/),
+    substitute: substituteSchema,
     destination: z
       .object({
         host: destinationHostSchema,
@@ -133,6 +205,46 @@ export const sessionEgressAuthorizeSchema = z
      * controlled correlation only: never authority, uniqueness, or proof
      * that a previous phase succeeded.
      */
+    authorizationId: z.string().uuid().optional(),
+  })
+  .strict();
+
+/**
+ * Public prefix of the API-side substitution proxy. A workload points an
+ * ordinary HTTP client at `<api origin>/api/session-egress` as the base URL
+ * of every approved service and presents the service's substitute as its
+ * credential; the substitute alone names the grant, so the API rewrites the
+ * request onto that grant's approved origin and injects the real credential.
+ * This is the path for compute providers without a per-workload connector.
+ */
+export const SESSION_EGRESS_PROXY_PATH = '/api/session-egress';
+
+/**
+ * The one base URL a workload uses for every approved service: the dedicated
+ * proxy hostname when the deployment has one, otherwise the API origin plus
+ * the proxy path. Workloads never learn which form they were given.
+ */
+export function sessionEgressProxyBaseUrl(
+  apiBaseUrl: string,
+  proxyHost?: string | null,
+): string {
+  if (proxyHost) return `https://${proxyHost}`;
+  let end = apiBaseUrl.length;
+  while (end > 0 && apiBaseUrl[end - 1] === '/') end--;
+  return `${apiBaseUrl.slice(0, end)}${SESSION_EGRESS_PROXY_PATH}`;
+}
+
+/**
+ * Authorization input for the API-side proxy. The substitute names the grant;
+ * there is no connector identity because the API itself is the only party
+ * between the workload and the origin.
+ */
+export const sessionEgressProxyAuthorizeSchema = z
+  .object({
+    substitute: substituteSchema,
+    method: sessionEgressMethodSchema,
+    path: requestPathSchema,
+    phase: z.enum(SESSION_EGRESS_PHASES).default('request'),
     authorizationId: z.string().uuid().optional(),
   })
   .strict();
@@ -156,6 +268,9 @@ export type SessionEgressWorkloadTerminate = z.infer<
 export type SessionEgressAuthorize = z.infer<
   typeof sessionEgressAuthorizeSchema
 >;
+export type SessionEgressProxyAuthorize = z.infer<
+  typeof sessionEgressProxyAuthorizeSchema
+>;
 export type SessionEgressRevocationsQuery = z.infer<
   typeof sessionEgressRevocationsQuerySchema
 >;
@@ -165,7 +280,9 @@ export interface SessionEgressGrantPolicy {
   label: string;
   /** Exact approved HTTPS origin, e.g. `https://api.example.com` or `https://host:8443`. */
   origin: string;
-  headerName: 'authorization' | 'x-api-key' | 'api-key';
+  /** Lowercase header that carries the key at the origin; see `isSessionEgressCredentialHeaderName`. */
+  headerName: string;
+  /** A scheme is only meaningful on `authorization`; other headers carry the bare key. */
   headerPrefix: '' | 'Bearer ' | 'Basic ' | 'Token ';
   allowedMethods: SessionEgressMethod[];
   expiresAt: string;
@@ -275,6 +392,12 @@ export const SESSION_EGRESS_WORKLOAD_ENV = {
   NO_PROXY: 'ROOMOTE_SESSION_EGRESS_NO_PROXY',
   /** JSON `SessionEgressWorkloadServiceManifestEntry[]`; never contains token values. */
   SERVICES: 'ROOMOTE_SESSION_EGRESS_SERVICES',
+  /**
+   * API-proxy admission only: the one base URL every approved service is
+   * called through (`<api origin>/api/session-egress`, or the deployment's
+   * dedicated proxy host). Nonsecret; delivered next to the substitutes.
+   */
+  BASE_URL: 'ROOMOTE_SERVICE_BASE_URL',
 } as const;
 
 /** Substitute tokens are delivered as `ROOMOTE_SERVICE_TOKEN_<LABEL_SLUG>`. */
@@ -286,6 +409,12 @@ export const SESSION_EGRESS_CONNECTOR_PORT = 3128;
 export interface SessionEgressWorkloadServiceManifestEntry extends SessionEgressGrantPolicy {
   /** The env var that carries this service's substitute token. */
   envName: string;
+  /**
+   * API-proxy admission only: call this instead of `origin`, with the
+   * substitute as the credential; the API forwards to `origin`. Absent under
+   * connector admission, where clients use `origin` through the proxy.
+   */
+  baseUrl?: string;
 }
 
 export function sessionEgressServiceTokenEnvName(label: string): string {
@@ -310,6 +439,7 @@ export function sessionEgressServiceTokenEnvName(label: string): string {
  */
 export function buildSessionEgressServiceTokenEnv(
   substitutes: readonly SessionEgressSubstituteIssue[],
+  options: { baseUrl?: string } = {},
 ): {
   tokens: Record<string, string>;
   manifest: SessionEgressWorkloadServiceManifestEntry[];
@@ -322,7 +452,11 @@ export function buildSessionEgressServiceTokenEnv(
     for (let n = 2; envName in tokens; n += 1) envName = `${base}_${n}`;
     tokens[envName] = issue.substitute;
     const { substitute: _omitted, ...policy } = issue;
-    manifest.push({ ...policy, envName });
+    manifest.push({
+      ...policy,
+      envName,
+      ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
+    });
   }
   return { tokens, manifest };
 }

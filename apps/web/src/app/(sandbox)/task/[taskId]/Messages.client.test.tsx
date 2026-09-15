@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { TaskArtifact } from '@/types';
 import type { AcpConversationRenderBlock } from './messages/acp/activity-groups';
 import type { AcpRenderBlock } from './messages/acp/render-blocks';
@@ -26,6 +26,28 @@ const taskPhaseState = vi.hoisted(() => ({
 
 const sandboxMessagesState = vi.hoisted(() => ({
   messages: [] as unknown[],
+}));
+
+const historyControlsState = vi.hoisted(() => ({
+  isError: false,
+  isRetrying: false,
+  retry: vi.fn(async () => undefined),
+  hasOlderMessages: false,
+  isFetchingOlderMessages: false,
+  olderMessagesError: null as unknown,
+  fetchOlderMessages: vi.fn(async () => false),
+}));
+
+const scrollState = vi.hoisted(() => ({
+  element: null as HTMLDivElement | null,
+  stopScroll: vi.fn(),
+}));
+
+vi.mock('use-stick-to-bottom', () => ({
+  useStickToBottomContext: () => ({
+    scrollRef: { current: scrollState.element },
+    stopScroll: scrollState.stopScroll,
+  }),
 }));
 
 vi.mock('@/components/ai-elements', () => ({
@@ -68,6 +90,7 @@ vi.mock('./hooks', () => ({
   useSandboxMessages: () => ({
     messages: sandboxMessagesState.messages,
   }),
+  useSandboxHistoryControls: () => historyControlsState,
   useSandboxHistoryReady: () => true,
   useSandboxTaskPhase: () => taskPhaseState.phase,
 }));
@@ -185,10 +208,29 @@ vi.mock('./ScrollBridge', () => ({
 }));
 
 vi.mock('@/components/system', () => ({
+  Button: ({
+    children,
+    ...props
+  }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button {...props}>{children}</button>
+  ),
   Lightbulb: () => <svg aria-hidden="true" />,
+  Skeleton: ({ className }: { className?: string }) => (
+    <div className={className} />
+  ),
 }));
 
 import { Messages } from './Messages';
+
+function createScrollElement(scrollTop = 1_200, scrollHeight = 2_000) {
+  const element = document.createElement('div');
+  Object.defineProperty(element, 'scrollHeight', {
+    configurable: true,
+    value: scrollHeight,
+  });
+  element.scrollTop = scrollTop;
+  return element;
+}
 
 describe('Messages', () => {
   beforeEach(() => {
@@ -198,7 +240,194 @@ describe('Messages', () => {
     narrationModeState.enabled = false;
     taskPhaseState.phase = null;
     sandboxMessagesState.messages = [];
+    historyControlsState.isError = false;
+    historyControlsState.isRetrying = false;
+    historyControlsState.hasOlderMessages = false;
+    historyControlsState.isFetchingOlderMessages = false;
+    historyControlsState.olderMessagesError = null;
+    historyControlsState.retry.mockClear();
+    historyControlsState.fetchOlderMessages.mockClear();
+    scrollState.element = null;
+    scrollState.stopScroll.mockClear();
     mockBuildAcpRenderBlocks.mockReturnValue([]);
+  });
+
+  it('offers retry when initial conversation history fails', async () => {
+    historyControlsState.isError = true;
+
+    render(<Messages session={{ taskId: 'task-1', taskRun: null } as never} />);
+
+    screen.getByText('Conversation history could not be loaded.');
+    screen.getByRole('button', { name: 'Retry' }).click();
+    expect(historyControlsState.retry).toHaveBeenCalledOnce();
+  });
+
+  it.each([390, 1_280])(
+    'loads one older page when scrolling near the top at %ipx wide',
+    async (width) => {
+      Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        value: width,
+      });
+      historyControlsState.hasOlderMessages = true;
+      const scrollElement = createScrollElement();
+      scrollState.element = scrollElement;
+
+      render(
+        <Messages session={{ taskId: 'task-1', taskRun: null } as never} />,
+      );
+
+      scrollElement.scrollTop = 800;
+      await act(async () => {
+        fireEvent.scroll(scrollElement);
+        await Promise.resolve();
+      });
+      expect(historyControlsState.fetchOlderMessages).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('preserves the visible scroll position when older messages are prepended', async () => {
+    historyControlsState.hasOlderMessages = true;
+    sandboxMessagesState.messages = [{ id: 'newer-message' }];
+    const scrollElement = createScrollElement(400, 1_000);
+    scrollState.element = scrollElement;
+    historyControlsState.fetchOlderMessages.mockImplementationOnce(async () => {
+      sandboxMessagesState.messages = [
+        { id: 'older-message' },
+        { id: 'newer-message' },
+      ];
+      Object.defineProperty(scrollElement, 'scrollHeight', {
+        configurable: true,
+        value: 1_400,
+      });
+      return true;
+    });
+
+    const { rerender } = render(
+      <Messages session={{ taskId: 'task-1', taskRun: null } as never} />,
+    );
+
+    await act(async () => {
+      fireEvent.scroll(scrollElement);
+      await Promise.resolve();
+    });
+    expect(historyControlsState.fetchOlderMessages).toHaveBeenCalledOnce();
+    rerender(
+      <Messages session={{ taskId: 'task-1', taskRun: null } as never} />,
+    );
+
+    expect(scrollState.stopScroll).toHaveBeenCalledOnce();
+    expect(scrollElement.scrollTop).toBe(800);
+  });
+
+  it('prevents overlapping loads and requires leaving the threshold before loading again', async () => {
+    historyControlsState.hasOlderMessages = true;
+    const scrollElement = createScrollElement();
+    scrollState.element = scrollElement;
+    let resolveLoad: ((loaded: boolean) => void) | undefined;
+    historyControlsState.fetchOlderMessages.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+
+    render(<Messages session={{ taskId: 'task-1', taskRun: null } as never} />);
+
+    scrollElement.scrollTop = 500;
+    await act(async () => {
+      fireEvent.scroll(scrollElement);
+      fireEvent.scroll(scrollElement);
+      await Promise.resolve();
+    });
+    expect(historyControlsState.fetchOlderMessages).toHaveBeenCalledOnce();
+
+    await act(async () => resolveLoad?.(true));
+    fireEvent.scroll(scrollElement);
+    expect(historyControlsState.fetchOlderMessages).toHaveBeenCalledOnce();
+
+    scrollElement.scrollTop = 900;
+    fireEvent.scroll(scrollElement);
+    scrollElement.scrollTop = 500;
+    await act(async () => {
+      fireEvent.scroll(scrollElement);
+      await Promise.resolve();
+    });
+    expect(historyControlsState.fetchOlderMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops automatic loading after failure and keeps manual retry visible', async () => {
+    historyControlsState.hasOlderMessages = true;
+    const scrollElement = createScrollElement();
+    scrollState.element = scrollElement;
+    historyControlsState.fetchOlderMessages.mockImplementationOnce(async () => {
+      historyControlsState.olderMessagesError = new Error('network error');
+      return false;
+    });
+
+    const { rerender } = render(
+      <Messages session={{ taskId: 'task-1', taskRun: null } as never} />,
+    );
+
+    scrollElement.scrollTop = 500;
+    await act(async () => {
+      fireEvent.scroll(scrollElement);
+      await Promise.resolve();
+    });
+    expect(historyControlsState.fetchOlderMessages).toHaveBeenCalledOnce();
+    rerender(
+      <Messages session={{ taskId: 'task-1', taskRun: null } as never} />,
+    );
+
+    fireEvent.scroll(scrollElement);
+    expect(historyControlsState.fetchOlderMessages).toHaveBeenCalledOnce();
+
+    historyControlsState.fetchOlderMessages.mockImplementationOnce(async () => {
+      historyControlsState.olderMessagesError = null;
+      return true;
+    });
+    screen
+      .getByRole('button', { name: 'Retry loading older messages' })
+      .click();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(historyControlsState.fetchOlderMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops requesting pages at the end of history', async () => {
+    historyControlsState.hasOlderMessages = true;
+    const scrollElement = createScrollElement();
+    scrollState.element = scrollElement;
+    historyControlsState.fetchOlderMessages.mockImplementationOnce(async () => {
+      historyControlsState.hasOlderMessages = false;
+      return true;
+    });
+
+    const { rerender } = render(
+      <Messages session={{ taskId: 'task-1', taskRun: null } as never} />,
+    );
+
+    scrollElement.scrollTop = 500;
+    await act(async () => {
+      fireEvent.scroll(scrollElement);
+      await Promise.resolve();
+    });
+    expect(historyControlsState.fetchOlderMessages).toHaveBeenCalledOnce();
+    rerender(
+      <Messages session={{ taskId: 'task-1', taskRun: null } as never} />,
+    );
+
+    scrollElement.scrollTop = 900;
+    fireEvent.scroll(scrollElement);
+    scrollElement.scrollTop = 500;
+    fireEvent.scroll(scrollElement);
+
+    expect(historyControlsState.fetchOlderMessages).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole('button', { name: /older messages/i }),
+    ).not.toBeInTheDocument();
   });
 
   afterEach(() => {

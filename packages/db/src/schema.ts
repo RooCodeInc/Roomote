@@ -4287,9 +4287,9 @@ export const sessionSecrets = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     label: text('label').notNull(),
     origin: text('origin').notNull(),
-    headerName: text('header_name')
-      .notNull()
-      .$type<'authorization' | 'x-api-key' | 'api-key'>(),
+    // Any lowercase RFC 7230 token; validated by the shared credential header
+    // schema at prepare time, never constrained here.
+    headerName: text('header_name').notNull(),
     headerPrefix: text('header_prefix')
       .notNull()
       .$type<'' | 'Bearer ' | 'Basic ' | 'Token '>(),
@@ -4326,9 +4326,9 @@ export const sessionSecretApprovals = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     label: text('label').notNull(),
     origin: text('origin').notNull(),
-    headerName: text('header_name')
-      .notNull()
-      .$type<'authorization' | 'x-api-key' | 'api-key'>(),
+    // Any lowercase RFC 7230 token; validated by the shared credential header
+    // schema at prepare time, never constrained here.
+    headerName: text('header_name').notNull(),
     headerPrefix: text('header_prefix')
       .notNull()
       .$type<'' | 'Bearer ' | 'Basic ' | 'Token '>(),

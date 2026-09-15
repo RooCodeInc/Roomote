@@ -2,6 +2,39 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.9.1 (2026-09-15)
+
+Roomote 1.9.1 brings Session secrets to every hosted sandbox, adds cross-surface chat actions and guided delegation discovery, and improves Voice, Session, provider, email, and deployment reliability.
+
+### Highlights
+
+- Use owner-approved Session secrets safely from coding tasks on every hosted sandbox provider, including services with custom credential headers.
+- Read Slack or Discord context and post verified Slack updates from any Fast surface, with optional peer-conversation follow-ups in Slack.
+- Find useful work to delegate through a guided interview available from Home and natural-language requests.
+- Open large task transcripts faster and get more reliable Voice, endpoint setup, wakeups, Session views, and AgentMail formatting.
+
+### Patch changes
+
+- AgentMail now renders safe links and rejects unsafe protocols with a forward-only Markdown parser, preventing crafted messages from stalling outbound email formatting.
+- Fast can now read authorized Slack or Discord context from any chat surface and post explicitly requested updates to verified Slack destinations, with workspace, channel-membership, and linked-account checks preserved across platforms.
+- Endpoint-backed inference providers can now save valid configuration during temporary model-discovery, compatibility, rate-limit, network, or upstream failures, while invalid URLs, rejected credentials, and exhausted credits remain blocked.
+- Add a guided delegation interview, trigger it from natural-language requests about how Roomote can help, and make it the first optional onboarding suggestion on Home.
+- Large task transcripts now open from a bounded recent window and load older messages as you scroll, avoiding unbounded initial loading while preserving live updates, position, and retry controls.
+- Memory disclosure is now consistent for everyone: Roomote identifies a materially useful remembered fact and explains how it informed the work without requiring the former per-user Therapist Mode setting.
+- Deployments now run MinIO from Roomote's own `ghcr.io/roocodeinc/roomote-minio` image, built from the final MinIO community source release, instead of the retired upstream images. The same image provides the `mc` client used to create the artifact bucket, so the separate `minio/mc` image is gone. Existing `/data` volumes are unaffected.
+- Deliver Session service tokens to coding runs on every hosted sandbox provider. Daytona, E2B, Blaxel, Box, and Azure runs now receive substitute tokens and the API proxy base URL the same way Modal and Roomote Cloud runs do, gated by the Session owner's Session secret tools setting. No deployment configuration is required.
+- Deliver owner-approved Session service tokens to coding runs on Modal and Roomote Cloud. When the Session owner has Session secret tools enabled, the controller registers the run after bootstrap and the worker receives substitute tokens, the service manifest, and the API proxy base URL; the model calls approved services through the proxy with ordinary HTTP clients while the real key stays in the API. No deployment configuration is required.
+- Add the API-side session egress substitution proxy at `/api/session-egress/<grant>/<path>`, so attached coding runs on compute providers without a per-workload connector can call an owner-approved origin with an ordinary HTTP client and a substitute token while the real credential stays in the API.
+- Session views now include every ready Session in the Ready filter and render transcript timestamps without time-zone-dependent hydration failures.
+- Session secret grants can name any credential header, not only `authorization`, `x-api-key`, and `api-key`, so services that authenticate with their own header such as `private-token` or `x-shopify-access-token` can be approved. Request-shaping headers remain refused, and a scheme is still only accepted on `authorization`.
+- Log bounded, nonsecret reason codes when Session-secret tools and HTTP integration requests fail closed, so operators can diagnose a denial from server logs. Client-facing messages are unchanged and no path, header, body, credential or upstream error text is logged.
+- Guide agents through Session secrets end to end: Fast checks existing approvals before preparing, reads through the broker, and launches attached coding tasks for scripts, SDKs, and approved writes; coding tasks get worked examples for the proxy base URL and clear meanings for its error responses; tool descriptions no longer call the broker read path deprecated. The public Session secrets page describes the feature as shipped.
+- Slack Session owners can opt into peer conversations so eligible human follow-ups continue reaching Fast after another person is mentioned, while direct Roomote mentions and established routing behavior remain unchanged by default.
+- Voice and dictation controls now present one focused composer mode at a time, preserve typed drafts across calls, show live call status and microphone controls, and allow a longer natural pause before browser dictation ends.
+- Deployment admins can now turn Voice off and back on from Settings > Integrations even when the Voice key is provided by the `R_VOICE_OPENAI_API_KEY` environment variable. The environment key decides which OpenAI account pays for Voice; the deployment decides whether Voice is on. A key saved in Settings is kept while Voice is off. The card no longer names the environment variable.
+- Scheduled wakeups now deliver their final result or blocker when they successfully cancel themselves after completing the monitored condition, while independently canceled or archived wakeups remain silent.
+- Webhook cleanup now retains its three-day default when environment validation is intentionally skipped, preventing repeated cleanup failures without changing validated deployment overrides.
+
 ## 1.9.0 (2026-09-13)
 
 Roomote 1.9 adds a native Telegram Fast experience, Session-owned Goal Mode, direct pull request merging, and more adaptive setup and workspace flows.

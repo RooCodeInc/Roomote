@@ -3,7 +3,7 @@
 import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
-import type { TaskMessageEnvelope } from '@/types';
+import type { TaskMessageEnvelope, TaskMessageEnvelopePage } from '@/types';
 import { generateClientUuid } from '@/lib/client-uuid';
 import { useTRPC } from '@/trpc/client';
 
@@ -14,6 +14,7 @@ import {
   useSandboxRemoveOptimisticMessage,
   useSandboxRemoveOptimisticQueuedMessage,
 } from '../hooks/SandboxProvider';
+import { updateTaskMessageEnvelopePage } from '../hooks/use-task-message-envelopes';
 import {
   appendOptimisticPromptEnvelope,
   removeOptimisticPromptEnvelope,
@@ -54,9 +55,9 @@ export function useOptimisticPromptSubmission() {
         current: TaskMessageEnvelope[] | undefined,
       ) => TaskMessageEnvelope[] | undefined,
     ) => {
-      queryClient.setQueryData<TaskMessageEnvelope[] | undefined>(
+      queryClient.setQueryData<TaskMessageEnvelopePage | undefined>(
         trpc.tasks.messageEnvelopes.queryKey({ taskId }),
-        updater,
+        (current) => updateTaskMessageEnvelopePage(current, updater),
       );
     },
     [queryClient, trpc],

@@ -14,6 +14,17 @@ const { getDeploymentStaticOauthReadinessMock } = vi.hoisted(() => ({
   getDeploymentStaticOauthReadinessMock: vi.fn(),
 }));
 
+const { resolveModelProviderEnvValueMock } = vi.hoisted(() => ({
+  resolveModelProviderEnvValueMock: vi.fn(
+    async () => undefined as string | undefined,
+  ),
+}));
+
+vi.mock('@roomote/db/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/db/server')>()),
+  resolveModelProviderEnvValue: resolveModelProviderEnvValueMock,
+}));
+
 vi.mock('@roomote/telemetry/server', () => ({
   captureEvent: captureEventMock,
 }));
@@ -59,10 +70,65 @@ describe('MCP connection lifecycle telemetry', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     getDeploymentStaticOauthReadinessMock.mockResolvedValue('ready');
+    resolveModelProviderEnvValueMock.mockResolvedValue(undefined);
     await cleanup();
   });
 
   afterAll(cleanup);
+
+  it('lets an environment-keyed Voice be switched off and on without a stored connection', async () => {
+    // Without an environment key, Voice behaves like any other
+    // deployment-scoped integration: enabling needs a stored connection.
+    await expect(
+      setDeploymentMcpEnabledCommand(adminAuth, {
+        mcpId: 'voice',
+        enabled: true,
+      }),
+    ).rejects.toThrow('must be connected before it can be enabled');
+
+    resolveModelProviderEnvValueMock.mockResolvedValue('sk-env-voice');
+
+    // The environment key stands in for the connection.
+    await expect(
+      setDeploymentMcpEnabledCommand(adminAuth, {
+        mcpId: 'voice',
+        enabled: true,
+      }),
+    ).resolves.toMatchObject({ mcpId: 'voice', enabled: true });
+
+    // A key the admin had saved earlier survives disabling: the deployment
+    // falls back to it if the environment key is ever removed.
+    await db.insert(mcpConnections).values({
+      userId: null,
+      mcpId: 'voice',
+      connectionRole: 'default',
+      authConfig: { type: 'voice', encryptedApiKey: 'stored-encrypted-key' },
+      enabled: true,
+      authStatus: 'authenticated',
+    });
+    await expect(
+      setDeploymentMcpEnabledCommand(adminAuth, {
+        mcpId: 'voice',
+        enabled: false,
+      }),
+    ).resolves.toMatchObject({ mcpId: 'voice', enabled: false });
+    await expect(
+      db.query.mcpConnections.findFirst({
+        where: (table, { eq: whereEq }) => whereEq(table.mcpId, 'voice'),
+      }),
+    ).resolves.toMatchObject({ mcpId: 'voice' });
+    await expect(
+      db.query.deploymentMcpEnablements.findFirst({
+        where: (table, { eq: whereEq }) => whereEq(table.mcpId, 'voice'),
+      }),
+    ).resolves.toMatchObject({ enabled: false });
+
+    // The card reads the switch from the connection query.
+    await expect(getVoiceConnectionCommand(adminAuth)).resolves.toMatchObject({
+      source: 'environment',
+      enabled: false,
+    });
+  });
 
   it('captures deployment enablement changes without connection PII', async () => {
     await setDeploymentMcpEnabledCommand(adminAuth, {

@@ -22,9 +22,37 @@ describe('personal preferences', () => {
     ).resolves.toEqual(
       expect.objectContaining({
         mindReaderMode: false,
-        therapistMode: false,
+        slackPeerConversationsExperimentEnabled: false,
         homeComposerSuggestionsEnabled: false,
         sessionSecretToolsEnabled: false,
+      }),
+    );
+  });
+
+  it('persists the Slack peer-conversations experiment without replacing other metadata', async () => {
+    const user = await userFactory.create({
+      metadata: { existing_value: 'preserved' },
+    });
+
+    await expect(
+      updatePersonalPreferencesCommand(buildAuth(user.id), {
+        slackPeerConversationsExperimentEnabled: true,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        slackPeerConversationsExperimentEnabled: true,
+      }),
+    );
+
+    const storedUser = await db.query.users.findFirst({
+      where: eq(users.id, user.id),
+      columns: { metadata: true },
+    });
+
+    expect(storedUser?.metadata).toEqual(
+      expect.objectContaining({
+        existing_value: 'preserved',
+        slack_peer_conversations_experiment_enabled: true,
       }),
     );
   });
@@ -79,29 +107,41 @@ describe('personal preferences', () => {
     );
   });
 
-  it('persists therapist mode without replacing other metadata', async () => {
-    const user = await userFactory.create({
-      metadata: { existing_value: 'preserved' },
-    });
+  it.each([undefined, false])(
+    'ignores a legacy therapist mode value of %s without dropping it on updates',
+    async (therapistMode) => {
+      const user = await userFactory.create({
+        metadata: {
+          existing_value: 'preserved',
+          ...(therapistMode === undefined
+            ? {}
+            : { therapist_mode: therapistMode }),
+        },
+      });
 
-    await expect(
-      updatePersonalPreferencesCommand(buildAuth(user.id), {
-        therapistMode: true,
-      }),
-    ).resolves.toEqual(expect.objectContaining({ therapistMode: true }));
+      const preferences = await getPersonalPreferencesCommand(
+        buildAuth(user.id),
+      );
+      expect(preferences).not.toHaveProperty('therapistMode');
 
-    const storedUser = await db.query.users.findFirst({
-      where: eq(users.id, user.id),
-      columns: { metadata: true },
-    });
+      await updatePersonalPreferencesCommand(buildAuth(user.id), {
+        mindReaderMode: true,
+      });
 
-    expect(storedUser?.metadata).toEqual(
-      expect.objectContaining({
+      const storedUser = await db.query.users.findFirst({
+        where: eq(users.id, user.id),
+        columns: { metadata: true },
+      });
+
+      expect(storedUser?.metadata).toEqual({
         existing_value: 'preserved',
-        therapist_mode: true,
-      }),
-    );
-  });
+        ...(therapistMode === undefined
+          ? {}
+          : { therapist_mode: therapistMode }),
+        mind_reader_mode: true,
+      });
+    },
+  );
 
   it('persists mind reader mode without replacing other metadata', async () => {
     const user = await userFactory.create({

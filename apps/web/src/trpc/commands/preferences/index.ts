@@ -4,6 +4,8 @@ import {
   eq,
   getUserPersonalization,
   isNull,
+  isSlackPeerConversationsExperimentEnabledInMetadata,
+  SLACK_PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY,
   sql,
   updateUserPersonalization,
   UserPersonalizationConflictError,
@@ -50,14 +52,12 @@ function normalizePersonalPreferences(
       typeof metadata.narration_mode === 'boolean'
         ? metadata.narration_mode
         : DEFAULT_PERSONAL_PREFERENCES.narrationMode,
-    therapistMode:
-      typeof metadata.therapist_mode === 'boolean'
-        ? metadata.therapist_mode
-        : DEFAULT_PERSONAL_PREFERENCES.therapistMode,
     resultsPageEnabled:
       typeof metadata.results_page_enabled === 'boolean'
         ? metadata.results_page_enabled
         : DEFAULT_PERSONAL_PREFERENCES.resultsPageEnabled,
+    slackPeerConversationsExperimentEnabled:
+      isSlackPeerConversationsExperimentEnabledInMetadata(metadata),
     homeComposerSuggestionsEnabled:
       typeof metadata.home_composer_suggestions_enabled === 'boolean'
         ? metadata.home_composer_suggestions_enabled
@@ -194,11 +194,12 @@ export async function updatePersonalPreferencesCommand(
     nextMetadataRecord.narration_mode = input.narrationMode;
   }
 
-  if (input.therapistMode !== undefined) {
-    nextMetadataRecord.therapist_mode = input.therapistMode;
-  }
   if (input.resultsPageEnabled !== undefined) {
     nextMetadataRecord.results_page_enabled = input.resultsPageEnabled;
+  }
+  if (input.slackPeerConversationsExperimentEnabled !== undefined) {
+    nextMetadataRecord[SLACK_PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY] =
+      input.slackPeerConversationsExperimentEnabled;
   }
   if (input.homeComposerSuggestionsEnabled !== undefined) {
     nextMetadataRecord.home_composer_suggestions_enabled =

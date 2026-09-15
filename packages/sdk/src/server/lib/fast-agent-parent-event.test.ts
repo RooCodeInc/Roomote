@@ -549,6 +549,34 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it.each([false, true])(
+    'preserves queued Slack caution eligibility (directed=%s)',
+    async (directedAtRoomote) => {
+      await deliverFastAgentParentEventWithLock(
+        {
+          parent,
+          event: {
+            type: 'human_follow_up',
+            eventId: '100.004',
+            currentMessageId: '100.004',
+            userId: 'user-2',
+            question: 'A follow-up',
+            directedAtRoomote,
+            agentContext: 'Human-to-human discussion may be continuing',
+          },
+        },
+        mocks.releaseTurnLock,
+      );
+      const input = mocks.answerQuestion.mock.calls[0]?.[0];
+      expect(input.currentMessageAgentContext).toBe(
+        'Human-to-human discussion may be continuing',
+      );
+      expect(input.allowSilentAmbientReply).toBe(
+        directedAtRoomote ? undefined : true,
+      );
+    },
+  );
+
   it('restores a queued cross-surface reply route without changing the canonical Session', async () => {
     const webParent = {
       sessionId: parent.sessionId,
@@ -4178,6 +4206,68 @@ describe('deliverFastAgentParentEvent', () => {
 
     expect(mocks.postMessage).not.toHaveBeenCalled();
     expect(signalAbortedAfterPost).toBe(true);
+  });
+
+  it('posts the final reply when a scheduled wakeup cancels itself', async () => {
+    mocks.findWakeup
+      .mockResolvedValueOnce({ status: 'active' })
+      .mockResolvedValueOnce({ status: 'cancelled' });
+    mocks.findWakeupSession.mockResolvedValue({ archivedAt: null });
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+        signal,
+      }: {
+        adapter: {
+          onWakeupCancelled?: (wakeupId: string) => void;
+          postReply: (reply: unknown) => Promise<unknown>;
+        };
+        signal: AbortSignal;
+      }) => {
+        adapter.onWakeupCancelled?.('wakeup-1');
+        await adapter.postReply({
+          purpose: 'closeout',
+          message: 'The deploy is ready, so I stopped checking.',
+        });
+        expect(signal.aborted).toBe(false);
+        return 'The deploy is ready, so I stopped checking.';
+      },
+    );
+
+    const result = await deliverFastAgentParentEvent({
+      parent: {
+        sessionId: parent.sessionId,
+        conversation: {
+          surface: 'telegram',
+          workspaceId: 'telegram-bot-1',
+          conversationId: 'telegram-chat-1',
+          replyTarget: { channelId: 'telegram-chat-1' },
+        },
+      },
+      event: {
+        type: 'scheduled_wakeup',
+        eventId: 'wakeup-1:2',
+        wakeupId: 'wakeup-1',
+        name: 'Check the deploy',
+        prompt: 'Check the deploy and stop once it is ready.',
+        runNumber: 2,
+        maxRuns: 12,
+        firedAt: '2026-09-15T03:38:29.344Z',
+        nextRunAt: '2026-09-15T03:43:29.344Z',
+        reportPolicy: 'only_when_notable',
+        createdByUserId: 'user-1',
+      },
+    });
+
+    expect(result).toBe('delivered');
+    expect(mocks.telegramPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'telegram-chat-1',
+        text: expect.stringContaining(
+          'The deploy is ready, so I stopped checking.',
+        ),
+      }),
+    );
   });
 
   it('still runs a scheduled wakeup whose one-shot row completed at claim time', async () => {

@@ -260,12 +260,14 @@ export async function getUserPersonalizationRuntimeContext(
   const explicit = decryptValue(row?.explicitConversationInstructions ?? null);
   const inferred = decryptValue(row?.inferredInstructions ?? null);
   const instructions = [
-    manual ? `Manually edited preferences (highest priority):\n${manual}` : '',
+    manual
+      ? `Manually edited personalization (highest priority):\n${manual}`
+      : '',
     explicit
-      ? `Preferences explicitly stated in conversation:\n${explicit}`
+      ? `Context and preferences explicitly stated in conversation:\n${explicit}`
       : '',
     inferred
-      ? `Tentative inferred preferences (lowest priority):\n${inferred}`
+      ? `Tentative inferred personalization (lowest priority):\n${inferred}`
       : '',
   ]
     .filter(Boolean)
@@ -329,13 +331,13 @@ export async function getOrCreateFastAgentPersonalizationSnapshot(input: {
       displayName: personalization?.resetAt ? null : user.name.trim() || null,
       instructions: [
         manual
-          ? `Manually edited preferences (highest priority):\n${manual}`
+          ? `Manually edited personalization (highest priority):\n${manual}`
           : '',
         explicit
-          ? `Preferences explicitly stated in conversation:\n${explicit}`
+          ? `Context and preferences explicitly stated in conversation:\n${explicit}`
           : '',
         inferred
-          ? `Tentative inferred preferences (lowest priority):\n${inferred}`
+          ? `Tentative inferred personalization (lowest priority):\n${inferred}`
           : '',
       ]
         .filter(Boolean)

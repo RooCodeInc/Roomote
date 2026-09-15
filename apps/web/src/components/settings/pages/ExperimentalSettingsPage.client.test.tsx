@@ -33,6 +33,15 @@ vi.mock('@/components/settings/ResultsExperimentalSetting', () => ({
   ResultsExperimentalSetting: () => <div>Results setting</div>,
 }));
 
+vi.mock(
+  '@/components/settings/SlackPeerConversationsExperimentalSetting',
+  () => ({
+    SlackPeerConversationsExperimentalSetting: () => (
+      <div>Slack peer conversations setting</div>
+    ),
+  }),
+);
+
 vi.mock('@/components/settings/SessionSecretToolsExperimentalSetting', () => ({
   SessionSecretToolsExperimentalSetting: () => (
     <div>Session secret tools setting</div>
@@ -63,6 +72,9 @@ describe('ExperimentalSettingsPage', () => {
       screen.queryByText('Home suggestions setting'),
     ).not.toBeInTheDocument();
     expect(screen.queryByText('Results setting')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Slack peer conversations setting'),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(refetchMock).toHaveBeenCalledOnce();
@@ -73,6 +85,9 @@ describe('ExperimentalSettingsPage', () => {
 
     expect(screen.getByText('Home suggestions setting')).toBeInTheDocument();
     expect(screen.getByText('Results setting')).toBeInTheDocument();
+    expect(
+      screen.getByText('Slack peer conversations setting'),
+    ).toBeInTheDocument();
     expect(
       screen.getByText('Session secret tools setting'),
     ).toBeInTheDocument();
@@ -103,6 +118,9 @@ describe('ExperimentalSettingsPage', () => {
 
     expect(screen.getByText('Home suggestions setting')).toBeInTheDocument();
     expect(screen.getByText('Results setting')).toBeInTheDocument();
+    expect(
+      screen.getByText('Slack peer conversations setting'),
+    ).toBeInTheDocument();
     expect(
       screen.getByText('Session secret tools setting'),
     ).toBeInTheDocument();

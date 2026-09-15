@@ -103,6 +103,7 @@ vi.mock('../../sandbox-oidc', () => ({
 }));
 
 const { spawnModalWorker } = await import('../spawn-modal-worker');
+const { buildModalWorkerEnv } = await import('@roomote/compute-providers');
 
 describe('spawnModalWorker', () => {
   beforeEach(() => {
@@ -126,6 +127,116 @@ describe('spawnModalWorker', () => {
       environmentConfig: undefined,
     });
     mockPrimeEnvironmentOidcForMachine.mockResolvedValue(undefined);
+  });
+
+  it('carries the Session egress bootstrap env and admits after the worker launches', async () => {
+    const admit = vi.fn().mockResolvedValue({
+      workloadId: 'w1',
+      generation: 1,
+      substitutes: [],
+    });
+    const planApiProxy = vi.fn().mockResolvedValue({
+      required: true,
+      bootstrapEnv: {
+        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
+        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+      },
+      admit,
+    });
+    const taskRun = mockTaskRun({
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: { repo: 'test/repo', environmentId: 'env_123' },
+    });
+    await spawnModalWorker(taskRun, 'auth_token', {
+      deploymentSlug: 'roomote',
+      modalTokenId: 'token-id',
+      modalTokenSecret: 'token-secret',
+      modalBaseImageRef: 'ghcr.io/roomote/worker:test',
+      modalVmMemoryMiB: 8192,
+      modalTimeoutMs: 60_000,
+      sessionEgress: { planApiProxy } as never,
+    });
+    expect(planApiProxy).toHaveBeenCalledWith({ taskRun, provider: 'modal' });
+    const extraEnv = vi.mocked(buildModalWorkerEnv).mock.calls.at(-1)![0]
+      .extraEnv as Record<string, string>;
+    expect(extraEnv).toMatchObject({
+      ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
+      ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+    });
+    // Admission runs only once the worker is launched and waiting.
+    expect(mockRunCommand).toHaveBeenCalledOnce();
+    expect(admit).toHaveBeenCalledOnce();
+    expect(admit.mock.invocationCallOrder[0]!).toBeGreaterThan(
+      mockRunCommand.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('spawns without bootstrap gating when no admission is needed', async () => {
+    const planApiProxy = vi.fn().mockResolvedValue({
+      required: false,
+      bootstrapEnv: {},
+      admit: vi.fn().mockResolvedValue(null),
+    });
+    await spawnModalWorker(
+      mockTaskRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_123' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'ghcr.io/roomote/worker:test',
+        modalVmMemoryMiB: 8192,
+        modalTimeoutMs: 60_000,
+        sessionEgress: { planApiProxy } as never,
+      },
+    );
+    const extraEnv = vi.mocked(buildModalWorkerEnv).mock.calls.at(-1)![0]
+      .extraEnv as Record<string, string>;
+    expect(extraEnv).not.toHaveProperty(
+      'ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED',
+    );
+  });
+
+  it('cleans up the sandbox when Session egress admission fails after launch', async () => {
+    const planApiProxy = vi.fn().mockResolvedValue({
+      required: true,
+      bootstrapEnv: {
+        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
+        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+      },
+      admit: vi
+        .fn()
+        .mockRejectedValue(
+          new Error('Session egress bootstrap admission timed out'),
+        ),
+    });
+    await expect(
+      spawnModalWorker(
+        mockTaskRun({
+          payloadKind: TaskPayloadKind.StandardTask,
+          payload: { repo: 'test/repo', environmentId: 'env_123' },
+        }),
+        'auth_token',
+        {
+          deploymentSlug: 'roomote',
+          modalTokenId: 'token-id',
+          modalTokenSecret: 'token-secret',
+          modalBaseImageRef: 'ghcr.io/roomote/worker:test',
+          modalVmMemoryMiB: 8192,
+          modalTimeoutMs: 60_000,
+          sessionEgress: { planApiProxy } as never,
+        },
+      ),
+    ).rejects.toThrow('Session egress bootstrap admission timed out');
+    expect(mockCleanupModalInstance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceId: 'modal-machine-123',
+        phase: 'spawn_worker',
+      }),
+    );
   });
 
   it('forwards Modal regions into the compute client config', async () => {

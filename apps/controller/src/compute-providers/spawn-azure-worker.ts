@@ -30,6 +30,7 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
+import type { SessionEgressLifecycle } from '../session-egress';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 import {
   COMPUTE_BOOTSTRAP_TIMEOUT_MS,
@@ -149,6 +150,8 @@ export async function spawnAzureWorker(
     localTarballPath?: string;
     deploymentSlug?: string;
     azureTags?: Record<string, string>;
+    /** Session-egress admission; omitted in unit paths that do not exercise it. */
+    sessionEgress?: SessionEgressLifecycle;
   },
 ): Promise<{
   machineId: string;
@@ -168,6 +171,7 @@ export async function spawnAzureWorker(
     localTarballPath,
     deploymentSlug,
     azureTags,
+    sessionEgress,
   } = config;
 
   const environmentId = taskRun.payload.environmentId;
@@ -335,6 +339,11 @@ export async function spawnAzureWorker(
     );
   });
 
+  const sessionEgressPlan = await sessionEgress?.planApiProxy({
+    taskRun,
+    provider: 'azure',
+  });
+
   const machine = await createAzureMachine({
     azureSubscriptionId,
     azureResourceGroup,
@@ -452,6 +461,7 @@ export async function spawnAzureWorker(
         diskImage: azureDiskImage,
         extraEnv: {
           SANDBOX_TIMEOUT_MS: String(azureTimeoutMs),
+          ...sessionEgressPlan?.bootstrapEnv,
         },
       }),
       detached: true,
@@ -484,6 +494,11 @@ export async function spawnAzureWorker(
         .set({ sandboxCmdId: result.commandId })
         .where(eq(taskRuns.id, taskRun.id));
     }
+
+    // The worker is waiting on the bootstrap nonce after its ordinary
+    // bootstrap; an admission failure fails the spawn, as it does for Docker,
+    // rather than leaving a worker that expected substitutes without them.
+    await sessionEgressPlan?.admit();
 
     return {
       machineId: machine.machineId,

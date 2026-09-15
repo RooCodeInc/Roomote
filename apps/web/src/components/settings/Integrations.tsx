@@ -2281,26 +2281,71 @@ export function Integrations({
           }
 
           if (integration.id === 'voice') {
+            if (voiceConfiguredByEnvironment) {
+              // The key comes from the environment (an operator's or a
+              // fleet-wide key), so there is nothing to configure or
+              // disconnect; the deployment's admins still decide whether
+              // Voice is on. The server reports that state (no enablement
+              // row means on), unlike the effective-integrations list, which
+              // treats a missing row as off.
+              const voiceEnabled = voiceConnection.data?.enabled ?? true;
+              const item = buildAdminConfiguredIntegrationItem({
+                integration,
+                connection: undefined,
+                orgEnabled: voiceEnabled,
+                highlightedIntegrationId,
+                savePending: false,
+                disconnectPending: false,
+                disconnectingMcpId: undefined,
+                dialogOpen: false,
+                connectionPending: voiceConnection.isPending,
+                canConfigure: false,
+                canManageTools: false,
+                openDialog: () => setIsVoiceDialogOpen(true),
+                openToolDialog: () => openMcpToolDialog(integration),
+                disconnectIntegration: () =>
+                  disconnectAdminConfiguredIntegration(integration),
+              });
+              if (!isAdmin) {
+                return item;
+              }
+              const nextEnabled = !voiceEnabled;
+              return {
+                ...item,
+                actionLabel: voiceEnabled ? 'Disable Voice' : 'Enable Voice',
+                isPending:
+                  setDeploymentEnabled.isPending &&
+                  setDeploymentEnabled.variables?.mcpId === integration.id,
+                onAction: () =>
+                  setDeploymentEnabled.mutate(
+                    { mcpId: integration.id, enabled: nextEnabled },
+                    {
+                      onSuccess: () =>
+                        toast.success(
+                          `Voice ${nextEnabled ? 'enabled' : 'disabled'} for this deployment.`,
+                        ),
+                      onError: (error) =>
+                        toast.error(
+                          error instanceof Error
+                            ? error.message
+                            : `Failed to ${nextEnabled ? 'enable' : 'disable'} Voice.`,
+                        ),
+                    },
+                  ),
+              };
+            }
+
             return buildAdminConfiguredIntegrationItem({
               integration,
               connection: userConnectionMap.get(integration.id),
-              orgEnabled:
-                voiceConfiguredByEnvironment ||
-                (orgEnablementMap.get(integration.id) ?? false),
+              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
               highlightedIntegrationId,
               savePending: saveVoiceConnection.isPending,
               disconnectPending: disconnectMcp.isPending,
               disconnectingMcpId: disconnectMcp.variables?.mcpId,
               dialogOpen: isVoiceDialogOpen,
               connectionPending: voiceConnection.isPending,
-              // An environment-provided key has nothing to edit or disconnect here.
-              canConfigure: isAdmin && !voiceConfiguredByEnvironment,
-              ...(voiceConfiguredByEnvironment
-                ? {
-                    status:
-                      'Configured by the R_VOICE_OPENAI_API_KEY environment variable.',
-                  }
-                : {}),
+              canConfigure: isAdmin,
               // Credential-only: no agent tools to manage.
               canManageTools: false,
               openDialog: () => setIsVoiceDialogOpen(true),
@@ -2561,6 +2606,7 @@ export function Integrations({
     elevenLabsConnection.isPending,
     voiceConnection.isPending,
     voiceConfiguredByEnvironment,
+    voiceConnection.data?.enabled,
     linearInstallation.data,
     linearInstallation.isPending,
     linearOauthSetup.isPending,

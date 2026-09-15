@@ -50,6 +50,8 @@ import {
   cloudDeploymentAccess,
   brainInference,
   sessionEgress,
+  sessionEgressProxy,
+  sessionEgressProxyHostAlias,
   inference,
   tts,
   mcp,
@@ -169,6 +171,20 @@ export function createApiApp(): ApiApp {
   // Uncomment this to enable verbose per-request logging.
   // app.use(logger());
 
+  // A deployment may serve the session egress proxy at the root of its own
+  // hostname so host-only SDK clients need no path prefix. The alias
+  // re-dispatches through the app, so the request still passes observability,
+  // token handling, route policy, and rate limits exactly once before it
+  // reaches the same route as `/api/session-egress`.
+  if (Env.R_SESSION_EGRESS_PROXY_HOST)
+    app.use(
+      '*',
+      sessionEgressProxyHostAlias(
+        (request) => app.fetch(request),
+        Env.R_SESSION_EGRESS_PROXY_HOST,
+      ),
+    );
+
   app.use('*', requestObservabilityMiddleware);
 
   const corsOptions = {
@@ -225,6 +241,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/inference', inference);
   app.route('/api/brain/inference', brainInference);
   app.route('/api/internal/session-egress', sessionEgress);
+  app.route('/api/session-egress', sessionEgressProxy);
   app.route('/api/tts', tts);
   app.route('/api/mcp', mcp);
   app.route('/api/mcp-routing', mcpRouting);

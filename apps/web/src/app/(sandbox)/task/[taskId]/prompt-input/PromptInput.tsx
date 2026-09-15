@@ -25,7 +25,6 @@ import {
 } from '@/hooks/useGhostSuggestion';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
 import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
-import { usePromptSubmitFocus } from '@/hooks/usePromptSubmitFocus';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import {
@@ -138,8 +137,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const cancellingRef = useRef(false);
     const steeringQueuedMessageRef = useRef(false);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-    const { beginSubmit, cancelSubmit, restoreFocus } =
-      usePromptSubmitFocus(textareaRef);
     const runId = taskRun?.id;
     const taskId = taskRun?.taskId;
     const taskHistory = useTaskMessageEnvelopes(taskId, {
@@ -155,17 +152,15 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             : count,
         0,
       ) ?? 0;
-    // The revision is the persisted assistant-message count, matching the
-    // server generation cache: each completed agent turn mints a new query
-    // key (and so a fresh suggestion), while the user's own messages and
-    // UI-only or optimistic events cannot advance it.
+    // Use the latest persisted assistant timestamp rather than a count so the
+    // revision remains monotonic when the bounded transcript window advances.
     const historyRevision =
       taskHistory?.reduce(
-        (count, message) =>
+        (latestTs, message) =>
           message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
           message.text?.trim()
-            ? count + 1
-            : count,
+            ? Math.max(latestTs, message.ts)
+            : latestTs,
         0,
       ) ?? 0;
 
@@ -513,17 +508,16 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           !taskRun?.taskId ||
           sending
         ) {
-          return;
+          return false;
         }
 
         if (!shouldAnswerPendingFreeText && /^\/goal(?:\s|$)/i.test(text)) {
           toast.error('Start Goal Mode from the Session conversation.');
-          return;
+          return false;
         }
 
         consumeSuggestion();
 
-        beginSubmit();
         handlePromptChange('');
         setSending(true);
         scrollToBottom?.();
@@ -538,11 +532,9 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
 
             if (answered) {
               handleMessageSent();
-            } else {
-              cancelSubmit();
             }
 
-            return;
+            return answered;
           }
 
           const preparedPrompt = await preparePromptAttachments({
@@ -575,7 +567,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
 
           handleMessageSent();
         } catch (err) {
-          cancelSubmit();
           handlePromptChange(text);
           if (optimisticClientMessageId) {
             const failedClientMessageId = optimisticClientMessageId;
@@ -602,8 +593,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         pendingUserInputState,
         sending,
         consumeSuggestion,
-        beginSubmit,
-        cancelSubmit,
         handlePromptChange,
         scrollToBottom,
         handleMessageSent,
@@ -694,16 +683,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         );
     }, [applyPromptChange, focusTextarea]);
 
-    // Re-focus after the inner PromptInput has reset and this composer is
-    // enabled again. Outside interaction while sending cancels the handoff.
-    const wasSendingRef = useRef(false);
-    useEffect(() => {
-      if (wasSendingRef.current && !sending) {
-        restoreFocus();
-      }
-      wasSendingRef.current = sending;
-    }, [sending, restoreFocus]);
-
     // Auto-focus the textarea when recording stops so the user can immediately
     // press Enter / Cmd+Enter to send the dictated text.
     const wasRecordingRef = useRef(false);
@@ -787,6 +766,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         <PromptInputRoot
           onSubmit={handleSubmit}
           accept={ROOMOTE_FILE_ATTACHMENT_ACCEPT}
+          keepFocusOnSubmit
           multiple
         >
           <AttachmentsDisplay />

@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   isBrainEnabled: vi.fn(),
   generateText: vi.fn(),
   generateHelperText: vi.fn(),
+  generateTrackedObject: vi.fn(),
   resolveImageDelivery: vi.fn(),
   classifyInferenceError: vi.fn(),
   invalidateSession: vi.fn(),
@@ -29,7 +30,6 @@ const mocks = vi.hoisted(() => ({
   stopTask: vi.fn(),
   launchPrReview: vi.fn(),
   getUserIdentity: vi.fn(),
-  getTherapistMode: vi.fn(),
   getPersonalization: vi.fn(),
   refreshTitle: vi.fn(),
   bindExecutor: vi.fn(),
@@ -62,6 +62,7 @@ const mocks = vi.hoisted(() => ({
   ensureOwnTaskFollowThroughWakeup: vi.fn(),
   ensureSessionGoalContinuationWakeup: vi.fn(),
   cancelSessionGoalContinuationWakeups: vi.fn(),
+  handleManageWakeups: vi.fn(),
   getSessionGoal: vi.fn(),
   claimSessionGoalContinuation: vi.fn(),
   releaseSessionGoalContinuation: vi.fn(),
@@ -172,6 +173,7 @@ vi.mock('../../session-wakeups', async (importOriginal) => ({
     mocks.ensureSessionGoalContinuationWakeup,
   cancelSessionGoalContinuationWakeups:
     mocks.cancelSessionGoalContinuationWakeups,
+  handleManageWakeupsToolCall: mocks.handleManageWakeups,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -235,6 +237,7 @@ vi.mock('../../non-task-provider-usage', () => ({
   },
   NonTaskInputModalityUnsupportedError,
   classifyNonTaskInferenceError: mocks.classifyInferenceError,
+  generateTrackedNonTaskObject: mocks.generateTrackedObject,
   generateTrackedNonTaskText: mocks.generateHelperText,
   generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
   resolveNonTaskInputModalityDelivery: mocks.resolveImageDelivery,
@@ -298,14 +301,6 @@ vi.mock('../fast-agent-tasks', () => ({
 vi.mock('../fast-agent-user-identity', () => ({
   getFastAgentUserIdentity: mocks.getUserIdentity,
 }));
-
-vi.mock('../../therapist-mode', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../therapist-mode')>();
-  return {
-    ...actual,
-    getTherapistModeEnabledForUser: mocks.getTherapistMode,
-  };
-});
 
 vi.mock('../../user-personalization', async (importOriginal) => {
   const actual =
@@ -477,6 +472,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.ensureOwnTaskFollowThroughWakeup.mockResolvedValue(undefined);
     mocks.ensureSessionGoalContinuationWakeup.mockResolvedValue(undefined);
     mocks.cancelSessionGoalContinuationWakeups.mockResolvedValue(undefined);
+    mocks.handleManageWakeups.mockResolvedValue({
+      success: false,
+      error: 'not configured',
+    });
     mocks.getSessionGoal.mockResolvedValue(null);
     mocks.claimSessionGoalContinuation.mockResolvedValue({
       updated: false,
@@ -603,9 +602,19 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       isAdmin: true,
       sessionSecretToolsEnabled: true,
     });
-    mocks.getTherapistMode.mockResolvedValue(false);
     mocks.getPersonalization.mockResolvedValue(null);
     mocks.appendLearnedPreference.mockResolvedValue({ saved: true });
+    mocks.generateTrackedObject.mockImplementation(
+      ({ prompt }: { prompt: string }) => {
+        const preference =
+          /<new_personalization confidence="[^"]+">\n([\s\S]*?)\n<\/new_personalization>/u.exec(
+            prompt,
+          )?.[1] ?? '';
+        return Promise.resolve({
+          object: { action: 'append', preference, supersedes: [] },
+        });
+      },
+    );
     mocks.classifyInferenceError.mockImplementation((error: unknown) => {
       const detail = error instanceof Error ? error.message.toLowerCase() : '';
 
@@ -663,17 +672,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         });
         return '';
       },
-    );
-  });
-
-  it('applies the current user therapist mode preference to the system prompt', async () => {
-    mocks.getTherapistMode.mockResolvedValueOnce(true);
-
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
-
-    expect(mocks.getTherapistMode).toHaveBeenCalledWith('user-1');
-    expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
-      '<therapist_mode>',
     );
   });
 
@@ -1722,7 +1720,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           });
           expect(
             await invokeTool(nativeToolNames.listSessionSecrets, {}),
-          ).toEqual(metadata);
+          ).toEqual({ ...metadata, sessionUrl: url.toString() });
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
             message: 'Enter the key securely.',
@@ -1985,6 +1983,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ],
     [nativeToolNames.listSessionSecrets, 'listSessionSecretApprovals', {}],
   ] as const)('sanitizes %s SDK failures', async (name, method, args) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
     mocks[method].mockRejectedValueOnce(
       new Error('sensitive SDK failure canary'),
@@ -2013,6 +2012,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(JSON.stringify(mocks.upsertMessage.mock.calls)).not.toContain(
       'sensitive SDK failure canary',
     );
+    // Operators get a class name for the reason, never the SDK message.
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    expect(lines).toContain(`[Fast Agent] ${name} unavailable (reason=Error)`);
+    expect(JSON.stringify(lines)).not.toContain('canary');
+    warn.mockRestore();
   });
 
   it.each(['openai/gpt-5.6', 'anthropic/claude-sonnet-5'])(
@@ -2122,6 +2126,56 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(JSON.stringify(mocks.captureEvent.mock.calls)).not.toContain(
         secretRef,
       );
+    },
+  );
+
+  it.each([
+    [
+      'Integration request rejected or failed. Check the allowed methods and paths; the broker never falls back to direct access.',
+      'broker_rejected',
+    ],
+    ['Secret request unavailable', 'broker_unavailable'],
+    [null, 'broker_unavailable'],
+  ] as const)(
+    'classifies broker isError text %j as %s without logging it',
+    async (upstreamText, reason) => {
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+      mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
+      mocks.callIntegration.mockRejectedValueOnce(
+        new McpToolCallError(upstreamText),
+      );
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          expect(
+            await invokeTool(nativeToolNames.requestWithSessionSecret, {
+              secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+              method: 'GET',
+              path: '/status',
+            }),
+          ).toEqual({ success: false, error: 'Secret request unavailable' });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'The approved request was unavailable.',
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: { ...baseParams.conversation, surface: 'web' },
+        adapter: callbacks(),
+      });
+      expect(mocks.callIntegration).toHaveBeenCalledOnce();
+      const lines = warn.mock.calls.map((call) => String(call[0]));
+      expect(lines).toContain(
+        `[Fast Agent] ${nativeToolNames.requestWithSessionSecret} unavailable (reason=${reason})`,
+      );
+      expect(JSON.stringify(lines)).not.toContain('allowed methods');
+      warn.mockRestore();
     },
   );
 
@@ -2629,6 +2683,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           question: 'Use the corrected requirement.',
           senderDisplayName: 'Matt',
           senderExternalId: 'U123',
+          agentContext:
+            'Untrusted peer-mention hint: <only reply if addressed>',
         },
       };
       mocks.getPendingHumanFollowUp
@@ -2695,6 +2751,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         text: expect.stringContaining('Use the corrected requirement.'),
         files: [],
       });
+      expect(mocks.nativeSteer.mock.calls[0]?.[0]?.text).toContain(
+        '<slack_message_context>\nUntrusted peer-mention hint: &lt;only reply if addressed&gt;\n</slack_message_context>',
+      );
       expect(mocks.upsertMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           sessionId: 'conversation-1',
@@ -4942,6 +5001,33 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ).resolves.toBe('');
 
     expect(adapter.postReply).not.toHaveBeenCalled();
+  });
+
+  it('reports a successful wakeup cancellation to the turn adapter', async () => {
+    mocks.handleManageWakeups.mockResolvedValueOnce({
+      success: true,
+      cancelled: true,
+    });
+    const onWakeupCancelled = vi.fn();
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.manageWakeups, {
+          action: 'cancel',
+          wakeupId: 'wakeup-1',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      turnSource: 'platform_event',
+      platformEventKind: 'scheduled_wakeup',
+      adapter: callbacks({ onWakeupCancelled }),
+    });
+
+    expect(onWakeupCancelled).toHaveBeenCalledWith('wakeup-1');
   });
 
   it('rejects ignore_event for directed human turns', async () => {
@@ -8913,7 +8999,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('omits gated channel tools when the Fast surface has no valid chat context', async () => {
+  it('keeps cross-surface posts while omitting origin-scoped channel tools', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
         id: 'roomote',
@@ -8957,7 +9043,70 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     )
       .find(({ id }) => id === 'roomote')!
       .tools.map(({ name }) => name);
-    expect(roomoteTools).toEqual(['get_chat_message_context']);
+    expect(roomoteTools).toEqual([
+      'get_chat_message_context',
+      'post_to_channel',
+    ]);
+  });
+
+  it('exposes an explicit Slack post from a Telegram Fast conversation', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [{ name: 'post_to_channel' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({ ok: true });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll share that.',
+        });
+        await invokeMcpTool('roomote', 'post_to_channel', {
+          provider: 'slack',
+          slackTeamId: 'team-1',
+          channel: 'channel-1',
+          threadTs: '199.9',
+          text: 'Release is ready.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Posted the release update.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'telegram',
+        workspaceId: 'chat-1',
+        conversationId: 'notification:chat-1:user:user-1',
+        replyTarget: { channelId: 'chat-1' },
+      },
+      adapter: callbacks(),
+    });
+
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      {
+        integrationId: 'roomote',
+        toolName: 'post_to_channel',
+        args: {
+          provider: 'slack',
+          slackTeamId: 'team-1',
+          channel: 'channel-1',
+          threadTs: '199.9',
+          text: 'Release is ready.',
+        },
+      },
+    );
   });
 
   it('preserves the broker inventory when deployment config disabled channel tools', async () => {
@@ -9048,6 +9197,155 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             ...(latest ? { latest } : {}),
             oldest: expectedOldest,
             provider: 'slack',
+          },
+        },
+      );
+    },
+  );
+
+  it('respects explicit cross-platform Slack lookups from Telegram', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [
+          { name: 'get_chat_message_context' },
+          { name: 'get_chat_channel_messages' },
+        ],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll inspect that.',
+        });
+        await invokeMcpTool('roomote', 'get_chat_message_context', {
+          messageLink: 'https://acme.slack.com/archives/C123/p1710000000000100',
+          provider: 'slack',
+        });
+        await invokeMcpTool('roomote', 'get_chat_channel_messages', {
+          channel: 'https://acme.slack.com/archives/C123',
+          provider: 'slack',
+          oldest: '1710000000.000100',
+        });
+        await invokeMcpTool('roomote', 'get_chat_channel_messages', {
+          channel: '456',
+          provider: 'discord',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I found the Slack context.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'telegram',
+        workspaceId: 'chat-1',
+        conversationId: 'notification:chat-1:user:user-1',
+        replyTarget: { channelId: 'chat-1' },
+      },
+      adapter: callbacks(),
+    });
+
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      {
+        integrationId: 'roomote',
+        toolName: 'get_chat_message_context',
+        args: {
+          messageLink: 'https://acme.slack.com/archives/C123/p1710000000000100',
+          provider: 'slack',
+        },
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      {
+        integrationId: 'roomote',
+        toolName: 'get_chat_channel_messages',
+        args: {
+          channel: 'https://acme.slack.com/archives/C123',
+          provider: 'slack',
+          oldest: '1710000000.000100',
+        },
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      {
+        integrationId: 'roomote',
+        toolName: 'get_chat_channel_messages',
+        args: { channel: '456', provider: 'discord' },
+      },
+    );
+  });
+
+  it.each([
+    [
+      'Slack',
+      'https://acme.slack.com/archives/C123/p1710000000000100',
+      'slack',
+    ],
+    ['Discord', 'https://discord.com/channels/123/456/789', 'discord'],
+  ] as const)(
+    'infers a cross-platform %s lookup from its link',
+    async (_name, messageLink, provider) => {
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Manage Roomote',
+          tools: [{ name: 'get_chat_message_context' }],
+        },
+      ]);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’ll inspect that.',
+          });
+          await invokeMcpTool('roomote', 'get_chat_message_context', {
+            messageLink,
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'I found the Slack context.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: {
+          surface: 'telegram',
+          workspaceId: 'chat-1',
+          conversationId: 'notification:chat-1:user:user-1',
+          replyTarget: { channelId: 'chat-1' },
+        },
+        adapter: callbacks(),
+      });
+
+      expect(mocks.callIntegration).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.any(Array),
+        {
+          integrationId: 'roomote',
+          toolName: 'get_chat_message_context',
+          args: {
+            messageLink,
+            provider,
           },
         },
       );

@@ -49,7 +49,13 @@ function assertMatchingReferences(
   if (
     left.provider !== right.provider ||
     left.channelId !== right.channelId ||
-    (left.messageId && right.messageId && left.messageId !== right.messageId)
+    (left.messageId && right.messageId && left.messageId !== right.messageId) ||
+    (left.workspaceId &&
+      right.workspaceId &&
+      left.workspaceId !== right.workspaceId) ||
+    (left.workspaceDomain &&
+      right.workspaceDomain &&
+      left.workspaceDomain !== right.workspaceDomain)
   ) {
     throw new McpProxyError(
       400,
@@ -151,6 +157,10 @@ export async function lookupCommunicationMessageContext(options: {
         ? { channel }
         : {}),
     messageId,
+    ...(reference?.workspaceId ? { workspaceId: reference.workspaceId } : {}),
+    ...(reference?.workspaceDomain
+      ? { workspaceDomain: reference.workspaceDomain }
+      : {}),
     ...(options.taskRun ? { taskRun: options.taskRun } : {}),
     ...(options.actingUserId ? { actingUserId: options.actingUserId } : {}),
   });
@@ -188,6 +198,10 @@ export async function lookupCommunicationChannelMessages(options: {
         : {}),
     ...(options.oldest ? { oldest: options.oldest } : {}),
     ...(options.latest ? { latest: options.latest } : {}),
+    ...(reference?.workspaceId ? { workspaceId: reference.workspaceId } : {}),
+    ...(reference?.workspaceDomain
+      ? { workspaceDomain: reference.workspaceDomain }
+      : {}),
     ...(options.taskRun ? { taskRun: options.taskRun } : {}),
     ...(options.actingUserId ? { actingUserId: options.actingUserId } : {}),
   });

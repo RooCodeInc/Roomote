@@ -14,6 +14,8 @@ import {
   resolveAppEnv,
 } from './app-env';
 
+export const DEFAULT_WEBHOOK_RETENTION_DAYS = 3;
+
 const sharedSchema = {
   NODE_ENV: z.enum(['test', 'development', 'production']),
 };
@@ -351,7 +353,11 @@ const serverSchema = {
   SLACK_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   // How long recorded webhook payloads are kept before the WebhookCleanup
   // scheduled job (apps/bullmq) deletes them.
-  WEBHOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(3),
+  WEBHOOK_RETENTION_DAYS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_WEBHOOK_RETENTION_DAYS),
   // Internal base URL of the deployment-hosted gbrain (Brain)
   // service. Unset means the feature is unavailable regardless of the
   // brain_settings row; the proxy and outbox drainer both no-op.
@@ -427,6 +433,20 @@ const serverSchema = {
   // its own; the surface stays disabled (404) until this is set. Controllers
   // authenticate to the same surface with a signed job-auth token instead.
   R_SESSION_EGRESS_GATEWAY_TOKEN: z.string().min(32).optional(),
+  // Optional dedicated hostname for the API-side session egress proxy. When a
+  // request arrives for this host, the API serves `/api/session-egress` at the
+  // root, so SDK clients that allow only a host override (no path prefix) can
+  // use it. Same route and checks; only the address differs. Point DNS for the
+  // name at the API service; the path form keeps working on the API host. Set
+  // the same value on the controller: it delivers the base URL to sandboxes.
+  R_SESSION_EGRESS_PROXY_HOST: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(
+      /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/,
+    )
+    .optional(),
   // Controller-side Session-egress provisioning. All five *_ADDR/*_FILE values
   // below must be set for the controller to register workloads; otherwise
   // every run is reported as `disabled` and receives no substitute tokens.

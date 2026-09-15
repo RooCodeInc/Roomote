@@ -43,6 +43,9 @@ import {
   INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE,
   matchIntegrationTools,
+  parseDiscordMessagePermalink,
+  parseSlackChannelPermalink,
+  parseSlackMessagePermalink,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
@@ -103,7 +106,6 @@ import {
 } from './fast-agent-constants';
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
-import { getTherapistModeEnabledForUser } from '../therapist-mode';
 import {
   enqueueUserPersonalizationUpdate,
   resolveFastAgentPersonalizationContext,
@@ -251,10 +253,7 @@ function selectFastRoomoteChannelTools(options: {
           ...integration,
           tools: integration.tools.filter(({ name }) => {
             if (name === LEGACY_SLACK_REACTION_TOOL) return false;
-            if (
-              name === CHAT_CHANNELS_TOOL.name ||
-              name === CHAT_CHANNEL_POST_TOOL_NAME
-            ) {
+            if (name === CHAT_CHANNELS_TOOL.name) {
               return slackConversation;
             }
             if (name === CHAT_REACTION_EMOJI_TOOL_NAME) {
@@ -727,6 +726,30 @@ function buildIntegrationCallSignature({
     toolName,
     canonicalizeIntegrationCallValue(args),
   ]);
+}
+
+function resolveFastAgentChatLookupProvider(
+  args: Record<string, unknown>,
+  conversation: FastAgentConversation,
+): 'slack' | 'discord' | undefined {
+  if (args.provider === 'slack' || args.provider === 'discord') {
+    return args.provider;
+  }
+
+  for (const reference of [args.messageLink, args.channel]) {
+    if (typeof reference !== 'string') continue;
+    if (
+      parseSlackMessagePermalink(reference) ||
+      parseSlackChannelPermalink(reference)
+    ) {
+      return 'slack';
+    }
+    if (parseDiscordMessagePermalink(reference)) return 'discord';
+  }
+
+  return conversation.surface === 'slack' || conversation.surface === 'discord'
+    ? conversation.surface
+    : undefined;
 }
 
 export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
@@ -2424,6 +2447,7 @@ export async function answerFastAgentQuestion({
           question: followUp.question,
           threadContext: [],
           compatibilityMessages: [],
+          currentMessageAgentContext: followUp.agentContext,
           currentMessageTs: followUp.currentMessageId,
           currentMessageSender: {
             slackUserId: followUp.senderExternalId,
@@ -3062,7 +3086,6 @@ export async function answerFastAgentQuestion({
       session,
       discoveredIntegrations,
       currentUser,
-      therapistModeEnabled,
       agentBehaviorSettings,
     ] = await Promise.all([
       getAvailableEnvironments(),
@@ -3106,12 +3129,6 @@ export async function answerFastAgentQuestion({
               sessionSecretToolsEnabled: false,
             };
           }),
-      getTherapistModeEnabledForUser(userId).catch((error) => {
-        console.warn(
-          `[Fast Agent] Personal preferences unavailable: ${formatErrorForLog(error)}`,
-        );
-        return false;
-      }),
       db.query.deploymentSettings
         .findFirst({
           columns: {
@@ -3416,7 +3433,6 @@ export async function answerFastAgentQuestion({
       appEnv: Env.R_APP_ENV,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
-      therapistModeEnabled,
       sessionSecretToolsEnabled: currentUser.sessionSecretToolsEnabled,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
@@ -3806,14 +3822,13 @@ export async function answerFastAgentQuestion({
         const chatLookupProvider =
           call.integrationId === ROOMOTE_MCP_ID &&
           (call.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name ||
-            call.toolName === CHAT_MESSAGE_CONTEXT_TOOL.name) &&
-          isFastAgentCommunicationConversation(conversation)
-            ? conversation.surface
+            call.toolName === CHAT_MESSAGE_CONTEXT_TOOL.name)
+            ? resolveFastAgentChatLookupProvider(call.args, conversation)
             : undefined;
         const integrationArguments =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name &&
-          conversation.surface === 'slack' &&
+          chatLookupProvider === 'slack' &&
           (typeof call.args.oldest !== 'string' ||
             call.args.oldest.trim().length === 0)
             ? {
@@ -3835,6 +3850,7 @@ export async function answerFastAgentQuestion({
           : undefined;
         const chatLookupArguments =
           chatLookupProvider &&
+          chatLookupProvider === conversation.surface &&
           currentChatChannel &&
           (typeof integrationArguments.channel !== 'string' ||
             integrationArguments.channel.trim().length === 0) &&
@@ -4622,9 +4638,18 @@ export async function answerFastAgentQuestion({
           case FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret:
           case FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets:
           case FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret: {
+            // The model only ever sees the generic message; the bounded reason
+            // goes to server logs so operators can tell a disabled experiment
+            // from a missing Session binding or a broker denial.
+            const unavailable = (reason: string) => {
+              console.warn(
+                `[Fast Agent] ${call.name} unavailable (reason=${reason})`,
+              );
+              return { success: false, error: 'Secret request unavailable' };
+            };
             try {
               if (!currentUser.sessionSecretToolsEnabled) {
-                return { success: false, error: 'Secret request unavailable' };
+                return unavailable('experiment_disabled');
               }
               const schema =
                 call.name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret
@@ -4634,19 +4659,25 @@ export async function answerFastAgentQuestion({
                     ? z.object({}).strict()
                     : sessionSecretRequestSchema;
               const args = schema.safeParse(call.args);
+              if (!args.success) return unavailable('invalid_arguments');
               // Platform events carry an owner for routing, not a human actor.
-              if (!args.success || platformEvent || !userId) {
-                return { success: false, error: 'Secret request unavailable' };
-              }
+              if (platformEvent) return unavailable('platform_event');
+              if (!userId) return unavailable('actor_missing');
               const canonicalSession = await getSessionForFastConversation(
                 db,
                 session.id,
               );
-              if (!canonicalSession) {
-                return { success: false, error: 'Secret request unavailable' };
-              }
+              if (!canonicalSession) return unavailable('session_not_bound');
               throwIfTurnCancelled();
               const context = { sessionId: canonicalSession.id, userId };
+              // The secure entry link is nonsecret and the same for every
+              // approval in the Session, so both tools return it: Fast can
+              // re-share it for a pending approval on a later turn without
+              // preparing a duplicate.
+              const sessionUrl = new URL(
+                `${Env.R_APP_URL}/sessions/${encodeURIComponent(canonicalSession.id)}`,
+              );
+              sessionUrl.hash = 'session-secrets';
               if (
                 call.name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret
               ) {
@@ -4654,16 +4685,15 @@ export async function answerFastAgentQuestion({
                   context,
                   sessionSecretPrepareSchema.parse(args.data),
                 );
-                const url = new URL(
-                  `${Env.R_APP_URL}/sessions/${encodeURIComponent(canonicalSession.id)}`,
-                );
-                url.hash = 'session-secrets';
-                return { pending, sessionUrl: url.toString() };
+                return { pending, sessionUrl: sessionUrl.toString() };
               }
               if (
                 call.name === FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets
               ) {
-                return await listSessionSecretApprovals(context);
+                return {
+                  ...(await listSessionSecretApprovals(context)),
+                  sessionUrl: sessionUrl.toString(),
+                };
               }
               const request = sessionSecretRequestSchema.parse(args.data);
               const result = await callFastAgentIntegration(
@@ -4689,8 +4719,22 @@ export async function answerFastAgentQuestion({
                 },
               );
               return { success: true, ...(result as Record<string, unknown>) };
-            } catch {
-              return { success: false, error: 'Secret request unavailable' };
+            } catch (error) {
+              // The broker's isError text is our own constant copy, so it is
+              // safe to classify (never to log); anything else is logged by
+              // class name only because SDK/database messages can echo bound
+              // values.
+              return unavailable(
+                error instanceof McpToolCallError
+                  ? error.upstreamText?.startsWith(
+                      'Integration request rejected',
+                    )
+                    ? 'broker_rejected'
+                    : 'broker_unavailable'
+                  : error instanceof Error
+                    ? error.name || 'Error'
+                    : 'unknown',
+              );
             }
           }
 
@@ -4733,11 +4777,19 @@ export async function answerFastAgentQuestion({
 
             throwIfTurnCancelled();
 
-            return await handleManageWakeupsToolCall(
+            const result = await handleManageWakeupsToolCall(
               { conversationId: session.id, userId },
-
               args,
             );
+            if (
+              args.action === 'cancel' &&
+              args.wakeupId &&
+              result.success === true &&
+              result.cancelled === true
+            ) {
+              adapter.onWakeupCancelled?.(args.wakeupId);
+            }
+            return result;
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.manageGoal: {

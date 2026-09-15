@@ -211,6 +211,45 @@ describe('useLiveVoice', () => {
     );
   });
 
+  it('derives the input level from microphone time-domain samples', async () => {
+    let frame: FrameRequestCallback | undefined;
+    const close = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal(
+      'requestAnimationFrame',
+      vi.fn((callback: FrameRequestCallback) => {
+        frame = callback;
+        return 1;
+      }),
+    );
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal(
+      'AudioContext',
+      class {
+        createAnalyser() {
+          return {
+            fftSize: 0,
+            frequencyBinCount: 4,
+            getByteTimeDomainData: (samples: Uint8Array<ArrayBuffer>) => {
+              samples.set([128, 192, 64, 128]);
+            },
+          };
+        }
+        createMediaStreamSource() {
+          return { connect: vi.fn() };
+        }
+        close = close;
+      },
+    );
+    const { result } = renderHook(() => useLiveVoice({ onUtterance: vi.fn() }));
+
+    await act(async () => result.current.start());
+    act(() => frame?.(100));
+
+    expect(result.current.inputLevel).toBe(1);
+    act(() => result.current.stop());
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it('releases handshake resources immediately when voice is ended', async () => {
     let finishHandshake:
       | ((value: { sessionId: string; sdp: string }) => void)

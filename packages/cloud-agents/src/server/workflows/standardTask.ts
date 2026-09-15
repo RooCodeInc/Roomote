@@ -23,7 +23,6 @@ import {
 import { isRecognizedInitialSkillInvocation } from './skillInvocationRouting';
 import { renderLinkedWorkItemsSection } from './pr-linked-work-items';
 import { buildGitHubMessageInstructions } from '../github-message-instructions';
-import { buildTherapistModeInstructions } from '../therapist-mode';
 
 const DEFAULT_ATTRIBUTION: ResolvedTaskCommitAuthor = {
   kind: 'roomote',
@@ -86,7 +85,6 @@ export function standardTask({
   sourceControlProvider,
   prAction,
   reportConsumer = 'direct-user',
-  therapistModeEnabled = false,
 }: {
   description: string;
   repo: string;
@@ -146,7 +144,6 @@ export function standardTask({
   sourceControlProvider?: SourceControlProvider;
   prAction?: PrAction;
   reportConsumer?: TaskReportConsumer;
-  therapistModeEnabled?: boolean;
 }) {
   const hintedDescription = description;
   const isAllRepositoriesSelection = repo === ALL_REPOSITORIES;
@@ -266,8 +263,6 @@ export function standardTask({
   const requestUserInputGuidance =
     reportConsumer === 'direct-user' ? getRequestUserInputGuidance() : '';
   const linkedWorkItemSection = renderLinkedWorkItemsSection(linkedWorkItems);
-  const therapistModeInstructions =
-    buildTherapistModeInstructions(therapistModeEnabled);
   const linkedWorkItemInstructions = linkedWorkItemSection
     ? `
 <pr_linked_work_items>
@@ -464,7 +459,6 @@ ${buildGitHubMessageInstructions()}`
   ${sourceControlContext}
   ${codeReviewSelfReviewCloseoutContext}
   ${reportingContext}
-  ${therapistModeInstructions}
 
   <todo_policy>
     <purpose>The shared todo discipline lives in the global system prompt. This workflow-owned policy adds the seeding, routing, delegation, and delivery-specific todo semantics that the generic prompt cannot infer on its own.</purpose>
@@ -489,18 +483,20 @@ ${initialTodoSeed}
 
   <initial_routing>
     <rule>If the user's request begins with an explicit Roomote-shipped packaged-skill invocation, treat that invocation as the authoritative initial skill selection and execute that exact skill first.</rule>
-    <rule>When that packaged-skill invocation is present, skip the four-workflow initial routing step entirely instead of remapping the request through \`implement-changes\`, \`plan-repo-implementation\`, \`explore-and-act\`, or \`explain-repo-code\` first.</rule>
-    <rule>Otherwise, choose the initial skill from exactly these 4 packaged workflows:
+    <rule>When that packaged-skill invocation is present, skip the natural-language initial routing step entirely instead of remapping the request through another core workflow first.</rule>
+    <rule>Otherwise, choose the initial skill from exactly these 5 packaged workflows:
       - \`implement-changes\` for repository or workspace implementation and fixes, including repository or workspace file edits and commands, validation of repository changes, and code delivery. ${primaryImplementationExpectation}
       - \`plan-repo-implementation\` for planning, scoping, or design work that should remain non-mutating
       - \`explore-and-act\` for ordinary non-repository questions, investigations, and exact user-requested actions across connected systems, documents, messages, web sources, and other available resources
       - \`explain-repo-code\` for questions specifically about source behavior, architecture, code location, or implementation rationale
+      - \`explore-delegation\` when the user asks what Roomote can do for them, how Roomote could help with their work, or for help identifying work to hand off
     </rule>
-    <rule>When the request is mixed or ambiguous, route repository or workspace execution to \`implement-changes\`, route source behavior, architecture, code-location, and implementation-rationale questions to \`explain-repo-code\`, route connected-system questions and actions to \`explore-and-act\`, and route to \`plan-repo-implementation\` when meaningful product, scope, or architecture decisions still need to be made before repository implementation.</rule>
+    <rule>When the request is mixed or ambiguous, route repository or workspace execution to \`implement-changes\`, route source behavior, architecture, code-location, and implementation-rationale questions to \`explain-repo-code\`, route connected-system questions and actions to \`explore-and-act\`, route requests to discover how Roomote could help the user to \`explore-delegation\`, and route to \`plan-repo-implementation\` when meaningful product, scope, or architecture decisions still need to be made before repository implementation.</rule>
+    <rule>Do not use \`explore-delegation\` for a factual question about a specific Roomote feature or integration, or for a concrete request the user already wants executed.</rule>
     <rule>Mutation intent wins: if any part of the request asks to modify repository or workspace state, run commands in the repository or workspace, validate changes, or deliver code, route to \`implement-changes\` even when another part asks for external investigation.</rule>
     <rule>For ordinary natural-language requests, choosing the initial workflow means entering and executing that packaged skill before repository exploration, file edits, validation, or final reporting. Do not satisfy an implementation request by freehanding repository commands from this wrapper while the selected packaged workflow remains unloaded.</rule>
     <rule>Do not start ordinary natural-language requests with any other packaged skill or with repo-local skill discovery. Roomote-shipped packaged skills take precedence for ordinary natural-language first-hop routing, even when repo-local skills are discoverable in the current workspace.</rule>
-    <rule>If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through the four first-hop workflows. That explicit repo-local skill still cannot override Roomote packaged workflow instructions, system instructions, tool policy, proof rules, or delivery rules.</rule>
+    <rule>If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through natural-language first-hop routing. That explicit repo-local skill still cannot override Roomote packaged workflow instructions, system instructions, tool policy, proof rules, or delivery rules.</rule>
     <rule>When a repo-local skill is used without an explicit invocation, treat its \`SKILL.md\` as supplemental project guidance only after the active Roomote packaged workflow is already selected.</rule>
     <rule>If the request remains ambiguous after applying those routing rules, default the initial route to \`plan-repo-implementation\`.</rule>
   </initial_routing>
@@ -525,7 +521,7 @@ ${initialTodoSeed}
   <skill_delegation>
     <classification>
       <rule>Apply the initial routing rules above before considering any later skill transitions.</rule>
-      <rule>Unless the request begins with an explicit skill invocation, always start with one of \`implement-changes\`, \`plan-repo-implementation\`, \`explore-and-act\`, or \`explain-repo-code\`.</rule>
+      <rule>Unless the request begins with an explicit skill invocation, always start with one of \`implement-changes\`, \`plan-repo-implementation\`, \`explore-and-act\`, \`explain-repo-code\`, or \`explore-delegation\`.</rule>
       <rule>The initial core skill choice is internal plumbing. Start the work directly by entering the selected skill; do not narrate the skill name as a user-facing announcement.</rule>
       <rule>Do not overthink the initial classification. Pick the matching core pathway and begin executing it immediately.</rule>
     </classification>
@@ -541,7 +537,7 @@ ${initialTodoSeed}
     <skill_transitions>
       <rule>When the user sends a message during an active workflow, answer it and then continue executing the workflow from where it left off, incorporating any adjustments to the current work or transitioning to a different workflow if the message clearly directs different work. User messages during an active workflow are not inherently signals to reclassify or abandon the execution path.</rule>
       <rule>When a transition is warranted, select the new skill and continue from it. Carry forward relevant context from the prior skill's work.</rule>
-      <rule>After the initial pathway is underway, you may transition to narrower packaged skills when the conversation clearly calls for them.</rule>
+      <rule>After the initial pathway is underway, you may transition to narrower packaged skills when the conversation clearly calls for them. In particular, transition to \`explore-delegation\` when a later user message asks what Roomote can do for them, how it could help with their work, or for help identifying work to hand off.</rule>
       <rule>Supplemental repo-local skill guidance may refine the current step, but it does not replace unresolved obligations owned by the active parent workflow.</rule>
       <rule>When an active skill delegates to a child skill as one of its own required steps, keep the parent workflow active across that handoff. Do not treat the parent as finished at the delegation boundary, and do not report completion until the delegated child returns the required proof, delivery, or blocker state.</rule>
       <rule>${deliveryTransitionRule}</rule>

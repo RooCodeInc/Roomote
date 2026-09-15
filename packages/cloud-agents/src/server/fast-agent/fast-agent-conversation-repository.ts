@@ -833,6 +833,9 @@ export interface FastAgentConversationRepository {
     id: string;
     fallbackConversation?: FastAgentConversation;
   }): Promise<FastAgentConversationRecord | null>;
+  findByConversation(
+    conversation: FastAgentConversation,
+  ): Promise<FastAgentConversationRecord | null>;
   getLookupIds(id: string): Promise<string[]>;
   exists(conversation: FastAgentConversation): Promise<boolean>;
   appendVisibleMessages(input: {
@@ -1174,6 +1177,27 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
       return loadConversationRecord(db, record.id);
     },
 
+    async findByConversation(conversation) {
+      const exact = await db.query.fastAgentConversations.findFirst({
+        where: buildIdentityWhere(conversation),
+        columns: { id: true },
+      });
+      if (exact) {
+        return loadConversationRecord(db, exact.id);
+      }
+
+      const replyTargetWhere = buildReplyTargetWhere(conversation);
+      if (!replyTargetWhere) {
+        return null;
+      }
+
+      const routed = await db.query.fastAgentConversations.findFirst({
+        where: replyTargetWhere,
+        columns: { id: true },
+      });
+      return routed ? loadConversationRecord(db, routed.id) : null;
+    },
+
     async getLookupIds(id) {
       const conversationId = await resolveCanonicalId(db, id);
       const record = await db.query.fastAgentConversations.findFirst({
@@ -1186,24 +1210,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
     },
 
     async exists(conversation) {
-      const exact = await db.query.fastAgentConversations.findFirst({
-        where: buildIdentityWhere(conversation),
-        columns: { id: true },
-      });
-      if (exact) {
-        return true;
-      }
-
-      const replyTargetWhere = buildReplyTargetWhere(conversation);
-      if (!replyTargetWhere) {
-        return false;
-      }
-
-      const routed = await db.query.fastAgentConversations.findFirst({
-        where: replyTargetWhere,
-        columns: { id: true },
-      });
-      return Boolean(routed);
+      return Boolean(await this.findByConversation(conversation));
     },
 
     async appendVisibleMessages({ conversationId: requestedId, messages }) {

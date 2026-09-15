@@ -30,6 +30,30 @@ export interface SessionSecretContext {
   fastConversationId?: string;
 }
 
+/** Bounded, nonsecret reasons a Session-secret operation fails closed. */
+type SessionSecretUnavailableReason =
+  | 'actor_missing'
+  | 'run_not_bound'
+  | 'session_not_bound'
+  | 'owner_not_found'
+  | 'approval_not_found'
+  | 'grant_not_found'
+  | 'write_failed';
+
+/**
+ * Every fail-closed path throws this with one generic message, so callers keep
+ * relaying nothing to clients while server logs can record `reason`.
+ */
+export class SessionSecretUnavailableError extends Error {
+  readonly reason: SessionSecretUnavailableReason;
+
+  constructor(reason: SessionSecretUnavailableReason) {
+    super('Secret unavailable');
+    this.name = 'SessionSecretUnavailableError';
+    this.reason = reason;
+  }
+}
+
 /** Resolve only signed server context. A caller-supplied Session ID is not authority. */
 export async function resolveSessionSecretContext(
   auth:
@@ -40,7 +64,7 @@ export async function resolveSessionSecretContext(
       }
     | { tokenType: 'run'; runId: number; userId: string | null },
 ): Promise<SessionSecretContext> {
-  if (!auth.userId) throw new Error('Secret unavailable');
+  if (!auth.userId) throw new SessionSecretUnavailableError('actor_missing');
   const [row] =
     auth.tokenType === 'run'
       ? await db
@@ -73,7 +97,10 @@ export async function resolveSessionSecretContext(
               isNull(sessions.archivedAt),
             ),
           );
-  if (!row?.userId) throw new Error('Secret unavailable');
+  if (!row?.userId)
+    throw new SessionSecretUnavailableError(
+      auth.tokenType === 'run' ? 'run_not_bound' : 'session_not_bound',
+    );
   return {
     ...row,
     ...(auth.tokenType === 'run'
@@ -123,7 +150,7 @@ function metadata(
 }
 
 function ownerWhere(context: SessionSecretContext, includeArchived = false) {
-  if (!context.userId) throw new Error('Secret unavailable');
+  if (!context.userId) throw new SessionSecretUnavailableError('actor_missing');
   return and(
     eq(sessions.id, context.sessionId),
     eq(sessions.ownerKind, 'user'),
@@ -173,7 +200,7 @@ export async function insertSessionSecretApproval(
       .innerJoin(users, eq(users.id, sessions.ownerUserId))
       .where(ownerWhere(context))
       .for('share');
-    if (!owner) throw new Error('Secret unavailable');
+    if (!owner) throw new SessionSecretUnavailableError('owner_not_found');
     const [row] = await tx
       .insert(sessionSecretApprovals)
       .values({
@@ -187,7 +214,7 @@ export async function insertSessionSecretApproval(
         expiresAt: sql`clock_timestamp() + ${input.ttlHours} * interval '1 hour'`,
       })
       .returning();
-    if (!row) throw new Error('Secret unavailable');
+    if (!row) throw new SessionSecretUnavailableError('write_failed');
     return pendingMetadata(row);
   });
 }
@@ -227,7 +254,7 @@ export async function finalizeSessionSecret(
       .innerJoin(users, eq(users.id, sessions.ownerUserId))
       .where(ownerWhere(context))
       .for('share');
-    if (!owner) throw new Error('Secret unavailable');
+    if (!owner) throw new SessionSecretUnavailableError('owner_not_found');
     // A conditional UPDATE serializes concurrent finalizers; insertion failure rolls consumption back.
     const [pending] = await tx
       .update(sessionSecretApprovals)
@@ -242,7 +269,7 @@ export async function finalizeSessionSecret(
         ),
       )
       .returning();
-    if (!pending) throw new Error('Secret unavailable');
+    if (!pending) throw new SessionSecretUnavailableError('approval_not_found');
     validate(pendingMetadata(pending));
     const [row] = await tx
       .insert(sessionSecrets)
@@ -260,7 +287,7 @@ export async function finalizeSessionSecret(
         expiresAt: pending.expiresAt,
       })
       .returning(metadataColumns);
-    if (!row) throw new Error('Secret unavailable');
+    if (!row) throw new SessionSecretUnavailableError('write_failed');
     return metadata(row);
   });
 }
@@ -271,7 +298,7 @@ export async function listOwnedSessionSecrets(context: SessionSecretContext) {
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.ownerUserId))
     .where(ownerWhere(context, true));
-  if (!owner) throw new Error('Secret unavailable');
+  if (!owner) throw new SessionSecretUnavailableError('owner_not_found');
   const rows = await db
     .select(metadataColumns)
     .from(sessionSecrets)
@@ -294,7 +321,7 @@ export async function revokeOwnedSessionSecret(
       .innerJoin(users, eq(users.id, sessions.ownerUserId))
       .where(ownerWhere(context, true))
       .for('share');
-    if (!owner) throw new Error('Secret unavailable');
+    if (!owner) throw new SessionSecretUnavailableError('owner_not_found');
     const [row] = await tx
       .update(sessionSecrets)
       .set({
@@ -309,7 +336,7 @@ export async function revokeOwnedSessionSecret(
         ),
       )
       .returning({ id: sessionSecrets.id });
-    if (!row) throw new Error('Secret unavailable');
+    if (!row) throw new SessionSecretUnavailableError('grant_not_found');
     // Live authorization already denies a revoked grant; retiring substitutes
     // and publishing the event only accelerates gateway-side stream cancel.
     await tx
@@ -343,7 +370,8 @@ export async function resolveOwnedSessionSecret(
         gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
       ),
     );
-  if (!row?.secret.value) throw new Error('Secret unavailable');
+  if (!row?.secret.value)
+    throw new SessionSecretUnavailableError('grant_not_found');
   return { ...metadata(row.secret), value: decrypt(row.secret.value) };
 }
 

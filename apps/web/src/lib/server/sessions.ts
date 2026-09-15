@@ -414,7 +414,11 @@ function listConditions(
     eq(sessions.visibility, 'visible'),
     isNull(sessions.archivedAt),
     input.ids ? inArray(sessions.id, input.ids) : undefined,
-    input.status ? eq(sessions.cachedStatus, input.status) : undefined,
+    input.status === 'ready'
+      ? or(eq(sessions.cachedStatus, 'ready'), isNull(sessions.cachedStatus))
+      : input.status
+        ? eq(sessions.cachedStatus, input.status)
+        : undefined,
     input.user ? sessionCreatorCondition(input.user) : undefined,
     input.source
       ? eq(sessions.sourceSurface, input.source as never)

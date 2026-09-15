@@ -91,7 +91,10 @@ const {
     speak: vi.fn(),
     setMicMuted: vi.fn(),
     setOutputMuted: vi.fn(),
+    micMuted: false,
+    outputMuted: false,
     startedAt: null as number | null,
+    inputLevel: 0,
     deliveringUtterances: 0,
     onUtterance: undefined as
       | ((text: string, delegationId: string | null) => void)
@@ -137,11 +140,12 @@ vi.mock('@/hooks/useLiveVoice', () => ({
       start: liveVoiceState.start,
       stop: liveVoiceState.stop,
       speak: liveVoiceState.speak,
-      micMuted: false,
+      micMuted: liveVoiceState.micMuted,
       setMicMuted: liveVoiceState.setMicMuted,
-      outputMuted: false,
+      outputMuted: liveVoiceState.outputMuted,
       setOutputMuted: liveVoiceState.setOutputMuted,
       startedAt: liveVoiceState.startedAt,
+      inputLevel: liveVoiceState.inputLevel,
       deliveringUtterances: liveVoiceState.deliveringUtterances,
     };
   },
@@ -338,6 +342,9 @@ beforeEach(() => {
   recordVoiceCallEventMutate.mockReset();
   recordVoiceCallEventMutate.mockResolvedValue({ eventId: 'voice-call:1' });
   liveVoiceState.startedAt = null;
+  liveVoiceState.inputLevel = 0;
+  liveVoiceState.micMuted = false;
+  liveVoiceState.outputMuted = false;
   liveVoiceState.deliveringUtterances = 0;
   liveVoiceState.onHeardTurn = undefined;
   liveVoiceState.onSpokenTurn = undefined;
@@ -2690,80 +2697,6 @@ describe('FastSessionTranscript', () => {
     ).not.toBeInTheDocument();
   });
 
-  it.each(['keyboard', 'button'] as const)(
-    'keeps focus in the Session composer after %s submission completes',
-    async (submissionMethod) => {
-      let resolveReply: (() => void) | undefined;
-      replyMutate.mockReturnValueOnce(
-        new Promise<void>((resolve) => {
-          resolveReply = resolve;
-        }),
-      );
-
-      render(
-        <FastSessionTranscript
-          sessionId="session-1"
-          initialMessages={[]}
-          canReply
-        />,
-      );
-
-      const input = screen.getByPlaceholderText('Message agent');
-      fireEvent.change(input, { target: { value: 'Follow up question' } });
-      if (submissionMethod === 'keyboard') {
-        fireEvent.keyDown(input, {
-          key: 'Enter',
-          code: 'Enter',
-          charCode: 13,
-        });
-      } else {
-        fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
-      }
-
-      await waitFor(() => expect(input).toBeDisabled());
-      await act(async () => resolveReply?.());
-
-      await waitFor(() =>
-        expect(screen.getByPlaceholderText('Message agent')).toHaveFocus(),
-      );
-    },
-  );
-
-  it('does not restore Session composer focus after focus moves elsewhere while sending', async () => {
-    let resolveReply: (() => void) | undefined;
-    replyMutate.mockReturnValueOnce(
-      new Promise<void>((resolve) => {
-        resolveReply = resolve;
-      }),
-    );
-
-    render(
-      <>
-        <FastSessionTranscript
-          sessionId="session-1"
-          initialMessages={[]}
-          canReply
-        />
-        <button type="button">Other control</button>
-      </>,
-    );
-
-    const input = screen.getByPlaceholderText('Message agent');
-    fireEvent.change(input, { target: { value: 'Follow up question' } });
-    fireEvent.keyDown(input, {
-      key: 'Enter',
-      code: 'Enter',
-      charCode: 13,
-    });
-    await waitFor(() => expect(input).toBeDisabled());
-
-    const otherControl = screen.getByRole('button', { name: 'Other control' });
-    otherControl.focus();
-    await act(async () => resolveReply?.());
-
-    await waitFor(() => expect(otherControl).toHaveFocus());
-  });
-
   it.each(['Tab', 'Escape', 'mouse', 'touch'])(
     'preserves focus-only hints and %s interaction for a long suggestion',
     (action) => {
@@ -3349,9 +3282,81 @@ describe('FastSessionTranscript', () => {
       const toggle = await screen.findByRole('button', {
         name: /^end voice conversation$/i,
       });
+      expect(screen.getByText('Connecting voice...')).toBeInTheDocument();
+      expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
       fireEvent.click(toggle);
       expect(liveVoiceState.stop).toHaveBeenCalledTimes(1);
       expect(liveVoiceState.start).not.toHaveBeenCalled();
+    });
+
+    it('replaces typing with in-call controls and restores the saved draft when the call ends', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      const view = render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      const input = await screen.findByPlaceholderText('Message agent');
+      fireEvent.change(input, { target: { value: 'Keep this draft' } });
+
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      liveVoiceState.startedAt = Date.now() - 4_000;
+      liveVoiceState.inputLevel = 0.6;
+      view.rerender(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
+      expect(
+        screen.getByRole('meter', { name: 'Microphone level' }),
+      ).toHaveAttribute('aria-valuenow', '60');
+      const muteButton = screen.getByRole('button', {
+        name: 'Mute your voice',
+      });
+      expect(muteButton.querySelector('.lucide-audio-lines')).not.toBeNull();
+      expect(muteButton.querySelector('.lucide-x')).toBeNull();
+      fireEvent.click(muteButton);
+      expect(liveVoiceState.setMicMuted).toHaveBeenCalledWith(true);
+      expect(
+        screen.getByRole('button', { name: 'Silence Roomote' }),
+      ).toBeInTheDocument();
+
+      liveVoiceState.micMuted = true;
+      view.rerender(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      const unmuteButton = screen.getByRole('button', {
+        name: 'Unmute your voice',
+      });
+      expect(unmuteButton.querySelector('.lucide-audio-lines')).not.toBeNull();
+      expect(unmuteButton.querySelector('.lucide-x')).not.toBeNull();
+
+      liveVoiceState.active = false;
+      liveVoiceState.status = 'idle';
+      liveVoiceState.startedAt = null;
+      view.rerender(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      expect(screen.getByPlaceholderText('Message agent')).toHaveValue(
+        'Keep this draft',
+      );
     });
 
     it('reads the answer to a spoken request to Live as it streams, and leaves typed replies on screen', async () => {

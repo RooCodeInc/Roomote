@@ -166,8 +166,12 @@ export function TaskPromptInput({
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => onPromptTextChange(text),
     getPrefix: () => promptText,
-    disabled: isBusy,
+    disabled: isBusy || Boolean(voice?.active),
   });
+  const handleVoiceToggle = () => {
+    if (!voice?.active) voiceDictation.stop();
+    voice?.onToggle();
+  };
   const {
     ghostSuggestion,
     suggestionHintId,
@@ -265,7 +269,7 @@ export function TaskPromptInput({
             {voice ? (
               <LiveVoiceButton
                 active={voice.active}
-                onClick={voice.onToggle}
+                onClick={handleVoiceToggle}
                 disabled={isBusy && !voice.active}
               />
             ) : null}
