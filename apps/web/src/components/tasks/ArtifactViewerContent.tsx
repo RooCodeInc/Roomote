@@ -178,47 +178,52 @@ function TabularArtifactPreview({
           )}
         </div>
       )}
-      <Table className="w-max min-w-full border-separate border-spacing-0 font-mono text-xs">
-        <caption className="sr-only">
-          {format === 'csv' ? 'CSV' : 'TSV'} preview. The first artifact row is
-          shown as data, not column headings.
-        </caption>
-        <TableHeader>
-          <TableRow>
-            <TableHead
-              scope="col"
-              className="sticky left-0 z-20 border-r bg-muted/95 text-right"
-            >
-              Row
-            </TableHead>
-            {Array.from({ length: preview.columnCount }, (_, index) => (
-              <TableHead key={index} scope="col" className="bg-muted/95">
-                Column {index + 1}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {preview.rows.map((row, rowIndex) => (
-            <TableRow key={rowIndex}>
+      <div className="min-w-0 overflow-x-auto">
+        <Table className="w-max min-w-full border-separate border-spacing-0 font-mono text-xs">
+          <caption className="sr-only">
+            {format === 'csv' ? 'CSV' : 'TSV'} preview. The first artifact row
+            is shown as data, not column headings.
+          </caption>
+          <TableHeader>
+            <TableRow>
               <TableHead
-                scope="row"
-                className="sticky left-0 z-10 border-r bg-background text-right text-muted-foreground"
+                scope="col"
+                className="sticky left-0 z-20 border-r bg-muted/95 text-right"
               >
-                {rowIndex + 1}
+                Row
               </TableHead>
-              {Array.from({ length: preview.columnCount }, (_, columnIndex) => (
-                <TableCell
-                  key={columnIndex}
-                  className="max-w-96 min-w-24 whitespace-pre-wrap break-words align-top"
-                >
-                  {row[columnIndex] ?? ''}
-                </TableCell>
+              {Array.from({ length: preview.columnCount }, (_, index) => (
+                <TableHead key={index} scope="col" className="bg-muted/95">
+                  Column {index + 1}
+                </TableHead>
               ))}
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {preview.rows.map((row, rowIndex) => (
+              <TableRow key={rowIndex}>
+                <TableHead
+                  scope="row"
+                  className="sticky left-0 z-10 border-r bg-background text-right text-muted-foreground"
+                >
+                  {rowIndex + 1}
+                </TableHead>
+                {Array.from(
+                  { length: preview.columnCount },
+                  (_, columnIndex) => (
+                    <TableCell
+                      key={columnIndex}
+                      className="max-w-96 min-w-24 whitespace-pre-wrap break-words align-top"
+                    >
+                      {row[columnIndex] ?? ''}
+                    </TableCell>
+                  ),
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }

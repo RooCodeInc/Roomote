@@ -91,7 +91,7 @@ describe('AcpActivityGroupMessage', () => {
     expect(screen.getByText('Latest activity')).toBeVisible();
   });
 
-  it('expands tool activity as a compact list instead of full tool messages', () => {
+  it('expands reasoning details alongside compact tool activity', () => {
     const tool: AcpToolCallUiMessage = {
       id: 'tool-1',
       ts: 2_000,
@@ -122,7 +122,7 @@ describe('AcpActivityGroupMessage', () => {
 
     render(
       <AcpActivityGroupMessage group={group}>
-        <div>Full tool message</div>
+        <div>Reasoning details</div>
       </AcpActivityGroupMessage>,
     );
 
@@ -130,6 +130,6 @@ describe('AcpActivityGroupMessage', () => {
 
     expect(screen.getByRole('list')).toBeVisible();
     expect(screen.getAllByRole('listitem')).toHaveLength(1);
-    expect(screen.queryByText('Full tool message')).not.toBeInTheDocument();
+    expect(screen.getByText('Reasoning details')).toBeVisible();
   });
 });

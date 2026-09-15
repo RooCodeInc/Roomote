@@ -205,7 +205,7 @@ export function AcpTranscriptBlockList({
             messageAnchorId(block.ts),
           ])}
         >
-          {renderNestedBlocks(block.blocks)}
+          {renderNestedBlocks(withoutToolBlocks(block.blocks))}
         </AcpActivityGroupMessage>
       );
 
@@ -275,6 +275,24 @@ export function AcpTranscriptBlockList({
       {renderRenderBlock(block, false)}
     </Fragment>
   ));
+}
+
+function withoutToolBlocks(blocks: AcpRenderBlock[]): AcpRenderBlock[] {
+  return blocks.flatMap((block) => {
+    if (block.kind === 'tool_group') return [];
+    if (block.msg.kind === 'tool_call' || block.msg.kind === 'tool_result') {
+      return [];
+    }
+
+    if (!block.childBlocks) return [block];
+
+    return [
+      {
+        ...block,
+        childBlocks: withoutToolBlocks(block.childBlocks),
+      },
+    ];
+  });
 }
 
 function DebugTimestamp({

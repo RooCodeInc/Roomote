@@ -104,14 +104,13 @@ export function AcpActivityGroupMessage({
         </div>
       )}
       <CollapsibleContent className="mt-4 space-y-0 border-l border-border pl-4 ml-2 data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 data-[state=closed]:animate-out data-[state=open]:animate-in">
-        {activityTools.length > 0 ? (
+        {children}
+        {activityTools.length > 0 && (
           <ul className="space-y-1">
             {activityTools.map((tool) => (
               <ActivityToolListItem key={tool.id} tool={tool} />
             ))}
           </ul>
-        ) : (
-          children
         )}
       </CollapsibleContent>
     </Collapsible>
