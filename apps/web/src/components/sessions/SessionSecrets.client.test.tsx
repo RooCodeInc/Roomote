@@ -51,7 +51,7 @@ it('does not approve while requests are loading', async () => {
   render(<SessionSecrets sessionId={sessionId} />);
   expect(screen.queryByLabelText('API key')).not.toBeInTheDocument();
   expect(
-    screen.queryByRole('button', { name: 'Allow for this Session' }),
+    screen.queryByRole('button', { name: 'Save integration' }),
   ).not.toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledOnce();
   expect(fetchMock.mock.calls[0]![1].method).toBeUndefined();
@@ -67,10 +67,10 @@ it('prefills a single-key consent flow and reports server-scheduled continuation
     screen.getByRole('heading', { name: 'Add your Demo service API key' }),
   ).toBeInTheDocument();
   expect(
-    screen.getByRole('button', { name: 'Allow for this Session' }),
+    screen.getByRole('button', { name: 'Save integration' }),
   ).toBeEnabled();
   expect(
-    screen.getByRole('button', { name: 'Allow for this Session' }),
+    screen.getByRole('button', { name: 'Save integration' }),
   ).toHaveAccessibleDescription('For https://api.example.com:8443 - GET, HEAD');
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(
@@ -96,11 +96,9 @@ it('prefills a single-key consent flow and reports server-scheduled continuation
       status: 201,
     }),
   );
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Allow for this Session' }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
   expect(await screen.findByRole('status')).toHaveTextContent(
-    'API key saved. The Session has been notified without sharing your key.',
+    'Integration saved. The Session has been notified without sharing your key.',
   );
   expect(fetchMock).toHaveBeenLastCalledWith(
     `/api/sessions/${sessionId}/secrets`,
@@ -163,9 +161,7 @@ it.each([
         { status: 201 },
       ),
     );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Allow for this Session' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
     await screen.findByRole('status');
     expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toEqual({
       pendingRef,
@@ -279,13 +275,11 @@ it('clears the revealed key immediately on save and leaves the next request mask
       finish = resolve;
     }),
   );
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Allow for this Session' }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
   expect(screen.getByLabelText('API key')).toHaveValue('');
   expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password');
   expect(
-    screen.getByRole('button', { name: 'Allow for this Session' }),
+    screen.getByRole('button', { name: 'Save integration' }),
   ).toBeDisabled();
   finish(
     new Response(JSON.stringify({ secret: metadata, resumed: true }), {
@@ -340,9 +334,7 @@ it('clears the key and asks for a new request when the prepared approval has exp
   );
   await open();
   fill();
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Allow for this Session' }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
   expect(await screen.findByRole('alert')).toHaveTextContent(
     'This request has expired',
   );
@@ -356,9 +348,7 @@ it.each([400, 500])(
     fill();
     fireEvent.click(screen.getByRole('button', { name: 'Show value' }));
     fetchMock.mockResolvedValueOnce(new Response(credential, { status }));
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Allow for this Session' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
     await screen.findByRole('alert');
     expect(screen.getByLabelText('API key')).toHaveValue('');
     expect(screen.getByLabelText('API key')).toHaveAttribute(
@@ -398,11 +388,9 @@ it('keeps saved status with native-tool fallback when server continuation was no
       status: 201,
     }),
   );
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Allow for this Session' }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
   expect(await screen.findByRole('status')).toHaveTextContent(
-    'API key saved. The Session could not be notified. Ask the agent to check list_session_secrets and continue.',
+    'Integration saved. The Session could not be notified. Ask the agent to check list_session_secrets and continue.',
   );
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledTimes(2);

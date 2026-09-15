@@ -4279,9 +4279,12 @@ export const sessionSecrets = pgTable(
   'session_secrets',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    sessionId: uuid('session_id')
-      .notNull()
-      .references(() => sessions.id, { onDelete: 'cascade' }),
+    // Provenance only: the Session the key was approved in, or null when it
+    // was added from Settings. An integration belongs to its owner and is
+    // usable from every Session and coding run of that owner.
+    sessionId: uuid('session_id').references(() => sessions.id, {
+      onDelete: 'set null',
+    }),
     ownerUserId: text('owner_user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -4302,7 +4305,8 @@ export const sessionSecrets = pgTable(
       .default(sql`'{GET,HEAD}'::text[]`)
       .$type<SessionEgressMethod[]>(),
     value: encryptedText('value'),
-    expiresAt: timestamp('expires_at').notNull(),
+    /** Null: kept until revoked. */
+    expiresAt: timestamp('expires_at'),
     revokedAt: timestamp('revoked_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
@@ -4337,6 +4341,9 @@ export const sessionSecretApprovals = pgTable(
       .notNull()
       .default(sql`'{GET,HEAD}'::text[]`)
       .$type<SessionEgressMethod[]>(),
+    /** How long the resulting integration lives once the key is entered; null keeps it until revoked. */
+    lifetimeHours: integer('lifetime_hours'),
+    /** The window for entering the key, not the integration's lifetime. */
     expiresAt: timestamp('expires_at').notNull(),
     consumedAt: timestamp('consumed_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),

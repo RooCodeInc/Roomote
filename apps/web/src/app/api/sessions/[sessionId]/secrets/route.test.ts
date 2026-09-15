@@ -217,7 +217,9 @@ describe('session secret route boundary', () => {
     await POST(request('POST', createArgs), props);
     const text = mocks.reply.mock.calls[0]![1].text;
     expect(text).not.toContain('GET or HEAD');
-    expect(text).toContain('approval was saved but cannot currently be used');
+    expect(text).toContain(
+      'integration was saved but cannot currently be used',
+    );
     for (const tool of [
       'list_session_secrets',
       'prepare_session_secret',
@@ -441,7 +443,7 @@ describe('session secret route boundary', () => {
       { headerName: 'authorization' },
       { headerPrefix: '' },
       { expiresAt: '2030-01-01T00:00:00Z' },
-      { ttlHours: 24 },
+      { lifetimeHours: 24 },
     ]) {
       await expectError(
         await POST(request('POST', { ...createArgs, ...policy }), props),

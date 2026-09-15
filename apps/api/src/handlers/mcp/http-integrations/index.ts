@@ -143,7 +143,8 @@ export function createHttpIntegrationsMcp() {
                 .filter(
                   (grant) =>
                     !grant.revokedAt &&
-                    Date.parse(grant.expiresAt) > Date.now(),
+                    (!grant.expiresAt ||
+                      Date.parse(grant.expiresAt) > Date.now()),
                 )
                 .map((grant) => ({
                   id: `session:${grant.secretRef}`,

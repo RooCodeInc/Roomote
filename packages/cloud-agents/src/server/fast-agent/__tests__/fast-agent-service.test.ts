@@ -1684,7 +1684,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             { userId: 'injected-user' },
             { sessionId: 'injected-session' },
             { headerName: 'cookie' },
-            { ttlHours: 721 },
+            { lifetimeHours: 8761 },
           ]) {
             expect(
               await invokeTool(nativeToolNames.prepareSessionSecret, {
@@ -1736,7 +1736,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.prepareSessionSecret).toHaveBeenNthCalledWith(
         1,
         { sessionId: 'canonical-session-1', userId: 'user-1' },
-        { ...args, ttlHours: 24, allowedMethods: ['GET', 'HEAD'] },
+        { ...args, allowedMethods: ['GET', 'HEAD'] },
       );
       expect(mocks.prepareSessionSecret).toHaveBeenNthCalledWith(
         2,
@@ -1746,7 +1746,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           origin: args.origin,
           headerName: 'x-api-key',
           headerPrefix: '',
-          ttlHours: 24,
           allowedMethods: ['GET', 'HEAD'],
         },
       );

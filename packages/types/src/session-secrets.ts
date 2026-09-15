@@ -23,11 +23,22 @@ export function isSessionSecretToolsExperimentEnabled(
   );
 }
 
+/** One year; an omitted lifetime keeps the integration until it is revoked. */
+export const SESSION_SECRET_MAX_LIFETIME_HOURS = 8760;
+/** How long a prepared approval waits for the human to enter the key. */
+export const SESSION_SECRET_APPROVAL_WINDOW_HOURS = 24;
+
 const sessionSecretPrepareFields = {
   label: z.string().trim().min(1).max(80),
   origin: z.string().min(1).max(2048),
   headerName: sessionEgressHeaderNameSchema,
-  ttlHours: z.number().int().min(1).max(720).default(24),
+  /** Omitted: the integration is kept until revoked. */
+  lifetimeHours: z
+    .number()
+    .int()
+    .min(1)
+    .max(SESSION_SECRET_MAX_LIFETIME_HOURS)
+    .optional(),
   /**
    * Methods ordinary clients may use through the egress gateway. Omitting
    * this keeps the grant read-only; anything beyond GET/HEAD must be
@@ -77,6 +88,18 @@ export const sessionSecretRevokeSchema = z
   .strict();
 
 /**
+ * An integration added from Settings: the human supplies the policy and the
+ * key together, so no prepared approval or method echo is involved.
+ */
+export const integrationCreateSchema = z
+  .object({
+    ...sessionSecretPrepareFields,
+    headerPrefix: z.enum(['', 'Bearer ', 'Basic ', 'Token ']),
+    secret: z.string().min(8).max(4096),
+  })
+  .strict();
+
+/**
  * @deprecated Mediated Session-grant requests (`request_with_session_secret`
  * / `integration_request` with a `session:` ID) are a GET/HEAD-only
  * compatibility path, not the required resource path. Grants are meant to be
@@ -100,6 +123,7 @@ export const sessionSecretRequestSchema = z
 
 export type SessionSecretCreate = z.infer<typeof sessionSecretCreateSchema>;
 export type SessionSecretPrepare = z.infer<typeof sessionSecretPrepareSchema>;
+export type IntegrationCreate = z.infer<typeof integrationCreateSchema>;
 export type SessionSecretRequest = z.infer<typeof sessionSecretRequestSchema>;
 
 export interface SessionSecretMetadata {
@@ -109,16 +133,21 @@ export interface SessionSecretMetadata {
   headerName: SessionSecretPrepare['headerName'];
   headerPrefix: SessionSecretPrepare['headerPrefix'];
   allowedMethods: SessionEgressMethod[];
-  expiresAt: string;
+  /** Null: kept until revoked. */
+  expiresAt: string | null;
   revokedAt: string | null;
   createdAt: string;
 }
 
 export interface SessionSecretPendingMetadata extends Omit<
   SessionSecretMetadata,
-  'secretRef' | 'revokedAt'
+  'secretRef' | 'revokedAt' | 'expiresAt'
 > {
   pendingRef: string;
+  /** How long the integration will live once the key is entered; null keeps it until revoked. */
+  lifetimeHours: number | null;
+  /** When this approval stops accepting a key. */
+  expiresAt: string;
 }
 
 export interface SessionSecretApprovals {

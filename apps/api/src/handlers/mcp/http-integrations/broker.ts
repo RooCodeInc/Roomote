@@ -383,7 +383,8 @@ async function performIntegrationRequest(
   signal?: AbortSignal,
   sessionGrant?: {
     value: string;
-    expiresAt: string;
+    /** Null: the grant is kept until revoked. */
+    expiresAt: string | null;
     revalidate: () => Promise<void>;
   },
 ) {
@@ -453,7 +454,12 @@ async function performIntegrationRequest(
       connect: createGuardedConnectOptions({ allowedPrivateCidrs: undefined }),
     });
     const timeoutMs = sessionGrant
-      ? Math.min(10_000, Date.parse(sessionGrant.expiresAt) - Date.now())
+      ? Math.min(
+          10_000,
+          sessionGrant.expiresAt
+            ? Date.parse(sessionGrant.expiresAt) - Date.now()
+            : 10_000,
+        )
       : 30_000;
     if (timeoutMs <= 0) throw new IntegrationRequestError('grant_expired');
     const timeout = AbortSignal.timeout(timeoutMs);
