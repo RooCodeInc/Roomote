@@ -65,6 +65,16 @@ describe('Fast session input schemas', () => {
     });
   });
 
+  it('rejects private voice-call creation', () => {
+    expect(() =>
+      startFastSessionInputSchema.parse({
+        text: '',
+        privacy: 'private',
+        voiceCall: true,
+      }),
+    ).toThrow('Private Sessions cannot start as voice calls');
+  });
+
   it('rejects too many extracted attachments', () => {
     expect(() =>
       startFastSessionInputSchema.parse({

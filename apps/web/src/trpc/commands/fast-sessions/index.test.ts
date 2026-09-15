@@ -826,6 +826,17 @@ describe('startFastSessionCommand', () => {
     );
   });
 
+  it('rejects private voice-call creation before creating a Session', async () => {
+    await expect(
+      startFastSessionCommand(auth, {
+        text: '',
+        privacy: 'private',
+        voiceCall: true,
+      }),
+    ).rejects.toThrow('Private Sessions cannot start as voice calls');
+    expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
+  });
+
   it('seeds the launch tab presence before scheduling the first turn', async () => {
     const conversationId = '22222222-2222-4222-8222-222222222222';
 

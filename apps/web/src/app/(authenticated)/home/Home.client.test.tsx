@@ -412,7 +412,12 @@ describe('Home', () => {
       .getByRole('button', { name: 'Add attachments' })
       .parentElement?.querySelectorAll('button');
     expect(toolbarButtons?.[0]).toHaveAccessibleName('Add attachments');
-    expect(toolbarButtons?.[1]).toHaveAccessibleName('Model for this session');
+    expect(
+      screen.getByRole('switch', { name: 'Start a private Session' }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByRole('button', { name: 'Model for this session' }),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 

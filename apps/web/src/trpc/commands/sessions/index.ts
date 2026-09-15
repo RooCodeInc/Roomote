@@ -17,6 +17,7 @@ import {
   markSessionGoal,
   sessions,
   sessionTasks,
+  taskArtifacts,
   tasks,
 } from '@roomote/db/server';
 import { captureEvent } from '@roomote/telemetry/server';
@@ -37,6 +38,7 @@ import {
   currentEpochSeconds,
   signArtifactId,
 } from '@/lib/server/artifact-signature';
+import { deleteArtifactsBatch } from '@/lib/server';
 
 // Keep polled session payloads stable for the raw route's one-hour cache lifetime.
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
@@ -70,6 +72,30 @@ export async function deletePrivateSessionCommand(
       .where(eq(sessionTasks.sessionId, session.id));
     const taskIds = linkedTasks.map(({ taskId }) => taskId);
     if (taskIds.length > 0) {
+      const artifacts = await tx
+        .select({
+          id: taskArtifacts.id,
+          taskId: taskArtifacts.taskId,
+          path: taskArtifacts.path,
+          version: taskArtifacts.version,
+        })
+        .from(taskArtifacts)
+        .where(inArray(taskArtifacts.taskId, taskIds));
+      if (artifacts.length > 0) {
+        const result = await deleteArtifactsBatch(
+          artifacts.map((artifact) => ({
+            taskId: artifact.taskId!,
+            artifactId: artifact.id,
+            path: artifact.path,
+            version: artifact.version,
+          })),
+        );
+        if (result.errors > 0) {
+          throw new Error(
+            `Failed to delete ${result.errors} private Session artifact object(s).`,
+          );
+        }
+      }
       await tx
         .delete(tasks)
         .where(

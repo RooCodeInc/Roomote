@@ -5,15 +5,27 @@ import {
   sessionFactory,
   sessions,
   sessionTasks,
+  taskArtifacts,
   taskFactory,
   tasks,
   userFactory,
 } from '@roomote/db/server';
 import type { UserAuthSuccess } from '@/types';
 
+const mockDeleteArtifactsBatch = vi.hoisted(() => vi.fn());
+
+vi.mock('@/lib/server', () => ({
+  deleteArtifactsBatch: mockDeleteArtifactsBatch,
+}));
+
 import { deletePrivateSessionCommand } from './index';
 
 describe('deletePrivateSessionCommand', () => {
+  beforeEach(() => {
+    mockDeleteArtifactsBatch.mockReset();
+    mockDeleteArtifactsBatch.mockResolvedValue({ deleted: 1, errors: 0 });
+  });
+
   it('deletes an owned private Session and descendants but denies other users', async () => {
     const owner = await userFactory.create();
     const other = await userFactory.create();
@@ -45,6 +57,17 @@ describe('deletePrivateSessionCommand', () => {
       taskId: task.id,
       origin: 'fast_delegation',
     });
+    const [artifact] = await db
+      .insert(taskArtifacts)
+      .values({
+        taskId: task.id,
+        contentType: 'text/plain',
+        path: 'private.txt',
+        version: 1,
+        size: 7,
+        uploaded: true,
+      })
+      .returning();
 
     await expect(
       deletePrivateSessionCommand(
@@ -58,6 +81,14 @@ describe('deletePrivateSessionCommand', () => {
         session.id,
       ),
     ).resolves.toEqual({ deleted: true });
+    expect(mockDeleteArtifactsBatch).toHaveBeenCalledWith([
+      {
+        taskId: task.id,
+        artifactId: artifact!.id,
+        path: 'private.txt',
+        version: 1,
+      },
+    ]);
     await expect(
       db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
     ).resolves.toBeUndefined();
@@ -69,5 +100,55 @@ describe('deletePrivateSessionCommand', () => {
         where: eq(fastAgentConversations.id, conversation!.id),
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('retains private Session rows when artifact object deletion fails', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'fast_delegation',
+    });
+    const [artifact] = await db
+      .insert(taskArtifacts)
+      .values({
+        taskId: task.id,
+        contentType: 'text/plain',
+        path: 'retry.txt',
+        version: 0,
+        size: 5,
+        uploaded: true,
+      })
+      .returning();
+    mockDeleteArtifactsBatch.mockResolvedValue({ deleted: 0, errors: 1 });
+
+    await expect(
+      deletePrivateSessionCommand(
+        { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+        session.id,
+      ),
+    ).rejects.toThrow('Failed to delete 1 private Session artifact object');
+    await expect(
+      db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
+    ).resolves.toBeDefined();
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, task.id) }),
+    ).resolves.toBeDefined();
+    await expect(
+      db.query.taskArtifacts.findFirst({
+        where: eq(taskArtifacts.id, artifact!.id),
+      }),
+    ).resolves.toBeDefined();
   });
 });

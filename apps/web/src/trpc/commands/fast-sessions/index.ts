@@ -437,6 +437,9 @@ export async function startFastSessionCommand(
   fastConversationId?: string;
   taskId?: string;
 }> {
+  if (input.privacy === 'private' && input.voiceCall) {
+    throw new Error('Private Sessions cannot start as voice calls.');
+  }
   if (input.pinnedLaunch) {
     if (input.privacy === 'private') {
       throw new Error(
