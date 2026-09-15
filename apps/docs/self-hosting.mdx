@@ -115,6 +115,13 @@ and isolated Memory database when the `brain` profile is enabled. Store the
 passphrase separately in your secret manager; the backup cannot be restored
 without it.
 
+Webhook and delivery lifecycle entries in `roomote logs` use single-line JSON
+with an `event` field plus safe correlation fields such as provider, delivery,
+Session, task, run, and job IDs. Search these entries to follow Telegram
+messages and GitHub pull-request review activity from receipt through
+persistence, dispatch, and final delivery. Message bodies, raw payloads,
+credentials, signatures, and token-bearing URLs are excluded.
+
 Use `roomote backup --include-redis` when queued work, BullMQ schedules,
 sessions, and other transient Redis state must survive. Backups briefly stop
 application writers (and active Docker task workers) so the included stores
