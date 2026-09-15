@@ -45,7 +45,11 @@ function messageReceivedPayload(input: {
    * ordinary delivery carries; `null` omits the field to exercise the
    * re-fetch path.
    */
-  authenticationResults?: { spf?: string; dkim?: string; dmarc?: string } | null;
+  authenticationResults?: {
+    spf?: string;
+    dkim?: string;
+    dmarc?: string;
+  } | null;
 }) {
   const authenticationResults =
     input.authenticationResults === undefined
@@ -221,7 +225,10 @@ describe('agentmail webhook event outbox (real database)', () => {
     const { senderEmail } = await createVerifiedSender();
     const originalFetch = globalThis.fetch;
     const replies: string[] = [];
-    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      _url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       replies.push(String(init?.body ?? ''));
       return new Response(JSON.stringify({ message_id: 'm-refusal' }), {
         status: 200,
@@ -271,7 +278,10 @@ describe('agentmail webhook event outbox (real database)', () => {
     const fetched: string[] = [];
     const messageId = `m-${randomUUID()}`;
     const threadId = `thread-${randomUUID()}`;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       const href = String(url);
       if ((init?.method ?? 'GET') === 'GET' && href.includes('/messages/')) {
         fetched.push(href);
