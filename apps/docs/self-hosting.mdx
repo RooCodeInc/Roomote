@@ -122,6 +122,14 @@ share a documented consistency point. If object storage is external, the
 bundle records its endpoint and bucket but does not copy its objects; keep a
 provider-level backup of that bucket.
 
+Roomote exposes `/health/bullmq` for queue-processing health. It returns healthy
+only when the background worker has recently processed its heartbeat job and no
+Session event has remained queued for more than five minutes. Any overdue event
+makes the check fail; authenticated error responses report the overdue count,
+while unauthenticated responses omit diagnostics. Use it alongside container
+liveness and `roomote logs`: a stale heartbeat or growing backlog can reveal a
+worker process that is still running but no longer draining jobs.
+
 Restore only after installing Roomote on the replacement host:
 
 ```sh
@@ -142,9 +150,11 @@ empty PostgreSQL/MinIO/Redis volumes, and starts the recorded Roomote release.
   otherwise one is generated and stored next to the bundle. Use
   `--skip-backup` to opt out.
 - **Migrations run before services are replaced.** Database migrations apply
-  in a single transaction while the previous release keeps serving. If a
-  migration fails, the schema rolls back, the previous configuration is
-  restored, and the previous release stays up.
+  in a single transaction while the previous release keeps serving. The bundled
+  migration runner makes up to three total attempts after a transient Postgres
+  connection failure: the initial run plus at most two retries. If migration
+  still fails, the schema rolls back, the previous configuration is restored,
+  and the previous release stays up.
 - **Rollback is one command.** Every release's schema keeps the previous
   release working, so `roomote rollback` re-deploys the prior release without
   touching the database. `roomote upgrade <tag>` does the same for any
