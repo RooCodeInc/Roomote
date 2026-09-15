@@ -43,6 +43,9 @@ import {
   INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE,
   matchIntegrationTools,
+  parseDiscordMessagePermalink,
+  parseSlackChannelPermalink,
+  parseSlackMessagePermalink,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
@@ -727,6 +730,30 @@ function buildIntegrationCallSignature({
     toolName,
     canonicalizeIntegrationCallValue(args),
   ]);
+}
+
+function resolveFastAgentChatLookupProvider(
+  args: Record<string, unknown>,
+  conversation: FastAgentConversation,
+): 'slack' | 'discord' | undefined {
+  if (args.provider === 'slack' || args.provider === 'discord') {
+    return args.provider;
+  }
+
+  for (const reference of [args.messageLink, args.channel]) {
+    if (typeof reference !== 'string') continue;
+    if (
+      parseSlackMessagePermalink(reference) ||
+      parseSlackChannelPermalink(reference)
+    ) {
+      return 'slack';
+    }
+    if (parseDiscordMessagePermalink(reference)) return 'discord';
+  }
+
+  return conversation.surface === 'slack' || conversation.surface === 'discord'
+    ? conversation.surface
+    : undefined;
 }
 
 export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
@@ -3806,14 +3833,13 @@ export async function answerFastAgentQuestion({
         const chatLookupProvider =
           call.integrationId === ROOMOTE_MCP_ID &&
           (call.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name ||
-            call.toolName === CHAT_MESSAGE_CONTEXT_TOOL.name) &&
-          isFastAgentCommunicationConversation(conversation)
-            ? conversation.surface
+            call.toolName === CHAT_MESSAGE_CONTEXT_TOOL.name)
+            ? resolveFastAgentChatLookupProvider(call.args, conversation)
             : undefined;
         const integrationArguments =
           call.integrationId === ROOMOTE_MCP_ID &&
           call.toolName === CHAT_CHANNEL_MESSAGES_TOOL.name &&
-          conversation.surface === 'slack' &&
+          chatLookupProvider === 'slack' &&
           (typeof call.args.oldest !== 'string' ||
             call.args.oldest.trim().length === 0)
             ? {
@@ -3835,6 +3861,7 @@ export async function answerFastAgentQuestion({
           : undefined;
         const chatLookupArguments =
           chatLookupProvider &&
+          chatLookupProvider === conversation.surface &&
           currentChatChannel &&
           (typeof integrationArguments.channel !== 'string' ||
             integrationArguments.channel.trim().length === 0) &&

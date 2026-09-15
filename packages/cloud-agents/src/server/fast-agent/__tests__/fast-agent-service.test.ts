@@ -9110,6 +9110,155 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
+  it('respects explicit cross-platform Slack lookups from Telegram', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Manage Roomote',
+        tools: [
+          { name: 'get_chat_message_context' },
+          { name: 'get_chat_channel_messages' },
+        ],
+      },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll inspect that.',
+        });
+        await invokeMcpTool('roomote', 'get_chat_message_context', {
+          messageLink: 'https://acme.slack.com/archives/C123/p1710000000000100',
+          provider: 'slack',
+        });
+        await invokeMcpTool('roomote', 'get_chat_channel_messages', {
+          channel: 'https://acme.slack.com/archives/C123',
+          provider: 'slack',
+          oldest: '1710000000.000100',
+        });
+        await invokeMcpTool('roomote', 'get_chat_channel_messages', {
+          channel: '456',
+          provider: 'discord',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'I found the Slack context.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'telegram',
+        workspaceId: 'chat-1',
+        conversationId: 'notification:chat-1:user:user-1',
+        replyTarget: { channelId: 'chat-1' },
+      },
+      adapter: callbacks(),
+    });
+
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      {
+        integrationId: 'roomote',
+        toolName: 'get_chat_message_context',
+        args: {
+          messageLink: 'https://acme.slack.com/archives/C123/p1710000000000100',
+          provider: 'slack',
+        },
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      {
+        integrationId: 'roomote',
+        toolName: 'get_chat_channel_messages',
+        args: {
+          channel: 'https://acme.slack.com/archives/C123',
+          provider: 'slack',
+          oldest: '1710000000.000100',
+        },
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      {
+        integrationId: 'roomote',
+        toolName: 'get_chat_channel_messages',
+        args: { channel: '456', provider: 'discord' },
+      },
+    );
+  });
+
+  it.each([
+    [
+      'Slack',
+      'https://acme.slack.com/archives/C123/p1710000000000100',
+      'slack',
+    ],
+    ['Discord', 'https://discord.com/channels/123/456/789', 'discord'],
+  ] as const)(
+    'infers a cross-platform %s lookup from its link',
+    async (_name, messageLink, provider) => {
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Manage Roomote',
+          tools: [{ name: 'get_chat_message_context' }],
+        },
+      ]);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'I’ll inspect that.',
+          });
+          await invokeMcpTool('roomote', 'get_chat_message_context', {
+            messageLink,
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'I found the Slack context.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: {
+          surface: 'telegram',
+          workspaceId: 'chat-1',
+          conversationId: 'notification:chat-1:user:user-1',
+          replyTarget: { channelId: 'chat-1' },
+        },
+        adapter: callbacks(),
+      });
+
+      expect(mocks.callIntegration).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.any(Array),
+        {
+          integrationId: 'roomote',
+          toolName: 'get_chat_message_context',
+          args: {
+            messageLink,
+            provider,
+          },
+        },
+      );
+    },
+  );
+
   it('rejects Slack history reads that wrap bounds in a stringified args field', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
