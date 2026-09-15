@@ -831,17 +831,23 @@ describe('optional setup integration discovery', () => {
       db,
       memberConversation!.id,
     );
+    // The real status command is admin-only; a member turn must never reach it.
+    mocks.getStatus.mockRejectedValue(new Error('Unauthorized'));
     try {
       const resolved = await resolveSetupSessionTurnContext(
         { userId: member.id, isAdmin: false } as UserAuthSuccess,
         memberSession.id,
       );
+      expect(mocks.getStatus).not.toHaveBeenCalled();
       expect(resolved?.adapterExtensions).toBeUndefined();
+      expect(resolved?.setupSession).toBe(false);
       const snapshot = JSON.parse(resolved!.setupSnapshot);
+      expect(snapshot.recommendedNextCapability).toBeNull();
       expect(snapshot.capabilities.integrations).toMatchObject({
         canOffer: false,
         unavailableReason: expect.stringContaining('administrator'),
       });
+      expect(snapshot.capabilities.starter_work.canOffer).toBe(false);
     } finally {
       await db.delete(sessions).where(eq(sessions.id, memberSession.id));
       await db

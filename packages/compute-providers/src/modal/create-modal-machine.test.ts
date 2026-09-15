@@ -93,6 +93,108 @@ describe('createModalMachine', () => {
     );
   });
 
+  it('retries create-and-bootstrap with a fresh instance when the install exec stream is cut', async () => {
+    vi.useFakeTimers();
+    mockGetWorkerRelease.mockResolvedValue({
+      archive: Buffer.from('worker-release'),
+      tag: 'worker-v1.2.3',
+      version: '1.2.3',
+    });
+    const createInstance = vi
+      .fn()
+      .mockResolvedValueOnce({ instanceId: 'modal-1', domains: {} })
+      .mockResolvedValueOnce({ instanceId: 'modal-2', domains: {} });
+    const runCommand = vi
+      .fn()
+      // undici's message when the broker's streamed exec response is cut.
+      .mockRejectedValueOnce(new Error('terminated'))
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'ok' });
+    const destroyInstance = vi.fn().mockResolvedValue(undefined);
+    const mutations: { operation: string; eventType: string }[] = [];
+
+    try {
+      const pending = createModalMachine({
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: MODAL_IMAGE_REF,
+        launchMode: 'fresh',
+        computeClient: {
+          vendor: 'modal',
+          createInstance,
+          resumeFromSnapshot: vi.fn(),
+          writeFiles: vi.fn().mockResolvedValue(undefined),
+          runCommand,
+          destroyInstance,
+        },
+        onMutation: async (event) => {
+          mutations.push({
+            operation: event.operation,
+            eventType: event.eventType,
+          });
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      const machine = await pending;
+
+      expect(machine.machineId).toBe('modal-2');
+      expect(createInstance).toHaveBeenCalledTimes(2);
+      expect(runCommand).toHaveBeenCalledTimes(2);
+      expect(destroyInstance).toHaveBeenCalledTimes(1);
+      expect(destroyInstance).toHaveBeenCalledWith(
+        expect.objectContaining({ instanceId: 'modal-1' }),
+      );
+      expect(mutations).toContainEqual({
+        operation: 'run_command',
+        eventType: 'failed',
+      });
+      expect(
+        mutations.filter(
+          (m) =>
+            m.operation === 'create_instance' && m.eventType === 'completed',
+        ),
+      ).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not retry a deterministic install failure', async () => {
+    mockGetWorkerRelease.mockResolvedValue({
+      archive: Buffer.from('worker-release'),
+      tag: 'worker-v1.2.3',
+      version: '1.2.3',
+    });
+    const createInstance = vi
+      .fn()
+      .mockResolvedValue({ instanceId: 'modal-1', domains: {} });
+    const runCommand = vi
+      .fn()
+      .mockResolvedValue({ exitCode: 1, stderr: 'apt failed' });
+    const destroyInstance = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      createModalMachine({
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: MODAL_IMAGE_REF,
+        launchMode: 'fresh',
+        computeClient: {
+          vendor: 'modal',
+          createInstance,
+          resumeFromSnapshot: vi.fn(),
+          writeFiles: vi.fn().mockResolvedValue(undefined),
+          runCommand,
+          destroyInstance,
+        },
+      }),
+    ).rejects.toThrow('Modal worker install failed with exit code 1');
+
+    expect(createInstance).toHaveBeenCalledTimes(1);
+    expect(runCommand).toHaveBeenCalledTimes(1);
+    expect(destroyInstance).toHaveBeenCalledTimes(1);
+  });
+
   it('emits mutation events with the roomote vendor for managed-provider launches', async () => {
     mockGetWorkerRelease.mockResolvedValue({
       archive: Buffer.from('worker-release'),

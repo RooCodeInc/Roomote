@@ -305,7 +305,7 @@ describe('spawnBoxWorker', () => {
     expect(mockDestroyInstance).toHaveBeenCalledWith({ instanceId: 'box-1' });
   });
 
-  it('carries the Session egress bootstrap env and admits after the worker launches', async () => {
+  it('carries the Credential egress bootstrap env and admits after the worker launches', async () => {
     const admit = vi.fn().mockResolvedValue({
       workloadId: 'w1',
       generation: 1,
@@ -314,8 +314,8 @@ describe('spawnBoxWorker', () => {
     const planApiProxy = vi.fn().mockResolvedValue({
       required: true,
       bootstrapEnv: {
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
       },
       admit,
     });
@@ -323,7 +323,7 @@ describe('spawnBoxWorker', () => {
 
     await spawnBoxWorker(run, 'auth-token', {
       ...config,
-      sessionEgress: { planApiProxy } as never,
+      credentialEgress: { planApiProxy } as never,
     });
 
     expect(planApiProxy).toHaveBeenCalledWith({
@@ -333,8 +333,8 @@ describe('spawnBoxWorker', () => {
     expect(
       vi.mocked(buildBoxWorkerEnv).mock.calls.at(-1)![0].extraEnv,
     ).toMatchObject({
-      ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
-      ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+      ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+      ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
     });
     // Admission runs only once the worker is launched and waiting.
     expect(admit).toHaveBeenCalledOnce();

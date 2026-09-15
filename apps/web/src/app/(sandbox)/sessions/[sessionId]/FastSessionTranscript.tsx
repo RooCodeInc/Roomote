@@ -1,6 +1,6 @@
 'use client';
 
-import { SessionSecrets } from '@/components/sessions/SessionSecrets';
+import { ServiceCredentials } from '@/components/sessions/ServiceCredentials';
 
 import {
   useCallback,
@@ -1603,7 +1603,7 @@ export function FastSessionTranscript({
           actions={
             <>
               {secretSessionId ? (
-                <SessionSecrets
+                <ServiceCredentials
                   key={secretSessionId}
                   sessionId={secretSessionId}
                 />

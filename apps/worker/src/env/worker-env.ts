@@ -3,12 +3,12 @@ import * as os from 'node:os';
 import { configureAuthClientEnv } from '@roomote/auth/client';
 import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
-  isSessionEgressWorkloadEnvKey,
+  isCredentialEgressWorkloadEnvKey,
   parseModelProviderEnvKeys,
   SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
-  SESSION_EGRESS_SERVICE_TOKEN_ENV_PREFIX,
-  SESSION_EGRESS_WORKLOAD_ENV,
-  type SessionEgressWorkloadServiceManifestEntry,
+  CREDENTIAL_EGRESS_SERVICE_TOKEN_ENV_PREFIX,
+  CREDENTIAL_EGRESS_WORKLOAD_ENV,
+  type CredentialEgressWorkloadServiceManifestEntry,
 } from '@roomote/types';
 
 /**
@@ -16,9 +16,9 @@ import {
  * nonsecret service manifest, and the API proxy base URL. Never a real
  * credential.
  */
-interface WorkerSessionEgressConfig {
+interface WorkerCredentialEgressConfig {
   baseUrl: string;
-  services: SessionEgressWorkloadServiceManifestEntry[];
+  services: CredentialEgressWorkloadServiceManifestEntry[];
   /** `ROOMOTE_SERVICE_TOKEN_<LABEL_SLUG>` -> `rses_…` */
   tokens: Record<string, string>;
 }
@@ -38,9 +38,9 @@ interface WorkerConfig {
   previewAuthCookieName?: string;
   appEnv?: string;
   sandboxOpenRouterApiKey?: string;
-  sessionEgress?: WorkerSessionEgressConfig;
-  sessionEgressBootstrapRequired?: boolean;
-  sessionEgressBootstrapNonce?: string;
+  credentialEgress?: WorkerCredentialEgressConfig;
+  credentialEgressBootstrapRequired?: boolean;
+  credentialEgressBootstrapNonce?: string;
 }
 
 const PRESET_SYSTEM_ENV: Record<string, string> = {
@@ -235,10 +235,10 @@ export class WorkerEnv {
     }
 
     const workerConfig: WorkerConfig = {
-      sessionEgressBootstrapRequired:
-        processEnv[SESSION_EGRESS_WORKLOAD_ENV.BOOTSTRAP_REQUIRED] === '1',
-      sessionEgressBootstrapNonce:
-        processEnv[SESSION_EGRESS_WORKLOAD_ENV.BOOTSTRAP_NONCE],
+      credentialEgressBootstrapRequired:
+        processEnv[CREDENTIAL_EGRESS_WORKLOAD_ENV.BOOTSTRAP_REQUIRED] === '1',
+      credentialEgressBootstrapNonce:
+        processEnv[CREDENTIAL_EGRESS_WORKLOAD_ENV.BOOTSTRAP_NONCE],
       authToken: processEnv.AUTH_TOKEN!,
       trpcUrl: processEnv.TRPC_URL!,
       jobAuthPublicKey: processEnv.JOB_AUTH_PUBLIC_KEY,
@@ -250,7 +250,7 @@ export class WorkerEnv {
       appEnv: processEnv.R_APP_ENV ?? processEnv.APP_ENV,
       sandboxOpenRouterApiKey:
         processEnv[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME],
-      sessionEgress: captureSessionEgressConfig(processEnv),
+      credentialEgress: captureCredentialEgressConfig(processEnv),
     };
 
     const env = new WorkerEnv({
@@ -287,10 +287,10 @@ export class WorkerEnv {
     }
 
     // Substitute tokens and proxy settings are re-derived per context by
-    // buildSessionEgressClientEnv(); the raw delivery must not linger in the
+    // buildCredentialEgressClientEnv(); the raw delivery must not linger in the
     // worker's own process env where nested tooling could inherit it.
     for (const key of Object.keys(processEnv)) {
-      if (isSessionEgressWorkloadEnvKey(key)) {
+      if (isCredentialEgressWorkloadEnvKey(key)) {
         delete processEnv[key];
       }
     }
@@ -452,30 +452,30 @@ export class WorkerEnv {
   }
 
   /** Nonsecret view of the services this run may call through the gateway. */
-  get sessionEgressServices(): SessionEgressWorkloadServiceManifestEntry[] {
-    return [...(this.workerConfig.sessionEgress?.services ?? [])];
+  get credentialEgressServices(): CredentialEgressWorkloadServiceManifestEntry[] {
+    return [...(this.workerConfig.credentialEgress?.services ?? [])];
   }
 
-  get sessionEgressBootstrapRequired(): boolean {
-    return this.workerConfig.sessionEgressBootstrapRequired === true;
+  get credentialEgressBootstrapRequired(): boolean {
+    return this.workerConfig.credentialEgressBootstrapRequired === true;
   }
 
   /** Whether a Session-egress delivery has been accepted for this run. */
-  get sessionEgressMode(): 'api_proxy' | undefined {
-    return this.workerConfig.sessionEgress ? 'api_proxy' : undefined;
+  get credentialEgressMode(): 'api_proxy' | undefined {
+    return this.workerConfig.credentialEgress ? 'api_proxy' : undefined;
   }
 
-  get sessionEgressBootstrapNonce(): string {
-    if (!this.workerConfig.sessionEgressBootstrapNonce)
-      throw new Error('Session egress bootstrap identity missing');
-    return this.workerConfig.sessionEgressBootstrapNonce;
+  get credentialEgressBootstrapNonce(): string {
+    if (!this.workerConfig.credentialEgressBootstrapNonce)
+      throw new Error('Credential egress bootstrap identity missing');
+    return this.workerConfig.credentialEgressBootstrapNonce;
   }
 
-  acceptSessionEgressDelivery(environment: Record<string, string>): void {
-    const config = captureSessionEgressConfig(environment);
+  acceptCredentialEgressDelivery(environment: Record<string, string>): void {
+    const config = captureCredentialEgressConfig(environment);
     if (!config)
-      throw new Error('Session egress client configuration unavailable');
-    this.workerConfig.sessionEgress = config;
+      throw new Error('Credential egress client configuration unavailable');
+    this.workerConfig.credentialEgress = config;
   }
 
   /**
@@ -486,30 +486,32 @@ export class WorkerEnv {
    * sandbox. No proxy or trust settings change: clients call the base URL
    * over the same route the worker already uses for the API.
    */
-  buildSessionEgressClientEnv(): Record<string, string> {
-    const config = this.workerConfig.sessionEgress;
+  buildCredentialEgressClientEnv(): Record<string, string> {
+    const config = this.workerConfig.credentialEgress;
     if (!config) {
       return {};
     }
     return {
-      [SESSION_EGRESS_WORKLOAD_ENV.BASE_URL]: config.baseUrl,
+      [CREDENTIAL_EGRESS_WORKLOAD_ENV.BASE_URL]: config.baseUrl,
       ...config.tokens,
-      [SESSION_EGRESS_WORKLOAD_ENV.SERVICES]: JSON.stringify(config.services),
+      [CREDENTIAL_EGRESS_WORKLOAD_ENV.SERVICES]: JSON.stringify(
+        config.services,
+      ),
     };
   }
 }
 
-function captureSessionEgressConfig(
+function captureCredentialEgressConfig(
   processEnv: NodeJS.ProcessEnv,
-): WorkerSessionEgressConfig | undefined {
-  const baseUrl = processEnv[SESSION_EGRESS_WORKLOAD_ENV.BASE_URL]?.trim();
+): WorkerCredentialEgressConfig | undefined {
+  const baseUrl = processEnv[CREDENTIAL_EGRESS_WORKLOAD_ENV.BASE_URL]?.trim();
   if (!baseUrl || !/^https?:\/\//.test(baseUrl)) {
     return undefined;
   }
 
   const tokens: Record<string, string> = {};
   for (const [key, value] of Object.entries(processEnv)) {
-    if (!key.startsWith(SESSION_EGRESS_SERVICE_TOKEN_ENV_PREFIX)) continue;
+    if (!key.startsWith(CREDENTIAL_EGRESS_SERVICE_TOKEN_ENV_PREFIX)) continue;
     // Only substitutes are ever accepted from the launcher; anything else
     // in this slot is a wiring bug and must not reach task processes.
     if (typeof value === 'string' && /^rses_[A-Za-z0-9_-]+$/.test(value)) {
@@ -517,13 +519,13 @@ function captureSessionEgressConfig(
     }
   }
 
-  let services: SessionEgressWorkloadServiceManifestEntry[] = [];
-  const manifest = processEnv[SESSION_EGRESS_WORKLOAD_ENV.SERVICES];
+  let services: CredentialEgressWorkloadServiceManifestEntry[] = [];
+  const manifest = processEnv[CREDENTIAL_EGRESS_WORKLOAD_ENV.SERVICES];
   if (manifest) {
     try {
       const parsed: unknown = JSON.parse(manifest);
       if (Array.isArray(parsed)) {
-        services = parsed as SessionEgressWorkloadServiceManifestEntry[];
+        services = parsed as CredentialEgressWorkloadServiceManifestEntry[];
       }
     } catch {
       // A malformed manifest only loses the nonsecret listing.

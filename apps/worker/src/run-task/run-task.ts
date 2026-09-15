@@ -873,11 +873,11 @@ export const runTask = async ({
       delete runtimeEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME];
     }
 
-    if (workerEnv.sessionEgressBootstrapRequired) {
-      Object.assign(runtimeEnv, workerEnv.buildSessionEgressClientEnv());
+    if (workerEnv.credentialEgressBootstrapRequired) {
+      Object.assign(runtimeEnv, workerEnv.buildCredentialEgressClientEnv());
       // Substitutes are only usable through the API proxy, so nothing about
       // the run's own networking or inference routing changes.
-      runtimeEnv.ROOMOTE_SESSION_EGRESS_API_PROXY = '1';
+      runtimeEnv.ROOMOTE_CREDENTIAL_EGRESS_API_PROXY = '1';
     }
 
     const workerHomeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';

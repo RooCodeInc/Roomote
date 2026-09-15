@@ -27,7 +27,7 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
-import type { SessionEgressLifecycle } from '../session-egress';
+import type { CredentialEgressLifecycle } from '../credential-egress';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 import { COMPUTE_BOOTSTRAP_TIMEOUT_MS } from './timeouts';
 
@@ -97,7 +97,7 @@ export async function spawnBoxWorker(
     localTarballPath?: string;
     deploymentSlug?: string;
     /** Session-egress admission; omitted in unit paths that do not exercise it. */
-    sessionEgress?: SessionEgressLifecycle;
+    credentialEgress?: CredentialEgressLifecycle;
   },
 ): Promise<{ machineId: string; sandboxCmdId?: string }> {
   const { namedPorts, environmentSnapshotId, environmentConfig } =
@@ -191,7 +191,7 @@ export async function spawnBoxWorker(
     launchMode: launchOptions.launchMode,
   });
 
-  const sessionEgressPlan = await config.sessionEgress?.planApiProxy({
+  const credentialEgressPlan = await config.credentialEgress?.planApiProxy({
     taskRun,
     provider: 'box',
   });
@@ -275,7 +275,7 @@ export async function spawnBoxWorker(
         machineType,
         extraEnv: {
           SANDBOX_TIMEOUT_MS: String(config.boxTimeoutMs),
-          ...sessionEgressPlan?.bootstrapEnv,
+          ...credentialEgressPlan?.bootstrapEnv,
         },
       }),
       detached: true,
@@ -307,7 +307,7 @@ export async function spawnBoxWorker(
     // The worker is waiting on the bootstrap nonce after its ordinary
     // bootstrap; an admission failure fails the spawn, as it does for Docker,
     // rather than leaving a worker that expected substitutes without them.
-    await sessionEgressPlan?.admit();
+    await credentialEgressPlan?.admit();
 
     return {
       machineId: machine.machineId,

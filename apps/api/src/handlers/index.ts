@@ -32,14 +32,14 @@ export { inference } from './inference';
 // the deployment Brain's own inference, keyless on the Brain's side
 export { brainInference } from './brain-inference';
 
-// session egress control plane: controller/gateway service principals only
-export { sessionEgress } from './session-egress';
+// credential egress control plane: controller/gateway service principals only
+export { credentialEgress } from './credential-egress';
 
-// API-side substitution proxy for coding runs holding Session service tokens
+// API-side substitution proxy for coding runs holding Service tokens
 export {
-  sessionEgressProxy,
-  sessionEgressProxyHostAlias,
-} from './session-egress-proxy';
+  credentialEgressProxy,
+  credentialEgressProxyHostAlias,
+} from './credential-egress-proxy';
 
 // narration tts
 export { tts } from './tts';

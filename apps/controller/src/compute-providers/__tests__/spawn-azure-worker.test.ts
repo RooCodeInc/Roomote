@@ -133,7 +133,7 @@ describe('spawnAzureWorker', () => {
     });
   });
 
-  it('carries the Session egress bootstrap env and admits after the worker launches', async () => {
+  it('carries the Credential egress bootstrap env and admits after the worker launches', async () => {
     const admit = vi.fn().mockResolvedValue({
       workloadId: 'w1',
       generation: 1,
@@ -142,8 +142,8 @@ describe('spawnAzureWorker', () => {
     const planApiProxy = vi.fn().mockResolvedValue({
       required: true,
       bootstrapEnv: {
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
       },
       admit,
     });
@@ -158,15 +158,15 @@ describe('spawnAzureWorker', () => {
 
     await spawnAzureWorker(taskRun, 'auth_token', {
       ...config,
-      sessionEgress: { planApiProxy } as never,
+      credentialEgress: { planApiProxy } as never,
     });
 
     expect(planApiProxy).toHaveBeenCalledWith({ taskRun, provider: 'azure' });
     expect(
       vi.mocked(buildAzureWorkerEnv).mock.calls.at(-1)![0].extraEnv,
     ).toMatchObject({
-      ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
-      ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+      ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+      ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
     });
     // Admission runs only once the worker is launched and waiting.
     expect(admit).toHaveBeenCalledOnce();
@@ -175,17 +175,17 @@ describe('spawnAzureWorker', () => {
     );
   });
 
-  it('cleans up the sandbox when Session egress admission fails after launch', async () => {
+  it('cleans up the sandbox when Credential egress admission fails after launch', async () => {
     const planApiProxy = vi.fn().mockResolvedValue({
       required: true,
       bootstrapEnv: {
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
       },
       admit: vi
         .fn()
         .mockRejectedValue(
-          new Error('Session egress bootstrap admission timed out'),
+          new Error('Credential egress bootstrap admission timed out'),
         ),
     });
 
@@ -200,9 +200,9 @@ describe('spawnAzureWorker', () => {
           payload: { repo: 'test/repo' },
         } as unknown as TaskRun,
         'auth_token',
-        { ...config, sessionEgress: { planApiProxy } as never },
+        { ...config, credentialEgress: { planApiProxy } as never },
       ),
-    ).rejects.toThrow('Session egress bootstrap admission timed out');
+    ).rejects.toThrow('Credential egress bootstrap admission timed out');
     expect(cleanupAzureInstance).toHaveBeenCalledWith(
       expect.objectContaining({
         instanceId: 'azure-machine-123',

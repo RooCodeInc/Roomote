@@ -54,7 +54,7 @@
           "goal-mode",
           "fast-sessions",
           "private-sessions",
-          "session-secrets",
+          "integration-keys",
           "memory",
           "file-attachments",
           "voice"

@@ -5,7 +5,7 @@ import { DOCKER_CAPABILITIES as DOCKER_CAPABILITIES_VALUE } from '@roomote/types
 import type { ComputeProvider } from '@roomote/types';
 
 import { unsupported } from '../errors';
-import { removeLegacySessionEgressHostPolicy } from '../session-egress-legacy-cleanup';
+import { removeLegacyCredentialEgressHostPolicy } from '../credential-egress-legacy-cleanup';
 import type {
   CommandOutputEvent,
   ComputeProviderClient,
@@ -44,7 +44,7 @@ function getTaskWorkspaceVolumeName(instanceId: string): string {
 }
 
 /** Session-egress connector sidecar (controller-provisioned, keys never in the worker). */
-function getSessionEgressConnectorContainerName(instanceId: string): string {
+function getCredentialEgressConnectorContainerName(instanceId: string): string {
   return `${instanceId}-connector`;
 }
 
@@ -109,7 +109,7 @@ async function removeTaskNetwork(
     });
   }
 
-  if (network) await removeLegacySessionEgressHostPolicy(network, runDocker);
+  if (network) await removeLegacyCredentialEgressHostPolicy(network, runDocker);
 
   await runDocker(['network', 'rm', taskNetwork], {
     signal,
@@ -131,7 +131,7 @@ export async function destroyDockerInstance(
     allowFailure: true,
   });
   await runDocker(
-    ['rm', '-f', getSessionEgressConnectorContainerName(input.instanceId)],
+    ['rm', '-f', getCredentialEgressConnectorContainerName(input.instanceId)],
     { signal: input.signal, allowFailure: true },
   );
   await runDocker(['rm', '-f', input.instanceId], {
@@ -207,7 +207,7 @@ export class DockerClient implements ComputeProviderClient {
     // The connector holds this generation's client certificate; the resume
     // path registers a new generation and provisions a fresh connector.
     await docker(
-      ['rm', '-f', getSessionEgressConnectorContainerName(input.instanceId)],
+      ['rm', '-f', getCredentialEgressConnectorContainerName(input.instanceId)],
       { signal: input.signal, allowFailure: true },
     );
     return { resumeHandle: input.instanceId };

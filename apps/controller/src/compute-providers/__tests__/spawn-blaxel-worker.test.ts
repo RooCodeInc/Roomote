@@ -208,7 +208,7 @@ describe('spawnBlaxelWorker', () => {
     expect(mockDestroyInstance).not.toHaveBeenCalled();
   });
 
-  it('carries the Session egress bootstrap env and admits after the worker launches', async () => {
+  it('carries the Credential egress bootstrap env and admits after the worker launches', async () => {
     const admit = vi.fn().mockResolvedValue({
       workloadId: 'w1',
       generation: 1,
@@ -217,8 +217,8 @@ describe('spawnBlaxelWorker', () => {
     const planApiProxy = vi.fn().mockResolvedValue({
       required: true,
       bootstrapEnv: {
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
       },
       admit,
     });
@@ -236,15 +236,15 @@ describe('spawnBlaxelWorker', () => {
       blaxelWorkspace: 'workspace',
       blaxelImage: 'sandbox/roomote-worker:test',
       blaxelTimeoutMs: 5 * 60 * 60 * 1_000,
-      sessionEgress: { planApiProxy } as never,
+      credentialEgress: { planApiProxy } as never,
     });
 
     expect(planApiProxy).toHaveBeenCalledWith({ taskRun, provider: 'blaxel' });
     expect(
       vi.mocked(buildBlaxelWorkerEnv).mock.calls.at(-1)![0].extraEnv,
     ).toMatchObject({
-      ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
-      ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+      ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+      ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
     });
     // Admission runs only once the worker is launched and waiting.
     expect(admit).toHaveBeenCalledOnce();

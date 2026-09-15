@@ -1,1 +1,0 @@
-ALTER TABLE "task_artifacts" ADD COLUMN "upload_url_expires_at" timestamp;

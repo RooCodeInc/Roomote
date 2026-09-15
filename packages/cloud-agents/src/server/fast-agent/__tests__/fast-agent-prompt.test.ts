@@ -466,6 +466,9 @@ describe('buildFastAgentSystemPrompt', () => {
       "When a description matches the user's request, load that skill with `load_skill` using its exact ID",
     );
     expect(prompt).toContain(
+      "A skill listed here or returned by `list_skills` is not a loaded skill. Only a `load_skill` call in this conversation that returned the skill's content counts as loading it.",
+    );
+    expect(prompt).toContain(
       "The Available Skills section above already lists this deployment's instance and inline environment skills; consult it before calling `list_skills`.",
     );
   });
@@ -717,14 +720,14 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('native JSON schema');
     for (const name of [
-      'prepare_session_secret',
-      'list_session_secrets',
-      'request_with_session_secret',
+      'prepare_integration_key',
+      'list_integration_keys',
+      'request_with_integration_key',
     ]) {
       expect(prompt).not.toContain(name);
     }
     expect(prompt).toContain(
-      'Session-secret tools are temporarily unavailable',
+      'Integration-key tools are temporarily unavailable',
     );
     expect(prompt).toContain(
       'The runtime rejects those actions until a visible text reply has been delivered',
@@ -732,12 +735,12 @@ describe('buildFastAgentSystemPrompt', () => {
 
     const enabledPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      sessionSecretToolsEnabled: true,
+      serviceCredentialToolsEnabled: true,
     });
-    expect(enabledPrompt).toContain('`prepare_session_secret`');
-    expect(enabledPrompt).toContain('`list_session_secrets`');
+    expect(enabledPrompt).toContain('`prepare_integration_key`');
+    expect(enabledPrompt).toContain('`list_integration_keys`');
     expect(enabledPrompt).not.toContain(
-      'Session-secret tools are temporarily unavailable',
+      'Integration-key tools are temporarily unavailable',
     );
     expect(prompt).toContain(
       'On a human-authored turn, acknowledge first, then send the instruction immediately',
@@ -1521,6 +1524,12 @@ describe('buildFastAgentSystemPrompt', () => {
       'Use calibrated language when certainty would be fake',
     );
     expect(prompt).toContain(
+      'Assume the user may know their domain better than you do',
+    );
+    expect(prompt).toContain(
+      'do not present your work as corrected, verified, reviewed, or a verdict unless the user asked for that review',
+    );
+    expect(prompt).toContain(
       'For a supported opinion, lead with a labeled provisional stance',
     );
     expect(prompt).toContain('Do not present interpretation as fact');
@@ -1615,6 +1624,9 @@ describe('buildFastAgentSystemPrompt', () => {
       'a platform event has no incoming chat message to react to',
     );
     expect(prompt).toContain('Child-message events are private updates');
+    expect(prompt).toContain(
+      `Drop the child's self-assessment framing (verdicts, "verified", "corrected", "reproducibility review")`,
+    );
     expect(prompt).toContain(
       'Call "ignore_event" only when the event is duplicate, lifecycle-only, machinery-only, or a routine log that adds nothing useful',
     );

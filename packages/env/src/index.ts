@@ -428,13 +428,13 @@ const serverSchema = {
   // second value for an operator to remember.
   R_BRAIN_GATEWAY_TOKEN_FILE: z.string().min(1).optional(),
   // Shared secret the credential-substituting egress gateway presents to
-  // Optional dedicated hostname for the API-side session egress proxy. When a
-  // request arrives for this host, the API serves `/api/session-egress` at the
+  // Optional dedicated hostname for the API-side credential egress proxy. When a
+  // request arrives for this host, the API serves `/api/credential-egress` at the
   // root, so SDK clients that allow only a host override (no path prefix) can
   // use it. Same route and checks; only the address differs. Point DNS for the
   // name at the API service; the path form keeps working on the API host. Set
   // the same value on the controller: it delivers the base URL to sandboxes.
-  R_SESSION_EGRESS_PROXY_HOST: z
+  R_CREDENTIAL_EGRESS_PROXY_HOST: z
     .string()
     .trim()
     .toLowerCase()

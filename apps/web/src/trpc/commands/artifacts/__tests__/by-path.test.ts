@@ -221,4 +221,43 @@ describe('getArtifactByPathCommand', () => {
       expect(result?.content).toBe('<h1>HTML preview</h1>');
     },
   );
+
+  it.each([
+    {
+      label: 'normalized CSV content type',
+      path: 'reports/data.bin',
+      contentType: 'TEXT/CSV; charset=UTF-8',
+    },
+    {
+      label: 'CSV extension with binary metadata',
+      path: 'reports/data.CSV',
+      contentType: 'application/octet-stream',
+    },
+    {
+      label: 'normalized TSV content type',
+      path: 'reports/data.bin',
+      contentType: 'TEXT/TAB-SEPARATED-VALUES; charset=UTF-8',
+    },
+    {
+      label: 'TSV extension with plain-text metadata',
+      path: 'reports/data.TSV',
+      contentType: 'text/plain',
+    },
+  ])(
+    'returns tabular content detected from $label',
+    async ({ path, contentType }) => {
+      mockGetArtifactByPath.mockResolvedValue(
+        createArtifact({ path, contentType }),
+      );
+      mockFetch.mockResolvedValue(new Response('first,second\n1,2'));
+
+      const result = await getArtifactByPathCommand(auth, {
+        taskId: 'task-1',
+        path,
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(result?.content).toBe('first,second\n1,2');
+    },
+  );
 });

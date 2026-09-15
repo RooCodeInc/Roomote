@@ -63,10 +63,14 @@ function mergeResultForUpdatedFields(
       updates.homeComposerSuggestionsEnabled === undefined
         ? mergedPreferences.homeComposerSuggestionsEnabled
         : result.homeComposerSuggestionsEnabled,
-    sessionSecretToolsEnabled:
-      updates.sessionSecretToolsEnabled === undefined
-        ? mergedPreferences.sessionSecretToolsEnabled
-        : result.sessionSecretToolsEnabled,
+    serviceCredentialToolsEnabled:
+      updates.serviceCredentialToolsEnabled === undefined
+        ? mergedPreferences.serviceCredentialToolsEnabled
+        : result.serviceCredentialToolsEnabled,
+    privateSessionsExperimentEnabled:
+      updates.privateSessionsExperimentEnabled === undefined
+        ? mergedPreferences.privateSessionsExperimentEnabled
+        : result.privateSessionsExperimentEnabled,
   };
 }
 
@@ -115,12 +119,18 @@ function rollbackUpdatedFields(
         optimisticPreferences.homeComposerSuggestionsEnabled
         ? previousPreferences.homeComposerSuggestionsEnabled
         : mergedPreferences.homeComposerSuggestionsEnabled,
-    sessionSecretToolsEnabled:
-      updates.sessionSecretToolsEnabled !== undefined &&
-      mergedPreferences.sessionSecretToolsEnabled ===
-        optimisticPreferences.sessionSecretToolsEnabled
-        ? previousPreferences.sessionSecretToolsEnabled
-        : mergedPreferences.sessionSecretToolsEnabled,
+    serviceCredentialToolsEnabled:
+      updates.serviceCredentialToolsEnabled !== undefined &&
+      mergedPreferences.serviceCredentialToolsEnabled ===
+        optimisticPreferences.serviceCredentialToolsEnabled
+        ? previousPreferences.serviceCredentialToolsEnabled
+        : mergedPreferences.serviceCredentialToolsEnabled,
+    privateSessionsExperimentEnabled:
+      updates.privateSessionsExperimentEnabled !== undefined &&
+      mergedPreferences.privateSessionsExperimentEnabled ===
+        optimisticPreferences.privateSessionsExperimentEnabled
+        ? previousPreferences.privateSessionsExperimentEnabled
+        : mergedPreferences.privateSessionsExperimentEnabled,
   };
 }
 

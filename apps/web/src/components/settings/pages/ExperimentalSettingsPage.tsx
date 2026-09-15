@@ -4,8 +4,8 @@ import { SettingsShell } from '@/components/settings/SettingsShell';
 import { ResultsExperimentalSetting } from '@/components/settings/ResultsExperimentalSetting';
 import { SlackPeerConversationsExperimentalSetting } from '@/components/settings/SlackPeerConversationsExperimentalSetting';
 import { HomeComposerSuggestionsExperimentalSetting } from '@/components/settings/HomeComposerSuggestionsExperimentalSetting';
-import { SessionSecretToolsExperimentalSetting } from '@/components/settings/SessionSecretToolsExperimentalSetting';
 import { PrivateSessionsExperimentalSetting } from '@/components/settings/PrivateSessionsExperimentalSetting';
+import { ServiceCredentialToolsExperimentalSetting } from '@/components/settings/ServiceCredentialToolsExperimentalSetting';
 import { RetryableLoadError } from '@/components/system';
 import { usePersonalPreferences } from '@/hooks/usePersonalPreferences';
 
@@ -27,8 +27,8 @@ export function ExperimentalSettingsPage() {
           <HomeComposerSuggestionsExperimentalSetting />
           <ResultsExperimentalSetting />
           <SlackPeerConversationsExperimentalSetting />
-          <SessionSecretToolsExperimentalSetting />
           <PrivateSessionsExperimentalSetting />
+          <ServiceCredentialToolsExperimentalSetting />
         </>
       )}
     </SettingsShell>

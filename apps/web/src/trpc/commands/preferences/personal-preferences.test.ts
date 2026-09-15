@@ -24,8 +24,8 @@ describe('personal preferences', () => {
         mindReaderMode: false,
         slackPeerConversationsExperimentEnabled: false,
         homeComposerSuggestionsEnabled: false,
-        sessionSecretToolsEnabled: false,
         privateSessionsExperimentEnabled: false,
+        serviceCredentialToolsEnabled: false,
       }),
     );
   });
@@ -83,17 +83,17 @@ describe('personal preferences', () => {
     );
   });
 
-  it('persists the Session secret tools experiment per user', async () => {
+  it('persists the integration keys experiment per user', async () => {
     const user = await userFactory.create({
       metadata: { existing_value: 'preserved' },
     });
 
     await expect(
       updatePersonalPreferencesCommand(buildAuth(user.id), {
-        sessionSecretToolsEnabled: true,
+        serviceCredentialToolsEnabled: true,
       }),
     ).resolves.toEqual(
-      expect.objectContaining({ sessionSecretToolsEnabled: true }),
+      expect.objectContaining({ serviceCredentialToolsEnabled: true }),
     );
 
     const storedUser = await db.query.users.findFirst({
@@ -103,7 +103,7 @@ describe('personal preferences', () => {
     expect(storedUser?.metadata).toEqual(
       expect.objectContaining({
         existing_value: 'preserved',
-        session_secret_tools_enabled: true,
+        integration_keys_enabled: true,
       }),
     );
   });
