@@ -145,7 +145,7 @@ done
 validate_slug "$customer"
 validate_domain "$domain"
 validate_tag "$roomote_version"
-validate_image_part "$image_registry"
+validate_image_registry "$image_registry"
 validate_image_part "$image_namespace"
 validate_positive_integer "$image_retention_releases" "--image-retention-releases"
 
