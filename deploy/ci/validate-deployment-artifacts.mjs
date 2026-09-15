@@ -687,6 +687,24 @@ for (const [imageName, locations] of Object.entries(imageLocations)) {
   }
 }
 
+// The substring check above only proves the catalog image appears somewhere
+// in each file. The compose stacks also run minio-init, which bootstraps the
+// artifact bucket with the mc bundled in the minio image; pin both services
+// to exactly the catalog image so an edit cannot leave minio-init on a
+// different or unpinned client.
+for (const location of [
+  'docker-compose.yml',
+  'deploy/compose/docker-compose.prod.yml',
+]) {
+  const compose = YAML.parse(read(location));
+  for (const service of ['minio', 'minio-init']) {
+    assert(
+      compose.services?.[service]?.image === catalog.criticalImages.minio,
+      `${location}: ${service} must use the catalog minio image`,
+    );
+  }
+}
+
 for (const script of [
   'deploy/install.sh',
   'deploy/host/roomote',
