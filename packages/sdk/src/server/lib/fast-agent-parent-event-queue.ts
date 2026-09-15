@@ -556,10 +556,12 @@ export async function drainFastAgentParentEvents(
 }
 
 /**
- * Queued (non-inline) events that have waited longer than `olderThan` for the
- * bullmq worker. Inline-admitted rows are excluded: their live owner delivers
- * them without the queue. A non-zero count means the queue worker is not
- * draining, which is what `/health/bullmq` reports.
+ * Events the queue worker owes a delivery that were created before
+ * `olderThan`: undelivered, undiscarded, not due for a scheduled retry, and
+ * without a live inline claim. An inline-admitted row counts too once its
+ * owner's claim lapses, because from then on only the queue can deliver it.
+ * A non-zero count means the queue worker is not draining, which is what
+ * `/health/bullmq` reports.
  */
 export async function countOverdueQueuedFastAgentParentEvents(
   olderThan: Date,
@@ -568,11 +570,7 @@ export async function countOverdueQueuedFastAgentParentEvents(
     .select({ count: count() })
     .from(fastAgentParentEvents)
     .where(
-      and(
-        pendingPredicate(),
-        isNull(fastAgentParentEvents.admission),
-        lt(fastAgentParentEvents.createdAt, olderThan),
-      ),
+      and(pendingPredicate(), lt(fastAgentParentEvents.createdAt, olderThan)),
     );
   return row?.count ?? 0;
 }

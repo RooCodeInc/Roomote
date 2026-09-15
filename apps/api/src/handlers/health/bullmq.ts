@@ -23,8 +23,9 @@ const BULLMQ_STALE_THRESHOLD_SECONDS = 300;
 
 /**
  * Queued Session events (PR mentions joining a Session, child task messages,
- * settle notices) are drained only by the bullmq worker. One that has waited
- * this long is a user-visible silence, whatever the heartbeat says.
+ * settle notices) are drained only by the bullmq worker once no live owner
+ * holds them. One that has waited this long is a user-visible silence,
+ * whatever the heartbeat says.
  */
 const QUEUED_EVENT_OVERDUE_SECONDS = 300;
 
