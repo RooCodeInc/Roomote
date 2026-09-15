@@ -246,6 +246,21 @@ describe('Env', () => {
     expect(isRoomoteCloudEnabled('false')).toBe(false);
   });
 
+  it('accepts only a valid pre-verified email from the hosting environment', () => {
+    expect(
+      createRoomoteEnv({
+        ...productionCoreEnv,
+        R_PRE_VERIFIED_EMAIL: 'owner@example.com',
+      }).R_PRE_VERIFIED_EMAIL,
+    ).toBe('owner@example.com');
+    expect(() =>
+      createRoomoteEnv({
+        ...productionCoreEnv,
+        R_PRE_VERIFIED_EMAIL: 'not-an-email',
+      }),
+    ).toThrow('Invalid environment variables');
+  });
+
   it('enables curated integrations by default and accepts an operator opt-out', () => {
     const runtimeEnv = { ...process.env };
     delete runtimeEnv.SKIP_ENV_VALIDATION;

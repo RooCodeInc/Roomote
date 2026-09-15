@@ -34,8 +34,11 @@ import {
 import { hasSeatAvailable } from './license';
 import {
   extractInviteTokenFromRequest,
+  getRequestInviteToken,
   runWithInviteContext,
 } from './invite-context';
+import { isSystemInviteToken } from './invites';
+import { claimPreVerifiedEmailBootstrap } from './setup-bootstrap';
 import {
   resolveAuthProviderConfig,
   type ResolvedAuthProviderConfig,
@@ -1137,6 +1140,14 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
             sendOnSignUp: true,
             autoSignInAfterVerification: true,
             sendVerificationEmail: async ({ user, url }) => {
+              // Better Auth sends on every password sign-up without checking
+              // the record it just created. A signup the create hook already
+              // marked verified (a Cloud-verified address consuming its
+              // bootstrap claim) has nothing to confirm, and the mail would
+              // be exactly the duplicate that hook exists to avoid.
+              if (user.emailVerified) {
+                return;
+              }
               const result = await sendAgentMailSystemEmail({
                 to: user.email,
                 subject: 'Verify your email for Roomote',
@@ -1224,6 +1235,17 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
                 message:
                   'This deployment has reached its licensed user limit. Ask an admin to free a seat or add a license key.',
               });
+            }
+
+            if (
+              context?.path === '/sign-up/email' &&
+              typeof user.email === 'string' &&
+              user.email.trim().toLowerCase() ===
+                Env.R_PRE_VERIFIED_EMAIL?.trim().toLowerCase() &&
+              isSystemInviteToken(await getRequestInviteToken()) &&
+              (await claimPreVerifiedEmailBootstrap())
+            ) {
+              return { data: { ...user, emailVerified: true } };
             }
 
             return true;

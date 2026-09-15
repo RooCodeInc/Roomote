@@ -1,0 +1,1 @@
+ALTER TABLE "deployment_settings" ADD COLUMN "pre_verified_email_claimed_at" timestamp;

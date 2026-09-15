@@ -8,6 +8,10 @@ const {
   mockIsEmailChannelEnabled,
   mockSendAgentMailSystemEmail,
   mockAuthSendVerificationEmail,
+  mockHasSeatAvailable,
+  mockEnv,
+  mockInviteContext,
+  mockClaimPreVerifiedEmailBootstrap,
 } = vi.hoisted(() => {
   const calls: Array<{
     config: Array<{
@@ -36,6 +40,14 @@ const {
     mockIsEmailChannelEnabled: vi.fn(),
     mockSendAgentMailSystemEmail: vi.fn(),
     mockAuthSendVerificationEmail: vi.fn(),
+    mockHasSeatAvailable: vi.fn(),
+    mockEnv: {
+      R_PRE_VERIFIED_EMAIL: undefined as string | undefined,
+    },
+    mockInviteContext: {
+      isSystemInvite: false,
+    },
+    mockClaimPreVerifiedEmailBootstrap: vi.fn(),
   };
 });
 
@@ -96,6 +108,10 @@ vi.mock('./auth-provider-config', () => ({
   resolveAuthProviderConfig: mockResolveAuthProviderConfig,
 }));
 
+vi.mock('./license', () => ({
+  hasSeatAvailable: mockHasSeatAvailable,
+}));
+
 vi.mock('./better-auth-base-url', () => ({
   getBetterAuthBaseUrlConfig: vi.fn(() => 'http://localhost:3000'),
 }));
@@ -109,6 +125,9 @@ vi.mock('./env', () => ({
     ENCRYPTION_KEY: 'test-encryption-key',
     R_ALLOWED_EMAILS: undefined,
     R_APP_URL: 'http://localhost:3000',
+    get R_PRE_VERIFIED_EMAIL() {
+      return mockEnv.R_PRE_VERIFIED_EMAIL;
+    },
   },
   isEmailChannelEnabled: mockIsEmailChannelEnabled,
   getEncryptionKey: () => 'test-encryption-key',
@@ -117,7 +136,16 @@ vi.mock('./env', () => ({
 
 vi.mock('./invite-context', () => ({
   extractInviteTokenFromRequest: vi.fn(),
+  getRequestInviteToken: vi.fn(() => 'request-invite-token'),
   runWithInviteContext: vi.fn((_token, callback) => callback()),
+}));
+
+vi.mock('./invites', () => ({
+  isSystemInviteToken: vi.fn(() => mockInviteContext.isSystemInvite),
+}));
+
+vi.mock('./setup-bootstrap', () => ({
+  claimPreVerifiedEmailBootstrap: mockClaimPreVerifiedEmailBootstrap,
 }));
 
 vi.mock('./canonical-forwarded-proto', () => ({
@@ -148,6 +176,26 @@ function getOAuthProvider(providerId: string) {
   return provider;
 }
 
+function getUserCreateBeforeHook() {
+  const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+    databaseHooks?: {
+      user?: {
+        create?: {
+          before?: (
+            user: Record<string, unknown>,
+            context?: { path?: string },
+          ) => Promise<unknown>;
+        };
+      };
+    };
+  };
+  const hook = options.databaseHooks?.user?.create?.before;
+  if (!hook) {
+    throw new Error('User create hook was not configured');
+  }
+  return hook;
+}
+
 describe('getAuth', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -170,6 +218,10 @@ describe('getAuth', () => {
     });
     mockIsEmailChannelEnabled.mockReturnValue(false);
     mockSendAgentMailSystemEmail.mockResolvedValue({ sent: true });
+    mockHasSeatAvailable.mockResolvedValue(true);
+    mockEnv.R_PRE_VERIFIED_EMAIL = undefined;
+    mockInviteContext.isSystemInvite = false;
+    mockClaimPreVerifiedEmailBootstrap.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -197,6 +249,114 @@ describe('getAuth', () => {
       freshAge: 0,
     });
     expect(options.emailAndPassword.revokeSessionsOnPasswordReset).toBe(true);
+  });
+
+  it('marks a matching Cloud-provided credential signup email as verified', async () => {
+    mockEnv.R_PRE_VERIFIED_EMAIL = ' Verified@Example.com ';
+    mockInviteContext.isSystemInvite = true;
+    await getAuth();
+    const user = {
+      id: 'user-id',
+      email: 'verified@example.com',
+      emailVerified: false,
+    };
+
+    await expect(
+      getUserCreateBeforeHook()(user, {
+        path: '/sign-up/email',
+      }),
+    ).resolves.toEqual({ data: { ...user, emailVerified: true } });
+  });
+
+  it('leaves an ordinary credential signup email unverified', async () => {
+    mockEnv.R_PRE_VERIFIED_EMAIL = 'verified@example.com';
+    mockInviteContext.isSystemInvite = true;
+    await getAuth();
+    const user = {
+      id: 'user-id',
+      email: 'other@example.com',
+      emailVerified: false,
+    };
+
+    await expect(
+      getUserCreateBeforeHook()(user, {
+        path: '/sign-up/email',
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it('does not trust a matching email without the system invite handoff', async () => {
+    mockEnv.R_PRE_VERIFIED_EMAIL = 'verified@example.com';
+    const user = {
+      id: 'user-id',
+      email: 'verified@example.com',
+      emailVerified: false,
+    };
+    await getAuth();
+
+    await expect(
+      getUserCreateBeforeHook()(user, {
+        path: '/sign-up/email',
+      }),
+    ).resolves.toBe(true);
+    expect(mockClaimPreVerifiedEmailBootstrap).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse a consumed pre-verified email claim', async () => {
+    mockEnv.R_PRE_VERIFIED_EMAIL = 'verified@example.com';
+    mockInviteContext.isSystemInvite = true;
+    mockClaimPreVerifiedEmailBootstrap.mockResolvedValue(false);
+    const user = {
+      id: 'user-id',
+      email: 'verified@example.com',
+      emailVerified: false,
+    };
+    await getAuth();
+
+    await expect(
+      getUserCreateBeforeHook()(user, {
+        path: '/sign-up/email',
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it('does not send a verification email to a signup already marked verified', async () => {
+    mockIsEmailChannelEnabled.mockReturnValue(true);
+    await getAuth();
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+      emailVerification?: {
+        sendVerificationEmail?: (
+          input: {
+            user: { email: string; emailVerified: boolean };
+            url: string;
+          },
+          request?: Request,
+        ) => Promise<void>;
+      };
+    };
+    const sendVerificationEmail =
+      options.emailVerification?.sendVerificationEmail;
+
+    await expect(
+      sendVerificationEmail?.(
+        {
+          user: { email: 'verified@example.com', emailVerified: true },
+          url: 'http://localhost:3000/api/auth/verify-email?token=token',
+        },
+        new Request('http://localhost:3000'),
+      ),
+    ).resolves.toBeUndefined();
+    expect(mockSendAgentMailSystemEmail).not.toHaveBeenCalled();
+
+    await sendVerificationEmail?.(
+      {
+        user: { email: 'person@example.com', emailVerified: false },
+        url: 'http://localhost:3000/api/auth/verify-email?token=token',
+      },
+      new Request('http://localhost:3000'),
+    );
+    expect(mockSendAgentMailSystemEmail).toHaveBeenCalledTimes(1);
   });
 
   it('reports authenticated resend delivery failures without weakening public endpoint privacy', async () => {
