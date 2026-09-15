@@ -404,6 +404,40 @@ describe('sendSandboxPromptCommand', () => {
     expect(mockClearLatestUserMessageForReplyQuoteIfId).not.toHaveBeenCalled();
   });
 
+  it('stores web follow-ups for the next Telegram thread reply quote', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+
+    const run = await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.test',
+      payload: {
+        communicationProvider: 'telegram',
+        communicationChannelId: 'chat-1',
+        communicationThreadId: 'topic-1',
+      },
+      result: {},
+    });
+
+    await sendSandboxPromptCommand(buildMockAuth({ userId: user.id }), {
+      taskId: task.id,
+      prompt: 'Please quote this in Telegram.',
+      source: 'web',
+    });
+
+    expect(mockSetLatestUserMessageForReplyQuote).toHaveBeenCalledWith(
+      'telegram',
+      run.id,
+      {
+        text: 'Please quote this in Telegram.',
+        userName: 'Test User',
+      },
+    );
+    expect(mockClearLatestUserMessageForReplyQuoteIfId).not.toHaveBeenCalled();
+  });
+
   it('clears the exact Discord quote when sandbox delivery fails', async () => {
     mockSendPromptMutate.mockRejectedValueOnce(new Error('sandbox exploded'));
 
