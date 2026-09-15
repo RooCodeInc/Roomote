@@ -966,13 +966,25 @@ export async function transitionCanonicalPrReviewDelivery(input: {
 }
 
 /**
- * Serializes an automatic follow-up enqueue with old-head retirement.
+ * Claims a delivery for automatic dispatch, then runs the enqueue.
  *
- * The delivery row stays locked until `dispatch` settles. A concurrent
- * synchronize transaction must therefore either fence the delivery before
- * this transaction reads it, or wait until the follow-up has been enqueued.
- * This closes the gap between a standalone state transition and the external
- * enqueue that follows it.
+ * The claim is its own short transaction: the delivery row is locked only
+ * long enough to check the old-head fence and mark it
+ * `auto_dispatch_pending`. `dispatch` runs after that commits. It must not
+ * run inside the transaction: the dispatch launches or resumes a task run,
+ * which opens its own transaction and locks the target task row, while the
+ * claim's `target_task_id` foreign key already holds a key-share lock on
+ * that same row. Held together on one pool, the two connections wait on
+ * each other forever, and once every pooled connection is parked that way
+ * the whole bullmq process falls silent (the managed-tenant outages of
+ * 2026-09-15).
+ *
+ * Old-head retirement is fenced by state rather than by the row lock: a
+ * retirement that lands before the claim sees `action_claimed_at` set and the
+ * claim is refused; one that lands after the claim marks the row and the
+ * already-claimed dispatch proceeds, exactly as it did when the lock made
+ * retirement wait for it. If `dispatch` throws, the claim is handed back so
+ * the next lease holder can retry.
  */
 export async function withCanonicalPrReviewAutoDispatchFence<T>(
   input: {
@@ -988,11 +1000,19 @@ export async function withCanonicalPrReviewAutoDispatchFence<T>(
   },
   dispatch: () => Promise<T>,
 ): Promise<{ acquired: false } | { acquired: true; result: T }> {
-  return db.transaction(async (tx) => {
+  const previous = await db.transaction(async (tx) => {
     const [delivery] = await tx
       .select({
         id: prReviewNotificationDeliveries.id,
         actionClaimedAt: prReviewNotificationDeliveries.actionClaimedAt,
+        status: prReviewNotificationDeliveries.status,
+        followUpPrompt: prReviewNotificationDeliveries.followUpPrompt,
+        targetTaskId: prReviewNotificationDeliveries.targetTaskId,
+        actingUserId: prReviewNotificationDeliveries.actingUserId,
+        routeProvider: prReviewNotificationDeliveries.routeProvider,
+        routeWorkspaceId: prReviewNotificationDeliveries.routeWorkspaceId,
+        routeChannelId: prReviewNotificationDeliveries.routeChannelId,
+        routeThreadId: prReviewNotificationDeliveries.routeThreadId,
       })
       .from(prReviewNotificationDeliveries)
       .where(
@@ -1007,7 +1027,7 @@ export async function withCanonicalPrReviewAutoDispatchFence<T>(
       .for('update');
 
     if (!delivery || delivery.actionClaimedAt !== null) {
-      return { acquired: false };
+      return null;
     }
 
     await tx
@@ -1025,8 +1045,45 @@ export async function withCanonicalPrReviewAutoDispatchFence<T>(
       })
       .where(eq(prReviewNotificationDeliveries.id, delivery.id));
 
-    return { acquired: true, result: await dispatch() };
+    return delivery;
   });
+
+  if (!previous) {
+    return { acquired: false };
+  }
+
+  try {
+    return { acquired: true, result: await dispatch() };
+  } catch (error) {
+    // Put the row back the way the claim found it so a later lease holder
+    // can retry. A retirement that fenced the row meanwhile keeps its mark.
+    await db
+      .update(prReviewNotificationDeliveries)
+      .set({
+        status: previous.status,
+        followUpPrompt: previous.followUpPrompt,
+        targetTaskId: previous.targetTaskId,
+        actingUserId: previous.actingUserId,
+        routeProvider: previous.routeProvider,
+        routeWorkspaceId: previous.routeWorkspaceId,
+        routeChannelId: previous.routeChannelId,
+        routeThreadId: previous.routeThreadId,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          canonicalClaimWhere(input),
+          eq(prReviewNotificationDeliveries.status, 'auto_dispatch_pending'),
+          isNull(prReviewNotificationDeliveries.dispatchedRunId),
+        ),
+      )
+      .catch((restoreError: unknown) => {
+        console.error(
+          `[pr-review-notification-units] Failed to hand back delivery ${input.deliveryId} after a dispatch failure: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+        );
+      });
+    throw error;
+  }
 }
 
 export async function deferCanonicalPrReviewDelivery(input: {
