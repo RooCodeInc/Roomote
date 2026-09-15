@@ -8,6 +8,12 @@ import { workUnitAsyncStorage } from 'next/dist/server/app-render/work-unit-asyn
 import { NextRequest } from 'next/server';
 import { authSessions, authUsers, db, eq } from '@roomote/db/server';
 
+const { mockAuthEnv } = vi.hoisted(() => ({
+  mockAuthEnv: {
+    R_PRE_VERIFIED_EMAIL: undefined as string | undefined,
+  },
+}));
+
 vi.mock('./bootstrap-runtime-env', () => ({ bootstrapWebRuntimeEnv: vi.fn() }));
 vi.mock('./auth-provider-config', () => ({
   resolveAuthProviderConfig: vi.fn(async () => ({ signature: 'session-test' })),
@@ -16,7 +22,12 @@ vi.mock('./better-auth-base-url', () => ({
   getBetterAuthBaseUrlConfig: () => 'https://auth.example.test',
 }));
 vi.mock('./env', () => ({
-  Env: { R_APP_URL: 'https://auth.example.test' },
+  Env: {
+    R_APP_URL: 'https://auth.example.test',
+    get R_PRE_VERIFIED_EMAIL() {
+      return mockAuthEnv.R_PRE_VERIFIED_EMAIL;
+    },
+  },
   getBetterAuthSecret: () => 'test-session-signing-secret-not-for-production',
   isEmailChannelEnabled: () => false,
 }));
@@ -84,6 +95,7 @@ describe('browser session renewal with real Better Auth, Next cookies and Postgr
   beforeEach(async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);
+    mockAuthEnv.R_PRE_VERIFIED_EMAIL = undefined;
     const auth = await getAuth();
     const response = await auth.handler(
       new Request('https://auth.example.test/api/auth/sign-up/email', {
@@ -133,6 +145,42 @@ describe('browser session renewal with real Better Auth, Next cookies and Postgr
     expect(renewed.toLowerCase()).toContain('samesite=lax');
     expect(renewed).toContain('Path=/');
     expect(renewed.toLowerCase()).not.toContain('domain=');
+  });
+
+  it('persists matching pre-verified signup state without verifying other signups', async () => {
+    const unverifiedUser = await db.query.authUsers.findFirst({
+      where: eq(authUsers.id, userId),
+    });
+    expect(unverifiedUser?.emailVerified).toBe(false);
+
+    const email = `${crypto.randomUUID()}@example.test`;
+    mockAuthEnv.R_PRE_VERIFIED_EMAIL = email.toUpperCase();
+    const auth = await getAuth();
+    const response = await auth.handler(
+      new Request('https://auth.example.test/api/auth/sign-up/email', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: 'https://auth.example.test',
+        },
+        body: JSON.stringify({
+          name: 'Pre-verified Test',
+          email,
+          password: 'test-password-123',
+        }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    const verifiedUserId = (await response.json()).user.id as string;
+
+    try {
+      const verifiedUser = await db.query.authUsers.findFirst({
+        where: eq(authUsers.id, verifiedUserId),
+      });
+      expect(verifiedUser?.emailVerified).toBe(true);
+    } finally {
+      await db.delete(authUsers).where(eq(authUsers.id, verifiedUserId));
+    }
   });
 
   it.each([false, true])(

@@ -8,6 +8,8 @@ const {
   mockIsEmailChannelEnabled,
   mockSendAgentMailSystemEmail,
   mockAuthSendVerificationEmail,
+  mockHasSeatAvailable,
+  mockEnv,
 } = vi.hoisted(() => {
   const calls: Array<{
     config: Array<{
@@ -36,6 +38,10 @@ const {
     mockIsEmailChannelEnabled: vi.fn(),
     mockSendAgentMailSystemEmail: vi.fn(),
     mockAuthSendVerificationEmail: vi.fn(),
+    mockHasSeatAvailable: vi.fn(),
+    mockEnv: {
+      R_PRE_VERIFIED_EMAIL: undefined as string | undefined,
+    },
   };
 });
 
@@ -96,6 +102,10 @@ vi.mock('./auth-provider-config', () => ({
   resolveAuthProviderConfig: mockResolveAuthProviderConfig,
 }));
 
+vi.mock('./license', () => ({
+  hasSeatAvailable: mockHasSeatAvailable,
+}));
+
 vi.mock('./better-auth-base-url', () => ({
   getBetterAuthBaseUrlConfig: vi.fn(() => 'http://localhost:3000'),
 }));
@@ -109,6 +119,9 @@ vi.mock('./env', () => ({
     ENCRYPTION_KEY: 'test-encryption-key',
     R_ALLOWED_EMAILS: undefined,
     R_APP_URL: 'http://localhost:3000',
+    get R_PRE_VERIFIED_EMAIL() {
+      return mockEnv.R_PRE_VERIFIED_EMAIL;
+    },
   },
   isEmailChannelEnabled: mockIsEmailChannelEnabled,
   getEncryptionKey: () => 'test-encryption-key',
@@ -148,6 +161,26 @@ function getOAuthProvider(providerId: string) {
   return provider;
 }
 
+function getUserCreateBeforeHook() {
+  const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+    databaseHooks?: {
+      user?: {
+        create?: {
+          before?: (
+            user: Record<string, unknown>,
+            context?: { path?: string },
+          ) => Promise<unknown>;
+        };
+      };
+    };
+  };
+  const hook = options.databaseHooks?.user?.create?.before;
+  if (!hook) {
+    throw new Error('User create hook was not configured');
+  }
+  return hook;
+}
+
 describe('getAuth', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -170,6 +203,8 @@ describe('getAuth', () => {
     });
     mockIsEmailChannelEnabled.mockReturnValue(false);
     mockSendAgentMailSystemEmail.mockResolvedValue({ sent: true });
+    mockHasSeatAvailable.mockResolvedValue(true);
+    mockEnv.R_PRE_VERIFIED_EMAIL = undefined;
   });
 
   afterEach(() => {
@@ -197,6 +232,38 @@ describe('getAuth', () => {
       freshAge: 0,
     });
     expect(options.emailAndPassword.revokeSessionsOnPasswordReset).toBe(true);
+  });
+
+  it('marks a matching Cloud-provided credential signup email as verified', async () => {
+    mockEnv.R_PRE_VERIFIED_EMAIL = ' Verified@Example.com ';
+    await getAuth();
+    const user = {
+      id: 'user-id',
+      email: 'verified@example.com',
+      emailVerified: false,
+    };
+
+    await expect(
+      getUserCreateBeforeHook()(user, {
+        path: '/sign-up/email',
+      }),
+    ).resolves.toEqual({ data: { ...user, emailVerified: true } });
+  });
+
+  it('leaves an ordinary credential signup email unverified', async () => {
+    mockEnv.R_PRE_VERIFIED_EMAIL = 'verified@example.com';
+    await getAuth();
+    const user = {
+      id: 'user-id',
+      email: 'other@example.com',
+      emailVerified: false,
+    };
+
+    await expect(
+      getUserCreateBeforeHook()(user, {
+        path: '/sign-up/email',
+      }),
+    ).resolves.toBe(true);
   });
 
   it('reports authenticated resend delivery failures without weakening public endpoint privacy', async () => {

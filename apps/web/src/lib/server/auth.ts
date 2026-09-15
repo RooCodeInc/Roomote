@@ -1226,6 +1226,15 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
               });
             }
 
+            if (
+              context?.path === '/sign-up/email' &&
+              typeof user.email === 'string' &&
+              user.email.trim().toLowerCase() ===
+                Env.R_PRE_VERIFIED_EMAIL?.trim().toLowerCase()
+            ) {
+              return { data: { ...user, emailVerified: true } };
+            }
+
             return true;
           },
         },

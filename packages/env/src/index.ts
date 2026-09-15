@@ -126,6 +126,10 @@ const serverSchema = {
   // Roomote Cloud-only analytics and support integrations. These values are
   // intentionally not used by self-hosted deployments.
   R_CLOUD_ENABLED: optInBoolean(),
+  // Trusted hosting provisioners can pass an email already verified by their
+  // own auth flow so the matching initial credential signup is not prompted
+  // to verify the same address again.
+  R_PRE_VERIFIED_EMAIL: z.string().email().optional(),
   // Operator policy for the curated Settings > Integrations catalog. Enabled
   // by default; operators opt out explicitly. Existing connections remain
   // stored but cannot be configured or used while disabled.
@@ -612,6 +616,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'RELEASE_PRODUCT_VERSION',
   'R_PING_BASE_URL',
   'R_INSTANCE_ID',
+  'R_PRE_VERIFIED_EMAIL',
   'R_STATUSPAGE_INCIDENTS_URL',
   'R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS',
   'R_ELEVENLABS_API_KEY',
