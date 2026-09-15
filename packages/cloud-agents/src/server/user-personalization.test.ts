@@ -76,10 +76,18 @@ describe('user personalization instructions', () => {
 describe('queued user personalization updates', () => {
   beforeEach(() => {
     mocks.appendLearnedPreference.mockReset();
+    mocks.generateTrackedObject.mockReset();
     mocks.getPersonalization.mockReset();
     mocks.getPersonalization.mockResolvedValue({
       instructions: '',
       learnFromConversations: true,
+    });
+    mocks.generateTrackedObject.mockResolvedValue({
+      object: {
+        action: 'append',
+        preference: 'Be concise.',
+        supersedes: [],
+      },
     });
   });
 
@@ -134,6 +142,35 @@ describe('queued user personalization updates', () => {
 });
 
 describe('personalization update resolution', () => {
+  it.each(['explicit', 'inferred'] as const)(
+    'screens a first %s update before persisting it',
+    async (confidence) => {
+      mocks.getPersonalization.mockResolvedValue({
+        instructions: '',
+        learnFromConversations: true,
+      });
+      mocks.generateTrackedObject.mockResolvedValue({
+        object: { action: 'ignore', supersedes: [] },
+      });
+
+      await expect(
+        resolveUserPersonalizationUpdate({
+          userId: 'user-1',
+          preference: 'The task today is to rename the launch button.',
+          confidence,
+        }),
+      ).resolves.toEqual({ action: 'ignore', supersedes: [] });
+
+      expect(mocks.generateTrackedObject).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: expect.stringContaining(
+            '<existing_personalization>\n(none)\n</existing_personalization>',
+          ),
+        }),
+      );
+    },
+  );
+
   it('accepts durable personal work context as personalization', async () => {
     mocks.getPersonalization.mockResolvedValue({
       instructions: '- Prefers concise summaries.',
@@ -167,5 +204,31 @@ describe('personalization update resolution', () => {
         prompt: expect.stringContaining('Runs a recurring monthly close.'),
       }),
     );
+  });
+
+  it('keeps a screened inferred update append-only', async () => {
+    mocks.getPersonalization.mockResolvedValue({
+      instructions: '- Prefers detailed explanations.',
+      learnFromConversations: true,
+    });
+    mocks.generateTrackedObject.mockResolvedValue({
+      object: {
+        action: 'replace',
+        preference: 'Prefers concise explanations.',
+        supersedes: ['Prefers detailed explanations.'],
+      },
+    });
+
+    await expect(
+      resolveUserPersonalizationUpdate({
+        userId: 'user-1',
+        preference: 'Prefers concise explanations.',
+        confidence: 'inferred',
+      }),
+    ).resolves.toEqual({
+      action: 'append',
+      preference: 'Prefers concise explanations.',
+      supersedes: [],
+    });
   });
 });

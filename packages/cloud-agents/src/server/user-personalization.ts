@@ -100,10 +100,6 @@ export async function resolveUserPersonalizationUpdate(input: {
   const context = await resolveUserPersonalizationContext(input.userId);
   if (!context) return { action: 'ignore', supersedes: [] };
 
-  if (!context.instructions.trim()) {
-    return { action: 'append', preference: input.preference, supersedes: [] };
-  }
-
   const normalizedPreference = input.preference.trim().toLocaleLowerCase();
   if (
     context.instructions.split('\n').some(
@@ -115,12 +111,6 @@ export async function resolveUserPersonalizationUpdate(input: {
     )
   ) {
     return { action: 'ignore', supersedes: [] };
-  }
-
-  // Inferred updates are append-only by policy, so avoid paying for a second
-  // model call when the result cannot replace anything.
-  if (input.confidence === 'inferred') {
-    return { action: 'append', preference: input.preference, supersedes: [] };
   }
 
   const { object } = await generateTrackedNonTaskObject({
@@ -142,6 +132,13 @@ Use action=replace when the new item conflicts with one or more existing items, 
 
   if (object.action === 'ignore' || !object.preference) {
     return { action: 'ignore', supersedes: [] };
+  }
+  if (input.confidence === 'inferred') {
+    return {
+      action: 'append',
+      preference: object.preference,
+      supersedes: [],
+    };
   }
   return object;
 }
