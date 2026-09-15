@@ -748,7 +748,13 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(enabledPrompt).toContain(
       'Never tell the human to enable the Integration keys setting while these tools are available to you',
     );
+    expect(enabledPrompt).toContain(
+      'Label that link with the service, for example "Connect Figma securely"',
+    );
     expect(prompt).toContain('Settings → Experimental');
+    expect(prompt).toContain(
+      'A human turn may begin with a Roomote-injected `<integration_saved>` block',
+    );
     expect(enabledPrompt).not.toContain(
       'Integration-key tools are turned off for this user',
     );
