@@ -208,8 +208,8 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     return { shouldRoute: false };
   }
 
-  // Fast receives the discussion and peer-mention reminders as context;
-  // peer mentions remain an admission cutoff only for legacy task threads.
+  // Opted-in Fast owners receive the discussion and peer-mention reminder as
+  // context. Otherwise the existing peer-mention cutoff remains unchanged.
   const fastSessionOwner = await getBoundSlackFastAgentSessionOwner({
     teamId,
     channelId: event.channel,
