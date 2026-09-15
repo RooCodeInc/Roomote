@@ -50,6 +50,7 @@ import {
   ensureAutomationRowsOnce,
   ensureSessionForTask,
   isChatGptSubscriptionConnected,
+  createChatInitiationOrder,
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
   projectPendingPrReviewEventsForAssociation,
@@ -1353,14 +1354,18 @@ export async function enqueueTask(
   input: EnqueueTaskInput,
   options: EnqueueTaskOptions = {},
 ): Promise<TaskRun> {
-  const initiatedAt = new Date();
+  const chatInitiationOrder = createChatInitiationOrder();
   await assertDeploymentIsActive();
 
   if (input.task.type === TaskPayloadKind.SnapshotResume) {
     return enqueueSnapshotResume(input as ResumeTaskLaunch, options);
   }
 
-  return enqueueFreshLaunch(input as FreshTaskLaunch, options, initiatedAt);
+  return enqueueFreshLaunch(
+    input as FreshTaskLaunch,
+    options,
+    chatInitiationOrder,
+  );
 }
 
 async function inheritSourceCommunicationMetadata(
@@ -1407,7 +1412,7 @@ async function inheritSourceCommunicationMetadata(
 async function enqueueFreshLaunch(
   input: FreshTaskLaunch,
   options: EnqueueTaskOptions,
-  initiatedAt: Date,
+  chatInitiationOrder: ReturnType<typeof createChatInitiationOrder>,
 ): Promise<TaskRun> {
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
@@ -1791,7 +1796,7 @@ async function enqueueFreshLaunch(
           await recordUserChatInitiationProvider(
             linkedUserId,
             surface,
-            initiatedAt,
+            chatInitiationOrder,
             tx,
           );
         }

@@ -2,6 +2,7 @@ import {
   and,
   db,
   eq,
+  createChatInitiationOrder,
   fastAgentConversations,
   fastAgentMessages,
   fastAgentParentEvents,
@@ -74,7 +75,7 @@ describe('Fast conversation repository', () => {
       await getOrCreateFastAgentSession({
         userId: user.id,
         conversation,
-        chatInitiatedAt: new Date(),
+        chatInitiationOrder: createChatInitiationOrder(),
       });
 
       await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
@@ -93,12 +94,16 @@ describe('Fast conversation repository', () => {
       userId: user.id,
       conversation,
     });
-    await recordUserChatInitiationProvider(user.id, 'discord', new Date());
+    await recordUserChatInitiationProvider(
+      user.id,
+      'discord',
+      createChatInitiationOrder(),
+    );
 
     const reused = await getOrCreateFastAgentSession({
       userId: user.id,
       conversation,
-      chatInitiatedAt: new Date(),
+      chatInitiationOrder: createChatInitiationOrder(),
     });
 
     expect(reused.created).toBe(false);
@@ -109,7 +114,11 @@ describe('Fast conversation repository', () => {
 
   it('does not record an automated chat-surface Session', async () => {
     const user = await createUser();
-    await recordUserChatInitiationProvider(user.id, 'telegram', new Date());
+    await recordUserChatInitiationProvider(
+      user.id,
+      'telegram',
+      createChatInitiationOrder(),
+    );
 
     await getOrCreateFastAgentSession({
       userId: user.id,
@@ -126,11 +135,16 @@ describe('Fast conversation repository', () => {
 
   it('does not let a delayed older initiation overwrite a newer preference', async () => {
     const user = await createUser();
-    const newerInitiation = new Date('2026-09-15T15:30:00.000Z');
-    const olderInitiation = new Date('2026-09-15T15:29:00.000Z');
+    const initiatedAt = '2026-09-15T15:30:00.000Z';
 
-    await recordUserChatInitiationProvider(user.id, 'discord', newerInitiation);
-    await recordUserChatInitiationProvider(user.id, 'slack', olderInitiation);
+    await recordUserChatInitiationProvider(user.id, 'discord', {
+      initiatedAt,
+      order: '200',
+    });
+    await recordUserChatInitiationProvider(user.id, 'slack', {
+      initiatedAt,
+      order: '100',
+    });
 
     await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
       'discord',

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   db,
+  createChatInitiationOrder,
   fastAgentConversations,
   fastAgentMessages,
   recordUserChatInitiationProvider,
@@ -232,7 +233,11 @@ describe('session attention notifications', () => {
 
   it('uses the recipient task-starting chat preference for a new route', async () => {
     const { run, user } = await createDirectWebRun();
-    await recordUserChatInitiationProvider(user.id, 'discord', new Date());
+    await recordUserChatInitiationProvider(
+      user.id,
+      'discord',
+      createChatInitiationOrder(),
+    );
 
     await notifyDirectWebTaskAttention({
       runId: run.id,

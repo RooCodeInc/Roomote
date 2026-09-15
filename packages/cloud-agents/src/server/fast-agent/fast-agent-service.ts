@@ -55,6 +55,7 @@ import {
   and,
   appendFastAgentMemory,
   asc,
+  createChatInitiationOrder,
   db,
   eq,
   fastAgentParentEvents,
@@ -1824,7 +1825,7 @@ export async function answerFastAgentQuestion({
    * after a previous execution parked it on a temporary provider failure. */
   resumedAfterInferenceRetry?: boolean;
 }): Promise<string> {
-  const initiatedAt = new Date();
+  const chatInitiationOrder = createChatInitiationOrder();
   const turnId = buildFastAgentTurnId({
     currentMessageId,
     conversation,
@@ -3100,7 +3101,7 @@ export async function answerFastAgentQuestion({
       getOrCreateFastAgentSession({
         userId,
         conversation: canonicalConversation ?? conversation,
-        ...(turnSource === 'human' ? { chatInitiatedAt: initiatedAt } : {}),
+        ...(turnSource === 'human' ? { chatInitiationOrder } : {}),
       }),
       listFastAgentIntegrations(
         { userId, apiBaseUrl },

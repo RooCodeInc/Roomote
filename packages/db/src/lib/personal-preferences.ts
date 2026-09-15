@@ -17,7 +17,30 @@ const LAST_CHAT_INITIATION_PROVIDER_METADATA_KEY =
 type StoredChatInitiationPreference = {
   provider: ChatInitiationProvider;
   initiatedAt: string;
+  order: string;
 };
+
+export type ChatInitiationOrder = Pick<
+  StoredChatInitiationPreference,
+  'initiatedAt' | 'order'
+>;
+
+let lastChatInitiationOrder = 0n;
+
+export function createChatInitiationOrder(): ChatInitiationOrder {
+  const initiatedAt = new Date();
+  const clockOrder = BigInt(
+    Math.floor((performance.timeOrigin + performance.now()) * 1_000),
+  );
+  lastChatInitiationOrder =
+    clockOrder > lastChatInitiationOrder
+      ? clockOrder
+      : lastChatInitiationOrder + 1n;
+  return {
+    initiatedAt: initiatedAt.toISOString(),
+    order: String(lastChatInitiationOrder),
+  };
+}
 
 export function isChatInitiationProvider(
   value: unknown,
@@ -28,12 +51,12 @@ export function isChatInitiationProvider(
 export async function recordUserChatInitiationProvider(
   userId: string,
   provider: ChatInitiationProvider,
-  initiatedAt: Date,
+  initiation: ChatInitiationOrder,
   database: DatabaseOrTransaction = db,
 ): Promise<void> {
   const preference: StoredChatInitiationPreference = {
     provider,
-    initiatedAt: initiatedAt.toISOString(),
+    ...initiation,
   };
   await database
     .update(users)
@@ -47,9 +70,9 @@ export async function recordUserChatInitiationProvider(
         sql`CASE
           WHEN jsonb_typeof(${users.metadata} -> ${LAST_CHAT_INITIATION_PROVIDER_METADATA_KEY}) = 'object'
             THEN COALESCE(
-              (${users.metadata} -> ${LAST_CHAT_INITIATION_PROVIDER_METADATA_KEY} ->> 'initiatedAt')::timestamptz,
-              '-infinity'::timestamptz
-            ) <= ${initiatedAt.toISOString()}::timestamptz
+              (${users.metadata} -> ${LAST_CHAT_INITIATION_PROVIDER_METADATA_KEY} ->> 'order')::numeric,
+              '-infinity'::numeric
+            ) < ${initiation.order}::numeric
           ELSE true
         END`,
       ),

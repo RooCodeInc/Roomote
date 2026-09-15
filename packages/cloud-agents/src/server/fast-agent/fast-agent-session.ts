@@ -1,5 +1,6 @@
 import type { ModelMessage } from 'ai';
 import {
+  type ChatInitiationOrder,
   and,
   desc,
   db,
@@ -51,7 +52,7 @@ export async function getOrCreateFastAgentSession({
   initialTitle,
   initialModel,
   initialReasoningEffort,
-  chatInitiatedAt,
+  chatInitiationOrder,
 }: {
   owner?: FastAgentConversationOwner;
   userId?: string;
@@ -62,8 +63,8 @@ export async function getOrCreateFastAgentSession({
   initialTitle?: string;
   initialModel?: string;
   initialReasoningEffort?: ReasoningEffort;
-  /** Human turn start time; records the provider only for a new Session. */
-  chatInitiatedAt?: Date;
+  /** Human turn start order; records the provider only for a new Session. */
+  chatInitiationOrder?: ChatInitiationOrder;
 }): Promise<FastAgentSessionRecord> {
   const session = await fastAgentConversationRepository.getOrCreate({
     ...(owner ? { owner } : {}),
@@ -75,7 +76,7 @@ export async function getOrCreateFastAgentSession({
     ...(initialReasoningEffort !== undefined ? { initialReasoningEffort } : {}),
   });
   if (
-    chatInitiatedAt &&
+    chatInitiationOrder &&
     session.created &&
     userId &&
     isChatInitiationProvider(conversation.surface)
@@ -83,7 +84,7 @@ export async function getOrCreateFastAgentSession({
     await recordUserChatInitiationProvider(
       userId,
       conversation.surface,
-      chatInitiatedAt,
+      chatInitiationOrder,
     ).catch((error) => {
       console.warn(
         `[Fast Agent] Failed to record chat initiation provider: ${error instanceof Error ? error.message : String(error)}`,

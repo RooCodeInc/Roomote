@@ -179,6 +179,10 @@ vi.mock('../../session-wakeups', async (importOriginal) => ({
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...values) => values),
   asc: vi.fn((value) => value),
+  createChatInitiationOrder: () => ({
+    initiatedAt: '2026-09-15T15:30:00.000Z',
+    order: '1',
+  }),
   eq: vi.fn((...values) => values),
   inArray: mocks.inArray,
   isNull: vi.fn((value) => value),
@@ -1225,7 +1229,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getSession).toHaveBeenCalledWith({
       userId: baseParams.userId,
       conversation: canonicalConversation,
-      chatInitiatedAt: expect.any(Date),
+      chatInitiationOrder: {
+        initiatedAt: expect.any(String),
+        order: expect.any(String),
+      },
     });
     expect(mocks.captureInferenceContext).toHaveBeenCalledWith(
       expect.objectContaining({ surface: 'telegram' }),
