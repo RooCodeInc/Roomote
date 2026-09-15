@@ -2801,6 +2801,12 @@ export async function deliverFastAgentParentEventWithLock(
         humanFollowUp?.question ??
         `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
       ...(humanFollowUp?.images ? { images: humanFollowUp.images } : {}),
+      ...(parentTurn.conversation.surface === 'slack' &&
+      humanFollowUp?.directedAtRoomote === false &&
+      !humanFollowUp.input &&
+      !humanFollowUp.turnSource
+        ? { allowSilentAmbientReply: true }
+        : {}),
       ...(humanFollowUp?.attachmentTexts
         ? { attachmentTexts: humanFollowUp.attachmentTexts }
         : {}),

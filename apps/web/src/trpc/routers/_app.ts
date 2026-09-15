@@ -1638,6 +1638,7 @@ export const appRouter = createRouter({
             narrationMode: z.boolean().optional(),
             therapistMode: z.boolean().optional(),
             resultsPageEnabled: z.boolean().optional(),
+            slackPeerConversationsExperimentEnabled: z.boolean().optional(),
             homeComposerSuggestionsEnabled: z.boolean().optional(),
             sessionSecretToolsEnabled: z.boolean().optional(),
           })
@@ -1648,6 +1649,7 @@ export const appRouter = createRouter({
               input.narrationMode !== undefined ||
               input.therapistMode !== undefined ||
               input.resultsPageEnabled !== undefined ||
+              input.slackPeerConversationsExperimentEnabled !== undefined ||
               input.homeComposerSuggestionsEnabled !== undefined ||
               input.sessionSecretToolsEnabled !== undefined,
             {

@@ -23,8 +23,37 @@ describe('personal preferences', () => {
       expect.objectContaining({
         mindReaderMode: false,
         therapistMode: false,
+        slackPeerConversationsExperimentEnabled: false,
         homeComposerSuggestionsEnabled: false,
         sessionSecretToolsEnabled: false,
+      }),
+    );
+  });
+
+  it('persists the Slack peer-conversations experiment without replacing other metadata', async () => {
+    const user = await userFactory.create({
+      metadata: { existing_value: 'preserved' },
+    });
+
+    await expect(
+      updatePersonalPreferencesCommand(buildAuth(user.id), {
+        slackPeerConversationsExperimentEnabled: true,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        slackPeerConversationsExperimentEnabled: true,
+      }),
+    );
+
+    const storedUser = await db.query.users.findFirst({
+      where: eq(users.id, user.id),
+      columns: { metadata: true },
+    });
+
+    expect(storedUser?.metadata).toEqual(
+      expect.objectContaining({
+        existing_value: 'preserved',
+        slack_peer_conversations_experiment_enabled: true,
       }),
     );
   });

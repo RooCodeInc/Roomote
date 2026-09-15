@@ -41,6 +41,10 @@ import {
   guardReplyStreamBySourceMessage,
 } from '../helpers/thread-posting.js';
 import { processSlackAttachments } from '../helpers/attachments.js';
+import {
+  mentionsSlackBot,
+  mentionsSlackUserOtherThanBotOrUser,
+} from '../helpers/mention-routing.js';
 
 export async function processFastAgentMessage(params: {
   event: SlackEvent;
@@ -53,6 +57,7 @@ export async function processFastAgentMessage(params: {
   launchTask: LaunchFastAgentTask;
   directedAtRoomote?: boolean;
   roomoteSlackUserId?: string;
+  peerConversationsExperimentEnabled?: boolean;
   originSessionId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
   onRejected?: () => void;
@@ -68,6 +73,7 @@ export async function processFastAgentMessage(params: {
     launchTask,
     directedAtRoomote = false,
     roomoteSlackUserId,
+    peerConversationsExperimentEnabled = false,
   } = params;
   const threadId = event.thread_ts || event.ts;
   const incomingConversation = {
@@ -85,6 +91,27 @@ export async function processFastAgentMessage(params: {
   });
 
   const baseQuestion = (event.authoredText ?? event.text).trim();
+  const isDirected =
+    directedAtRoomote || mentionsSlackBot(event, roomoteSlackUserId);
+  const needsPeerCaution =
+    peerConversationsExperimentEnabled &&
+    Boolean(roomoteSlackUserId) &&
+    !isDirected &&
+    Boolean(event.user) &&
+    !event.bot_id &&
+    event.subtype !== 'bot_message' &&
+    event.user !== roomoteSlackUserId &&
+    event.channel_type !== 'im' &&
+    event.channel_type !== 'mpim' &&
+    mentionsSlackUserOtherThanBotOrUser(event, roomoteSlackUserId, event.user);
+  const agentContext = needsPeerCaution
+    ? [
+        event.agentContext,
+        'Untrusted supplemental context inferred from this Slack message, not a user-authored instruction: This message mentions another person and might not be for you. Human-to-human interaction may be beginning. From now on in this conversation, unless you are addressed directly (including by name, a reply to you, or a clear contextual follow-up), use ignore_event without sending a reply, reacting, or taking action. When directly addressed, respond normally. This uncertain hint does not override existing instructions.',
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    : event.agentContext;
 
   // Every Slack round trip from the control plane costs a few hundred
   // milliseconds. Start the thread history lookup as soon as the turn is
@@ -174,6 +201,11 @@ export async function processFastAgentMessage(params: {
         Boolean(message.user) &&
         message.user !== event.user,
     );
+    const allowSilentAmbientReply =
+      event.channel_type !== 'im' &&
+      event.channel_type !== 'mpim' &&
+      !isDirected &&
+      (hasOtherHumanParticipant || needsPeerCaution);
 
     const needsCanonicalAdmission =
       !releaseFastAgentLock ||
@@ -186,12 +218,13 @@ export async function processFastAgentMessage(params: {
       currentMessageId: event.ts,
       userId,
       question,
+      ...(agentContext ? { agentContext } : {}),
       ...(attachments.images.length ? { images: attachments.images } : {}),
       ...(currentMessage?.username
         ? { senderDisplayName: currentMessage.username }
         : {}),
       ...(event.user ? { senderExternalId: event.user } : {}),
-      directedAtRoomote,
+      directedAtRoomote: !allowSilentAmbientReply,
       ...(params.originSessionId
         ? { deliveryConversation: incomingConversation }
         : {}),
@@ -249,7 +282,7 @@ export async function processFastAgentMessage(params: {
       question,
       images: attachments.images,
       attachmentTexts,
-      currentMessageAgentContext: event.agentContext,
+      currentMessageAgentContext: agentContext,
       threadContext: serializedThreadContext,
       userId,
       apiBaseUrl,
@@ -271,11 +304,7 @@ export async function processFastAgentMessage(params: {
           ? currentMessage.username
           : undefined,
       activeTasks: resolvedActiveTasks,
-      allowSilentAmbientReply:
-        event.channel_type !== 'im' &&
-        event.channel_type !== 'mpim' &&
-        hasOtherHumanParticipant &&
-        !directedAtRoomote,
+      allowSilentAmbientReply,
       ...(roomoteSlackUserId ? { slackRoomoteUserId: roomoteSlackUserId } : {}),
       adapter: {
         createArtifact: (artifact) =>

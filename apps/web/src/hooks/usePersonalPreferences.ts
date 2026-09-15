@@ -59,6 +59,10 @@ function mergeResultForUpdatedFields(
       updates.resultsPageEnabled === undefined
         ? mergedPreferences.resultsPageEnabled
         : result.resultsPageEnabled,
+    slackPeerConversationsExperimentEnabled:
+      updates.slackPeerConversationsExperimentEnabled === undefined
+        ? mergedPreferences.slackPeerConversationsExperimentEnabled
+        : result.slackPeerConversationsExperimentEnabled,
     homeComposerSuggestionsEnabled:
       updates.homeComposerSuggestionsEnabled === undefined
         ? mergedPreferences.homeComposerSuggestionsEnabled
@@ -108,6 +112,12 @@ function rollbackUpdatedFields(
         optimisticPreferences.resultsPageEnabled
         ? previousPreferences.resultsPageEnabled
         : mergedPreferences.resultsPageEnabled,
+    slackPeerConversationsExperimentEnabled:
+      updates.slackPeerConversationsExperimentEnabled !== undefined &&
+      mergedPreferences.slackPeerConversationsExperimentEnabled ===
+        optimisticPreferences.slackPeerConversationsExperimentEnabled
+        ? previousPreferences.slackPeerConversationsExperimentEnabled
+        : mergedPreferences.slackPeerConversationsExperimentEnabled,
     homeComposerSuggestionsEnabled:
       updates.homeComposerSuggestionsEnabled !== undefined &&
       mergedPreferences.homeComposerSuggestionsEnabled ===
