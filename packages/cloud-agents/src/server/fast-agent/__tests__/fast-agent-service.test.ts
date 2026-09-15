@@ -62,6 +62,7 @@ const mocks = vi.hoisted(() => ({
   ensureOwnTaskFollowThroughWakeup: vi.fn(),
   ensureSessionGoalContinuationWakeup: vi.fn(),
   cancelSessionGoalContinuationWakeups: vi.fn(),
+  handleManageWakeups: vi.fn(),
   getSessionGoal: vi.fn(),
   claimSessionGoalContinuation: vi.fn(),
   releaseSessionGoalContinuation: vi.fn(),
@@ -172,6 +173,7 @@ vi.mock('../../session-wakeups', async (importOriginal) => ({
     mocks.ensureSessionGoalContinuationWakeup,
   cancelSessionGoalContinuationWakeups:
     mocks.cancelSessionGoalContinuationWakeups,
+  handleManageWakeupsToolCall: mocks.handleManageWakeups,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -477,6 +479,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.ensureOwnTaskFollowThroughWakeup.mockResolvedValue(undefined);
     mocks.ensureSessionGoalContinuationWakeup.mockResolvedValue(undefined);
     mocks.cancelSessionGoalContinuationWakeups.mockResolvedValue(undefined);
+    mocks.handleManageWakeups.mockResolvedValue({
+      success: false,
+      error: 'not configured',
+    });
     mocks.getSessionGoal.mockResolvedValue(null);
     mocks.claimSessionGoalContinuation.mockResolvedValue({
       updated: false,
@@ -5003,6 +5009,33 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ).resolves.toBe('');
 
     expect(adapter.postReply).not.toHaveBeenCalled();
+  });
+
+  it('reports a successful wakeup cancellation to the turn adapter', async () => {
+    mocks.handleManageWakeups.mockResolvedValueOnce({
+      success: true,
+      cancelled: true,
+    });
+    const onWakeupCancelled = vi.fn();
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.manageWakeups, {
+          action: 'cancel',
+          wakeupId: 'wakeup-1',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      turnSource: 'platform_event',
+      platformEventKind: 'scheduled_wakeup',
+      adapter: callbacks({ onWakeupCancelled }),
+    });
+
+    expect(onWakeupCancelled).toHaveBeenCalledWith('wakeup-1');
   });
 
   it('rejects ignore_event for directed human turns', async () => {
