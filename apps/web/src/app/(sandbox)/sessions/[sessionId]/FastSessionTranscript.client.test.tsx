@@ -438,11 +438,9 @@ describe('FastSessionTranscript', () => {
         { status: 201 },
       ),
     );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Allow for this Session' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
     await screen.findByText(
-      'API key saved. The Session has been notified without sharing your key.',
+      'Integration saved. The Session has been notified without sharing your key.',
     );
     expect(replyMutate).not.toHaveBeenCalled();
     expect(preparePromptAttachments).not.toHaveBeenCalled();

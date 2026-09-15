@@ -1,12 +1,16 @@
 import {
   insertSessionSecretApproval,
+  insertUserIntegration,
   finalizeSessionSecret,
   listOwnedSessionSecretApprovals,
   listOwnedSessionSecrets,
+  listUserIntegrations,
   revokeOwnedSessionSecret,
+  revokeUserIntegration,
   type SessionSecretContext,
 } from '@roomote/db/server';
 import {
+  integrationCreateSchema,
   isReadOnlyMethodPolicy,
   sessionSecretCreateSchema,
   sessionSecretPrepareSchema,
@@ -207,6 +211,47 @@ export async function revokeSessionSecret(
   try {
     const { secretRef } = sessionSecretRevokeSchema.parse(rawArgs);
     await revokeOwnedSessionSecret(context, secretRef);
+  } catch {
+    throw new Error(ERROR);
+  }
+}
+
+/** Settings: the owner's integrations, metadata only. */
+export async function listIntegrations(userId: string) {
+  try {
+    return await listUserIntegrations(userId);
+  } catch {
+    throw new Error(ERROR);
+  }
+}
+
+/** Settings: policy and key together from the owner; the same checks as an approved key. */
+export async function createIntegration(userId: string, rawArgs: unknown) {
+  try {
+    const input = integrationCreateSchema.parse(rawArgs);
+    const origin = approvedOrigin(input.origin);
+    if (input.headerName !== 'authorization' && input.headerPrefix !== '')
+      throw new Error(ERROR);
+    if (/[^\x21-\x7e]/.test(input.secret)) throw new Error(ERROR);
+    if (
+      redactEcho(
+        input.label + origin,
+        input.secret,
+        input.headerPrefix + input.secret,
+      ) === '[REDACTED]'
+    )
+      throw new Error(ERROR);
+    return await insertUserIntegration(userId, { ...input, origin });
+  } catch {
+    // Never retain causes: Drizzle errors may include bound plaintext values.
+    throw new Error(ERROR);
+  }
+}
+
+export async function revokeIntegration(userId: string, rawArgs: unknown) {
+  try {
+    const { secretRef } = sessionSecretRevokeSchema.parse(rawArgs);
+    await revokeUserIntegration(userId, secretRef);
   } catch {
     throw new Error(ERROR);
   }

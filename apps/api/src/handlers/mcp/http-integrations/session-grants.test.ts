@@ -176,11 +176,24 @@ it.each(['Fast', 'run'] as const)(
   },
 );
 
+it.each(['Fast', 'run'] as const)(
+  'serves an owner integration from another Session of the same owner for %s context',
+  async (kind) => {
+    const elsewhere = await session(ownerId);
+    const auth: Auth =
+      kind === 'Fast'
+        ? { ...fastAuth, fastConversationId: elsewhere.fastConversationId! }
+        : { ...runAuth, runId: (await run(ownerId, elsewhere.id)).id };
+    expect(await request({}, auth)).toMatchObject({ status: 200 });
+    expect(fetch).toHaveBeenCalledOnce();
+  },
+);
+
 it.each([
   'other-Fast-user',
   'other-run-actor',
-  'unrelated-Fast',
-  'unrelated-run',
+  'other-owner-Fast',
+  'other-owner-run',
   'unattached-run',
   'actorless',
   'deleted-owner',
@@ -197,12 +210,18 @@ it.each([
         .update(taskRuns)
         .set({ actingUserId: kind === 'actorless' ? null : otherId })
         .where(eq(taskRuns.id, runAuth.runId));
-    if (kind === 'unrelated-Fast' || kind === 'unrelated-run') {
-      const unrelated = await session(ownerId);
+    if (kind === 'other-owner-Fast' || kind === 'other-owner-run') {
+      // A Session that resolves fine for its own owner still never reaches
+      // another owner's integration.
+      const foreign = await session(otherId);
       auth =
-        kind === 'unrelated-Fast'
-          ? { ...fastAuth, fastConversationId: unrelated.fastConversationId! }
-          : { ...runAuth, runId: (await run(ownerId, unrelated.id)).id };
+        kind === 'other-owner-Fast'
+          ? {
+              ...fastAuth,
+              userId: otherId,
+              fastConversationId: foreign.fastConversationId!,
+            }
+          : { ...runAuth, runId: (await run(otherId, foreign.id)).id };
     }
     if (kind === 'unattached-run')
       auth = { ...runAuth, runId: (await run(ownerId)).id };
@@ -266,9 +285,10 @@ it.each([
           .set({ actingUserId: otherId })
           .where(eq(taskRuns.id, runAuth.runId));
       if (kind === 'changed-membership')
+        // Reattached to a Session the run's actor does not own.
         await db
           .update(sessionTasks)
-          .set({ sessionId: (await session(ownerId)).id })
+          .set({ sessionId: (await session(otherId)).id })
           .where(eq(sessionTasks.taskId, taskId));
       if (kind === 'archived')
         await db

@@ -654,7 +654,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Prepare a Session credential approval using only nonsecret metadata from the service documentation. Call list_session_secrets first: a pending approval for the same service means re-share its link, not prepare again. Choose the HTTPS origin and the header that carries the key (authorization, x-api-key, api-key, or the service's own header), omitting headerPrefix when the key needs no scheme, then share the returned secure Session link so the human can enter the key privately. Omit allowedMethods for read-only access; list the exact HTTP methods only when the requested work needs writes, and say so in the Session before the human approves. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
+  description: "Prepare an integration approval using only nonsecret metadata from the service documentation. Call list_session_secrets first: a ready integration for the service means no approval is needed, and a pending one means re-share its link, not prepare again. Choose the HTTPS origin and the header that carries the key (authorization, x-api-key, api-key, or the service's own header), omitting headerPrefix when the key needs no scheme, then share the returned secure link so the human can enter the key privately. Once entered, the key is an integration for every Session the human owns. Omit allowedMethods for read-only access; list the exact HTTP methods only when the requested work needs writes, and say so before the human approves. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
   args: {
     label: z.string().trim().min(1).max(80),
     origin: z.string().min(1).max(2048),
@@ -666,7 +666,7 @@ export default {
         "Lowercase HTTP header that carries the key at this service: authorization, x-api-key, api-key, or the service's own name such as private-token or x-shopify-access-token",
       ),
     headerPrefix: z.enum(["Bearer ", "Basic ", "Token "]).optional(),
-    ttlHours: z.number().int().min(1).max(720).optional().default(24),
+    lifetimeHours: z.number().int().min(1).max(8760).optional().describe("Hours until the integration expires. Omit unless the human asked for a temporary key; integrations are kept until revoked."),
     allowedMethods: z.array(z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])).min(1).max(6).optional().describe("HTTP methods the approved key may be used with. Defaults to GET and HEAD."),
   },
   execute: (args, context) => invoke("prepare_session_secret", args, context),
@@ -677,7 +677,7 @@ export default {
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "List this Session's pending credential approvals and ready secret references with their origin, header, allowed methods, and expiry, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval and before using a reference; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready references are usable by request_with_session_secret for reads and are delivered automatically to coding tasks launched from this Session.",
+  description: "List the human's integrations (ready secret references with their origin, header, allowed methods, and expiry, whichever Session approved them) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval and before using a reference; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready references are usable by request_with_session_secret for reads and are delivered automatically to coding tasks launched from this Session.",
   args: {},
   execute: (args, context) => invoke("list_session_secrets", args, context),
 }

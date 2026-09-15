@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 
-import { and, asc, eq, gt, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 
 import { getEncryptionKey } from '@roomote/env';
 import {
@@ -123,10 +123,13 @@ export async function findSessionEgressCandidateForRun(runId: number): Promise<{
     .from(sessionSecrets)
     .where(
       and(
-        eq(sessionSecrets.sessionId, eligible.sessionId),
+        // Every integration of the owner, whichever Session approved it.
         eq(sessionSecrets.ownerUserId, eligible.ownerUserId),
         isNull(sessionSecrets.revokedAt),
-        gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
+        or(
+          isNull(sessionSecrets.expiresAt),
+          gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
+        ),
       ),
     );
   return {
@@ -247,10 +250,12 @@ async function mintMissingSubstitutes(
     .from(sessionSecrets)
     .where(
       and(
-        eq(sessionSecrets.sessionId, workload.sessionId),
         eq(sessionSecrets.ownerUserId, workload.ownerUserId),
         isNull(sessionSecrets.revokedAt),
-        gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
+        or(
+          isNull(sessionSecrets.expiresAt),
+          gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
+        ),
         sql`not exists (
           select 1 from ${sessionEgressSubstitutes}
           where ${sessionEgressSubstitutes.workloadId} = ${workload.id}
@@ -287,7 +292,7 @@ async function mintMissingSubstitutes(
       headerName: grant.headerName,
       headerPrefix: grant.headerPrefix,
       allowedMethods: [...grant.allowedMethods],
-      expiresAt: grant.expiresAt.toISOString(),
+      expiresAt: grant.expiresAt?.toISOString() ?? null,
       substitute,
     });
   }
@@ -570,7 +575,7 @@ async function authorizeSubstitute(
           and ${sessionTasks.taskId} = ${taskRuns.taskId}
       )`,
         workloadExpired: sql<boolean>`${sessionEgressWorkloads.expiresAt} <= clock_timestamp()`,
-        grantExpired: sql<boolean>`${sessionSecrets.expiresAt} <= clock_timestamp()`,
+        grantExpired: sql<boolean>`coalesce(${sessionSecrets.expiresAt} <= clock_timestamp(), false)`,
       })
       .from(sessionEgressSubstitutes)
       .innerJoin(
@@ -607,7 +612,6 @@ async function authorizeSubstitute(
       session.ownerKind !== 'user' ||
       session.ownerUserId !== workload.ownerUserId ||
       secret.ownerUserId !== workload.ownerUserId ||
-      secret.sessionId !== workload.sessionId ||
       session.archivedAt ||
       row.ownerDeletedAt ||
       !isSessionSecretToolsExperimentEnabled(row.ownerMetadata) ||
@@ -659,10 +663,10 @@ async function authorizeSubstitute(
     generation: finalRow.workload.generation,
     sessionId: finalRow.workload.sessionId,
     secretRef: finalRow.secret.id,
-    // Earliest of grant expiry and workload lease: no stream outlives either.
+    // Earliest of grant expiry (if any) and workload lease: no exchange outlives either.
     expiresAt: new Date(
       Math.min(
-        finalRow.secret.expiresAt.getTime(),
+        finalRow.secret.expiresAt?.getTime() ?? Infinity,
         finalRow.workload.expiresAt.getTime(),
       ),
     ).toISOString(),
