@@ -610,7 +610,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'call `roomote_get_about_me` with operation `overview` before answering',
     );
     expect(prompt).toContain(
-      'produce a contextual answer grounded in the capabilities and access available in this conversation',
+      'produce a contextual answer in natural, everyday language about what the person can accomplish',
+    );
+    expect(prompt).toContain(
+      'Explain tools or access only when relevant to a claimed action',
     );
     expect(prompt).toContain(
       'Do not substitute a generic coding-assistant description',

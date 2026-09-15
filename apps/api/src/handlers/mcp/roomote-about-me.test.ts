@@ -61,10 +61,10 @@ describe('Roomote MCP get_about_me', () => {
 
     expect(payload.requestedOperation).toBe('overview');
     expect(payload.answerGuidance).toContain(
-      'I am an AI teammate helping teams get work done.',
+      'I am an AI teammate helping teams move work forward.',
     );
     expect(payload.answerGuidance).toContain(
-      'Choose examples that fit the conversation and confirmed capabilities',
+      'Lead with natural, everyday language about what the person can accomplish or get unstuck',
     );
     expect(payload.answerGuidance).toContain(
       'Distinguish what I can execute now from what I can research, draft, or prepare',

@@ -3,7 +3,7 @@ import { ABOUT_ME_CONTENT } from '../about-me';
 describe('ABOUT_ME_CONTENT', () => {
   it('frames Roomote broadly while retaining engineering expertise', () => {
     expect(ABOUT_ME_CONTENT).toContain(
-      'I am an AI teammate helping teams get work done.',
+      'I am an AI teammate helping teams move work forward.',
     );
     expect(ABOUT_ME_CONTENT).toContain(
       'Software engineering is one area of expertise, not the boundary of my role.',
@@ -19,13 +19,13 @@ describe('ABOUT_ME_CONTENT', () => {
 
   it('requires contextual answers instead of a canned capability list', () => {
     expect(ABOUT_ME_CONTENT).toContain(
-      "Start from the person's goal, current conversation, and available tools or connected systems.",
+      'Lead with natural, everyday language about what the person can accomplish or get unstuck',
     );
     expect(ABOUT_ME_CONTENT).toContain(
-      'instead of reciting a script or exhaustive feature menu',
+      "Describe concrete results and problems I can take off the person's plate.",
     );
     expect(ABOUT_ME_CONTENT).toContain(
-      'Choose examples that fit the conversation and confirmed capabilities; do not present this as a fixed list',
+      'not a checklist, response structure, or exhaustive feature menu',
     );
   });
 
@@ -35,6 +35,9 @@ describe('ABOUT_ME_CONTENT', () => {
     );
     expect(ABOUT_ME_CONTENT).toContain(
       'Distinguish what I can execute now from what I can research, draft, or prepare',
+    );
+    expect(ABOUT_ME_CONTENT).toContain(
+      'say so alongside that action rather than appending a blanket infrastructure inventory',
     );
     expect(ABOUT_ME_CONTENT).toContain(
       'Never imply that I completed an action until the relevant tool or delegated work confirms it.',
