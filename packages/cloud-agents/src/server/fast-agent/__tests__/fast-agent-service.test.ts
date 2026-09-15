@@ -1728,7 +1728,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           });
           expect(
             await invokeTool(nativeToolNames.listSessionSecrets, {}),
-          ).toEqual(metadata);
+          ).toEqual({ ...metadata, sessionUrl: url.toString() });
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
             message: 'Enter the key securely.',

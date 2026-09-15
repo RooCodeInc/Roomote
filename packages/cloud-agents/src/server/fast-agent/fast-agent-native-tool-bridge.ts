@@ -654,7 +654,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Prepare a Session credential approval using only nonsecret metadata from the service documentation. Choose the HTTPS origin and authentication header, omitting headerPrefix when the key needs no prefix, then share the returned secure Session link so the human can enter the key privately. Omit allowedMethods for read-only access; list the exact HTTP methods only when the requested work needs writes, and say so in the Session before the human approves. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
+  description: "Prepare a Session credential approval using only nonsecret metadata from the service documentation. Call list_session_secrets first: a pending approval for the same service means re-share its link, not prepare again. Choose the HTTPS origin and the header that carries the key (authorization, x-api-key, api-key, or the service's own header), omitting headerPrefix when the key needs no scheme, then share the returned secure Session link so the human can enter the key privately. Omit allowedMethods for read-only access; list the exact HTTP methods only when the requested work needs writes, and say so in the Session before the human approves. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
   args: {
     label: z.string().trim().min(1).max(80),
     origin: z.string().min(1).max(2048),
@@ -677,7 +677,7 @@ export default {
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "List this Session's pending credential approvals and secret metadata, including ready references, without exposing credentials. Use this to discover status and references yourself; never ask the human to copy an opaque reference.",
+  description: "List this Session's pending credential approvals and ready secret references with their origin, header, allowed methods, and expiry, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval and before using a reference; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready references are usable by request_with_session_secret for reads and are delivered automatically to coding tasks launched from this Session.",
   args: {},
   execute: (args, context) => invoke("list_session_secrets", args, context),
 }
@@ -688,7 +688,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Make a bounded GET or HEAD request using an existing Session secret reference without exposing the credential. Discover ready references and metadata with list_session_secrets; never invent a reference or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers. For an authorized request in a web Session, call directly without an opening acknowledgement or another confirmation. Report the actual result.",
+  description: "Make one bounded GET or HEAD request using a ready Session secret reference without exposing the credential; the server sends the request to the approved origin with the real key. Discover references with list_session_secrets; never invent one or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers. For scripts, SDKs, CLIs, repeated calls, or approved write methods, launch a coding task attached to this Session instead: it receives the approved services as substitute tokens with a base URL. Call directly without an opening acknowledgement or another confirmation, and report the actual result.",
   args: {
     secretRef: z.string().uuid(),
     method: z.enum(["GET", "HEAD"]),

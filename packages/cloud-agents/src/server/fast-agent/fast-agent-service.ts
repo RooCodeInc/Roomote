@@ -4679,6 +4679,14 @@ export async function answerFastAgentQuestion({
               if (!canonicalSession) return unavailable('session_not_bound');
               throwIfTurnCancelled();
               const context = { sessionId: canonicalSession.id, userId };
+              // The secure entry link is nonsecret and the same for every
+              // approval in the Session, so both tools return it: Fast can
+              // re-share it for a pending approval on a later turn without
+              // preparing a duplicate.
+              const sessionUrl = new URL(
+                `${Env.R_APP_URL}/sessions/${encodeURIComponent(canonicalSession.id)}`,
+              );
+              sessionUrl.hash = 'session-secrets';
               if (
                 call.name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret
               ) {
@@ -4686,16 +4694,15 @@ export async function answerFastAgentQuestion({
                   context,
                   sessionSecretPrepareSchema.parse(args.data),
                 );
-                const url = new URL(
-                  `${Env.R_APP_URL}/sessions/${encodeURIComponent(canonicalSession.id)}`,
-                );
-                url.hash = 'session-secrets';
-                return { pending, sessionUrl: url.toString() };
+                return { pending, sessionUrl: sessionUrl.toString() };
               }
               if (
                 call.name === FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets
               ) {
-                return await listSessionSecretApprovals(context);
+                return {
+                  ...(await listSessionSecretApprovals(context)),
+                  sessionUrl: sessionUrl.toString(),
+                };
               }
               const request = sessionSecretRequestSchema.parse(args.data);
               const result = await callFastAgentIntegration(

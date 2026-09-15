@@ -233,14 +233,13 @@ let active = 0;
 const scopes = new Map<string, number>();
 
 /**
- * Operator-manifest requests are the supported product of this broker.
+ * Operator-manifest requests and `session:` grant reads share this broker.
  *
- * @deprecated for `session:` IDs only. Routing a Session grant through this
- * mediated request tool is a GET/HEAD-only compatibility path kept until
- * ordinary HTTP clients at the real service URL (attached runs through the
- * session egress gateway, `apps/api/src/handlers/session-egress`) reach
- * parity. It is not the required way to consume a Session grant and is never
- * widened: `allowedMethods` on a grant applies to the gateway path only.
+ * For `session:` IDs this is the read-only floor: a GET or HEAD made by the
+ * API itself, available on every compute provider and to Fast. It is never
+ * widened; a grant's `allowedMethods` apply to the session egress proxy
+ * (`apps/api/src/handlers/session-egress-proxy`), where attached runs use
+ * ordinary clients with a delivered substitute token.
  */
 export async function integrationRequest(
   config: HttpIntegrationsConfig,
