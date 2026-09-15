@@ -20,6 +20,7 @@ export const FAST_AGENT_PACKAGED_SKILL_NAMES = [
   'doctor',
   'environment-setup',
   'explain-repo-code',
+  'explore-delegation',
   'explore-and-act',
   'feature-demo',
   'fix-pr',

@@ -129,6 +129,29 @@ describe('FastAgentSkillStore', () => {
     expect(reference.content).toContain('Authentication');
   });
 
+  it('discovers delegation exploration as an unscoped packaged skill', async () => {
+    const store = new FastAgentSkillStore();
+
+    await expect(
+      store.list({ name: 'explore-delegation' }),
+    ).resolves.toMatchObject({
+      counts: {
+        packaged: 1,
+        repository: 0,
+        settings: 0,
+        total: 1,
+      },
+      skills: [
+        {
+          id: 'packaged:explore-delegation',
+          invocation: 'explore-delegation',
+          name: 'explore-delegation',
+          source: 'packaged',
+        },
+      ],
+    });
+  });
+
   it('loads the shipped implement-changes default workflow as a separate resource', async () => {
     const skillRoot = resolve(
       import.meta.dirname,

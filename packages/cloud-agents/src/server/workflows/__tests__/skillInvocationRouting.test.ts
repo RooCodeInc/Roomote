@@ -129,6 +129,28 @@ describe('packaged skill invocation routing', () => {
     expect(generalSkill).not.toContain('read the applicable repo-local');
   });
 
+  it('ships delegation discovery with an explicit execution boundary', () => {
+    expect(
+      isRecognizedInitialSkillInvocation({
+        skillName: 'explore-delegation',
+      }),
+    ).toBe(true);
+
+    const skill = readPackagedSkill('explore-delegation');
+    expect(skill).toContain('name: explore-delegation');
+    expect(skill).toContain('# Find Work To Delegate');
+    expect(skill).toContain('Ask one question at a time');
+    expect(skill).toContain(
+      'Describing pain, supplying an example, or saying an idea sounds useful is exploration, not authorization to execute work',
+    );
+    expect(skill).toContain(
+      'When the user explicitly requests execution, stop the interview',
+    );
+    expect(skill).toContain(
+      'do not make integration or repository setup a prerequisite for this interview',
+    );
+  });
+
   it('keeps Doctor packaged for Fast without routing it into sandbox tasks', () => {
     expect(PACKAGED_SKILL_INVOCATIONS).toContain('doctor');
     expect(PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS).not.toContain('doctor');
