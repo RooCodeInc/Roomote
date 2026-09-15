@@ -218,6 +218,18 @@ verifies the provider installation, conversation, and linked user before it
 accepts the follow-up. On Slack, a longer reply streams into the thread as the
 model writes it and settles into the finished message.
 
+From any Fast surface, you can ask Roomote to read an authorized Slack or
+Discord message link or explicitly name either provider for a context lookup.
+Roomote resolves the target provider independently of the conversation you are
+using and applies the target provider's installation, linked-account, and
+channel-access checks. It does not infer access from the originating chat.
+
+Fast can also post an explicitly requested update to Slack from another chat
+surface. Outside a Slack conversation, name the Slack workspace and destination.
+Public channels require the Roomote app to be a member; private channels also
+require your linked Slack account to be a member, and direct messages require
+workspace-scoped linked identities for both participants.
+
 Follow-ups sent while Fast is responding are retained before Roomote reports
 that they were accepted. A correction from the same person can steer the active
 response between completed tool calls; messages from another participant wait
