@@ -172,7 +172,7 @@ function TabularArtifactPreview({
           )}{' '}
           {preview.malformed && (
             <span>
-              An unclosed quoted field was found; the available values are shown
+              Malformed quoted data was found; the available values are shown
               below.
             </span>
           )}

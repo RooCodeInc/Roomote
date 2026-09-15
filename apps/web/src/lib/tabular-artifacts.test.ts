@@ -50,6 +50,13 @@ describe('tabular artifacts', () => {
     });
   });
 
+  it('flags non-delimiter text after a closing quote without losing it', () => {
+    expect(parseTabularArtifact('one,"two"three', 'csv')).toMatchObject({
+      rows: [['one', 'twothree']],
+      malformed: true,
+    });
+  });
+
   it('bounds rows, columns, and cell content', () => {
     const oversizedFirstRow = [
       'x'.repeat(TABULAR_PREVIEW_LIMITS.cellCharacters + 1),

@@ -24,11 +24,13 @@ export function parseTabularArtifact(
   let row: string[] = [];
   let cell = '';
   let inQuotes = false;
+  let afterClosingQuote = false;
   let fieldStarted = false;
   let endedWithRowSeparator = false;
   let rowsTruncated = false;
   let columnsTruncated = false;
   let cellsTruncated = false;
+  let malformed = false;
 
   const appendToCell = (value: string) => {
     fieldStarted = true;
@@ -47,6 +49,7 @@ export function parseTabularArtifact(
       columnsTruncated = true;
     }
     cell = '';
+    afterClosingQuote = false;
     fieldStarted = false;
   };
 
@@ -72,6 +75,7 @@ export function parseTabularArtifact(
           index += 1;
         } else {
           inQuotes = false;
+          afterClosingQuote = true;
         }
       } else if (character === '\r') {
         appendToCell('\n');
@@ -92,6 +96,7 @@ export function parseTabularArtifact(
       endedWithRowSeparator = true;
       if (character === '\r' && content[index + 1] === '\n') index += 1;
     } else {
+      if (afterClosingQuote) malformed = true;
       appendToCell(character);
     }
   }
@@ -107,6 +112,6 @@ export function parseTabularArtifact(
     rowsTruncated,
     columnsTruncated,
     cellsTruncated,
-    malformed: inQuotes,
+    malformed: malformed || inQuotes,
   };
 }

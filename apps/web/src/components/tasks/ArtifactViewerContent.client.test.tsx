@@ -486,16 +486,16 @@ describe('ArtifactViewerContent', () => {
           version: 1,
           artifactType: 'general',
           contentType: 'text/csv',
-          size: 8,
+          size: 14,
           createdAt: new Date('2026-05-22T00:00:00.000Z'),
           downloadUrl: 'https://example.test/malformed.csv',
-          content: 'one,"two',
+          content: 'one,"two"three',
         }}
       />,
     );
 
-    expect(screen.getByText(/unclosed quoted field/)).toBeVisible();
-    expect(screen.getByRole('cell', { name: 'two' })).toBeVisible();
+    expect(screen.getByText(/Malformed quoted data/)).toBeVisible();
+    expect(screen.getByRole('cell', { name: 'twothree' })).toBeVisible();
   });
 
   it('clearly reports table preview limits', () => {
