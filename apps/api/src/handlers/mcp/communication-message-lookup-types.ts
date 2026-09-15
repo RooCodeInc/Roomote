@@ -16,6 +16,8 @@ export type ParsedCommunicationReference = {
   provider: SupportedCommunicationLookupProvider;
   channelId: string;
   messageId?: string;
+  workspaceId?: string;
+  workspaceDomain?: string;
 };
 
 export type CommunicationLookupMessage = {
@@ -39,6 +41,7 @@ export type CommunicationLookupMessage = {
 
 export type CommunicationMessageContextPayload = {
   provider: SupportedCommunicationLookupProvider;
+  slackTeamId?: string;
   channelId: string;
   requestedMessageId: string;
   threadId: string;
@@ -49,6 +52,7 @@ export type CommunicationMessageContextPayload = {
 
 export type CommunicationChannelMessagesPayload = {
   provider: SupportedCommunicationLookupProvider;
+  slackTeamId?: string;
   channelId: string;
   requestedOldest?: string;
   requestedLatest?: string;
@@ -64,11 +68,15 @@ export type CommunicationLookupStrategy = {
   getMessageContext(options: {
     channel?: string;
     messageId: string;
+    workspaceId?: string;
+    workspaceDomain?: string;
     taskRun?: CommunicationLookupTaskRun | null;
     actingUserId?: string | null;
   }): Promise<CommunicationMessageContextPayload>;
   getChannelMessages(options: {
     channel?: string;
+    workspaceId?: string;
+    workspaceDomain?: string;
     oldest?: string;
     latest?: string;
     taskRun?: CommunicationLookupTaskRun | null;
