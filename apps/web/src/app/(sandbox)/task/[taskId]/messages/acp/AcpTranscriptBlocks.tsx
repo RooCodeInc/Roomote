@@ -281,7 +281,7 @@ function withoutToolBlocks(blocks: AcpRenderBlock[]): AcpRenderBlock[] {
   return blocks.flatMap((block) => {
     if (block.kind === 'tool_group') return [];
     if (block.msg.kind === 'tool_call' || block.msg.kind === 'tool_result') {
-      return [];
+      return withoutToolBlocks(block.childBlocks ?? []);
     }
 
     if (!block.childBlocks) return [block];
