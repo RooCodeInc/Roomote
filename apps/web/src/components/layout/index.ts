@@ -5,6 +5,7 @@ export { useRegisterCommands } from './CommandPaletteContext';
 export { Loading } from './Loading';
 export { Logo } from './Logo';
 export { OriginMismatchAlert } from './OriginMismatchAlert';
+export { PreSessionBackdrop } from './PreSessionBackdrop';
 export { RoomoteWordmark } from './RoomoteWordmark';
 export { UserMenu } from './UserMenu';
 export { WorkspaceHeader } from './WorkspaceHeader';

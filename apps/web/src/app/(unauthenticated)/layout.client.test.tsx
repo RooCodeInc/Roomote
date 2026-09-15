@@ -34,6 +34,9 @@ const { framedSurfaceMock, roomoteWordmarkMock } = vi.hoisted(() => ({
 
 vi.mock('@/components/layout', () => ({
   FramedSurface: framedSurfaceMock,
+  PreSessionBackdrop: ({ children }: { children: ReactNode }) => (
+    <div data-testid="pre-session-backdrop">{children}</div>
+  ),
   RoomoteWordmark: roomoteWordmarkMock,
 }));
 
@@ -54,20 +57,15 @@ describe('Unauthenticated layout', () => {
 
     expect(screen.getByText('RoomoteWordmark')).toBeInTheDocument();
     expect(screen.getByText('child')).toBeInTheDocument();
+    expect(screen.getByTestId('pre-session-backdrop')).toBeInTheDocument();
 
     expect(framedSurfaceMock).toHaveBeenCalledWith(
       expect.objectContaining({
         variant: 'bold',
-        frameClassName: expect.stringContaining(
-          'h-[calc(var(--effective-viewport-height)-0.25rem)]',
-        ),
+        frameClassName: expect.stringContaining('h-effective-viewport'),
         surfaceClassName: expect.stringContaining(
-          'light flex flex-col !overflow-y-auto !overflow-x-hidden text-foreground md:items-center',
+          'light flex flex-col !overflow-y-auto !overflow-x-hidden',
         ),
-        style: expect.objectContaining({
-          height: 'var(--effective-viewport-height)',
-          minHeight: 'var(--effective-viewport-height)',
-        }),
       }),
       undefined,
     );
