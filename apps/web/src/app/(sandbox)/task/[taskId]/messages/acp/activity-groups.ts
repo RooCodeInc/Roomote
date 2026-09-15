@@ -92,6 +92,18 @@ function isActivityBoundaryBlock(block: AcpRenderBlock): boolean {
   return isTextBoundaryBlock(block) || isProgressBoundaryBlock(block);
 }
 
+function closesPrecedingActivitySegment(
+  block: AcpRenderBlock,
+  artifacts?: readonly TaskArtifact[] | null,
+  keepDelegatedTasksVisible = false,
+): boolean {
+  return (
+    isActivityBoundaryBlock(block) ||
+    (!isActivityCollapsibleBlock(block, artifacts, keepDelegatedTasksVisible) &&
+      !isLiveActivityBlockEligible(block, artifacts, keepDelegatedTasksVisible))
+  );
+}
+
 function isLivePartialBlock(block: AcpRenderBlock): boolean {
   if (block.kind === 'tool_group') {
     return block.items.some(
@@ -349,7 +361,11 @@ function buildActivitySegmentRenderBlocks(
       (countToolCalls(activityBlocks) > 1 ||
         options.collapseSettledActivityIds?.has(activityId)) &&
       next &&
-      isActivityBoundaryBlock(next)
+      closesPrecedingActivitySegment(
+        next,
+        options.artifacts,
+        options.keepDelegatedTasksVisible,
+      )
     ) {
       const firstActivity = activityBlocks[0]!;
 

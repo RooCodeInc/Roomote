@@ -681,7 +681,7 @@ describe('buildAcpActivityRenderBlocks', () => {
   it('keeps manage_artifacts rows visible and uses them as a boundary', () => {
     const manageArtifacts = toolResultBlock({
       id: 'artifact-tool',
-      ts: 3_000,
+      ts: 5_000,
       toolName: 'manage_artifacts',
     });
 
@@ -690,18 +690,35 @@ describe('buildAcpActivityRenderBlocks', () => {
     const entries = buildAcpActivityRenderBlocks([
       textBlock('text-1', 1_000),
       messageBlock('reasoning-1', 2_000, 'reasoning'),
+      toolResultBlock({ id: 'command-1', ts: 3_000, toolName: 'execute' }),
+      toolResultBlock({ id: 'command-2', ts: 4_000, toolName: 'execute' }),
       manageArtifacts,
-      messageBlock('reasoning-2', 4_000, 'reasoning'),
-      textBlock('text-2', 5_000),
+      messageBlock('reasoning-2', 6_000, 'reasoning'),
+      textBlock('text-2', 7_000),
     ]);
 
     expect(entries.map((entry) => entry.kind)).toEqual([
       'message',
-      'message',
+      'activity_group',
       'message',
       'message',
       'message',
     ]);
+    expect(entries[1]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-reasoning-1',
+      live: false,
+      endTs: 5_000,
+      blocks: [
+        { kind: 'message', msg: { id: 'reasoning-1' } },
+        { kind: 'message', msg: { id: 'command-1' } },
+        { kind: 'message', msg: { id: 'command-2' } },
+      ],
+    });
+    expect(entries[2]).toMatchObject({
+      kind: 'message',
+      msg: { id: 'artifact-tool' },
+    });
   });
 
   it('keeps visual-proof preview rows visible and uses them as a boundary', () => {
