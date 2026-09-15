@@ -127,6 +127,7 @@ function VoiceLevel({ level, muted }: { level: number; muted: boolean }) {
 }
 
 function AudioLinesX() {
+  // The pinned Lucide version has no native AudioLinesX export.
   return (
     <span className="relative size-4">
       <AudioLines className="size-4" />
