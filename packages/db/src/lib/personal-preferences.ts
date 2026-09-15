@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import { type DatabaseOrTransaction, db } from '../db';
 import { users } from '../schema';
@@ -14,6 +14,11 @@ export type ChatInitiationProvider = (typeof CHAT_INITIATION_PROVIDERS)[number];
 const LAST_CHAT_INITIATION_PROVIDER_METADATA_KEY =
   'last_chat_initiation_provider';
 
+type StoredChatInitiationPreference = {
+  provider: ChatInitiationProvider;
+  initiatedAt: string;
+};
+
 export function isChatInitiationProvider(
   value: unknown,
 ): value is ChatInitiationProvider {
@@ -23,15 +28,32 @@ export function isChatInitiationProvider(
 export async function recordUserChatInitiationProvider(
   userId: string,
   provider: ChatInitiationProvider,
+  initiatedAt: Date,
   database: DatabaseOrTransaction = db,
 ): Promise<void> {
+  const preference: StoredChatInitiationPreference = {
+    provider,
+    initiatedAt: initiatedAt.toISOString(),
+  };
   await database
     .update(users)
     .set({
-      metadata: sql`${users.metadata} || ${JSON.stringify({ [LAST_CHAT_INITIATION_PROVIDER_METADATA_KEY]: provider })}::jsonb`,
+      metadata: sql`${users.metadata} || ${JSON.stringify({ [LAST_CHAT_INITIATION_PROVIDER_METADATA_KEY]: preference })}::jsonb`,
       updatedAt: new Date(),
     })
-    .where(eq(users.id, userId));
+    .where(
+      and(
+        eq(users.id, userId),
+        sql`CASE
+          WHEN jsonb_typeof(${users.metadata} -> ${LAST_CHAT_INITIATION_PROVIDER_METADATA_KEY}) = 'object'
+            THEN COALESCE(
+              (${users.metadata} -> ${LAST_CHAT_INITIATION_PROVIDER_METADATA_KEY} ->> 'initiatedAt')::timestamptz,
+              '-infinity'::timestamptz
+            ) <= ${initiatedAt.toISOString()}::timestamptz
+          ELSE true
+        END`,
+      ),
+    );
 }
 
 export async function getUserChatInitiationProvider(
@@ -47,9 +69,18 @@ export async function getUserChatInitiationProvider(
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     return null;
   }
-  const provider = (metadata as Record<string, unknown>)[
+  const preference = (metadata as Record<string, unknown>)[
     LAST_CHAT_INITIATION_PROVIDER_METADATA_KEY
   ];
+  if (
+    !preference ||
+    typeof preference !== 'object' ||
+    Array.isArray(preference)
+  ) {
+    return null;
+  }
+  const provider = (preference as Partial<StoredChatInitiationPreference>)
+    .provider;
   return isChatInitiationProvider(provider) ? provider : null;
 }
 

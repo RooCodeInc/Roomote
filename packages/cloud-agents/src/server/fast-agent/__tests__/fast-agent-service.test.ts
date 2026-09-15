@@ -1225,6 +1225,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getSession).toHaveBeenCalledWith({
       userId: baseParams.userId,
       conversation: canonicalConversation,
+      chatInitiatedAt: expect.any(Date),
     });
     expect(mocks.captureInferenceContext).toHaveBeenCalledWith(
       expect.objectContaining({ surface: 'telegram' }),

@@ -232,7 +232,7 @@ describe('session attention notifications', () => {
 
   it('uses the recipient task-starting chat preference for a new route', async () => {
     const { run, user } = await createDirectWebRun();
-    await recordUserChatInitiationProvider(user.id, 'discord');
+    await recordUserChatInitiationProvider(user.id, 'discord', new Date());
 
     await notifyDirectWebTaskAttention({
       runId: run.id,

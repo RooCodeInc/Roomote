@@ -51,7 +51,7 @@ export async function getOrCreateFastAgentSession({
   initialTitle,
   initialModel,
   initialReasoningEffort,
-  recordChatInitiation,
+  chatInitiatedAt,
 }: {
   owner?: FastAgentConversationOwner;
   userId?: string;
@@ -62,8 +62,8 @@ export async function getOrCreateFastAgentSession({
   initialTitle?: string;
   initialModel?: string;
   initialReasoningEffort?: ReasoningEffort;
-  /** Record the provider only when this human turn creates a new Session. */
-  recordChatInitiation?: boolean;
+  /** Human turn start time; records the provider only for a new Session. */
+  chatInitiatedAt?: Date;
 }): Promise<FastAgentSessionRecord> {
   const session = await fastAgentConversationRepository.getOrCreate({
     ...(owner ? { owner } : {}),
@@ -75,18 +75,20 @@ export async function getOrCreateFastAgentSession({
     ...(initialReasoningEffort !== undefined ? { initialReasoningEffort } : {}),
   });
   if (
-    recordChatInitiation &&
+    chatInitiatedAt &&
     session.created &&
     userId &&
     isChatInitiationProvider(conversation.surface)
   ) {
-    await recordUserChatInitiationProvider(userId, conversation.surface).catch(
-      (error) => {
-        console.warn(
-          `[Fast Agent] Failed to record chat initiation provider: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      },
-    );
+    await recordUserChatInitiationProvider(
+      userId,
+      conversation.surface,
+      chatInitiatedAt,
+    ).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to record chat initiation provider: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
   }
   return session;
 }

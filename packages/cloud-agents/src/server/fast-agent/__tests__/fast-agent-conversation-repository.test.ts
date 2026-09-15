@@ -74,7 +74,7 @@ describe('Fast conversation repository', () => {
       await getOrCreateFastAgentSession({
         userId: user.id,
         conversation,
-        recordChatInitiation: true,
+        chatInitiatedAt: new Date(),
       });
 
       await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
@@ -93,12 +93,12 @@ describe('Fast conversation repository', () => {
       userId: user.id,
       conversation,
     });
-    await recordUserChatInitiationProvider(user.id, 'discord');
+    await recordUserChatInitiationProvider(user.id, 'discord', new Date());
 
     const reused = await getOrCreateFastAgentSession({
       userId: user.id,
       conversation,
-      recordChatInitiation: true,
+      chatInitiatedAt: new Date(),
     });
 
     expect(reused.created).toBe(false);
@@ -109,7 +109,7 @@ describe('Fast conversation repository', () => {
 
   it('does not record an automated chat-surface Session', async () => {
     const user = await createUser();
-    await recordUserChatInitiationProvider(user.id, 'telegram');
+    await recordUserChatInitiationProvider(user.id, 'telegram', new Date());
 
     await getOrCreateFastAgentSession({
       userId: user.id,
@@ -117,11 +117,23 @@ describe('Fast conversation repository', () => {
         ...slackConversation,
         conversationId: crypto.randomUUID(),
       },
-      recordChatInitiation: false,
     });
 
     await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
       'telegram',
+    );
+  });
+
+  it('does not let a delayed older initiation overwrite a newer preference', async () => {
+    const user = await createUser();
+    const newerInitiation = new Date('2026-09-15T15:30:00.000Z');
+    const olderInitiation = new Date('2026-09-15T15:29:00.000Z');
+
+    await recordUserChatInitiationProvider(user.id, 'discord', newerInitiation);
+    await recordUserChatInitiationProvider(user.id, 'slack', olderInitiation);
+
+    await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+      'discord',
     );
   });
 

@@ -1353,13 +1353,14 @@ export async function enqueueTask(
   input: EnqueueTaskInput,
   options: EnqueueTaskOptions = {},
 ): Promise<TaskRun> {
+  const initiatedAt = new Date();
   await assertDeploymentIsActive();
 
   if (input.task.type === TaskPayloadKind.SnapshotResume) {
     return enqueueSnapshotResume(input as ResumeTaskLaunch, options);
   }
 
-  return enqueueFreshLaunch(input as FreshTaskLaunch, options);
+  return enqueueFreshLaunch(input as FreshTaskLaunch, options, initiatedAt);
 }
 
 async function inheritSourceCommunicationMetadata(
@@ -1406,6 +1407,7 @@ async function inheritSourceCommunicationMetadata(
 async function enqueueFreshLaunch(
   input: FreshTaskLaunch,
   options: EnqueueTaskOptions,
+  initiatedAt: Date,
 ): Promise<TaskRun> {
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
@@ -1786,7 +1788,12 @@ async function enqueueFreshLaunch(
           linkedUserId &&
           isChatInitiationProvider(surface)
         ) {
-          await recordUserChatInitiationProvider(linkedUserId, surface, tx);
+          await recordUserChatInitiationProvider(
+            linkedUserId,
+            surface,
+            initiatedAt,
+            tx,
+          );
         }
         taskId = createdTask.id;
       }

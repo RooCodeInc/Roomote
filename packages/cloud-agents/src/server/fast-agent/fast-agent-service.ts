@@ -1824,6 +1824,7 @@ export async function answerFastAgentQuestion({
    * after a previous execution parked it on a temporary provider failure. */
   resumedAfterInferenceRetry?: boolean;
 }): Promise<string> {
+  const initiatedAt = new Date();
   const turnId = buildFastAgentTurnId({
     currentMessageId,
     conversation,
@@ -3099,7 +3100,7 @@ export async function answerFastAgentQuestion({
       getOrCreateFastAgentSession({
         userId,
         conversation: canonicalConversation ?? conversation,
-        recordChatInitiation: turnSource === 'human',
+        ...(turnSource === 'human' ? { chatInitiatedAt: initiatedAt } : {}),
       }),
       listFastAgentIntegrations(
         { userId, apiBaseUrl },
