@@ -28,7 +28,7 @@ import {
   humanizeFilename,
 } from '@/lib';
 import { type SessionArtifactSelection } from '@/lib/artifact-view-urls';
-import { isMarkdownArtifact } from '@/lib/artifact-types';
+import { isMarkdownArtifact, isTabularArtifact } from '@/lib/artifact-types';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
 import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInferenceCostBreakdown';
 import { PullRequestBadge } from '@/components/sandbox';
@@ -93,6 +93,7 @@ import {
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
 import { TaskRobotIconProvider } from '@/components/tasks/TaskRobotIcon';
 import { MarkdownArtifactPreview } from '@/components/tasks/MarkdownArtifactPreview';
+import { TabularArtifactPreview } from '@/components/tasks/TabularArtifactPreview';
 import { useArtifactByPath } from '@/hooks/use-artifact-by-path';
 import { PreviewPaneProvider } from '../../task/[taskId]/hooks/use-preview-pane';
 import { humanizePortName } from '../../task/[taskId]/preview-port-utils';
@@ -245,6 +246,7 @@ function SessionArtifactCard({
   const isImage = artifact.contentType.startsWith('image/');
   const isVideo = artifact.contentType.startsWith('video/');
   const isMarkdown = isMarkdownArtifact(artifact.contentType, artifact.path);
+  const isTabular = isTabularArtifact(artifact.contentType, artifact.path);
   const thumbnailUrl = artifact.thumbnailUrl;
   const videoPreviewUrl = artifact.previewUrl;
 
@@ -260,6 +262,12 @@ function SessionArtifactCard({
     >
       {isMarkdown ? (
         <MarkdownArtifactPreview
+          owner={owner}
+          path={artifact.path}
+          version={artifact.version}
+        />
+      ) : isTabular ? (
+        <TabularArtifactPreview
           owner={owner}
           path={artifact.path}
           version={artifact.version}
