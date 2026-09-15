@@ -23,7 +23,7 @@ import {
 } from '@roomote/slack';
 import {
   getBackgroundAgentSettingsForDeployment,
-  isSlackPeerConversationsExperimentEnabledForUser,
+  isPeerConversationsExperimentEnabledForUser,
   type SlackInstallation,
   type SlackUserMapping,
 } from '@roomote/db/server';
@@ -217,7 +217,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   });
   const peerConversationsExperimentEnabled =
     fastSessionOwner?.kind === 'user' &&
-    (await isSlackPeerConversationsExperimentEnabledForUser(
+    (await isPeerConversationsExperimentEnabledForUser(
       fastSessionOwner.userId,
     ));
   if (peerConversationsExperimentEnabled) {

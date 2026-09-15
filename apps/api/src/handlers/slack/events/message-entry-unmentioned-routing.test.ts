@@ -71,7 +71,7 @@ vi.mock('@roomote/redis', async (importOriginal) => ({
 vi.mock('@roomote/db/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/db/server')>()),
   db: {},
-  isSlackPeerConversationsExperimentEnabledForUser:
+  isPeerConversationsExperimentEnabledForUser:
     peerConversationsExperimentEnabledMock,
 }));
 

@@ -4,8 +4,8 @@ import {
   eq,
   getUserPersonalization,
   isNull,
-  isSlackPeerConversationsExperimentEnabledInMetadata,
-  SLACK_PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY,
+  isPeerConversationsExperimentEnabledInMetadata,
+  PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY,
   sql,
   updateUserPersonalization,
   UserPersonalizationConflictError,
@@ -57,7 +57,7 @@ function normalizePersonalPreferences(
         ? metadata.results_page_enabled
         : DEFAULT_PERSONAL_PREFERENCES.resultsPageEnabled,
     slackPeerConversationsExperimentEnabled:
-      isSlackPeerConversationsExperimentEnabledInMetadata(metadata),
+      isPeerConversationsExperimentEnabledInMetadata(metadata),
     homeComposerSuggestionsEnabled:
       typeof metadata.home_composer_suggestions_enabled === 'boolean'
         ? metadata.home_composer_suggestions_enabled
@@ -198,7 +198,7 @@ export async function updatePersonalPreferencesCommand(
     nextMetadataRecord.results_page_enabled = input.resultsPageEnabled;
   }
   if (input.slackPeerConversationsExperimentEnabled !== undefined) {
-    nextMetadataRecord[SLACK_PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY] =
+    nextMetadataRecord[PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY] =
       input.slackPeerConversationsExperimentEnabled;
   }
   if (input.homeComposerSuggestionsEnabled !== undefined) {

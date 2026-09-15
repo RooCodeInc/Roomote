@@ -97,7 +97,7 @@ describe('persistFastAgentInlineHumanTurn', () => {
     expect(mocks.updateWhere).toHaveBeenCalledOnce();
   });
 
-  it('does not supersede a parked request with a quiet-eligible Slack aside', async () => {
+  it('does not supersede a parked request with a quiet-eligible provider aside', async () => {
     mocks.findFirst.mockResolvedValue({
       id: 'row-1',
       admission: 'inline',
@@ -105,7 +105,10 @@ describe('persistFastAgentInlineHumanTurn', () => {
       discardedAt: null,
     });
     await persistFastAgentInlineHumanTurn({
-      parent,
+      parent: {
+        ...parent,
+        conversation: { ...parent.conversation, surface: 'discord' },
+      },
       event: { ...event, directedAtRoomote: false },
     });
     expect(mocks.insertOnConflict).toHaveBeenCalledOnce();

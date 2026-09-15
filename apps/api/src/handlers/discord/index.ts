@@ -22,10 +22,12 @@ import {
 import { reactionEmojiMatches } from '@roomote/communication/reaction-emoji';
 import {
   buildFastAgentReactionExternalInputQuestion,
+  getFastAgentSessionOwner,
   getOrCreateFastAgentSession,
   hasFastAgentSession,
   type FastAgentReactionExternalInput,
 } from '@roomote/cloud-agents/server';
+import { isPeerConversationsExperimentEnabledForUser } from '@roomote/db/server';
 import {
   RunStatus,
   activeRunStatuses,
@@ -719,6 +721,7 @@ async function processDiscordGatewayEvent(
     repliedToAutomationReport ||
     isFastAgentConversation,
   );
+  let peerConversationsExperimentEnabled = false;
   const isTaskEntry = isDiscordTaskEntryEvent(event, {
     botUserId: resolved.botUserId,
     isTaskThread: isRoomoteThread,
@@ -786,6 +789,22 @@ async function processDiscordGatewayEvent(
     !repliedFastSession &&
     isRoomoteThread
   ) {
+    const fastSessionOwner = isFastAgentConversation
+      ? await getFastAgentSessionOwner({
+          surface: 'discord',
+          workspaceId: channel.guildId ?? 'dm',
+          conversationId: channel.channelId,
+          replyTarget: {
+            channelId: metadata.communicationChannelId,
+            ...(channel.isThread ? { threadId: channel.channelId } : {}),
+          },
+        })
+      : null;
+    peerConversationsExperimentEnabled =
+      fastSessionOwner?.kind === 'user' &&
+      (await isPeerConversationsExperimentEnabledForUser(
+        fastSessionOwner.userId,
+      ));
     const shouldRouteUnmentioned =
       await shouldRouteUnmentionedDiscordThreadReplyToAgent({
         message,
@@ -799,6 +818,7 @@ async function processDiscordGatewayEvent(
           null,
         isAutomationReportThread: Boolean(repliedToAutomationReport),
         isOpenConversationThread: isFastAgentConversation,
+        peerConversationsExperimentEnabled,
         fetchThreadMessages: async () => {
           const history = await fetchDiscordThreadHistoryBestEffort({
             provider: resolved.provider,
@@ -1034,6 +1054,7 @@ async function processDiscordGatewayEvent(
         senderUserId,
         provider: resolved.provider,
         applicationId: resolved.applicationId,
+        botUserId: resolved.botUserId,
         channel,
         metadata,
         conversationId:
@@ -1049,6 +1070,7 @@ async function processDiscordGatewayEvent(
           channel.isDirectMessage ||
           Boolean(repliedFastSession) ||
           isDiscordBotMentioned(message, resolved.botUserId),
+        peerConversationsExperimentEnabled,
       });
       return { ok: true, fastAnswered: true, fastContinued: true };
     }

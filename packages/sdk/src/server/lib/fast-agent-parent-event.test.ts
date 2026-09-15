@@ -550,11 +550,14 @@ describe('deliverFastAgentParentEvent', () => {
   });
 
   it.each([false, true])(
-    'preserves queued Slack caution eligibility (directed=%s)',
+    'preserves queued provider caution eligibility (directed=%s)',
     async (directedAtRoomote) => {
       await deliverFastAgentParentEventWithLock(
         {
-          parent,
+          parent: {
+            ...parent,
+            conversation: { ...parent.conversation, surface: 'discord' },
+          },
           event: {
             type: 'human_follow_up',
             eventId: '100.004',
