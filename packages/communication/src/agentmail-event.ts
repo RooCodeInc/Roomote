@@ -47,6 +47,19 @@ export const agentMailMessageSchema = z
     references: z.array(z.string()).optional(),
     labels: z.array(z.string()).optional(),
     attachments: z.array(agentMailAttachmentSchema).optional(),
+    /**
+     * The provider's SPF/DKIM/DMARC verdicts for the message. Present on
+     * the message resource; the webhook payload may omit it, in which case
+     * the message is re-fetched before the sender is trusted.
+     */
+    authentication_results: z
+      .object({
+        spf: z.string().optional(),
+        dkim: z.string().optional(),
+        dmarc: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 
@@ -307,6 +320,35 @@ function readAddressString(address: AgentMailAddress): string | undefined {
   }
 
   return address.address ?? address.email;
+}
+
+/**
+ * Whether the message carries the provider's authentication verdicts at all.
+ * Without them nothing can vouch for the From header, so the message is
+ * re-fetched rather than judged.
+ */
+export function hasAgentMailAuthenticationResults(
+  message: AgentMailMessage,
+): boolean {
+  return (
+    message.authentication_results !== undefined &&
+    message.authentication_results !== null
+  );
+}
+
+/**
+ * Whether the From header can be trusted as the sender's identity. The
+ * inbound path resolves that address to a verified account and acts on the
+ * account's behalf, so it is authentication, and only a DMARC pass ties the
+ * From domain to the message. AgentMail drops messages whose headers fail
+ * outright and routes header-less ones to a separate event, but a domain
+ * with no DMARC policy at all still arrives as an ordinary received
+ * message; that is the case this refuses.
+ */
+export function isAgentMailSenderAuthenticated(
+  message: AgentMailMessage,
+): boolean {
+  return message.authentication_results?.dmarc?.toLowerCase() === 'pass';
 }
 
 /**
