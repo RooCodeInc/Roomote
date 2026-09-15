@@ -26,8 +26,11 @@ re-joined on every call.
 
 ## Principals and authentication
 
-The surface is disabled (every route returns `404 {"error":"not_found"}`)
-until `R_SESSION_EGRESS_GATEWAY_TOKEN` (>= 32 chars) is configured on the API.
+The controller routes are always available to a signed controller token,
+since API-proxy admission needs them on every deployment. The gateway
+principal exists only once `R_SESSION_EGRESS_GATEWAY_TOKEN` (>= 32 chars) is
+configured on the API; without it every other caller sees
+`404 {"error":"not_found"}`, so the surface stays invisible.
 
 | Principal    | Credential                                                                                                                  | Routes                                              |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
@@ -62,7 +65,9 @@ Request (`sessionEgressWorkloadRegisterSchema`):
 - `runId`: the attached run. Eligible only if the run status is in
   `activeRunStatuses`, it is attached (`session_tasks`) to exactly one Session,
   that Session is `ownerKind = 'user'`, unarchived, and the run's
-  `actingUserId` equals the Session owner, who is not deleted.
+  `actingUserId` equals the Session owner, who is not deleted and has Session
+  secret tools enabled (`session_secret_tools_enabled`). The owner check is
+  made inside the minting transaction, not only in the controller's preflight.
 - `connectorIdentity`: the identity the gateway will authenticate at connection
   time (16–512 printable ASCII chars). Unique among active workloads.
 - `leaseSeconds`: 60–86400, default 3600. Leases are renewed only by the
@@ -203,9 +208,9 @@ Response is always `200` with `Cache-Control: no-store`:
 
 Decision order (first failing rule wins): token lookup by hash →
 workload/connector binding → workload active and lease unexpired → generation
-match → grant not revoked → grant not expired → owner not deleted, Session
-unarchived and still owned by the same user, grant belongs to that
-Session/owner, run still active with `actingUserId = owner`, run still
+match → grant not revoked → grant not expired → owner not deleted and still has Session secret tools
+enabled, Session unarchived and still owned by the same user, grant belongs to
+that Session/owner, run still active with `actingUserId = owner`, run still
 attached to the Session → exact `host:port` equals the approved origin
 (default port 443) and that origin still passes the deployment public-egress
 policy (`assertEgressUrlAllowed`, HTTPS) → method in the grant's
@@ -252,9 +257,13 @@ the gateway received) alone.
 ## API substitution proxy (`/api/session-egress/<upstream path>`)
 
 Compute providers without a per-workload connector (hosted sandboxes such as
-Modal) use the API itself as the gateway. The controller registers the run
-through `POST /workloads` exactly as for the connector path, using a synthetic
-connector identity, and delivers the substitutes together with one base URL,
+Modal) use the API itself as the gateway. Delivery is gated per Session owner
+by the same `session_secret_tools_enabled` experiment that gates the Fast and
+coding-run tools; no deployment configuration is needed. The controller
+registers the run through `POST /workloads` exactly as for the
+connector path, using a synthetic connector identity
+(`roomote://api-proxy/run/<runId>/<random>`), after the worker's ordinary
+bootstrap reports ready, and delivers the substitutes together with one base URL,
 `<api origin>/api/session-egress`, shared by every approved service. The
 workload points an ordinary HTTP client at that base URL and presents the
 service's substitute as its credential in any header

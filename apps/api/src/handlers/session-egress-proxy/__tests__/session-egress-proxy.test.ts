@@ -212,6 +212,10 @@ beforeEach(async () => {
   minted.length = 0;
   ownerId = (await userFactory.create()).id;
   userIds.push(ownerId);
+  await db
+    .update(users)
+    .set({ metadata: { session_secret_tools_enabled: true } })
+    .where(eq(users.id, ownerId));
   const row = await session(ownerId);
   sessionId = row.id;
   context = { userId: ownerId, sessionId };
@@ -576,6 +580,11 @@ it.each([
     'detached run',
     'session_unavailable',
     () => db.delete(sessionTasks).where(eq(sessionTasks.sessionId, sessionId)),
+  ],
+  [
+    'run whose owner turned Session secret tools off',
+    'session_unavailable',
+    () => db.update(users).set({ metadata: {} }).where(eq(users.id, ownerId)),
   ],
 ])('denies a %s', async (_name, reason, mutate) => {
   await mutate();

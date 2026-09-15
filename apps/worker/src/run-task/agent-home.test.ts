@@ -670,6 +670,23 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(clientEnv.NODE_USE_ENV_PROXY).toBe('1');
   });
 
+  it('instructs API-proxy runs to call services through the base URL without touching inference', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        ROOMOTE_SESSION_EGRESS_API_PROXY: '1',
+        ROOMOTE_SERVICE_BASE_URL: 'https://api.example.com/api/session-egress',
+        ROOMOTE_SESSION_EGRESS_SERVICES: '[]',
+        R_MODEL: 'openrouter/openai/gpt-4.1-mini',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'OPENROUTER_API_KEY',
+      },
+    });
+    expect(result.configContent).toContain('Roomote API proxy');
+    expect(result.configContent).toContain('$ROOMOTE_SERVICE_BASE_URL');
+    expect(result.configContent).not.toContain('configured HTTPS proxy');
+  });
+
   it('rejects protected direct/custom inference without a served gateway provider', () => {
     expect(() =>
       generateOpenCodeConfig({

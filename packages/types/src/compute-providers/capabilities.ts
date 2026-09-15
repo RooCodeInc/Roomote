@@ -21,17 +21,25 @@ export interface ComputeProviderCapabilities {
   /** Can run customer-owned Docker Compose and Dockerfile projects. */
   supportsDockerProjects: boolean;
   /**
-   * Whether the provider can hold a Session-egress workload to the
-   * credential-substitution contract: externally enforced workload identity
-   * (connector mTLS outside the sandbox), sandbox egress restricted to that
-   * connector plus control-plane services, and connector keys the sandbox
-   * can never read. `unsupported` providers fail closed: no workload is
-   * registered and no substitute is ever delivered to them.
+   * How the provider can hold a Session-egress workload.
+   *
+   * - `enforced`: externally enforced workload identity (connector mTLS
+   *   outside the sandbox), sandbox egress restricted to that connector plus
+   *   control-plane services, and connector keys the sandbox can never read.
+   * - `api_proxy`: no connector. The workload receives substitutes and calls
+   *   the API-side substitution proxy over the HTTPS route it already uses;
+   *   possession of the substitute is the authority, bounded by the live
+   *   workload, run, Session, and grant state.
+   * - `unsupported`: fails closed; no workload is registered and no
+   *   substitute is ever delivered.
    */
   sessionEgress: ComputeProviderSessionEgressCapability;
 }
 
-export type ComputeProviderSessionEgressCapability = 'enforced' | 'unsupported';
+export type ComputeProviderSessionEgressCapability =
+  | 'enforced'
+  | 'api_proxy'
+  | 'unsupported';
 
 export type ComputeProviderCommandOutputSource =
   | 'central'
@@ -65,7 +73,9 @@ export const MODAL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
-  sessionEgress: 'unsupported',
+  // Sandboxes reach the API over HTTPS already; substitutes are used through
+  // the API-side session egress proxy, so no connector is needed.
+  sessionEgress: 'api_proxy',
 };
 
 export const DAYTONA_CAPABILITIES: ComputeProviderCapabilities = {

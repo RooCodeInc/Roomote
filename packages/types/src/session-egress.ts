@@ -392,6 +392,12 @@ export const SESSION_EGRESS_WORKLOAD_ENV = {
   NO_PROXY: 'ROOMOTE_SESSION_EGRESS_NO_PROXY',
   /** JSON `SessionEgressWorkloadServiceManifestEntry[]`; never contains token values. */
   SERVICES: 'ROOMOTE_SESSION_EGRESS_SERVICES',
+  /**
+   * API-proxy admission only: the one base URL every approved service is
+   * called through (`<api origin>/api/session-egress`, or the deployment's
+   * dedicated proxy host). Nonsecret; delivered next to the substitutes.
+   */
+  BASE_URL: 'ROOMOTE_SERVICE_BASE_URL',
 } as const;
 
 /** Substitute tokens are delivered as `ROOMOTE_SERVICE_TOKEN_<LABEL_SLUG>`. */
@@ -403,6 +409,12 @@ export const SESSION_EGRESS_CONNECTOR_PORT = 3128;
 export interface SessionEgressWorkloadServiceManifestEntry extends SessionEgressGrantPolicy {
   /** The env var that carries this service's substitute token. */
   envName: string;
+  /**
+   * API-proxy admission only: call this instead of `origin`, with the
+   * substitute as the credential; the API forwards to `origin`. Absent under
+   * connector admission, where clients use `origin` through the proxy.
+   */
+  baseUrl?: string;
 }
 
 export function sessionEgressServiceTokenEnvName(label: string): string {
@@ -427,6 +439,7 @@ export function sessionEgressServiceTokenEnvName(label: string): string {
  */
 export function buildSessionEgressServiceTokenEnv(
   substitutes: readonly SessionEgressSubstituteIssue[],
+  options: { baseUrl?: string } = {},
 ): {
   tokens: Record<string, string>;
   manifest: SessionEgressWorkloadServiceManifestEntry[];
@@ -439,7 +452,11 @@ export function buildSessionEgressServiceTokenEnv(
     for (let n = 2; envName in tokens; n += 1) envName = `${base}_${n}`;
     tokens[envName] = issue.substitute;
     const { substitute: _omitted, ...policy } = issue;
-    manifest.push({ ...policy, envName });
+    manifest.push({
+      ...policy,
+      envName,
+      ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
+    });
   }
   return { tokens, manifest };
 }

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import {
@@ -27,9 +28,17 @@ import {
  * centralized run-finalization path, so a workload never outlives its run
  * regardless of which process observed the transition.
  *
+ * Two admissions exist. `connector` providers (Docker) get a controller-issued
+ * connector certificate and an external gateway. `api_proxy` providers
+ * (Modal, Roomote Cloud) get substitutes and the API-side proxy base URL,
+ * nothing else; the API is the gateway.
+ *
  * Fail-closed rules:
- * - a provider whose capability is not `enforced` is never registered;
- * - a deployment without gateway/CA configuration never registers;
+ * - a provider whose capability is `unsupported` is never registered;
+ * - a `connector` provider on a deployment without gateway/CA configuration
+ *   never registers;
+ * - a run whose Session owner has not enabled Session secret tools never
+ *   registers, matching the gate on the Fast and coding-run tools;
  * - a control-plane error leaves the run without substitutes, never with
  *   partially provisioned ones.
  * In every one of those cases the run gets a nonsecret lifecycle event so the
@@ -147,12 +156,27 @@ export type SessionEgressSkipReason =
 export type SessionEgressRegistrationOutcome =
   | {
       status: 'registered';
+      admission: 'connector';
       workload: SessionEgressWorkloadRegistration;
       connectorIdentity: string;
       connector: IssuedConnectorCertificate;
     }
+  | {
+      status: 'registered';
+      admission: 'api_proxy';
+      workload: SessionEgressWorkloadRegistration;
+      /** Synthetic, never a certificate claim; unique per generation. */
+      connectorIdentity: string;
+    }
   | { status: 'skipped'; reason: SessionEgressSkipReason }
   | { status: 'failed'; error: string };
+
+const DEFAULT_LEASE_SECONDS = 3_600;
+
+/** Unique per registration so a stale generation can never collide with a live one. */
+function buildApiProxyWorkloadIdentity(runId: number): string {
+  return `roomote://api-proxy/run/${runId}/${randomBytes(12).toString('hex')}`;
+}
 
 export interface SessionEgressLifecycleEvent {
   runId: number;
@@ -166,9 +190,12 @@ export interface SessionEgressLifecycleDependencies {
   client: SessionEgressControllerClient | null;
   config: SessionEgressProvisioningConfig | null;
   /** Session/grant preflight; `null` for runs not attached to an owned Session. */
-  findCandidate: (
-    runId: number,
-  ) => Promise<{ sessionId: string; grantCount: number } | null>;
+  findCandidate: (runId: number) => Promise<{
+    sessionId: string;
+    grantCount: number;
+    /** The Session owner has Session secret tools enabled. */
+    experimentEnabled: boolean;
+  } | null>;
   recordEvent: (event: SessionEgressLifecycleEvent) => Promise<void>;
   issueCertificate?: typeof issueConnectorCertificate;
   connectorIdentityFor?: (runId: number) => string;
@@ -192,6 +219,19 @@ export class SessionEgressLifecycle {
     return this.deps.config;
   }
 
+  private get leaseSeconds(): number {
+    return this.deps.config?.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
+  }
+
+  /** Which admission this deployment can perform for the provider, if any. */
+  admissionFor(provider: ComputeProvider): 'connector' | 'api_proxy' | null {
+    if (!this.deps.client) return null;
+    const capability = getComputeProviderSessionEgressCapability(provider);
+    if (capability === 'enforced') return this.deps.config ? 'connector' : null;
+    if (capability === 'api_proxy') return 'api_proxy';
+    return null;
+  }
+
   /** Planning only: do not mint a lease/token while repository bootstrap runs. */
   async needsBootstrapAdmission(
     runId: number,
@@ -199,11 +239,7 @@ export class SessionEgressLifecycle {
   ): Promise<boolean> {
     const candidate = await this.safeFindCandidate(runId);
     if (!candidate || candidate.grantCount === 0) return false;
-    if (
-      getComputeProviderSessionEgressCapability(provider) !== 'enforced' ||
-      !this.deps.config ||
-      !this.deps.client
-    ) {
+    if (!candidate.experimentEnabled || !this.admissionFor(provider)) {
       await this.safeRecord({
         runId,
         eventType: 'decision',
@@ -243,7 +279,24 @@ export class SessionEgressLifecycle {
       return { status: 'skipped', reason: 'no_grants' };
     }
 
-    if (getComputeProviderSessionEgressCapability(provider) !== 'enforced') {
+    if (!candidate.experimentEnabled) {
+      await record({
+        eventType: 'decision',
+        message:
+          'Session service tokens are unavailable: the Session owner has not enabled Session secret tools, so no substitute credentials were issued to this run.',
+        details: {
+          stage: 'session_egress',
+          status: 'disabled',
+          provider,
+          sessionId: candidate.sessionId,
+          grantCount: candidate.grantCount,
+        },
+      });
+      return { status: 'skipped', reason: 'disabled' };
+    }
+
+    const capability = getComputeProviderSessionEgressCapability(provider);
+    if (capability === 'unsupported') {
       await record({
         eventType: 'decision',
         message: `Session service tokens are unavailable on the ${provider} compute provider: it cannot yet enforce the workload identity and egress contract, so no substitute credentials were issued to this run.`,
@@ -258,7 +311,8 @@ export class SessionEgressLifecycle {
       return { status: 'skipped', reason: 'unsupported_provider' };
     }
 
-    if (!this.deps.config || !this.deps.client) {
+    const admission = this.admissionFor(provider);
+    if (!admission || !this.deps.client) {
       await record({
         eventType: 'decision',
         message:
@@ -274,14 +328,17 @@ export class SessionEgressLifecycle {
       return { status: 'skipped', reason: 'disabled' };
     }
 
-    const connectorIdentity = this.connectorIdentityFor(taskRun.id);
+    const connectorIdentity =
+      admission === 'api_proxy'
+        ? buildApiProxyWorkloadIdentity(taskRun.id)
+        : this.connectorIdentityFor(taskRun.id);
     let workload: SessionEgressWorkloadRegistration;
     try {
       workload = await this.deps.client.register({
         runId: taskRun.id,
         provider,
         connectorIdentity,
-        leaseSeconds: this.deps.config.leaseSeconds,
+        leaseSeconds: this.leaseSeconds,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -306,17 +363,36 @@ export class SessionEgressLifecycle {
       return { status: 'failed', error: sanitizeControlPlaneError(message) };
     }
 
+    if (admission === 'api_proxy') {
+      await record({
+        eventType: 'decision',
+        message: input.resume
+          ? `Session service tokens were rotated for this resumed run (generation ${workload.generation}); they are usable through the Session egress API proxy once delivered.`
+          : 'Session service tokens were prepared for this run; they are usable through the Session egress API proxy once delivered.',
+        details: {
+          stage: 'session_egress',
+          status: input.resume ? 'rotated' : 'registered',
+          admission,
+          provider,
+          sessionId: workload.sessionId,
+          workloadId: workload.workloadId,
+          generation: workload.generation,
+          leaseExpiresAt: workload.expiresAt,
+          substituteCount: workload.substitutes.length,
+        },
+      });
+      return { status: 'registered', admission, workload, connectorIdentity };
+    }
+
+    const config = this.deps.config!;
     let connector: IssuedConnectorCertificate;
     try {
-      connector = this.issueCertificate(this.deps.config.connectorCa, {
+      connector = this.issueCertificate(config.connectorCa, {
         connectorIdentity,
         workloadId: workload.workloadId,
         // Outlive the lease slightly so a renewed lease is not cut short by
         // the certificate; rotation re-issues on resume anyway.
-        validitySeconds: Math.max(
-          86_400,
-          this.deps.config.leaseSeconds + 15 * 60,
-        ),
+        validitySeconds: Math.max(86_400, config.leaseSeconds + 15 * 60),
       });
     } catch {
       // No connector can exist for this generation: retire it immediately.
@@ -347,6 +423,7 @@ export class SessionEgressLifecycle {
       details: {
         stage: 'session_egress',
         status: input.resume ? 'rotated' : 'registered',
+        admission,
         provider,
         sessionId: workload.sessionId,
         workloadId: workload.workloadId,
@@ -357,7 +434,13 @@ export class SessionEgressLifecycle {
       },
     });
 
-    return { status: 'registered', workload, connectorIdentity, connector };
+    return {
+      status: 'registered',
+      admission,
+      workload,
+      connectorIdentity,
+      connector,
+    };
   }
 
   /** Best-effort termination; the run-finalization path is the backstop. */
@@ -385,9 +468,8 @@ export class SessionEgressLifecycle {
 
   /** Start only after the controller has verified enforcement and published delivery. */
   startLeaseRenewal(runId: number, workloadId: string): void {
-    if (!this.deps.config || !this.deps.client || this.renewals.has(workloadId))
-      return;
-    const leaseSeconds = this.deps.config.leaseSeconds;
+    if (!this.deps.client || this.renewals.has(workloadId)) return;
+    const leaseSeconds = this.leaseSeconds;
     const schedule = () => {
       const timer = setTimeout(
         async () => {

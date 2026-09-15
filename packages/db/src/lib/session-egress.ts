@@ -5,6 +5,7 @@ import { and, asc, eq, gt, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { getEncryptionKey } from '@roomote/env';
 import {
   activeRunStatuses,
+  isSessionSecretToolsExperimentEnabled,
   SESSION_EGRESS_SUBSTITUTE_PREFIX,
   type RunStatus,
   type SessionEgressAuthorization,
@@ -81,7 +82,11 @@ const grantPolicyColumns = {
  */
 async function eligibleRunSession(tx: DatabaseOrTransaction, runId: number) {
   const rows = await tx
-    .select({ sessionId: sessions.id, ownerUserId: users.id })
+    .select({
+      sessionId: sessions.id,
+      ownerUserId: users.id,
+      ownerMetadata: users.metadata,
+    })
     .from(taskRuns)
     .innerJoin(sessionTasks, eq(sessionTasks.taskId, taskRuns.taskId))
     .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
@@ -101,14 +106,18 @@ async function eligibleRunSession(tx: DatabaseOrTransaction, runId: number) {
 
 /**
  * Controller preflight: is this run attached to a Session that could receive
- * substitutes, and how many live grants would it get? Runs with no such
- * Session are ordinary runs and never contact the control plane; runs with a
- * Session but zero grants are reported, not registered (grants approved
- * mid-run take effect at the next start or resume).
+ * substitutes, has its owner enabled Session secret tools, and how many live
+ * grants would it get? Runs with no such Session are ordinary runs and never
+ * contact the control plane; runs with a Session but zero grants are
+ * reported, not registered (grants approved mid-run take effect at the next
+ * start or resume). The owner's experiment setting gates delivery the same
+ * way it gates the Fast and coding-run tools.
  */
-export async function findSessionEgressCandidateForRun(
-  runId: number,
-): Promise<{ sessionId: string; grantCount: number } | null> {
+export async function findSessionEgressCandidateForRun(runId: number): Promise<{
+  sessionId: string;
+  grantCount: number;
+  experimentEnabled: boolean;
+} | null> {
   const eligible = await eligibleRunSession(db, runId);
   if (!eligible) return null;
   const [row] = await db
@@ -122,7 +131,33 @@ export async function findSessionEgressCandidateForRun(
         gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
       ),
     );
-  return { sessionId: eligible.sessionId, grantCount: row?.count ?? 0 };
+  return {
+    sessionId: eligible.sessionId,
+    grantCount: row?.count ?? 0,
+    experimentEnabled: isSessionSecretToolsExperimentEnabled(
+      eligible.ownerMetadata,
+    ),
+  };
+}
+
+/**
+ * The owner's Session-secret-tools setting, read under a share lock so a
+ * concurrent toggle blocks until this transaction commits. Every path that
+ * mints or extends substitutes calls this inside its transaction; the
+ * controller's preflight read is planning only.
+ */
+async function ownerExperimentLocked(
+  tx: DatabaseOrTransaction,
+  ownerUserId: string,
+): Promise<boolean> {
+  const [owner] = await tx
+    .select({ metadata: users.metadata })
+    .from(users)
+    .where(and(eq(users.id, ownerUserId), isNull(users.deletedAt)))
+    .for('share');
+  return (
+    Boolean(owner) && isSessionSecretToolsExperimentEnabled(owner!.metadata)
+  );
 }
 
 /** An active workload whose run, Session, owner, and attachment are all still live. */
@@ -154,7 +189,12 @@ async function liveWorkload(tx: DatabaseOrTransaction, workloadId: string) {
       ),
     )
     .for('update', { of: sessionEgressWorkloads });
-  return row?.workload ?? null;
+  // The owner's experiment gates the tools per request; a workload is only
+  // live while it stays on, so renewals and new substitutes stop with it.
+  if (!row) return null;
+  return (await ownerExperimentLocked(tx, row.workload.ownerUserId))
+    ? row.workload
+    : null;
 }
 
 /** Authorization for controller-to-worker delivery of substitute-only client config. */
@@ -224,6 +264,14 @@ async function mintMissingSubstitutes(
     )
     .orderBy(asc(sessionSecrets.createdAt));
   const issued: SessionEgressSubstituteIssue[] = [];
+  // Minting is the write boundary: the owner row is already share-locked by
+  // the caller's transaction, so this re-read cannot observe a newer toggle
+  // and simply refuses to write for an owner whose tools are off.
+  if (
+    grants.length > 0 &&
+    !(await ownerExperimentLocked(tx, workload.ownerUserId))
+  )
+    return issued;
   for (const grant of grants) {
     // Withheld plaintext is unrecoverable, so denied grants must remain mintable.
     if (!isOriginAllowed(grant.origin)) continue;
@@ -279,7 +327,12 @@ export async function registerSessionEgressWorkload(
       .where(eq(taskRuns.id, input.runId))
       .for('update');
     const eligible = await eligibleRunSession(tx, input.runId);
-    if (!eligible) throw new SessionEgressRegistrationError('run_not_eligible');
+    // The controller's preflight is planning only. The owner row is locked
+    // here for the rest of the transaction, so a toggle that lands between
+    // this read and the mint waits for the commit and then governs the next
+    // live check; nothing is minted for an owner who already turned it off.
+    if (!eligible || !(await ownerExperimentLocked(tx, eligible.ownerUserId)))
+      throw new SessionEgressRegistrationError('run_not_eligible');
 
     const [existing] = await tx
       .select()
@@ -556,6 +609,7 @@ async function authorizeSubstitute(
           archivedAt: sessions.archivedAt,
         },
         ownerDeletedAt: users.deletedAt,
+        ownerMetadata: users.metadata,
         run: { actingUserId: taskRuns.actingUserId, status: taskRuns.status },
         attached: sql<boolean>`exists (
         select 1 from ${sessionTasks}
@@ -609,6 +663,7 @@ async function authorizeSubstitute(
       secret.sessionId !== workload.sessionId ||
       session.archivedAt ||
       row.ownerDeletedAt ||
+      !isSessionSecretToolsExperimentEnabled(row.ownerMetadata) ||
       run.actingUserId !== workload.ownerUserId ||
       !ELIGIBLE_RUN_STATUSES.includes(run.status) ||
       !row.attached
