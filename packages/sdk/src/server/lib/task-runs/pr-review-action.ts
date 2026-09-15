@@ -375,11 +375,15 @@ async function retireLegacyPrReviewActionsForContext(
 export type RetirablePrReviewActionMessage = Pick<
   PendingPrReviewAction,
   'provider' | 'slackTeamId' | 'channelId' | 'threadId' | 'messageId'
->;
+> & {
+  /** Telegram callback text used only when no managed footer record exists. */
+  messageText?: string;
+};
 
 /** Removes controls from superseded review offers without failing delivery. */
 export async function retirePrReviewActionMessagesBestEffort(
   pendingActions: RetirablePrReviewActionMessage[],
+  options?: { resolution?: string },
 ): Promise<void> {
   for (const pending of pendingActions) {
     if (!pending.messageId) continue;
@@ -444,16 +448,45 @@ export async function retirePrReviewActionMessagesBestEffort(
               pending.channelId,
               footerThreadId,
             );
+            const matchingFooter =
+              footer?.messageId === messageId ? footer : null;
             await assertLock();
-            if (footer && footer.messageId === messageId && footer.buttons) {
-              const { buttons: _buttons, ...withoutButtons } = footer;
+            if (matchingFooter) {
+              const { buttons: _buttons, ...withoutButtons } = matchingFooter;
+              const nextFooter = options?.resolution
+                ? {
+                    ...withoutButtons,
+                    textWithoutFooter: [
+                      withoutButtons.textWithoutFooter,
+                      `_${options.resolution}_`,
+                    ]
+                      .filter(Boolean)
+                      .join('\n\n'),
+                  }
+                : withoutButtons;
               await setThreadReplyFooterRecord(
                 'telegram',
                 pending.channelId,
                 footerThreadId,
-                withoutButtons,
+                nextFooter,
                 { keepTtl: true, lock },
               );
+            }
+            const originalText =
+              matchingFooter?.textWithoutFooter ?? pending.messageText;
+            if (options?.resolution && originalText !== undefined) {
+              await adapter.editMessageText({
+                channelId: pending.channelId,
+                messageId,
+                text: [originalText, `_${options.resolution}_`]
+                  .filter(Boolean)
+                  .join('\n\n'),
+                textFormat: 'markdown',
+                ...(matchingFooter?.refresh
+                  ? { footerText: matchingFooter.refresh.footerText }
+                  : {}),
+              });
+              return;
             }
             await adapter.editMessageReplyMarkup({
               channelId: pending.channelId,
