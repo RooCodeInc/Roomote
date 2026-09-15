@@ -539,6 +539,9 @@ function buildPrReviewSummaryLifecycle(
         event: {
           kind: 'review_summary',
           providerEventId: `github-review-summary:${comment.id}:${revision}`,
+          ...(context.deliveryId
+            ? { sourceDeliveryId: context.deliveryId }
+            : {}),
           authorLogin,
           ...(markerSha ? { reviewHeadSha: markerSha } : {}),
           ...(reviewTaskId ? { reviewTaskId } : {}),

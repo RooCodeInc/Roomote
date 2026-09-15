@@ -692,7 +692,9 @@ function summaryPayload({
 
 describe('buildPrReviewSummaryNotification', () => {
   it('builds a review_summary event from a terminal Roomote summary comment on create', () => {
-    const notification = buildPrReviewSummaryNotification(summaryPayload());
+    const notification = buildPrReviewSummaryNotification(summaryPayload(), {
+      deliveryId: 'github-summary-delivery-1',
+    });
 
     expect(notification?.input).toEqual({
       repository: 'owner/repo',
@@ -702,6 +704,7 @@ describe('buildPrReviewSummaryNotification', () => {
       event: {
         kind: 'review_summary',
         providerEventId: 'github-review-summary:99:2026-08-10T19:30:00.000Z',
+        sourceDeliveryId: 'github-summary-delivery-1',
         authorLogin: 'roomote[bot]',
         reviewHeadSha,
         reviewTaskId: 'x',
