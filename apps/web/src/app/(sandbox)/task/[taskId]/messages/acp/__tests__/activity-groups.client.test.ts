@@ -694,14 +694,16 @@ describe('buildAcpActivityRenderBlocks', () => {
       toolResultBlock({ id: 'command-2', ts: 4_000, toolName: 'execute' }),
       manageArtifacts,
       messageBlock('reasoning-2', 6_000, 'reasoning'),
-      textBlock('text-2', 7_000),
+      toolResultBlock({ id: 'command-3', ts: 7_000, toolName: 'execute' }),
+      toolResultBlock({ id: 'command-4', ts: 8_000, toolName: 'execute' }),
+      textBlock('text-2', 9_000),
     ]);
 
     expect(entries.map((entry) => entry.kind)).toEqual([
       'message',
       'activity_group',
       'message',
-      'message',
+      'activity_group',
       'message',
     ]);
     expect(entries[1]).toMatchObject({
@@ -718,6 +720,17 @@ describe('buildAcpActivityRenderBlocks', () => {
     expect(entries[2]).toMatchObject({
       kind: 'message',
       msg: { id: 'artifact-tool' },
+    });
+    expect(entries[3]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-reasoning-2',
+      live: false,
+      endTs: 9_000,
+      blocks: [
+        { kind: 'message', msg: { id: 'reasoning-2' } },
+        { kind: 'message', msg: { id: 'command-3' } },
+        { kind: 'message', msg: { id: 'command-4' } },
+      ],
     });
   });
 

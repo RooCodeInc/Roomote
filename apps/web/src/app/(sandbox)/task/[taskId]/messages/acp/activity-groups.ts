@@ -284,7 +284,11 @@ function buildActivitySegmentRenderBlocks(
         ))
     ) {
       groupedBlocks.push(current);
-      hasLeftTextBoundary = false;
+      hasLeftTextBoundary = closesPrecedingActivitySegment(
+        current,
+        options.artifacts,
+        options.keepDelegatedTasksVisible,
+      );
       cursor += 1;
       continue;
     }
@@ -335,7 +339,11 @@ function buildActivitySegmentRenderBlocks(
       )
     ) {
       groupedBlocks.push(current);
-      hasLeftTextBoundary = false;
+      hasLeftTextBoundary = closesPrecedingActivitySegment(
+        current,
+        options.artifacts,
+        options.keepDelegatedTasksVisible,
+      );
       cursor += 1;
       continue;
     }
