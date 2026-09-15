@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 import { AcpActivityGroupMessage } from '../AcpActivityGroupMessage';
 import type { AcpActivityGroupRenderBlock } from '../activity-groups';
+import type { AcpToolCallUiMessage } from '../types';
 
 function buildGroup(): AcpActivityGroupRenderBlock {
   return {
@@ -88,5 +89,47 @@ describe('AcpActivityGroupMessage', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('First activity')).toBeVisible();
     expect(screen.getByText('Latest activity')).toBeVisible();
+  });
+
+  it('expands tool activity as a compact list instead of full tool messages', () => {
+    const tool: AcpToolCallUiMessage = {
+      id: 'tool-1',
+      ts: 2_000,
+      role: 'tool',
+      kind: 'tool_call',
+      partial: false,
+      sessionId: 'session-1',
+      updateType: 'roomote_runtime.tool_call',
+      data: {
+        toolCallId: 'call-1',
+        kind: 'mcp',
+        title: 'manage_tasks',
+        status: 'completed',
+        isExecute: false,
+        isRead: false,
+        isMcp: true,
+        mcpServerName: 'roomote',
+        mcpToolName: 'manage_tasks',
+        serverName: 'roomote',
+        toolName: 'manage_tasks',
+        command: null,
+      },
+    };
+    const group = {
+      ...buildGroup(),
+      blocks: [{ kind: 'message', msg: tool }],
+    } satisfies AcpActivityGroupRenderBlock;
+
+    render(
+      <AcpActivityGroupMessage group={group}>
+        <div>Full tool message</div>
+      </AcpActivityGroupMessage>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Worked for 17s/ }));
+
+    expect(screen.getByRole('list')).toBeVisible();
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+    expect(screen.queryByText('Full tool message')).not.toBeInTheDocument();
   });
 });

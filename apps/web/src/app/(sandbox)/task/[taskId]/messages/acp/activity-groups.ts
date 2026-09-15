@@ -222,6 +222,19 @@ export function buildAcpActivityRenderBlocks(
     return blocks;
   }
 
+  return buildActivitySegmentRenderBlocks(blocks, options);
+}
+
+/**
+ * Build one activity group per contiguous assistant-work segment. Narrative
+ * replies and progress headings are durable boundaries: a live group may grow
+ * only until the next such boundary, and the same group ID is retained after
+ * that segment settles into "Worked for …".
+ */
+function buildActivitySegmentRenderBlocks(
+  blocks: AcpRenderBlock[],
+  options: BuildAcpActivityRenderBlocksOptions,
+): AcpConversationRenderBlock[] {
   const groupedBlocks: AcpConversationRenderBlock[] = [];
   let cursor = 0;
   let hasLeftTextBoundary =

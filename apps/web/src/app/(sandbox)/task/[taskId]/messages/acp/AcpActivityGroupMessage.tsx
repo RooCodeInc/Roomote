@@ -2,25 +2,23 @@
 
 import type { ReactNode } from 'react';
 
-import {
-  Message,
-  MessageContent,
-  Shimmer,
-  ToolHeader,
-} from '@/components/ai-elements';
+import { Message, MessageContent, ToolHeader } from '@/components/ai-elements';
 import {
   AlertCircle,
   ChevronRight,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
+  Spinner,
 } from '@/components/system';
 import { sanitizeSandboxPathString } from '@/lib';
 import { cn } from '@/lib/utils';
 
 import type { AcpActivityGroupRenderBlock } from './activity-groups';
+import type { AcpRenderBlock } from './render-blocks';
 import { resolveToolPresentation } from './tool-presentation';
 import { mcpIntegrationIconFor, toolIconForKey } from './tool-icons';
+import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 
 interface AcpActivityGroupMessageProps {
   group: AcpActivityGroupRenderBlock;
@@ -44,6 +42,7 @@ export function AcpActivityGroupMessage({
         ? mcpIntegrationIconFor(presentation.integrationIcon)
         : toolIconForKey(presentation.iconKey)
     : null;
+  const activityTools = getActivityToolMessages(group.blocks);
 
   return (
     <Collapsible
@@ -59,20 +58,32 @@ export function AcpActivityGroupMessage({
           className="h-0 overflow-hidden"
         />
       ))}
-      {group.live && presentation && ToolIcon ? (
-        <ToolHeader
-          action={presentation.verb}
-          object={sanitizeSandboxPathString(presentation.object ?? '')}
-          suffix={presentation.providerLabel}
-          icon={ToolIcon}
-          state={
-            presentation.phase === 'failed'
-              ? 'output-error'
-              : presentation.phase === 'running'
-                ? 'input-available'
-                : 'output-available'
-          }
-        />
+      {group.live ? (
+        presentation && ToolIcon ? (
+          <ToolHeader
+            action={presentation.verb}
+            object={sanitizeSandboxPathString(presentation.object ?? '')}
+            suffix={presentation.providerLabel}
+            icon={ToolIcon}
+            state={
+              presentation.phase === 'failed'
+                ? 'output-error'
+                : presentation.phase === 'running'
+                  ? 'input-available'
+                  : 'output-available'
+            }
+          />
+        ) : (
+          <CollapsibleTrigger
+            className={cn(
+              'flex cursor-default items-center gap-2 py-1 text-sm font-light text-muted-foreground transition-opacity hover:opacity-50',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+            )}
+          >
+            <Spinner size="sm" />
+            <span>Working</span>
+          </CollapsibleTrigger>
+        )
       ) : (
         <div className="flex items-center gap-3">
           <CollapsibleTrigger
@@ -83,9 +94,7 @@ export function AcpActivityGroupMessage({
           >
             <ChevronRight className="size-4 transition-transform group-data-[state=open]/acp-activity:rotate-90" />
             <span>
-              {group.live
-                ? 'Working'
-                : `Worked for ${formatWorkedDuration(group.endTs - group.ts)}`}
+              Worked for {formatWorkedDuration(group.endTs - group.ts)}
             </span>
           </CollapsibleTrigger>
           <div
@@ -95,9 +104,87 @@ export function AcpActivityGroupMessage({
         </div>
       )}
       <CollapsibleContent className="mt-4 space-y-0 border-l border-border pl-4 ml-2 data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 data-[state=closed]:animate-out data-[state=open]:animate-in">
-        {children}
+        {activityTools.length > 0 ? (
+          <ul className="space-y-1">
+            {activityTools.map((tool) => (
+              <ActivityToolListItem key={tool.id} tool={tool} />
+            ))}
+          </ul>
+        ) : (
+          children
+        )}
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+function getActivityToolMessages(
+  blocks: AcpRenderBlock[],
+): Array<AcpToolCallUiMessage | AcpToolResultUiMessage> {
+  const tools: Array<{
+    message: AcpToolCallUiMessage | AcpToolResultUiMessage;
+    order: number;
+  }> = [];
+
+  function collect(nestedBlocks: AcpRenderBlock[]) {
+    for (const block of nestedBlocks) {
+      if (block.kind === 'tool_group') {
+        for (const item of block.items) {
+          tools.push({ message: item.msg, order: tools.length });
+        }
+        continue;
+      }
+
+      if (block.msg.kind === 'tool_call' || block.msg.kind === 'tool_result') {
+        tools.push({ message: block.msg, order: tools.length });
+      }
+
+      if (block.childBlocks) {
+        collect(block.childBlocks);
+      }
+    }
+  }
+
+  collect(blocks);
+
+  return tools
+    .sort(
+      (left, right) =>
+        left.message.ts - right.message.ts || left.order - right.order,
+    )
+    .map(({ message }) => message);
+}
+
+function ActivityToolListItem({
+  tool,
+}: {
+  tool: AcpToolCallUiMessage | AcpToolResultUiMessage;
+}) {
+  const presentation = resolveToolPresentation(tool.data, tool.partial);
+  const ToolIcon =
+    presentation.phase === 'failed'
+      ? AlertCircle
+      : presentation.integrationIcon
+        ? mcpIntegrationIconFor(presentation.integrationIcon)
+        : toolIconForKey(presentation.iconKey);
+
+  return (
+    <li>
+      <ToolHeader
+        action={presentation.verb}
+        object={sanitizeSandboxPathString(presentation.object ?? '')}
+        suffix={presentation.providerLabel}
+        icon={ToolIcon}
+        state={
+          presentation.phase === 'failed'
+            ? 'output-error'
+            : presentation.phase === 'running'
+              ? 'input-available'
+              : 'output-available'
+        }
+        collapsible={false}
+      />
+    </li>
   );
 }
 
@@ -105,7 +192,10 @@ export function AcpWorkingMessage() {
   return (
     <Message from="assistant" className="chat-reasoning-message">
       <MessageContent>
-        <Shimmer className="text-sm font-light">Working</Shimmer>
+        <div className="flex cursor-default items-center gap-2 text-sm font-light text-muted-foreground">
+          <Spinner size="sm" />
+          <span>Working</span>
+        </div>
       </MessageContent>
     </Message>
   );

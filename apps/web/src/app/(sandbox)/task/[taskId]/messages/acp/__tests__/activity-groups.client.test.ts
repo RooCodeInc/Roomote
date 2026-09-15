@@ -32,6 +32,17 @@ function textBlock(id: string, ts: number): AcpRenderBlock {
   };
 }
 
+function userTextBlock(id: string, ts: number): AcpRenderBlock {
+  const block = textBlock(id, ts);
+
+  if (block.kind !== 'message') throw new Error('Expected message block');
+
+  return {
+    ...block,
+    msg: { ...block.msg, role: 'user' },
+  };
+}
+
 function providerRetryBlock(params: {
   id: string;
   ts: number;
@@ -328,6 +339,115 @@ describe('buildAcpActivityRenderBlocks', () => {
       id: 'activity-tool-1',
       live: true,
       latestToolMessage: { id: 'tool-1' },
+    });
+  });
+
+  it('pre-groups only the trailing activity segment after the latest narrative update', () => {
+    const entries = buildAcpActivityRenderBlocks(
+      [
+        userTextBlock('user-1', 1_000),
+        toolResultBlock({ id: 'tool-1', ts: 2_000 }),
+        textBlock('progress-update', 3_000),
+        toolResultBlock({ id: 'tool-2', ts: 4_000, toolName: 'search' }),
+      ],
+      { isWorking: true },
+    );
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+      'activity_group',
+    ]);
+    expect(entries[1]).toMatchObject({
+      kind: 'message',
+      msg: { id: 'tool-1' },
+    });
+    expect(entries[3]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-tool-2',
+      live: true,
+      latestToolMessage: { id: 'tool-2' },
+      blocks: [{ kind: 'message', msg: { id: 'tool-2' } }],
+    });
+  });
+
+  it('uses progress headings as segment boundaries for live tool activity', () => {
+    const entries = buildAcpActivityRenderBlocks(
+      [
+        textBlock('text-1', 1_000),
+        toolResultBlock({ id: 'tool-1', ts: 2_000 }),
+        messageBlock('todo-1', 3_000, 'todo_section'),
+        toolResultBlock({ id: 'tool-2', ts: 4_000 }),
+      ],
+      { isWorking: true },
+    );
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+      'activity_group',
+    ]);
+    expect(entries[3]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-tool-2',
+      blocks: [{ kind: 'message', msg: { id: 'tool-2' } }],
+    });
+  });
+
+  it('keeps same-type tool groups inside the current activity segment', () => {
+    const entries = buildAcpActivityRenderBlocks(
+      [
+        userTextBlock('user-1', 1_000),
+        toolGroupBlock({
+          id: 'group-1',
+          ts: 2_000,
+          items: [
+            buildToolResult({ id: 'tool-1', ts: 2_000 }),
+            buildToolResult({ id: 'tool-2', ts: 3_000 }),
+          ],
+        }),
+      ],
+      { isWorking: true },
+    );
+
+    expect(entries[1]).toMatchObject({
+      kind: 'activity_group',
+      blocks: [
+        {
+          kind: 'tool_group',
+          items: [{ msg: { id: 'tool-1' } }, { msg: { id: 'tool-2' } }],
+        },
+      ],
+    });
+  });
+
+  it('keeps the same segment grouped when live activity settles', () => {
+    const blocks = [
+      userTextBlock('user-1', 1_000),
+      toolResultBlock({ id: 'tool-1', ts: 2_000 }),
+      textBlock('progress-update', 3_000),
+      toolResultBlock({ id: 'tool-2', ts: 4_000, toolName: 'search' }),
+      textBlock('final-response', 5_000),
+    ];
+    const entries = buildAcpActivityRenderBlocks(blocks, {
+      collapseSettledActivityIds: new Set(['activity-tool-2']),
+    });
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+      'activity_group',
+      'message',
+    ]);
+    expect(entries[3]).toMatchObject({
+      kind: 'activity_group',
+      id: 'activity-tool-2',
+      live: false,
+      endTs: 5_000,
+      blocks: [{ kind: 'message', msg: { id: 'tool-2' } }],
     });
   });
 
