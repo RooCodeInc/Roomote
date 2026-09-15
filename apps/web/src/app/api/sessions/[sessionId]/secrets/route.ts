@@ -4,14 +4,14 @@ import { db, eq, sessions, users } from '@roomote/db/server';
 import { replyToFastSessionCommand } from '@/trpc/commands/fast-sessions';
 
 import {
-  createSessionSecret,
-  listSessionSecretApprovals,
-  revokeSessionSecret,
-} from '@roomote/sdk/server/session-secrets';
+  createServiceCredential,
+  listServiceCredentialApprovals,
+  revokeServiceCredential,
+} from '@roomote/sdk/server/service-credentials';
 import {
-  isSessionSecretToolsExperimentEnabled,
-  sessionSecretCreateSchema,
-  sessionSecretRevokeSchema,
+  isServiceCredentialToolsExperimentEnabled,
+  serviceCredentialCreateSchema,
+  serviceCredentialRevokeSchema,
 } from '@roomote/types';
 
 import { authorize } from '@/lib/server/auth-context';
@@ -47,7 +47,7 @@ async function handle(
     const context = { sessionId: params.data.sessionId, userId: auth.userId };
 
     if (method === 'GET') {
-      return NextResponse.json(await listSessionSecretApprovals(context), {
+      return NextResponse.json(await listServiceCredentialApprovals(context), {
         headers,
       });
     }
@@ -78,9 +78,9 @@ async function handle(
     if (!body.ok) return error(body.status);
     const rawArgs = body.value;
     if (method === 'POST') {
-      const args = sessionSecretCreateSchema.safeParse(rawArgs);
+      const args = serviceCredentialCreateSchema.safeParse(rawArgs);
       if (!args.success) return error(400);
-      const secret = await createSessionSecret(context, args.data);
+      const secret = await createServiceCredential(context, args.data);
       let resumed = false;
       try {
         const [session, user] = await Promise.all([
@@ -106,8 +106,8 @@ async function handle(
         ) {
           await replyToFastSessionCommand(auth, {
             sessionId: session.fastConversationId,
-            text: isSessionSecretToolsExperimentEnabled(user?.metadata)
-              ? 'I saved an API key securely as an integration for every Session I own. Check list_session_secrets for ready integrations and continue the requested work using only the approved methods and destination. Attached coding runs may use this same integration. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.'
+            text: isServiceCredentialToolsExperimentEnabled(user?.metadata)
+              ? 'I saved an API key securely as an integration for every Session I own. Check list_integration_keys for ready integrations and continue the requested work using only the approved methods and destination. Attached coding runs may use this same integration. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.'
               : 'I saved an API key securely as an integration. Credential-backed Session access is temporarily unavailable. Explain that the integration was saved but cannot currently be used; do not attempt a credential-backed request or ask me to paste credentials into chat.',
           });
           resumed = true;
@@ -117,9 +117,9 @@ async function handle(
       }
       return NextResponse.json({ secret, resumed }, { status: 201, headers });
     }
-    const args = sessionSecretRevokeSchema.safeParse(rawArgs);
+    const args = serviceCredentialRevokeSchema.safeParse(rawArgs);
     if (!args.success) return error(400);
-    await revokeSessionSecret(context, args.data);
+    await revokeServiceCredential(context, args.data);
     return new NextResponse(null, { status: 204, headers });
   } catch {
     // Never log request values, validation details, or upstream exception messages.

@@ -388,7 +388,7 @@ describe('FastSessionTranscript', () => {
       ),
     );
     vi.stubGlobal('fetch', fetchMock);
-    window.location.hash = '#session-secrets';
+    window.location.hash = '#integrations';
     render(
       <FastSessionTranscript
         sessionId="fast-conversation"

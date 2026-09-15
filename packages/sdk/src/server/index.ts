@@ -592,6 +592,6 @@ export * from './lib/brain-inference';
 export * from './lib/brain-source-availability';
 export * from './lib/home-composer-recommendations';
 export {
-  publishSessionEgressDelivery,
-  isSessionEgressBootstrapReady,
-} from './lib/session-egress-delivery';
+  publishCredentialEgressDelivery,
+  isCredentialEgressBootstrapReady,
+} from './lib/credential-egress-delivery';

@@ -1744,7 +1744,7 @@ describe('Fast native OpenCode tool bridge', () => {
     'preserves the opaque Session request reference and empty body through the native bridge: %j',
     async (body) => {
       const runtime = await getFastAgentNativeToolRuntime(
-        'session-secret-bridge',
+        'service-credential-bridge',
         [],
       );
       const executor = vi.fn(async () => ({
@@ -1775,7 +1775,7 @@ describe('Fast native OpenCode tool bridge', () => {
             },
             body: JSON.stringify({
               sessionID: 'opencode-secret-session',
-              tool: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+              tool: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
               args,
             }),
           },
@@ -1784,7 +1784,7 @@ describe('Fast native OpenCode tool bridge', () => {
         expect(executor).toHaveBeenCalledExactlyOnceWith(
           expect.objectContaining({
             sessionId: 'opencode-secret-session',
-            name: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+            name: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
             args,
           }),
         );
@@ -1802,9 +1802,9 @@ describe('Fast native OpenCode tool bridge', () => {
 
   it.each([
     FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
-    FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret,
-    FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets,
-    FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+    FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
+    FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
+    FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
   ])('rejects unauthenticated and inactive-session %s calls', async (tool) => {
     const runtime = await getFastAgentNativeToolRuntime('native-auth', []);
     const body = JSON.stringify({

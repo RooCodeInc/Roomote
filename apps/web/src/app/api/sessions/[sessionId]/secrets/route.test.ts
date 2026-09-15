@@ -1,5 +1,5 @@
 import { GET, POST, DELETE } from './route';
-import { filterSessionSecretTelemetry } from '@/lib/server/session-secret-telemetry';
+import { filterServiceCredentialTelemetry } from '@/lib/server/service-credential-telemetry';
 
 const mocks = vi.hoisted(() => ({
   authorize: vi.fn(),
@@ -31,10 +31,10 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('@/trpc/commands/fast-sessions', () => ({
   replyToFastSessionCommand: mocks.reply,
 }));
-vi.mock('@roomote/sdk/server/session-secrets', () => ({
-  createSessionSecret: mocks.create,
-  listSessionSecretApprovals: mocks.list,
-  revokeSessionSecret: mocks.revoke,
+vi.mock('@roomote/sdk/server/service-credentials', () => ({
+  createServiceCredential: mocks.create,
+  listServiceCredentialApprovals: mocks.list,
+  revokeServiceCredential: mocks.revoke,
 }));
 
 const sessionId = 'e19702ce-306b-4db3-813c-77f299f1eb20';
@@ -90,7 +90,7 @@ beforeEach(() => {
   });
 });
 
-describe('session secret route boundary', () => {
+describe('integration key route boundary', () => {
   it.each([POST, DELETE])(
     'cancels stalled bodies after one 10-second budget',
     async (handler) => {
@@ -202,14 +202,14 @@ describe('session secret route boundary', () => {
 
   it('resumes with the available workflow when the experiment is enabled', async () => {
     mocks.findUser.mockResolvedValue({
-      metadata: { session_secret_tools_enabled: true },
+      metadata: { integration_keys_enabled: true },
     });
 
     await POST(request('POST', createArgs), props);
 
     expect(mocks.reply).toHaveBeenCalledWith(auth, {
       sessionId: fastConversationId,
-      text: expect.stringContaining('Check list_session_secrets'),
+      text: expect.stringContaining('Check list_integration_keys'),
     });
   });
 
@@ -221,9 +221,9 @@ describe('session secret route boundary', () => {
       'integration was saved but cannot currently be used',
     );
     for (const tool of [
-      'list_session_secrets',
-      'prepare_session_secret',
-      'request_with_session_secret',
+      'list_integration_keys',
+      'prepare_integration_key',
+      'request_with_integration_key',
     ]) {
       expect(text).not.toContain(tool);
     }
@@ -526,17 +526,17 @@ describe('secret route telemetry protection', () => {
     `/api/sessions/${sessionId}/%73ecrets`,
   ])('drops sensitive events rather than retaining copies elsewhere', (url) => {
     expect(
-      filterSessionSecretTelemetry({
+      filterServiceCredentialTelemetry({
         request: { url, data: plaintext },
         extra: { body: plaintext },
       }),
     ).toBeNull();
     expect(
-      filterSessionSecretTelemetry({ transaction: `POST ${url}` }),
+      filterServiceCredentialTelemetry({ transaction: `POST ${url}` }),
     ).toBeNull();
   });
   it('preserves unrelated route telemetry', () => {
     const event = { request: { url: '/api/sessions/123/presence' } };
-    expect(filterSessionSecretTelemetry(event)).toBe(event);
+    expect(filterServiceCredentialTelemetry(event)).toBe(event);
   });
 });

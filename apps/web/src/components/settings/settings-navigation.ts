@@ -109,10 +109,10 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     label: 'Integrations',
     title: 'Integrations',
     description:
-      'Enable deployment integrations. Individual users can optionally link their own accounts when an integration supports it.',
+      'Your API keys for services agents can call on your behalf, and the deployment integrations an admin enables. Individual users can optionally link their own accounts when an integration supports it.',
     href: SETTINGS_PATHS.integrations,
     icon: PlugIcon,
-    adminOnly: true,
+    adminOnly: false,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.integrations),
   },
   {

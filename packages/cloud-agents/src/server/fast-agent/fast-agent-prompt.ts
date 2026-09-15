@@ -227,7 +227,7 @@ export function buildFastAgentSystemPrompt({
   appEnv,
   setupSnapshot,
   setupSession = false,
-  sessionSecretToolsEnabled = false,
+  serviceCredentialToolsEnabled = false,
   personalizationContext,
   globalAgentInstructions,
   workspaceRoutingRules = [],
@@ -261,7 +261,7 @@ export function buildFastAgentSystemPrompt({
   setupSnapshot?: string;
   /** True only for the active conversational setup session. */
   setupSession?: boolean;
-  sessionSecretToolsEnabled?: boolean;
+  serviceCredentialToolsEnabled?: boolean;
   personalizationContext?: {
     displayName: string | null;
     instructions: string;
@@ -474,9 +474,9 @@ ${surface === 'slack' ? '- Charts supplied to "send_chat_reply" render as Slack 
 - If the answer is immediate, call the closeout tool directly.
 - Use \`request_user_input\` when the next step needs structured choices (for example a multi-select). Write self-contained questions with concrete options, or pass the required trusted preset without questions when setup instructions name one; only \`setup_integrations\` may also carry \`setupIntegrationAnswers\`. The input request is user-visible, ends the turn in needs_input without a separate reply, and resumes automatically with the submitted answers. For a single free-text or choice question, prefer a clarification reply instead, except for setup integration discovery's one-category-at-a-time structured questions.
 - Never ask for credentials in chat, including structured input. ${
-    sessionSecretToolsEnabled
-      ? 'When work needs a service the human holds a key for, use their integrations. First call `list_session_secrets`: a ready reference means the key is already approved in some Session and usable here, and a pending approval means the human still has to enter it, so re-share the `sessionUrl` that call returns instead of preparing again. If nothing exists, read the service documentation for its HTTPS origin and the header that carries its key, then call `prepare_session_secret` with only a label, origin, header name, optional scheme prefix, and the exact HTTP methods the work needs (omit for read-only); omit the lifetime unless the human asked for a temporary key. Share the returned secure link so the human enters the key privately; it then becomes an integration for every Session they own. Never ask for the key in chat and never ask the human to copy a reference. Preparation is not approval. Once a reference is ready: for a quick GET or HEAD read, call `request_with_session_secret` directly with the reference, method, an origin-relative path, and optional accept, without another confirmation, and report the actual result. For scripts, SDKs, CLIs, several calls, or approved write methods, launch a coding task attached to this Session instead: it receives every approved service as a substitute token plus a base URL and uses ordinary HTTP clients, while the real key stays server-side. Name the service label in the task instruction and never put a key or reference in a task prompt or environment. Never invent a reference or substitute another credential. In web Sessions these tools need no opening `send_chat_reply`.'
-      : 'Session-secret tools are temporarily unavailable. Use existing connected integrations when available; otherwise explain that credential-backed Session access is unavailable.'
+    serviceCredentialToolsEnabled
+      ? 'When work needs a service the human holds a key for, use their integrations. First call `list_integration_keys`: a ready reference means the key is already approved in some Session and usable here, and a pending approval means the human still has to enter it, so re-share the `sessionUrl` that call returns instead of preparing again. If nothing exists, read the service documentation for its HTTPS origin and the header that carries its key, then call `prepare_integration_key` with only a label, origin, header name, optional scheme prefix, and the exact HTTP methods the work needs (omit for read-only); omit the lifetime unless the human asked for a temporary key. Share the returned secure link so the human enters the key privately; it then becomes an integration for every Session they own. Never ask for the key in chat and never ask the human to copy a reference. Preparation is not approval. Once a reference is ready: for a quick GET or HEAD read, call `request_with_integration_key` directly with the reference, method, an origin-relative path, and optional accept, without another confirmation, and report the actual result. For scripts, SDKs, CLIs, several calls, or approved write methods, launch a coding task attached to this Session instead: it receives every approved service as a substitute token plus a base URL and uses ordinary HTTP clients, while the real key stays server-side. Name the service label in the task instruction and never put a key or reference in a task prompt or environment. Never invent a reference or substitute another credential. In web Sessions these tools need no opening `send_chat_reply`.'
+      : 'Integration-key tools are temporarily unavailable. Use existing connected integrations when available; otherwise explain that credential-backed Session access is unavailable.'
   }
 ${reactionGuidance}
 ${emailCadenceGuidance}- Prefer one direct closeout over an acknowledgement followed immediately by the same answer.

@@ -10,9 +10,9 @@ import { once } from 'node:events';
 import {
   CALL_INTEGRATION_TOOL_TOOL,
   FAST_AGENT_NATIVE_TOOL_NAMES,
-  sessionSecretRequestSchema,
-  sessionSecretPrepareSchema,
-  sessionSecretPrepareToolSchema,
+  serviceCredentialRequestSchema,
+  serviceCredentialPrepareSchema,
+  serviceCredentialPrepareToolSchema,
   MANAGE_WAKEUPS_TOOL,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -276,10 +276,10 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       await rm(dirname(join(workDir, 'x')), { recursive: true, force: true });
   });
 
-  it('generates a concrete bounded Session-secret request shape without caller identity', async () => {
+  it('generates a concrete bounded Integration-key request shape without caller identity', async () => {
     const tool = tools.find(
       ({ name }) =>
-        name === FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+        name === FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
     )!;
     expect(Object.keys(tool.args!).sort()).toEqual([
       'accept',
@@ -306,10 +306,10 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       method: 'GET',
       path: '/status',
     };
-    expect(sessionSecretRequestSchema.safeParse(args).success).toBe(true);
+    expect(serviceCredentialRequestSchema.safeParse(args).success).toBe(true);
     for (const body of [undefined, null, '']) {
       expect(
-        sessionSecretRequestSchema.safeParse({ ...args, body }).success,
+        serviceCredentialRequestSchema.safeParse({ ...args, body }).success,
       ).toBe(true);
       expect(validator.compile(schema)({ ...args, body })).toBe(true);
     }
@@ -326,24 +326,28 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       { ...args, body: ' ' },
       { ...args, body: {} },
     ]) {
-      expect(sessionSecretRequestSchema.safeParse(invalid).success).toBe(false);
+      expect(serviceCredentialRequestSchema.safeParse(invalid).success).toBe(
+        false,
+      );
     }
     const execute = tool.execute as (
       args: unknown,
       context: unknown,
     ) => Promise<unknown>;
     expect(await execute(args, {})).toEqual({
-      name: 'request_with_session_secret',
+      name: 'request_with_integration_key',
       args,
     });
   });
 
   it('generates concrete nonsecret preparation and empty status schemas', async () => {
     const prepare = tools.find(
-      ({ name }) => name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret,
+      ({ name }) =>
+        name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
     )!;
     const status = tools.find(
-      ({ name }) => name === FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets,
+      ({ name }) =>
+        name === FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
     )!;
     const schema = toOpenCodeJsonSchema(zod, prepare.args!);
     expect(Object.keys(prepare.args!).sort()).toEqual([
@@ -384,12 +388,12 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       headerName: 'authorization',
       headerPrefix: 'Bearer ',
     };
-    expect(sessionSecretPrepareSchema.parse(args)).toEqual({
+    expect(serviceCredentialPrepareSchema.parse(args)).toEqual({
       ...args,
       allowedMethods: ['GET', 'HEAD'],
     });
     expect(
-      sessionSecretPrepareToolSchema.parse({
+      serviceCredentialPrepareToolSchema.parse({
         label: 'API',
         origin: 'https://api.example.com',
         headerName: 'x-api-key',
@@ -402,7 +406,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       allowedMethods: ['GET', 'HEAD'],
     });
     expect(
-      sessionSecretPrepareSchema.parse({
+      serviceCredentialPrepareSchema.parse({
         ...args,
         allowedMethods: ['POST', 'GET'],
       }).allowedMethods,
@@ -421,11 +425,12 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       { allowedMethods: ['OPTIONS'] },
     ]) {
       expect(
-        sessionSecretPrepareToolSchema.safeParse({ ...args, ...extra }).success,
+        serviceCredentialPrepareToolSchema.safeParse({ ...args, ...extra })
+          .success,
       ).toBe(false);
     }
     expect(
-      sessionSecretPrepareSchema.parse({ ...args, headerPrefix: '' })
+      serviceCredentialPrepareSchema.parse({ ...args, headerPrefix: '' })
         .headerPrefix,
     ).toBe('');
     for (const [tool, input] of [
@@ -457,7 +462,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
   // Opt in where the pinned OpenCode binary is installed. No real provider
   // credentials/config are inherited; both providers terminate at this mock.
   it.skipIf(process.env.ROOMOTE_TEST_OPENCODE_SCHEMAS !== '1')(
-    'captures the Session-secret schema emitted to OpenAI and Anthropic HTTP endpoints',
+    'captures the Integration-key schema emitted to OpenAI and Anthropic HTTP endpoints',
     async () => {
       const requests: Record<string, unknown>[] = [];
       const provider = createServer(async (request, response) => {
@@ -521,9 +526,9 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
                 build: {
                   tools: {
                     '*': false,
-                    request_with_session_secret: true,
-                    prepare_session_secret: true,
-                    list_session_secrets: true,
+                    request_with_integration_key: true,
+                    prepare_integration_key: true,
+                    list_integration_keys: true,
                   },
                 },
               },
@@ -582,7 +587,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
           });
           for (const [name, properties] of [
             [
-              FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret,
+              FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
               {
                 label: { type: 'string' },
                 origin: { type: 'string' },
@@ -592,7 +597,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
                 allowedMethods: { type: 'array' },
               },
             ],
-            [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets, {}],
+            [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials, {}],
           ] as const) {
             const tool = requests
               .flatMap(
@@ -610,7 +615,9 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
                 ? tool!.input_schema
                 : tool!.parameters;
             expect(schema).toMatchObject({ type: 'object', properties });
-            if (name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret) {
+            if (
+              name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential
+            ) {
               expect(
                 (schema as { required?: string[] }).required,
               ).not.toContain('headerPrefix');
@@ -632,7 +639,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
             .find(
               (tool) =>
                 tool.name ===
-                FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+                FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
             );
           expect(emitted, `${providerID}: ${output}`).toBeDefined();
           const schema =

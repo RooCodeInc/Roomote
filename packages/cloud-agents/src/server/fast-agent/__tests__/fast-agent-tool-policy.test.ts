@@ -11,11 +11,14 @@ import {
 describe('getFastAgentNativeAcpKind', () => {
   it.each([
     [
-      FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+      FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
       ACP_TOOL_KINDS.read,
     ],
-    [FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret, ACP_TOOL_KINDS.tool],
-    [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets, ACP_TOOL_KINDS.list],
+    [
+      FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
+      ACP_TOOL_KINDS.tool,
+    ],
+    [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials, ACP_TOOL_KINDS.list],
   ])('temporarily hides %s from every Fast surface', (name, kind) => {
     expect(FAST_AGENT_NATIVE_TOOL_FILTER[name]).toBe(false);
     expect(buildFastAgentToolFilter([], { surface: 'web' })[name]).toBe(false);
@@ -25,7 +28,7 @@ describe('getFastAgentNativeAcpKind', () => {
     expect(
       buildFastAgentToolFilter([], {
         surface: 'web',
-        sessionSecretToolsEnabled: true,
+        serviceCredentialToolsEnabled: true,
       })[name],
     ).toBe(true);
     expect(FAST_AGENT_SUBAGENT_TOOL_FILTER[name]).toBe(false);

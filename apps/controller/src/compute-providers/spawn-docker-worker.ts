@@ -10,7 +10,7 @@ import {
   SANDBOX_SERVER_NAMED_PORT,
   TaskRunErrorCode,
   type NamedPort,
-  sessionEgressProxyBaseUrl,
+  credentialEgressProxyBaseUrl,
 } from '@roomote/types';
 import { Env, resolveAppEnv } from '@roomote/env';
 import {
@@ -34,7 +34,7 @@ import {
   updateTaskRunMachine,
 } from '../utils';
 import { resolveFromWorkspaceRoot } from '../repo-paths';
-import type { SessionEgressLifecycle } from '../session-egress/lifecycle';
+import type { CredentialEgressLifecycle } from '../credential-egress/lifecycle';
 import {
   attachDockerEgressPolicy,
   buildDockerTaskDaemonResourceArgs,
@@ -141,7 +141,7 @@ export async function spawnDockerWorker(
     deploymentSlug?: string;
     signal?: AbortSignal;
     /** Session-egress registration/rotation; omitted in unit paths that do not exercise it. */
-    sessionEgress?: SessionEgressLifecycle;
+    credentialEgress?: CredentialEgressLifecycle;
   },
 ): Promise<{ containerId: string }> {
   if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
@@ -483,10 +483,10 @@ export async function spawnDockerWorker(
     // worker already reaches the API on (the `api` alias on a control
     // network, or the container-reachable API URL); a public proxy hostname
     // is not assumed reachable from a task network.
-    const sessionEgressPlan = await config.sessionEgress?.planApiProxy({
+    const credentialEgressPlan = await config.credentialEgress?.planApiProxy({
       taskRun,
       provider: 'docker',
-      baseUrl: sessionEgressProxyBaseUrl(workerTrpcUrl),
+      baseUrl: credentialEgressProxyBaseUrl(workerTrpcUrl),
     });
     const workerEnv = buildDockerWorkerEnv({
       authToken,
@@ -530,7 +530,7 @@ export async function spawnDockerWorker(
         }),
         // Bootstrap runs with ordinary connectivity but without any usable
         // substitutes. Only the controller can publish verified admission.
-        ...sessionEgressPlan?.bootstrapEnv,
+        ...credentialEgressPlan?.bootstrapEnv,
       },
     });
 
@@ -556,7 +556,7 @@ export async function spawnDockerWorker(
     // The worker is waiting on the bootstrap nonce after its ordinary
     // bootstrap; an admission failure fails the spawn rather than leaving a
     // worker that expected substitutes without them.
-    const sessionEgressWorkload = await sessionEgressPlan?.admit();
+    const credentialEgressWorkload = await credentialEgressPlan?.admit();
 
     console.log(
       `[spawnDockerWorker] Docker worker launched for task run #${taskRun.id} ${JSON.stringify(
@@ -565,11 +565,11 @@ export async function spawnDockerWorker(
           containerId,
           trpcUrl: sanitizeDockerWorkerTrpcUrlForLog(workerTrpcUrl),
           envKeys: Object.keys(workerEnv).sort(),
-          sessionEgress: sessionEgressWorkload
+          credentialEgress: credentialEgressWorkload
             ? {
-                workloadId: sessionEgressWorkload.workloadId,
-                generation: sessionEgressWorkload.generation,
-                substituteCount: sessionEgressWorkload.substitutes.length,
+                workloadId: credentialEgressWorkload.workloadId,
+                generation: credentialEgressWorkload.generation,
+                substituteCount: credentialEgressWorkload.substitutes.length,
               }
             : null,
         },

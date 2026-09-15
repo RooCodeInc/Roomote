@@ -1,5 +1,5 @@
 import { db, eq, users } from '@roomote/db/server';
-import { isSessionSecretToolsExperimentEnabled } from '@roomote/types';
+import { isServiceCredentialToolsExperimentEnabled } from '@roomote/types';
 
 import { findLatestGithubIdentityForUser } from '../commit-author';
 
@@ -7,7 +7,7 @@ interface FastAgentUserIdentity {
   displayName: string | null;
   githubLogin: string | null;
   isAdmin: boolean;
-  sessionSecretToolsEnabled: boolean;
+  serviceCredentialToolsEnabled: boolean;
 }
 
 export async function getFastAgentUserIdentity(
@@ -25,7 +25,7 @@ export async function getFastAgentUserIdentity(
     displayName: user?.name?.trim() || null,
     githubLogin: githubIdentity.githubLogin,
     isAdmin: user?.role === 'admin',
-    sessionSecretToolsEnabled: isSessionSecretToolsExperimentEnabled(
+    serviceCredentialToolsEnabled: isServiceCredentialToolsExperimentEnabled(
       user?.metadata,
     ),
   };

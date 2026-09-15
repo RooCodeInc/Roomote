@@ -11,7 +11,7 @@ It is intentionally written as a set of **normative requirements** (“MUST/SHOU
 
 ## 0) Safety, boundaries, and anti-abuse constraints (MUST FOLLOW)
 
-* MUST NOT request, output, log, or commit secrets (API keys, passwords, private keys, session secrets, cookies, tokens).
+* MUST NOT request, output, log, or commit secrets (API keys, passwords, private keys, integration keys, cookies, tokens).
 * MUST NOT “fix” security by disabling protections (e.g., weakening cookie flags, disabling CSRF defenses for cookie-authenticated apps, enabling permissive CORS, trusting proxy headers from the open internet, turning on debugging/stack traces in production, disabling TLS without a replacement).
 * MUST provide **evidence-based findings** during audits: cite file paths, code snippets, middleware/config values, and runtime assumptions that justify the claim.
 * MUST treat uncertainty honestly: if a protection might exist in infrastructure (reverse proxy, gateway, WAF, CDN), report it as “not visible in app code; verify at runtime/config.”
@@ -331,7 +331,7 @@ Severity: High
 Required:
 
 * MUST NOT use `MemoryStore` in production (it is not designed for production use).
-* MUST store session secrets outside source control and rotate them safely.
+* MUST store integration keys outside source control and rotate them safely.
 * SHOULD regenerate sessions on login / privilege changes to reduce session fixation risk.
 * MUST NOT store sensitive secrets in client-readable cookie sessions.
 

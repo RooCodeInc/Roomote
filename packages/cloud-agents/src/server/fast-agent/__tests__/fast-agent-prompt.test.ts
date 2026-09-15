@@ -717,14 +717,14 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('native JSON schema');
     for (const name of [
-      'prepare_session_secret',
-      'list_session_secrets',
-      'request_with_session_secret',
+      'prepare_integration_key',
+      'list_integration_keys',
+      'request_with_integration_key',
     ]) {
       expect(prompt).not.toContain(name);
     }
     expect(prompt).toContain(
-      'Session-secret tools are temporarily unavailable',
+      'Integration-key tools are temporarily unavailable',
     );
     expect(prompt).toContain(
       'The runtime rejects those actions until a visible text reply has been delivered',
@@ -732,12 +732,12 @@ describe('buildFastAgentSystemPrompt', () => {
 
     const enabledPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      sessionSecretToolsEnabled: true,
+      serviceCredentialToolsEnabled: true,
     });
-    expect(enabledPrompt).toContain('`prepare_session_secret`');
-    expect(enabledPrompt).toContain('`list_session_secrets`');
+    expect(enabledPrompt).toContain('`prepare_integration_key`');
+    expect(enabledPrompt).toContain('`list_integration_keys`');
     expect(enabledPrompt).not.toContain(
-      'Session-secret tools are temporarily unavailable',
+      'Integration-key tools are temporarily unavailable',
     );
     expect(prompt).toContain(
       'On a human-authored turn, acknowledge first, then send the instruction immediately',

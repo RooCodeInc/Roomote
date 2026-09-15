@@ -22,7 +22,7 @@ const mockReleaseRedisLock = Object.assign(
   { renewDetailed: mockRenewRedisLock },
 );
 const mockDbExecute = vi.fn().mockResolvedValue([]);
-const mockTerminateSessionEgress = vi.fn().mockResolvedValue([]);
+const mockTerminateCredentialEgress = vi.fn().mockResolvedValue([]);
 const mockRecordTaskRunLifecycleEvent = vi.fn().mockResolvedValue(undefined);
 const mockCleanupSandboxOidcTargetsForTaskRun = vi
   .fn()
@@ -132,8 +132,8 @@ vi.mock('@roomote/db/server', async () => {
     );
   return {
     ...actual,
-    terminateSessionEgressWorkloadsForRun: (...args: unknown[]) =>
-      mockTerminateSessionEgress(...args),
+    terminateCredentialEgressWorkloadsForRun: (...args: unknown[]) =>
+      mockTerminateCredentialEgress(...args),
     db: {
       query: {
         taskRuns: {
@@ -598,7 +598,7 @@ describe('finishRun', () => {
     await finishRun({ id: 1, status: RunStatus.Idle });
 
     expect(mockCaptureTaskSettled).not.toHaveBeenCalled();
-    expect(mockTerminateSessionEgress).not.toHaveBeenCalled();
+    expect(mockTerminateCredentialEgress).not.toHaveBeenCalled();
     expect(mockNotifyWebTaskInitiatorOnSettle).not.toHaveBeenCalled();
   });
 
@@ -637,7 +637,7 @@ describe('finishRun', () => {
       state: 'completed',
       updatedAt: expect.any(Date),
     });
-    expect(mockTerminateSessionEgress).toHaveBeenCalledWith(
+    expect(mockTerminateCredentialEgress).toHaveBeenCalledWith(
       1,
       'completed',
       expect.anything(),
@@ -658,7 +658,7 @@ describe('finishRun', () => {
       state: 'canceled',
       updatedAt: expect.any(Date),
     });
-    expect(mockTerminateSessionEgress).toHaveBeenCalledWith(
+    expect(mockTerminateCredentialEgress).toHaveBeenCalledWith(
       1,
       'stopped',
       expect.anything(),
@@ -680,7 +680,7 @@ describe('finishRun', () => {
       state: 'failed',
       updatedAt: expect.any(Date),
     });
-    expect(mockTerminateSessionEgress).toHaveBeenCalledWith(
+    expect(mockTerminateCredentialEgress).toHaveBeenCalledWith(
       1,
       'failed',
       expect.anything(),
