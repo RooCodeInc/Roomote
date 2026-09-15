@@ -1,7 +1,7 @@
 import type { TaskRun } from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
 
-const mockCreateDaytonaMachine = vi.fn();
+const mockCreateE2bMachine = vi.fn();
 const mockRunCommand = vi.fn();
 const mockRecordMutation = vi.fn();
 const mockCreateComputeProviderClient = vi.fn((_arg?: unknown) => ({
@@ -38,15 +38,14 @@ vi.mock('@roomote/compute-providers', async (importOriginal) => {
 
   return {
     ...actual,
-    createDaytonaMachine: (...args: unknown[]) =>
-      mockCreateDaytonaMachine(...args),
+    createE2bMachine: (...args: unknown[]) => mockCreateE2bMachine(...args),
     createComputeProviderClient: (arg: unknown) =>
       mockCreateComputeProviderClient(arg),
     buildComputeProviderMutationDetails: vi.fn(
       (_context: unknown, details: Record<string, unknown> = {}) => details,
     ),
-    buildDaytonaWorkerEnv: vi.fn(() => ({ AUTH_TOKEN: 'auth_token' })),
-    cleanupDaytonaInstance: vi.fn(),
+    buildE2bWorkerEnv: vi.fn(() => ({ AUTH_TOKEN: 'auth_token' })),
+    cleanupE2bInstance: vi.fn(),
     resolveAuthBypassHeaderName: vi.fn(() => undefined),
     resolveAuthBypassValue: vi.fn(() => undefined),
   };
@@ -65,128 +64,73 @@ vi.mock('../../sandbox-oidc', () => ({
     mockPrimeEnvironmentOidcForMachine(...args),
 }));
 
-const { spawnDaytonaWorker } = await import('../spawn-daytona-worker');
-const { buildDaytonaWorkerEnv, cleanupDaytonaInstance } =
+const { spawnE2bWorker } = await import('../spawn-e2b-worker');
+const { buildE2bWorkerEnv, cleanupE2bInstance } =
   await import('@roomote/compute-providers');
 
-describe('spawnDaytonaWorker', () => {
+const config = {
+  e2bApiKey: 'api-key',
+  e2bTemplateId: 'worker-template',
+  e2bTimeoutMs: 60_000,
+};
+
+describe('spawnE2bWorker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCreateDaytonaMachine.mockResolvedValue({
-      machineId: 'daytona-machine-123',
-      domain: vi.fn().mockReturnValue('daytona.example.com'),
+    mockCreateE2bMachine.mockResolvedValue({
+      machineId: 'e2b-machine-123',
+      domain: vi.fn().mockReturnValue('e2b.example.com'),
       proxyPorts: {},
     });
     mockRunCommand.mockResolvedValue({
       exitCode: null,
       commandId: 'cmd_123',
     });
+    mockGetNamedPortsForTaskRun.mockResolvedValue({
+      namedPorts: [],
+      environmentSnapshotId: undefined,
+      environmentConfig: undefined,
+    });
     mockUpdateTaskRunMachine.mockResolvedValue(undefined);
     mockPrimeEnvironmentOidcForMachine.mockResolvedValue(undefined);
     mockFindTask.mockResolvedValue({ workflow: 'standard' });
   });
 
-  it('launches environments with docker projects', async () => {
-    mockGetNamedPortsForTaskRun.mockResolvedValue({
-      namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
-      environmentSnapshotId: undefined,
-      environmentConfig: {
-        docker_projects: [
-          {
-            name: 'app',
-            type: 'compose',
-            repository: 'test/repo',
-            files: ['compose.yaml'],
-          },
-        ],
-      },
-    });
-
-    const result = await spawnDaytonaWorker(
+  it('launches a fresh worker and reports its detached command', async () => {
+    const result = await spawnE2bWorker(
       {
         id: 123,
         taskId: 'task_123',
-        vendor: 'daytona',
+        vendor: 'e2b',
         sourceSnapshotId: null,
         payloadKind: TaskPayloadKind.StandardTask,
-        payload: { repo: 'test/repo', environmentId: 'env_123' },
+        payload: { repo: 'test/repo' },
       } as unknown as TaskRun,
       'auth_token',
-      {
-        deploymentSlug: 'roomote',
-        daytonaApiKey: 'api-key',
-        daytonaSnapshotName: 'worker-snapshot',
-        daytonaTimeoutMs: 60_000,
-      },
+      config,
     );
 
-    expect(mockCreateDaytonaMachine).toHaveBeenCalledWith(
+    expect(mockCreateE2bMachine).toHaveBeenCalledWith(
       expect.objectContaining({
-        daytonaSnapshotName: 'worker-snapshot',
+        e2bTemplateId: 'worker-template',
         launchMode: 'fresh',
       }),
     );
-    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: 'daytona',
-        config: expect.objectContaining({ memoryGiB: 8 }),
-      }),
-    );
-    expect(mockUpdateTaskRunMachine).toHaveBeenCalledWith(
-      expect.objectContaining({ configuredMemoryMiB: 8192 }),
-    );
     expect(mockRunCommand).toHaveBeenCalledWith(
       expect.objectContaining({
-        instanceId: 'daytona-machine-123',
+        instanceId: 'e2b-machine-123',
         cmd: 'worker',
         args: ['run', '123'],
         detached: true,
       }),
     );
     expect(result).toEqual({
-      machineId: 'daytona-machine-123',
+      machineId: 'e2b-machine-123',
       sandboxCmdId: 'cmd_123',
     });
   });
 
-  it('uses 4 GiB for a task that does not need nested Docker', async () => {
-    mockGetNamedPortsForTaskRun.mockResolvedValue({
-      namedPorts: [],
-      environmentSnapshotId: undefined,
-      environmentConfig: undefined,
-    });
-
-    await spawnDaytonaWorker(
-      {
-        id: 124,
-        taskId: 'task_124',
-        vendor: 'daytona',
-        sourceSnapshotId: null,
-        payloadKind: TaskPayloadKind.StandardTask,
-        payload: { repo: 'test/repo' },
-      } as unknown as TaskRun,
-      'auth_token',
-      {
-        daytonaApiKey: 'api-key',
-        daytonaSnapshotName: 'worker-snapshot',
-        daytonaTimeoutMs: 60_000,
-      },
-    );
-
-    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: 'daytona',
-        config: expect.objectContaining({ memoryGiB: 4 }),
-      }),
-    );
-  });
-
   it('carries the Session egress bootstrap env and admits after the worker launches', async () => {
-    mockGetNamedPortsForTaskRun.mockResolvedValue({
-      namedPorts: [],
-      environmentSnapshotId: undefined,
-      environmentConfig: undefined,
-    });
     const admit = vi.fn().mockResolvedValue({
       workloadId: 'w1',
       generation: 1,
@@ -203,22 +147,20 @@ describe('spawnDaytonaWorker', () => {
     const taskRun = {
       id: 123,
       taskId: 'task_123',
-      vendor: 'daytona',
+      vendor: 'e2b',
       sourceSnapshotId: null,
       payloadKind: TaskPayloadKind.StandardTask,
       payload: { repo: 'test/repo' },
     } as unknown as TaskRun;
 
-    await spawnDaytonaWorker(taskRun, 'auth_token', {
-      daytonaApiKey: 'api-key',
-      daytonaSnapshotName: 'worker-snapshot',
-      daytonaTimeoutMs: 60_000,
+    await spawnE2bWorker(taskRun, 'auth_token', {
+      ...config,
       sessionEgress: { planApiProxy } as never,
     });
 
-    expect(planApiProxy).toHaveBeenCalledWith({ taskRun, provider: 'daytona' });
+    expect(planApiProxy).toHaveBeenCalledWith({ taskRun, provider: 'e2b' });
     expect(
-      vi.mocked(buildDaytonaWorkerEnv).mock.calls.at(-1)![0].extraEnv,
+      vi.mocked(buildE2bWorkerEnv).mock.calls.at(-1)![0].extraEnv,
     ).toMatchObject({
       ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
       ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
@@ -231,11 +173,6 @@ describe('spawnDaytonaWorker', () => {
   });
 
   it('cleans up the sandbox when Session egress admission fails after launch', async () => {
-    mockGetNamedPortsForTaskRun.mockResolvedValue({
-      namedPorts: [],
-      environmentSnapshotId: undefined,
-      environmentConfig: undefined,
-    });
     const planApiProxy = vi.fn().mockResolvedValue({
       required: true,
       bootstrapEnv: {
@@ -250,27 +187,22 @@ describe('spawnDaytonaWorker', () => {
     });
 
     await expect(
-      spawnDaytonaWorker(
+      spawnE2bWorker(
         {
           id: 123,
           taskId: 'task_123',
-          vendor: 'daytona',
+          vendor: 'e2b',
           sourceSnapshotId: null,
           payloadKind: TaskPayloadKind.StandardTask,
           payload: { repo: 'test/repo' },
         } as unknown as TaskRun,
         'auth_token',
-        {
-          daytonaApiKey: 'api-key',
-          daytonaSnapshotName: 'worker-snapshot',
-          daytonaTimeoutMs: 60_000,
-          sessionEgress: { planApiProxy } as never,
-        },
+        { ...config, sessionEgress: { planApiProxy } as never },
       ),
     ).rejects.toThrow('Session egress bootstrap admission timed out');
-    expect(cleanupDaytonaInstance).toHaveBeenCalledWith(
+    expect(cleanupE2bInstance).toHaveBeenCalledWith(
       expect.objectContaining({
-        instanceId: 'daytona-machine-123',
+        instanceId: 'e2b-machine-123',
         phase: 'spawn_worker',
       }),
     );
