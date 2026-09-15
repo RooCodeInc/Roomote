@@ -203,6 +203,7 @@ describe('parseSlackMessagePermalink', () => {
       ),
     ).toEqual({
       teamId: null,
+      teamDomain: 'acme',
       channelId: 'C123',
       messageId: '1710000000.000100',
     });
@@ -213,6 +214,7 @@ describe('parseSlackMessagePermalink', () => {
       ),
     ).toEqual({
       teamId: null,
+      teamDomain: null,
       channelId: 'C456',
       messageId: '1710000000.000200',
     });
@@ -225,6 +227,7 @@ describe('parseSlackMessagePermalink', () => {
       ),
     ).toEqual({
       teamId: 'T123',
+      teamDomain: null,
       channelId: 'C456',
       messageId: '1710000000.000100',
     });
@@ -246,10 +249,10 @@ describe('parseSlackChannelPermalink', () => {
   it('parses workspace archive and app client channel links', () => {
     expect(
       parseSlackChannelPermalink('https://acme.slack.com/archives/C123'),
-    ).toEqual({ teamId: null, channelId: 'C123' });
+    ).toEqual({ teamId: null, teamDomain: 'acme', channelId: 'C123' });
     expect(
       parseSlackChannelPermalink('https://app.slack.com/client/T123/C456'),
-    ).toEqual({ teamId: 'T123', channelId: 'C456' });
+    ).toEqual({ teamId: 'T123', teamDomain: null, channelId: 'C456' });
   });
 
   it('does not treat a message link as a channel-only link', () => {
