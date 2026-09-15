@@ -2615,6 +2615,7 @@ export async function deliverFastAgentParentEvent(
 async function isScheduledWakeupDeliverable(params: {
   wakeupId: string;
   conversationId: string;
+  allowCancelled?: boolean;
 }): Promise<boolean> {
   const [wakeup, session] = await Promise.all([
     getSessionWakeupById(params.wakeupId),
@@ -2622,7 +2623,7 @@ async function isScheduledWakeupDeliverable(params: {
   ]);
   return Boolean(
     wakeup &&
-    wakeup.status !== 'cancelled' &&
+    (params.allowCancelled || wakeup.status !== 'cancelled') &&
     wakeup.status !== 'failed' &&
     !session?.archivedAt,
   );
@@ -2630,6 +2631,7 @@ async function isScheduledWakeupDeliverable(params: {
 
 type ScheduledWakeupReplyGuard = {
   signal: AbortSignal;
+  onWakeupCancelled: (wakeupId: string) => void;
   guardPostReply: (
     postReply: FastAgentTurnAdapter['postReply'],
   ) => FastAgentTurnAdapter['postReply'];
@@ -2648,6 +2650,7 @@ function createScheduledWakeupReplyGuard(params: {
   upstream: AbortSignal;
 }): ScheduledWakeupReplyGuard {
   const controller = new AbortController();
+  let cancelledByTurn = false;
   const abortFromUpstream = () => controller.abort(params.upstream.reason);
   if (params.upstream.aborted) {
     abortFromUpstream();
@@ -2658,10 +2661,19 @@ function createScheduledWakeupReplyGuard(params: {
   }
   return {
     signal: controller.signal,
+    onWakeupCancelled: (wakeupId) => {
+      if (wakeupId === params.wakeupId) cancelledByTurn = true;
+    },
     guardPostReply: (postReply) => async (reply) => {
+      const terminalSelfCancellationReply =
+        cancelledByTurn &&
+        (reply.purpose === 'closeout' || reply.purpose === 'clarification');
       if (
         !controller.signal.aborted &&
-        (await isScheduledWakeupDeliverable(params))
+        (await isScheduledWakeupDeliverable({
+          ...params,
+          allowCancelled: terminalSelfCancellationReply,
+        }))
       ) {
         return postReply(reply);
       }
@@ -2926,6 +2938,7 @@ export async function deliverFastAgentParentEventWithLock(
           : {}),
         ...(wakeupGuard
           ? {
+              onWakeupCancelled: wakeupGuard.onWakeupCancelled,
               postReply: wakeupGuard.guardPostReply(
                 parentTurn.adapter.postReply,
               ),

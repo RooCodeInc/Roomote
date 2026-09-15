@@ -4779,11 +4779,19 @@ export async function answerFastAgentQuestion({
 
             throwIfTurnCancelled();
 
-            return await handleManageWakeupsToolCall(
+            const result = await handleManageWakeupsToolCall(
               { conversationId: session.id, userId },
-
               args,
             );
+            if (
+              args.action === 'cancel' &&
+              args.wakeupId &&
+              result.success === true &&
+              result.cancelled === true
+            ) {
+              adapter.onWakeupCancelled?.(args.wakeupId);
+            }
+            return result;
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.manageGoal: {
