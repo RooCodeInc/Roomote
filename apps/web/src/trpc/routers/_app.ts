@@ -1636,7 +1636,6 @@ export const appRouter = createRouter({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
-            therapistMode: z.boolean().optional(),
             resultsPageEnabled: z.boolean().optional(),
             slackPeerConversationsExperimentEnabled: z.boolean().optional(),
             homeComposerSuggestionsEnabled: z.boolean().optional(),
@@ -1647,7 +1646,6 @@ export const appRouter = createRouter({
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
               input.narrationMode !== undefined ||
-              input.therapistMode !== undefined ||
               input.resultsPageEnabled !== undefined ||
               input.slackPeerConversationsExperimentEnabled !== undefined ||
               input.homeComposerSuggestionsEnabled !== undefined ||

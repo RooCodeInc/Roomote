@@ -2,7 +2,7 @@
 
 import { cn } from '@/lib/utils';
 
-import { BasicTooltip, Mic, MicOff } from '@/components/system';
+import { BasicTooltip, Mic } from '@/components/system';
 
 import { PromptInputButton } from './prompt-input';
 
@@ -33,13 +33,13 @@ export const VoiceDictationButton = ({
         disabled={disabled}
         className={cn(
           'rounded-full transition-colors',
-          isRecording && 'text-red-500 bg-red-500/10 hover:bg-red-500/20',
+          isRecording && 'bg-primary/10 text-primary hover:bg-primary/20',
         )}
       >
         {isRecording ? (
           <span className="relative flex items-center justify-center">
-            <span className="absolute inline-flex size-6 animate-ping rounded-full bg-red-400 opacity-30" />
-            <MicOff className="relative size-4" />
+            <span className="absolute inline-flex size-6 animate-ping rounded-full bg-primary opacity-20" />
+            <Mic className="relative size-4" />
           </span>
         ) : (
           <Mic className="size-4" />

@@ -106,7 +106,6 @@ import {
 } from './fast-agent-constants';
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
-import { getTherapistModeEnabledForUser } from '../therapist-mode';
 import {
   enqueueUserPersonalizationUpdate,
   resolveFastAgentPersonalizationContext,
@@ -3087,7 +3086,6 @@ export async function answerFastAgentQuestion({
       session,
       discoveredIntegrations,
       currentUser,
-      therapistModeEnabled,
       agentBehaviorSettings,
     ] = await Promise.all([
       getAvailableEnvironments(),
@@ -3131,12 +3129,6 @@ export async function answerFastAgentQuestion({
               sessionSecretToolsEnabled: false,
             };
           }),
-      getTherapistModeEnabledForUser(userId).catch((error) => {
-        console.warn(
-          `[Fast Agent] Personal preferences unavailable: ${formatErrorForLog(error)}`,
-        );
-        return false;
-      }),
       db.query.deploymentSettings
         .findFirst({
           columns: {
@@ -3441,7 +3433,6 @@ export async function answerFastAgentQuestion({
       appEnv: Env.R_APP_ENV,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
-      therapistModeEnabled,
       sessionSecretToolsEnabled: currentUser.sessionSecretToolsEnabled,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,

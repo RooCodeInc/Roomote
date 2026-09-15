@@ -154,6 +154,7 @@ const PROVIDER_ENV_VAR_NAMES = [
   'VLLM_BASE_URL',
   'R_MODEL',
 ] as const;
+const fetchMock = vi.fn();
 
 function buildMockAuth(
   overrides: Partial<UserAuthSuccess> = {},
@@ -192,8 +193,6 @@ describe('lookupTaskModelCommand', () => {
   const originalRoomoteCodeReviewModel = process.env.R_CODE_REVIEW_MODEL;
   const originalRoomoteExploreModel = process.env.R_EXPLORE_MODEL;
   const originalRoomotePlanningModel = process.env.R_PLANNING_MODEL;
-  const fetchMock = vi.fn();
-
   beforeEach(() => {
     vi.clearAllMocks();
     mockValidateSetupModelProviderCredentials.mockResolvedValue(undefined);
@@ -1576,6 +1575,7 @@ describe('task model provider commands', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal('fetch', fetchMock);
     mockTxDelete.mockReturnValue({ where: txDeleteWhere });
 
     for (const name of PROVIDER_ENV_VAR_NAMES) {
@@ -1596,6 +1596,8 @@ describe('task model provider commands', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
+
     for (const name of PROVIDER_ENV_VAR_NAMES) {
       const originalValue = originalEnvValues.get(name);
 
@@ -1907,6 +1909,63 @@ describe('task model provider commands', () => {
     expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
     expect(txInsert).not.toHaveBeenCalled();
   });
+
+  it('saves an endpoint provider when model discovery is temporarily unavailable', async () => {
+    mockCollectCandidateProviderCredentials.mockResolvedValue({
+      values: [{ name: 'VLLM_BASE_URL', value: 'https://vllm.example/v1' }],
+      clearedEnvVarNames: [],
+      changedValues: [
+        { name: 'VLLM_BASE_URL', value: 'https://vllm.example/v1' },
+      ],
+      clearedPersistedEnvVarNames: [],
+      persistedEnv: {},
+    });
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'VLLM_BASE_URL',
+    ]);
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      VLLM_BASE_URL: 'https://vllm.example/v1',
+    });
+    fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
+
+    const result = await saveTaskModelProviderCommand(buildMockAuth(), {
+      provider: 'vllm',
+      apiKey: 'https://vllm.example/v1',
+    });
+
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalled();
+    expect(result.discoveryError).toContain('server error (503)');
+    expect(result.addedDiscoveredModelCount).toBe(0);
+  });
+
+  it.each([
+    [401, 'https://vllm.example/v1', 'rejected the API key'],
+    [402, 'https://vllm.example/v1', 'enough credits or quota'],
+    [null, 'not a URL', 'valid endpoint URL'],
+  ])(
+    'does not save an endpoint provider after a blocking %s discovery response',
+    async (status, baseUrl, message) => {
+      mockCollectCandidateProviderCredentials.mockResolvedValue({
+        values: [{ name: 'VLLM_BASE_URL', value: baseUrl }],
+        clearedEnvVarNames: [],
+        changedValues: [{ name: 'VLLM_BASE_URL', value: baseUrl }],
+        clearedPersistedEnvVarNames: [],
+        persistedEnv: {},
+      });
+      if (status !== null) {
+        fetchMock.mockResolvedValue(new Response(null, { status }));
+      }
+
+      await expect(
+        saveTaskModelProviderCommand(buildMockAuth(), {
+          provider: 'vllm',
+          apiKey: baseUrl,
+        }),
+      ).rejects.toThrow(message);
+
+      expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+    },
+  );
 
   it('keeps other connected providers models when seeding a fresh deployment', async () => {
     process.env.OPENROUTER_API_KEY = 'runtime-openrouter-key';

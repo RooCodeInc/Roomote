@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
+import { useState } from 'react';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -343,5 +344,96 @@ describe('PromptInput', () => {
         files: [],
       });
     });
+  });
+
+  it.each(['keyboard', 'button'] as const)(
+    'restores composer focus after a successful %s submit',
+    async (submissionMethod) => {
+      let resolveSubmit: (() => void) | undefined;
+      const onSubmit = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSubmit = resolve;
+          }),
+      );
+
+      function FocusHarness() {
+        const [submitting, setSubmitting] = useState(false);
+
+        return (
+          <PromptInput
+            keepFocusOnSubmit
+            onSubmit={async () => {
+              setSubmitting(true);
+              try {
+                await onSubmit();
+              } finally {
+                setSubmitting(false);
+              }
+            }}
+          >
+            <PromptInputBody>
+              <PromptInputTextarea aria-label="Prompt" disabled={submitting} />
+            </PromptInputBody>
+            <button type="submit">Send</button>
+          </PromptInput>
+        );
+      }
+
+      render(<FocusHarness />);
+
+      const textarea = screen.getByLabelText('Prompt');
+      textarea.focus();
+      fireEvent.change(textarea, { target: { value: 'Continue' } });
+
+      if (submissionMethod === 'keyboard') {
+        fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+      } else {
+        fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      }
+
+      await waitFor(() => expect(textarea).toBeDisabled());
+      resolveSubmit?.();
+
+      await waitFor(() => {
+        expect(textarea).not.toBeDisabled();
+        expect(textarea).toHaveFocus();
+      });
+    },
+  );
+
+  it('does not restore composer focus after an outside interaction while submitting', async () => {
+    let resolveSubmit: (() => void) | undefined;
+
+    render(
+      <>
+        <PromptInput
+          keepFocusOnSubmit
+          onSubmit={() =>
+            new Promise<void>((resolve) => {
+              resolveSubmit = resolve;
+            })
+          }
+        >
+          <PromptInputBody>
+            <PromptInputTextarea aria-label="Prompt" />
+          </PromptInputBody>
+          <button type="submit">Send</button>
+        </PromptInput>
+        <button type="button">Other control</button>
+      </>,
+    );
+
+    const textarea = screen.getByLabelText('Prompt');
+    textarea.focus();
+    fireEvent.change(textarea, { target: { value: 'Continue' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+
+    const otherControl = screen.getByRole('button', { name: 'Other control' });
+    fireEvent.pointerDown(otherControl);
+    otherControl.focus();
+    resolveSubmit?.();
+
+    await waitFor(() => expect(otherControl).toHaveFocus());
   });
 });

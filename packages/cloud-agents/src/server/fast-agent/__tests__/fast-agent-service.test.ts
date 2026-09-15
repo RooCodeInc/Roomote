@@ -29,7 +29,6 @@ const mocks = vi.hoisted(() => ({
   stopTask: vi.fn(),
   launchPrReview: vi.fn(),
   getUserIdentity: vi.fn(),
-  getTherapistMode: vi.fn(),
   getPersonalization: vi.fn(),
   refreshTitle: vi.fn(),
   bindExecutor: vi.fn(),
@@ -300,14 +299,6 @@ vi.mock('../fast-agent-tasks', () => ({
 vi.mock('../fast-agent-user-identity', () => ({
   getFastAgentUserIdentity: mocks.getUserIdentity,
 }));
-
-vi.mock('../../therapist-mode', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../therapist-mode')>();
-  return {
-    ...actual,
-    getTherapistModeEnabledForUser: mocks.getTherapistMode,
-  };
-});
 
 vi.mock('../../user-personalization', async (importOriginal) => {
   const actual =
@@ -609,7 +600,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       isAdmin: true,
       sessionSecretToolsEnabled: true,
     });
-    mocks.getTherapistMode.mockResolvedValue(false);
     mocks.getPersonalization.mockResolvedValue(null);
     mocks.appendLearnedPreference.mockResolvedValue({ saved: true });
     mocks.classifyInferenceError.mockImplementation((error: unknown) => {
@@ -669,17 +659,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         });
         return '';
       },
-    );
-  });
-
-  it('applies the current user therapist mode preference to the system prompt', async () => {
-    mocks.getTherapistMode.mockResolvedValueOnce(true);
-
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
-
-    expect(mocks.getTherapistMode).toHaveBeenCalledWith('user-1');
-    expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
-      '<therapist_mode>',
     );
   });
 

@@ -3,37 +3,28 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 
 type PersonalColorTheme = 'light' | 'dark' | 'system';
 
-const {
-  colorThemeState,
-  mindReaderModeState,
-  narrationModeState,
-  therapistModeState,
-} = vi.hoisted(() => ({
-  colorThemeState: {
-    colorTheme: 'system' as PersonalColorTheme,
-    isLoading: false,
-    isUpdating: false,
-    setColorTheme: vi.fn(),
-  },
-  mindReaderModeState: {
-    enabled: false,
-    isLoading: false,
-    isUpdating: false,
-    setEnabled: vi.fn(),
-  },
-  narrationModeState: {
-    enabled: false,
-    isLoading: false,
-    isUpdating: false,
-    setEnabled: vi.fn(),
-  },
-  therapistModeState: {
-    enabled: false,
-    isLoading: false,
-    isUpdating: false,
-    setEnabled: vi.fn(),
-  },
-}));
+const { colorThemeState, mindReaderModeState, narrationModeState } = vi.hoisted(
+  () => ({
+    colorThemeState: {
+      colorTheme: 'system' as PersonalColorTheme,
+      isLoading: false,
+      isUpdating: false,
+      setColorTheme: vi.fn(),
+    },
+    mindReaderModeState: {
+      enabled: false,
+      isLoading: false,
+      isUpdating: false,
+      setEnabled: vi.fn(),
+    },
+    narrationModeState: {
+      enabled: false,
+      isLoading: false,
+      isUpdating: false,
+      setEnabled: vi.fn(),
+    },
+  }),
+);
 
 vi.mock('@/hooks/useColorTheme', () => ({
   useColorTheme: () => colorThemeState,
@@ -45,10 +36,6 @@ vi.mock('@/hooks/useNarrationMode', () => ({
 
 vi.mock('@/hooks/useMindReaderMode', () => ({
   useMindReaderMode: () => mindReaderModeState,
-}));
-
-vi.mock('@/hooks/useTherapistMode', () => ({
-  useTherapistMode: () => therapistModeState,
 }));
 
 vi.mock('@/components/system', () => ({
@@ -136,16 +123,12 @@ describe('UserPreferencesSection', () => {
     narrationModeState.enabled = false;
     narrationModeState.isLoading = false;
     narrationModeState.isUpdating = false;
-    therapistModeState.enabled = false;
-    therapistModeState.isLoading = false;
-    therapistModeState.isUpdating = false;
   });
 
   it('renders user preference controls with the current state', () => {
     colorThemeState.colorTheme = 'dark' as PersonalColorTheme;
     mindReaderModeState.enabled = true;
     narrationModeState.enabled = true;
-    therapistModeState.enabled = true;
 
     render(<UserPreferencesSection />);
 
@@ -166,27 +149,19 @@ describe('UserPreferencesSection', () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Toggle narration mode')).toBeChecked();
-    expect(screen.getByText('Therapist mode')).toHaveClass('font-semibold');
-    expect(
-      screen.getByText(
-        'Mention the specific memory used to inform a session or task.',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText('Toggle therapist mode')).toBeChecked();
+    expect(screen.queryByText('Therapist mode')).not.toBeInTheDocument();
   });
 
   it('disables controls while the corresponding preference is loading or updating', () => {
     colorThemeState.isLoading = true;
     mindReaderModeState.isLoading = true;
     narrationModeState.isUpdating = true;
-    therapistModeState.isLoading = true;
 
     render(<UserPreferencesSection />);
 
     expect(screen.getByLabelText('Color theme')).toBeDisabled();
     expect(screen.getByLabelText('Toggle mind reader mode')).toBeDisabled();
     expect(screen.getByLabelText('Toggle narration mode')).toBeDisabled();
-    expect(screen.getByLabelText('Toggle therapist mode')).toBeDisabled();
   });
 
   it('updates the color theme immediately when a different option is selected', () => {
@@ -213,14 +188,6 @@ describe('UserPreferencesSection', () => {
     fireEvent.click(screen.getByLabelText('Toggle mind reader mode'));
 
     expect(mindReaderModeState.setEnabled).toHaveBeenCalledWith(true);
-  });
-
-  it('updates therapist mode immediately when the switch changes', () => {
-    render(<UserPreferencesSection />);
-
-    fireEvent.click(screen.getByLabelText('Toggle therapist mode'));
-
-    expect(therapistModeState.setEnabled).toHaveBeenCalledWith(true);
   });
 
   it('renders theme choices in a dropdown', () => {
