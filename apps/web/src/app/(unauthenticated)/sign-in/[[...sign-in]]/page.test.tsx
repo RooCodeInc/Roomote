@@ -6,6 +6,7 @@ const {
   getSignedInAuthContextMock,
   resolveAuthProviderConfigMock,
   getDeploymentAccountLinkHelpTextMock,
+  isSelfServicePasswordResetAvailableMock,
   redirectMock,
   signInPageClientMock,
 } = vi.hoisted(() => ({
@@ -14,6 +15,7 @@ const {
   getSignedInAuthContextMock: vi.fn(),
   resolveAuthProviderConfigMock: vi.fn(),
   getDeploymentAccountLinkHelpTextMock: vi.fn(),
+  isSelfServicePasswordResetAvailableMock: vi.fn(),
   redirectMock: vi.fn(() => {
     throw new Error('NEXT_REDIRECT');
   }),
@@ -30,6 +32,9 @@ vi.mock('@/lib/server/auth-context', () => ({
 }));
 vi.mock('@/lib/server/auth-provider-config', () => ({
   resolveAuthProviderConfig: resolveAuthProviderConfigMock,
+}));
+vi.mock('@/lib/server/self-service-password-reset', () => ({
+  isSelfServicePasswordResetAvailable: isSelfServicePasswordResetAvailableMock,
 }));
 vi.mock('@roomote/db/server', () => ({
   getDeploymentAccountLinkHelpText: getDeploymentAccountLinkHelpTextMock,
@@ -49,6 +54,7 @@ describe('Sign-in page', () => {
       enabledProviders: ['slack'],
     });
     getDeploymentAccountLinkHelpTextMock.mockResolvedValue(null);
+    isSelfServicePasswordResetAvailableMock.mockResolvedValue(false);
   });
 
   it('redirects an authenticated user to the requested safe path without refreshing the session', async () => {
@@ -103,7 +109,23 @@ describe('Sign-in page', () => {
         inviteInvalid: false,
         seatLimitBlocked: false,
         accountLinkHelpText: null,
+        passwordResetAvailable: false,
       },
+    });
+  });
+
+  it('offers self-service resets only when AgentMail delivery is available', async () => {
+    getSignedInAuthContextMock.mockResolvedValue({
+      success: false,
+      error: 'Unauthorized: User required',
+    });
+    isSelfServicePasswordResetAvailableMock.mockResolvedValue(true);
+
+    const result = await Page({ searchParams: Promise.resolve({}) });
+
+    expect(result).toMatchObject({
+      type: signInPageClientMock,
+      props: { passwordResetAvailable: true },
     });
   });
 });
