@@ -330,23 +330,6 @@ describe('WorkerEnv', () => {
       );
       expect(client).not.toHaveProperty('HTTPS_PROXY');
     });
-
-    it('still recognizes a connector delivery', () => {
-      const env = WorkerEnv.fromProcessEnv({
-        ...base,
-        ROOMOTE_SESSION_EGRESS_PROXY_URL: 'http://connector:3128',
-        ROOMOTE_SESSION_EGRESS_CA_FILE: '/etc/roomote/ca.pem',
-        ROOMOTE_SESSION_EGRESS_NO_PROXY: 'api',
-        ROOMOTE_SESSION_EGRESS_SERVICES: '[]',
-      });
-      expect(env.sessionEgressMode).toBe('connector');
-      expect(env.buildSessionEgressClientEnv().HTTPS_PROXY).toBe(
-        'http://connector:3128',
-      );
-      expect(env.buildSessionEgressClientEnv()).not.toHaveProperty(
-        'ROOMOTE_SERVICE_BASE_URL',
-      );
-    });
   });
 
   describe('fromProcessEnv', () => {

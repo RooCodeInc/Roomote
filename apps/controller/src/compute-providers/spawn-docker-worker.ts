@@ -1,6 +1,4 @@
 import { existsSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
-import { setTimeout as delay } from 'node:timers/promises';
 
 import {
   buildPreviewProxyUrl,
@@ -12,9 +10,7 @@ import {
   SANDBOX_SERVER_NAMED_PORT,
   TaskRunErrorCode,
   type NamedPort,
-  type SessionEgressWorkloadRegistration,
-  SESSION_EGRESS_WORKLOAD_ENV,
-  activeRunStatuses,
+  sessionEgressProxyBaseUrl,
 } from '@roomote/types';
 import { Env, resolveAppEnv } from '@roomote/env';
 import {
@@ -22,14 +18,9 @@ import {
   db,
   eq,
   resolveEffectivePreviewRuntimeConfig,
-  terminateSessionEgressWorkloadsForRun,
   type TaskRun,
 } from '@roomote/db/server';
-import {
-  stampTaskRunMilestone,
-  publishSessionEgressDelivery,
-  isSessionEgressBootstrapReady,
-} from '@roomote/sdk/server';
+import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
   buildDockerWorkerEnv,
   resolveAuthBypassHeaderName,
@@ -43,19 +34,7 @@ import {
   updateTaskRunMachine,
 } from '../utils';
 import { resolveFromWorkspaceRoot } from '../repo-paths';
-import type {
-  SessionEgressLifecycle,
-  SessionEgressRegistrationOutcome,
-} from '../session-egress/lifecycle';
-import { admitBootstrappedSessionEgress } from '../session-egress/lifecycle';
-import { installDockerSessionEgressBoundary } from '@roomote/compute-providers';
-import {
-  buildDockerSessionEgressWorkerEnv,
-  collectNoProxyHosts,
-  installDockerSessionEgressCaBundle,
-  startDockerSessionEgressConnector,
-  resetDockerSessionEgressForResume,
-} from './docker-session-egress';
+import type { SessionEgressLifecycle } from '../session-egress/lifecycle';
 import {
   attachDockerEgressPolicy,
   buildDockerTaskDaemonResourceArgs,
@@ -64,7 +43,6 @@ import {
   docker,
   DockerBootError,
   getDockerTaskNetworkName,
-  getDockerSessionEgressConnectorContainerName,
   getDockerTaskDaemonContainerName,
   getDockerTaskWorkspaceVolumeName,
   getDockerWorkerContainerName,
@@ -280,59 +258,6 @@ export async function spawnDockerWorker(
   );
 
   let containerId = '';
-  // Set once a workload generation exists for this spawn so failure cleanup
-  // retires it before any substitute could have been used.
-  let sessionEgressRegistration: SessionEgressWorkloadRegistration | undefined;
-  let sessionEgressRequired = false;
-  const sessionEgressBootstrapNonce = randomUUID();
-  let sessionEgressOutcome:
-    | Extract<SessionEgressRegistrationOutcome, { admission: 'connector' }>
-    | undefined;
-
-  /**
-   * Register (fresh) or rotate (resume) the run's egress workload, then
-   * provision the connector sidecar on the task network. The worker gets
-   * nothing until the connector exists; on any non-registered outcome the
-   * run proceeds as an ordinary sandbox with no substitutes.
-   */
-  const provisionSessionEgress = async (): Promise<void> => {
-    if (!sessionEgressOutcome) {
-      return;
-    }
-    const outcome = sessionEgressOutcome;
-    const egressConfig = config.sessionEgress!.config!;
-    await startDockerSessionEgressConnector(
-      {
-        workerContainerName: containerName,
-        taskRunId: taskRun.id,
-        taskNetwork: dockerNetwork,
-        platform: config.platform,
-        image: egressConfig.connectorImage,
-        gatewayAddr: egressConfig.gatewayAddr,
-        gatewayNetwork: egressConfig.gatewayNetwork,
-        gatewayServerCaPem: egressConfig.gatewayServerCaPem,
-        certificatePem: outcome.connector.certificatePem,
-        privateKeyPem: outcome.connector.privateKeyPem,
-        autoRemove: autoRemoveContainer,
-        logMaxSize: config.logMaxSize,
-        logMaxFiles: config.logMaxFiles,
-      },
-      runDocker,
-    );
-    await installDockerSessionEgressBoundary(
-      {
-        taskNetwork: dockerNetwork,
-        connectorName:
-          getDockerSessionEgressConnectorContainerName(containerName),
-        workerContainerName: containerName,
-        image: config.image,
-        platform: config.platform,
-        controlPorts: { api: 3001, 'preview-proxy': 8081 },
-      },
-      runDocker,
-    );
-  };
-
   const startContainer = async (diskLimit?: string): Promise<string> =>
     (
       await runDocker([
@@ -368,30 +293,12 @@ export async function spawnDockerWorker(
   try {
     throwIfSpawnAborted();
 
-    if (config.sessionEgress) {
-      sessionEgressRequired =
-        await config.sessionEgress.needsBootstrapAdmission(
-          taskRun.id,
-          'docker',
-        );
-      if (sessionEgressRequired) {
-        if (!controlNetwork || !config.sessionEgress.config?.gatewayNetwork) {
-          throw new Error(
-            'Session egress requires separate trusted control and gateway Docker networks',
-          );
-        }
-      }
-    }
-
     if (!isStandbyResume) {
       dockerNetwork = await prepareDockerTaskNetwork(
         {
           taskRunId: taskRun.id,
           controlNetwork,
           egressPolicy: config.egressPolicy,
-          sessionEgress: sessionEgressRequired,
-          sessionEgressPolicyImage: config.image,
-          sessionEgressPolicyPlatform: config.platform,
           autoRemove: autoRemoveContainer,
         },
         runDocker,
@@ -403,24 +310,6 @@ export async function spawnDockerWorker(
       // call after Docker has begun starting the retained snapshot, catch must
       // still take the non-destructive resume path and never delete it.
       containerId = containerName;
-      await resetDockerSessionEgressForResume(
-        {
-          workerContainerName: containerName,
-          taskNetwork: dockerNetwork,
-          retireSource: async () => {
-            const sourceRun = await db.query.taskRuns.findFirst({
-              where: eq(taskRuns.id, sourceRunId),
-              columns: { taskId: true },
-            });
-            if (sourceRun?.taskId !== taskRun.taskId)
-              throw new Error(
-                'Retained Session egress container is not bound to this task',
-              );
-            await terminateSessionEgressWorkloadsForRun(sourceRunId, 'resumed');
-          },
-        },
-        runDocker,
-      );
       await runDocker(['start', containerName]);
       await restoreDockerStandbyNetworking(
         {
@@ -430,7 +319,6 @@ export async function spawnDockerWorker(
           egressPolicy: config.egressPolicy,
           image: config.image,
           platform: config.platform,
-          sessionEgress: Boolean(sessionEgressRegistration),
         },
         runDocker,
       );
@@ -474,7 +362,6 @@ export async function spawnDockerWorker(
           image: config.image,
           platform: config.platform,
           blockDockerGateway: Boolean(controlNetwork),
-          sessionEgress: Boolean(sessionEgressRegistration),
         },
         runDocker,
       );
@@ -592,6 +479,15 @@ export async function spawnDockerWorker(
       trpcUrl: process.env.TRPC_URL ?? Env.TRPC_URL,
       controlNetwork,
     });
+    // Substitutes are used through the API proxy at the same address the
+    // worker already reaches the API on (the `api` alias on a control
+    // network, or the container-reachable API URL); a public proxy hostname
+    // is not assumed reachable from a task network.
+    const sessionEgressPlan = await config.sessionEgress?.planApiProxy({
+      taskRun,
+      provider: 'docker',
+      baseUrl: sessionEgressProxyBaseUrl(workerTrpcUrl),
+    });
     const workerEnv = buildDockerWorkerEnv({
       authToken,
       sandboxExpiresAtMs: Date.now() + config.dockerTimeoutMs,
@@ -634,11 +530,7 @@ export async function spawnDockerWorker(
         }),
         // Bootstrap runs with ordinary connectivity but without any usable
         // substitutes. Only the controller can publish verified admission.
-        ...(sessionEgressRequired && {
-          [SESSION_EGRESS_WORKLOAD_ENV.BOOTSTRAP_REQUIRED]: '1',
-          [SESSION_EGRESS_WORKLOAD_ENV.BOOTSTRAP_NONCE]:
-            sessionEgressBootstrapNonce,
-        }),
+        ...sessionEgressPlan?.bootstrapEnv,
       },
     });
 
@@ -661,80 +553,10 @@ export async function spawnDockerWorker(
 
     await assertDetachedWorkerStarted(containerName, taskRun.id, config.signal);
 
-    if (sessionEgressRequired) {
-      let caBundleFile = '';
-      await admitBootstrappedSessionEgress({
-        waitForBootstrap: async () => {
-          // setupCompletedAt is a request to transition, not authority. Repository
-          // scripts may trigger it early; host policy must still succeed first.
-          for (;;) {
-            throwIfSpawnAborted();
-            const run = await db.query.taskRuns.findFirst({
-              where: eq(taskRuns.id, taskRun.id),
-            });
-            if (
-              !run ||
-              !activeRunStatuses.some((status) => status === run.status)
-            )
-              throw new Error(
-                'Session egress bootstrap run is no longer active',
-              );
-            if (
-              await isSessionEgressBootstrapReady(
-                taskRun.id,
-                sessionEgressBootstrapNonce,
-              )
-            )
-              break;
-            await delay(500, undefined, { signal: config.signal });
-          }
-        },
-        enforceAndVerify: async () => {
-          const outcome = await config.sessionEgress!.register({
-            taskRun: { id: taskRun.id, taskId: taskRun.taskId },
-            provider: 'docker',
-            resume: isStandbyResume,
-          });
-          if (outcome.status !== 'registered')
-            throw new Error('Session egress admission is no longer eligible');
-          if (outcome.admission !== 'connector')
-            throw new Error('Docker requires connector admission');
-          sessionEgressRegistration = outcome.workload;
-          sessionEgressOutcome = outcome;
-          await provisionSessionEgress();
-          caBundleFile = await installDockerSessionEgressCaBundle(
-            {
-              workerContainerName: containerName,
-              gatewayCaCertificatePem:
-                config.sessionEgress!.config!.gatewayCaCertificatePem,
-            },
-            runDocker,
-          );
-          throwIfSpawnAborted();
-        },
-        deliver: async () => {
-          await publishSessionEgressDelivery(
-            taskRun.id,
-            sessionEgressRegistration!,
-            buildDockerSessionEgressWorkerEnv({
-              registration: sessionEgressRegistration!,
-              caBundleFile,
-              noProxyHosts: collectNoProxyHosts([
-                workerTrpcUrl,
-                'api',
-                'preview-proxy',
-                containerName,
-              ]),
-            }),
-            sessionEgressBootstrapNonce,
-          );
-        },
-      });
-      config.sessionEgress!.startLeaseRenewal(
-        taskRun.id,
-        sessionEgressRegistration!.workloadId,
-      );
-    }
+    // The worker is waiting on the bootstrap nonce after its ordinary
+    // bootstrap; an admission failure fails the spawn rather than leaving a
+    // worker that expected substitutes without them.
+    const sessionEgressWorkload = await sessionEgressPlan?.admit();
 
     console.log(
       `[spawnDockerWorker] Docker worker launched for task run #${taskRun.id} ${JSON.stringify(
@@ -743,11 +565,11 @@ export async function spawnDockerWorker(
           containerId,
           trpcUrl: sanitizeDockerWorkerTrpcUrlForLog(workerTrpcUrl),
           envKeys: Object.keys(workerEnv).sort(),
-          sessionEgress: sessionEgressRegistration
+          sessionEgress: sessionEgressWorkload
             ? {
-                workloadId: sessionEgressRegistration.workloadId,
-                generation: sessionEgressRegistration.generation,
-                substituteCount: sessionEgressRegistration.substitutes.length,
+                workloadId: sessionEgressWorkload.workloadId,
+                generation: sessionEgressWorkload.generation,
+                substituteCount: sessionEgressWorkload.substitutes.length,
               }
             : null,
         },
@@ -764,27 +586,10 @@ export async function spawnDockerWorker(
       hasContainerId: Boolean(containerId),
     });
 
-    // Retire this generation first: no connector for it may keep serving.
-    if (sessionEgressRegistration && config.sessionEgress) {
-      await config.sessionEgress.terminate(
-        taskRun.id,
-        sessionEgressRegistration.workloadId,
-        'provision_failed',
-      );
-    }
-
     if (cleanupMode === 'stop-retained') {
       await docker(['stop', '--time', '10', containerName], {
         allowFailure: true,
       });
-      await docker(
-        [
-          'rm',
-          '-f',
-          getDockerSessionEgressConnectorContainerName(containerName),
-        ],
-        { allowFailure: true },
-      );
       // Nested Docker project daemons are started on standby resume. Stop the
       // privileged `<worker>-docker` daemon so it does not keep running after a
       // failed resume, but keep the container retained for later `docker start`

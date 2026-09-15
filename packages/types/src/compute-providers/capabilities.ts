@@ -23,11 +23,8 @@ export interface ComputeProviderCapabilities {
   /**
    * How the provider can hold a Session-egress workload.
    *
-   * - `enforced`: externally enforced workload identity (connector mTLS
-   *   outside the sandbox), sandbox egress restricted to that connector plus
-   *   control-plane services, and connector keys the sandbox can never read.
-   * - `api_proxy`: no connector. The workload receives substitutes and calls
-   *   the API-side substitution proxy over the HTTPS route it already uses;
+   * - `api_proxy`: the workload receives substitutes and calls the API-side
+   *   substitution proxy over the route it already uses for the API;
    *   possession of the substitute is the authority, bounded by the live
    *   workload, run, Session, and grant state.
    * - `unsupported`: fails closed; no workload is registered and no
@@ -37,7 +34,6 @@ export interface ComputeProviderCapabilities {
 }
 
 export type ComputeProviderSessionEgressCapability =
-  | 'enforced'
   | 'api_proxy'
   | 'unsupported';
 
@@ -57,9 +53,9 @@ export const DOCKER_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: false,
   supportsDockerProjects: true,
-  // Per-task bridge network, host-applied egress rules, and a connector
-  // sidecar the controller provisions outside the worker container.
-  sessionEgress: 'enforced',
+  // The worker reaches the API over the task network; substitutes are used
+  // through the API-side session egress proxy like every other provider.
+  sessionEgress: 'api_proxy',
 };
 
 export const MODAL_CAPABILITIES: ComputeProviderCapabilities = {
@@ -201,18 +197,12 @@ export function getComputeProviderCommandOutputSource(
 }
 
 /**
- * Session-egress gate. Only providers whose adapter enforces the workload
- * identity and egress contract outside the sandbox may receive substitute
- * tokens; every other provider fails closed with an explicit status.
+ * Session-egress gate. Providers whose sandboxes can reach the API-side proxy
+ * receive substitute tokens; any other provider fails closed with an explicit
+ * status.
  */
 export function getComputeProviderSessionEgressCapability(
   provider: ComputeProvider,
 ): ComputeProviderSessionEgressCapability {
   return getComputeProviderCapabilities(provider).sessionEgress;
-}
-
-export function isSessionEgressEnforcedComputeProvider(
-  provider: ComputeProvider,
-): boolean {
-  return getComputeProviderSessionEgressCapability(provider) === 'enforced';
 }

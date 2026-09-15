@@ -22,4 +22,3 @@ export * from './adapters/box';
 export * from './box';
 export * from './adapters/azure';
 export * from './azure';
-export * from './session-egress-docker-boundary';

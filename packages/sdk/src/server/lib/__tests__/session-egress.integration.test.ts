@@ -25,7 +25,7 @@ import {
 } from '../session-egress-delivery';
 
 import {
-  authorize,
+  authorizeProxy,
   issueSubstitutes,
   registerWorkload,
 } from '../session-egress';
@@ -94,11 +94,8 @@ it('registers exact prepared GET+POST consent and authorizes both methods withou
     expect.objectContaining({ secretRef, allowedMethods: ['GET', 'POST'] }),
   ]);
   for (const method of ['GET', 'POST', 'DELETE']) {
-    const result = await authorize({
-      workloadId: registered.workloadId,
-      connectorIdentity,
+    const result = await authorizeProxy({
       substitute: registered.substitutes[0]!.substitute,
-      destination: { host: 'api.example.com', port: 443 },
       method,
       path: '/v1/resource',
     });
@@ -303,16 +300,13 @@ it.each(['registration', 'late approval'])(
       }),
     ]);
     const request = {
-      workloadId: registered.workloadId,
-      connectorIdentity,
       substitute: issued[0]!.substitute,
-      destination: { host: 'api.example.com', port: 443 },
       method: 'GET',
       path: '/',
     };
-    expect(await authorize(request)).toMatchObject({ allowed: true });
+    expect(await authorizeProxy(request)).toMatchObject({ allowed: true });
     blocked = true;
-    expect(await authorize(request)).toEqual({
+    expect(await authorizeProxy(request)).toEqual({
       allowed: false,
       reason: 'destination_mismatch',
     });

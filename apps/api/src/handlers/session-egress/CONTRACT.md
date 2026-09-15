@@ -1,51 +1,35 @@
-# Session egress control plane: gateway/controller -> API contract
+# Session egress control plane and proxy: controller -> API contract
 
 Base path: `/api/internal/session-egress` (constant
 `SESSION_EGRESS_CONTROL_PLANE_PATH` in `@roomote/types`). All bodies are JSON.
 Schemas and response types live in `packages/types/src/session-egress.ts`;
 persistence in `packages/db/src/lib/session-egress.ts`; the service layer and a
-typed controller client in `packages/sdk/src/server/lib/session-egress.ts`.
-
-This document is the contract the Iron-based gateway extension and the
-controller integration are written against. It describes milestone 1 (control
-plane only). Gateway build/deployment, connector networking, provider egress
-enforcement, and worker client configuration are separate milestones.
+typed controller client in `packages/sdk/src/server/lib/session-egress.ts`;
+the substitution proxy in `apps/api/src/handlers/session-egress-proxy`.
 
 ## Threat model in one paragraph
 
 Workloads (attached coding runs) receive only opaque **substitute tokens**
-(`rses_` + 32 random bytes, base64url) plus the gateway's public CA. The real
-credential exists only encrypted at rest and, per request, in gateway memory
-after this API resolves it. Nothing a sandbox can send is authority: not a
-Session ID, not a header, not the substitute alone. Authority is the
-conjunction of an authenticated **connector identity** (established by the
-gateway outside the sandbox, e.g. connector mTLS), the workload registration
-the trusted controller created for that identity, the workload generation the
-substitute was minted in, and the live owner/Session/attached-run/grant state
-re-joined on every call.
+(`rses_` + 32 random bytes, base64url) and one proxy base URL. The real
+credential exists only encrypted at rest and, per request, in API memory while
+the proxy forwards to the approved origin. Nothing a sandbox can send is
+authority: not a Session ID, not a header, not a path. Possession of a
+substitute names a grant, and every use is bounded by the workload
+registration the trusted controller created, the workload generation the
+substitute was minted in, the lease, and the live owner/Session/attached-run/
+grant state re-joined on every call.
 
 ## Principals and authentication
 
-The controller routes are always available to a signed controller token,
-since API-proxy admission needs them on every deployment. The gateway
-principal exists only once `R_SESSION_EGRESS_GATEWAY_TOKEN` (>= 32 chars) is
-configured on the API; without it every other caller sees
-`404 {"error":"not_found"}`, so the surface stays invisible.
-
-| Principal    | Credential                                                                                                                  | Routes                                              |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `controller` | `Authorization: Bearer <ES256 JWT>` minted by `createSessionEgressControllerToken()` (`@roomote/auth`) with the deployment `JOB_AUTH_PRIVATE_KEY`; `aud=roomote-session-egress-controller`, `sub=roomote-controller`, 60 s lifetime | `POST /workloads`, `POST /workloads/:id/substitutes`, `POST /workloads/:id/lease`, `DELETE /workloads/:id` |
-| `gateway`    | `Authorization: Bearer <R_SESSION_EGRESS_GATEWAY_TOKEN>` (constant-time compared)                                          | `POST /authorize`, `GET /revocations`               |
-
-Run tokens, user auth tokens, MCP access tokens, and session-broker tokens are
-rejected with `401 {"error":"unauthorized"}` everywhere on this surface. A
-valid principal on the other principal's route gets
-`403 {"error":"forbidden_principal"}`. The route-policy class is `webhook`
-(handler-authenticated); the generic bearer middleware never grants access here.
-
-The gateway is an external binary and must never hold the job-auth signing key;
-that is why it gets a dedicated shared secret while the controller reuses the
-key it already has. Sandboxes hold neither.
+One service principal exists. The controller authenticates with
+`Authorization: Bearer <ES256 JWT>` minted by
+`createSessionEgressControllerToken()` (`@roomote/auth`) with the deployment
+`JOB_AUTH_PRIVATE_KEY`; `aud=roomote-session-egress-controller`,
+`sub=roomote-controller`, 60 s lifetime. Run tokens, user auth tokens, MCP
+access tokens, and session-broker tokens are rejected with
+`401 {"error":"unauthorized"}` everywhere on this surface. The route-policy
+class is `webhook` (handler-authenticated); the generic bearer middleware never
+grants access here. Sandboxes hold no control-plane credential at all.
 
 ## Controller routes
 
@@ -57,7 +41,7 @@ Request (`sessionEgressWorkloadRegisterSchema`):
 {
   "runId": 123,
   "provider": "docker",
-  "connectorIdentity": "spiffe://roomote/connector/3f9c…",
+  "connectorIdentity": "roomote://api-proxy/run/123/3f9c…",
   "leaseSeconds": 3600
 }
 ```
@@ -68,8 +52,9 @@ Request (`sessionEgressWorkloadRegisterSchema`):
   `actingUserId` equals the Session owner, who is not deleted and has Session
   secret tools enabled (`session_secret_tools_enabled`). The owner check is
   made inside the minting transaction, not only in the controller's preflight.
-- `connectorIdentity`: the identity the gateway will authenticate at connection
-  time (16–512 printable ASCII chars). Unique among active workloads.
+- `connectorIdentity`: a synthetic identity unique per registration (16–512
+  printable ASCII chars), unique among active workloads. The column keeps its
+  historical name; it is never a certificate claim.
 - `leaseSeconds`: 60–86400, default 3600. Leases are renewed only by the
   controller; nothing a sandbox asserts extends one.
 
@@ -109,11 +94,11 @@ Responses:
 - `400 {"error":"malformed"}`.
 
 Re-registering a run that already has an active workload **rotates** it: same
-`workloadId`, `generation + 1`, new `connectorIdentity`, all earlier
-substitutes retired, a `generation` revocation event published, and fresh
-substitutes minted. Use this on resume, actor reconciliation, and connector
-credential rotation. If the run's Session/owner binding changed, the stale
-workload is terminated (`detached`) and a new workload is created instead.
+`workloadId`, `generation + 1`, new identity, all earlier substitutes retired,
+a `generation` revocation event recorded, and fresh substitutes minted. Use
+this on resume and actor reconciliation. If the run's Session/owner binding
+changed, the stale workload is terminated (`detached`) and a new workload is
+created instead.
 
 ### `POST /workloads/:workloadId/substitutes` — issue for new grants
 
@@ -134,165 +119,69 @@ expired, or binding no longer live — an expired lease is not renewable; re-reg
 Body optional: `{ "reason": "stopped" | "completed" | "failed" |
 "provision_failed" | "resumed" | "actor_changed" | "detached" | "orphaned" |
 "cleanup" }` (default `cleanup`). Idempotent: `200 { workloadId, terminated:
-boolean }`. Retires all substitutes and publishes a `workload` revocation
+boolean }`. Retires all substitutes and records a `workload` revocation
 event. Controllers must call this on stop, failure, timeout, orphan recovery,
 and before snapshot/standby.
 
-## Gateway routes
+## Delivery
 
-### `POST /authorize` — live per-phase authorization
-
-The gateway calls this **before forwarding** the inner HTTP request
-(`phase: "request"`), **before releasing** a buffered response
-(`phase: "response"`), and **at each emission boundary** of a streaming
-response (`phase: "stream"`). Every call re-joins live state; there is no
-server-side caching and the gateway must not cache positive decisions or
-credentials across requests.
-
-Request (`sessionEgressAuthorizeSchema`):
-
-```json
-{
-  "workloadId": "uuid",
-  "connectorIdentity": "spiffe://roomote/connector/3f9c…",
-  "substitute": "rses_…",
-  "destination": { "host": "api.example.com", "port": 443 },
-  "method": "POST",
-  "path": "/v1/things",
-  "phase": "request",
-  "authorizationId": "uuid (echo the value from the request phase)"
-}
-```
-
-- `workloadId` and `connectorIdentity` come from the gateway's own connector
-  authentication and its registration mapping — never from request headers.
-- `substitute` is the whole credential value the client sent in the approved
-  header position, after stripping the approved prefix. Substring matching
-  across headers/bodies is not part of this contract.
-- `destination.host` is the lowercase DNS name the client addressed (CONNECT
-  authority, SNI, and `Host`/`:authority` must all agree before calling);
-  literal IPs are rejected as `malformed`. `port` is the real destination port.
-- `path` is validated for shape only and is never stored or logged.
-- `authorizationId` is optional caller-controlled correlation, generated by
-  the API when omitted. Reusing an ID never grants authority, proves an earlier
-  phase succeeded, or skips any live binding check.
-
-Response is always `200` with `Cache-Control: no-store`:
-
-- Allowed, request phase:
-
-  ```json
-  {
-    "allowed": true,
-    "authorizationId": "uuid",
-    "workloadId": "uuid",
-    "generation": 2,
-    "sessionId": "uuid",
-    "secretRef": "uuid",
-    "expiresAt": "ISO-8601, earliest of grant expiry and workload lease expiry",
-    "credential": { "headerName": "authorization", "headerPrefix": "Bearer ", "value": "<real key>" }
-  }
-  ```
-
-  The gateway replaces the approved header with `headerPrefix + value`,
-  forwards, and discards `value` after the exchange. It must close any
-  stream at `expiresAt` at the latest.
-
-- Allowed, response/stream phases: same object without `credential`.
-- Denied: `{ "allowed": false, "reason": <code> }` where `reason` is one of
-  `malformed`, `unknown_substitute`, `workload_mismatch`, `workload_inactive`,
-  `stale_generation`, `grant_revoked`, `grant_expired`, `session_unavailable`,
-  `destination_mismatch`, `method_not_allowed`. The gateway returns a generic
-  failure to the client, never the code's details or any upstream/credential
-  material.
-
-Decision order (first failing rule wins): token lookup by hash →
-workload/connector binding → workload active and lease unexpired → generation
-match → grant not revoked → grant not expired → owner not deleted and still has Session secret tools
-enabled, Session unarchived and still owned by the same user, grant belongs to
-that Session/owner, run still active with `actingUserId = owner`, run still
-attached to the Session → exact `host:port` equals the approved origin
-(default port 443) and that origin still passes the deployment public-egress
-policy (`assertEgressUrlAllowed`, HTTPS) → method in the grant's
-`allowedMethods`.
-
-Method policy is literal: `HEAD` is not implied by `GET`. A grant prepared
-with `["GET"]` denies `HEAD`; the default policy is `["GET","HEAD"]`.
-
-After the initial evaluation and its awaited audit insert, an otherwise allowed
-call performs one fresh full-binding SELECT. That READ COMMITTED snapshot is
-the authorization decision point; the result and any decrypted credential are
-constructed entirely from that final row with no subsequent awaited work on
-the allow path. Changes committed while the audit write was blocked therefore
-cannot release stale authority. This does not eliminate distributed TOCTOU
-after the final snapshot: the gateway must still enforce `expiresAt`, perform
-every phase check, and honor cancellation. Already forwarded bytes cannot be
-recalled.
-
-Any non-2xx or transport failure from this endpoint is a **fail-closed**
-denial for the gateway. A `200` with `allowed:false` (including `malformed`)
-is a terminal decision for that exchange, not something to retry.
-
-### `GET /revocations?after=<cursor>&limit=<1..500>` — acceleration feed
-
-```json
-{
-  "events": [
-    { "id": 42, "kind": "grant", "workloadId": null, "secretRef": "uuid", "generation": null, "createdAt": "ISO-8601" },
-    { "id": 43, "kind": "generation", "workloadId": "uuid", "secretRef": null, "generation": 2, "createdAt": "…" },
-    { "id": 44, "kind": "workload", "workloadId": "uuid", "secretRef": null, "generation": null, "createdAt": "…" }
-  ],
-  "cursor": 44
-}
-```
-
-Append-only, ordered by `id`; poll with the returned `cursor`. Use it to
-cancel in-flight connections/streams early. Only explicit actions produce
-events: grant revocation (`grant`), workload rotation (`generation`), and
-workload termination (`workload`). It is **not** the correctness mechanism:
-owner removal, archive, detach, actor change, grant expiry, and lease expiry
-produce no event and are enforced by `/authorize` (and by the `expiresAt`
-the gateway received) alone.
+Every supported compute provider admits the same way. The sandbox launches
+with a bootstrap nonce (`ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED=1`,
+`ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE`) and ordinary connectivity but no
+substitutes. After the worker's ordinary bootstrap it marks the nonce ready
+and waits. The controller then registers the run through `POST /workloads`
+and publishes, bound to that nonce, the substitute-only client configuration:
+`ROOMOTE_SERVICE_BASE_URL` (one base URL shared by every approved service),
+`ROOMOTE_SESSION_EGRESS_SERVICES` (the nonsecret manifest), and one
+`ROOMOTE_SERVICE_TOKEN_<LABEL>` per grant. Delivery is gated per Session owner
+by the same `session_secret_tools_enabled` experiment that gates the Fast and
+coding-run tools; no deployment configuration is needed. The workload never
+receives the real credential, a proxy address, or a CA bundle, and nothing
+about its networking or inference routing changes.
 
 ## API substitution proxy (`/api/session-egress/<upstream path>`)
 
-Compute providers without a per-workload connector (every hosted sandbox
-provider: Modal, Roomote Cloud, Daytona, E2B, Blaxel, Box, and Azure) use the
-API itself as the gateway. Delivery is gated per Session owner
-by the same `session_secret_tools_enabled` experiment that gates the Fast and
-coding-run tools; no deployment configuration is needed. The controller
-registers the run through `POST /workloads` exactly as for the
-connector path, using a synthetic connector identity
-(`roomote://api-proxy/run/<runId>/<random>`), after the worker's ordinary
-bootstrap reports ready, and delivers the substitutes together with one base URL,
-`<api origin>/api/session-egress`, shared by every approved service. The
-workload points an ordinary HTTP client at that base URL and presents the
-service's substitute as its credential in any header
+The workload points an ordinary HTTP client at the base URL
+(`<api origin>/api/session-egress`, or, when the deployment sets
+`R_SESSION_EGRESS_PROXY_HOST`, the root of that dedicated hostname) and
+presents the service's substitute as its credential in any header
 (`Authorization: Bearer rses_…`, `x-api-key: rses_…`, `private-token: rses_…`);
 the substitute alone names the grant, and the grant's own header name decides
 where the origin receives the real key. Grants may name any RFC 7230 header
-token except request-shaping ones (see `isSessionEgressCredentialHeaderName`). The workload never receives the real credential, a proxy
-address, or a CA bundle. A deployment may additionally serve the same route at
-the root of a dedicated hostname (`R_SESSION_EGRESS_PROXY_HOST`) for SDK
-clients that allow only a host override; the base URL delivered to workloads
-is then that host, and nothing else differs.
+token except request-shaping ones (see `isSessionEgressCredentialHeaderName`).
 
-Per request the API performs the same live decision as `/authorize` with the
-grant taken from the token instead of a connector identity: token lookup by
-hash → workload active and lease unexpired → generation match → grant not
-revoked → grant not expired → owner, Session, attached run, and actor still
-bound → approved origin still passes egress policy → method in the grant's
-`allowedMethods`. The path and query are re-rooted on the approved origin;
-anything that normalizes to another origin is refused. The client's
-credential-shaped, cookie, routing, and hop-by-hop headers are dropped; the
-grant's own header slot is set to the real value; redirects are never
-followed. The response is buffered (8 MiB cap), scanned for the literal
-credential and its common encodings in body and headers, stripped of
-`set-cookie` and authentication challenges, and released only after a
-`response`-phase re-authorization. Audit rows are written per phase with the
-grant's origin as destination; an unknown token, which names nothing to
-attribute, is logged but not audited. Only bounded reason codes and grant ids
-are logged.
+Per request the API performs one live decision, re-joined from the database
+with nothing cached: token lookup by hash → workload active and lease
+unexpired → generation match → grant not revoked → grant not expired → owner
+not deleted and still has Session secret tools enabled, Session unarchived and
+still owned by the same user, grant belongs to that Session/owner, run still
+active with `actingUserId = owner`, run still attached to the Session →
+approved origin still passes the deployment public-egress policy
+(`assertEgressUrlAllowed`, HTTPS) → method in the grant's `allowedMethods`.
+Method policy is literal: `HEAD` is not implied by `GET`; the default policy
+is `["GET","HEAD"]`.
+
+The path and query are re-rooted on the approved origin; anything that
+normalizes to another origin is refused. The client's credential-shaped,
+cookie, routing, and hop-by-hop headers are dropped; the grant's own header
+slot is set to the real value; redirects are never followed. The response is
+buffered (8 MiB cap), scanned for the literal credential and its common
+encodings in body and headers, stripped of `set-cookie` and authentication
+challenges, and released only after a `response`-phase re-authorization.
+
+After the initial evaluation and its awaited audit insert, an otherwise
+allowed decision performs one fresh full-binding SELECT. That READ COMMITTED
+snapshot is the authorization decision point; the result and any decrypted
+credential are constructed entirely from that final row with no subsequent
+awaited work on the allow path. Already forwarded bytes cannot be recalled.
+
+Denials map to bounded reason codes (`unknown_substitute`,
+`workload_inactive`, `stale_generation`, `grant_revoked`, `grant_expired`,
+`session_unavailable`, `destination_mismatch`, `method_not_allowed`,
+`malformed`); the client sees `403 session_egress_denied` and never the
+code's details or any upstream/credential material. A withheld origin
+response is `502 session_egress_upstream_rejected`; concurrency limits are
+`429`.
 
 What this path does not provide is a physical origin proof: possession of the
 substitute is the authority, bounded by the workload generation, lease, run,
@@ -303,60 +192,53 @@ signature-based authentication schemes are out of scope.
 ## Audit and logging
 
 `session_egress_audit` records the initial **evaluation attempt** for each
-schema-valid `/authorize` call, not its final outcome or proof of released
+proxied request phase, not its final outcome or proof of released
 credentials/bytes. An `allowed` attempt can subsequently be denied by the
 fresh read after the audit insert; no final-success meaning should be inferred
 from it. The server-generated row `id` uniquely identifies that attempt.
-`authorizationId` is caller-controlled correlation and may repeat across
-unrelated calls; it is neither authority nor a unique/final outcome identifier.
-The attempt contains: `authorizationId`,
-presented `workloadId`, bound `sessionId`/`actorUserId`/`secretRef` (only when
-the token actually belongs to the presented workload), `phase`, `method`,
-`destination` as `host:port`, `decision`, and the bounded `reason` code.
+`authorizationId` correlates the request and response phases of one exchange;
+it is neither authority nor a unique/final outcome identifier. The attempt
+contains: `authorizationId`, `workloadId`, bound
+`sessionId`/`actorUserId`/`secretRef`, `phase`, `method`, `destination` as
+`host:port` of the approved origin, `decision`, and the bounded `reason` code.
+An unknown token names nothing to attribute and is logged, not audited.
 Never paths, query strings, headers, bodies, tokens, credentials, or upstream
-errors. The handler logs only method, route pattern, and error class on
-unexpected failures. Gateways must apply the same rule: no body capture, no
-credential-bearing annotations, no full URLs.
+errors. Handlers log only method, route pattern, and error class on
+unexpected failures.
+
+`session_egress_revocations` keeps an append-only record of explicit
+revocations (grant revocation, workload rotation, workload termination) for
+operator tooling. It is not the correctness mechanism: every request is
+authorized against live state.
 
 ## Method policy and consent
 
 `session_secrets.allowed_methods` (default `{GET,HEAD}`) is the grant's method
-policy for the gateway path. A prepared approval may request write methods;
-finalizing such an approval requires the approving client to echo the exact
-prepared method set (`sessionSecretCreateSchema.allowedMethods`), so a client
-that never shows the policy cannot approve a write-capable grant and a
-successful key entry never widens an approval. Grants created before this
-column existed remain GET/HEAD-only. The legacy `integration_request`
-Session-grant path stays GET/HEAD-only regardless of `allowed_methods`.
+policy. A prepared approval may request write methods; finalizing such an
+approval requires the approving client to echo the exact prepared method set
+(`sessionSecretCreateSchema.allowedMethods`), so a client that never shows the
+policy cannot approve a write-capable grant and a successful key entry never
+widens an approval. Grants created before this column existed remain
+GET/HEAD-only. The Fast `request_with_session_secret` path stays GET/HEAD-only
+regardless of `allowed_methods`.
 
 ## Lifecycle obligations (controller)
 
-- Register after the workload's connector exists and before the workload can
-  reach the gateway; deliver substitutes + proxy settings + public CA only.
-- Rotate (re-register) on resume from snapshot, actor reconciliation, and
-  connector credential rotation. Substitutes are invalid after restore until
-  re-registration.
+- Register only after the worker reports bootstrap; deliver substitutes, the
+  manifest, and the base URL only, bound to the bootstrap nonce.
+- Rotate (re-register) on resume and actor reconciliation. Substitutes are
+  invalid after restore until re-registration.
 - Renew the lease periodically while the run is alive; treat `404` as a signal
-  to re-register or stop.
+  to stop.
 - Terminate on stop, completion, failure, orphan recovery, and detach.
-- A failed cleanup must not reuse a connector identity for another Session:
-  the active-connector uniqueness index refuses it until the old workload is
+- A failed cleanup must not reuse an identity for another Session: the
+  active-identity uniqueness index refuses it until the old workload is
   terminated.
 
 ## Schema (additive, N-1 safe)
 
-Migration `packages/db/drizzle/0082_wooden_cardiac.sql`: new tables
-`session_egress_workloads`, `session_egress_substitutes`,
-`session_egress_audit`, `session_egress_revocations`; new column
-`allowed_methods text[] NOT NULL DEFAULT '{GET,HEAD}'` on `session_secrets`
-and `session_secret_approvals`. No existing column or table changes shape;
-the previous release ignores all of it.
-
-## Out of scope here (later milestones)
-
-Iron gateway extension (connector identity → workload mapping, CONNECT/SNI/
-Host binding, header-position substitution, response echo containment,
-stream cancellation), Docker/provider connector networking and egress
-enforcement, worker client trust/proxy configuration, Fast delegation
-guidance, and removal of the deprecated `integration_request` Session-grant
-compatibility path after parity tests.
+Tables `session_egress_workloads`, `session_egress_substitutes`,
+`session_egress_audit`, `session_egress_revocations`, and the
+`allowed_methods` column on `session_secrets` and `session_secret_approvals`
+are unchanged by the gateway removal. `connector_identity` keeps its name and
+uniqueness index; only the synthetic identity form is written now.

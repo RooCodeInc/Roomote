@@ -21,29 +21,32 @@ vi.mock('@roomote/auth', async (importOriginal) => ({
 beforeEach(() => vi.clearAllMocks());
 
 it.each([
-  'Bearer gateway-token',
-  'bEaReR\tgateway-token',
-  'BEARER \t gateway-token \t',
-  'Bearer\u00a0gateway-token\u00a0',
-  'Bearer\v\fgateway-token\t',
+  'Bearer controller-token',
+  'bEaReR\tcontroller-token',
+  'BEARER \t controller-token \t',
+  'Bearer\u00a0controller-token\u00a0',
+  'Bearer\v\fcontroller-token\t',
 ])('preserves bearer scheme and surrounding whitespace: %j', async (header) => {
-  expect(
-    await authenticateSessionEgressPrincipal(header, 'gateway-token'),
-  ).toBe('gateway');
-  expect(validateSessionEgressControllerToken).not.toHaveBeenCalled();
+  vi.mocked(validateSessionEgressControllerToken).mockResolvedValueOnce({
+    tokenType: 'session-egress-controller',
+  });
+  expect(await authenticateSessionEgressPrincipal(header)).toBe('controller');
+  expect(validateSessionEgressControllerToken).toHaveBeenCalledExactlyOnceWith(
+    'controller-token',
+  );
 });
 
 it.each([
   undefined,
   '',
-  'Basic gateway-token',
-  ' Bearer gateway-token',
+  'Basic controller-token',
+  ' Bearer controller-token',
   'Bearer',
-  'Bearergateway-token',
+  'Bearercontroller-token',
   'Bearer \t ',
-  'Bearer\r\ngateway-token',
-  'Bearer gateway-token\r\n',
-  'Bearer gateway\ntoken',
+  'Bearer\r\ncontroller-token',
+  'Bearer controller-token\r\n',
+  'Bearer controller\ntoken',
   'Bearer\rcontroller-token',
   'Bearer\ncontroller-token',
   'Bearer controller\u2028token',
@@ -51,22 +54,26 @@ it.each([
 ])(
   'rejects malformed bearer headers before token validation: %j',
   async (header) => {
-    expect(
-      await authenticateSessionEgressPrincipal(header, 'gateway-token'),
-    ).toBeNull();
+    expect(await authenticateSessionEgressPrincipal(header)).toBeNull();
     expect(validateSessionEgressControllerToken).not.toHaveBeenCalled();
   },
 );
+
+it('rejects a bearer the controller token validator refuses', async () => {
+  expect(
+    await authenticateSessionEgressPrincipal('Bearer not-a-controller-token'),
+  ).toBeNull();
+  expect(validateSessionEgressControllerToken).toHaveBeenCalledExactlyOnceWith(
+    'not-a-controller-token',
+  );
+});
 
 it('passes a parsed controller token to validation without changing its case', async () => {
   vi.mocked(validateSessionEgressControllerToken).mockResolvedValueOnce({
     tokenType: 'session-egress-controller',
   });
   expect(
-    await authenticateSessionEgressPrincipal(
-      'bearer\tController-Token \t',
-      'gateway-token',
-    ),
+    await authenticateSessionEgressPrincipal('bearer\tController-Token \t'),
   ).toBe('controller');
   expect(validateSessionEgressControllerToken).toHaveBeenCalledExactlyOnceWith(
     'Controller-Token',
@@ -76,17 +83,17 @@ it('passes a parsed controller token to validation without changing its case', a
 it('handles hostile long tab runs without token validation', async () => {
   const tabs = '\t'.repeat(200_000);
   for (const header of [`Bearer${tabs}`, `Bearer${tabs}\r\n`]) {
-    expect(
-      await authenticateSessionEgressPrincipal(header, 'gateway-token'),
-    ).toBeNull();
+    expect(await authenticateSessionEgressPrincipal(header)).toBeNull();
   }
   expect(validateSessionEgressControllerToken).not.toHaveBeenCalled();
+  vi.mocked(validateSessionEgressControllerToken).mockResolvedValueOnce({
+    tokenType: 'session-egress-controller',
+  });
   expect(
     await authenticateSessionEgressPrincipal(
-      `bEaReR${tabs}gateway-token${tabs}`,
-      'gateway-token',
+      `bEaReR${tabs}controller-token${tabs}`,
     ),
-  ).toBe('gateway');
+  ).toBe('controller');
 }, 2_000);
 
 it.each([
