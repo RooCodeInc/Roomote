@@ -120,15 +120,22 @@ vi.mock('./messages/index', () => ({
 vi.mock('./messages/acp', async () => {
   const { buildAcpActivityRenderBlocks } =
     await import('./messages/acp/activity-groups');
-  const hasAssistantOutput = (blocks: AcpConversationRenderBlock[]): boolean =>
-    blocks.some((block) =>
-      block.kind === 'activity_group'
-        ? hasAssistantOutput(block.blocks)
-        : block.kind === 'tool_group'
-          ? false
-          : block.msg.role === 'assistant' ||
-            hasAssistantOutput(block.childBlocks ?? []),
-    );
+  const hasAssistantOutput = (
+    blocks: AcpConversationRenderBlock[],
+  ): boolean => {
+    for (let index = blocks.length - 1; index >= 0; index -= 1) {
+      const block = blocks[index]!;
+      if (block.kind === 'activity_group' || block.kind === 'tool_group') {
+        return true;
+      }
+      if (block.msg.role === 'user') return false;
+      if (block.msg.role === 'assistant' || block.msg.role === 'tool') {
+        return true;
+      }
+      if (hasAssistantOutput(block.childBlocks ?? [])) return true;
+    }
+    return false;
+  };
   const renderBlock = (block: AcpConversationRenderBlock): ReactNode => {
     if (block.kind === 'activity_group') {
       return (
@@ -153,6 +160,7 @@ vi.mock('./messages/acp', async () => {
     AcpTextMessage: ({ msg }: { msg: { text?: string } }) => (
       <div>{msg.text}</div>
     ),
+    AcpWorkingMessage: () => <div>Working</div>,
     AcpTranscriptBlockList: ({
       blocks,
     }: {
@@ -571,13 +579,13 @@ describe('Messages', () => {
       />,
     );
 
-    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
 
     act(() => {
       vi.advanceTimersByTime(700);
     });
 
-    expect(screen.getByText('Thinking...')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
   });
 
   it('does not show the narration-mode reasoning indicator when visible assistant output already exists', () => {
@@ -610,7 +618,41 @@ describe('Messages', () => {
       vi.advanceTimersByTime(700);
     });
 
-    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
+  });
+
+  it('shows Working for a subsequent turn before new activity arrives', () => {
+    taskPhaseState.phase = 'running';
+    mockBuildAcpRenderBlocks.mockReturnValue([
+      {
+        kind: 'message',
+        msg: {
+          id: 'assistant-1',
+          role: 'assistant',
+          partial: false,
+        },
+      },
+      {
+        kind: 'message',
+        msg: {
+          id: 'user-2',
+          role: 'user',
+          partial: false,
+        },
+      },
+    ] as never);
+
+    render(
+      <Messages
+        session={{ taskId: 'task-1', prompt: null, taskRun: null } as never}
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(700);
+    });
+
+    expect(screen.getByText('Working')).toBeInTheDocument();
   });
 
   it('does not show the narration-mode reasoning indicator when only nested child assistant output is visible', () => {
@@ -653,7 +695,7 @@ describe('Messages', () => {
       vi.advanceTimersByTime(700);
     });
 
-    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
   });
 
   it('shows the narration-mode reasoning indicator when narration display mode is forced', () => {
@@ -683,7 +725,7 @@ describe('Messages', () => {
         displayMode: 'narration',
       }),
     );
-    expect(screen.getByText('Thinking...')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
   });
 
   it('hides session prompts flagged as hidden by the server', () => {
