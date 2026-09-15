@@ -58,6 +58,7 @@ export async function processFastAgentMessage(params: {
   directedAtRoomote?: boolean;
   roomoteSlackUserId?: string;
   peerConversationsExperimentEnabled?: boolean;
+  originSessionId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
   onRejected?: () => void;
 }): Promise<void> {
@@ -146,6 +147,9 @@ export async function processFastAgentMessage(params: {
         return await getOrCreateFastAgentSession({
           userId,
           conversation: incomingConversation,
+          ...(params.originSessionId
+            ? { sessionId: params.originSessionId }
+            : {}),
         });
       } finally {
         await releaseRootBindingLock().catch(() => {});
@@ -221,6 +225,9 @@ export async function processFastAgentMessage(params: {
         : {}),
       ...(event.user ? { senderExternalId: event.user } : {}),
       directedAtRoomote: !allowSilentAmbientReply,
+      ...(params.originSessionId
+        ? { deliveryConversation: incomingConversation }
+        : {}),
     };
     let durableTurn: FastAgentDurableTurn | null = null;
     if (needsCanonicalAdmission) {
@@ -279,7 +286,12 @@ export async function processFastAgentMessage(params: {
       threadContext: serializedThreadContext,
       userId,
       apiBaseUrl,
-      conversation,
+      conversation: params.originSessionId
+        ? incomingConversation
+        : conversation,
+      ...(params.originSessionId
+        ? { canonicalConversation: conversation }
+        : {}),
       currentMessageId: event.ts,
       signal: activeTurnLock.signal,
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),

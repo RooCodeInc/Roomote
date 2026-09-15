@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { BasicTooltip, SendHorizontal } from '@/components/system';
 
 import {
@@ -25,6 +25,7 @@ import {
 } from '@/components/ai-elements';
 
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
+import { useGhostSuggestion } from '@/hooks/useGhostSuggestion';
 import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
 import { cn } from '@/lib/utils';
 
@@ -106,6 +107,9 @@ type TaskPromptInputProps = {
   onPromptTextChange: (text: string) => void;
   onSubmit: (message: PromptInputMessage) => Promise<void> | void;
   placeholder: string;
+  /** Optional empty-composer suggestion accepted with Tab. */
+  promptSuggestion?: string;
+  onPromptFocusChange?: (focused: boolean) => void;
   /** React key forwarded to the PromptInputRoot (useful for resetting state). */
   promptKey?: string;
   autoFocus?: boolean;
@@ -144,6 +148,8 @@ export function TaskPromptInput({
   onPromptTextChange,
   onSubmit,
   placeholder,
+  promptSuggestion,
+  onPromptFocusChange,
   promptKey,
   autoFocus,
   textareaMaxHeight,
@@ -156,10 +162,22 @@ export function TaskPromptInput({
   surface = 'default',
   voice,
 }: TaskPromptInputProps) {
+  const [isTextareaFocused, setIsTextareaFocused] = useState(false);
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => onPromptTextChange(text),
     getPrefix: () => promptText,
     disabled: isBusy,
+  });
+  const {
+    ghostSuggestion,
+    suggestionHintId,
+    acceptGhostSuggestion,
+    handleSuggestionKeyDown,
+  } = useGhostSuggestion({
+    suggestion: promptSuggestion?.trim() || null,
+    active: !promptText && !isBusy,
+    surface: 'home',
+    onAccept: onPromptTextChange,
   });
 
   return (
@@ -182,20 +200,54 @@ export function TaskPromptInput({
       >
         <AttachmentsDisplay />
         <PromptInputBody>
-          <PromptInputTextarea
-            autoFocus={autoFocus}
-            placeholder={placeholder}
-            disabled={isBusy}
-            className={surface === 'default' ? 'min-h-30' : undefined}
-            style={
-              textareaMaxHeight != null
-                ? { maxHeight: textareaMaxHeight }
-                : undefined
-            }
-            value={promptText}
-            submitWithMetaKey={submitWithMetaKey}
-            onChange={(e) => onPromptTextChange(e.target.value)}
-          />
+          <div className="flex items-start">
+            <PromptInputTextarea
+              autoFocus={autoFocus}
+              placeholder={ghostSuggestion ?? placeholder}
+              disabled={isBusy}
+              className={cn(
+                'min-w-0 flex-1',
+                surface === 'default' && 'min-h-30',
+              )}
+              style={
+                textareaMaxHeight != null
+                  ? { maxHeight: textareaMaxHeight }
+                  : undefined
+              }
+              value={promptText}
+              submitWithMetaKey={submitWithMetaKey}
+              onChange={(e) => onPromptTextChange(e.target.value)}
+              onFocus={() => {
+                setIsTextareaFocused(true);
+                onPromptFocusChange?.(true);
+              }}
+              onBlur={() => {
+                setIsTextareaFocused(false);
+                onPromptFocusChange?.(false);
+              }}
+              onKeyDown={handleSuggestionKeyDown}
+              aria-describedby={ghostSuggestion ? suggestionHintId : undefined}
+            />
+            {ghostSuggestion ? (
+              <>
+                <span id={suggestionHintId} className="sr-only">
+                  Suggested task: {ghostSuggestion}. Press Tab to accept or
+                  Escape to dismiss.
+                </span>
+                {isTextareaFocused ? (
+                  <button
+                    type="button"
+                    aria-label="Insert suggested task"
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={acceptGhostSuggestion}
+                    className="mt-4 mr-4 shrink-0 whitespace-nowrap rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
+                  >
+                    Tab to accept
+                  </button>
+                ) : null}
+              </>
+            ) : null}
+          </div>
         </PromptInputBody>
         <PromptInputFooter
           className={surface === 'default' ? 'p-0' : 'pt-0 pb-4 px-4'}

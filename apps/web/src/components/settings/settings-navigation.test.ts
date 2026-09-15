@@ -6,9 +6,9 @@ import {
 } from './settings-navigation';
 
 describe('settings navigation', () => {
-  it('shows the empty state for Experimental settings', () => {
+  it('describes Experimental settings with active opt-in features', () => {
     expect(getSettingsNavigationItem('experimental')?.description).toBe(
-      'Try features that are still under development.',
+      'Try opt-in features that may change while they are being evaluated.',
     );
   });
 

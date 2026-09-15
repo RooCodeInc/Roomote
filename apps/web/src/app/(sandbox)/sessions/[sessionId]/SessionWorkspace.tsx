@@ -19,6 +19,7 @@ import {
   isTaskExecutingTurn,
   type ReasoningEffort,
   type RunStatus,
+  type SessionGoal,
 } from '@roomote/types';
 
 import {
@@ -189,6 +190,7 @@ export type SessionInfo = {
   };
   createdAt: Date;
   status: string | null;
+  goal?: SessionGoal | null;
   tasks: SessionTaskSummary[];
   artifacts?: SessionArtifact[];
   taskSource?: 'unified' | 'fast';
@@ -399,7 +401,7 @@ function SessionArtifactViewer({
         onClose={onClose}
         closeLabel={closeLabel}
       />
-      <div className="min-h-0 flex-1 bg-zinc-800">
+      <div className="min-h-0 flex-1 bg-background">
         <ArtifactViewerContent
           artifact={selectedArtifact}
           owner={selection.owner}
@@ -630,6 +632,7 @@ function SessionTasksPanel({
               size="icon"
               className="size-8"
               aria-label="Open side-by-side"
+              onPointerDown={(event) => event.preventDefault()}
               onClick={onOpenSideBySide}
             >
               <Columns3 />
@@ -1014,8 +1017,10 @@ export function SessionWorkspace({
                   tooltip="Tasks"
                   description="Middle-click to open side-by-side"
                   active={utilityPanel?.kind === 'tasks'}
+                  aria-expanded={utilityPanel?.kind === 'tasks'}
                   disabled={taskCards.length === 0}
                   icon={Rows4}
+                  onPointerDown={(event) => event.preventDefault()}
                   onClick={() => togglePanel('tasks')}
                   onAuxClick={(event) => {
                     if (event.button !== 1) return;
@@ -1028,6 +1033,7 @@ export function SessionWorkspace({
                   label="Live Preview"
                   tooltip="Live Preview"
                   active={utilityPanel?.kind === 'previews'}
+                  aria-expanded={utilityPanel?.kind === 'previews'}
                   disabled={sessionPreviewCount === 0}
                   icon={AppWindow}
                   onClick={() => togglePanel('previews')}
@@ -1037,6 +1043,7 @@ export function SessionWorkspace({
                   label="Artifacts"
                   tooltip="Artifacts"
                   active={utilityPanel?.kind === 'artifacts'}
+                  aria-expanded={utilityPanel?.kind === 'artifacts'}
                   icon={LayoutGrid}
                   onClick={() => togglePanel('artifacts')}
                 />
@@ -1045,6 +1052,7 @@ export function SessionWorkspace({
                   label="Session info"
                   tooltip="Session info"
                   active={utilityPanel?.kind === 'info'}
+                  aria-expanded={utilityPanel?.kind === 'info'}
                   icon={Info}
                   onClick={() => togglePanel('info')}
                 />

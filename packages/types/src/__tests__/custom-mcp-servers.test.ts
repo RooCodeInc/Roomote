@@ -22,6 +22,18 @@ describe('customMcpServerInputSchema', () => {
     );
   });
 
+  it('keeps http-integrations valid for existing custom servers', () => {
+    expect(RESERVED_CUSTOM_MCP_SERVER_NAMES.has('http-integrations')).toBe(
+      false,
+    );
+    expect(
+      customMcpServerInputSchema.safeParse({
+        ...validServer,
+        name: 'http-integrations',
+      }).success,
+    ).toBe(true);
+  });
+
   it('accepts a no-auth server without headers', () => {
     const result = customMcpServerInputSchema.safeParse({
       transport: 'remote',
@@ -86,6 +98,7 @@ describe('customMcpServerInputSchema', () => {
     'slack',
     'notion',
     'gbrain',
+    '_roomote_http_integrations',
   ])('rejects reserved name %s', (name) => {
     expect(RESERVED_CUSTOM_MCP_SERVER_NAMES.has(name)).toBe(true);
 

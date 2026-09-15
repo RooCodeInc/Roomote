@@ -7,12 +7,13 @@ import type {
   ActivationSetupMilestone,
   ActivationSetupMilestoneProperties,
 } from '@roomote/telemetry';
-import type {
-  SetupAuthStatus,
-  SetupComputeStatus,
-  SetupModelStatus,
-  SetupNewState,
-  SetupSourceControlStatus,
+import {
+  normalizeSetupNewSetupSession,
+  type SetupAuthStatus,
+  type SetupComputeStatus,
+  type SetupModelStatus,
+  type SetupNewState,
+  type SetupSourceControlStatus,
 } from '@roomote/types';
 
 const METADATA_KEY = 'setup_funnel_milestones';
@@ -146,6 +147,13 @@ export function evaluateSetupFunnelMilestones(input: {
       provider: sourceControlProvider,
       preexisting: sourceControlPreexisting,
     });
+  }
+
+  const setupSession = normalizeSetupNewSetupSession(
+    input.setupNewState.setupSession,
+  );
+  if (setupSession?.integrationDiscoveryCompletedAt) {
+    candidates.push({ milestone: 'integrations_decided' });
   }
 
   const computeProvider =

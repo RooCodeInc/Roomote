@@ -5,12 +5,15 @@ import {
 
 import { COMMUNICATION_LOOKUP_STRATEGIES } from './communication-message-lookup-strategies';
 import type {
-  CommunicationChannelMessagesPayload,
   CommunicationLookupTaskRun,
   CommunicationMessageContextPayload,
   ParsedCommunicationReference,
   SupportedCommunicationLookupProvider,
 } from './communication-message-lookup-types';
+import {
+  applyChannelMessagesResultBudget,
+  type BudgetedCommunicationChannelMessagesPayload,
+} from './communication-channel-messages-budget';
 import { McpProxyError } from './proxy-utils';
 
 export type { CommunicationLookupTaskRun } from './communication-message-lookup-types';
@@ -160,7 +163,7 @@ export async function lookupCommunicationChannelMessages(options: {
   provider?: SupportedCommunicationLookupProvider;
   taskRun?: CommunicationLookupTaskRun | null;
   actingUserId?: string | null;
-}): Promise<CommunicationChannelMessagesPayload> {
+}): Promise<BudgetedCommunicationChannelMessagesPayload> {
   const channel = options.channel?.trim();
   const reference = channel ? parseReference(channel) : null;
   const provider = resolveLookupProvider({
@@ -175,7 +178,9 @@ export async function lookupCommunicationChannelMessages(options: {
     );
   }
 
-  return COMMUNICATION_LOOKUP_STRATEGIES[provider].getChannelMessages({
+  const payload = await COMMUNICATION_LOOKUP_STRATEGIES[
+    provider
+  ].getChannelMessages({
     ...(reference?.channelId
       ? { channel: reference.channelId }
       : channel
@@ -186,4 +191,6 @@ export async function lookupCommunicationChannelMessages(options: {
     ...(options.taskRun ? { taskRun: options.taskRun } : {}),
     ...(options.actingUserId ? { actingUserId: options.actingUserId } : {}),
   });
+
+  return applyChannelMessagesResultBudget(payload);
 }

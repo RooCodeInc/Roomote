@@ -16,6 +16,7 @@ import { UserAnalyticsContext } from './UserAnalyticsContext';
 import { TelemetryProvider } from './TelemetryProvider';
 import { CloudConsentGate } from './CloudConsentGate';
 import { StatusBanner } from './StatusBanner';
+import { VoiceConsentProvider } from './VoiceConsentProvider';
 
 export function RootProviders({
   authStatus,
@@ -60,9 +61,11 @@ export function RootProviders({
               userId={authUser?.userId}
             />
           ) : null}
-          <PersonalThemeSync />
-          <StatusBanner />
-          {children}
+          <VoiceConsentProvider cloudEnabled={cloudEnabled}>
+            <PersonalThemeSync />
+            <StatusBanner />
+            {children}
+          </VoiceConsentProvider>
           <Toaster />
         </TRPCReactProvider>
       </AuthProvider>

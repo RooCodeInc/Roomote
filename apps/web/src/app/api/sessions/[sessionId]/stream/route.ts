@@ -7,8 +7,10 @@ import {
   eq,
   fastAgentConversations,
   isSessionConversationResponding,
+  sessionGoals,
   sessions as unifiedSessions,
 } from '@roomote/db/server';
+import type { SessionGoal } from '@roomote/types';
 
 import { authorizeUserToken } from '@/lib/server';
 import {
@@ -63,6 +65,7 @@ export async function GET(
     : Date.now() - INITIAL_CURSOR_OVERLAP_MS;
   let lastTitle = session.title;
   let lastConversationResponding: boolean | null | undefined;
+  let lastGoalSignature: string | undefined;
 
   return createResponse(request, async (sseSession) => {
     const startTime = Date.now();
@@ -97,11 +100,24 @@ export async function GET(
               title: fastAgentConversations.title,
               unifiedSessionId: unifiedSessions.id,
               respondingUntil: unifiedSessions.respondingUntil,
+              goal: {
+                objective: sessionGoals.objective,
+                generation: sessionGoals.lastContinuationId,
+                status: sessionGoals.status,
+                maxContinuations: sessionGoals.maxContinuations,
+                continuationsUsed: sessionGoals.continuationsUsed,
+                blockedReason: sessionGoals.blockedReason,
+                completedAt: sessionGoals.completedAt,
+              },
             })
             .from(fastAgentConversations)
             .leftJoin(
               unifiedSessions,
               eq(unifiedSessions.fastConversationId, fastAgentConversations.id),
+            )
+            .leftJoin(
+              sessionGoals,
+              eq(sessionGoals.sessionId, unifiedSessions.id),
             )
             .where(eq(fastAgentConversations.id, session.id))
             .limit(1);
@@ -114,6 +130,7 @@ export async function GET(
                 respondingUntil: conversation.respondingUntil,
               })
             : null;
+          const goal: SessionGoal | null = conversation?.goal ?? null;
           if (messages.length > 0) {
             await sseSession.push(
               { messages, conversationResponding },
@@ -123,6 +140,7 @@ export async function GET(
           const sessionUpdate: {
             title?: string;
             conversationResponding?: boolean | null;
+            goal?: SessionGoal | null;
           } = {};
           if (title && title !== lastTitle) {
             lastTitle = title;
@@ -131,6 +149,11 @@ export async function GET(
           if (conversationResponding !== lastConversationResponding) {
             lastConversationResponding = conversationResponding;
             sessionUpdate.conversationResponding = conversationResponding;
+          }
+          const goalSignature = JSON.stringify(goal);
+          if (goalSignature !== lastGoalSignature) {
+            lastGoalSignature = goalSignature;
+            sessionUpdate.goal = goal;
           }
           if (Object.keys(sessionUpdate).length > 0) {
             await sseSession.push(sessionUpdate, 'session');

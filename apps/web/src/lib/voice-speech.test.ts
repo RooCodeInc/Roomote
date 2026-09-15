@@ -99,6 +99,14 @@ describe('splitSpeakableSentences', () => {
 });
 
 describe('stripVoiceAnnotations', () => {
+  it('collapses transcript formatting whitespace inside spoken sentences', () => {
+    expect(
+      stripVoiceAnnotations(
+        'When\nR_CLOUD_ENABLED\n\nis true, AgentMail shows status only.',
+      ),
+    ).toBe('When R_CLOUD_ENABLED is true, AgentMail shows status only.');
+  });
+
   it('drops bracketed sound annotations and tidies the spacing', () => {
     expect(
       stripVoiceAnnotations('[chuckle] Can you can you sing your updates'),

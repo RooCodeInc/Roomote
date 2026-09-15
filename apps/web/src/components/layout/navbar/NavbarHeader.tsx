@@ -23,7 +23,9 @@ export const NavbarHeader = ({
   className,
   setupIncomplete = false,
   ...props
-}: NavbarHeaderProps & { setupIncomplete?: boolean }) => {
+}: NavbarHeaderProps & {
+  setupIncomplete?: boolean;
+}) => {
   const { setOpen: openCommandPalette } = useCommandPalette();
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
   useAuthorizedUser();
@@ -37,7 +39,10 @@ export const NavbarHeader = ({
         )}
         {...props}
       >
-        <NavbarDrawer setupIncomplete={setupIncomplete} />
+        <NavbarDrawer
+          setupIncomplete={setupIncomplete}
+          onNewSession={() => setIsNewTaskDialogOpen(true)}
+        />
         {setupIncomplete ? (
           <Image
             src={MOBILE_HEADER_LOGO_SRC}

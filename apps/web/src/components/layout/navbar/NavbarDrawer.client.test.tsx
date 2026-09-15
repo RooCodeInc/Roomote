@@ -3,10 +3,11 @@ import type {
   ButtonHTMLAttributes,
   ReactNode,
 } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 const state = vi.hoisted(() => ({
   pathname: '/',
+  recentSessionsEnabled: false,
   user: {
     isAdmin: true,
   },
@@ -18,6 +19,10 @@ function Icon() {
 
 vi.mock('next/navigation', () => ({
   usePathname: () => state.pathname,
+}));
+
+vi.mock('usehooks-ts', () => ({
+  useMediaQuery: () => true,
 }));
 
 vi.mock('next/link', () => ({
@@ -40,12 +45,24 @@ vi.mock('@/hooks/useResultsPage', () => ({
   useResultsPage: () => ({ enabled: false, isLoading: false }),
 }));
 
+vi.mock('@/components/layout/side-nav/RecentSessions', () => ({
+  RecentSessions: ({ enabled }: { enabled: boolean }) => {
+    state.recentSessionsEnabled = enabled;
+    return (
+      <section>
+        <h3>Recent sessions</h3>
+      </section>
+    );
+  },
+}));
+
 vi.mock('@/components/system', () => ({
   Menu: Icon,
   X: Icon,
   House: Icon,
   Rows4: Icon,
   NotepadText: Icon,
+  Plus: Icon,
   GalleryVerticalEnd: Icon,
   ChartColumnIncreasing: Icon,
   Lightbulb: Icon,
@@ -89,6 +106,7 @@ import { NavbarDrawer } from './NavbarDrawer';
 describe('NavbarDrawer', () => {
   beforeEach(() => {
     state.user.isAdmin = true;
+    state.recentSessionsEnabled = false;
   });
 
   it('shows a settings link for members', () => {
@@ -98,6 +116,20 @@ describe('NavbarDrawer', () => {
       'href',
       '/settings',
     );
+  });
+
+  it('opens a new Session from the first navigation action', () => {
+    const onNewSession = vi.fn();
+    render(<NavbarDrawer onNewSession={onNewSession} />);
+
+    const newSession = screen.getByRole('button', { name: 'New Session' });
+    const home = screen.getByRole('link', { name: 'Home' });
+
+    expect(newSession.compareDocumentPosition(home)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    fireEvent.click(newSession);
+    expect(onNewSession).toHaveBeenCalledOnce();
   });
 
   it('keeps settings as the only admin/navigation destination in the drawer', () => {
@@ -112,6 +144,20 @@ describe('NavbarDrawer', () => {
     expect(
       screen.queryByRole('button', { name: /support/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows recent sessions below the navigation options', () => {
+    render(<NavbarDrawer />);
+
+    const settings = screen.getByRole('link', { name: /settings/i });
+    const recentSessions = screen.getByRole('heading', {
+      name: 'Recent sessions',
+    });
+
+    expect(settings.compareDocumentPosition(recentSessions)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(state.recentSessionsEnabled).toBe(true);
   });
 
   it('keeps setup-gated destinations visible but disabled with an explanation', () => {

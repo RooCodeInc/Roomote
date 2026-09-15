@@ -20,7 +20,18 @@ export interface ComputeProviderCapabilities {
   supportsFileWrite: boolean;
   /** Can run customer-owned Docker Compose and Dockerfile projects. */
   supportsDockerProjects: boolean;
+  /**
+   * Whether the provider can hold a Session-egress workload to the
+   * credential-substitution contract: externally enforced workload identity
+   * (connector mTLS outside the sandbox), sandbox egress restricted to that
+   * connector plus control-plane services, and connector keys the sandbox
+   * can never read. `unsupported` providers fail closed: no workload is
+   * registered and no substitute is ever delivered to them.
+   */
+  sessionEgress: ComputeProviderSessionEgressCapability;
 }
+
+export type ComputeProviderSessionEgressCapability = 'enforced' | 'unsupported';
 
 export type ComputeProviderCommandOutputSource =
   | 'central'
@@ -38,6 +49,9 @@ export const DOCKER_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: false,
   supportsDockerProjects: true,
+  // Per-task bridge network, host-applied egress rules, and a connector
+  // sidecar the controller provisions outside the worker container.
+  sessionEgress: 'enforced',
 };
 
 export const MODAL_CAPABILITIES: ComputeProviderCapabilities = {
@@ -51,6 +65,7 @@ export const MODAL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
+  sessionEgress: 'unsupported',
 };
 
 export const DAYTONA_CAPABILITIES: ComputeProviderCapabilities = {
@@ -64,6 +79,7 @@ export const DAYTONA_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
+  sessionEgress: 'unsupported',
 };
 
 export const E2B_CAPABILITIES: ComputeProviderCapabilities = {
@@ -77,6 +93,7 @@ export const E2B_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
+  sessionEgress: 'unsupported',
 };
 
 export const BLAXEL_CAPABILITIES: ComputeProviderCapabilities = {
@@ -90,6 +107,7 @@ export const BLAXEL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
+  sessionEgress: 'unsupported',
 };
 
 export const BOX_CAPABILITIES: ComputeProviderCapabilities = {
@@ -104,6 +122,7 @@ export const BOX_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
+  sessionEgress: 'unsupported',
 };
 
 export const AZURE_CAPABILITIES: ComputeProviderCapabilities = {
@@ -120,6 +139,7 @@ export const AZURE_CAPABILITIES: ComputeProviderCapabilities = {
   supportsFileWrite: true,
   // dockerd runs inside the ACA microVM (verified against the worker image).
   supportsDockerProjects: true,
+  sessionEgress: 'unsupported',
 };
 
 export function getComputeProviderCapabilities(
@@ -158,4 +178,21 @@ export function getComputeProviderCommandOutputSource(
   return getComputeProviderCapabilities(provider).supportsCommandOutputLookup
     ? 'provider'
     : 'none';
+}
+
+/**
+ * Session-egress gate. Only providers whose adapter enforces the workload
+ * identity and egress contract outside the sandbox may receive substitute
+ * tokens; every other provider fails closed with an explicit status.
+ */
+export function getComputeProviderSessionEgressCapability(
+  provider: ComputeProvider,
+): ComputeProviderSessionEgressCapability {
+  return getComputeProviderCapabilities(provider).sessionEgress;
+}
+
+export function isSessionEgressEnforcedComputeProvider(
+  provider: ComputeProvider,
+): boolean {
+  return getComputeProviderSessionEgressCapability(provider) === 'enforced';
 }

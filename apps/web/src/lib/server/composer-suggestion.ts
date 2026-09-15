@@ -23,7 +23,6 @@ const MAX_SUGGESTION_CHARS = 100;
 // The prompt asks for 5-10 words; discard overshoots instead of truncating
 // them mid-thought.
 const MAX_SUGGESTION_WORDS = 12;
-
 const composerSuggestionSchema = z.object({
   suggestion: z.string().trim().min(1).max(300),
 });
@@ -95,7 +94,13 @@ function buildConversationText(messages: SuggestableMessage[]): string {
 }
 
 /** Collapse to one line, strip wrapping quotes, and enforce brevity. */
-function normalizeSuggestion(raw: string): string | null {
+function normalizeSuggestion(
+  raw: string,
+  {
+    maxWords = MAX_SUGGESTION_WORDS,
+    maxChars = MAX_SUGGESTION_CHARS,
+  }: { maxWords?: number; maxChars?: number } = {},
+): string | null {
   let text = raw.replace(/\s+/g, ' ').trim();
 
   if (
@@ -110,10 +115,7 @@ function normalizeSuggestion(raw: string): string | null {
     return null;
   }
 
-  if (
-    text.split(' ').length > MAX_SUGGESTION_WORDS ||
-    text.length > MAX_SUGGESTION_CHARS
-  ) {
+  if (text.split(' ').length > maxWords || text.length > maxChars) {
     return null;
   }
 

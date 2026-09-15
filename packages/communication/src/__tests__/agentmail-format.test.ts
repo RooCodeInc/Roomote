@@ -37,9 +37,21 @@ describe('renderAgentMailHtml', () => {
     );
   });
 
+  it('handles long malformed link-like input without backtracking', () => {
+    const source = `[${'\\['.repeat(20_000)}`;
+
+    expect(renderAgentMailPlainText(source)).toBe(source);
+  });
+
   it('renders headings one size down as h3-h5', () => {
     expect(renderAgentMailHtml('# One\n\n## Two\n\n### Three')).toBe(
       '<h3>One</h3><h4>Two</h4><h5>Three</h5>',
+    );
+  });
+
+  it('parses headings with long whitespace prefixes linearly', () => {
+    expect(renderAgentMailPlainText(`#${'\t'.repeat(20_000)}Heading`)).toBe(
+      'Heading',
     );
   });
 

@@ -63,6 +63,14 @@ function mergeResultForUpdatedFields(
       updates.slackPeerConversationsExperimentEnabled === undefined
         ? mergedPreferences.slackPeerConversationsExperimentEnabled
         : result.slackPeerConversationsExperimentEnabled,
+    homeComposerSuggestionsEnabled:
+      updates.homeComposerSuggestionsEnabled === undefined
+        ? mergedPreferences.homeComposerSuggestionsEnabled
+        : result.homeComposerSuggestionsEnabled,
+    sessionSecretToolsEnabled:
+      updates.sessionSecretToolsEnabled === undefined
+        ? mergedPreferences.sessionSecretToolsEnabled
+        : result.sessionSecretToolsEnabled,
   };
 }
 
@@ -110,6 +118,18 @@ function rollbackUpdatedFields(
         optimisticPreferences.slackPeerConversationsExperimentEnabled
         ? previousPreferences.slackPeerConversationsExperimentEnabled
         : mergedPreferences.slackPeerConversationsExperimentEnabled,
+    homeComposerSuggestionsEnabled:
+      updates.homeComposerSuggestionsEnabled !== undefined &&
+      mergedPreferences.homeComposerSuggestionsEnabled ===
+        optimisticPreferences.homeComposerSuggestionsEnabled
+        ? previousPreferences.homeComposerSuggestionsEnabled
+        : mergedPreferences.homeComposerSuggestionsEnabled,
+    sessionSecretToolsEnabled:
+      updates.sessionSecretToolsEnabled !== undefined &&
+      mergedPreferences.sessionSecretToolsEnabled ===
+        optimisticPreferences.sessionSecretToolsEnabled
+        ? previousPreferences.sessionSecretToolsEnabled
+        : mergedPreferences.sessionSecretToolsEnabled,
   };
 }
 
@@ -186,8 +206,12 @@ export function usePersonalPreferences(
 
   return {
     preferences: preferencesQuery.data ?? DEFAULT_PERSONAL_PREFERENCES,
+    error: preferencesQuery.error,
+    hasLoadedPreferences: preferencesQuery.data !== undefined,
+    isFetching: preferencesQuery.isFetching,
     isLoading: preferencesQuery.isPending,
     isUpdating: updatePreferences.isPending,
+    refetch: preferencesQuery.refetch,
     setPreferences,
   };
 }

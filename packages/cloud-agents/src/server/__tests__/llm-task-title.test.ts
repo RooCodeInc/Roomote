@@ -15,7 +15,10 @@ vi.mock('../non-task-provider-usage', async (importOriginal) => {
 import {
   finalizeGeneratedTaskTitle,
   generateLlmTaskTitle,
+  generateLlmTaskTitleWithIcon,
   isFallbackTaskTitle,
+  TELEGRAM_TOPIC_ICON_EMOJIS,
+  telegramTopicIconEmojiSchema,
 } from '../llm-task-title';
 
 describe('llm-task-title', () => {
@@ -48,6 +51,48 @@ describe('llm-task-title', () => {
     expect(isFallbackTaskTitle('Untitled task')).toBe(true);
     expect(isFallbackTaskTitle('Investigate worker boot loops')).toBe(false);
   });
+
+  it.each(TELEGRAM_TOPIC_ICON_EMOJIS)(
+    'accepts the %s Telegram topic icon',
+    (iconEmoji) => {
+      expect(telegramTopicIconEmojiSchema.parse(iconEmoji)).toBe(iconEmoji);
+    },
+  );
+
+  it('omits invalid and missing Telegram topic icons', () => {
+    expect(telegramTopicIconEmojiSchema.parse('unexpected')).toBeUndefined();
+    expect(telegramTopicIconEmojiSchema.parse(undefined)).toBeUndefined();
+  });
+
+  it('returns a validated Telegram topic icon with the generated title', async () => {
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: { title: 'Fix deploy failures', iconEmoji: '🦠' },
+    });
+
+    await expect(
+      generateLlmTaskTitleWithIcon({
+        messages: [{ role: 'user', text: 'Fix the failing deployment.' }],
+      }),
+    ).resolves.toEqual({ title: 'Fix deploy failures', iconEmoji: '🦠' });
+  });
+
+  it.each([undefined, 'unexpected'])(
+    'omits model icon %s instead of substituting a generic icon',
+    async (iconEmoji) => {
+      mockGenerateTrackedNonTaskObject.mockResolvedValue({
+        object: { title: 'Plan quarterly priorities', iconEmoji },
+      });
+
+      await expect(
+        generateLlmTaskTitleWithIcon({
+          messages: [{ role: 'user', text: 'Plan quarterly priorities.' }],
+        }),
+      ).resolves.toEqual({
+        title: 'Plan quarterly priorities',
+        iconEmoji: undefined,
+      });
+    },
+  );
 
   it('falls back to a sanitized default title on malformed model output', async () => {
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
@@ -87,6 +132,13 @@ describe('llm-task-title', () => {
       ],
     });
 
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining(
+          '🦠 bug or infection, 💬 conversation or messaging',
+        ),
+      }),
+    );
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
       expect.objectContaining({
         system: expect.stringContaining(
@@ -141,6 +193,28 @@ describe('llm-task-title', () => {
         prompt: expect.stringContaining(
           '[Assistant] I found the rollback cause and I am checking the title flow.',
         ),
+      }),
+    );
+  });
+
+  it('treats a question-shaped user message as title source material', async () => {
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        title: 'Investigate deployment timing',
+      },
+    });
+
+    await generateLlmTaskTitle({
+      messages: [{ role: 'user', text: 'When was the latest deployment?' }],
+    });
+
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining(
+          'never answer or reply to the user; when the user asks a question, title its subject or investigation instead',
+        ),
+        prompt:
+          'Conversation transcript (speaker-labeled):\n[User] When was the latest deployment?\n',
       }),
     );
   });

@@ -39,6 +39,7 @@ const {
   preferencesQueryKey,
   queryClientMock,
   queryState,
+  refetchMock,
   toastErrorMock,
 } = vi.hoisted(() => ({
   mutateMock: vi.fn(),
@@ -56,14 +57,17 @@ const {
       mindReaderMode: false,
       narrationMode: false,
     } as PersonalPreferences | undefined,
+    error: null as Error | null,
+    isFetching: false,
     isPending: false,
   },
+  refetchMock: vi.fn(),
   toastErrorMock: vi.fn(),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => queryClientMock,
-  useQuery: () => queryState,
+  useQuery: () => ({ ...queryState, refetch: refetchMock }),
   useMutation: (options: MutationOptions) => {
     mutationOptionsRef.current = options;
 
@@ -115,6 +119,8 @@ describe('usePersonalPreferences', () => {
       mindReaderMode: false,
       narrationMode: false,
     };
+    queryState.error = null;
+    queryState.isFetching = false;
     queryState.isPending = false;
     queryClientMock.cancelQueries.mockResolvedValue(undefined);
     queryClientMock.getQueryData.mockReturnValue({
@@ -152,7 +158,31 @@ describe('usePersonalPreferences', () => {
       narrationMode: false,
       therapistMode: false,
       resultsPageEnabled: false,
+      homeComposerSuggestionsEnabled: false,
+      sessionSecretToolsEnabled: false,
     });
+  });
+
+  it('exposes an uncached query failure and its retry action', () => {
+    const queryError = new Error('Failed to load preferences');
+    queryState.data = undefined;
+    queryState.error = queryError;
+
+    const { result } = renderHook(() => usePersonalPreferences());
+
+    expect(result.current.error).toBe(queryError);
+    expect(result.current.hasLoadedPreferences).toBe(false);
+    result.current.refetch();
+    expect(refetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('reports cached preferences as loaded during a later query failure', () => {
+    queryState.error = new Error('Refresh failed');
+
+    const { result } = renderHook(() => usePersonalPreferences());
+
+    expect(result.current.error).toBeInstanceOf(Error);
+    expect(result.current.hasLoadedPreferences).toBe(true);
   });
 
   it('mutates only the changed preferences fields', () => {

@@ -43,7 +43,20 @@ validate_slug() {
 }
 
 validate_domain() {
-  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$ ]] || die "invalid domain: $1"
+  local domain="$1"
+  local label
+  local -a labels
+
+  if [ -z "$domain" ] || [ "${#domain}" -gt 253 ] || [[ "$domain" = .* || "$domain" = *. ]]; then
+    die "invalid domain: $domain"
+  fi
+  case "$domain" in
+    *$'\n'* | *$'\r'*) die "invalid domain: $domain" ;;
+  esac
+  IFS='.' read -r -a labels <<<"$domain"
+  for label in "${labels[@]}"; do
+    [[ "$label" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || die "invalid domain: $domain"
+  done
 }
 
 validate_image_part() {

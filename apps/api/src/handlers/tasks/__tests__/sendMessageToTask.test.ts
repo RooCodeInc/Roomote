@@ -3,7 +3,6 @@ const {
   mockCreateTRPCProxyClient,
   mockEnqueueTask,
   mockGetTaskChannelBindings,
-  mockGetTaskGoalForRun,
   mockFindLatestTaskRun,
   mockFindReusableGitHubPrFollowUpOwner,
   mockHttpBatchLink,
@@ -26,7 +25,6 @@ const {
   mockCreateTRPCProxyClient: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetTaskChannelBindings: vi.fn(),
-  mockGetTaskGoalForRun: vi.fn(),
   mockFindLatestTaskRun: vi.fn(),
   mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
   mockHttpBatchLink: vi.fn((options) => options),
@@ -125,7 +123,6 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
   return {
     ...actual,
     findReusableGitHubPrFollowUpOwner: mockFindReusableGitHubPrFollowUpOwner,
-    getTaskGoalForRun: mockGetTaskGoalForRun,
     touchTaskActivity: mockTouchTaskActivity,
     and: mockAnd,
     eq: mockEq,
@@ -223,7 +220,6 @@ describe('sendMessageToTask', () => {
       linearIssueId: null,
       linearOrganizationId: null,
     });
-    mockGetTaskGoalForRun.mockResolvedValue(null);
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
     mockNotifyFastAgentParentOnPrFeedback.mockResolvedValue(undefined);
     mockTaskPullRequestFindFirst.mockResolvedValue(null);
@@ -347,36 +343,31 @@ describe('sendMessageToTask', () => {
     },
   );
 
-  it.each(['goal lookup', 'run token'])(
-    'allows a safe retry after active-run %s preparation fails',
-    async (stage) => {
-      mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
-      const preparation =
-        stage === 'goal lookup' ? mockGetTaskGoalForRun : mockCreateRunToken;
-      preparation.mockRejectedValueOnce(new Error('preparation failed'));
-      const input = {
-        taskId: 'task-1',
-        userId: 'user-1',
-        message: 'Include the additional context.',
-        senderMode: 'fast_agent' as const,
-      };
+  it('allows a safe retry after active-run token preparation fails', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
+    mockCreateRunToken.mockRejectedValueOnce(new Error('preparation failed'));
+    const input = {
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Include the additional context.',
+      senderMode: 'fast_agent' as const,
+    };
 
-      expect(await steerMessageToTask(input)).toEqual({
-        success: false,
-        status: 500,
-        error: 'preparation failed',
-        delivery: 'not_accepted',
-      });
-      expect(mockSteerTaskMutate).not.toHaveBeenCalled();
-      expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(await steerMessageToTask(input)).toEqual({
+      success: false,
+      status: 500,
+      error: 'preparation failed',
+      delivery: 'not_accepted',
+    });
+    expect(mockSteerTaskMutate).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
 
-      expect(await steerMessageToTask(input)).toEqual({
-        success: true,
-        result: { ok: true },
-      });
-      expect(mockSteerTaskMutate).toHaveBeenCalledOnce();
-    },
-  );
+    expect(await steerMessageToTask(input)).toEqual({
+      success: true,
+      result: { ok: true },
+    });
+    expect(mockSteerTaskMutate).toHaveBeenCalledOnce();
+  });
 
   it('marks Fast child messages for worker-owned pending-input dispatch', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
@@ -907,105 +898,6 @@ describe('sendMessageToTask', () => {
     });
   });
 
-  it('includes the current active goal when delivering a follow-up', async () => {
-    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
-    mockGetTaskGoalForRun.mockResolvedValue({
-      objective: 'Complete the release',
-      generation: 'goal-generation:current',
-      status: 'active',
-      maxContinuations: 5,
-      continuationsUsed: 1,
-      blockedReason: null,
-      completedAt: null,
-    });
-
-    await sendMessageToTask({
-      taskId: 'task-1',
-      userId: 'user-1',
-      message: 'Continue from GitHub.',
-    });
-
-    expect(mockGetTaskGoalForRun).toHaveBeenCalledWith(42);
-    expect(mockSendPromptMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: 'Continue from GitHub.',
-        goalContext: expect.objectContaining({
-          objective: 'Complete the release',
-          generation: 'goal-generation:current',
-          status: 'active',
-        }),
-      }),
-    );
-  });
-
-  it('prefers an explicit goal over a pending activation from the database', async () => {
-    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
-    mockGetTaskGoalForRun.mockResolvedValue({
-      objective: 'Pending objective',
-      generation: 'goal-activation:pending',
-      status: 'active',
-      maxContinuations: 5,
-      continuationsUsed: 0,
-      blockedReason: null,
-      completedAt: null,
-    });
-
-    await sendMessageToTask({
-      taskId: 'task-1',
-      userId: 'user-1',
-      message: 'Ship the release',
-      goalContext: {
-        objective: 'Ship the release',
-        generation: 'goal-generation:final',
-        status: 'active',
-        maxContinuations: 5,
-        continuationsUsed: 0,
-        blockedReason: null,
-        completedAt: null,
-      },
-    });
-
-    expect(mockGetTaskGoalForRun).not.toHaveBeenCalled();
-    expect(mockSendPromptMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        autoSteerWhenQueued: true,
-        goalContext: expect.objectContaining({
-          objective: 'Ship the release',
-          generation: 'goal-generation:final',
-        }),
-      }),
-    );
-  });
-
-  it('includes the current active goal when steering a follow-up', async () => {
-    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
-    mockGetTaskGoalForRun.mockResolvedValue({
-      objective: 'Complete the release',
-      generation: 'goal-generation:steer',
-      status: 'active',
-      maxContinuations: 5,
-      continuationsUsed: 1,
-      blockedReason: null,
-      completedAt: null,
-    });
-
-    await steerMessageToTask({
-      taskId: 'task-1',
-      userId: 'user-1',
-      message: 'Steer from GitHub.',
-    });
-
-    expect(mockSteerTaskMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prompt: 'Steer from GitHub.',
-        goalContext: expect.objectContaining({
-          generation: 'goal-generation:steer',
-          status: 'active',
-        }),
-      }),
-    );
-  });
-
   it('does not deliver the prompt when the pre-delivery acting-user write fails', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({ actingUserId: 'user-1' }),
@@ -1271,43 +1163,6 @@ describe('sendMessageToTask', () => {
             fastAgentSessionId: fastAgentParent.sessionId,
             fastAgentParent,
           }),
-        }),
-      }),
-      expect.any(Object),
-    );
-  });
-
-  it('resumes the same task when settlement races with preparation before the steer is submitted', async () => {
-    const activeRun = createActiveRun({ snapshotId: 'snap-race' });
-    const completedRun = createActiveRun({
-      status: 'completed',
-      sandboxServerUrl: null,
-      snapshotId: 'snap-race',
-      payload: { repo: 'acme/app' },
-    });
-    mockFindLatestTaskRun
-      .mockResolvedValueOnce(activeRun)
-      .mockResolvedValueOnce(completedRun);
-    mockGetTaskGoalForRun.mockRejectedValueOnce(
-      new Error('preparation failed'),
-    );
-
-    const result = await steerMessageToTask({
-      taskId: 'task-1',
-      userId: 'user-1',
-      message: 'Continue after settlement.',
-    });
-
-    expect(result).toEqual({
-      success: true,
-      result: { resumed: true, runId: 77, taskId: 'task-1' },
-    });
-    expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
-    expect(mockSteerTaskMutate).not.toHaveBeenCalled();
-    expect(mockEnqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          sourceRunId: 42,
         }),
       }),
       expect.any(Object),

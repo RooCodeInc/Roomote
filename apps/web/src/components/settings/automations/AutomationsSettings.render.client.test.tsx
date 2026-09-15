@@ -18,6 +18,15 @@ const state = vi.hoisted(() => ({
   customAutomationsPending: false,
   customAutomationRunPendingId: null as string | null,
   customAutomationTimeZone: 'UTC' as string | undefined,
+  customAutomationDefaultTarget: undefined as
+    | {
+        provider: 'slack' | 'discord' | 'teams' | 'telegram' | 'email';
+        targetKind: string;
+        externalRef: string;
+        metadata?: Record<string, unknown>;
+      }
+    | null
+    | undefined,
   customAutomations: [] as Array<{
     id: string;
     name: string;
@@ -337,14 +346,34 @@ vi.mock('@tanstack/react-query', () => ({
     state.queriedKeys.push(queryOptions.queryKey);
     const key1 = queryOptions.queryKey?.[1];
     if (key1 === 'getCustomAutomationOptions') {
+      const managerSlackChannelId =
+        state.settingsQuery.data.settings.managerSlackChannelId;
+      const managerDiscordChannelId =
+        state.settingsQuery.data.settings.managerDiscordChannelId;
       return {
         isPending: state.settingsQuery.isPending,
         data: {
           capabilities: state.settingsQuery.data.capabilities,
-          managerSlackChannelId:
-            state.settingsQuery.data.settings.managerSlackChannelId,
-          managerDiscordChannelId:
-            state.settingsQuery.data.settings.managerDiscordChannelId,
+          managerSlackChannelId,
+          managerDiscordChannelId,
+          defaultTarget:
+            state.customAutomationDefaultTarget !== undefined
+              ? state.customAutomationDefaultTarget
+              : managerSlackChannelId &&
+                  state.settingsQuery.data.capabilities.slackConnected
+                ? {
+                    provider: 'slack',
+                    targetKind: 'slack_channel',
+                    externalRef: managerSlackChannelId,
+                  }
+                : managerDiscordChannelId &&
+                    state.settingsQuery.data.capabilities.discordConnected
+                  ? {
+                      provider: 'discord',
+                      targetKind: 'discord_channel',
+                      externalRef: managerDiscordChannelId,
+                    }
+                  : null,
           effectiveTimeZone: state.customAutomationTimeZone,
         },
       };
@@ -712,6 +741,7 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.reviewer.relayUsers = [];
     state.customAutomations = [];
     state.customAutomationTimeZone = 'UTC';
+    state.customAutomationDefaultTarget = undefined;
     state.customAutomationsPending = false;
     state.settingsQuery.isPending = false;
     state.environments = [];
@@ -1904,6 +1934,11 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.capabilities.discordConnected = true;
     state.settingsQuery.data.capabilities.teamsConnected = true;
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.customAutomationDefaultTarget = {
+      provider: 'discord',
+      targetKind: 'discord_user',
+      externalRef: 'user-1',
+    };
 
     render(<AutomationsSettings />);
 

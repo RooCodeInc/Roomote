@@ -151,7 +151,7 @@ describe('getTaskRelayUpdates', () => {
     expect(serialized).not.toContain('private narrative');
     expect(serialized).not.toContain('not-returned');
     expect(Buffer.byteLength(legacyPayload)).toBe(101_046);
-    expect(Buffer.byteLength(serialized)).toBe(858);
+    expect(Buffer.byteLength(serialized)).toBe(840);
 
     const unchangedResponse = await app.request(
       `/tasks/${task.id}/updates?cursor=${encodeURIComponent(first.nextCursor)}`,

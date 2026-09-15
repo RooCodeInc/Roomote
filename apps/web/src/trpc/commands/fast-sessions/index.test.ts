@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   startPinnedLaunch: vi.fn(),
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
+  startSessionGoal: vi.fn(),
   getFastSessionTasks: vi.fn(),
   currentEpochSeconds: vi.fn(),
   createSessionArtifact: vi.fn(),
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   dbInnerJoin: vi.fn(),
   dbSelectLimit: vi.fn(),
   reconcileSetupEvents: vi.fn(),
+  refreshSessionPresence: vi.fn(),
   resolveSetupContext: vi.fn().mockResolvedValue(null),
   submitSetupInput: vi.fn(),
   upsertMessage: vi.fn(),
@@ -51,6 +53,7 @@ vi.mock('@roomote/sdk/server', () => ({
   resolveUserMcpServerConfigs: vi.fn(),
   wakeFastAgentParentEventAt: vi.fn(),
   wakeFastAgentParentEventNow: vi.fn(),
+  startFastSessionGoal: mocks.startSessionGoal,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -64,6 +67,10 @@ vi.mock('@roomote/db/server', () => ({
   sessions: {},
   getSessionForFastConversation: mocks.getUnifiedSession,
   ensureSessionForFastConversation: mocks.getUnifiedSession,
+}));
+
+vi.mock('@roomote/redis', () => ({
+  refreshSessionPresence: mocks.refreshSessionPresence,
 }));
 
 vi.mock('@/lib/server/fast-sessions', () => ({
@@ -100,6 +107,7 @@ import {
   replyToFastSessionCommand,
   scheduleWebFastAgentTurn,
   startFastSessionCommand,
+  startFastSessionGoalCommand,
   startSetupFastSessionCommand,
   updateFastSessionModelSelectionCommand,
   submitFastSessionUserInputCommand,
@@ -623,6 +631,30 @@ const session = {
   reasoningEffort: null,
 };
 
+describe('Session Goal Mode commands', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.findAccessibleSession.mockResolvedValue(session);
+    mocks.startSessionGoal.mockResolvedValue({ success: true, goal: {} });
+  });
+
+  it('starts a goal directly on the Fast Session', async () => {
+    await startFastSessionGoalCommand(auth, {
+      sessionId: session.id,
+      objective: 'Ship the release',
+      clientMessageId: 'message-1',
+    });
+
+    expect(mocks.startSessionGoal).toHaveBeenCalledWith({
+      sessionId: session.id,
+      userId: 'user-1',
+      senderDisplayName: 'User One',
+      objective: 'Ship the release',
+      currentMessageId: 'message-1',
+    });
+  });
+});
+
 describe('scheduleWebFastAgentTurn', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -698,6 +730,7 @@ describe('startFastSessionCommand', () => {
       id: 'fast-session-1',
       created: true,
     });
+    mocks.refreshSessionPresence.mockResolvedValue({ expiresAt: Date.now() });
     mocks.buildReplyDelivery.mockResolvedValue({
       conversation: {
         surface: 'web',
@@ -773,6 +806,39 @@ describe('startFastSessionCommand', () => {
         voiceMode: true,
       }),
     );
+  });
+
+  it('seeds the launch tab presence before scheduling the first turn', async () => {
+    const conversationId = '22222222-2222-4222-8222-222222222222';
+
+    await startFastSessionCommand(auth, {
+      text: 'What is your name?',
+      conversationId,
+    });
+
+    expect(mocks.refreshSessionPresence).toHaveBeenCalledWith({
+      sessionId: 'unified-session-1',
+      userId: 'user-1',
+      clientId: conversationId,
+    });
+    expect(
+      mocks.refreshSessionPresence.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.after.mock.invocationCallOrder[0]!);
+  });
+
+  it('keeps kickoff best-effort when the presence seed fails', async () => {
+    mocks.refreshSessionPresence.mockRejectedValueOnce(new Error('redis down'));
+
+    await expect(
+      startFastSessionCommand(auth, {
+        text: 'What is your name?',
+        conversationId: '22222222-2222-4222-8222-222222222222',
+      }),
+    ).resolves.toEqual({
+      sessionId: 'unified-session-1',
+      fastConversationId: 'fast-session-1',
+    });
+    expect(mocks.after).toHaveBeenCalledOnce();
   });
 
   it('opens an empty Session for a call without scheduling a turn', async () => {

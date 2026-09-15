@@ -112,11 +112,13 @@ export function AcpTranscriptBlockList({
   showInternalMessages,
   onSuppress,
   onOpenDelegatedTask,
+  renderMessage,
 }: {
   blocks: AcpConversationRenderBlock[];
   showInternalMessages: boolean;
   onSuppress: (messageId: string) => void;
   onOpenDelegatedTask?: (taskId: string) => void;
+  renderMessage?: (message: AcpUiMessage) => React.ReactNode | undefined;
 }) {
   function renderNestedBlocks(nestedBlocks: AcpRenderBlock[]) {
     return nestedBlocks.map((block) => (
@@ -198,18 +200,22 @@ export function AcpTranscriptBlockList({
       });
     }
 
-    const content = (
-      <AcpMessageItem
-        msg={block.msg}
-        onSuppress={onSuppress}
-        showSubagentPayload={showInternalMessages}
-        onOpenDelegatedTask={onOpenDelegatedTask}
-      >
-        {block.childBlocks?.length
-          ? renderNestedBlocks(block.childBlocks)
-          : null}
-      </AcpMessageItem>
-    );
+    const override = renderMessage?.(block.msg);
+    const content =
+      override !== undefined ? (
+        override
+      ) : (
+        <AcpMessageItem
+          msg={block.msg}
+          onSuppress={onSuppress}
+          showSubagentPayload={showInternalMessages}
+          onOpenDelegatedTask={onOpenDelegatedTask}
+        >
+          {block.childBlocks?.length
+            ? renderNestedBlocks(block.childBlocks)
+            : null}
+        </AcpMessageItem>
+      );
 
     return wrapRenderedBlock({
       content,

@@ -13,6 +13,8 @@ vi.mock('@roomote/gitlab', () => ({
   isGitLabOAuthAccessToken: (token: string) => token === 'oauth-token',
 }));
 
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
+
 import {
   assertRepositoryInTaskRunScope,
   buildGitLabTokenHeader,
@@ -148,6 +150,55 @@ describe('environment GitHub repository scope', () => {
     await expect(
       assertRepositoryInTaskRunScope(run, anchor.fullName),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('on-demand workspace repository scope', () => {
+  it.each([
+    ['all-repositories', ALL_REPOSITORIES],
+    ['Blank slate', NO_REPOSITORIES],
+  ])(
+    'keeps every deployment repository in scope for a %s run',
+    async (_label, repo) => {
+      const user = await userFactory.create();
+      const installation = await githubInstallationFactory.create({
+        installedByUserId: user.id,
+      });
+      const target = await repositoryFactory.create({
+        linkedByUserId: user.id,
+        installationId: installation.id,
+      });
+      const run = await runFactory.create({
+        payload: {
+          repo,
+          sourceControlProvider: 'github',
+          repositoryProviders: { [target.fullName]: 'github' },
+        },
+      });
+
+      await expect(
+        assertRepositoryInTaskRunScope(run, target.fullName),
+      ).resolves.toBeUndefined();
+    },
+  );
+
+  it('keeps an unstamped Blank slate run out of every repository', async () => {
+    const user = await userFactory.create();
+    const installation = await githubInstallationFactory.create({
+      installedByUserId: user.id,
+    });
+    const target = await repositoryFactory.create({
+      linkedByUserId: user.id,
+      installationId: installation.id,
+    });
+    // Launched with no active repositories: no provider stamp, no credentials.
+    const run = await runFactory.create({
+      payload: { repo: NO_REPOSITORIES },
+    });
+
+    await expect(
+      assertRepositoryInTaskRunScope(run, target.fullName),
+    ).rejects.toThrow('outside this task');
   });
 });
 

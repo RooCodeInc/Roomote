@@ -646,7 +646,7 @@ describe('route policy enforcement', () => {
           }
         | undefined;
       expect(Buffer.byteLength(JSON.stringify(legacy))).toBe(202_099);
-      expect(Buffer.byteLength(JSON.stringify(first))).toBe(2_091);
+      expect(Buffer.byteLength(JSON.stringify(first))).toBe(2_138);
       expect(firstUpdate?.narrative).toEqual([
         expect.objectContaining({
           direction: 'Codex → Roomote',

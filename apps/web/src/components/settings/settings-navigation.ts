@@ -174,7 +174,8 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     id: 'experimental',
     label: 'Experimental',
     title: 'Experimental',
-    description: 'Try features that are still under development.',
+    description:
+      'Try opt-in features that may change while they are being evaluated.',
     href: SETTINGS_PATHS.experimental,
     icon: FlaskConical,
     newGroup: true,

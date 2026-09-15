@@ -390,6 +390,12 @@ test('rejects candidate already in main even without a tag', (t) => {
   rejectsWithoutPush(f, /Candidate already in main/);
 });
 
+test('accepts a stale Promote PR base SHA when live main matches the pin', (t) => {
+  const f = fixture(t);
+  f.state.promote.base.sha = f.expected_candidate_sha;
+  assert.ok(f.execute().head);
+});
+
 for (const target of ['promote', 'review']) {
   for (const variant of ['missing', 'closed', 'wrong base', 'fork']) {
     test(`rejects ${variant} ${target} PR`, (t) => {

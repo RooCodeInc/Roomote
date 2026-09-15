@@ -63,6 +63,11 @@ See [`.changeset/README.md`](.changeset/README.md).
    `pnpm run version -- --amend`, merge those amendments to `develop`, and
    explicitly dispatch the Release workflow for that version. The workflow
    only fast-forwards an open, unshipped candidate with no pending changesets.
+   Replacing a reconciled candidate from `develop` while preserving its
+   unpublished version requires an explicitly authorized Release dispatch
+   pinned to both the exact current candidate and audited `develop` commits.
+   That compare-and-swap replacement invalidates prior candidate checks and
+   reconciliation provenance; it is never a manual release-branch push.
 4. Merge that promote PR with a **merge commit** (branch rules on `main` allow
    merge only; `develop` stays squash-only). Tagging (`vX.Y.Z`), GHCR image
    publish (`latest`), and the GitHub Release follow from `main` / tag workflows.

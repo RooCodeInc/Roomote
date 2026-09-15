@@ -37,6 +37,7 @@
     "bullmq": "^5.78.0",
     "hono": "4.13.5",
     "ioredis": "^5.10.1",
+    "jsdom": "26.1.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

@@ -11,7 +11,7 @@ import { WorkerReleaseWatcherService } from './services/worker-release-watcher';
 const rootDir = path.resolve(process.cwd(), '../..');
 
 const watcher = new WorkerReleaseWatcherService(rootDir);
-watcher.start();
+await watcher.start();
 
 // Keep the process alive.
 process.on('SIGINT', () => {

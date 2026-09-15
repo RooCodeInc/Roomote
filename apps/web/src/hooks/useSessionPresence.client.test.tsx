@@ -43,6 +43,34 @@ describe('useSessionPresence', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it('adopts and refreshes a presence lease seeded during Session creation', () => {
+    renderHook(() => useSessionPresence(SESSION_ID, CLIENT_ID));
+
+    expect(crypto.randomUUID).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `/api/sessions/${SESSION_ID}/presence`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ clientId: CLIENT_ID }),
+      }),
+    );
+  });
+
+  it('releases a seeded presence lease when focus was lost during navigation', () => {
+    focused = false;
+
+    renderHook(() => useSessionPresence(SESSION_ID, CLIENT_ID));
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `/api/sessions/${SESSION_ID}/presence`,
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ clientId: CLIENT_ID }),
+      }),
+    );
+  });
+
   it('disconnects when attention leaves and starts a fresh heartbeat cycle on return', () => {
     renderHook(() => useSessionPresence(SESSION_ID));
 

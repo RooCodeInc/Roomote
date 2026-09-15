@@ -656,6 +656,56 @@ describe('processFastAgentMessage', () => {
     );
   });
 
+  it('persists the Slack route when a notification reply resumes a web Session', async () => {
+    const canonicalConversation = {
+      surface: 'web' as const,
+      workspaceId: 'web',
+      conversationId: 'fast-session-1',
+    };
+    mocks.getSession.mockResolvedValue({
+      id: 'fast-session-1',
+      conversation: canonicalConversation,
+    });
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        channel_type: 'im',
+        user: 'U123',
+        text: 'continue',
+        thread_ts: '100.001',
+        ts: '100.002',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      originSessionId: 'product-session-1',
+    });
+
+    expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent: expect.objectContaining({
+          conversation: canonicalConversation,
+        }),
+        event: expect.objectContaining({
+          deliveryConversation: {
+            surface: 'slack',
+            workspaceId: 'T123',
+            conversationId: '100.001',
+            replyTarget: { channelId: 'D123', threadId: '100.001' },
+          },
+        }),
+      }),
+    );
+  });
+
   it('waits for root binding before resolving an immediate reply session', async () => {
     const bindingLock = createDeferred<() => Promise<void>>();
     mocks.acquireRootBindingLock.mockReturnValueOnce(bindingLock.promise);

@@ -20,7 +20,17 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
   { id: 'env-2', name: 'Secondary Env' },
 ];
 let currentEnvironmentsPending = false;
+let currentBrainConfigured = false;
+let currentHomeComposerSuggestionsEnabled = false;
+let currentHomeComposerSuggestionsFlagLoading = false;
+let currentHomeSuggestions: string[] = [];
+let currentHomeSuggestionsHasData = true;
+let currentHomeSuggestionsPending = false;
+let currentHomeSuggestionsFetching = false;
+let currentHomeSuggestionsError = false;
 let capturedSubmitWithMetaKey: boolean | undefined;
+let capturedAutoFocus: boolean | undefined;
+let capturedHomeSuggestionsQueryEnabled: boolean | undefined;
 let capturedDefaultReasoningEffort: string | null | undefined;
 let submittedPromptText = 'Test prompt';
 
@@ -64,6 +74,41 @@ vi.mock('sonner', () => ({
   }),
 }));
 
+vi.mock('@tanstack/react-query', () => ({
+  useQuery: () => ({
+    data: currentHomeSuggestionsHasData
+      ? { suggestions: currentHomeSuggestions }
+      : undefined,
+    isPending: currentHomeSuggestionsPending,
+    isFetching: currentHomeSuggestionsFetching,
+    isError: currentHomeSuggestionsError,
+  }),
+}));
+
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    home: {
+      composerSuggestions: {
+        queryOptions: vi.fn(
+          (_input, options: { enabled?: boolean } | undefined) => {
+            capturedHomeSuggestionsQueryEnabled = options?.enabled;
+            return {};
+          },
+        ),
+      },
+    },
+  }),
+}));
+
+vi.mock('@/hooks/useHomeComposerSuggestions', () => ({
+  useHomeComposerSuggestions: () => ({
+    enabled: currentHomeComposerSuggestionsEnabled,
+    isLoading: currentHomeComposerSuggestionsFlagLoading,
+    isUpdating: false,
+    setEnabled: vi.fn(),
+  }),
+}));
+
 vi.mock('@/hooks/useUser', () => ({
   useUser: () => ({
     authStatus: 'signed-in',
@@ -76,6 +121,7 @@ vi.mock('@/hooks/useUser', () => ({
     name: 'Test User',
     primaryEmail: 'test@example.com',
     cloudEnabled: false,
+    brainConfigured: currentBrainConfigured,
     resource: {
       username: 'tester',
       fullName: 'Test User',
@@ -170,6 +216,9 @@ vi.mock('@/components/tasks', async () => {
       onPromptTextChange,
       promptText,
       placeholder,
+      promptSuggestion,
+      onPromptFocusChange,
+      autoFocus,
       submitDisabledReason,
       submitWithMetaKey,
       tools,
@@ -179,12 +228,16 @@ vi.mock('@/components/tasks', async () => {
       onPromptTextChange?: (value: string) => void;
       promptText?: string;
       placeholder?: string;
+      promptSuggestion?: string;
+      onPromptFocusChange?: (focused: boolean) => void;
+      autoFocus?: boolean;
       submitDisabledReason?: string;
       submitWithMetaKey?: boolean;
       tools?: import('react').ReactNode;
       voice?: { active: boolean; onToggle: () => void };
     }) => {
       capturedSubmitWithMetaKey = submitWithMetaKey;
+      capturedAutoFocus = autoFocus;
 
       return (
         <form
@@ -214,11 +267,18 @@ vi.mock('@/components/tasks', async () => {
               Voice
             </button>
           ) : null}
-          <div data-testid="prompt-placeholder">{placeholder}</div>
+          <div data-testid="prompt-placeholder">
+            {promptText ? placeholder : (promptSuggestion ?? placeholder)}
+          </div>
           <textarea
             aria-label="Task prompt"
+            placeholder={
+              promptText ? placeholder : (promptSuggestion ?? placeholder)
+            }
             value={promptText ?? ''}
             onChange={(event) => onPromptTextChange?.(event.target.value)}
+            onFocus={() => onPromptFocusChange?.(true)}
+            onBlur={() => onPromptFocusChange?.(false)}
           />
           <button type="submit" disabled={Boolean(submitDisabledReason)}>
             Submit prompt
@@ -279,7 +339,17 @@ describe('Home', () => {
       { id: 'env-2', name: 'Secondary Env' },
     ];
     currentEnvironmentsPending = false;
+    currentBrainConfigured = false;
+    currentHomeComposerSuggestionsEnabled = false;
+    currentHomeComposerSuggestionsFlagLoading = false;
+    currentHomeSuggestions = [];
+    currentHomeSuggestionsHasData = true;
+    currentHomeSuggestionsPending = false;
+    currentHomeSuggestionsFetching = false;
+    currentHomeSuggestionsError = false;
     capturedSubmitWithMetaKey = undefined;
+    capturedAutoFocus = undefined;
+    capturedHomeSuggestionsQueryEnabled = undefined;
     capturedDefaultReasoningEffort = undefined;
     submittedPromptText = 'Test prompt';
     localStorage.clear();
@@ -460,6 +530,27 @@ describe('Home', () => {
     );
   });
 
+  it('hands off seeded presence for an attachment-only Fast session', async () => {
+    mockPreparePromptAttachments.mockResolvedValueOnce({
+      text: '',
+      attachmentTexts: ['Attachment contents'],
+    });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => expect(mockStartFastSession).toHaveBeenCalledOnce());
+    const conversationId =
+      mockStartFastSession.mock.calls[0]![0].conversationId;
+    expect(
+      getPendingFastSessionLaunch('11111111-1111-4111-8111-111111111111'),
+    ).toEqual(
+      expect.objectContaining({
+        presenceClientId: conversationId,
+      }),
+    );
+  });
+
   it('renders the feedback prompt below the input and opens its dialog', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
@@ -551,7 +642,7 @@ describe('Home', () => {
     }
   });
 
-  it('cycles prompt placeholders every 5 seconds from a random starting point', async () => {
+  it('cycles prompt placeholders every 10 seconds from a random starting point', async () => {
     vi.useFakeTimers();
 
     try {
@@ -562,7 +653,15 @@ describe('Home', () => {
       );
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(5_000);
+        await vi.advanceTimersByTimeAsync(9_999);
+      });
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        'Review this pull request and address the feedback',
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
       });
 
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
@@ -570,11 +669,240 @@ describe('Home', () => {
       );
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(10_000);
+        await vi.advanceTimersByTimeAsync(20_000);
       });
 
       expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
         'Find a TODO in the code and fix it',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('restores static placeholders and suppresses personalized requests when the flag is off', async () => {
+    vi.useFakeTimers();
+    currentBrainConfigured = true;
+    currentHomeSuggestions = [
+      'Review authentication callback regression coverage',
+      'Fix deployment health check failures',
+      'Document session handoff recovery behavior',
+      'Investigate flaky pull request delivery',
+      'Improve Home composer keyboard accessibility',
+    ];
+
+    try {
+      render(<Home initialPlaceholderIndex={0} />);
+      const textarea = screen.getByRole('textbox', { name: 'Task prompt' });
+
+      expect(capturedHomeSuggestionsQueryEnabled).toBe(false);
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        'Find a TODO in the code and fix it',
+      );
+      fireEvent.focus(textarea);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        'Try a different design for our home page',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('requests personalized suggestions only when the flag and Brain are enabled', () => {
+    currentBrainConfigured = true;
+    currentHomeComposerSuggestionsEnabled = true;
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(capturedHomeSuggestionsQueryEnabled).toBe(true);
+  });
+
+  it('autofocuses Home when the experiment is off', () => {
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.getByRole('textbox', { name: 'Task prompt' })).toHaveFocus();
+    expect(capturedAutoFocus).toBe(false);
+  });
+
+  it('does not autofocus Home when the experiment is on', () => {
+    currentHomeComposerSuggestionsEnabled = true;
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(
+      screen.getByRole('textbox', { name: 'Task prompt' }),
+    ).not.toHaveFocus();
+  });
+
+  it('waits for a disabled experiment to load before focusing once', () => {
+    currentHomeComposerSuggestionsFlagLoading = true;
+    const { rerender } = render(<Home initialPlaceholderIndex={0} />);
+    const textarea = screen.getByRole('textbox', { name: 'Task prompt' });
+
+    expect(textarea).not.toHaveFocus();
+    currentHomeComposerSuggestionsFlagLoading = false;
+    rerender(<Home initialPlaceholderIndex={0} />);
+    expect(textarea).toHaveFocus();
+
+    act(() => textarea.blur());
+    rerender(<Home initialPlaceholderIndex={0} />);
+    expect(textarea).not.toHaveFocus();
+  });
+
+  it('never autofocuses after an enabled experiment finishes loading', () => {
+    currentHomeComposerSuggestionsEnabled = true;
+    currentHomeComposerSuggestionsFlagLoading = true;
+    const { rerender } = render(<Home initialPlaceholderIndex={0} />);
+    const textarea = screen.getByRole('textbox', { name: 'Task prompt' });
+
+    currentHomeComposerSuggestionsFlagLoading = false;
+    rerender(<Home initialPlaceholderIndex={0} />);
+
+    expect(textarea).not.toHaveFocus();
+  });
+
+  it('cycles generated memory suggestions using the existing timing', async () => {
+    vi.useFakeTimers();
+    currentBrainConfigured = true;
+    currentHomeComposerSuggestionsEnabled = true;
+    currentHomeSuggestions = [
+      'Add regression coverage for recent authentication fixes',
+      'Review the latest deployment reliability follow-ups',
+      'Document the new session handoff behavior clearly',
+      'Investigate recent flaky integration test failures',
+      'Ship the pending accessibility improvements safely',
+    ];
+
+    try {
+      render(<Home initialPlaceholderIndex={0} />);
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[0]!,
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[1]!,
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[4]!,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the suggestion area empty during the initial request', () => {
+    currentBrainConfigured = true;
+    currentHomeComposerSuggestionsEnabled = true;
+    currentHomeSuggestionsHasData = false;
+    currentHomeSuggestionsPending = true;
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.getByTestId('prompt-placeholder')).toBeEmptyDOMElement();
+    expect(
+      screen.getByRole('textbox', { name: 'Task prompt' }),
+    ).toHaveAttribute('placeholder', '');
+  });
+
+  it('shows generated suggestions after the initial request succeeds', () => {
+    currentBrainConfigured = true;
+    currentHomeComposerSuggestionsEnabled = true;
+    currentHomeSuggestions = [
+      'Add focused regression tests for authentication callback validation across supported login flows',
+      'Resolve deployment health check gaps before the next production release begins',
+      'Document session handoff behavior for developers troubleshooting interrupted task execution',
+      'Investigate flaky integration failures affecting automated pull request delivery checks',
+      'Improve accessibility guidance for keyboard users accepting Home composer suggestions',
+    ];
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+      currentHomeSuggestions[0]!,
+    );
+  });
+
+  it.each([
+    { state: 'empty', hasData: true, isError: false },
+    { state: 'error', hasData: false, isError: true },
+  ])(
+    'shows fallback placeholders after a settled $state result',
+    ({ hasData, isError }) => {
+      currentBrainConfigured = true;
+      currentHomeComposerSuggestionsEnabled = true;
+      currentHomeSuggestionsHasData = hasData;
+      currentHomeSuggestionsError = isError;
+
+      render(<Home initialPlaceholderIndex={0} />);
+
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        'Find a TODO in the code and fix it',
+      );
+    },
+  );
+
+  it('keeps cached suggestions visible during a background refresh', () => {
+    currentBrainConfigured = true;
+    currentHomeComposerSuggestionsEnabled = true;
+    currentHomeSuggestionsFetching = true;
+    currentHomeSuggestions = [
+      'Add focused regression tests for authentication callback validation across supported login flows',
+      'Resolve deployment health check gaps before the next production release begins',
+      'Document session handoff behavior for developers troubleshooting interrupted task execution',
+      'Investigate flaky integration failures affecting automated pull request delivery checks',
+      'Improve accessibility guidance for keyboard users accepting Home composer suggestions',
+    ];
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+      currentHomeSuggestions[0]!,
+    );
+  });
+
+  it('pauses suggestion rotation while focused and resumes after blur', async () => {
+    vi.useFakeTimers();
+    currentBrainConfigured = true;
+    currentHomeComposerSuggestionsEnabled = true;
+    currentHomeSuggestions = [
+      'Add focused regression tests for authentication callback validation across supported login flows',
+      'Resolve deployment health check gaps before the next production release begins',
+      'Document session handoff behavior for developers troubleshooting interrupted task execution',
+      'Investigate flaky integration failures affecting automated pull request delivery checks',
+      'Improve accessibility guidance for keyboard users accepting Home composer suggestions',
+    ];
+
+    try {
+      render(<Home initialPlaceholderIndex={0} />);
+      const textarea = screen.getByRole('textbox', { name: 'Task prompt' });
+
+      fireEvent.focus(textarea);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[0]!,
+      );
+
+      fireEvent.blur(textarea);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(screen.getByTestId('prompt-placeholder')).toHaveTextContent(
+        currentHomeSuggestions[1]!,
       );
     } finally {
       vi.useRealTimers();

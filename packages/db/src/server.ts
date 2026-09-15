@@ -54,7 +54,9 @@ export * from './lib/tracked-suggestion-cards';
 export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
 export * from './lib/sessions';
-export * from './lib/task-goals';
+export * from './lib/session-secrets';
+export * from './lib/session-egress';
+export * from './lib/session-goals';
 export * from './lib/source-control-provider';
 export * from './lib/sync-task-state';
 export * from './lib/cancel-task-run';
@@ -135,9 +137,17 @@ export {
   taskPins,
   taskPinsRelations,
   sessions,
+  sessionGoals,
   sessionsRelations,
   sessionTasks,
   sessionTasksRelations,
+  sessionSecrets,
+  sessionSecretApprovals,
+  sessionSecretAudit,
+  sessionEgressWorkloads,
+  sessionEgressSubstitutes,
+  sessionEgressAudit,
+  sessionEgressRevocations,
   sessionParticipants,
   sessionParticipantsRelations,
   sessionPins,
@@ -225,6 +235,8 @@ export {
   sessionWakeupsRelations,
   fastAgentProviderMessages,
   fastAgentProviderMessagesRelations,
+  sessionAttentionNotifications,
+  sessionAttentionNotificationMessages,
   fastAgentPrFeedbackDeliveries,
   fastAgentPrFeedbackDeliveriesRelations,
   slackConversationMessages,

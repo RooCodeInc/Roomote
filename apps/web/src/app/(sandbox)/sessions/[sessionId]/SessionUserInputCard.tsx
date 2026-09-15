@@ -52,6 +52,7 @@ export function SessionUserInputCard({
   isResolved,
   submission = 'session',
   cancellable = true,
+  emptySubmissionLabel,
 }: {
   sessionId: string;
   request: Pick<
@@ -61,6 +62,8 @@ export function SessionUserInputCard({
   isResolved?: boolean;
   submission?: 'session' | 'setup';
   cancellable?: boolean;
+  /** Submit no answers for an optional trusted choice while continuing setup. */
+  emptySubmissionLabel?: string;
 }) {
   const trpc = useTRPC();
   const [selections, setSelections] = useState<SelectionState>(() =>
@@ -380,6 +383,23 @@ export function SessionUserInputCard({
               ? "Let's go"
               : 'Submit'}
         </Button>
+        {emptySubmissionLabel ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={submit.isPending}
+            onClick={() =>
+              submit.mutate({
+                sessionId,
+                requestId: request.requestId,
+                answers: {},
+              })
+            }
+          >
+            {emptySubmissionLabel}
+          </Button>
+        ) : null}
       </div>
     </form>
   );

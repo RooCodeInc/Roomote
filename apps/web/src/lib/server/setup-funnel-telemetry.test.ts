@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createEmptySetupNewState,
+  createSetupNewSetupSession,
   type SetupAuthStatus,
   type SetupComputeStatus,
   type SetupModelStatus,
@@ -221,5 +222,27 @@ describe('setup funnel telemetry', () => {
         expect.objectContaining({ milestone: 'source_control_configured' }),
       ]),
     );
+  });
+
+  it('records an integration decision from durable setup-session state', () => {
+    const setupSession = createSetupNewSetupSession({ sessionId: 'session-1' });
+    setupSession.integrationDiscoveryCompletedAt = '2026-08-02T00:00:00.000Z';
+
+    expect(
+      evaluateSetupFunnelMilestones({
+        setupNewState: {
+          ...createEmptySetupNewState(),
+          setupSession,
+        },
+        hasSlack: false,
+        authSetup: { providers: [] } as unknown as SetupAuthStatus,
+        modelSetup: { setupSatisfied: false } as unknown as SetupModelStatus,
+        computeSetup: { providers: [] } as unknown as SetupComputeStatus,
+        sourceControlSetup: {
+          providers: [],
+          setupSatisfied: false,
+        } as unknown as SetupSourceControlStatus,
+      }),
+    ).toEqual([{ milestone: 'authed' }, { milestone: 'integrations_decided' }]);
   });
 });
