@@ -658,7 +658,13 @@ export default {
   args: {
     label: z.string().trim().min(1).max(80),
     origin: z.string().min(1).max(2048),
-    headerName: z.enum(["authorization", "x-api-key", "api-key"]),
+    headerName: z
+      .string()
+      .min(1)
+      .max(64)
+      .describe(
+        "Lowercase HTTP header that carries the key at this service: authorization, x-api-key, api-key, or the service's own name such as private-token or x-shopify-access-token",
+      ),
     headerPrefix: z.enum(["Bearer ", "Basic ", "Token "]).optional(),
     ttlHours: z.number().int().min(1).max(720).optional().default(24),
     allowedMethods: z.array(z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])).min(1).max(6).optional().describe("HTTP methods the approved key may be used with. Defaults to GET and HEAD."),

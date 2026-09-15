@@ -13,6 +13,7 @@ import {
   type SessionSecretContext,
 } from '@roomote/db/server';
 import { redactEcho } from '@roomote/sdk/server/session-secrets';
+import { isSessionEgressCredentialHeaderName } from '@roomote/types';
 
 /**
  * Fail-closed broker errors keep their client-facing message but carry a
@@ -308,7 +309,7 @@ export async function integrationRequest(
     if (
       origin.protocol !== 'https:' ||
       origin.origin !== grant.origin ||
-      !['authorization', 'x-api-key', 'api-key'].includes(grant.headerName) ||
+      !isSessionEgressCredentialHeaderName(grant.headerName) ||
       !['', 'Bearer ', 'Basic ', 'Token '].includes(grant.headerPrefix) ||
       (grant.headerName !== 'authorization' && grant.headerPrefix !== '')
     )

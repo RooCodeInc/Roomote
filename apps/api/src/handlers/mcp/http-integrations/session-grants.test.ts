@@ -726,3 +726,47 @@ it('distinguishes the request deadline from caller cancellation in the reason', 
     warn.mockRestore();
   }
 });
+
+it('injects a service-specific credential header and refuses a scheme on it', async () => {
+  const pending = await prepareSessionSecret(context, {
+    label: 'GitLab',
+    origin,
+    headerName: 'PRIVATE-TOKEN',
+    headerPrefix: '',
+  });
+  const { secretRef: customRef } = await createSessionSecret(context, {
+    pendingRef: pending.pendingRef,
+    secret,
+  });
+  await integrationRequest(
+    { integrations: [] },
+    `session-test:${context.sessionId}`,
+    { integrationId: `session:${customRef}`, method: 'GET', path: '/v4/user' },
+    ownerId,
+    undefined,
+    () => resolveSessionSecretContext(fastAuth),
+  );
+  expect(fetch).toHaveBeenCalledOnce();
+  const sent = vi.mocked(fetch).mock.calls[0]![1]!.headers as Record<
+    string,
+    string
+  >;
+  expect(sent['private-token']).toBe(secret);
+  expect(sent.authorization).toBeUndefined();
+  await expect(
+    prepareSessionSecret(context, {
+      label: 'GitLab',
+      origin,
+      headerName: 'private-token',
+      headerPrefix: 'Bearer ',
+    }),
+  ).rejects.toThrow();
+  await expect(
+    prepareSessionSecret(context, {
+      label: 'Cookie',
+      origin,
+      headerName: 'cookie',
+      headerPrefix: '',
+    }),
+  ).rejects.toThrow();
+});

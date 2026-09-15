@@ -32,8 +32,9 @@ import { buildProxyResponseHeaders } from '../mcp/proxy-utils';
  * The API-side counterpart of the Iron gateway for compute providers that
  * have no per-workload connector. A workload uses one base URL for every
  * approved service and presents the service's substitute token as its
- * credential (`Authorization: Bearer rses_...`, `x-api-key: rses_...`). The
- * substitute alone names the grant: the API re-joins the live workload,
+ * credential in any header (`Authorization: Bearer rses_...`,
+ * `x-api-key: rses_...`, `private-token: rses_...`). The substitute alone
+ * names the grant: the API re-joins the live workload,
  * Session, run, grant, generation and expiry on every request, rewrites the
  * path onto that grant's approved origin, replaces the substitute with the
  * real credential in the grant's own header slot, forwards, and releases the
@@ -58,16 +59,17 @@ const MAX_IN_FLIGHT = 64;
 const MAX_IN_FLIGHT_PER_WORKLOAD = 8;
 const UPSTREAM_TIMEOUT_MS = 60_000;
 
-/** The header slots a client may present a substitute in; all are replaced. */
-const CREDENTIAL_HEADERS = ['authorization', 'x-api-key', 'api-key'] as const;
-
 /**
- * Client headers never forwarded. Every credential slot is replaced, cookies
- * are dropped, and hop-by-hop or routing headers are stripped so the origin
- * sees a clean direct request.
+ * Client headers never forwarded. The common credential slots are always
+ * replaced, cookies are dropped, and hop-by-hop or routing headers are
+ * stripped so the origin sees a clean direct request. Whatever header the
+ * client actually presented the substitute in, and the grant's own header,
+ * are removed per request on top of this list.
  */
 const REQUEST_HEADER_DENYLIST = new Set([
-  ...CREDENTIAL_HEADERS,
+  'authorization',
+  'x-api-key',
+  'api-key',
   'proxy-authorization',
   'cookie',
   'host',
@@ -140,10 +142,16 @@ function failureReason(error: unknown): string {
 function buildUpstreamHeaders(
   requestHeaders: Headers,
   credential: Allowed['credential'] & object,
+  presentedIn: Iterable<string>,
 ): Record<string, string> {
+  const dropped = new Set([
+    ...REQUEST_HEADER_DENYLIST,
+    ...presentedIn,
+    credential.headerName,
+  ]);
   const headers: Record<string, string> = {};
   for (const [key, value] of requestHeaders.entries())
-    if (!REQUEST_HEADER_DENYLIST.has(key.toLowerCase())) headers[key] = value;
+    if (!dropped.has(key.toLowerCase())) headers[key] = value;
   headers['accept-encoding'] = 'identity';
   headers[credential.headerName] =
     `${credential.headerPrefix}${credential.value}`;
@@ -252,13 +260,16 @@ export function createSessionEgressProxy(
     egressMethod: SessionEgressMethod,
     admitWorkload: (workloadId: string) => boolean,
   ): Promise<Response> => {
-    // Exactly one substitute may be presented, in any credential slot.
+    // Exactly one substitute may be presented, in any header: the grant's
+    // own header name decides where the origin receives the real key, so the
+    // client's choice of slot only has to be unambiguous.
+    const presentedIn = new Set<string>();
     const presented = new Set<string>();
-    for (const name of CREDENTIAL_HEADERS) {
-      const value = presentedSubstitute(
-        c.req.raw.headers.get(name) ?? undefined,
-      );
-      if (value) presented.add(value);
+    for (const [name, value] of c.req.raw.headers.entries()) {
+      const token = presentedSubstitute(value);
+      if (!token) continue;
+      presentedIn.add(name.toLowerCase());
+      presented.add(token);
     }
     if (presented.size !== 1)
       return denied(
@@ -360,7 +371,11 @@ export function createSessionEgressProxy(
         upstream = await doFetch(target, {
           dispatcher: agent,
           method,
-          headers: buildUpstreamHeaders(c.req.raw.headers, credential),
+          headers: buildUpstreamHeaders(
+            c.req.raw.headers,
+            credential,
+            presentedIn,
+          ),
           ...(body === undefined ? {} : { body }),
           signal,
           redirect: 'manual',

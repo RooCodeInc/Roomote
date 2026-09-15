@@ -257,9 +257,11 @@ through `POST /workloads` exactly as for the connector path, using a synthetic
 connector identity, and delivers the substitutes together with one base URL,
 `<api origin>/api/session-egress`, shared by every approved service. The
 workload points an ordinary HTTP client at that base URL and presents the
-service's substitute as its credential in any credential slot
-(`Authorization: Bearer rses_…`, `x-api-key: rses_…`); the substitute alone
-names the grant. The workload never receives the real credential, a proxy
+service's substitute as its credential in any header
+(`Authorization: Bearer rses_…`, `x-api-key: rses_…`, `private-token: rses_…`);
+the substitute alone names the grant, and the grant's own header name decides
+where the origin receives the real key. Grants may name any RFC 7230 header
+token except request-shaping ones (see `isSessionEgressCredentialHeaderName`). The workload never receives the real credential, a proxy
 address, or a CA bundle. A deployment may additionally serve the same route at
 the root of a dedicated hostname (`R_SESSION_EGRESS_PROXY_HOST`) for SDK
 clients that allow only a host override; the base URL delivered to workloads

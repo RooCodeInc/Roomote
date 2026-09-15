@@ -115,7 +115,7 @@ async function grant(
   input: {
     label?: string;
     origin?: string;
-    headerName?: 'authorization' | 'x-api-key' | 'api-key';
+    headerName?: string;
     headerPrefix?: '' | 'Bearer ' | 'Basic ' | 'Token ';
     allowedMethods?: SessionEgressMethod[];
   } = {},
@@ -398,6 +398,29 @@ it('injects into the grant slot whichever slot the client used', async () => {
     'allowed',
     'allowed',
   ]);
+});
+
+it('serves grants on service-specific headers and strips whichever header carried the token', async () => {
+  const { secretRef: gitlabRef } = await grant({
+    label: 'GitLab',
+    headerName: 'PRIVATE-TOKEN',
+    headerPrefix: '',
+  });
+  const gitlab = await substituteFor(gitlabRef);
+  const variants: Record<string, string>[] = [
+    { 'private-token': gitlab },
+    { authorization: `Bearer ${gitlab}` },
+    { 'x-anything-goes': gitlab },
+  ];
+  for (const headers of variants) {
+    vi.mocked(fetch).mockClear();
+    const response = await request('/v4/user', { token: null, headers });
+    expect(response.status).toBe(200);
+    const sent = sentHeaders();
+    expect(sent['private-token']).toBe(secret);
+    expect(sent.authorization).toBeUndefined();
+    expect(sent['x-anything-goes']).toBeUndefined();
+  }
 });
 
 it('routes each substitute to its own approved origin from one base URL', async () => {

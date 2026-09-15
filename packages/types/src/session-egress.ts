@@ -27,6 +27,76 @@ export const SESSION_EGRESS_METHODS = [
   'DELETE',
 ] as const;
 export const sessionEgressMethodSchema = z.enum(SESSION_EGRESS_METHODS);
+
+export const SESSION_EGRESS_HEADER_NAME_MAX_LENGTH = 64;
+
+/**
+ * Headers that can never carry a Session credential: they shape the request
+ * itself, route it, frame its body, or carry other credentials, so injecting
+ * a key there would change what the origin sees rather than authenticate it.
+ */
+const RESERVED_CREDENTIAL_HEADER_NAMES = new Set([
+  'accept',
+  'accept-encoding',
+  'accept-language',
+  'cache-control',
+  'connection',
+  'content-encoding',
+  'content-length',
+  'content-type',
+  'cookie',
+  'cookie2',
+  'date',
+  'expect',
+  'forwarded',
+  'host',
+  'if-match',
+  'if-modified-since',
+  'if-none-match',
+  'if-range',
+  'if-unmodified-since',
+  'keep-alive',
+  'location',
+  'origin',
+  'pragma',
+  'range',
+  'referer',
+  'set-cookie',
+  'set-cookie2',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+  'user-agent',
+  'via',
+  'www-authenticate',
+  'x-real-ip',
+]);
+
+/**
+ * Any RFC 7230 token can name the header that carries a grant's key:
+ * `authorization`, `x-api-key`, `api-key`, or a service-specific name such as
+ * `private-token` or `x-shopify-access-token`. Names compare lowercase.
+ */
+export function isSessionEgressCredentialHeaderName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower.length <= SESSION_EGRESS_HEADER_NAME_MAX_LENGTH &&
+    /^[a-z0-9!#$%&'*+.^_`|~-]+$/.test(lower) &&
+    !RESERVED_CREDENTIAL_HEADER_NAMES.has(lower) &&
+    !lower.startsWith('proxy-') &&
+    !lower.startsWith('x-forwarded-') &&
+    !lower.startsWith('sec-')
+  );
+}
+
+export const sessionEgressHeaderNameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .refine(isSessionEgressCredentialHeaderName, {
+    message: 'unsupported credential header',
+  });
 export type SessionEgressMethod = z.infer<typeof sessionEgressMethodSchema>;
 
 /** Grants prepared before method policy existed, and grants that omit it, stay read-only. */
@@ -210,7 +280,9 @@ export interface SessionEgressGrantPolicy {
   label: string;
   /** Exact approved HTTPS origin, e.g. `https://api.example.com` or `https://host:8443`. */
   origin: string;
-  headerName: 'authorization' | 'x-api-key' | 'api-key';
+  /** Lowercase header that carries the key at the origin; see `isSessionEgressCredentialHeaderName`. */
+  headerName: string;
+  /** A scheme is only meaningful on `authorization`; other headers carry the bare key. */
   headerPrefix: '' | 'Bearer ' | 'Basic ' | 'Token ';
   allowedMethods: SessionEgressMethod[];
   expiresAt: string;

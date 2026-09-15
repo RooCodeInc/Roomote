@@ -59,7 +59,9 @@ The gateway uses the existing Roomote
   lowercase DNS `host:port`. No substitute is required or resolved there.
 - Inner TLS is mandatory. CONNECT target, SNI, Host and any absolute request URL
   must agree, including the exact HTTPS port. IP literal origins are refused.
-- Only `authorization`, `x-api-key`, or `api-key` can hold one whole substitute.
+- Only `authorization`, `x-api-key`, or `api-key` can hold one whole substitute
+  on this connector path; grants that name another header are served by the
+  API-side proxy.
   The returned grant must match that slot and the presented authentication scheme
   (`Bearer `, `Basic `, `Token `, or empty). Only the scheme is case-insensitive;
   substitute values remain case-sensitive and spacing remains exact. Injection
