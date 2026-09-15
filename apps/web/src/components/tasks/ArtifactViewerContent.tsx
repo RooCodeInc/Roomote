@@ -131,6 +131,8 @@ interface ArtifactViewerContentProps {
   showToolbar?: boolean;
   isLoading?: boolean;
   emptyMessage?: string;
+  firstRowIsHeader?: boolean;
+  onFirstRowIsHeaderChange?: (checked: boolean) => void;
 }
 
 function TabularArtifactPreview({
@@ -242,6 +244,8 @@ export function ArtifactViewerContent({
   showToolbar = true,
   isLoading = false,
   emptyMessage = 'Select an artifact to inspect it here.',
+  firstRowIsHeader: controlledFirstRowIsHeader,
+  onFirstRowIsHeaderChange,
 }: ArtifactViewerContentProps) {
   const artifactOwner = owner ?? { taskId: taskIdProp! };
   const taskId = 'taskId' in artifactOwner ? artifactOwner.taskId : undefined;
@@ -250,7 +254,10 @@ export function ArtifactViewerContent({
   const pathname = usePathname();
   const router = useRouter();
   const [isRaw, setIsRaw] = useState(false);
-  const [firstRowIsHeader, setFirstRowIsHeader] = useState(false);
+  const [localFirstRowIsHeader, setLocalFirstRowIsHeader] = useState(false);
+  const firstRowIsHeader = controlledFirstRowIsHeader ?? localFirstRowIsHeader;
+  const setFirstRowIsHeader =
+    onFirstRowIsHeaderChange ?? setLocalFirstRowIsHeader;
   const [isCopied, setIsCopied] = useState(false);
   const [isUrlCopied, setIsUrlCopied] = useState(false);
   const [isRawUrlCopied, setIsRawUrlCopied] = useState(false);
@@ -315,7 +322,7 @@ export function ArtifactViewerContent({
 
   useEffect(() => {
     setIsRaw(false);
-    setFirstRowIsHeader(false);
+    setLocalFirstRowIsHeader(false);
   }, [artifact?.path, artifact?.version]);
 
   const latestVersion = versions[0]?.version;

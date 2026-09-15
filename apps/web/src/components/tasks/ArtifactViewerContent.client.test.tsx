@@ -432,6 +432,63 @@ describe('ArtifactViewerContent', () => {
     ).toBeVisible();
   });
 
+  it('renders controlled header mode without a toolbar', () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        showToolbar={false}
+        firstRowIsHeader
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/data.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 32,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/data.csv',
+          content: 'name,value\nAda,42',
+        }}
+      />,
+    );
+
+    expect(
+      screen.queryByLabelText('First row is a header'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'name' })).toBeVisible();
+    expect(
+      screen.queryByRole('cell', { name: 'name' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('reports controlled header mode changes', () => {
+    const onFirstRowIsHeaderChange = vi.fn();
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        firstRowIsHeader={false}
+        onFirstRowIsHeaderChange={onFirstRowIsHeaderChange}
+        artifact={{
+          id: 'artifact-table',
+          taskId: 'task-1',
+          path: 'reports/data.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 32,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/data.csv',
+          content: 'name,value\nAda,42',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('First row is a header'));
+
+    expect(onFirstRowIsHeaderChange).toHaveBeenCalledWith(true);
+  });
+
   it('renders table values as inert text and keeps source available', () => {
     const content = 'value\n<script>window.alert(1)</script>';
     const { container } = render(
