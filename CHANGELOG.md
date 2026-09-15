@@ -16,7 +16,7 @@ Roomote 1.9.4 makes integration keys easier to enter and email identity safer wh
 ### Patch changes
 
 - CSV and TSV artifact previews now align row numbers with the first line of adjacent cell content, including rows with multiline values and whether the first row is treated as headers or data.
-- Inbound email now requires a passing DMARC result before Roomote trusts the sender as a verified account, closing a sender-spoofing gap while giving domains without valid SPF, DKIM, and DMARC guidance for fixing delivery.
+- Inbound email now requires a passing DMARC result before Roomote trusts the sender as a verified account, closing a sender-spoofing gap while giving domains without a published DMARC policy or aligned SPF or DKIM guidance for fixing delivery.
 - When an agent asks for an integration key in a Session, the key dialog now opens on its own for the Session owner, and a small "Add your <service> key" card stays at the end of the conversation until the key is saved, so the dialog is always one click away even after it was dismissed. The agent's link keeps working as before.
 - Session and task transcripts now render skill results that omit output instead of falling back to the client-side exception page.
 - Webhook and pull-request review delivery outcomes now emit searchable, correlation-friendly operational events, so operators can follow Telegram and GitHub activity from receipt through persistence, dispatch, and final delivery without logging message content or credentials.
