@@ -875,12 +875,18 @@ export const runTask = async ({
 
     if (workerEnv.sessionEgressBootstrapRequired) {
       Object.assign(runtimeEnv, workerEnv.buildSessionEgressClientEnv());
-      if (!runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME]) {
-        throw new Error(
-          'Protected execution requires a configured Roomote inference gateway; direct-provider inference is unavailable',
-        );
+      if (workerEnv.sessionEgressMode === 'api_proxy') {
+        // Substitutes are only usable through the API proxy, so nothing about
+        // the run's own networking or inference routing changes.
+        runtimeEnv.ROOMOTE_SESSION_EGRESS_API_PROXY = '1';
+      } else {
+        if (!runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME]) {
+          throw new Error(
+            'Protected execution requires a configured Roomote inference gateway; direct-provider inference is unavailable',
+          );
+        }
+        runtimeEnv.ROOMOTE_SESSION_EGRESS_ENFORCED = '1';
       }
-      runtimeEnv.ROOMOTE_SESSION_EGRESS_ENFORCED = '1';
     }
 
     const workerHomeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';

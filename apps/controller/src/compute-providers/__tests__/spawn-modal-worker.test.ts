@@ -102,7 +102,16 @@ vi.mock('../../sandbox-oidc', () => ({
     mockPrimeEnvironmentOidcForMachine(...args),
 }));
 
+const mockAdmitSessionEgressApiProxy = vi.fn();
+vi.mock('../../session-egress', () => ({
+  admitSessionEgressApiProxy: (...args: unknown[]) =>
+    mockAdmitSessionEgressApiProxy(...args),
+  resolveSessionEgressApiProxyBaseUrl: () =>
+    'https://api.roomote.test/api/session-egress',
+}));
+
 const { spawnModalWorker } = await import('../spawn-modal-worker');
+const { buildModalWorkerEnv } = await import('@roomote/compute-providers');
 
 describe('spawnModalWorker', () => {
   beforeEach(() => {
@@ -126,6 +135,72 @@ describe('spawnModalWorker', () => {
       environmentConfig: undefined,
     });
     mockPrimeEnvironmentOidcForMachine.mockResolvedValue(undefined);
+  });
+
+  it('admits Session egress through the API proxy after the worker bootstraps', async () => {
+    const needsBootstrapAdmission = vi.fn().mockResolvedValue(true);
+    mockAdmitSessionEgressApiProxy.mockResolvedValue({
+      workloadId: 'w1',
+      generation: 1,
+      substitutes: [],
+    });
+    const taskRun = mockTaskRun({
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: { repo: 'test/repo', environmentId: 'env_123' },
+    });
+    await spawnModalWorker(taskRun, 'auth_token', {
+      deploymentSlug: 'roomote',
+      modalTokenId: 'token-id',
+      modalTokenSecret: 'token-secret',
+      modalBaseImageRef: 'ghcr.io/roomote/worker:test',
+      modalVmMemoryMiB: 8192,
+      modalTimeoutMs: 60_000,
+      sessionEgress: { needsBootstrapAdmission } as never,
+    });
+    expect(needsBootstrapAdmission).toHaveBeenCalledWith(123, 'modal');
+    const extraEnv = vi.mocked(buildModalWorkerEnv).mock.calls.at(-1)![0]
+      .extraEnv as Record<string, string>;
+    expect(extraEnv.ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED).toBe('1');
+    expect(extraEnv.ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE).toMatch(
+      /^[0-9a-f-]{36}$/,
+    );
+    // Admission runs after the worker is launched and is bound to that nonce.
+    expect(mockRunCommand).toHaveBeenCalledOnce();
+    expect(mockAdmitSessionEgressApiProxy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskRun: { id: 123, taskId: 'task_123' },
+        provider: 'modal',
+        nonce: extraEnv.ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE,
+        baseUrl: 'https://api.roomote.test/api/session-egress',
+        resume: false,
+      }),
+    );
+  });
+
+  it('spawns without bootstrap gating when no admission is needed', async () => {
+    const needsBootstrapAdmission = vi.fn().mockResolvedValue(false);
+    await spawnModalWorker(
+      mockTaskRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_123' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'ghcr.io/roomote/worker:test',
+        modalVmMemoryMiB: 8192,
+        modalTimeoutMs: 60_000,
+        sessionEgress: { needsBootstrapAdmission } as never,
+      },
+    );
+    const extraEnv = vi.mocked(buildModalWorkerEnv).mock.calls.at(-1)![0]
+      .extraEnv as Record<string, string>;
+    expect(extraEnv).not.toHaveProperty(
+      'ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED',
+    );
+    expect(mockAdmitSessionEgressApiProxy).not.toHaveBeenCalled();
   });
 
   it('forwards Modal regions into the compute client config', async () => {

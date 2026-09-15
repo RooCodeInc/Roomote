@@ -1,10 +1,14 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   TaskPayloadKind,
   NonRetryableSpawnError,
   resolveConfiguredComputeProviderResources,
   getPrimaryPortFromConfig,
   getComputeProviderCommandOutputSource,
+  SESSION_EGRESS_WORKLOAD_ENV,
 } from '@roomote/types';
+import { Env } from '@roomote/env';
 import {
   type TaskRun,
   createComputeProviderMutationEventRecorder,
@@ -29,6 +33,11 @@ import {
 } from '@roomote/compute-providers';
 
 import { primeEnvironmentOidcForMachine } from '../sandbox-oidc';
+import {
+  admitSessionEgressApiProxy,
+  resolveSessionEgressApiProxyBaseUrl,
+  type SessionEgressLifecycle,
+} from '../session-egress';
 import {
   getNamedPortsForTaskRun,
   shouldEnableAuthBypassForTaskRun,
@@ -240,6 +249,8 @@ export async function spawnModalWorker(
       launchDiagnostics?: string;
     }) => Promise<'ignore' | 'restart' | 'failed'>;
     onWorkerRestart?: () => void;
+    /** Session-egress admission; omitted in unit paths that do not exercise it. */
+    sessionEgress?: SessionEgressLifecycle;
   },
 ): Promise<{
   machineId: string;
@@ -267,8 +278,16 @@ export async function spawnModalWorker(
     modalTags,
     onWorkerExit,
     onWorkerRestart,
+    sessionEgress,
   } = config;
   const parsedModalRegions = parseModalRegions(modalRegions);
+  // Session egress (API-proxy admission): the sandbox bootstraps with ordinary
+  // connectivity and no substitutes; only the controller publishes verified
+  // delivery, bound to this nonce, after the worker reports bootstrap done.
+  const sessionEgressBootstrapNonce = randomUUID();
+  const sessionEgressRequired = sessionEgress
+    ? await sessionEgress.needsBootstrapAdmission(taskRun.id, vendor)
+    : false;
   const environmentId = taskRun.payload.environmentId;
 
   const { namedPorts, environmentSnapshotId, environmentConfig } =
@@ -555,6 +574,11 @@ export async function spawnModalWorker(
         baseImageRef: modalBaseImageRef,
         extraEnv: {
           SANDBOX_TIMEOUT_MS: String(modalTimeoutMs),
+          ...(sessionEgressRequired && {
+            [SESSION_EGRESS_WORKLOAD_ENV.BOOTSTRAP_REQUIRED]: '1',
+            [SESSION_EGRESS_WORKLOAD_ENV.BOOTSTRAP_NONCE]:
+              sessionEgressBootstrapNonce,
+          }),
         },
       }),
       detached: true,
@@ -691,6 +715,29 @@ export async function spawnModalWorker(
         .update(taskRuns)
         .set({ sandboxCmdId: result.commandId })
         .where(eq(taskRuns.id, taskRun.id));
+    }
+
+    if (sessionEgressRequired && sessionEgress) {
+      // The worker is waiting on this nonce after its ordinary bootstrap; an
+      // admission failure fails the spawn, as it does for Docker, rather
+      // than leaving a worker that expected substitutes without them.
+      const workload = await admitSessionEgressApiProxy({
+        lifecycle: sessionEgress,
+        taskRun: { id: taskRun.id, taskId: taskRun.taskId },
+        provider: vendor,
+        nonce: sessionEgressBootstrapNonce,
+        baseUrl: resolveSessionEgressApiProxyBaseUrl(Env),
+        resume: launchOptions.launchMode === 'task_snapshot',
+      });
+      console.log(
+        `[spawnModalWorker] Session egress delivered for task run #${taskRun.id} ${JSON.stringify(
+          {
+            workloadId: workload.workloadId,
+            generation: workload.generation,
+            substituteCount: workload.substitutes.length,
+          },
+        )}`,
+      );
     }
 
     return {

@@ -431,7 +431,8 @@ const serverSchema = {
   // request arrives for this host, the API serves `/api/session-egress` at the
   // root, so SDK clients that allow only a host override (no path prefix) can
   // use it. Same route and checks; only the address differs. Point DNS for the
-  // name at the API service; the path form keeps working on the API host.
+  // name at the API service; the path form keeps working on the API host. Set
+  // the same value on the controller: it delivers the base URL to sandboxes.
   R_SESSION_EGRESS_PROXY_HOST: z
     .string()
     .trim()
