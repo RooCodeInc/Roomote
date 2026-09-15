@@ -50,7 +50,11 @@ let taskId: string;
 let connectorIdentity: string;
 
 beforeEach(async () => {
-  const owner = await userFactory.create();
+  // Delivery follows the owner's Session secret tools experiment, like the
+  // Fast and coding-run tools; every fixture owner here has it on.
+  const owner = await userFactory.create({
+    metadata: { session_secret_tools_enabled: true },
+  });
   const session = await sessionFactory.create({
     ownerKind: 'user',
     ownerUserId: owner.id,
