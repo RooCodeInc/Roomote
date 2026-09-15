@@ -4679,7 +4679,7 @@ export async function answerFastAgentQuestion({
               const sessionUrl = new URL(
                 `${Env.R_APP_URL}/sessions/${encodeURIComponent(canonicalSession.id)}`,
               );
-              sessionUrl.hash = 'service-credentials';
+              sessionUrl.hash = 'integrations';
               if (
                 call.name ===
                 FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential
