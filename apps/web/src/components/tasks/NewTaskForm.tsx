@@ -31,17 +31,6 @@ type SubmissionSnapshot = {
   attachmentTexts?: string[];
 };
 
-type FastSessionSubmission = {
-  text: string;
-  images?: string[];
-  attachmentTexts?: string[];
-  model?: string | null;
-  reasoningEffort?: ReasoningEffort | null;
-  /** Open the Session for a voice call; it may start with nothing typed. */
-  voiceCall?: boolean;
-  privacy?: 'shared' | 'private';
-};
-
 type NewTaskFormProps = {
   animate?: boolean;
   onTaskStarted?: () => void;
