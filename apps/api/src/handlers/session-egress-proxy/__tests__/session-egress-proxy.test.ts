@@ -110,6 +110,7 @@ async function run(userId: string, attachTo: string) {
 async function grant(
   input: {
     label?: string;
+    origin?: string;
     headerName?: 'authorization' | 'x-api-key' | 'api-key';
     headerPrefix?: '' | 'Bearer ' | 'Basic ' | 'Token ';
     allowedMethods?: SessionEgressMethod[];
@@ -117,7 +118,7 @@ async function grant(
 ) {
   const pending = await prepareSessionSecret(context, {
     label: input.label ?? 'Example API',
-    origin,
+    origin: input.origin ?? origin,
     headerName: input.headerName ?? 'authorization',
     headerPrefix: input.headerPrefix ?? 'Bearer ',
     ...(input.allowedMethods ? { allowedMethods: input.allowedMethods } : {}),
@@ -129,7 +130,7 @@ async function grant(
   });
 }
 
-/** Register the run the way a connector-less controller would, returning substitutes by grant. */
+/** Register the run the way a connector-less controller would; returns substitutes by grant. */
 async function register() {
   const registration = await registerSessionEgressWorkload({
     runId,
@@ -141,18 +142,23 @@ async function register() {
   return registration;
 }
 
+async function substituteFor(ref: string) {
+  const registration = await register();
+  return registration.substitutes.find((issue) => issue.secretRef === ref)!
+    .substitute;
+}
+
 function request(
   suffix = '/v1/items',
   init: {
     method?: string;
     headers?: Record<string, string>;
     body?: string;
-    ref?: string;
     token?: string | null;
   } = {},
 ) {
   const token = init.token === undefined ? substitute : init.token;
-  return app.request(`${base}/${init.ref ?? secretRef}${suffix}`, {
+  return app.request(`${base}${suffix}`, {
     method: init.method ?? 'GET',
     headers: {
       ...(token === null ? {} : { authorization: `Bearer ${token}` }),
@@ -160,6 +166,13 @@ function request(
     },
     ...(init.body === undefined ? {} : { body: init.body }),
   });
+}
+
+function sentHeaders(call = 0): Record<string, string> {
+  return vi.mocked(fetch).mock.calls[call]![1]!.headers as Record<
+    string,
+    string
+  >;
 }
 
 async function auditRows(ref = secretRef) {
@@ -243,27 +256,27 @@ afterEach(async () => {
   await db.delete(users).where(inArray(users.id, userIds));
 });
 
-it('is a handler-authenticated public surface with a per-grant base URL', () => {
-  expect(findRoutePolicyRule(`${base}/${secretRef}/v1/items`)).toMatchObject({
+it('is a handler-authenticated public surface with one shared base URL', () => {
+  expect(findRoutePolicyRule(`${base}/v1/items`)).toMatchObject({
     name: 'session-egress-proxy',
     policy: 'webhook',
   });
-  expect(
-    sessionEgressProxyBaseUrl('https://api.roomote.test/', secretRef),
-  ).toBe(`https://api.roomote.test${base}/${secretRef}`);
+  expect(sessionEgressProxyBaseUrl('https://api.roomote.test/')).toBe(
+    `https://api.roomote.test${base}`,
+  );
 });
 
-it('reads the substitute from the approved header slot with an exact value', () => {
+it('reads an exact substitute after any single authentication scheme', () => {
   const token = `${SESSION_EGRESS_SUBSTITUTE_PREFIX}${'a'.repeat(43)}`;
-  expect(presentedSubstitute(`Bearer ${token}`, 'Bearer ')).toBe(token);
-  expect(presentedSubstitute(`bearer ${token}`, 'Bearer ')).toBe(token);
-  expect(presentedSubstitute(`Basic ${token}`, 'Bearer ')).toBeNull();
-  expect(presentedSubstitute(`Bearer  ${token}`, 'Bearer ')).toBeNull();
-  expect(presentedSubstitute(`Bearer ${token}`, '')).toBeNull();
-  expect(presentedSubstitute(token, '')).toBe(token);
-  expect(presentedSubstitute(token.toUpperCase(), '')).toBeNull();
-  expect(presentedSubstitute(undefined, 'Bearer ')).toBeNull();
-  expect(presentedSubstitute('Bearer not-a-substitute', 'Bearer ')).toBeNull();
+  expect(presentedSubstitute(`Bearer ${token}`)).toBe(token);
+  expect(presentedSubstitute(`bearer ${token}`)).toBe(token);
+  expect(presentedSubstitute(`Basic ${token}`)).toBe(token);
+  expect(presentedSubstitute(token)).toBe(token);
+  expect(presentedSubstitute(`Bearer  ${token}`)).toBeNull();
+  expect(presentedSubstitute(`12 ${token}`)).toBeNull();
+  expect(presentedSubstitute(token.toUpperCase())).toBeNull();
+  expect(presentedSubstitute(undefined)).toBeNull();
+  expect(presentedSubstitute('Bearer not-a-substitute')).toBeNull();
 });
 
 it('forwards an allowed request with the real credential and relays a scrubbed response', async () => {
@@ -298,7 +311,7 @@ it('forwards an allowed request with the real credential and relays a scrubbed r
   expect(String(url)).toBe(
     'https://api.example.com/v1/items?limit=3&q=private-query-marker',
   );
-  const sent = init!.headers as Record<string, string>;
+  const sent = sentHeaders();
   expect(sent.authorization).toBe(`Bearer ${secret}`);
   expect(sent['accept-encoding']).toBe('identity');
   expect(sent.accept).toBe('application/json');
@@ -321,79 +334,87 @@ it('forwards an allowed request with the real credential and relays a scrubbed r
     });
 });
 
-it('supports the api-key header slot and a bare prefix', async () => {
+it('injects into the grant slot whichever slot the client used', async () => {
   const { secretRef: keyRef } = await grant({
     label: 'Keyed API',
     headerName: 'x-api-key',
     headerPrefix: '',
   });
-  const registration = await register();
-  const keyed = registration.substitutes.find(
-    (issue) => issue.secretRef === keyRef,
-  )!;
-  const response = await request('/v1/keys', {
-    ref: keyRef,
-    token: null,
-    headers: { 'x-api-key': keyed.substitute },
+  const keyed = await substituteFor(keyRef);
+  const variants: Record<string, string>[] = [
+    { 'x-api-key': keyed },
+    { authorization: `Bearer ${keyed}` },
+  ];
+  for (const headers of variants) {
+    vi.mocked(fetch).mockClear();
+    const response = await request('/v1/keys', { token: null, headers });
+    expect(response.status).toBe(200);
+    expect(sentHeaders()['x-api-key']).toBe(secret);
+    expect(sentHeaders().authorization).toBeUndefined();
+  }
+  expect((await auditRows(keyRef)).map((row) => row.decision)).toEqual([
+    'allowed',
+    'allowed',
+    'allowed',
+    'allowed',
+  ]);
+});
+
+it('routes each substitute to its own approved origin from one base URL', async () => {
+  const { secretRef: otherRef } = await grant({
+    label: 'Other API',
+    origin: 'https://api.other.example',
+    headerPrefix: 'Token ',
   });
-  expect(response.status).toBe(200);
-  const sent = vi.mocked(fetch).mock.calls[0]![1]!.headers as Record<
-    string,
-    string
-  >;
-  expect(sent['x-api-key']).toBe(secret);
-  expect(sent.authorization).toBeUndefined();
+  // Registering again rotates the workload generation, so both tokens must
+  // come from the same registration.
+  const registration = await register();
+  const tokenFor = (ref: string) =>
+    registration.substitutes.find((issue) => issue.secretRef === ref)!
+      .substitute;
+  await request('/v1/items', { token: tokenFor(secretRef) });
+  await request('/v2/things', { token: tokenFor(otherRef) });
+  expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([
+    'https://api.example.com/v1/items',
+    'https://api.other.example/v2/things',
+  ]);
+  expect(sentHeaders(1).authorization).toBe(`Token ${secret}`);
 });
 
 it.each([
-  ['missing header', { token: null }],
-  ['wrong scheme', { token: null, headers: { authorization: 'Token ' } }],
-  ['other slot', { token: null, headers: { 'x-api-key': '' } }],
-  ['not a substitute', { token: 'Real-Upstream-Key' }],
-] as const)('denies %s without contacting the origin', async (_name, init) => {
-  const headers = { ...(init as { headers?: Record<string, string> }).headers };
-  if (headers.authorization === 'Token ') headers.authorization += substitute;
-  if (headers['x-api-key'] === '') headers['x-api-key'] = substitute;
-  const response = await request('/v1/items', { ...init, headers });
-  expect(response.status).toBe(403);
-  expect(await response.json()).toEqual({ error: 'session_egress_denied' });
-  expect(fetch).not.toHaveBeenCalled();
-  expect(consoleOutput.join('\n')).toContain('reason=missing_substitute');
-});
+  ['missing header', { token: null }, 'missing_substitute'],
+  ['not a substitute', { token: 'Real-Upstream-Key' }, 'missing_substitute'],
+  [
+    'two different substitutes',
+    {
+      headers: {
+        'x-api-key': `${SESSION_EGRESS_SUBSTITUTE_PREFIX}${'z'.repeat(43)}`,
+      },
+    },
+    'ambiguous_substitute',
+  ],
+] as const)(
+  'denies %s without contacting the origin',
+  async (_name, init, reason) => {
+    const response = await request('/v1/items', init);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: 'session_egress_denied' });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(consoleOutput.join('\n')).toContain(`reason=${reason}`);
+    expect(await auditRows()).toEqual([]);
+  },
+);
 
-it('denies an unknown substitute and records the presented grant', async () => {
+it('denies an unknown substitute without attributing an audit row', async () => {
   const response = await request('/v1/items', {
     token: `${SESSION_EGRESS_SUBSTITUTE_PREFIX}${'z'.repeat(43)}`,
   });
   expect(response.status).toBe(403);
   expect(fetch).not.toHaveBeenCalled();
-  expect(await auditRows()).toEqual([
-    {
-      phase: 'request',
-      decision: 'denied',
-      reason: 'unknown_substitute',
-      destination: null,
-      workload_id: null,
-    },
-  ]);
-});
-
-it('denies a substitute presented for a different grant', async () => {
-  const { secretRef: otherRef } = await grant({ label: 'Other API' });
-  await register();
-  const response = await request('/v1/items', { ref: otherRef });
-  expect(response.status).toBe(403);
-  expect(fetch).not.toHaveBeenCalled();
-  expect((await auditRows(otherRef)).map((row) => row.reason)).toEqual([
-    'workload_mismatch',
-  ]);
-});
-
-it.each(['unknown', randomUUID()])('denies grant reference %s', async (ref) => {
-  const response = await request('/v1/items', { ref });
-  expect(response.status).toBe(403);
-  expect(fetch).not.toHaveBeenCalled();
-  expect(consoleOutput.join('\n')).toContain('reason=unknown_grant');
+  expect(consoleOutput.join('\n')).toContain(
+    'grant=unknown, method=GET, reason=unknown_substitute',
+  );
+  expect(await auditRows()).toEqual([]);
 });
 
 it('enforces the grant method policy and forwards approved writes with their body', async () => {
@@ -412,16 +433,12 @@ it('enforces the grant method policy and forwards approved writes with their bod
     label: 'Writable API',
     allowedMethods: ['GET', 'POST'],
   });
-  const registration = await register();
-  const writable = registration.substitutes.find(
-    (issue) => issue.secretRef === writeRef,
-  )!;
+  const writable = await substituteFor(writeRef);
   vi.mocked(fetch).mockResolvedValueOnce(
     Response.json({ id: 'new' }, { status: 201 }) as never,
   );
   const created = await request('/v1/items', {
-    ref: writeRef,
-    token: writable.substitute,
+    token: writable,
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: '{"name":"widget"}',
@@ -433,12 +450,10 @@ it('enforces the grant method policy and forwards approved writes with their bod
   expect(Buffer.from(init!.body as ArrayBuffer).toString()).toBe(
     '{"name":"widget"}',
   );
-  expect((init!.headers as Record<string, string>)['content-type']).toBe(
-    'application/json',
-  );
+  expect(sentHeaders()['content-type']).toBe('application/json');
   const options = await request('/v1/items', {
     method: 'OPTIONS',
-    ref: writeRef,
+    token: writable,
   });
   expect(options.status).toBe(405);
 });
@@ -449,13 +464,13 @@ it('re-roots paths on the approved origin and refuses escapes', async () => {
     'https://api.example.com/v1/items?x=1',
   );
   vi.mocked(fetch).mockClear();
-  // Dot segments that climb above the grant segment are resolved by the URL
-  // layer before routing, so they can only land on an unknown grant; a
-  // protocol-relative path reaches the handler and is refused there.
-  for (const suffix of ['/v1/../../evil', '//evil.example.com/steal']) {
-    const escaped = await request(suffix);
-    expect(escaped.status).toBe(403);
-  }
+  // Dot segments that climb above the mount are resolved by the URL layer
+  // before routing, so they never reach the proxy; a protocol-relative path
+  // does reach the handler and is refused there.
+  const climbed = await request('/v1/../../evil');
+  expect(climbed.status).toBe(404);
+  const escaped = await request('//evil.example.com/steal');
+  expect(escaped.status).toBe(403);
   expect(fetch).not.toHaveBeenCalled();
   expect(consoleOutput.join('\n')).toContain('reason=destination_mismatch');
 });

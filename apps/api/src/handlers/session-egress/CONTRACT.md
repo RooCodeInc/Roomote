@@ -249,32 +249,35 @@ owner removal, archive, detach, actor change, grant expiry, and lease expiry
 produce no event and are enforced by `/authorize` (and by the `expiresAt`
 the gateway received) alone.
 
-## API substitution proxy (`/api/session-egress/<secretRef>/<path>`)
+## API substitution proxy (`/api/session-egress/<upstream path>`)
 
 Compute providers without a per-workload connector (hosted sandboxes such as
 Modal) use the API itself as the gateway. The controller registers the run
 through `POST /workloads` exactly as for the connector path, using a synthetic
-connector identity, and delivers each grant's substitute together with a
-per-grant base URL, `<api origin>/api/session-egress/<secretRef>`. The
+connector identity, and delivers the substitutes together with one base URL,
+`<api origin>/api/session-egress`, shared by every approved service. The
 workload points an ordinary HTTP client at that base URL and presents the
-substitute in the grant's own header slot (`Authorization: Bearer rses_…`,
-`x-api-key: rses_…`); it never receives the real credential, a proxy address,
-or a CA bundle.
+service's substitute as its credential in any credential slot
+(`Authorization: Bearer rses_…`, `x-api-key: rses_…`); the substitute alone
+names the grant. The workload never receives the real credential, a proxy
+address, or a CA bundle.
 
 Per request the API performs the same live decision as `/authorize` with the
-grant named by the URL instead of a connector identity: token lookup by hash →
-token belongs to that grant → workload active and lease unexpired → generation
-match → grant not revoked → grant not expired → owner, Session, attached run,
-and actor still bound → approved origin still passes egress policy → method in
-the grant's `allowedMethods`. The path and query are re-rooted on the approved
-origin; anything that normalizes to another origin is refused. The client's
+grant taken from the token instead of a connector identity: token lookup by
+hash → workload active and lease unexpired → generation match → grant not
+revoked → grant not expired → owner, Session, attached run, and actor still
+bound → approved origin still passes egress policy → method in the grant's
+`allowedMethods`. The path and query are re-rooted on the approved origin;
+anything that normalizes to another origin is refused. The client's
 credential-shaped, cookie, routing, and hop-by-hop headers are dropped; the
-approved header is set to the real value; redirects are never followed. The
-response is buffered (8 MiB cap), scanned for the literal credential and its
-common encodings in body and headers, stripped of `set-cookie` and
-authentication challenges, and released only after a `response`-phase
-re-authorization. Audit rows are written per phase with the grant's origin as
-destination. Only bounded reason codes are logged.
+grant's own header slot is set to the real value; redirects are never
+followed. The response is buffered (8 MiB cap), scanned for the literal
+credential and its common encodings in body and headers, stripped of
+`set-cookie` and authentication challenges, and released only after a
+`response`-phase re-authorization. Audit rows are written per phase with the
+grant's origin as destination; an unknown token, which names nothing to
+attribute, is logged but not audited. Only bounded reason codes and grant ids
+are logged.
 
 What this path does not provide is a physical origin proof: possession of the
 substitute is the authority, bounded by the workload generation, lease, run,

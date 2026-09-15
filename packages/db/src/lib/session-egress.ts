@@ -505,11 +505,11 @@ function approvedDestination(origin: string): { host: string; port: number } {
  * - `connector`: the external gateway authenticated a connector certificate
  *   and maps it to a workload; the token must belong to exactly that workload
  *   and the CONNECT target must equal the approved origin.
- * - `proxy`: the API itself is the gateway. The grant is named by the request
- *   URL and there is no connector; the token must belong to that grant and the
- *   destination is the approved origin by construction. Possession of the
- *   substitute is the authority, bounded by the same live workload, Session,
- *   run, generation, expiry and revocation checks.
+ * - `proxy`: the API itself is the gateway and there is no connector. The
+ *   token alone names the grant, and the destination is that grant's approved
+ *   origin by construction. Possession of the substitute is the authority,
+ *   bounded by the same live workload, Session, run, generation, expiry and
+ *   revocation checks.
  */
 type SubstituteBinding =
   | {
@@ -518,7 +518,7 @@ type SubstituteBinding =
       connectorIdentity: string;
       destination: { host: string; port: number };
     }
-  | { kind: 'proxy'; secretRef: string };
+  | { kind: 'proxy' };
 
 /**
  * Live per-request authorization. Every phase of one HTTP exchange (request,
@@ -590,10 +590,9 @@ async function authorizeSubstitute(
     if (!row) return 'unknown_substitute';
     const { substitute, workload, secret, session, run } = row;
     if (
-      binding.kind === 'connector'
-        ? workload.id !== binding.workloadId ||
-          workload.connectorIdentity !== binding.connectorIdentity
-        : secret.id !== binding.secretRef
+      binding.kind === 'connector' &&
+      (workload.id !== binding.workloadId ||
+        workload.connectorIdentity !== binding.connectorIdentity)
     )
       return 'workload_mismatch';
     if (workload.status !== 'active' || row.workloadExpired)
@@ -630,6 +629,11 @@ async function authorizeSubstitute(
 
   const [row] = await load();
   const reason = decide(row);
+  // On the proxy path an unknown token names no workload, Session, or grant,
+  // so there is nothing an audit row could attribute; the caller logs the
+  // bounded reason instead.
+  if (binding.kind === 'proxy' && !row)
+    return { allowed: false, reason: 'unknown_substitute' };
   const authorizationId = input.authorizationId ?? randomUUID();
   // A token that does not belong to this binding tells the audit nothing
   // trustworthy about a Session or grant; record only what was presented.
@@ -651,12 +655,7 @@ async function authorizeSubstitute(
           : null,
     sessionId: bound ? row.workload.sessionId : null,
     actorUserId: bound ? row.workload.ownerUserId : null,
-    secretRef:
-      binding.kind === 'proxy'
-        ? binding.secretRef
-        : bound
-          ? row.secret.id
-          : null,
+    secretRef: bound ? row.secret.id : null,
     phase: input.phase,
     method: input.method,
     destination: destination
@@ -718,16 +717,12 @@ export async function authorizeSessionEgress(
   );
 }
 
-/** API proxy path: a workload presents a substitute for the grant named in the URL. */
+/** API proxy path: a workload presents a substitute; the token alone names the grant. */
 export async function authorizeSessionEgressProxy(
   input: SessionEgressProxyAuthorize,
   options: { isOriginAllowed?: (origin: string) => boolean } = {},
 ): Promise<SessionEgressAuthorization> {
-  return authorizeSubstitute(
-    input,
-    { kind: 'proxy', secretRef: input.secretRef },
-    options,
-  );
+  return authorizeSubstitute(input, { kind: 'proxy' }, options);
 }
 
 /** Audit rows for one workload: bounded codes only, for tests and operator tooling. */

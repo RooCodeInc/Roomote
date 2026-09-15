@@ -141,31 +141,28 @@ export const sessionEgressAuthorizeSchema = z
 
 /**
  * Public prefix of the API-side substitution proxy. A workload points an
- * ordinary HTTP client at `<api origin>/api/session-egress/<secretRef>` and
- * presents its substitute in the grant's own header slot; the API rewrites the
- * request onto the approved origin and injects the real credential. This is
- * the path for compute providers without a per-workload connector.
+ * ordinary HTTP client at `<api origin>/api/session-egress` as the base URL
+ * of every approved service and presents the service's substitute as its
+ * credential; the substitute alone names the grant, so the API rewrites the
+ * request onto that grant's approved origin and injects the real credential.
+ * This is the path for compute providers without a per-workload connector.
  */
 export const SESSION_EGRESS_PROXY_PATH = '/api/session-egress';
 
-/** Per-grant base URL delivered to a workload alongside its substitute. */
-export function sessionEgressProxyBaseUrl(
-  apiBaseUrl: string,
-  secretRef: string,
-): string {
+/** The one base URL a workload uses for every approved service. */
+export function sessionEgressProxyBaseUrl(apiBaseUrl: string): string {
   let end = apiBaseUrl.length;
   while (end > 0 && apiBaseUrl[end - 1] === '/') end--;
-  return `${apiBaseUrl.slice(0, end)}${SESSION_EGRESS_PROXY_PATH}/${secretRef}`;
+  return `${apiBaseUrl.slice(0, end)}${SESSION_EGRESS_PROXY_PATH}`;
 }
 
 /**
- * Authorization input for the API-side proxy. The grant is named by the URL
- * and the substitute by the header; there is no connector identity because
- * the API itself is the only party between the workload and the origin.
+ * Authorization input for the API-side proxy. The substitute names the grant;
+ * there is no connector identity because the API itself is the only party
+ * between the workload and the origin.
  */
 export const sessionEgressProxyAuthorizeSchema = z
   .object({
-    secretRef: z.string().uuid(),
     substitute: substituteSchema,
     method: sessionEgressMethodSchema,
     path: requestPathSchema,
@@ -229,7 +226,7 @@ export const SESSION_EGRESS_DENIAL_REASONS = [
   'malformed',
   /** No live substitute matches the presented token hash. */
   'unknown_substitute',
-  /** Token exists but belongs to another workload, generation, connector identity, or grant. */
+  /** Token exists but belongs to another workload, generation, or connector identity. */
   'workload_mismatch',
   /** Workload terminated or its lease expired. */
   'workload_inactive',
