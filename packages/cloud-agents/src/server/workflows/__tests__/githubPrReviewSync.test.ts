@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 describe('githubPrReviewSync', () => {
-  it('forwards therapist mode to the Standard Task prompt', () => {
+  it('does not carry obsolete per-user memory disclosure state', () => {
     const thisFilePath = fileURLToPath(import.meta.url);
     const workflowPath = path.resolve(
       path.dirname(thisFilePath),
@@ -14,10 +14,7 @@ describe('githubPrReviewSync', () => {
     );
     const workflowContent = fs.readFileSync(workflowPath, 'utf8');
 
-    expect(workflowContent).toContain('therapistModeEnabled?: boolean;');
-    expect(workflowContent).toContain(
-      'linkedWorkItems,\n    therapistModeEnabled,',
-    );
+    expect(workflowContent).not.toContain('therapistModeEnabled');
   });
 
   describe('getMarkdownChecklist unit tests', () => {

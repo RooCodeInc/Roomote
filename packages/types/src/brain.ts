@@ -418,7 +418,7 @@ A result set that comes back populated is not proof of coverage, and one query r
 
 When the Brain genuinely has nothing on a question, say so rather than guessing.
 
-When recalled context materially shapes the path or approach you choose, casually and concisely mention the specific insight that informed it; do not merely say that memory or history was helpful, and keep it incidental rather than making a disclosure out of it.
+When specific information returned by a Brain memory retrieval materially informs your answer or work, naturally tell the user which remembered fact you retrieved and how you used it. Describe the memory in human terms, keep the disclosure incidental, and do not turn the response into tool narration. Do not mention retrieval that did not inform the outcome. Never expose internal memory IDs, page slugs, storage paths, raw metadata, source fields, or other internal provenance.
 
 Brain provenance is internal-only. Use it to judge and ground results, but never expose Brain's \`source\` field or other internal provenance metadata in a user-facing reply. This includes Brain page or entity IDs, slugs, namespace or storage paths, raw record keys, and similar implementation details. Do not add a \`Source:\` line or cite raw Brain metadata. Summarize the useful context naturally. If human-verifiable attribution is necessary, inspect and cite the underlying user-facing integration directly rather than presenting Brain's internal source.`;
 

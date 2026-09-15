@@ -73,7 +73,6 @@ export async function linearAgentSession({
   codeReviewReviewOnCommit,
   codeReviewReviewDraftPrs,
   prAction,
-  therapistModeEnabled,
 }: {
   taskSpec: LinearAgentSessionTask;
   repoFullNames?: string[];
@@ -84,7 +83,6 @@ export async function linearAgentSession({
   codeReviewReviewOnCommit?: boolean;
   codeReviewReviewDraftPrs?: boolean;
   prAction?: PrAction;
-  therapistModeEnabled?: boolean;
 }): Promise<{
   prompt: string;
   harnessInstructions?: string;
@@ -135,6 +133,5 @@ export async function linearAgentSession({
       taskSpec.payload,
     ),
     prAction,
-    therapistModeEnabled,
   });
 }

@@ -308,7 +308,6 @@ export async function slackAppMention({
   codeReviewReviewOnCommit,
   codeReviewReviewDraftPrs,
   prAction,
-  therapistModeEnabled,
 }: {
   taskSpec: SlackAppMentionTask;
   repoFullNames?: string[];
@@ -320,7 +319,6 @@ export async function slackAppMention({
   codeReviewReviewOnCommit?: boolean;
   codeReviewReviewDraftPrs?: boolean;
   prAction?: PrAction;
-  therapistModeEnabled?: boolean;
 }): Promise<{
   prompt: string;
   harnessInstructions?: string;
@@ -400,7 +398,6 @@ export async function slackAppMention({
       taskSpec.payload,
     ),
     prAction,
-    therapistModeEnabled,
   });
 
   const slackInstructions = buildSlackMessageInstructions({

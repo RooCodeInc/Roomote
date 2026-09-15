@@ -47,6 +47,9 @@ describe('memory MCP task guidance', () => {
       'first normal context or work tool call and remain visible in the session',
     );
     expect(instructions.endsWith(BRAIN_MCP_INSTRUCTIONS)).toBe(true);
+    expect(instructions).toContain(
+      'which remembered fact you retrieved and how you used it',
+    );
   });
 
   it('keeps provider-neutral instructions for non-Brain memory servers', () => {
@@ -109,6 +112,9 @@ describe('memory MCP conversation guidance', () => {
     });
 
     expect(instructions.endsWith(BRAIN_MCP_FAST_INSTRUCTIONS)).toBe(true);
+    expect(instructions).toContain(
+      'which remembered fact you retrieved and how you used it',
+    );
     expect(instructions).not.toContain('save_task_memory');
   });
 

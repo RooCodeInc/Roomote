@@ -70,7 +70,6 @@ describe('GitLab MR review workflows', () => {
       gitHubToken: 'unused',
       taskRunUrl: 'https://roomote.example/task/1',
       additionalInstructions: 'Focus on authorization boundaries.',
-      therapistModeEnabled: true,
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -82,7 +81,6 @@ describe('GitLab MR review workflows', () => {
     expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
     expect(result.prompt).toContain('Additional team instructions:');
     expect(result.prompt).toContain('Focus on authorization boundaries.');
-    expect(result.harnessInstructions).toContain('<therapist_mode>');
   });
 
   it('builds GitLab MR sync review prompts without fetching GitHub PR details', async () => {
@@ -94,7 +92,6 @@ describe('GitLab MR review workflows', () => {
       gitHubToken: 'unused',
       taskRunUrl: 'https://roomote.example/task/1',
       additionalInstructions: 'Check backward compatibility.',
-      therapistModeEnabled: true,
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -104,7 +101,6 @@ describe('GitLab MR review workflows', () => {
     expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
     expect(result.prompt).toContain('Additional team instructions:');
     expect(result.prompt).toContain('Check backward compatibility.');
-    expect(result.harnessInstructions).toContain('<therapist_mode>');
   });
 
   it('builds initial Gitea PR review prompts without fetching GitHub PR details', async () => {
@@ -116,7 +112,6 @@ describe('GitLab MR review workflows', () => {
       gitHubToken: 'unused',
       taskRunUrl: 'https://roomote.example/task/1',
       additionalInstructions: 'Focus on authorization boundaries.',
-      therapistModeEnabled: true,
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -125,7 +120,6 @@ describe('GitLab MR review workflows', () => {
     expect(result.prompt).toContain('gitea');
     expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
     expect(result.prompt).toContain('Focus on authorization boundaries.');
-    expect(result.harnessInstructions).toContain('<therapist_mode>');
   });
 
   it('builds Gitea PR sync review prompts without fetching GitHub PR details', async () => {
@@ -137,7 +131,6 @@ describe('GitLab MR review workflows', () => {
       gitHubToken: 'unused',
       taskRunUrl: 'https://roomote.example/task/1',
       additionalInstructions: 'Check backward compatibility.',
-      therapistModeEnabled: true,
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -146,7 +139,6 @@ describe('GitLab MR review workflows', () => {
     );
     expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
     expect(result.prompt).toContain('Check backward compatibility.');
-    expect(result.harnessInstructions).toContain('<therapist_mode>');
   });
 
   it('builds initial Azure DevOps PR review prompts without fetching GitHub PR details', async () => {
@@ -158,7 +150,6 @@ describe('GitLab MR review workflows', () => {
       gitHubToken: 'unused',
       taskRunUrl: 'https://roomote.example/task/1',
       additionalInstructions: 'Focus on authorization boundaries.',
-      therapistModeEnabled: true,
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -169,7 +160,6 @@ describe('GitLab MR review workflows', () => {
     expect(result.prompt).toContain('ado');
     expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
     expect(result.prompt).toContain('Focus on authorization boundaries.');
-    expect(result.harnessInstructions).toContain('<therapist_mode>');
   });
 
   it('builds Azure DevOps PR sync review prompts without fetching GitHub PR details', async () => {
@@ -181,7 +171,6 @@ describe('GitLab MR review workflows', () => {
       gitHubToken: 'unused',
       taskRunUrl: 'https://roomote.example/task/1',
       additionalInstructions: 'Check backward compatibility.',
-      therapistModeEnabled: true,
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -190,10 +179,9 @@ describe('GitLab MR review workflows', () => {
     );
     expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
     expect(result.prompt).toContain('Check backward compatibility.');
-    expect(result.harnessInstructions).toContain('<therapist_mode>');
   });
 
-  it('forwards therapist mode through initial Bitbucket PR reviews', async () => {
+  it('builds initial Bitbucket PR review prompts without fetching GitHub PR details', async () => {
     const result = await githubPrReview({
       taskSpec: {
         type: TaskPayloadKind.GithubPrReview,
@@ -201,14 +189,18 @@ describe('GitLab MR review workflows', () => {
       } as GithubPullRequestReviewOpenTask,
       gitHubToken: 'unused',
       taskRunUrl: 'https://roomote.example/task/1',
-      therapistModeEnabled: true,
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
-    expect(result.harnessInstructions).toContain('<therapist_mode>');
+    expect(result.harnessInstructions).toContain(
+      'Bitbucket pull request surface',
+    );
+    expect(result.prompt).toContain('source_control_provider');
+    expect(result.prompt).toContain('bitbucket');
+    expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
   });
 
-  it('forwards therapist mode through Bitbucket PR sync reviews', async () => {
+  it('builds Bitbucket PR sync review prompts without fetching GitHub PR details', async () => {
     const result = await githubPrReviewSync({
       taskSpec: {
         type: TaskPayloadKind.GithubPrReviewSync,
@@ -216,10 +208,12 @@ describe('GitLab MR review workflows', () => {
       } as GithubPullRequestReviewSyncTask,
       gitHubToken: 'unused',
       taskRunUrl: 'https://roomote.example/task/1',
-      therapistModeEnabled: true,
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
-    expect(result.harnessInstructions).toContain('<therapist_mode>');
+    expect(result.prompt).toContain(
+      'Review the new Bitbucket pull request changes',
+    );
+    expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
   });
 });
