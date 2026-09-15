@@ -18,6 +18,10 @@ export ENCRYPTION_KEY=12345678901234567890123456789012
 export ARTIFACT_SIGNING_KEY=12345678901234567890123456789012
 export DASHBOARD_PASSWORD=test-dashboard-password
 export ROOMOTE_APP_TMPFS_SIZE=768m
+export R_MODEL=openrouter/openai/gpt-5.4
+export R_MODEL_ENV_KEYS=CUSTOM_PROVIDER_API_KEY
+export CUSTOM_PROVIDER_API_KEY=test-custom-provider-key
+export AWS_REGION=us-east-1
 
 docker compose --profile local-inference -f "$compose_file" config --format json >"$rendered_config"
 
@@ -79,6 +83,10 @@ jq -e '
     "S3_SECRET_ACCESS_KEY", "R_GITHUB_APP_PRIVATE_KEY", "R_SLACK_CLIENT_SECRET",
     "OPENAI_API_KEY"
   ][] | . as $key | $root.services.controller.environment[$key] == null] | all) and
+  (.services.controller.environment.R_MODEL == "openrouter/openai/gpt-5.4") and
+  (.services.controller.environment.R_MODEL_ENV_KEYS == "CUSTOM_PROVIDER_API_KEY") and
+  (.services.controller.environment.CUSTOM_PROVIDER_API_KEY == "test-custom-provider-key") and
+  (.services.controller.environment.AWS_REGION == "us-east-1") and
   ([[
     "JOB_AUTH_PRIVATE_KEY", "PREVIEW_AUTH_PRIVATE_KEY", "ENCRYPTION_KEY",
     "S3_SECRET_ACCESS_KEY", "OPENAI_API_KEY"

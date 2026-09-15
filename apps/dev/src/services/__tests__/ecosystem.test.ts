@@ -1,10 +1,47 @@
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+
+import {
+  DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
+  DEFAULT_MODEL_PROVIDER_ENV_KEYS,
+  isSettingsOnlyProviderEnvVar,
+} from '@roomote/types';
 
 const require = createRequire(import.meta.url);
 const ecosystemConfigPath = fileURLToPath(
   new URL('../../../../../ecosystem.config.js', import.meta.url),
 );
+const productionComposePath = fileURLToPath(
+  new URL(
+    '../../../../../deploy/compose/docker-compose.prod.yml',
+    import.meta.url,
+  ),
+);
+const runtimeProviderEnvKeys = DEFAULT_MODEL_PROVIDER_ENV_KEYS.filter(
+  (key) => !isSettingsOnlyProviderEnvVar(key),
+);
+const workerLauncherEnvKeys = [
+  'R_MODEL',
+  'R_SMALL_MODEL',
+  'R_VISION_MODEL',
+  'R_CODE_REVIEW_MODEL',
+  'R_EXPLORE_MODEL',
+  'R_PLANNING_MODEL',
+  'R_MODEL_REASONING_EFFORT',
+  'R_SMALL_MODEL_REASONING_EFFORT',
+  'R_VISION_MODEL_REASONING_EFFORT',
+  'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
+  'R_EXPLORE_MODEL_REASONING_EFFORT',
+  'R_PLANNING_MODEL_REASONING_EFFORT',
+  'R_MODEL_ENV_KEYS',
+  'CUSTOM_PROVIDER_API_KEY',
+  'AZURE_RESOURCE_NAME',
+  'AZURE_COGNITIVE_SERVICES_RESOURCE_NAME',
+  'AWS_REGION',
+  'ZAI_REGION',
+  'ZAI_CODING_PLAN_REGION',
+] as const;
 
 interface EcosystemApp {
   name: string;
@@ -120,6 +157,58 @@ describe('ecosystem.config.js', () => {
       OPENROUTER_API_KEY: 'test-openrouter-key',
       CUSTOM_PROVIDER_API_KEY: 'custom-provider-key',
     });
+  });
+
+  it('forwards every canonical runtime provider variable in deployment templates', () => {
+    process.env = {
+      ...originalEnv,
+      ...Object.fromEntries(runtimeProviderEnvKeys.map((key) => [key, key])),
+    };
+
+    const apps = loadEcosystemApps();
+    for (const serviceName of ['api', 'web', 'bullmq', 'controller']) {
+      const app = apps.find((entry) => entry.name === `roomote-${serviceName}`);
+
+      for (const key of runtimeProviderEnvKeys) {
+        expect(app?.env?.[key], `${serviceName} is missing ${key}`).toBe(key);
+      }
+    }
+
+    const compose = readFileSync(productionComposePath, 'utf8');
+    const inferenceEnv = compose.slice(
+      compose.indexOf('x-roomote-inference-env:'),
+      compose.indexOf('x-roomote-worker-launcher-env:'),
+    );
+    for (const key of runtimeProviderEnvKeys) {
+      expect(inferenceEnv, `production Compose is missing ${key}`).toContain(
+        `  ${key}: \${${key}:-}`,
+      );
+    }
+  });
+
+  it('gives the production controller only worker launcher model configuration', () => {
+    const compose = readFileSync(productionComposePath, 'utf8');
+    const workerLauncherEnv = compose.slice(
+      compose.indexOf('x-roomote-worker-launcher-env:'),
+      compose.indexOf('x-roomote-web-env:'),
+    );
+    const controllerEnv = compose.slice(
+      compose.indexOf('x-roomote-controller-env:'),
+      compose.indexOf('x-roomote-bullmq-env:'),
+    );
+
+    for (const key of workerLauncherEnvKeys) {
+      expect(workerLauncherEnv, `worker launcher is missing ${key}`).toContain(
+        `  ${key}: \${${key}:-}`,
+      );
+    }
+    for (const key of DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES) {
+      expect(
+        workerLauncherEnv,
+        `worker launcher must not receive provider credential ${key}`,
+      ).not.toContain(`  ${key}:`);
+    }
+    expect(controllerEnv).toContain('  <<: *roomote-worker-launcher-env');
   });
 
   it('passes the preview inference launcher key only to the controller', () => {
