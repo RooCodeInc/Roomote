@@ -1634,6 +1634,26 @@ describe('canonical PR review notification ownership', () => {
     });
     expect(fenced?.status).toBe('auto_dispatch_pending');
     expect(fenced?.actionClaimedAt).not.toBeNull();
+
+    // The completion transition only guards action_claimed_at when moving
+    // into prompt_posting or auto_dispatch_pending, so the in-flight dispatch
+    // still records its run and finishes the delivery.
+    const run = await runFactory.create({ taskId: task.id });
+    await expect(
+      transitionCanonicalPrReviewDelivery({
+        deliveryId: claim.deliveryId,
+        leaseToken: claim.leaseToken,
+        expected: 'auto_dispatch_pending',
+        status: 'completed',
+        values: { dispatchedRunId: run.id },
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.id, claim.deliveryId),
+        columns: { status: true, dispatchedRunId: true },
+      }),
+    ).resolves.toEqual({ status: 'completed', dispatchedRunId: run.id });
   });
 
   it('refuses the automatic dispatch claim once retirement fenced the row', async () => {
