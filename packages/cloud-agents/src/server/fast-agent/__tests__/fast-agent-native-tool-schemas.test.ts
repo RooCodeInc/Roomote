@@ -351,8 +351,8 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       'headerName',
       'headerPrefix',
       'label',
+      'lifetimeHours',
       'origin',
-      'ttlHours',
     ]);
     expect(schema).toMatchObject({
       type: 'object',
@@ -361,7 +361,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
         origin: { type: 'string', minLength: 1, maxLength: 2048 },
         headerName: { type: 'string', minLength: 1, maxLength: 64 },
         headerPrefix: { enum: ['Bearer ', 'Basic ', 'Token '] },
-        ttlHours: { type: 'integer', minimum: 1, maximum: 720, default: 24 },
+        lifetimeHours: { type: 'integer', minimum: 1, maximum: 8760 },
         allowedMethods: {
           type: 'array',
           items: { enum: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] },
@@ -386,7 +386,6 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     };
     expect(sessionSecretPrepareSchema.parse(args)).toEqual({
       ...args,
-      ttlHours: 24,
       allowedMethods: ['GET', 'HEAD'],
     });
     expect(
@@ -400,7 +399,6 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       origin: 'https://api.example.com',
       headerName: 'x-api-key',
       headerPrefix: '',
-      ttlHours: 24,
       allowedMethods: ['GET', 'HEAD'],
     });
     expect(
@@ -413,9 +411,9 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       { secret: 'never-a-key' },
       { userId: 'caller' },
       { sessionId: 'caller' },
-      { ttlHours: 0 },
-      { ttlHours: 721 },
-      { ttlHours: 1.5 },
+      { lifetimeHours: 0 },
+      { lifetimeHours: 8761 },
+      { lifetimeHours: 1.5 },
       { headerName: 'cookie' },
       { headerPrefix: 'Custom ' },
       { allowedMethods: [] },
@@ -590,7 +588,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
                 origin: { type: 'string' },
                 headerName: { enum: ['authorization', 'x-api-key', 'api-key'] },
                 headerPrefix: { enum: ['Bearer ', 'Basic ', 'Token '] },
-                ttlHours: { type: 'integer' },
+                lifetimeHours: { type: 'integer' },
                 allowedMethods: { type: 'array' },
               },
             ],

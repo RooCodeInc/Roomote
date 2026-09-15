@@ -47,8 +47,8 @@ export function SessionSecrets({ sessionId }: { sessionId: string }) {
         <DialogHeader>
           <DialogTitle>Approve API key</DialogTitle>
           <DialogDescription>
-            Enter it here, never in chat. It will only be available to this
-            Session.
+            Enter it here, never in chat. It becomes an integration for every
+            Session you own; manage it under Settings → Personal.
           </DialogDescription>
         </DialogHeader>
         {open ? (
@@ -193,8 +193,8 @@ function SessionSecretsForm({ sessionId }: { sessionId: string }) {
                   setSelectedRef(remaining[0]?.pendingRef ?? '');
                   setNotice(
                     data.resumed
-                      ? 'API key saved. The Session has been notified without sharing your key.'
-                      : 'API key saved. The Session could not be notified. Ask the agent to check list_session_secrets and continue.',
+                      ? 'Integration saved. The Session has been notified without sharing your key.'
+                      : 'Integration saved. The Session could not be notified. Ask the agent to check list_session_secrets and continue.',
                   );
                 } catch {
                   clearForm();
@@ -222,6 +222,11 @@ function SessionSecretsForm({ sessionId }: { sessionId: string }) {
                     ? ' (allows writes)'
                     : ''}
                 </p>
+                <p className="text-sm text-muted-foreground">
+                  {selected.lifetimeHours
+                    ? `Expires ${selected.lifetimeHours} hours after you save it.`
+                    : 'Kept until you revoke it under Settings → Personal.'}
+                </p>
                 <div className="space-y-1">
                   <Label htmlFor="session-secret-value">API key</Label>
                   <Input
@@ -242,7 +247,7 @@ function SessionSecretsForm({ sessionId }: { sessionId: string }) {
                   disabled={busy}
                   aria-describedby="session-secret-destination"
                 >
-                  Allow for this Session
+                  Save integration
                 </Button>
               </fieldset>
             </form>

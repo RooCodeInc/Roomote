@@ -1,11 +1,13 @@
-import { and, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, or, sql } from 'drizzle-orm';
 
-import type {
-  SessionSecretCreate,
-  SessionSecretPrepare,
-  SessionSecretPendingMetadata,
-  SessionSecretMetadata,
-  SessionEgressMethod,
+import {
+  SESSION_SECRET_APPROVAL_WINDOW_HOURS,
+  type IntegrationCreate,
+  type SessionSecretCreate,
+  type SessionSecretPrepare,
+  type SessionSecretPendingMetadata,
+  type SessionSecretMetadata,
+  type SessionEgressMethod,
 } from '@roomote/types';
 
 import { db } from '../db';
@@ -131,7 +133,7 @@ function metadata(
         headerName: SessionSecretPrepare['headerName'];
         headerPrefix: SessionSecretPrepare['headerPrefix'];
         allowedMethods: SessionEgressMethod[];
-        expiresAt: Date;
+        expiresAt: Date | null;
         revokedAt: Date | null;
         createdAt: Date;
       },
@@ -143,7 +145,7 @@ function metadata(
     headerName: row.headerName,
     headerPrefix: row.headerPrefix,
     allowedMethods: [...row.allowedMethods],
-    expiresAt: row.expiresAt.toISOString(),
+    expiresAt: row.expiresAt?.toISOString() ?? null,
     revokedAt: row.revokedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
   };
@@ -184,9 +186,45 @@ function pendingMetadata(
     headerName: row.headerName,
     headerPrefix: row.headerPrefix,
     allowedMethods: [...row.allowedMethods],
+    lifetimeHours: row.lifetimeHours,
     expiresAt: row.expiresAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+/** Grant expiry from an optional lifetime; null keeps the integration until revoked. */
+function lifetimeExpiry(lifetimeHours: number | null | undefined) {
+  return lifetimeHours
+    ? sql`clock_timestamp() + ${lifetimeHours} * interval '1 hour'`
+    : null;
+}
+
+/** A live grant: not revoked and either permanent or not yet expired. */
+function liveGrantWhere() {
+  return and(
+    isNull(sessionSecrets.revokedAt),
+    or(
+      isNull(sessionSecrets.expiresAt),
+      gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
+    ),
+  );
+}
+
+async function retireGrantSubstitutes(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  secretId: string,
+) {
+  // Live authorization already denies a revoked grant; retiring substitutes
+  // and recording the event only accelerates in-flight cancellation.
+  await tx
+    .update(sessionEgressSubstitutes)
+    .set({
+      revokedAt: sql`coalesce(${sessionEgressSubstitutes.revokedAt}, now())`,
+    })
+    .where(eq(sessionEgressSubstitutes.secretId, secretId));
+  await tx
+    .insert(sessionEgressRevocations)
+    .values({ kind: 'grant', secretRef: secretId });
 }
 
 export async function insertSessionSecretApproval(
@@ -211,7 +249,8 @@ export async function insertSessionSecretApproval(
         headerName: input.headerName,
         headerPrefix: input.headerPrefix,
         allowedMethods: input.allowedMethods,
-        expiresAt: sql`clock_timestamp() + ${input.ttlHours} * interval '1 hour'`,
+        lifetimeHours: input.lifetimeHours ?? null,
+        expiresAt: sql`clock_timestamp() + ${SESSION_SECRET_APPROVAL_WINDOW_HOURS} * interval '1 hour'`,
       })
       .returning();
     if (!row) throw new SessionSecretUnavailableError('write_failed');
@@ -284,7 +323,7 @@ export async function finalizeSessionSecret(
         allowedMethods: pending.allowedMethods,
         // Always treat human input as plaintext, even if it happens to be valid ciphertext.
         value: encrypt(input.secret),
-        expiresAt: pending.expiresAt,
+        expiresAt: lifetimeExpiry(pending.lifetimeHours),
       })
       .returning(metadataColumns);
     if (!row) throw new SessionSecretUnavailableError('write_failed');
@@ -292,6 +331,7 @@ export async function finalizeSessionSecret(
   });
 }
 
+/** Every integration of the Session's owner: approved in any Session or added from Settings. */
 export async function listOwnedSessionSecrets(context: SessionSecretContext) {
   const [owner] = await db
     .select({ id: users.id })
@@ -299,15 +339,74 @@ export async function listOwnedSessionSecrets(context: SessionSecretContext) {
     .innerJoin(users, eq(users.id, sessions.ownerUserId))
     .where(ownerWhere(context, true));
   if (!owner) throw new SessionSecretUnavailableError('owner_not_found');
+  return listUserIntegrations(owner.id);
+}
+
+export async function listUserIntegrations(userId: string) {
   const rows = await db
     .select(metadataColumns)
     .from(sessionSecrets)
-    .innerJoin(sessions, eq(sessions.id, sessionSecrets.sessionId))
     .innerJoin(users, eq(users.id, sessionSecrets.ownerUserId))
-    .where(
-      and(ownerWhere(context, true), eq(sessionSecrets.ownerUserId, owner.id)),
-    );
+    .where(and(eq(sessionSecrets.ownerUserId, userId), isNull(users.deletedAt)))
+    .orderBy(asc(sessionSecrets.createdAt));
   return rows.map(metadata);
+}
+
+/** Settings path: policy and key arrive together from the owner; no approval is involved. */
+export async function insertUserIntegration(
+  userId: string,
+  input: IntegrationCreate & { origin: string },
+) {
+  return db.transaction(async (tx) => {
+    const [owner] = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+      .for('share');
+    if (!owner) throw new SessionSecretUnavailableError('owner_not_found');
+    const [row] = await tx
+      .insert(sessionSecrets)
+      .values({
+        sessionId: null,
+        ownerUserId: owner.id,
+        label: input.label,
+        origin: input.origin,
+        headerName: input.headerName,
+        headerPrefix: input.headerPrefix,
+        allowedMethods: input.allowedMethods,
+        value: encrypt(input.secret),
+        expiresAt: lifetimeExpiry(input.lifetimeHours),
+      })
+      .returning(metadataColumns);
+    if (!row) throw new SessionSecretUnavailableError('write_failed');
+    return metadata(row);
+  });
+}
+
+export async function revokeUserIntegration(userId: string, secretRef: string) {
+  await db.transaction(async (tx) => {
+    const [owner] = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+      .for('share');
+    if (!owner) throw new SessionSecretUnavailableError('owner_not_found');
+    const [row] = await tx
+      .update(sessionSecrets)
+      .set({
+        revokedAt: sql`coalesce(${sessionSecrets.revokedAt}, now())`,
+        value: null,
+      })
+      .where(
+        and(
+          eq(sessionSecrets.id, secretRef),
+          eq(sessionSecrets.ownerUserId, owner.id),
+        ),
+      )
+      .returning({ id: sessionSecrets.id });
+    if (!row) throw new SessionSecretUnavailableError('grant_not_found');
+    await retireGrantSubstitutes(tx, row.id);
+  });
 }
 
 export async function revokeOwnedSessionSecret(
@@ -331,43 +430,34 @@ export async function revokeOwnedSessionSecret(
       .where(
         and(
           eq(sessionSecrets.id, secretRef),
-          eq(sessionSecrets.sessionId, context.sessionId),
           eq(sessionSecrets.ownerUserId, owner.id),
         ),
       )
       .returning({ id: sessionSecrets.id });
     if (!row) throw new SessionSecretUnavailableError('grant_not_found');
-    // Live authorization already denies a revoked grant; retiring substitutes
-    // and publishing the event only accelerates gateway-side stream cancel.
-    await tx
-      .update(sessionEgressSubstitutes)
-      .set({
-        revokedAt: sql`coalesce(${sessionEgressSubstitutes.revokedAt}, now())`,
-      })
-      .where(eq(sessionEgressSubstitutes.secretId, row.id));
-    await tx
-      .insert(sessionEgressRevocations)
-      .values({ kind: 'grant', secretRef: row.id });
+    await retireGrantSubstitutes(tx, row.id);
   });
 }
 
-/** Ciphertext is decrypted only after the live actor/owner/Session/grant join. */
+/** Ciphertext is decrypted only after the live actor/owner/Session and grant checks. */
 export async function resolveOwnedSessionSecret(
   context: SessionSecretContext,
   secretRef: string,
 ) {
+  const [owner] = await db
+    .select({ id: users.id })
+    .from(sessions)
+    .innerJoin(users, eq(users.id, sessions.ownerUserId))
+    .where(ownerWhere(context));
+  if (!owner) throw new SessionSecretUnavailableError('grant_not_found');
   const [row] = await db
     .select({ secret: sessionSecrets })
     .from(sessionSecrets)
-    .innerJoin(sessions, eq(sessions.id, sessionSecrets.sessionId))
-    .innerJoin(users, eq(users.id, sessionSecrets.ownerUserId))
     .where(
       and(
-        ownerWhere(context),
         eq(sessionSecrets.id, secretRef),
-        eq(sessionSecrets.ownerUserId, context.userId!),
-        isNull(sessionSecrets.revokedAt),
-        gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
+        eq(sessionSecrets.ownerUserId, owner.id),
+        liveGrantWhere(),
       ),
     );
   if (!row?.secret.value)

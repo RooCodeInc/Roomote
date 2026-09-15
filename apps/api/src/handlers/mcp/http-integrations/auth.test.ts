@@ -936,10 +936,11 @@ it('denies a signed Fast token claiming the canonical Session UUID instead of it
 });
 
 it.each(['broker', 'run'] as const)(
-  'denies cross-selection between unrelated same-owner Sessions through signed %s MCP calls',
+  'shares integrations between same-owner Sessions and denies other owners through signed %s MCP calls',
   async (kind) => {
     const a = await sessionGrant();
     const b = await sessionGrant(a.owner);
+    const stranger = await sessionGrant();
     for (const [current, other] of [
       [a, b],
       [b, a],
@@ -949,8 +950,10 @@ it.each(['broker', 'run'] as const)(
       const ids = JSON.parse(list.content[0].text).integrations.map(
         (entry: { id: string }) => entry.id,
       );
+      // An integration belongs to its owner, whichever Session approved it.
       expect(ids).toContain(`session:${current.grant.secretRef}`);
-      expect(ids).not.toContain(`session:${other.grant.secretRef}`);
+      expect(ids).toContain(`session:${other.grant.secretRef}`);
+      expect(ids).not.toContain(`session:${stranger.grant.secretRef}`);
       expect(
         (
           await tool(token, 'integration_request', {
@@ -959,17 +962,26 @@ it.each(['broker', 'run'] as const)(
             path: '/items',
           })
         ).isError,
+      ).not.toBe(true);
+      expect(
+        (
+          await tool(token, 'integration_request', {
+            integrationId: `session:${stranger.grant.secretRef}`,
+            method: 'GET',
+            path: '/items',
+          })
+        ).isError,
       ).toBe(true);
     }
-    expect(fetch).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(2);
   },
 );
 
 it.each(['before-call', 'in-flight'] as const)(
-  're-resolves a signed run reattached from Session A to same-owner Session B (%s)',
+  "re-resolves a signed run reattached from its owner's Session to another owner's Session (%s)",
   async (stage) => {
     const a = await sessionGrant();
-    const b = await sessionGrant(a.owner);
+    const b = await sessionGrant();
     const args = {
       integrationId: `session:${a.grant.secretRef}`,
       method: 'GET',
@@ -1012,29 +1024,24 @@ it.each(['before-call', 'in-flight'] as const)(
       'original-A-result-must-not-escape',
     );
     expect(fetch).toHaveBeenCalledTimes(stage === 'in-flight' ? 1 : 0);
-    expect(await listIds()).toEqual([
-      'example',
+    // The run's actor no longer owns its Session: nothing is listed or usable,
+    // neither its own owner's integrations nor the new Session owner's.
+    expect(await listIds()).toEqual(['example']);
+    expect((await tool(a.runToken, 'list_session_secrets')).isError).toBe(true);
+    for (const integrationId of [
+      args.integrationId,
       `session:${b.grant.secretRef}`,
-    ]);
-    expect((await tool(a.runToken, 'integration_request', args)).isError).toBe(
-      true,
-    );
+    ]) {
+      expect(
+        (
+          await tool(a.runToken, 'integration_request', {
+            ...args,
+            integrationId,
+          })
+        ).isError,
+      ).toBe(true);
+    }
     expect(fetch).toHaveBeenCalledTimes(stage === 'in-flight' ? 1 : 0);
-    const metadata = await tool(a.runToken, 'list_session_secrets');
-    expect(
-      JSON.parse(metadata.content[0].text).secrets.map(
-        (entry: { secretRef: string }) => entry.secretRef,
-      ),
-    ).toEqual([b.grant.secretRef]);
-    expect(
-      (
-        await tool(a.runToken, 'integration_request', {
-          ...args,
-          integrationId: `session:${b.grant.secretRef}`,
-        })
-      ).isError,
-    ).not.toBe(true);
-    expect(fetch).toHaveBeenCalledTimes(stage === 'in-flight' ? 2 : 1);
   },
 );
 

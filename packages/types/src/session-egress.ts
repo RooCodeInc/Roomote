@@ -234,7 +234,8 @@ export interface SessionEgressGrantPolicy {
   /** A scheme is only meaningful on `authorization`; other headers carry the bare key. */
   headerPrefix: '' | 'Bearer ' | 'Basic ' | 'Token ';
   allowedMethods: SessionEgressMethod[];
-  expiresAt: string;
+  /** Null: the grant is kept until revoked. */
+  expiresAt: string | null;
 }
 
 /** Returned exactly once to the trusted controller; the API stores only a hash. */

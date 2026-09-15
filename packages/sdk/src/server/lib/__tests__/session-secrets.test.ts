@@ -12,10 +12,13 @@ import {
   type SessionSecretContext,
 } from '@roomote/db/server';
 import {
+  createIntegration,
   createSessionSecret,
   prepareSessionSecret,
+  listIntegrations,
   listSessionSecretApprovals,
   listSessionSecrets,
+  revokeIntegration,
   revokeSessionSecret,
 } from '../session-secrets';
 
@@ -58,7 +61,7 @@ afterEach(async () => {
   await db.delete(users).where(inArray(users.id, userIds));
 });
 
-it('persists immutable nonsecret approvals, defaults TTL and finalizes exactly once under a race', async () => {
+it('persists immutable nonsecret approvals, waits 24 hours for the key, and finalizes exactly once under a race', async () => {
   const pending = await prepareSessionSecret(context, policy);
   expect(
     Date.parse(pending.expiresAt) - Date.parse(pending.createdAt),
@@ -71,6 +74,7 @@ it('persists immutable nonsecret approvals, defaults TTL and finalizes exactly o
     'headerName',
     'headerPrefix',
     'label',
+    'lifetimeHours',
     'origin',
     'pendingRef',
   ]);
@@ -105,7 +109,7 @@ it('persists immutable nonsecret approvals, defaults TTL and finalizes exactly o
   expect(approvals.secrets).toHaveLength(2);
   expect(
     approvals.secrets.find((row) => row.secretRef !== secretRef),
-  ).toMatchObject({ ...policy, expiresAt: pending.expiresAt });
+  ).toMatchObject({ ...policy, expiresAt: null });
   expect(JSON.stringify(approvals)).not.toContain(secret);
 });
 
@@ -157,13 +161,13 @@ it.each([
   ).rejects.toThrow('Secret request unavailable');
 });
 
-it('rejects unknown fields and invalid TTLs without consuming approvals on validation failure', async () => {
+it('rejects unknown fields and invalid lifetimes without consuming approvals on validation failure', async () => {
   for (const extra of [
     { secret },
     { sessionId: context.sessionId },
-    { ttlHours: 0 },
-    { ttlHours: 721 },
-    { ttlHours: 1.5 },
+    { lifetimeHours: 0 },
+    { lifetimeHours: 8761 },
+    { lifetimeHours: 1.5 },
     { expiresAt: new Date().toISOString() },
   ]) {
     await expect(
@@ -173,7 +177,7 @@ it('rejects unknown fields and invalid TTLs without consuming approvals on valid
   const pending = await prepareSessionSecret(context, {
     ...policy,
     label: secret,
-    ttlHours: 720,
+    lifetimeHours: 720,
   });
   await expect(
     createSessionSecret(context, { pendingRef: pending.pendingRef, secret }),
@@ -276,11 +280,23 @@ it.each([
   },
 );
 
-it('binds references to the Session even for the same owner and rejects unknown references', async () => {
+it('shares an integration across every Session of its owner and rejects other owners and unknown references', async () => {
   const other = { ...context, sessionId: await session(context.userId!) };
-  expect(await listSessionSecrets(other)).toEqual([]);
+  expect(
+    (await listSessionSecrets(other)).map((item) => item.secretRef),
+  ).toEqual([secretRef]);
+  expect((await resolveOwnedSessionSecret(other, secretRef)).value).toBe(
+    secret,
+  );
+  const stranger = await userFactory.create();
+  userIds.push(stranger.id);
+  const foreign = {
+    userId: stranger.id,
+    sessionId: await session(stranger.id),
+  };
+  expect(await listSessionSecrets(foreign)).toEqual([]);
   for (const [actor, ref] of [
-    [other, secretRef],
+    [foreign, secretRef],
     [context, randomUUID()],
   ] as const) {
     await expect(resolveOwnedSessionSecret(actor, ref)).rejects.toThrow(
@@ -290,6 +306,81 @@ it('binds references to the Session even for the same owner and rejects unknown 
       revokeSessionSecret(actor, { secretRef: ref }),
     ).rejects.toThrow('Secret request unavailable');
   }
+  // Revoking from any owned Session retires it everywhere.
+  await revokeSessionSecret(other, { secretRef });
+  await expect(resolveOwnedSessionSecret(context, secretRef)).rejects.toThrow(
+    'Secret unavailable',
+  );
+});
+
+it('keeps integrations until revoked unless a lifetime is set, and manages them from Settings', async () => {
+  expect((await listSessionSecrets(context))[0]!.expiresAt).toBeNull();
+  const timed = await prepareSessionSecret(context, {
+    ...policy,
+    label: 'Temporary',
+    lifetimeHours: 2,
+  });
+  expect(timed.lifetimeHours).toBe(2);
+  const saved = await createSessionSecret(context, {
+    pendingRef: timed.pendingRef,
+    secret,
+  });
+  expect(
+    Date.parse(saved.expiresAt!) - Date.parse(saved.createdAt),
+  ).toBeGreaterThanOrEqual(2 * 3600_000 - 1000);
+
+  const added = await createIntegration(context.userId!, {
+    label: 'From settings',
+    origin: 'https://settings.example.com',
+    headerName: 'x-api-key',
+    headerPrefix: '',
+    allowedMethods: ['GET', 'POST'],
+    secret,
+  });
+  expect(added).toMatchObject({
+    origin: 'https://settings.example.com',
+    allowedMethods: ['GET', 'POST'],
+    expiresAt: null,
+  });
+  await expect(
+    createIntegration(context.userId!, {
+      label: 'Bad',
+      origin: 'http://insecure.example.com',
+      headerName: 'authorization',
+      headerPrefix: 'Bearer ',
+      secret,
+    }),
+  ).rejects.toThrow('Secret request unavailable');
+  await expect(
+    createIntegration(context.userId!, {
+      label: 'Bad',
+      origin: 'https://api.example.com',
+      headerName: 'x-api-key',
+      headerPrefix: 'Bearer ',
+      secret,
+    }),
+  ).rejects.toThrow('Secret request unavailable');
+
+  // The Session sees what Settings added, and Settings sees what the Session approved.
+  expect(
+    (await listSessionSecrets(context)).map((item) => item.label).sort(),
+  ).toEqual(['From settings', 'Temporary', 'Test credential']);
+  expect(
+    (await listIntegrations(context.userId!)).map((item) => item.secretRef),
+  ).toContain(added.secretRef);
+  expect(
+    (await resolveOwnedSessionSecret(context, added.secretRef)).value,
+  ).toBe(secret);
+  const stranger = await userFactory.create();
+  userIds.push(stranger.id);
+  expect(await listIntegrations(stranger.id)).toEqual([]);
+  await expect(
+    revokeIntegration(stranger.id, { secretRef: added.secretRef }),
+  ).rejects.toThrow('Secret request unavailable');
+  await revokeIntegration(context.userId!, { secretRef: added.secretRef });
+  await expect(
+    resolveOwnedSessionSecret(context, added.secretRef),
+  ).rejects.toThrow('Secret unavailable');
 });
 
 it('uses SQL expiry to deny decryption', async () => {
