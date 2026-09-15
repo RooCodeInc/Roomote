@@ -1,4 +1,4 @@
-import { db, deploymentSettings, eq } from '@roomote/db/server';
+import { and, db, deploymentSettings, eq, isNull } from '@roomote/db/server';
 
 import { bootstrapWebRuntimeEnv } from './bootstrap-runtime-env';
 
@@ -19,4 +19,25 @@ export async function isSetupBootstrapOpen(): Promise<boolean> {
   });
 
   return deployment?.setupCompletedAt == null;
+}
+
+/** Atomically consumes the one-time pre-verified email bootstrap claim. */
+export async function claimPreVerifiedEmailBootstrap(
+  deploymentId = DEFAULT_DEPLOYMENT_ID,
+): Promise<boolean> {
+  const now = new Date();
+  const claimed = await db
+    .insert(deploymentSettings)
+    .values({ id: deploymentId, preVerifiedEmailClaimedAt: now })
+    .onConflictDoUpdate({
+      target: deploymentSettings.id,
+      set: { preVerifiedEmailClaimedAt: now, updatedAt: now },
+      setWhere: and(
+        isNull(deploymentSettings.setupCompletedAt),
+        isNull(deploymentSettings.preVerifiedEmailClaimedAt),
+      ),
+    })
+    .returning({ id: deploymentSettings.id });
+
+  return claimed.length > 0;
 }

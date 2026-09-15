@@ -13,6 +13,7 @@ const { mockAuthEnv } = vi.hoisted(() => ({
     R_PRE_VERIFIED_EMAIL: undefined as string | undefined,
     requestInviteToken: null as string | null,
     setupToken: 'setup-token',
+    preVerifiedClaimAvailable: false,
   },
 }));
 
@@ -43,6 +44,13 @@ vi.mock('./access-policy', () => ({
   evaluateSignInAccess: async () => ({ allowed: false }),
 }));
 vi.mock('./license', () => ({ hasSeatAvailable: async () => true }));
+vi.mock('./setup-bootstrap', () => ({
+  claimPreVerifiedEmailBootstrap: () => {
+    const available = mockAuthEnv.preVerifiedClaimAvailable;
+    mockAuthEnv.preVerifiedClaimAvailable = false;
+    return available;
+  },
+}));
 vi.mock('./invite-context', () => ({
   extractInviteTokenFromRequest: () => null,
   getRequestInviteToken: () => mockAuthEnv.requestInviteToken,
@@ -105,6 +113,7 @@ describe('browser session renewal with real Better Auth, Next cookies and Postgr
     userEmail = `${crypto.randomUUID()}@example.test`;
     mockAuthEnv.R_PRE_VERIFIED_EMAIL = userEmail.toUpperCase();
     mockAuthEnv.requestInviteToken = null;
+    mockAuthEnv.preVerifiedClaimAvailable = false;
     const auth = await getAuth();
     const response = await auth.handler(
       new Request('https://auth.example.test/api/auth/sign-up/email', {
@@ -165,6 +174,7 @@ describe('browser session renewal with real Better Auth, Next cookies and Postgr
     const email = `${crypto.randomUUID()}@example.test`;
     mockAuthEnv.R_PRE_VERIFIED_EMAIL = email.toUpperCase();
     mockAuthEnv.requestInviteToken = mockAuthEnv.setupToken;
+    mockAuthEnv.preVerifiedClaimAvailable = true;
     const auth = await getAuth();
     const response = await auth.handler(
       new Request('https://auth.example.test/api/auth/sign-up/email', {
@@ -188,6 +198,30 @@ describe('browser session renewal with real Better Auth, Next cookies and Postgr
         where: eq(authUsers.id, verifiedUserId),
       });
       expect(verifiedUser?.emailVerified).toBe(true);
+
+      const replayEmail = `${crypto.randomUUID()}@example.test`;
+      mockAuthEnv.R_PRE_VERIFIED_EMAIL = replayEmail;
+      const replayResponse = await auth.handler(
+        new Request('https://auth.example.test/api/auth/sign-up/email', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            origin: 'https://auth.example.test',
+          },
+          body: JSON.stringify({
+            name: 'Replayed Claim',
+            email: replayEmail,
+            password: 'test-password-123',
+          }),
+        }),
+      );
+      expect(replayResponse.status).toBe(200);
+      const replayUserId = (await replayResponse.json()).user.id as string;
+      const replayUser = await db.query.authUsers.findFirst({
+        where: eq(authUsers.id, replayUserId),
+      });
+      expect(replayUser?.emailVerified).toBe(false);
+      await db.delete(authUsers).where(eq(authUsers.id, replayUserId));
     } finally {
       await db.delete(authUsers).where(eq(authUsers.id, verifiedUserId));
     }

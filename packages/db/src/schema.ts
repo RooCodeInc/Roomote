@@ -270,6 +270,7 @@ export const deploymentSettings = pgTable('deployment_settings', {
   latestKnownVersion: text('latest_known_version'),
   latestVersionCheckedAt: timestamp('latest_version_checked_at'),
   setupCompletedAt: timestamp('setup_completed_at'),
+  preVerifiedEmailClaimedAt: timestamp('pre_verified_email_claimed_at'),
   setupNewState: jsonb('setup_new_state').$type<SetupNewState>(),
   slackOnboardingStage: text('slack_onboarding_stage').$type<
     | 'not_started'

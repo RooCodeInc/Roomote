@@ -645,6 +645,13 @@
       "when": 1789384172188,
       "tag": "0091_cold_inertia",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1789489900619,
+      "tag": "0092_rare_thunderball",
+      "breakpoints": true
     }
   ]
 }

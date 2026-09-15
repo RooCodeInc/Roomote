@@ -38,6 +38,7 @@ import {
   runWithInviteContext,
 } from './invite-context';
 import { isSystemInviteToken } from './invites';
+import { claimPreVerifiedEmailBootstrap } from './setup-bootstrap';
 import {
   resolveAuthProviderConfig,
   type ResolvedAuthProviderConfig,
@@ -1233,7 +1234,8 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
               typeof user.email === 'string' &&
               user.email.trim().toLowerCase() ===
                 Env.R_PRE_VERIFIED_EMAIL?.trim().toLowerCase() &&
-              isSystemInviteToken(await getRequestInviteToken())
+              isSystemInviteToken(await getRequestInviteToken()) &&
+              (await claimPreVerifiedEmailBootstrap())
             ) {
               return { data: { ...user, emailVerified: true } };
             }

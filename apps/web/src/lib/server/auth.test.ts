@@ -11,6 +11,7 @@ const {
   mockHasSeatAvailable,
   mockEnv,
   mockInviteContext,
+  mockClaimPreVerifiedEmailBootstrap,
 } = vi.hoisted(() => {
   const calls: Array<{
     config: Array<{
@@ -46,6 +47,7 @@ const {
     mockInviteContext: {
       isSystemInvite: false,
     },
+    mockClaimPreVerifiedEmailBootstrap: vi.fn(),
   };
 });
 
@@ -142,6 +144,10 @@ vi.mock('./invites', () => ({
   isSystemInviteToken: vi.fn(() => mockInviteContext.isSystemInvite),
 }));
 
+vi.mock('./setup-bootstrap', () => ({
+  claimPreVerifiedEmailBootstrap: mockClaimPreVerifiedEmailBootstrap,
+}));
+
 vi.mock('./canonical-forwarded-proto', () => ({
   withCanonicalForwardedProto: vi.fn((request) => request),
 }));
@@ -215,6 +221,7 @@ describe('getAuth', () => {
     mockHasSeatAvailable.mockResolvedValue(true);
     mockEnv.R_PRE_VERIFIED_EMAIL = undefined;
     mockInviteContext.isSystemInvite = false;
+    mockClaimPreVerifiedEmailBootstrap.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -280,6 +287,25 @@ describe('getAuth', () => {
 
   it('does not trust a matching email without the system invite handoff', async () => {
     mockEnv.R_PRE_VERIFIED_EMAIL = 'verified@example.com';
+    const user = {
+      id: 'user-id',
+      email: 'verified@example.com',
+      emailVerified: false,
+    };
+    await getAuth();
+
+    await expect(
+      getUserCreateBeforeHook()(user, {
+        path: '/sign-up/email',
+      }),
+    ).resolves.toBe(true);
+    expect(mockClaimPreVerifiedEmailBootstrap).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse a consumed pre-verified email claim', async () => {
+    mockEnv.R_PRE_VERIFIED_EMAIL = 'verified@example.com';
+    mockInviteContext.isSystemInvite = true;
+    mockClaimPreVerifiedEmailBootstrap.mockResolvedValue(false);
     const user = {
       id: 'user-id',
       email: 'verified@example.com',
