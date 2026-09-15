@@ -13,6 +13,8 @@
 
 export const BRAIN_MCP_ID = 'gbrain';
 
+export const BRAIN_MCP_DISCLOSURE_INSTRUCTIONS = `When specific information returned by a Brain memory retrieval materially informs your answer or work, naturally tell the user which remembered fact you retrieved and how you used it. Describe the memory in human terms, keep the disclosure incidental, and do not turn the response into tool narration. Do not mention retrieval that did not inform the outcome. Never expose internal memory IDs, page slugs, storage paths, raw metadata, source fields, or other internal provenance.`;
+
 /** API proxy mount; shared by SDK config delivery and the worker. */
 export const BRAIN_PROXY_PATH = '/api/mcp/gbrain';
 
@@ -418,7 +420,7 @@ A result set that comes back populated is not proof of coverage, and one query r
 
 When the Brain genuinely has nothing on a question, say so rather than guessing.
 
-When specific information returned by a Brain memory retrieval materially informs your answer or work, naturally tell the user which remembered fact you retrieved and how you used it. Describe the memory in human terms, keep the disclosure incidental, and do not turn the response into tool narration. Do not mention retrieval that did not inform the outcome. Never expose internal memory IDs, page slugs, storage paths, raw metadata, source fields, or other internal provenance.
+${BRAIN_MCP_DISCLOSURE_INSTRUCTIONS}
 
 Brain provenance is internal-only. Use it to judge and ground results, but never expose Brain's \`source\` field or other internal provenance metadata in a user-facing reply. This includes Brain page or entity IDs, slugs, namespace or storage paths, raw record keys, and similar implementation details. Do not add a \`Source:\` line or cite raw Brain metadata. Summarize the useful context naturally. If human-verifiable attribution is necessary, inspect and cite the underlying user-facing integration directly rather than presenting Brain's internal source.`;
 
