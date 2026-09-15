@@ -151,9 +151,10 @@ empty PostgreSQL/MinIO/Redis volumes, and starts the recorded Roomote release.
   `--skip-backup` to opt out.
 - **Migrations run before services are replaced.** Database migrations apply
   in a single transaction while the previous release keeps serving. The bundled
-  migration runner retries a transient Postgres connection failure up to three
-  times. If migration still fails, the schema rolls back, the previous
-  configuration is restored, and the previous release stays up.
+  migration runner makes up to three total attempts after a transient Postgres
+  connection failure: the initial run plus at most two retries. If migration
+  still fails, the schema rolls back, the previous configuration is restored,
+  and the previous release stays up.
 - **Rollback is one command.** Every release's schema keeps the previous
   release working, so `roomote rollback` re-deploys the prior release without
   touching the database. `roomote upgrade <tag>` does the same for any
