@@ -6,7 +6,7 @@ export const TABULAR_PREVIEW_LIMITS = {
   cellCharacters: 2_000,
 } as const;
 
-export interface TabularArtifactPreview {
+interface TabularArtifactPreview {
   rows: string[][];
   columnCount: number;
   rowsTruncated: boolean;
