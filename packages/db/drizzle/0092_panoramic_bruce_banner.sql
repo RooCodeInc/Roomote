@@ -1,1 +1,0 @@
-ALTER TABLE "session_wakeups" ADD COLUMN "cancelled_by_parent_event_id" uuid;

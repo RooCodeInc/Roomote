@@ -2561,8 +2561,6 @@ type FastAgentParentEventDeliveryParams = {
   requestDurableRetry?: (retryAt: Date) => Promise<void>;
   /** Schedule the next setup state turn after a server-only preset completion. */
   onSetupIntegrationDiscoveryCompleted?: () => Promise<void>;
-  /** Durable row identity shared by every retry of this parent event. */
-  parentEventId?: string;
 };
 
 /** Give a structured child event to the Fast orchestrator for presentation. */
@@ -2617,7 +2615,7 @@ export async function deliverFastAgentParentEvent(
 async function isScheduledWakeupDeliverable(params: {
   wakeupId: string;
   conversationId: string;
-  parentEventId?: string;
+  allowCancelled?: boolean;
 }): Promise<boolean> {
   const [wakeup, session] = await Promise.all([
     getSessionWakeupById(params.wakeupId),
@@ -2625,9 +2623,7 @@ async function isScheduledWakeupDeliverable(params: {
   ]);
   return Boolean(
     wakeup &&
-    (wakeup.status !== 'cancelled' ||
-      (params.parentEventId &&
-        wakeup.cancelledByParentEventId === params.parentEventId)) &&
+    (params.allowCancelled || wakeup.status !== 'cancelled') &&
     wakeup.status !== 'failed' &&
     !session?.archivedAt,
   );
@@ -2635,6 +2631,7 @@ async function isScheduledWakeupDeliverable(params: {
 
 type ScheduledWakeupReplyGuard = {
   signal: AbortSignal;
+  onWakeupCancelled: (wakeupId: string) => void;
   guardPostReply: (
     postReply: FastAgentTurnAdapter['postReply'],
   ) => FastAgentTurnAdapter['postReply'];
@@ -2651,9 +2648,9 @@ function createScheduledWakeupReplyGuard(params: {
   wakeupId: string;
   conversationId: string;
   upstream: AbortSignal;
-  parentEventId?: string;
 }): ScheduledWakeupReplyGuard {
   const controller = new AbortController();
+  let cancelledByTurn = false;
   const abortFromUpstream = () => controller.abort(params.upstream.reason);
   if (params.upstream.aborted) {
     abortFromUpstream();
@@ -2664,17 +2661,18 @@ function createScheduledWakeupReplyGuard(params: {
   }
   return {
     signal: controller.signal,
+    onWakeupCancelled: (wakeupId) => {
+      if (wakeupId === params.wakeupId) cancelledByTurn = true;
+    },
     guardPostReply: (postReply) => async (reply) => {
-      const parentEventId =
-        reply.purpose === 'closeout' || reply.purpose === 'clarification'
-          ? params.parentEventId
-          : undefined;
+      const terminalSelfCancellationReply =
+        cancelledByTurn &&
+        (reply.purpose === 'closeout' || reply.purpose === 'clarification');
       if (
         !controller.signal.aborted &&
         (await isScheduledWakeupDeliverable({
-          wakeupId: params.wakeupId,
-          conversationId: params.conversationId,
-          ...(parentEventId ? { parentEventId } : {}),
+          ...params,
+          allowCancelled: terminalSelfCancellationReply,
         }))
       ) {
         return postReply(reply);
@@ -2708,9 +2706,6 @@ export async function deliverFastAgentParentEventWithLock(
           wakeupId: params.event.wakeupId,
           conversationId: params.parent.sessionId,
           upstream: turnLock.signal,
-          ...(params.parentEventId
-            ? { parentEventId: params.parentEventId }
-            : {}),
         })
       : null;
   const turnSignal = wakeupGuard?.signal ?? turnLock.signal;
@@ -2735,9 +2730,6 @@ export async function deliverFastAgentParentEventWithLock(
       !(await isScheduledWakeupDeliverable({
         wakeupId: params.event.wakeupId,
         conversationId: params.parent.sessionId,
-        ...(params.parentEventId
-          ? { parentEventId: params.parentEventId }
-          : {}),
       }))
     ) {
       return 'skipped';
@@ -2946,13 +2938,11 @@ export async function deliverFastAgentParentEventWithLock(
           : {}),
         ...(wakeupGuard
           ? {
+              onWakeupCancelled: wakeupGuard.onWakeupCancelled,
               postReply: wakeupGuard.guardPostReply(
                 parentTurn.adapter.postReply,
               ),
             }
-          : {}),
-        ...(params.parentEventId
-          ? { parentEventId: params.parentEventId }
           : {}),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({

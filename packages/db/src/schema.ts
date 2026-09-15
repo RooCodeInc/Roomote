@@ -3849,8 +3849,6 @@ export const sessionWakeups = pgTable(
     nextRunAt: timestamp('next_run_at'),
     lastFiredAt: timestamp('last_fired_at'),
     lastError: text('last_error'),
-    /** Durable parent event allowed to finish after cancelling this wakeup. */
-    cancelledByParentEventId: uuid('cancelled_by_parent_event_id'),
     completedAt: timestamp('completed_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),

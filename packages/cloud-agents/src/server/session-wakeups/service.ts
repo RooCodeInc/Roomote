@@ -60,7 +60,6 @@ function isOwnTaskFollowThroughInput(input: CreateSessionWakeupInput): boolean {
 export type SessionWakeupActor = {
   conversationId: string;
   userId: string;
-  parentEventId?: string;
 };
 
 export type CreateSessionWakeupInput = {
@@ -295,13 +294,8 @@ export type CancelSessionWakeupResult =
 export async function cancelSessionWakeupForConversation(
   conversationId: string,
   wakeupId: string,
-  cancelledByParentEventId?: string,
 ): Promise<CancelSessionWakeupResult> {
-  const cancelled = await cancelSessionWakeup({
-    id: wakeupId,
-    conversationId,
-    ...(cancelledByParentEventId ? { cancelledByParentEventId } : {}),
-  });
+  const cancelled = await cancelSessionWakeup({ id: wakeupId, conversationId });
   if (cancelled) {
     return { outcome: 'cancelled', wakeup: toSessionWakeupSummary(cancelled) };
   }
@@ -399,7 +393,6 @@ export async function handleManageWakeupsToolCall(
         const result = await cancelSessionWakeupForConversation(
           actor.conversationId,
           input.wakeupId,
-          actor.parentEventId,
         );
         switch (result.outcome) {
           case 'cancelled':

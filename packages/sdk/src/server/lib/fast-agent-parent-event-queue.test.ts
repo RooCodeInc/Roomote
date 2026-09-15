@@ -1011,7 +1011,7 @@ describe('Fast parent event durable queue', () => {
 
     expect(mocks.deliver).toHaveBeenCalledOnce();
     expect(mocks.deliver).toHaveBeenCalledWith(
-      { parent, event: humanFollowUp, parentEventId: 'human-follow-up' },
+      { parent, event: humanFollowUp },
       mocks.releaseLock,
     );
     expect(mocks.releaseLock).toHaveBeenCalledOnce();

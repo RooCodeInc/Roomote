@@ -239,8 +239,8 @@ export type FastAgentTurnAdapter = {
   offerCapability?: (
     input: FastAgentCapabilityOfferInput,
   ) => Promise<FastAgentCapabilityOfferInput>;
-  /** Durable parent-event identity for side effects that must survive replay. */
-  parentEventId?: string;
+  /** Let a scheduled wakeup deliver its final closeout after cancelling itself. */
+  onWakeupCancelled?: (wakeupId: string) => void;
   /** Surface lifecycle callback used for server-owned post-turn reconciliation. */
   onTurnSettled?: () => Promise<void>;
   /**
