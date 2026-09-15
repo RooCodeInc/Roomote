@@ -108,7 +108,7 @@ export function createHttpIntegrationsMcp() {
         'list_integrations',
         {
           description: sessionSecretToolsEnabled
-            ? 'List allowed operator integrations and live owner-approved Session grants with their methods/paths. Credentials are never returned. Session grants do not require an operator manifest. Session grant entries here are a deprecated read-only compatibility listing; the supported way to use a Session grant is an ordinary HTTP client at the real service URL inside an attached run, through the session egress gateway.'
+            ? "List allowed operator integrations and live owner-approved Session grants with their methods and paths. Credentials are never returned. Session grants need no operator manifest: use integration_request with a session: id for a GET or HEAD read, or, inside an attached coding run, the substitute token and base URL delivered for that grant (see ROOMOTE_SESSION_EGRESS_SERVICES) with any ordinary HTTP client and the grant's allowed methods."
             : 'List allowed operator integrations with their methods and paths. Credentials are never returned.',
           inputSchema: {},
           annotations: {
@@ -192,7 +192,7 @@ export function createHttpIntegrationsMcp() {
         'list_session_secrets',
         {
           description:
-            "List this Session owner's nonsecret pending approvals and key metadata, including each grant's allowed HTTP methods. Grants are consumed by ordinary HTTP clients in attached runs through the session egress gateway; the session-prefixed integration_request path is deprecated and not required.",
+            "List this Session owner's nonsecret pending approvals and ready grants with origin, header, allowed HTTP methods, and expiry. A ready grant is usable through integration_request with its session: id for GET and HEAD, and is delivered to attached coding runs as a substitute token with a base URL for ordinary clients and the grant's allowed methods.",
           inputSchema: {},
         },
         async () => {
@@ -222,7 +222,7 @@ export function createHttpIntegrationsMcp() {
         'integration_request',
         {
           description: sessionSecretToolsEnabled
-            ? 'Make a credential-broker request using an ID from list_integrations. Operator manifest integrations are the supported use. Session-prefixed IDs are a deprecated GET/HEAD-only compatibility path that never widens, is not required for Session resources, and will be removed once ordinary clients through the session egress gateway reach parity. Supply only integrationId, method, relative path (optional query), optional body/contentType and Session accept preference; never supply credentials, arbitrary headers, or a Session/user ID.'
+            ? 'Make a credential-broker request using an ID from list_integrations: an operator integration ID, or a session: ID for an owner-approved Session grant. Session grants are GET and HEAD only here; for approved write methods, scripts, or SDKs inside an attached run, use the delivered substitute token with the base URL instead. Supply only integrationId, method, relative path (optional query), optional body/contentType and Session accept preference; never supply credentials, arbitrary headers, or a Session/user ID.'
             : 'Make a credential-broker request using an operator integration ID from list_integrations. Supply only integrationId, method, relative path (optional query), optional body/contentType and accept preference; never supply credentials, arbitrary headers, or a Session/user ID.',
           inputSchema: integrationRequestSchema,
           annotations: {
