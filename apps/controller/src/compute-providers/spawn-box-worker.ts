@@ -27,6 +27,7 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
+import type { SessionEgressLifecycle } from '../session-egress';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 import { COMPUTE_BOOTSTRAP_TIMEOUT_MS } from './timeouts';
 
@@ -95,6 +96,8 @@ export async function spawnBoxWorker(
     boxTimeoutMs: number;
     localTarballPath?: string;
     deploymentSlug?: string;
+    /** Session-egress admission; omitted in unit paths that do not exercise it. */
+    sessionEgress?: SessionEgressLifecycle;
   },
 ): Promise<{ machineId: string; sandboxCmdId?: string }> {
   const { namedPorts, environmentSnapshotId, environmentConfig } =
@@ -187,6 +190,12 @@ export async function spawnBoxWorker(
     field: 'provisionStartedAt',
     launchMode: launchOptions.launchMode,
   });
+
+  const sessionEgressPlan = await config.sessionEgress?.planApiProxy({
+    taskRun,
+    provider: 'box',
+  });
+
   const machine = await createBoxMachine({
     boxApiKey: config.boxApiKey,
     boxApiBaseUrl: config.boxApiBaseUrl,
@@ -264,7 +273,10 @@ export async function spawnBoxWorker(
         deploymentSlug: config.deploymentSlug,
         environmentId,
         machineType,
-        extraEnv: { SANDBOX_TIMEOUT_MS: String(config.boxTimeoutMs) },
+        extraEnv: {
+          SANDBOX_TIMEOUT_MS: String(config.boxTimeoutMs),
+          ...sessionEgressPlan?.bootstrapEnv,
+        },
       }),
       detached: true,
       signal: AbortSignal.timeout(60_000),
@@ -292,6 +304,11 @@ export async function spawnBoxWorker(
         .set({ sandboxCmdId: result.commandId })
         .where(eq(taskRuns.id, taskRun.id));
     }
+    // The worker is waiting on the bootstrap nonce after its ordinary
+    // bootstrap; an admission failure fails the spawn, as it does for Docker,
+    // rather than leaving a worker that expected substitutes without them.
+    await sessionEgressPlan?.admit();
+
     return {
       machineId: machine.machineId,
       ...(result.commandId ? { sandboxCmdId: result.commandId } : {}),

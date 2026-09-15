@@ -256,8 +256,9 @@ the gateway received) alone.
 
 ## API substitution proxy (`/api/session-egress/<upstream path>`)
 
-Compute providers without a per-workload connector (hosted sandboxes such as
-Modal) use the API itself as the gateway. Delivery is gated per Session owner
+Compute providers without a per-workload connector (every hosted sandbox
+provider: Modal, Roomote Cloud, Daytona, E2B, Blaxel, Box, and Azure) use the
+API itself as the gateway. Delivery is gated per Session owner
 by the same `session_secret_tools_enabled` experiment that gates the Fast and
 coding-run tools; no deployment configuration is needed. The controller
 registers the run through `POST /workloads` exactly as for the

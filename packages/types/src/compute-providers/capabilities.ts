@@ -89,7 +89,9 @@ export const DAYTONA_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
-  sessionEgress: 'unsupported',
+  // Substitutes are used through the API-side session egress proxy; see
+  // MODAL_CAPABILITIES.
+  sessionEgress: 'api_proxy',
 };
 
 export const E2B_CAPABILITIES: ComputeProviderCapabilities = {
@@ -103,7 +105,9 @@ export const E2B_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
-  sessionEgress: 'unsupported',
+  // Substitutes are used through the API-side session egress proxy; see
+  // MODAL_CAPABILITIES.
+  sessionEgress: 'api_proxy',
 };
 
 export const BLAXEL_CAPABILITIES: ComputeProviderCapabilities = {
@@ -117,7 +121,9 @@ export const BLAXEL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
-  sessionEgress: 'unsupported',
+  // Substitutes are used through the API-side session egress proxy; see
+  // MODAL_CAPABILITIES.
+  sessionEgress: 'api_proxy',
 };
 
 export const BOX_CAPABILITIES: ComputeProviderCapabilities = {
@@ -132,7 +138,9 @@ export const BOX_CAPABILITIES: ComputeProviderCapabilities = {
   supportsResume: true,
   supportsFileWrite: true,
   supportsDockerProjects: true,
-  sessionEgress: 'unsupported',
+  // Substitutes are used through the API-side session egress proxy; see
+  // MODAL_CAPABILITIES.
+  sessionEgress: 'api_proxy',
 };
 
 export const AZURE_CAPABILITIES: ComputeProviderCapabilities = {
@@ -149,7 +157,9 @@ export const AZURE_CAPABILITIES: ComputeProviderCapabilities = {
   supportsFileWrite: true,
   // dockerd runs inside the ACA microVM (verified against the worker image).
   supportsDockerProjects: true,
-  sessionEgress: 'unsupported',
+  // Substitutes are used through the API-side session egress proxy; see
+  // MODAL_CAPABILITIES.
+  sessionEgress: 'api_proxy',
 };
 
 export function getComputeProviderCapabilities(

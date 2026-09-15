@@ -6,6 +6,7 @@ import {
 } from '@roomote/db/server';
 import { createSessionEgressControllerClient } from '@roomote/sdk/server/session-egress';
 
+import { resolveSessionEgressApiProxyBaseUrl } from './api-proxy';
 import {
   resolveSessionEgressProvisioningConfig,
   SessionEgressLifecycle,
@@ -36,6 +37,7 @@ export function createSessionEgressLifecycle(): SessionEgressLifecycle {
   return new SessionEgressLifecycle({
     client,
     config,
+    apiProxyBaseUrl: resolveSessionEgressApiProxyBaseUrl(Env),
     findCandidate: findSessionEgressCandidateForRun,
     recordEvent: async (event) => {
       await recordTaskRunLifecycleEvent(db, {

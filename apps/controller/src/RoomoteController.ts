@@ -101,8 +101,8 @@ export class RoomoteController extends BaseController {
     // Providers with no admission path fail closed for Session egress: the
     // run is spawned normally, receives no substitute tokens, and the Session
     // sees a nonsecret status explaining why. `register` returns `skipped`
-    // here without contacting the control plane. Docker and the Modal-backed
-    // providers admit inside their own spawn paths after bootstrap.
+    // here without contacting the control plane. Docker and every hosted
+    // provider admit inside their own spawn paths after bootstrap.
     if (getComputeProviderSessionEgressCapability(provider) === 'unsupported') {
       await this.sessionEgress.register({
         taskRun: { id: taskRun.id, taskId: taskRun.taskId },
@@ -283,6 +283,7 @@ export class RoomoteController extends BaseController {
         }
 
         await spawnDaytonaWorker(taskRun, authToken, {
+          sessionEgress: this.sessionEgress,
           deploymentSlug: deploymentSlug,
           daytonaTags: this.buildSandboxTags(),
           daytonaApiKey,
@@ -307,6 +308,7 @@ export class RoomoteController extends BaseController {
         }
 
         await spawnE2bWorker(taskRun, authToken, {
+          sessionEgress: this.sessionEgress,
           deploymentSlug: deploymentSlug,
           e2bTags: this.buildSandboxTags(),
           e2bApiKey,
@@ -330,6 +332,7 @@ export class RoomoteController extends BaseController {
           );
         }
         await spawnBlaxelWorker(taskRun, authToken, {
+          sessionEgress: this.sessionEgress,
           deploymentSlug,
           blaxelTags: this.buildSandboxTags(),
           blaxelApiKey,
@@ -357,6 +360,7 @@ export class RoomoteController extends BaseController {
         const machineType = resolvedEnv.BOX_MACHINE_TYPE;
 
         await spawnBoxWorker(taskRun, authToken, {
+          sessionEgress: this.sessionEgress,
           deploymentSlug,
           boxApiKey,
           boxApiBaseUrl: resolvedEnv.BOX_API_BASE_URL,
@@ -409,6 +413,7 @@ export class RoomoteController extends BaseController {
         }
 
         await spawnAzureWorker(taskRun, authToken, {
+          sessionEgress: this.sessionEgress,
           deploymentSlug,
           azureTags: this.buildSandboxTags(),
           azureSubscriptionId,

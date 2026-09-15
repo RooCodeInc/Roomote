@@ -1,14 +1,17 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import {
   getComputeProviderSessionEgressCapability,
+  SESSION_EGRESS_WORKLOAD_ENV,
+  TaskPayloadKind,
   type ComputeProvider,
   type SessionEgressWorkloadRegistration,
   type SessionEgressWorkloadTerminate,
 } from '@roomote/types';
 import type { createSessionEgressControllerClient } from '@roomote/sdk/server/session-egress';
 
+import { admitSessionEgressApiProxy } from './api-proxy';
 import {
   buildConnectorIdentity,
   issueConnectorCertificate,
@@ -29,8 +32,8 @@ import {
  * regardless of which process observed the transition.
  *
  * Two admissions exist. `connector` providers (Docker) get a controller-issued
- * connector certificate and an external gateway. `api_proxy` providers
- * (Modal, Roomote Cloud) get substitutes and the API-side proxy base URL,
+ * connector certificate and an external gateway. `api_proxy` providers (every
+ * hosted sandbox provider) get substitutes and the API-side proxy base URL,
  * nothing else; the API is the gateway.
  *
  * Fail-closed rules:
@@ -186,9 +189,31 @@ export interface SessionEgressLifecycleEvent {
   details: Record<string, string | number | boolean | null>;
 }
 
+/**
+ * One sandbox launch's share of API-proxy admission. The launcher carries
+ * `bootstrapEnv` so the worker pauses after its ordinary bootstrap, and
+ * `admit` runs once the worker process is launched: it waits for the
+ * bootstrap nonce, registers the run, and publishes the substitute-only
+ * configuration. Every hosted provider uses the plan identically; a run that
+ * needs no admission gets an empty plan whose `admit` does nothing.
+ */
+interface SessionEgressApiProxyPlan {
+  required: boolean;
+  bootstrapEnv: Record<string, string>;
+  admit: () => Promise<SessionEgressWorkloadRegistration | null>;
+}
+
 export interface SessionEgressLifecycleDependencies {
   client: SessionEgressControllerClient | null;
   config: SessionEgressProvisioningConfig | null;
+  /**
+   * Base URL sandboxes call the API-side proxy at. Without it API-proxy
+   * admission stays closed: substitutes that cannot be delivered are never
+   * minted.
+   */
+  apiProxyBaseUrl?: string;
+  /** Injectable for tests; production admission waits on Redis and the database. */
+  admitApiProxy?: typeof admitSessionEgressApiProxy;
   /** Session/grant preflight; `null` for runs not attached to an owned Session. */
   findCandidate: (runId: number) => Promise<{
     sessionId: string;
@@ -228,8 +253,60 @@ export class SessionEgressLifecycle {
     if (!this.deps.client) return null;
     const capability = getComputeProviderSessionEgressCapability(provider);
     if (capability === 'enforced') return this.deps.config ? 'connector' : null;
-    if (capability === 'api_proxy') return 'api_proxy';
+    if (capability === 'api_proxy')
+      return this.deps.apiProxyBaseUrl ? 'api_proxy' : null;
     return null;
+  }
+
+  /** Plan API-proxy admission for one launch; see `SessionEgressApiProxyPlan`. */
+  async planApiProxy(input: {
+    taskRun: { id: number; taskId: string; payloadKind: TaskPayloadKind };
+    provider: ComputeProvider;
+  }): Promise<SessionEgressApiProxyPlan> {
+    const { taskRun, provider } = input;
+    const baseUrl = this.deps.apiProxyBaseUrl;
+    const required =
+      (await this.needsBootstrapAdmission(taskRun.id, provider)) &&
+      this.admissionFor(provider) === 'api_proxy';
+    if (!required || !baseUrl) {
+      return { required: false, bootstrapEnv: {}, admit: async () => null };
+    }
+
+    // The sandbox bootstraps with ordinary connectivity and no substitutes;
+    // only the controller publishes verified delivery, bound to this nonce,
+    // after the worker reports bootstrap done.
+    const nonce = randomUUID();
+    const admit = this.deps.admitApiProxy ?? admitSessionEgressApiProxy;
+    return {
+      required: true,
+      bootstrapEnv: {
+        [SESSION_EGRESS_WORKLOAD_ENV.BOOTSTRAP_REQUIRED]: '1',
+        [SESSION_EGRESS_WORKLOAD_ENV.BOOTSTRAP_NONCE]: nonce,
+      },
+      admit: async () => {
+        const workload = await admit({
+          lifecycle: this,
+          taskRun: { id: taskRun.id, taskId: taskRun.taskId },
+          provider,
+          nonce,
+          baseUrl,
+          // A resumed sandbox may still hold an earlier generation's tokens;
+          // rotation invalidates them.
+          resume: taskRun.payloadKind === TaskPayloadKind.SnapshotResume,
+        });
+        this.logger.log(
+          `[sessionEgress] Delivered Session service tokens for task run #${taskRun.id} ${JSON.stringify(
+            {
+              provider,
+              workloadId: workload.workloadId,
+              generation: workload.generation,
+              substituteCount: workload.substitutes.length,
+            },
+          )}`,
+        );
+        return workload;
+      },
+    };
   }
 
   /** Planning only: do not mint a lease/token while repository bootstrap runs. */
