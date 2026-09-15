@@ -1,4 +1,4 @@
-import { Hono, type MiddlewareHandler } from 'hono';
+import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { Agent, fetch as undiciFetch } from 'undici';
 
@@ -219,6 +219,39 @@ export function createSessionEgressProxy(
       return c.json({ error: 'method_not_allowed' }, 405);
     const egressMethod = method as SessionEgressMethod;
 
+    // The global guard runs before any database work so unauthenticated
+    // traffic is bounded too; the per-workload guard needs the workload,
+    // which only authorization can name.
+    if (inFlight >= MAX_IN_FLIGHT) {
+      console.warn(`${LOG_PREFIX} concurrency limit (method=${method})`);
+      return c.json({ error: 'too_many_requests' }, 429);
+    }
+    inFlight++;
+    let workloadKey: string | undefined;
+    try {
+      return await proxy(c, method, egressMethod, (workloadId) => {
+        const current = inFlightByWorkload.get(workloadId) ?? 0;
+        if (current >= MAX_IN_FLIGHT_PER_WORKLOAD) return false;
+        workloadKey = workloadId;
+        inFlightByWorkload.set(workloadId, current + 1);
+        return true;
+      });
+    } finally {
+      inFlight--;
+      if (workloadKey) {
+        const remaining = (inFlightByWorkload.get(workloadKey) ?? 1) - 1;
+        if (remaining > 0) inFlightByWorkload.set(workloadKey, remaining);
+        else inFlightByWorkload.delete(workloadKey);
+      }
+    }
+  });
+
+  const proxy = async (
+    c: Context<{ Variables: Variables }>,
+    method: string,
+    egressMethod: SessionEgressMethod,
+    admitWorkload: (workloadId: string) => boolean,
+  ): Promise<Response> => {
     // Exactly one substitute may be presented, in any credential slot.
     const presented = new Set<string>();
     for (const name of CREDENTIAL_HEADERS) {
@@ -299,18 +332,12 @@ export function createSessionEgressProxy(
     const credential = request.credential;
     if (!credential) return denied(c, grant.secretRef, method, 'malformed');
 
-    const workloadInFlight = inFlightByWorkload.get(request.workloadId) ?? 0;
-    if (
-      inFlight >= MAX_IN_FLIGHT ||
-      workloadInFlight >= MAX_IN_FLIGHT_PER_WORKLOAD
-    ) {
+    if (!admitWorkload(request.workloadId)) {
       console.warn(
         `${LOG_PREFIX} concurrency limit (grant=${grant.secretRef}, method=${method})`,
       );
       return c.json({ error: 'too_many_requests' }, 429);
     }
-    inFlight++;
-    inFlightByWorkload.set(request.workloadId, workloadInFlight + 1);
 
     const agent = createAgent();
     // No exchange outlives the grant or the workload lease.
@@ -419,12 +446,8 @@ export function createSessionEgressProxy(
       });
     } finally {
       await agent.destroy().catch(() => undefined);
-      inFlight--;
-      const remaining = (inFlightByWorkload.get(request.workloadId) ?? 1) - 1;
-      if (remaining > 0) inFlightByWorkload.set(request.workloadId, remaining);
-      else inFlightByWorkload.delete(request.workloadId);
     }
-  });
+  };
 
   return app;
 }

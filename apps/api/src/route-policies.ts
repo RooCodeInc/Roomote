@@ -276,10 +276,19 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   // and forwards. The substitute is not a Roomote bearer, so the handler owns
   // authentication (live workload, Session, run, grant, generation, expiry)
   // and no bearer class applies here.
+  // The client-keyed limit bounds the database work an unauthenticated caller
+  // can cause by spraying tokens; a sandbox's legitimate use sits far below it.
   {
     name: 'session-egress-proxy',
     match: { type: 'prefix', path: '/api/session-egress' },
     policy: 'webhook',
+    rateLimits: [
+      {
+        keySource: 'client',
+        limit: 300,
+        windowSeconds: 60,
+      },
+    ],
   },
 
   // Inference gateway: task sandboxes call model providers through this

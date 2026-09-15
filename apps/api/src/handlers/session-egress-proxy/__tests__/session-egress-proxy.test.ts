@@ -264,6 +264,8 @@ it('is a handler-authenticated public surface with one shared base URL', () => {
   expect(findRoutePolicyRule(`${base}/v1/items`)).toMatchObject({
     name: 'session-egress-proxy',
     policy: 'webhook',
+    // Unauthenticated callers are bounded before the handler touches the database.
+    rateLimits: [{ keySource: 'client', limit: 300, windowSeconds: 60 }],
   });
   expect(sessionEgressProxyBaseUrl('https://api.roomote.test/')).toBe(
     `https://api.roomote.test${base}`,
