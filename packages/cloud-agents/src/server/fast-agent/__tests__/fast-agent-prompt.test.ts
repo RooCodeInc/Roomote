@@ -466,6 +466,9 @@ describe('buildFastAgentSystemPrompt', () => {
       "When a description matches the user's request, load that skill with `load_skill` using its exact ID",
     );
     expect(prompt).toContain(
+      "A skill listed here or returned by `list_skills` is not a loaded skill. Only a `load_skill` call in this conversation that returned the skill's content counts as loading it.",
+    );
+    expect(prompt).toContain(
       "The Available Skills section above already lists this deployment's instance and inline environment skills; consult it before calling `list_skills`.",
     );
   });

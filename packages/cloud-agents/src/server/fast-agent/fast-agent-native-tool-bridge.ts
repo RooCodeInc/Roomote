@@ -49,6 +49,7 @@ import {
   FastAgentSkillStore,
   fastAgentSkillStore,
   type FastAgentSkillDocument,
+  type FastAgentSkillListResult,
 } from './fast-agent-skill-store';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import {
@@ -129,6 +130,27 @@ type FastAgentNativeToolBridge = {
   url: string;
 };
 
+/**
+ * Transcript-safe record of a `list_skills` or `load_skill` call. The bridge
+ * answers those tools itself, ahead of the turn executor, so nothing else
+ * sees them; this is what lets a Session show that a skill was (or was not)
+ * actually loaded, instead of taking the model's word for it. Skill content
+ * stays out of the record: the summary names what was loaded, not its body.
+ */
+export type FastAgentSkillToolCallRecord = {
+  name:
+    | typeof FAST_AGENT_NATIVE_TOOL_NAMES.listSkills
+    | typeof FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill;
+  args: Record<string, unknown>;
+  messageId?: string;
+  agent?: string;
+  result: Record<string, unknown>;
+};
+
+export type FastAgentSkillToolCallRecorder = (
+  record: FastAgentSkillToolCallRecord,
+) => Promise<void>;
+
 type ActiveExecutor = {
   allowSkillAccess: boolean;
   allowSpillRecovery: boolean;
@@ -136,6 +158,7 @@ type ActiveExecutor = {
   executor: FastAgentNativeToolExecutor;
   skillStore: FastAgentSkillStore;
   spillBudget: FastAgentSpillTurnBudget;
+  recordSkillToolCall?: FastAgentSkillToolCallRecorder;
 };
 
 type FastAgentNativeToolBindingOptions = {
@@ -143,7 +166,47 @@ type FastAgentNativeToolBindingOptions = {
   allowSpillRecovery: boolean;
   skillStore?: FastAgentSkillStore;
   spillBudget?: FastAgentSpillTurnBudget;
+  /** Receives every skill catalog or load call the bridge answers for this session. */
+  recordSkillToolCall?: FastAgentSkillToolCallRecorder;
 };
+
+const SKILL_RECORD_NAME_LIMIT = 20;
+
+export function summarizeSkillListForRecord(
+  catalog: FastAgentSkillListResult,
+): Record<string, unknown> {
+  return {
+    success: true,
+    skillCount: catalog.skills.length,
+    skills: catalog.skills.slice(0, SKILL_RECORD_NAME_LIMIT).map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      source: skill.source,
+    })),
+    ...(catalog.skills.length > SKILL_RECORD_NAME_LIMIT
+      ? { omittedSkillCount: catalog.skills.length - SKILL_RECORD_NAME_LIMIT }
+      : {}),
+    ...(catalog.nextSourceOffset !== undefined
+      ? { nextSourceOffset: catalog.nextSourceOffset }
+      : {}),
+    ...(catalog.warnings.length > 0 ? { warnings: catalog.warnings } : {}),
+  };
+}
+
+export function summarizeSkillDocumentForRecord(
+  document: FastAgentSkillDocument,
+): Record<string, unknown> {
+  return {
+    success: true,
+    id: document.id,
+    name: document.name,
+    source: document.source,
+    ...(document.version !== undefined ? { version: document.version } : {}),
+    resource: document.resource,
+    resources: document.resources,
+    byteLength: document.byteLength,
+  };
+}
 
 type FastAgentSpillTurnBudget = {
   calls: number;
@@ -1170,10 +1233,38 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
           return;
         }
       }
+      const recordSkillToolCall = async (
+        result: Record<string, unknown>,
+      ): Promise<void> => {
+        if (
+          parsed.tool !== FAST_AGENT_NATIVE_TOOL_NAMES.listSkills &&
+          parsed.tool !== FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill
+        ) {
+          return;
+        }
+        try {
+          await activeExecutor.recordSkillToolCall?.({
+            name: parsed.tool,
+            args: parsed.args,
+            ...(parsed.messageID ? { messageId: parsed.messageID } : {}),
+            ...(parsed.agent ? { agent: parsed.agent } : {}),
+            result,
+          });
+        } catch (error) {
+          // The record is diagnostic; a failure to write it must not turn a
+          // successful skill call into a failed one for the model.
+          console.warn(
+            `[Fast Agent] Failed to record ${parsed.tool} call for session ${parsed.sessionID}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      };
       if (parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.listSkills) {
         try {
           const args = listSkillsArgsSchema.parse(parsed.args);
           const catalog = await activeExecutor.skillStore.list(args);
+          await recordSkillToolCall(summarizeSkillListForRecord(catalog));
           writeJson(response, 200, {
             ok: true,
             ...(await formatFastAgentNativeToolResult(
@@ -1196,15 +1287,16 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
               }`,
             );
           }
+          const failure = {
+            success: false,
+            error: argsError ?? 'The requested skill catalog is unavailable.',
+          };
+          await recordSkillToolCall(failure);
           writeJson(response, 200, {
             ok: true,
             ...(await formatFastAgentNativeToolResult(
               parsed.sessionID,
-              {
-                success: false,
-                error:
-                  argsError ?? 'The requested skill catalog is unavailable.',
-              },
+              failure,
               { allowSpill: false },
             )),
           });
@@ -1228,20 +1320,23 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
               }`,
             );
           }
+          const failure = {
+            success: false,
+            error:
+              argsError ?? 'The skill or Markdown resource is unavailable.',
+          };
+          await recordSkillToolCall(failure);
           writeJson(response, 200, {
             ok: true,
             ...(await formatFastAgentNativeToolResult(
               parsed.sessionID,
-              {
-                success: false,
-                error:
-                  argsError ?? 'The skill or Markdown resource is unavailable.',
-              },
+              failure,
               { allowSpill: false },
             )),
           });
           return;
         }
+        await recordSkillToolCall(summarizeSkillDocumentForRecord(document));
         writeJson(response, 200, {
           ok: true,
           ...(await formatFastAgentSkillDocumentForModel(
@@ -1603,6 +1698,9 @@ export function bindFastAgentNativeToolExecutor(
     conversationId,
     executor,
     skillStore: options.skillStore ?? fastAgentSkillStore,
+    ...(options.recordSkillToolCall
+      ? { recordSkillToolCall: options.recordSkillToolCall }
+      : {}),
     spillBudget: options.spillBudget ?? createFastAgentSpillTurnBudget(),
   });
 

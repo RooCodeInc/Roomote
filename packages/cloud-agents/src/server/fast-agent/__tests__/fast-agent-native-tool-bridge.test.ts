@@ -533,6 +533,130 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
+  it('records skill catalog and load calls for the transcript without the skill body', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'native-skill-record',
+      [],
+    );
+    const sessionId = 'opencode-skill-record';
+    const skill = {
+      id: 'instance:00000000-0000-4000-8000-000000000002',
+      name: 'incident-create',
+      invocation: 'incident-create',
+      description: 'Create incidents.',
+      source: 'instance' as const,
+      version: 3,
+    };
+    const content = '# Incident Create\n\nLong body that must not be recorded.';
+    const document = {
+      ...skill,
+      content,
+      byteLength: Buffer.byteLength(content),
+      resource: 'SKILL.md',
+      resources: ['SKILL.md', 'checklist.md'],
+    };
+    const skillStore = new FastAgentSkillStore();
+    const list = vi
+      .spyOn(skillStore, 'list')
+      .mockImplementation(
+        vi.fn().mockResolvedValue({ skills: [skill], warnings: [] }),
+      );
+    const read = vi.spyOn(skillStore, 'read').mockImplementation(
+      vi.fn(async (id: string) => {
+        if (id !== skill.id) throw new Error('missing');
+        return document;
+      }),
+    );
+    const records: unknown[] = [];
+    const unbind = bindFastAgentNativeToolExecutor(
+      sessionId,
+      'conversation-skill-record',
+      async () => null,
+      {
+        allowSkillAccess: true,
+        allowSpillRecovery: true,
+        skillStore,
+        recordSkillToolCall: async (record) => {
+          records.push(record);
+        },
+      },
+    );
+    const callBridge = (tool: string, args: Record<string, unknown>) =>
+      fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionID: sessionId,
+          messageID: 'msg-skill-record',
+          tool,
+          args,
+        }),
+      })
+        .then((response) => response.json())
+        .then((payload) => JSON.parse(payload.output));
+
+    try {
+      await callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.listSkills, {
+        name: skill.name,
+      });
+      const loaded = await callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill, {
+        id: skill.id,
+      });
+      expect(loaded).toMatchObject({ success: true, result: document });
+      const failed = await callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill, {
+        id: 'instance:00000000-0000-4000-8000-00000000dead',
+      });
+      expect(failed).toMatchObject({ success: false });
+
+      expect(records).toEqual([
+        {
+          name: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
+          args: { name: skill.name },
+          messageId: 'msg-skill-record',
+          result: {
+            success: true,
+            skillCount: 1,
+            skills: [{ id: skill.id, name: skill.name, source: 'instance' }],
+          },
+        },
+        {
+          name: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
+          args: { id: skill.id },
+          messageId: 'msg-skill-record',
+          result: {
+            success: true,
+            id: skill.id,
+            name: skill.name,
+            source: 'instance',
+            version: 3,
+            resource: 'SKILL.md',
+            resources: ['SKILL.md', 'checklist.md'],
+            byteLength: document.byteLength,
+          },
+        },
+        {
+          name: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
+          args: { id: 'instance:00000000-0000-4000-8000-00000000dead' },
+          messageId: 'msg-skill-record',
+          result: {
+            success: false,
+            error: 'The skill or Markdown resource is unavailable.',
+          },
+        },
+      ]);
+      expect(JSON.stringify(records)).not.toContain('Long body');
+      expect(list).toHaveBeenCalledTimes(1);
+      expect(read).toHaveBeenCalledTimes(2);
+    } finally {
+      unbind();
+      list.mockRestore();
+      read.mockRestore();
+    }
+  });
+
   it('lists and loads packaged and repository skills without filesystem access', async () => {
     const runtime = await getFastAgentNativeToolRuntime('native-skills', []);
     const parentSession = 'opencode-parent-skills';
