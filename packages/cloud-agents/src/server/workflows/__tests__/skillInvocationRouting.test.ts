@@ -149,6 +149,13 @@ describe('packaged skill invocation routing', () => {
     expect(skill).toContain(
       'do not make integration or repository setup a prerequisite for this interview',
     );
+    expect(skill).toContain(
+      "Learning the user's durable working preferences is part of this conversation",
+    );
+    expect(skill).toContain(
+      'call `update_personalization` immediately with confidence `explicit`',
+    );
+    expect(skill).toContain('Do not copy it into shared memory');
   });
 
   it('keeps Doctor packaged for Fast without routing it into sandbox tasks', () => {
