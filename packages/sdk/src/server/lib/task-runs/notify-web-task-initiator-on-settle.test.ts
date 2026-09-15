@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   findLatestReceipt: vi.fn(),
   findTaskMessage: vi.fn(),
   resolvePresentation: vi.fn(),
+  getChatPreference: vi.fn(),
 }));
 
 function updateChain() {
@@ -31,6 +32,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   eq: (...args: unknown[]) => args,
   getSessionForTask: mocks.getSessionForTask,
+  getUserChatInitiationProvider: mocks.getChatPreference,
   recordTaskRunLifecycleEvent: mocks.recordEvent,
   selectTaskStateRun: mocks.selectTaskStateRun,
   sql: vi.fn(),
@@ -85,11 +87,22 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
     mocks.findLatestReceipt.mockResolvedValue(null);
     mocks.findTaskMessage.mockResolvedValue('The actual task response.');
     mocks.resolvePresentation.mockResolvedValue({ sessionId: 'session-1' });
+    mocks.getChatPreference.mockResolvedValue(null);
     mocks.sendPersonalNotification.mockResolvedValue({
       deliveredProviders: ['slack'],
       receipts: [],
     });
     mocks.recordEvent.mockResolvedValue(undefined);
+  });
+
+  it('uses the user task-starting chat preference for a new notification route', async () => {
+    mocks.getChatPreference.mockResolvedValue('discord');
+
+    await notifyWebTaskInitiatorOnSettle(run, RunStatus.Completed);
+
+    expect(mocks.sendPersonalNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ preferredProvider: 'discord' }),
+    );
   });
 
   it.each([

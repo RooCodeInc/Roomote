@@ -15,6 +15,8 @@ const {
   mockBeginCanonicalWebPrompt,
   mockBeginCanonicalWebAutoDispatch,
   mockDispatchCanonicalAutoFollowUp,
+  mockReadLivePullRequestState,
+  mockDbUpdate,
   mockReleaseCanonicalWebAutoDispatch,
   mockBeginCanonicalAutoDispatch,
   mockCompleteCanonicalAutoDispatch,
@@ -54,6 +56,10 @@ const {
   mockBeginCanonicalWebPrompt: vi.fn(),
   mockBeginCanonicalWebAutoDispatch: vi.fn(),
   mockDispatchCanonicalAutoFollowUp: vi.fn(),
+  mockReadLivePullRequestState: vi.fn(),
+  mockDbUpdate: vi.fn(() => ({
+    set: () => ({ where: () => Promise.resolve([]) }),
+  })),
   mockReleaseCanonicalWebAutoDispatch: vi.fn(),
   mockBeginCanonicalAutoDispatch: vi.fn(),
   mockCompleteCanonicalAutoDispatch: vi.fn(),
@@ -86,6 +92,7 @@ const {
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    update: () => mockDbUpdate(),
     query: {
       taskRuns: {
         findFirst: (...args: unknown[]) => mockFindFirstTaskRun(...args),
@@ -93,6 +100,12 @@ vi.mock('@roomote/db/server', () => ({
       taskPullRequests: {
         findFirst: (...args: unknown[]) =>
           mockFindFirstTaskPullRequest(...args),
+        // The job lists links and picks the instance itself; tests keep
+        // describing one link (or an explicit list) through the same mock.
+        findMany: async (...args: unknown[]) => {
+          const links = await mockFindFirstTaskPullRequest(...args);
+          return Array.isArray(links) ? links : links ? [links] : [];
+        },
       },
       slackInstallations: {
         findFirst: (...args: unknown[]) =>
@@ -113,6 +126,7 @@ vi.mock('@roomote/db/server', () => ({
     session.respondingUntil !== null && session.respondingUntil > new Date(),
   taskRuns: { taskId: 'taskId', createdAt: 'createdAt' },
   taskPullRequests: {
+    id: 'id',
     taskId: 'taskId',
     repository: 'repository',
     prNumber: 'prNumber',
@@ -216,6 +230,8 @@ vi.mock('@roomote/sdk/server', () => ({
   beginCanonicalPrReviewWebAutoDispatch: mockBeginCanonicalWebAutoDispatch,
   dispatchCanonicalPrReviewAutoFollowUp: mockDispatchCanonicalAutoFollowUp,
   releaseCanonicalPrReviewWebAutoDispatch: mockReleaseCanonicalWebAutoDispatch,
+  readLivePullRequestStateForNotification: (...args: unknown[]) =>
+    mockReadLivePullRequestState(...args),
   beginCanonicalPrReviewAutoDispatch: mockBeginCanonicalAutoDispatch,
   completeCanonicalPrReviewAutoDispatch: mockCompleteCanonicalAutoDispatch,
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
@@ -1174,6 +1190,108 @@ describe('prReviewNotificationJob', () => {
         text: expect.stringContaining("New review feedback — I'm on it"),
       }),
     );
+  });
+
+  it('suppresses stale feedback instead of auto-dispatching when the provider says the PR is merged', async () => {
+    // The persisted link still says open (the merge webhook was missed), but
+    // the provider says merged. Nothing is posted and nothing is resumed.
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      id: 'link-1',
+      status: 'open',
+      host: 'github.com',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockReadLivePullRequestState.mockResolvedValue('merged');
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockReadLivePullRequestState).toHaveBeenCalledWith({
+      provider: 'github',
+      host: 'github.com',
+      repository: 'owner/repo',
+      prNumber: 42,
+    });
+    expect(mockDispatchFollowUp).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockNotifyFastAgentParent).not.toHaveBeenCalled();
+    // Only the resolved link row is corrected, never every link that shares
+    // the task/provider/repository/number across hosts.
+    expect(mockDbUpdate).toHaveBeenCalledTimes(1);
+    expect(mockEq).toHaveBeenCalledWith('id', 'link-1');
+    expect(mockFinalize).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 'task-1' }),
+      'suppressed',
+    );
+  });
+
+  it('checks the link for the host the notification names, not a same-name PR elsewhere', async () => {
+    mockFindFirstTaskPullRequest.mockResolvedValue([
+      {
+        id: 'link-github',
+        status: 'merged',
+        host: 'github.com',
+        repositoryId: 'repo-github',
+        autoHandleFeedbackByUserId: 'user-9',
+      },
+      {
+        id: 'link-gitea',
+        status: 'open',
+        host: 'gitea.example.com',
+        repositoryId: 'repo-gitea',
+        autoHandleFeedbackByUserId: 'user-9',
+      },
+    ]);
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockReadLivePullRequestState.mockResolvedValue('open');
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+
+    await prReviewNotificationJob(
+      makeJob({
+        sourceControlProvider: 'gitea',
+        host: 'gitea.example.com',
+        repositoryId: 'repo-gitea',
+      }) as never,
+    );
+
+    // The merged GitHub link did not suppress the Gitea delivery, and the
+    // live read was scoped to the Gitea host.
+    expect(mockReadLivePullRequestState).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'gitea', host: 'gitea.example.com' }),
+    );
+    expect(mockDispatchFollowUp).toHaveBeenCalled();
+  });
+
+  it('auto-dispatches when the live PR state cannot be read', async () => {
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      status: 'open',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockReadLivePullRequestState.mockResolvedValue(null);
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockDispatchFollowUp).toHaveBeenCalled();
   });
 
   it('fences a reclaimed automatic dispatch before remediation starts', async () => {
