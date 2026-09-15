@@ -149,6 +149,8 @@ describe('controller-owned Session egress lifecycle', () => {
     });
     expect(result.status).toBe('registered');
     if (result.status !== 'registered') throw new Error('registration failed');
+    if (result.admission !== 'connector')
+      throw new Error('expected connector admission');
     const certificate = new X509Certificate(result.connector.certificatePem);
     expect(certificate.subjectAltName).toContain(
       `URI:roomote://workload/${workloadId}`,
@@ -169,16 +171,8 @@ describe('controller-owned Session egress lifecycle', () => {
     );
   });
 
-  it.each([
-    'modal',
-    'daytona',
-    'e2b',
-    'blaxel',
-    'box',
-    'azure',
-    'roomote',
-  ] as const)(
-    'does not mint substitutes for an unenforced %s adapter',
+  it.each(['daytona', 'e2b', 'blaxel', 'box', 'azure'] as const)(
+    'does not mint substitutes for an unsupported %s adapter',
     async (provider) => {
       const deps = dependencies();
       await expect(
@@ -255,4 +249,78 @@ describe('controller-owned Session egress lifecycle', () => {
       registration.substitutes[0]!.substitute,
     );
   });
+
+  it('admits connector-less providers through the API proxy once the deployment opts in', async () => {
+    vi.useFakeTimers();
+    try {
+      const deps = { ...dependencies(), config: null, apiProxyEnabled: true };
+      const lifecycle = new SessionEgressLifecycle(deps);
+      expect(await lifecycle.admissionFor('modal')).toBe('api_proxy');
+      expect(await lifecycle.admissionFor('roomote')).toBe('api_proxy');
+      // Without gateway configuration the connector path stays closed.
+      expect(await lifecycle.admissionFor('docker')).toBeNull();
+      expect(await lifecycle.needsBootstrapAdmission(1, 'modal')).toBe(true);
+      expect(deps.client!.register).not.toHaveBeenCalled();
+
+      const result = await lifecycle.register({
+        taskRun: { id: 1, taskId: 'task1' },
+        provider: 'modal',
+        resume: false,
+      });
+      expect(result).toMatchObject({
+        status: 'registered',
+        admission: 'api_proxy',
+        workload: registration,
+      });
+      if (result.status !== 'registered') throw new Error('unreachable');
+      expect(result.connectorIdentity).toMatch(
+        /^roomote:\/\/api-proxy\/run\/1\/[0-9a-f]{24}$/,
+      );
+      expect('connector' in result).toBe(false);
+      expect(deps.client!.register).toHaveBeenCalledWith({
+        runId: 1,
+        provider: 'modal',
+        connectorIdentity: result.connectorIdentity,
+        leaseSeconds: 3600,
+      });
+      const events = vi.mocked(deps.recordEvent).mock.calls;
+      expect(events.at(-1)![0]).toMatchObject({
+        eventType: 'decision',
+        details: { status: 'registered', admission: 'api_proxy' },
+      });
+      expect(JSON.stringify(events)).not.toContain(
+        registration.substitutes[0]!.substitute,
+      );
+
+      // Lease renewal needs no gateway configuration either.
+      lifecycle.startLeaseRenewal(1, workloadId);
+      await vi.advanceTimersByTimeAsync(1_200_000);
+      expect(deps.client!.renewLease).toHaveBeenCalledWith(workloadId, {
+        leaseSeconds: 3600,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['modal', 'roomote'] as const)(
+    'reports %s as disabled until the deployment enables the API proxy',
+    async (provider) => {
+      const deps = dependencies();
+      const lifecycle = new SessionEgressLifecycle(deps);
+      expect(await lifecycle.needsBootstrapAdmission(1, provider)).toBe(false);
+      await expect(
+        lifecycle.register({
+          taskRun: { id: 1, taskId: 'task1' },
+          provider,
+          resume: false,
+        }),
+      ).resolves.toEqual({ status: 'skipped', reason: 'disabled' });
+      expect(deps.client!.register).not.toHaveBeenCalled();
+      const events = vi.mocked(deps.recordEvent).mock.calls;
+      expect(events.at(-1)![0].message).toContain(
+        'has not enabled the Session egress API proxy',
+      );
+    },
+  );
 });

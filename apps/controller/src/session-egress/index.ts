@@ -12,6 +12,7 @@ import {
 } from './lifecycle';
 
 export * from './lifecycle';
+export * from './api-proxy';
 
 /**
  * Production wiring: configuration from the validated env, the typed SDK
@@ -20,23 +21,32 @@ export * from './lifecycle';
  */
 export function createSessionEgressLifecycle(): SessionEgressLifecycle {
   const config = resolveSessionEgressProvisioningConfig(Env);
-  const client = config
-    ? createSessionEgressControllerClient({ apiBaseUrl: Env.TRPC_URL })
-    : null;
+  const apiProxyEnabled = Env.R_SESSION_EGRESS_API_PROXY_ENABLED === true;
+  const client =
+    config || apiProxyEnabled
+      ? createSessionEgressControllerClient({ apiBaseUrl: Env.TRPC_URL })
+      : null;
 
   if (config) {
     console.log(
-      `[sessionEgress] Enabled: gateway ${config.gatewayAddr}, connector image ${config.connectorImage}, lease ${config.leaseSeconds}s`,
+      `[sessionEgress] Connector admission enabled: gateway ${config.gatewayAddr}, connector image ${config.connectorImage}, lease ${config.leaseSeconds}s`,
     );
-  } else {
+  }
+  if (apiProxyEnabled) {
     console.log(
-      '[sessionEgress] Disabled: no SESSION_EGRESS_* provisioning configured; runs attached to Sessions with service grants will report no service tokens.',
+      '[sessionEgress] API-proxy admission enabled for connector-less compute providers.',
+    );
+  }
+  if (!config && !apiProxyEnabled) {
+    console.log(
+      '[sessionEgress] Disabled: no SESSION_EGRESS_* provisioning and no R_SESSION_EGRESS_API_PROXY_ENABLED; runs attached to Sessions with service grants will report no service tokens.',
     );
   }
 
   return new SessionEgressLifecycle({
     client,
     config,
+    apiProxyEnabled,
     findCandidate: findSessionEgressCandidateForRun,
     recordEvent: async (event) => {
       await recordTaskRunLifecycleEvent(db, {

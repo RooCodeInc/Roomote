@@ -49,12 +49,23 @@ import { assertEgressUrlAllowed } from './safe-fetch';
 export type SessionEgressPrincipal = 'controller' | 'gateway';
 
 export interface SessionEgressServiceOptions {
-  /** Resolves the gateway shared secret; `null` disables the whole surface. */
+  /** Resolves the gateway shared secret; `null` disables the gateway principal. */
   gatewayToken?: () => string | null;
+  /** Whether API-proxy admission keeps the controller routes available without a gateway. */
+  apiProxyEnabled?: () => boolean;
 }
 
 export function getSessionEgressGatewayToken(): string | null {
   return Env.R_SESSION_EGRESS_GATEWAY_TOKEN?.trim() || null;
+}
+
+/**
+ * API-proxy admission needs the controller routes of this surface but no
+ * gateway. The deployment opts in explicitly; the gateway principal stays
+ * unavailable until a gateway token exists.
+ */
+export function isSessionEgressApiProxyEnabled(): boolean {
+  return Env.R_SESSION_EGRESS_API_PROXY_ENABLED === true;
 }
 
 function constantTimeEquals(presented: string, expected: string): boolean {
@@ -82,11 +93,12 @@ function bearer(header: string | undefined): string | null {
 
 export async function authenticateSessionEgressPrincipal(
   authorizationHeader: string | undefined,
-  gatewayToken: string,
+  gatewayToken: string | null,
 ): Promise<SessionEgressPrincipal | null> {
   const token = bearer(authorizationHeader);
   if (!token) return null;
-  if (constantTimeEquals(token, gatewayToken)) return 'gateway';
+  if (gatewayToken !== null && constantTimeEquals(token, gatewayToken))
+    return 'gateway';
   try {
     await validateSessionEgressControllerToken(token);
     return 'controller';

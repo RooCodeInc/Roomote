@@ -6,6 +6,7 @@ import {
   authenticateSessionEgressPrincipal,
   authorize,
   getSessionEgressGatewayToken,
+  isSessionEgressApiProxyEnabled,
   issueSubstitutes,
   registerWorkload,
   renewLease,
@@ -47,6 +48,8 @@ export function createSessionEgressControlPlane(
   options: SessionEgressServiceOptions = {},
 ) {
   const gatewayToken = options.gatewayToken ?? getSessionEgressGatewayToken;
+  const apiProxyEnabled =
+    options.apiProxyEnabled ?? isSessionEgressApiProxyEnabled;
   const app = new Hono<Env>();
 
   app.use(
@@ -58,8 +61,12 @@ export function createSessionEgressControlPlane(
   );
 
   app.use('*', async (c, next) => {
+    // The surface exists for a gateway or for API-proxy admission; with
+    // neither configured it stays invisible. Without a gateway token only the
+    // controller principal can authenticate.
     const expected = gatewayToken();
-    if (!expected) return c.json({ error: 'not_found' }, 404);
+    if (!expected && !apiProxyEnabled())
+      return c.json({ error: 'not_found' }, 404);
     const principal = await authenticateSessionEgressPrincipal(
       c.req.header('authorization'),
       expected,

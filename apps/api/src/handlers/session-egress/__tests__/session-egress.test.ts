@@ -302,14 +302,36 @@ it('is classified as a handler-authenticated internal surface', () => {
   });
 });
 
-it('is absent until a gateway secret is configured', async () => {
+it('is absent until a gateway secret or API-proxy admission is configured', async () => {
   app = new Hono<{ Variables: Variables }>();
   app.route(
     path,
-    createSessionEgressControlPlane({ gatewayToken: () => null }),
+    createSessionEgressControlPlane({
+      gatewayToken: () => null,
+      apiProxyEnabled: () => false,
+    }),
   );
   expect((await call('/workloads', { body: {} })).status).toBe(404);
   expect((await call('/authorize', { body: {} })).status).toBe(404);
+});
+
+it('serves only the controller when API-proxy admission is enabled without a gateway', async () => {
+  app = new Hono<{ Variables: Variables }>();
+  app.route(
+    path,
+    createSessionEgressControlPlane({
+      gatewayToken: () => null,
+      apiProxyEnabled: () => true,
+    }),
+  );
+  const result = await register({
+    provider: 'modal',
+    connectorIdentity: 'roomote://api-proxy/run/1/0123456789abcdef',
+  });
+  expect(result.status).toBe(201);
+  // No gateway token exists, so nothing can authenticate as the gateway.
+  expect((await call('/authorize', { body: {} })).status).toBe(401);
+  expect((await call('/revocations', { method: 'GET' })).status).toBe(401);
 });
 
 it('accepts only the controller and gateway service principals on their own routes', async () => {

@@ -27,7 +27,10 @@ re-joined on every call.
 ## Principals and authentication
 
 The surface is disabled (every route returns `404 {"error":"not_found"}`)
-until `R_SESSION_EGRESS_GATEWAY_TOKEN` (>= 32 chars) is configured on the API.
+until either `R_SESSION_EGRESS_GATEWAY_TOKEN` (>= 32 chars) or
+`R_SESSION_EGRESS_API_PROXY_ENABLED=true` is configured on the API. With only
+the latter, the controller routes are available for API-proxy admission and
+the gateway principal cannot authenticate at all.
 
 | Principal    | Credential                                                                                                                  | Routes                                              |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
@@ -252,9 +255,12 @@ the gateway received) alone.
 ## API substitution proxy (`/api/session-egress/<upstream path>`)
 
 Compute providers without a per-workload connector (hosted sandboxes such as
-Modal) use the API itself as the gateway. The controller registers the run
-through `POST /workloads` exactly as for the connector path, using a synthetic
-connector identity, and delivers the substitutes together with one base URL,
+Modal) use the API itself as the gateway when the deployment sets
+`R_SESSION_EGRESS_API_PROXY_ENABLED=true` on the API and the controller. The
+controller registers the run through `POST /workloads` exactly as for the
+connector path, using a synthetic connector identity
+(`roomote://api-proxy/run/<runId>/<random>`), after the worker's ordinary
+bootstrap reports ready, and delivers the substitutes together with one base URL,
 `<api origin>/api/session-egress`, shared by every approved service. The
 workload points an ordinary HTTP client at that base URL and presents the
 service's substitute as its credential in any header

@@ -432,6 +432,12 @@ const serverSchema = {
   // root, so SDK clients that allow only a host override (no path prefix) can
   // use it. Same route and checks; only the address differs. Point DNS for the
   // name at the API service; the path form keeps working on the API host.
+  // Lets attached coding runs on compute providers without a per-workload
+  // connector (Modal, Roomote Cloud) receive substitute tokens and use the
+  // API-side session egress proxy at /api/session-egress. Set on the API and
+  // the controller. Off by default: without it those runs get no tokens and
+  // the Session shows a nonsecret status explaining why.
+  R_SESSION_EGRESS_API_PROXY_ENABLED: optInBoolean(),
   R_SESSION_EGRESS_PROXY_HOST: z
     .string()
     .trim()
