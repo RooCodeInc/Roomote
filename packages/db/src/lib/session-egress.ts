@@ -10,6 +10,7 @@ import {
   type SessionEgressAuthorization,
   type SessionEgressAuthorize,
   type SessionEgressDenialReason,
+  type SessionEgressProxyAuthorize,
   type SessionEgressRevocationFeed,
   type SessionEgressSubstituteIssue,
   type SessionEgressWorkloadRegister,
@@ -499,13 +500,40 @@ function approvedDestination(origin: string): { host: string; port: number } {
 }
 
 /**
- * Live per-request authorization for the gateway. Every phase of one HTTP
- * exchange (request, buffered response release, each stream emission) calls
- * this again; nothing here is cached. Plaintext is decrypted only after the
- * whole decision is `allowed`, and only for the `request` phase.
+ * How a presented substitute is bound to a caller.
+ *
+ * - `connector`: the external gateway authenticated a connector certificate
+ *   and maps it to a workload; the token must belong to exactly that workload
+ *   and the CONNECT target must equal the approved origin.
+ * - `proxy`: the API itself is the gateway. The grant is named by the request
+ *   URL and there is no connector; the token must belong to that grant and the
+ *   destination is the approved origin by construction. Possession of the
+ *   substitute is the authority, bounded by the same live workload, Session,
+ *   run, generation, expiry and revocation checks.
  */
-export async function authorizeSessionEgress(
-  input: SessionEgressAuthorize,
+type SubstituteBinding =
+  | {
+      kind: 'connector';
+      workloadId: string;
+      connectorIdentity: string;
+      destination: { host: string; port: number };
+    }
+  | { kind: 'proxy'; secretRef: string };
+
+/**
+ * Live per-request authorization. Every phase of one HTTP exchange (request,
+ * buffered response release, each stream emission) calls this again; nothing
+ * here is cached. Plaintext is decrypted only after the whole decision is
+ * `allowed`, and only for the `request` phase.
+ */
+async function authorizeSubstitute(
+  input: {
+    substitute: string;
+    method: SessionEgressAuthorize['method'];
+    phase: SessionEgressAuthorize['phase'];
+    authorizationId?: string;
+  },
+  binding: SubstituteBinding,
   options: {
     /**
      * Current deployment egress policy for the approved origin (public
@@ -514,7 +542,7 @@ export async function authorizeSessionEgress(
      * second line, not the only one.
      */
     isOriginAllowed?: (origin: string) => boolean;
-  } = {},
+  },
 ): Promise<SessionEgressAuthorization> {
   const load = () =>
     db
@@ -562,8 +590,10 @@ export async function authorizeSessionEgress(
     if (!row) return 'unknown_substitute';
     const { substitute, workload, secret, session, run } = row;
     if (
-      workload.id !== input.workloadId ||
-      workload.connectorIdentity !== input.connectorIdentity
+      binding.kind === 'connector'
+        ? workload.id !== binding.workloadId ||
+          workload.connectorIdentity !== binding.connectorIdentity
+        : secret.id !== binding.secretRef
     )
       return 'workload_mismatch';
     if (workload.status !== 'active' || row.workloadExpired)
@@ -587,8 +617,9 @@ export async function authorizeSessionEgress(
       return 'session_unavailable';
     const expected = approvedDestination(secret.origin);
     if (
-      input.destination.host.toLowerCase() !== expected.host ||
-      input.destination.port !== expected.port ||
+      (binding.kind === 'connector' &&
+        (binding.destination.host.toLowerCase() !== expected.host ||
+          binding.destination.port !== expected.port)) ||
       !(options.isOriginAllowed?.(secret.origin) ?? true)
     )
       return 'destination_mismatch';
@@ -600,19 +631,37 @@ export async function authorizeSessionEgress(
   const [row] = await load();
   const reason = decide(row);
   const authorizationId = input.authorizationId ?? randomUUID();
-  // A token that does not belong to this workload tells the audit nothing
-  // trustworthy about a Session or grant; record only the presented workload.
+  // A token that does not belong to this binding tells the audit nothing
+  // trustworthy about a Session or grant; record only what was presented.
   const bound =
     row && reason !== 'unknown_substitute' && reason !== 'workload_mismatch';
+  const destination =
+    binding.kind === 'connector'
+      ? binding.destination
+      : bound
+        ? approvedDestination(row.secret.origin)
+        : null;
   await db.insert(sessionEgressAudit).values({
     authorizationId,
-    workloadId: input.workloadId,
+    workloadId:
+      binding.kind === 'connector'
+        ? binding.workloadId
+        : bound
+          ? row.workload.id
+          : null,
     sessionId: bound ? row.workload.sessionId : null,
     actorUserId: bound ? row.workload.ownerUserId : null,
-    secretRef: bound ? row.secret.id : null,
+    secretRef:
+      binding.kind === 'proxy'
+        ? binding.secretRef
+        : bound
+          ? row.secret.id
+          : null,
     phase: input.phase,
     method: input.method,
-    destination: `${input.destination.host.toLowerCase()}:${input.destination.port}`,
+    destination: destination
+      ? `${destination.host.toLowerCase()}:${destination.port}`
+      : null,
     decision: reason ? 'denied' : 'allowed',
     reason,
   });
@@ -650,6 +699,35 @@ export async function authorizeSessionEgress(
         }
       : {}),
   };
+}
+
+/** Gateway path: an authenticated connector presents a substitute for a CONNECT target. */
+export async function authorizeSessionEgress(
+  input: SessionEgressAuthorize,
+  options: { isOriginAllowed?: (origin: string) => boolean } = {},
+): Promise<SessionEgressAuthorization> {
+  return authorizeSubstitute(
+    input,
+    {
+      kind: 'connector',
+      workloadId: input.workloadId,
+      connectorIdentity: input.connectorIdentity,
+      destination: input.destination,
+    },
+    options,
+  );
+}
+
+/** API proxy path: a workload presents a substitute for the grant named in the URL. */
+export async function authorizeSessionEgressProxy(
+  input: SessionEgressProxyAuthorize,
+  options: { isOriginAllowed?: (origin: string) => boolean } = {},
+): Promise<SessionEgressAuthorization> {
+  return authorizeSubstitute(
+    input,
+    { kind: 'proxy', secretRef: input.secretRef },
+    options,
+  );
 }
 
 /** Audit rows for one workload: bounded codes only, for tests and operator tooling. */

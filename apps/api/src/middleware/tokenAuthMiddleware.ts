@@ -8,7 +8,10 @@ import {
   validateSessionBrokerToken,
 } from '@roomote/auth';
 import { db, deploymentSettings, eq, users } from '@roomote/db/server';
-import { isRoomoteDeploymentDisabled } from '@roomote/types';
+import {
+  SESSION_EGRESS_PROXY_PATH,
+  isRoomoteDeploymentDisabled,
+} from '@roomote/types';
 
 import type { Variables } from '../types';
 
@@ -59,6 +62,14 @@ function extractBearerToken(
 
 export const tokenAuthMiddleware = () =>
   createMiddleware(async (c: Context<{ Variables: Variables }>, next: Next) => {
+    // The session egress proxy authenticates a substitute token in the
+    // grant's own header slot. It is never a Roomote bearer, so validating it
+    // here would only log a failed lookup on every proxied request.
+    if (c.req.path.startsWith(`${SESSION_EGRESS_PROXY_PATH}/`)) {
+      await next();
+      return;
+    }
+
     const token = extractBearerToken(c);
 
     if (token) {

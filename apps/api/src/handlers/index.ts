@@ -35,6 +35,9 @@ export { brainInference } from './brain-inference';
 // session egress control plane: controller/gateway service principals only
 export { sessionEgress } from './session-egress';
 
+// API-side substitution proxy for workloads without a connector
+export { sessionEgressProxy } from './session-egress-proxy';
+
 // narration tts
 export { tts } from './tts';
 

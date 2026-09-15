@@ -50,6 +50,7 @@ import {
   cloudDeploymentAccess,
   brainInference,
   sessionEgress,
+  sessionEgressProxy,
   inference,
   tts,
   mcp,
@@ -225,6 +226,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/inference', inference);
   app.route('/api/brain/inference', brainInference);
   app.route('/api/internal/session-egress', sessionEgress);
+  app.route('/api/session-egress', sessionEgressProxy);
   app.route('/api/tts', tts);
   app.route('/api/mcp', mcp);
   app.route('/api/mcp-routing', mcpRouting);
