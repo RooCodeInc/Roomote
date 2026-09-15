@@ -115,7 +115,10 @@ export function AcpActivityGroupMessage({
                 <AcpMessageItem
                   msg={tool}
                   showSubagentPayload={showSubagentPayload}
-                  forceToolDetails
+                  forceToolDetails={
+                    resolveToolPresentation(tool.data, tool.partial)
+                      .category === 'read'
+                  }
                 />
               </li>
             ))}

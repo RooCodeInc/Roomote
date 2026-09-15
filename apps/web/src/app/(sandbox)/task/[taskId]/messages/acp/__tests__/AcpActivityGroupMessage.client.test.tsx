@@ -320,6 +320,11 @@ describe('AcpActivityGroupMessage', () => {
         command: null,
       },
     } satisfies AcpToolCallUiMessage;
+    Object.assign(parentTool.data, {
+      rawInput: {
+        arguments: { prompt: 'Hidden raw subagent prompt' },
+      },
+    });
     const childMessage = (
       id: string,
       kind: 'reasoning' | 'text',
@@ -364,6 +369,9 @@ describe('AcpActivityGroupMessage', () => {
 
     expect(screen.getByText('Child reasoning')).toBeVisible();
     expect(screen.getByText('Child reply')).toBeVisible();
+    expect(
+      screen.queryByText('Hidden raw subagent prompt'),
+    ).not.toBeInTheDocument();
     expect(screen.getAllByRole('listitem')).toHaveLength(1);
   });
 });
