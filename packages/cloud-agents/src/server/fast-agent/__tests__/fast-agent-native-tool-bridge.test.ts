@@ -133,6 +133,10 @@ describe('Fast native OpenCode tool bridge', () => {
 
     expect(installedToolFiles.sort()).toEqual(
       Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)
+        .filter(
+          (name) =>
+            name !== FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
+        )
         .map((name) => `${name}.js`)
         .sort(),
     );
@@ -1012,6 +1016,7 @@ describe('Fast native OpenCode tool bridge', () => {
       task: true,
       'roomote_*': true,
     });
+    expect(config.agent.build.tools.webfetch).not.toBe(true);
     const serverConfig = JSON.parse(
       buildOpenCodeCliEnv(runtime.env, {
         preserveReasoning: true,
@@ -1077,30 +1082,34 @@ describe('Fast native OpenCode tool bridge', () => {
     ).toBe(false);
   });
 
-  it('registers only native servers with OpenCode and keeps on-demand servers off the request', async () => {
-    const runtime = await getFastAgentNativeToolRuntime('lazy-mcp', [
-      {
-        id: 'roomote',
-        name: 'Roomote',
-        description: 'Deployment access',
-        tools: [{ name: 'manage_tasks', inputSchema: { type: 'object' } }],
-      },
-      {
-        id: 'gbrain',
-        name: 'Brain',
-        description: 'Deployment memory',
-        tools: [{ name: 'query', inputSchema: { type: 'object' } }],
-      },
-      {
-        id: 'github',
-        name: 'GitHub',
-        description: 'Repository access',
-        tools: Array.from({ length: 40 }, (_, index) => ({
-          name: `tool_${index}`,
-          inputSchema: { type: 'object' },
-        })),
-      },
-    ]);
+  it('registers discovery and setup without direct key-based requests', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'lazy-mcp',
+      [
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Deployment access',
+          tools: [{ name: 'manage_tasks', inputSchema: { type: 'object' } }],
+        },
+        {
+          id: 'gbrain',
+          name: 'Brain',
+          description: 'Deployment memory',
+          tools: [{ name: 'query', inputSchema: { type: 'object' } }],
+        },
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: Array.from({ length: 40 }, (_, index) => ({
+            name: `tool_${index}`,
+            inputSchema: { type: 'object' },
+          })),
+        },
+      ],
+      { serviceCredentialToolsEnabled: true },
+    );
     const config = JSON.parse(
       await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
     ) as {
@@ -1114,15 +1123,22 @@ describe('Fast native OpenCode tool bridge', () => {
       'gbrain_*': true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential]: false,
     });
     expect(config.agent.build.tools).not.toHaveProperty('github_*');
     const toolsDirectory = join(runtime.env.OPENCODE_CONFIG_DIR!, 'tools');
-    expect(await readdir(toolsDirectory)).toEqual(
+    const toolFiles = await readdir(toolsDirectory);
+    expect(toolFiles).toEqual(
       expect.arrayContaining([
         'find_integration_tools.js',
         'call_integration_tool.js',
+        'list_integration_keys.js',
+        'prepare_integration_key.js',
       ]),
     );
+    expect(toolFiles).not.toContain('request_with_integration_key.js');
   });
 
   it('keeps member task inspection namespaced from native task mutations', async () => {

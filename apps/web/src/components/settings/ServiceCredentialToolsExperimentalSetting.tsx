@@ -19,8 +19,7 @@ export function ServiceCredentialToolsExperimentalSetting() {
           onCheckedChange={setEnabled}
         />
         <p className="text-sm text-muted-foreground">
-          Let agents request and use short-lived credentials approved in a
-          Session.
+          Let agents request and use integration keys approved in a Session.
         </p>
       </div>
     </Section>

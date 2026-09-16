@@ -32,6 +32,11 @@ describe('ServiceCredentialToolsExperimentalSetting', () => {
       name: 'Toggle integration keys',
     });
 
+    expect(
+      screen.getByText(
+        'Let agents request and use integration keys approved in a Session.',
+      ),
+    ).toBeInTheDocument();
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
     expect(setEnabledMock).toHaveBeenCalledWith(true);

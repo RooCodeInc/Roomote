@@ -349,6 +349,70 @@ describe('seedDemoData', () => {
     }
   });
 
+  it('fails before writes when the reserved Fast Session ID is occupied', async () => {
+    await db.insert(sessions).values({
+      id: demoSeedFastSession.sessionId,
+      title: 'Unrelated Session',
+      ownerKind: 'system',
+      sourceSurface: 'web',
+      sourceTrigger: 'manual',
+      visibility: 'visible',
+      activityAt: 1,
+      cachedStatus: 'ready',
+    });
+    const unrelatedSession = await db.query.sessions.findFirst({
+      where: eq(sessions.id, demoSeedFastSession.sessionId),
+    });
+    const settingsBefore = await db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+    });
+
+    try {
+      await expect(seedDemoData()).rejects.toThrow(
+        `Cannot seed demo data: reserved Fast Session ID ${demoSeedFastSession.sessionId} is already used by an unrelated Session.`,
+      );
+
+      expect(
+        await db.query.sessions.findFirst({
+          where: eq(sessions.id, demoSeedFastSession.sessionId),
+        }),
+      ).toEqual(unrelatedSession);
+      expect(
+        await db.query.deploymentSettings.findFirst({
+          where: eq(deploymentSettings.id, 'default'),
+        }),
+      ).toEqual(settingsBefore);
+      expect(
+        await db.query.users.findFirst({ where: eq(users.id, demoSeedUserId) }),
+      ).toBeUndefined();
+      expect(
+        await db.query.fastAgentConversations.findFirst({
+          where: eq(
+            fastAgentConversations.id,
+            demoSeedFastSession.conversationId,
+          ),
+        }),
+      ).toBeUndefined();
+      expect(
+        await db.query.fastAgentMessages.findMany({
+          where: eq(
+            fastAgentMessages.conversationId,
+            demoSeedFastSession.conversationId,
+          ),
+        }),
+      ).toEqual([]);
+      expect(
+        await db.query.sessionParticipants.findFirst({
+          where: eq(sessionParticipants.id, demoSeedFastSession.participantId),
+        }),
+      ).toBeUndefined();
+    } finally {
+      await db
+        .delete(sessions)
+        .where(eq(sessions.id, demoSeedFastSession.sessionId));
+    }
+  });
+
   it('removes legacy external reply delivery from the Fast fixture', async () => {
     await seedDemoData();
     await db

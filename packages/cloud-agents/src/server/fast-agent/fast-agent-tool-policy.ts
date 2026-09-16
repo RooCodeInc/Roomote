@@ -13,6 +13,16 @@ export {
   type FastAgentNativeToolName,
 };
 
+const FAST_AGENT_DISABLED_NATIVE_TOOLS = new Set<FastAgentNativeToolName>([
+  FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
+]);
+
+export function isFastAgentNativeToolEnabled(
+  name: FastAgentNativeToolName,
+): boolean {
+  return !FAST_AGENT_DISABLED_NATIVE_TOOLS.has(name);
+}
+
 export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
   '*': false,
   task: true,
@@ -67,8 +77,7 @@ export function buildFastAgentToolFilter(
       options.serviceCredentialToolsEnabled === true,
     [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]:
       options.serviceCredentialToolsEnabled === true,
-    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential]:
-      options.serviceCredentialToolsEnabled === true,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential]: false,
     ...(options.surface && options.surface !== 'web'
       ? {
           [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: false,

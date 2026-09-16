@@ -41,6 +41,7 @@ import { z } from 'zod';
 
 import {
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  isFastAgentNativeToolEnabled,
   isFastAgentSpillTool,
   type FastAgentNativeToolName,
 } from './fast-agent-tool-policy';
@@ -745,7 +746,7 @@ export default {
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List integrations available to this human (their own and deployment-visible grants, with origin, header, allowed methods, visibility, and expiry) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval and before using a reference; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready references are usable by request_with_integration_key with any of their allowed methods and are delivered automatically to coding tasks launched from this Session.",
+  description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List integrations available to this human (their own and deployment-visible grants, with origin, header, allowed methods, visibility, and expiry) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready integrations are delivered automatically to coding tasks launched from this Session.",
   args: {},
   execute: (args, context) => invoke("list_integration_keys", args, context),
 }
@@ -1487,6 +1488,10 @@ function createSharedToolsDirectory(): string {
         layout: 3,
         bridge: FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE,
         tools: FAST_AGENT_NATIVE_TOOL_SOURCES,
+        enabledTools: Object.keys(FAST_AGENT_NATIVE_TOOL_SOURCES).filter(
+          (name) =>
+            isFastAgentNativeToolEnabled(name as FastAgentNativeToolName),
+        ),
       }),
     )
     .digest('hex');
@@ -1518,6 +1523,8 @@ function createSharedToolsDirectory(): string {
     'utf8',
   );
   for (const [name, source] of Object.entries(FAST_AGENT_NATIVE_TOOL_SOURCES)) {
+    if (!isFastAgentNativeToolEnabled(name as FastAgentNativeToolName))
+      continue;
     writeFileSync(join(toolsDirectory, `${name}.js`), source, 'utf8');
   }
   return directory;
