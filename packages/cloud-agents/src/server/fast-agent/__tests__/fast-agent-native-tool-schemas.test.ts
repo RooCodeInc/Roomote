@@ -10,7 +10,6 @@ import { once } from 'node:events';
 import {
   CALL_INTEGRATION_TOOL_TOOL,
   FAST_AGENT_NATIVE_TOOL_NAMES,
-  serviceCredentialRequestSchema,
   serviceCredentialPrepareSchema,
   serviceCredentialPrepareToolSchema,
   MANAGE_WAKEUPS_TOOL,
@@ -19,6 +18,7 @@ import { z } from 'zod';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 
 import { getFastAgentNativeToolRuntime } from '../fast-agent-native-tool-bridge';
+import { isFastAgentNativeToolEnabled } from '../fast-agent-tool-policy';
 import { writeOpenCodePluginSeedFixture } from '../../__tests__/helpers/opencode-plugin-seed-fixture';
 
 /**
@@ -276,86 +276,13 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       await rm(dirname(join(workDir, 'x')), { recursive: true, force: true });
   });
 
-  it('generates a concrete bounded Integration-key request shape without caller identity', async () => {
-    const tool = tools.find(
-      ({ name }) =>
-        name === FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
-    )!;
-    expect(Object.keys(tool.args!).sort()).toEqual([
-      'accept',
-      'body',
-      'contentType',
-      'method',
-      'path',
-      'secretRef',
-    ]);
-    const schema = toOpenCodeJsonSchema(zod, tool.args!);
-    expect(JSON.stringify(schema)).not.toContain('\\p{');
-    expect(schema).toMatchObject({
-      type: 'object',
-      properties: {
-        secretRef: { type: 'string', format: 'uuid' },
-        method: { enum: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] },
-        path: { type: 'string', minLength: 1, maxLength: 2048 },
-        accept: { enum: ['application/json', 'text/plain'] },
-        body: expect.any(Object),
-        contentType: {
-          enum: [
-            'application/json',
-            'text/plain',
-            'application/x-www-form-urlencoded',
-          ],
-        },
-      },
-      required: ['secretRef', 'method', 'path'],
-    });
-    const args = {
-      secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
-      method: 'GET',
-      path: '/status',
-    };
-    expect(serviceCredentialRequestSchema.safeParse(args).success).toBe(true);
-    for (const body of [undefined, null, '']) {
-      expect(
-        serviceCredentialRequestSchema.safeParse({ ...args, body }).success,
-      ).toBe(true);
-      expect(validator.compile(schema)({ ...args, body })).toBe(true);
-    }
-    // A write with a body is valid; the broker still checks the grant's methods.
-    const write = {
-      ...args,
-      method: 'POST',
-      body: '{"q":"roomote"}',
-      contentType: 'application/json',
-    };
-    expect(serviceCredentialRequestSchema.safeParse(write).success).toBe(true);
-    expect(validator.compile(schema)(write)).toBe(true);
-    expect(validator.compile(schema)({ ...args, body: {} })).toBe(false);
-    // GET/HEAD never carry a body: the JSON schema cannot express that
-    // cross-field rule, so the runtime schema enforces it.
-    for (const invalid of [
-      { ...args, userId: 'caller' },
-      { ...args, sessionId: 'caller' },
-      { ...args, method: 'TRACE' },
-      { ...args, path: 'x'.repeat(2049) },
-      { ...args, accept: 'text/html' },
-      { ...args, body: 'nonempty' },
-      { ...args, body: ' ' },
-      { ...args, body: {} },
-      { ...write, contentType: 'application/xml' },
-    ]) {
-      expect(serviceCredentialRequestSchema.safeParse(invalid).success).toBe(
-        false,
-      );
-    }
-    const execute = tool.execute as (
-      args: unknown,
-      context: unknown,
-    ) => Promise<unknown>;
-    expect(await execute(args, {})).toEqual({
-      name: 'request_with_integration_key',
-      args,
-    });
+  it('omits direct Integration-key requests from generated Fast tools', () => {
+    expect(
+      tools.find(
+        ({ name }) =>
+          name === FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
+      ),
+    ).toBeUndefined();
   });
 
   it('generates concrete nonsecret preparation and empty status schemas', async () => {
@@ -472,10 +399,10 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     }
   });
 
-  it('covers every native tool', () => {
+  it('covers every enabled native tool', () => {
     const generated = tools.map((tool) => tool.name).sort();
     for (const name of Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)) {
-      expect(generated).toContain(name);
+      expect(generated.includes(name)).toBe(isFastAgentNativeToolEnabled(name));
     }
     for (const tool of tools) {
       expect(typeof tool.description, tool.name).toBe('string');
@@ -674,43 +601,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
                 tool.name ===
                 FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
             );
-          expect(emitted, `${providerID}: ${output}`).toBeDefined();
-          const schema =
-            providerID === 'anthropic'
-              ? emitted!.input_schema
-              : emitted!.parameters;
-          expect(schema).toMatchObject({
-            type: 'object',
-            properties: {
-              secretRef: { type: 'string' },
-              method: { enum: ['GET', 'HEAD'] },
-              path: { type: 'string' },
-              accept: { enum: ['application/json', 'text/plain'] },
-              body: expect.any(Object),
-            },
-            required: expect.arrayContaining(['secretRef', 'method', 'path']),
-          });
-          expect(
-            Object.keys((schema as { properties: object }).properties).sort(),
-          ).toEqual(['accept', 'body', 'method', 'path', 'secretRef']);
-          // OpenCode strips string constraints for OpenAI; the server-side
-          // schema above remains responsible for enforcing these bounds.
-          if (providerID === 'anthropic') {
-            expect(schema).toMatchObject({
-              properties: {
-                secretRef: { format: 'uuid' },
-                path: { minLength: 1, maxLength: 2048 },
-              },
-            });
-          }
-          expect(validateJsonSchema(schema, providerID!)).toEqual([]);
-          expect(
-            validator.compile(schema!)({
-              secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
-              method: 'GET',
-              path: '/status',
-            }),
-          ).toBe(true);
+          expect(emitted, `${providerID}: ${output}`).toBeUndefined();
           expect(JSON.stringify(requests)).not.toContain('mock-provider-key');
         }
       } catch (error) {
