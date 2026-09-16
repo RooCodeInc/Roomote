@@ -189,6 +189,28 @@ class SaturatedTestController extends TestController {
   protected readonly MAX_CONCURRENT_SPAWNS: number = 0;
 }
 
+class ShutdownTestController extends TestController {
+  protected readonly SHUTDOWN_TIMEOUT_MS = 50;
+
+  public readonly spawnStarted = vi.fn();
+  public readonly spawnCompleted = vi.fn();
+  public readonly teardownCompleted = vi.fn();
+
+  public constructor(private readonly spawnResult: Promise<void>) {
+    super();
+  }
+
+  protected override async spawnFreshWorker(): Promise<void> {
+    this.spawnStarted();
+    await this.spawnResult;
+    this.spawnCompleted();
+  }
+
+  protected override async teardown(): Promise<void> {
+    this.teardownCompleted();
+  }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeTaskRun(overrides: Partial<TaskRun> = {}): TaskRun {
@@ -217,11 +239,11 @@ function makeTaskRun(overrides: Partial<TaskRun> = {}): TaskRun {
 }
 
 function resetControllerMocks() {
-  mockTaskRunsFindFirst.mockResolvedValue(null);
+  mockTaskRunsFindFirst.mockReset().mockResolvedValue(null);
   mockTaskRunsFindMany.mockResolvedValue([]);
-  mockDequeueTaskRun.mockResolvedValue(null);
+  mockDequeueTaskRun.mockReset().mockResolvedValue(null);
   mockFindPersistedWorkerBootstrapRestarts.mockResolvedValue([]);
-  mockGetOrphanedTaskRun.mockResolvedValue(null);
+  mockGetOrphanedTaskRun.mockReset().mockResolvedValue(null);
   mockReadManagedDeploymentAccess.mockResolvedValue({
     state: 'active',
     reason: null,
@@ -239,6 +261,15 @@ function resetControllerMocks() {
   mockUpdateWhere.mockReset().mockReturnValue({
     returning: vi.fn().mockResolvedValue([{}]),
   });
+}
+
+function createDeferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+
+  return { promise, resolve };
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -473,6 +504,87 @@ describe('BaseController.handleSpawnTaskRunError', () => {
 
     expect(mockGetOrphanedTaskRun).not.toHaveBeenCalled();
     expect(mockCaptureControllerMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('BaseController shutdown', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetControllerMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('shares one shutdown deadline and tears down without terminalizing an unfinished spawn', async () => {
+    const spawn = createDeferred();
+    const controller = new ShutdownTestController(spawn.promise);
+    const taskRun = makeTaskRun({ id: 110 });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    mockDequeueTaskRun
+      .mockResolvedValueOnce(taskRun.id)
+      .mockResolvedValue(null);
+    mockTaskRunsFindFirst.mockResolvedValueOnce(taskRun);
+
+    const startPromise = controller.start();
+    await vi.waitFor(() => expect(controller.spawnStarted).toHaveBeenCalled());
+
+    const stopPromise = controller.stop();
+    const result = await Promise.race([
+      stopPromise.then(() => 'stopped'),
+      new Promise<'timed-out'>((resolve) =>
+        setTimeout(() => resolve('timed-out'), 90),
+      ),
+    ]);
+
+    expect(result).toBe('stopped');
+    expect(controller.teardownCompleted).toHaveBeenCalledOnce();
+    expect(controller.spawnCompleted).not.toHaveBeenCalled();
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      '[BaseController] Shutdown deadline reached with unfinished in-flight spawns for task runs: #110; continuing shutdown',
+    );
+
+    spawn.resolve();
+    await startPromise;
+    expect(controller.spawnCompleted).toHaveBeenCalledOnce();
+    expect(controller.teardownCompleted).toHaveBeenCalledOnce();
+    expect(
+      controller.teardownCompleted.mock.invocationCallOrder[0],
+    ).toBeLessThan(controller.spawnCompleted.mock.invocationCallOrder[0] ?? 0);
+    expect(mockFinishRun).not.toHaveBeenCalled();
+  });
+
+  it('waits for a normally settling spawn before teardown', async () => {
+    const spawn = createDeferred();
+    const controller = new ShutdownTestController(spawn.promise);
+    const taskRun = makeTaskRun({ id: 111 });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    mockDequeueTaskRun
+      .mockResolvedValueOnce(taskRun.id)
+      .mockResolvedValue(null);
+    mockTaskRunsFindFirst.mockResolvedValueOnce(taskRun);
+
+    const startPromise = controller.start();
+    await vi.waitFor(() => expect(controller.spawnStarted).toHaveBeenCalled());
+
+    const stopPromise = controller.stop();
+    spawn.resolve();
+    await stopPromise;
+    await startPromise;
+
+    expect(controller.spawnCompleted).toHaveBeenCalledOnce();
+    expect(controller.teardownCompleted).toHaveBeenCalledOnce();
+    expect(controller.spawnCompleted.mock.invocationCallOrder[0]).toBeLessThan(
+      controller.teardownCompleted.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalledWith(
+      expect.stringContaining('unfinished in-flight spawns'),
+    );
   });
 });
 
