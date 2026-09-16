@@ -38,8 +38,9 @@ use x11rb::{
     protocol::{
         randr::{self, ConnectionExt as RandrConnectionExt},
         xproto::{
-            BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ConnectionExt as XprotoConnectionExt,
-            KEY_PRESS_EVENT, KEY_RELEASE_EVENT, MOTION_NOTIFY_EVENT, Window,
+            BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ConfigureWindowAux,
+            ConnectionExt as XprotoConnectionExt, KEY_PRESS_EVENT, KEY_RELEASE_EVENT,
+            MOTION_NOTIFY_EVENT, MapState, Window,
         },
         xtest::ConnectionExt as XtestConnectionExt,
     },
@@ -651,7 +652,63 @@ impl X11Controller {
         }
         self.width = size.width;
         self.height = size.height;
+        self.fit_windows_to_screen(size);
         Ok(())
+    }
+
+    /// There is no window manager on the sandbox display, so top-level
+    /// windows keep whatever size they were created with. Resize the mapped
+    /// ones to fill the new screen, the way a maximizing window manager
+    /// would, so the application follows the viewer's panel. Failures are
+    /// logged and ignored: the screen resize itself already succeeded.
+    fn fit_windows_to_screen(&self, size: ScreenSize) {
+        let tree = match self
+            .connection
+            .query_tree(self.root)
+            .map(|cookie| cookie.reply())
+        {
+            Ok(Ok(tree)) => tree,
+            Ok(Err(error)) => {
+                eprintln!("failed to list X11 windows after resize: {error}");
+                return;
+            }
+            Err(error) => {
+                eprintln!("failed to list X11 windows after resize: {error}");
+                return;
+            }
+        };
+        for window in tree.children {
+            let attributes = match self
+                .connection
+                .get_window_attributes(window)
+                .map(|cookie| cookie.reply())
+            {
+                Ok(Ok(attributes)) => attributes,
+                _ => continue,
+            };
+            if attributes.override_redirect || attributes.map_state != MapState::VIEWABLE {
+                continue;
+            }
+            let values = ConfigureWindowAux::new()
+                .x(0)
+                .y(0)
+                .width(u32::from(size.width))
+                .height(u32::from(size.height));
+            match self
+                .connection
+                .configure_window(window, &values)
+                .map(|cookie| cookie.check())
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    eprintln!("failed to fit X11 window {window} to the screen: {error}");
+                }
+                Err(error) => {
+                    eprintln!("failed to fit X11 window {window} to the screen: {error}");
+                }
+            }
+        }
+        let _ = self.connection.flush();
     }
 
     fn apply(&mut self, event: ControlEvent) -> Result<(), String> {

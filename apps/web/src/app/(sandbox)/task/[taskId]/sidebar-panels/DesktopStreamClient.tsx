@@ -108,17 +108,17 @@ interface RemoteSize {
 }
 
 /**
- * Remote screen size that fills the panel: the panel's CSS box scaled by the
- * device pixel ratio (capped at 2x), reduced proportionally when that exceeds
- * the pixel budget, and rounded to even dimensions for the encoder.
+ * Remote screen size that fills the panel: the panel's CSS box, reduced
+ * proportionally when that exceeds the pixel budget, and rounded to even
+ * dimensions for the encoder. CSS pixels are used deliberately: the sandbox
+ * renders at 1x, so matching device pixels on a high-DPI display would make
+ * every remote control half its intended size.
  */
-export function computeRemoteSize(
-  panel: { width: number; height: number },
-  devicePixelRatio: number,
-): RemoteSize | null {
-  const ratio = Math.min(Math.max(devicePixelRatio, 1), 2);
-  let width = panel.width * ratio;
-  let height = panel.height * ratio;
+export function computeRemoteSize(panel: {
+  width: number;
+  height: number;
+}): RemoteSize | null {
+  let { width, height } = panel;
   if (width < MIN_REMOTE_WIDTH || height < MIN_REMOTE_HEIGHT) {
     return null;
   }
@@ -422,7 +422,7 @@ export function DesktopStreamClient({
       return false;
     }
     const rect = container.getBoundingClientRect();
-    const size = computeRemoteSize(rect, window.devicePixelRatio || 1);
+    const size = computeRemoteSize(rect);
     if (!size) {
       return false;
     }

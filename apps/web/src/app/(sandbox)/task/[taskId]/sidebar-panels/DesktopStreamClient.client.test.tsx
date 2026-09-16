@@ -312,20 +312,15 @@ describe('DesktopStreamClient', () => {
   });
 
   it('sizes the remote screen to the panel within the pixel budget', () => {
-    expect(computeRemoteSize({ width: 641, height: 481 }, 1)).toEqual({
+    expect(computeRemoteSize({ width: 641, height: 481 })).toEqual({
       width: 640,
       height: 480,
     });
-    // Retina panels double the request until they exceed roughly 1080p.
-    expect(computeRemoteSize({ width: 700, height: 500 }, 2)).toEqual({
-      width: 1400,
-      height: 1000,
-    });
-    const capped = computeRemoteSize({ width: 1600, height: 1000 }, 2);
+    const capped = computeRemoteSize({ width: 3200, height: 2000 });
     expect(capped).not.toBeNull();
     expect(capped!.width * capped!.height).toBeLessThanOrEqual(1920 * 1080);
     expect(capped!.width / capped!.height).toBeCloseTo(1.6, 1);
-    expect(computeRemoteSize({ width: 100, height: 100 }, 1)).toBeNull();
+    expect(computeRemoteSize({ width: 100, height: 100 })).toBeNull();
   });
 
   it('asks the sandbox to match the panel size and reconnects after the resize', async () => {
