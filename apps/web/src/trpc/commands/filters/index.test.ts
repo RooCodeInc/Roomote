@@ -1,4 +1,10 @@
-import { db, taskFactory, taskPullRequests } from '@roomote/db/server';
+import {
+  db,
+  repositoryFactory,
+  taskFactory,
+  taskPullRequests,
+  userFactory,
+} from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -7,11 +13,19 @@ import { getPullRequestsForFilterCommand } from './index';
 describe('getPullRequestsForFilterCommand', () => {
   it('returns distinct provider- and host-qualified values for matching PR coordinates', async () => {
     const repository = `filter-provider/${crypto.randomUUID()}`;
-    const [githubTask, gitlabTask, selfManagedGitlabTask] = await Promise.all([
-      taskFactory.create({ repositoryName: repository }),
-      taskFactory.create({ repositoryName: repository }),
-      taskFactory.create({ repositoryName: repository }),
-    ]);
+    const linkedBy = await userFactory.create();
+    const linkedRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitlab',
+      fullName: repository,
+      linkedByUserId: linkedBy.id,
+    });
+    const [githubTask, gitlabTask, linkedGitlabTask, selfManagedGitlabTask] =
+      await Promise.all([
+        taskFactory.create({ repositoryName: repository }),
+        taskFactory.create({ repositoryName: repository }),
+        taskFactory.create({ repositoryName: repository }),
+        taskFactory.create({ repositoryName: repository }),
+      ]);
     await db.insert(taskPullRequests).values([
       {
         taskId: githubTask.id,
@@ -27,6 +41,15 @@ describe('getPullRequestsForFilterCommand', () => {
         repository,
         prNumber: 123,
         prUrl: `https://gitlab.com/${repository}/-/merge_requests/123`,
+        host: 'gitlab.com',
+      },
+      {
+        taskId: linkedGitlabTask.id,
+        sourceControlProvider: 'gitlab',
+        repository,
+        repositoryId: linkedRepository.id,
+        prNumber: 123,
+        prUrl: `https://gitlab.com/${repository}/-/merge_requests/123?linked=1`,
         host: 'gitlab.com',
       },
       {
@@ -62,5 +85,10 @@ describe('getPullRequestsForFilterCommand', () => {
       ]),
     );
     expect(options).toHaveLength(3);
+    expect(
+      options.filter(
+        (option) => option.value === `gitlab:${repository}#123|host:gitlab.com`,
+      ),
+    ).toHaveLength(1);
   });
 });

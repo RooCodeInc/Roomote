@@ -270,12 +270,17 @@ export async function getPullRequestsForFilterCommand(
   const latestDetectedAt = max(taskPullRequests.detectedAt).as(
     'latest_detected_at',
   );
+  const pullRequestScopeExpression = sql<string | null>`case
+    when ${taskPullRequests.host} is not null then 'host:' || ${taskPullRequests.host}
+    when ${taskPullRequests.repositoryId} is not null then 'repositoryId:' || ${taskPullRequests.repositoryId}::text
+    else null
+  end`;
+  const pullRequestScope = pullRequestScopeExpression.as('pull_request_scope');
 
   const results = await db
     .select({
       sourceControlProvider: taskPullRequests.sourceControlProvider,
-      repositoryId: taskPullRequests.repositoryId,
-      host: taskPullRequests.host,
+      scope: pullRequestScope,
       repository: taskPullRequests.repository,
       prNumber: taskPullRequests.prNumber,
       prTitle: latestPrTitle,
@@ -286,8 +291,7 @@ export async function getPullRequestsForFilterCommand(
     .where(and(...whereConditions))
     .groupBy(
       taskPullRequests.sourceControlProvider,
-      taskPullRequests.repositoryId,
-      taskPullRequests.host,
+      pullRequestScopeExpression,
       taskPullRequests.repository,
       taskPullRequests.prNumber,
     )
@@ -304,19 +308,25 @@ export async function getPullRequestsForFilterCommand(
       } => !!r.repository && r.prNumber !== null,
     )
     .map((r) => {
+      const host = r.scope?.startsWith('host:')
+        ? r.scope.slice('host:'.length)
+        : undefined;
+      const repositoryId = r.scope?.startsWith('repositoryId:')
+        ? r.scope.slice('repositoryId:'.length)
+        : undefined;
       const value = buildPullRequestFilterValue({
         provider: r.sourceControlProvider,
         repository: r.repository,
         number: r.prNumber,
-        repositoryId: r.repositoryId,
-        host: r.host,
+        repositoryId,
+        host,
       });
       const label = r.prTitle || `#${r.prNumber}`;
       const provider =
         sourceControlProviderDescriptors[r.sourceControlProvider];
       const providerLabel =
-        r.host && r.host !== provider.defaultHost
-          ? `${provider.label} (${r.host})`
+        host && host !== provider.defaultHost
+          ? `${provider.label} (${host})`
           : provider.label;
       const subLabel = `${providerLabel} · ${formatRepositoryName(r.repository)}#${r.prNumber}`;
       return { value, label, subLabel };

@@ -19,7 +19,7 @@ describe('pull request filter values', () => {
     });
   });
 
-  it('prefers repository IDs and falls back to encoded hosts', () => {
+  it('prefers encoded hosts and falls back to repository IDs', () => {
     const repositoryIdentity = buildPullRequestFilterValue({
       provider: 'gitlab',
       repository: 'owner/repository',
@@ -31,20 +31,20 @@ describe('pull request filter values', () => {
       provider: 'gitlab',
       repository: 'owner/repository',
       number: 123,
-      repositoryId: '11111111-1111-4111-8111-111111111111',
+      host: 'gitlab.example.com',
     });
 
-    const hostIdentity = buildPullRequestFilterValue({
+    const repositoryIdIdentity = buildPullRequestFilterValue({
       provider: 'gitea',
       repository: 'owner/repository',
       number: 123,
-      host: 'gitea.example.com:3000',
+      repositoryId: '11111111-1111-4111-8111-111111111111',
     });
-    expect(parsePullRequestFilterValue(hostIdentity)).toEqual({
+    expect(parsePullRequestFilterValue(repositoryIdIdentity)).toEqual({
       provider: 'gitea',
       repository: 'owner/repository',
       number: 123,
-      host: 'gitea.example.com:3000',
+      repositoryId: '11111111-1111-4111-8111-111111111111',
     });
   });
 

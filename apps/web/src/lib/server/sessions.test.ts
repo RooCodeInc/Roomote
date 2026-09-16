@@ -10,6 +10,7 @@ import {
   fastAgentParentEvents,
   inArray,
   llmUsageEvents,
+  repositoryFactory,
   runFactory,
   sessionFactory,
   sessionParticipants,
@@ -669,6 +670,11 @@ describe('unified Session queries', () => {
       ownerUserId: owner.id,
       activityAt: 200,
     });
+    const linkedSameHostSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 175,
+    });
     const otherHostSession = await sessionFactory.create({
       ownerKind: 'user',
       ownerUserId: owner.id,
@@ -683,6 +689,7 @@ describe('unified Session queries', () => {
       matchingSession,
       otherRepositorySession,
       otherProviderSession,
+      linkedSameHostSession,
       otherHostSession,
       deletedTaskSession,
     ];
@@ -699,6 +706,11 @@ describe('unified Session queries', () => {
     const matchingPrTask = await taskFactory.create({
       initiatorUserId: owner.id,
       repositoryName: 'RooCodeInc/Other',
+    });
+    const linkedRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitlab',
+      fullName: 'RooCodeInc/Roomote',
+      linkedByUserId: owner.id,
     });
     await db.insert(sessionTasks).values([
       ...tasksBySession.map((task, index) => ({
@@ -742,12 +754,22 @@ describe('unified Session queries', () => {
         repository: 'RooCodeInc/Roomote',
         prNumber: 123,
         prUrl:
+          'https://gitlab.com/RooCodeInc/Roomote/-/merge_requests/123?linked=1',
+        sourceControlProvider: 'gitlab',
+        host: 'gitlab.com',
+        repositoryId: linkedRepository.id,
+      },
+      {
+        taskId: tasksBySession[4]!.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl:
           'https://gitlab.internal/RooCodeInc/Roomote/-/merge_requests/123',
         sourceControlProvider: 'gitlab',
         host: 'gitlab.internal',
       },
       {
-        taskId: tasksBySession[4]!.id,
+        taskId: tasksBySession[5]!.id,
         repository: 'RooCodeInc/Roomote',
         prNumber: 123,
         prUrl: 'https://github.com/RooCodeInc/Roomote/pull/123',
@@ -780,7 +802,10 @@ describe('unified Session queries', () => {
         pullRequest: 'gitlab:RooCodeInc/Roomote#123|host:gitlab.com',
       }),
     ).resolves.toMatchObject({
-      sessions: [expect.objectContaining({ id: otherProviderSession.id })],
+      sessions: [
+        expect.objectContaining({ id: otherProviderSession.id }),
+        expect.objectContaining({ id: linkedSameHostSession.id }),
+      ],
     });
     await expect(
       getSessions(auth, {
@@ -799,7 +824,7 @@ describe('unified Session queries', () => {
     ).resolves.toMatchObject({
       sessions: [expect.objectContaining({ id: matchingSession.id })],
     });
-    expect((await getSessions(auth, { ids })).sessions).toHaveLength(5);
+    expect((await getSessions(auth, { ids })).sessions).toHaveLength(6);
   });
 
   it('lists only distinct visible sources within the list scope', async () => {

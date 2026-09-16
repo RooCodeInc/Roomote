@@ -37,11 +37,11 @@ export function buildPullRequestFilterValue(input: {
   host?: string | null;
 }) {
   const identity = `${input.provider}:${input.repository}#${input.number}`;
-  if (input.repositoryId) {
-    return `${identity}|repositoryId:${encodeURIComponent(input.repositoryId)}`;
-  }
   if (input.host) {
     return `${identity}|host:${encodeURIComponent(input.host)}`;
+  }
+  if (input.repositoryId) {
+    return `${identity}|repositoryId:${encodeURIComponent(input.repositoryId)}`;
   }
   return identity;
 }
