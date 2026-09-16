@@ -927,6 +927,62 @@ describe('SessionWorkspace', () => {
     expect(screen.queryByLabelText('Full task task-3')).toBeNull();
   });
 
+  it('promotes an existing hidden task when it begins running', async () => {
+    const existingRunningTask = {
+      ...secondTask,
+      latestRun: {
+        id: 2,
+        status: RunStatus.Running,
+        taskPhase: 'running',
+        error: null,
+        result: null,
+      },
+    };
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Hidden task',
+    };
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: {
+        tasks: [singleTask, existingRunningTask, thirdTask],
+      },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.queryByLabelText('Full task task-3')).toBeNull();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [
+          singleTask,
+          existingRunningTask,
+          {
+            ...thirdTask,
+            latestRun: {
+              id: 3,
+              status: RunStatus.Running,
+              taskPhase: 'running',
+              error: null,
+              result: null,
+            },
+          },
+        ],
+      });
+    });
+
+    const existingRunningPanel = screen.getByLabelText('Full task task-2');
+    const promotedRunningPanel =
+      await screen.findByLabelText('Full task task-3');
+    expect(
+      existingRunningPanel.compareDocumentPosition(promotedRunningPanel),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
+  });
+
   it('keeps closed task panels dismissed after navigating away and back', async () => {
     const { navigateAwayAndBack } = renderWorkspace({
       isMobile: false,

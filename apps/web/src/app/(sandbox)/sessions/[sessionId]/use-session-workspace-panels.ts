@@ -42,6 +42,13 @@ export type SessionWorkspacePanelAction =
       capacity: number;
     }
   | {
+      type: 'promote-running-tasks';
+      runningTaskIds: string[];
+      transitionedTaskIds: string[];
+      selectedTaskId: string | null;
+      capacity: number;
+    }
+  | {
       type: 'open-task';
       taskId: string;
       selectedTaskId: string | null;
@@ -160,6 +167,34 @@ export function sessionWorkspacePanelReducer(
         ...state,
         utilityPanel: shouldShowTaskPanels ? null : state.utilityPanel,
         taskPanelIds,
+      };
+    }
+    case 'promote-running-tasks': {
+      const visibleTaskPanelIds = getOrderedSessionTaskPanelIds(
+        state,
+        action.selectedTaskId,
+      ).slice(0, action.capacity);
+      const shouldPromote = action.transitionedTaskIds.some(
+        (taskId) =>
+          taskId !== action.selectedTaskId &&
+          state.taskPanelIds.includes(taskId) &&
+          !visibleTaskPanelIds.includes(taskId),
+      );
+      if (!shouldPromote) return state;
+
+      const runningTaskIdSet = new Set(action.runningTaskIds);
+      return {
+        ...state,
+        taskPanelIds: [
+          ...action.runningTaskIds.filter(
+            (taskId) =>
+              taskId !== action.selectedTaskId &&
+              state.taskPanelIds.includes(taskId),
+          ),
+          ...state.taskPanelIds.filter(
+            (taskId) => !runningTaskIdSet.has(taskId),
+          ),
+        ],
       };
     }
     case 'open-task': {
@@ -356,6 +391,7 @@ type SessionWorkspacePanelControllerOptions = {
   sessionId: string;
   taskIds: string[];
   automaticTaskPanelIds: string[];
+  runningTaskIds: string[];
   singleRunningTaskId: string | null;
   taskPanelCapacity: number;
   isMdOrLarger: boolean;
@@ -366,6 +402,7 @@ export function useSessionWorkspacePanels({
   sessionId,
   taskIds,
   automaticTaskPanelIds,
+  runningTaskIds,
   singleRunningTaskId,
   taskPanelCapacity,
   isMdOrLarger,
@@ -389,6 +426,7 @@ export function useSessionWorkspacePanels({
     createSessionWorkspacePanelState,
   );
   const knownTaskIdsRef = useRef<string[] | null>(null);
+  const runningTaskIdsRef = useRef<string[] | null>(null);
   const widePanelsSeededRef = useRef(false);
 
   useEffect(() => {
@@ -436,7 +474,9 @@ export function useSessionWorkspacePanels({
     const dismissedTaskPanelIds =
       navigationState?.getDismissedTaskPanelIds(sessionId);
     const previousTaskIds = knownTaskIdsRef.current;
+    const previousRunningTaskIds = runningTaskIdsRef.current;
     knownTaskIdsRef.current = taskIds;
+    runningTaskIdsRef.current = runningTaskIds;
     if (!widePanelsSeededRef.current && taskPanelCapacity >= 2) {
       widePanelsSeededRef.current = true;
       dispatch({
@@ -450,24 +490,44 @@ export function useSessionWorkspacePanels({
       });
       return;
     }
-    if (!previousTaskIds) return;
+    if (!previousTaskIds || !previousRunningTaskIds) return;
 
     const previousTaskIdSet = new Set(previousTaskIds);
+    const previousRunningTaskIdSet = new Set(previousRunningTaskIds);
     const newTaskIds = automaticTaskPanelIds.filter(
       (taskId) =>
         !previousTaskIdSet.has(taskId) && !dismissedTaskPanelIds?.has(taskId),
     );
-    if (newTaskIds.length === 0) return;
-    dispatch({
-      type: 'add-tasks',
-      taskIds: newTaskIds,
-      selectedTaskId: selectedPanelTaskId,
-      capacity: taskPanelCapacity,
-    });
+    if (newTaskIds.length > 0) {
+      dispatch({
+        type: 'add-tasks',
+        taskIds: newTaskIds,
+        selectedTaskId: selectedPanelTaskId,
+        capacity: taskPanelCapacity,
+      });
+    }
+    if (widePanelsSeededRef.current) {
+      const transitionedTaskIds = runningTaskIds.filter(
+        (taskId) =>
+          previousTaskIdSet.has(taskId) &&
+          !previousRunningTaskIdSet.has(taskId) &&
+          !dismissedTaskPanelIds?.has(taskId),
+      );
+      if (transitionedTaskIds.length > 0) {
+        dispatch({
+          type: 'promote-running-tasks',
+          runningTaskIds,
+          transitionedTaskIds,
+          selectedTaskId: selectedPanelTaskId,
+          capacity: taskPanelCapacity,
+        });
+      }
+    }
   }, [
     isMdOrLarger,
     automaticTaskPanelIds,
     navigationState,
+    runningTaskIds,
     selectedPanelTaskId,
     sessionId,
     taskIds,

@@ -846,13 +846,17 @@ export function SessionWorkspace({
     () => taskCards.map((task) => task.taskId),
     [taskCards],
   );
+  const runningTaskIds = useMemo(
+    () => runningTasks.map((task) => task.taskId),
+    [runningTasks],
+  );
   const automaticTaskPanelIds = useMemo(() => {
-    const runningTaskIds = new Set(runningTasks.map((task) => task.taskId));
+    const runningTaskIdSet = new Set(runningTaskIds);
     return [
       ...runningTaskIds,
-      ...taskIds.filter((taskId) => !runningTaskIds.has(taskId)),
+      ...taskIds.filter((taskId) => !runningTaskIdSet.has(taskId)),
     ];
-  }, [runningTasks, taskIds]);
+  }, [runningTaskIds, taskIds]);
   const {
     utilityPanel,
     taskArtifacts,
@@ -879,6 +883,7 @@ export function SessionWorkspace({
     sessionId: session.id,
     taskIds,
     automaticTaskPanelIds,
+    runningTaskIds,
     singleRunningTaskId: singleRunningTaskId ?? null,
     taskPanelCapacity,
     isMdOrLarger,
