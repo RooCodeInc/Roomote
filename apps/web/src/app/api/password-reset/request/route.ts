@@ -9,6 +9,7 @@ import {
 } from '@/lib/server/self-service-password-reset';
 import { requestSelfServicePasswordReset } from '@/lib/server/user-management';
 import { logger } from '@/lib/server/logger';
+import { Env, resolveTrustedClientAddress } from '@/lib/server/env';
 
 export const runtime = 'nodejs';
 
@@ -29,10 +30,9 @@ function acceptedResponse(requestId: string) {
 }
 
 function getClientAddress(request: NextRequest): string | null {
-  return (
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    request.headers.get('x-real-ip')?.trim() ||
-    null
+  return resolveTrustedClientAddress(
+    request.headers,
+    Env.R_TRUSTED_PROXY_CLIENT_IP_HEADER,
   );
 }
 

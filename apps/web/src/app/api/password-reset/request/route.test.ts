@@ -24,6 +24,10 @@ vi.mock('@/lib/server/user-management', () => ({
 vi.mock('@/lib/server/logger', () => ({
   logger: { info: loggerInfoMock, warn: loggerWarnMock },
 }));
+vi.mock('@/lib/server/env', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/server/env')>()),
+  Env: { R_TRUSTED_PROXY_CLIENT_IP_HEADER: 'x-real-ip' },
+}));
 vi.mock('next/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('next/server')>()),
   after: (callback: () => unknown) => afterCallbacks.push(callback),
@@ -31,12 +35,13 @@ vi.mock('next/server', async (importOriginal) => ({
 
 import { POST } from './route';
 
-function createRequest(body: unknown) {
+function createRequest(body: unknown, forwardedFor = '203.0.113.10, 10.0.0.1') {
   return new Request('http://localhost/api/password-reset/request', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-forwarded-for': '203.0.113.10, 10.0.0.1',
+      'x-forwarded-for': forwardedFor,
+      'x-real-ip': '192.0.2.20',
     },
     body: JSON.stringify(body),
   });
@@ -64,7 +69,7 @@ describe('password reset request route', () => {
     });
     expect(isSelfServicePasswordResetAllowedMock).toHaveBeenCalledWith({
       email: 'ada@example.com',
-      clientAddress: '203.0.113.10',
+      clientAddress: '192.0.2.20',
     });
     expect(requestSelfServicePasswordResetMock).not.toHaveBeenCalled();
 
@@ -81,6 +86,24 @@ describe('password reset request route', () => {
       }),
       'Password reset request completed',
     );
+  });
+
+  it('ignores attacker-controlled forwarded addresses behind a trusted proxy', async () => {
+    await POST(
+      createRequest({ email: 'ada@example.com' }, '198.51.100.1') as never,
+    );
+    await POST(
+      createRequest({ email: 'ada@example.com' }, '198.51.100.2') as never,
+    );
+
+    expect(isSelfServicePasswordResetAllowedMock).toHaveBeenNthCalledWith(1, {
+      email: 'ada@example.com',
+      clientAddress: '192.0.2.20',
+    });
+    expect(isSelfServicePasswordResetAllowedMock).toHaveBeenNthCalledWith(2, {
+      email: 'ada@example.com',
+      clientAddress: '192.0.2.20',
+    });
   });
 
   it.each([
