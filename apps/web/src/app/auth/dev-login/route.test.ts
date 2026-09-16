@@ -205,6 +205,23 @@ describe('GET /auth/dev-login', () => {
       role: 'admin',
       onboardingCompletedAt: null,
     });
+
+    await db
+      .update(users)
+      .set({ onboardingCompletedAt: new Date() })
+      .where(eq(users.id, user!.id));
+    await GET(
+      new NextRequest(
+        'http://localhost:3000/auth/dev-login?scenario=onboarding',
+        { headers: { 'user-agent': 'roomote-dev-login-test' } },
+      ),
+    );
+
+    expect(
+      await db.query.users.findFirst({
+        where: eq(users.email, 'local+onboarding@roomote.dev'),
+      }),
+    ).toMatchObject({ onboardingCompletedAt: null });
   });
 
   it('satisfies inference setup with an intentionally invalid saved key when configuration is empty', async () => {

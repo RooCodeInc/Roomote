@@ -537,22 +537,33 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
     );
 
     if ('taskId' in fixture) {
-      const existingTaskLink = await db.query.sessionTasks.findFirst({
-        where: and(
-          eq(sessionTasks.sessionId, fixture.id),
-          eq(sessionTasks.taskId, fixture.taskId),
-        ),
-      });
-      if (!existingTaskLink) {
-        await db.insert(sessionTasks).values({
+      const insertedTaskLink = await db
+        .insert(sessionTasks)
+        .values({
           sessionId: fixture.id,
           taskId: fixture.taskId,
           origin: 'backfill',
-        });
+        })
+        .onConflictDoNothing()
+        .returning({ taskId: sessionTasks.taskId });
+      const existingTaskLink = await db.query.sessionTasks.findFirst({
+        where: eq(sessionTasks.taskId, fixture.taskId),
+      });
+      let taskLinkChanged = insertedTaskLink.length > 0;
+      if (existingTaskLink?.sessionId !== fixture.id) {
+        await db
+          .update(sessionTasks)
+          .set({
+            sessionId: fixture.id,
+            attachedAt: now,
+            origin: 'backfill',
+          })
+          .where(eq(sessionTasks.taskId, fixture.taskId));
+        taskLinkChanged = true;
       }
       record(
         `task link for lifecycle Session ${fixture.title}`,
-        !existingTaskLink,
+        taskLinkChanged,
       );
     }
   }

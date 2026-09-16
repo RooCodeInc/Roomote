@@ -12,6 +12,7 @@ import {
   githubInstallations,
   repositories,
   sessionParticipants,
+  sessionTasks,
   sessions,
   taskPullRequests,
   tasks,
@@ -367,6 +368,38 @@ describe('seedDemoData', () => {
       currentReplyThreadId: null,
       replyTargetVerified: false,
     });
+  });
+
+  it('recovers when reconciliation already linked the active fixture task', async () => {
+    await seedDemoData();
+    const fixture = demoSeedLifecycleSessions.active;
+    const reconciledSessionId = crypto.randomUUID();
+    await db.insert(sessions).values({
+      id: reconciledSessionId,
+      title: 'Reconciled fixture task',
+      ownerKind: 'user',
+      ownerUserId: demoSeedUserId,
+      sourceSurface: 'web',
+      sourceTrigger: 'manual',
+      visibility: 'visible',
+      activityAt: Math.floor(Date.now() / 1_000),
+      cachedStatus: 'active',
+    });
+    await db
+      .update(sessionTasks)
+      .set({ sessionId: reconciledSessionId })
+      .where(eq(sessionTasks.taskId, fixture.taskId));
+
+    try {
+      await expect(seedDemoData()).resolves.toBeDefined();
+      expect(
+        await db.query.sessionTasks.findFirst({
+          where: eq(sessionTasks.taskId, fixture.taskId),
+        }),
+      ).toMatchObject({ sessionId: fixture.id });
+    } finally {
+      await db.delete(sessions).where(eq(sessions.id, reconciledSessionId));
+    }
   });
 
   it('is idempotent and leaves existing rows untouched on re-run', async () => {

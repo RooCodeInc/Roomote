@@ -189,6 +189,7 @@ export async function GET(request: NextRequest) {
       target: users.id,
       set: {
         role: 'admin',
+        onboardingCompletedAt: identity.onboardingCompletedAt,
         deletedAt: null,
         updatedAt: now,
       },
