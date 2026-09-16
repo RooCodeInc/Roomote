@@ -7,8 +7,6 @@ import {
   type TaskRun,
   createComputeProviderMutationEventRecorder,
   db,
-  eq,
-  taskRuns,
 } from '@roomote/db/server';
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
@@ -27,7 +25,10 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
-import type { CredentialEgressLifecycle } from '../credential-egress';
+import {
+  prepareHostedWorkerLaunch,
+  type CredentialEgressLifecycle,
+} from '../credential-egress';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 import { COMPUTE_BOOTSTRAP_TIMEOUT_MS } from './timeouts';
 
@@ -191,7 +192,8 @@ export async function spawnBoxWorker(
     launchMode: launchOptions.launchMode,
   });
 
-  const credentialEgressPlan = await config.credentialEgress?.planApiProxy({
+  const launchHostedWorker = await prepareHostedWorkerLaunch({
+    credentialEgress: config.credentialEgress,
     taskRun,
     provider: 'box',
   });
@@ -263,11 +265,8 @@ export async function spawnBoxWorker(
         phase: 'launch_worker',
       }),
     });
-    const result = await computeClient.runCommand({
-      instanceId: machine.machineId,
-      cmd: 'worker',
-      args,
-      env: buildBoxWorkerEnv({
+    const result = await launchHostedWorker(
+      buildBoxWorkerEnv({
         authToken,
         sandboxExpiresAtMs: Date.now() + config.boxTimeoutMs,
         deploymentSlug: config.deploymentSlug,
@@ -275,39 +274,37 @@ export async function spawnBoxWorker(
         machineType,
         extraEnv: {
           SANDBOX_TIMEOUT_MS: String(config.boxTimeoutMs),
-          ...credentialEgressPlan?.bootstrapEnv,
         },
       }),
-      detached: true,
-      signal: AbortSignal.timeout(60_000),
-    });
-    launchedCommandId = result.commandId;
-    if (result.exitCode !== null && result.exitCode !== 0) {
-      throw new Error(
-        `Detached Box worker exited with code ${result.exitCode}`,
-      );
-    }
-    await recordMutation({
-      provider: 'box',
-      operation: 'run_command',
-      eventType: 'completed',
-      instanceId: machine.machineId,
-      message: `Detached worker launched for Box ${machine.machineId}.`,
-      details: buildComputeProviderMutationDetails(mutationContext, {
-        commandId: result.commandId ?? null,
-        exitCode: result.exitCode,
-      }),
-    });
-    if (result.commandId) {
-      await db
-        .update(taskRuns)
-        .set({ sandboxCmdId: result.commandId })
-        .where(eq(taskRuns.id, taskRun.id));
-    }
-    // The worker is waiting on the bootstrap nonce after its ordinary
-    // bootstrap; an admission failure fails the spawn, as it does for Docker,
-    // rather than leaving a worker that expected substitutes without them.
-    await credentialEgressPlan?.admit();
+      async (env) => {
+        const launchResult = await computeClient.runCommand({
+          instanceId: machine.machineId,
+          cmd: 'worker',
+          args,
+          env,
+          detached: true,
+          signal: AbortSignal.timeout(60_000),
+        });
+        launchedCommandId = launchResult.commandId;
+        if (launchResult.exitCode !== null && launchResult.exitCode !== 0) {
+          throw new Error(
+            `Detached Box worker exited with code ${launchResult.exitCode}`,
+          );
+        }
+        await recordMutation({
+          provider: 'box',
+          operation: 'run_command',
+          eventType: 'completed',
+          instanceId: machine.machineId,
+          message: `Detached worker launched for Box ${machine.machineId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            commandId: launchResult.commandId ?? null,
+            exitCode: launchResult.exitCode,
+          }),
+        });
+        return launchResult;
+      },
+    );
 
     return {
       machineId: machine.machineId,
