@@ -1579,7 +1579,7 @@ describe('fast-agent integration broker', () => {
       roomote: { url: 'https://app.example.test/mcp', headers: {} },
     };
     mocks.listMcpTools.mockResolvedValue([
-      { name: 'fetch_public_url', inputSchema: { type: 'object' } },
+      { name: 'fetch_url', inputSchema: { type: 'object' } },
     ]);
     const available = await listFastAgentIntegrations(auditContext);
     const result = {
@@ -1594,7 +1594,7 @@ describe('fast-agent integration broker', () => {
     await expect(
       callFastAgentIntegration(auditContext, available, {
         integrationId: 'roomote',
-        toolName: 'fetch_public_url',
+        toolName: 'fetch_url',
         args: {
           url: 'https://public.example/docs?token=secret-query',
           format: 'text',
@@ -1610,7 +1610,7 @@ describe('fast-agent integration broker', () => {
     expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
       expect.objectContaining({
         integrationId: 'roomote',
-        toolName: 'fetch_public_url',
+        toolName: 'fetch_url',
         arguments: {
           destination: 'https://public.example',
           format: 'text',
@@ -1633,18 +1633,18 @@ describe('fast-agent integration broker', () => {
       roomote: { url: 'https://app.example.test/mcp', headers: {} },
     };
     mocks.listMcpTools.mockResolvedValue([
-      { name: 'fetch_public_url', inputSchema: { type: 'object' } },
+      { name: 'fetch_url', inputSchema: { type: 'object' } },
     ]);
     const available = await listFastAgentIntegrations(auditContext);
     mocks.callMcpTool.mockImplementation(() => new Promise(() => undefined));
 
     const call = callFastAgentIntegration(auditContext, available, {
       integrationId: 'roomote',
-      toolName: 'fetch_public_url',
+      toolName: 'fetch_url',
       args: { url: 'https://public.example/', timeout: 120 },
     });
     const timedOut = expect(call).rejects.toThrow(
-      'Fast roomote/fetch_public_url integration call timed out after 125000ms.',
+      'Fast roomote/fetch_url integration call timed out after 125000ms.',
     );
     await vi.advanceTimersByTimeAsync(125_000);
     await timedOut;

@@ -98,7 +98,7 @@ function resolveFastIntegrationCallTimeoutMs(request: {
 }): number {
   if (
     request.integrationId !== ROOMOTE_MCP_ID ||
-    request.toolName !== 'fetch_public_url'
+    request.toolName !== 'fetch_url'
   ) {
     return FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS;
   }
@@ -683,7 +683,7 @@ export async function callFastAgentIntegration(
   // Fail closed: an integration tool never executes unless its durable audit
   // record exists first.
   const publicFetchAudit =
-    integration.id === ROOMOTE_MCP_ID && request.toolName === 'fetch_public_url'
+    integration.id === ROOMOTE_MCP_ID && request.toolName === 'fetch_url'
       ? (() => {
           let destination: string | undefined;
           try {

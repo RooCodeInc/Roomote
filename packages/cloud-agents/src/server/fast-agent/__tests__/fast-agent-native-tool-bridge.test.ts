@@ -1010,7 +1010,7 @@ describe('Fast native OpenCode tool bridge', () => {
         tools: [
           { name: 'search_code', description: 'Search code', inputSchema },
           {
-            name: 'fetch_public_url',
+            name: 'fetch_url',
             description: 'Fetch public content',
             inputSchema: fetchInputSchema,
           },
@@ -1024,7 +1024,7 @@ describe('Fast native OpenCode tool bridge', () => {
       mcp: Record<string, { url: string; headers: Record<string, string> }>;
     };
     const executor = vi.fn(async ({ toolName, args }) =>
-      toolName === 'fetch_public_url'
+      toolName === 'fetch_url'
         ? {
             kind: 'image',
             url: 'https://example.com/image.png',
@@ -1078,7 +1078,7 @@ describe('Fast native OpenCode tool bridge', () => {
       ).resolves.toEqual([
         { name: 'search_code', description: 'Search code', inputSchema },
         {
-          name: 'fetch_public_url',
+          name: 'fetch_url',
           description: 'Fetch public content',
           inputSchema: fetchInputSchema,
         },
@@ -1100,7 +1100,7 @@ describe('Fast native OpenCode tool bridge', () => {
         callMcpTool({
           url: config.mcp.roomote!.url,
           headers: config.mcp.roomote!.headers,
-          toolName: 'fetch_public_url',
+          toolName: 'fetch_url',
           args: { url: 'https://example.com/image.png' },
         }),
       ).resolves.toEqual([

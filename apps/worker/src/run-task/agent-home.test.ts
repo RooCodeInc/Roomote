@@ -85,7 +85,7 @@ describe('createIntegrationMcpInstructions', () => {
       { type: 'local', name: 'roomote', command: 'node' },
     ]);
 
-    expect(instructions).toContain('Use `roomote_fetch_public_url`');
+    expect(instructions).toContain('Use `roomote_fetch_url`');
     expect(instructions).toContain('built-in webfetch tool is disabled');
     expect(instructions).toContain('markdown, plain text, and raw HTML output');
     expect(instructions).toContain(
@@ -260,7 +260,7 @@ describe('generateOpenCodeConfig provider support', () => {
         '_roomote_http_integrations',
       );
       expect(readFileSync(instructionsPath, 'utf8')).toContain(
-        'Use `roomote_fetch_public_url`',
+        'Use `roomote_fetch_url`',
       );
       expect(JSON.parse(refreshed.configContent).permission.webfetch).toBe(
         'deny',
@@ -352,7 +352,7 @@ describe('generateOpenCodeConfig provider support', () => {
       ),
       'utf8',
     );
-    expect(instructions).toContain('Use `roomote_fetch_public_url`');
+    expect(instructions).toContain('Use `roomote_fetch_url`');
     expect(instructions).not.toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
     expect(
       existsSync(join(result.openCodeConfigDir, 'on-demand-mcp-servers.json')),

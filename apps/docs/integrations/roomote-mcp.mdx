@@ -69,7 +69,8 @@ only returns conversations your signed-in user is allowed to read.
 
 ### Read a public URL
 
-Roomote MCP can fetch text or supported images from a public HTTP or HTTPS URL.
+Roomote MCP's `fetch_url` tool can fetch text or supported images from a public
+HTTP or HTTPS URL.
 Text can be returned as Markdown, plain text, or raw HTML; HTML is converted
 when Markdown or text is requested. Requests default to a 30-second timeout,
 allow a caller-selected timeout up to 120 seconds, and return at most 5 MiB of
