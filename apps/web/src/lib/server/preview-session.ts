@@ -17,7 +17,7 @@ interface PreviewSession {
   wsUrl: string;
 }
 
-export interface DesktopStreamSession {
+interface DesktopStreamSession {
   configUrl: string;
   controlUrl: string;
   metricsUrl: string;
