@@ -93,7 +93,11 @@ vi.mock('@roomote/ado', () => ({
   },
 }));
 
-import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  NO_REPOSITORIES,
+  TaskPayloadKind,
+} from '@roomote/types';
 
 import {
   buildSourceControlDiscussionUrl,
@@ -222,6 +226,48 @@ describe('createFastAgentSourceControlTaskLauncher', () => {
       fastAgentParent: { sessionId: 'fast-1', conversation },
     });
     expect(task.payload).not.toHaveProperty('linkedWorkItems');
+  });
+
+  it('keeps the discussion repository and drops the sentinel when a blank slate is requested', async () => {
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+    });
+    const launch = createFastAgentSourceControlTaskLauncher({
+      userId: 'user-1',
+      conversation,
+      resolveTarget: vi.fn().mockResolvedValue({
+        repositoryId: 'repo-1',
+        branch: 'feature/ship',
+        pullRequest: {
+          url: 'https://github.com/acme/api/pull/42',
+          title: 'Ship it',
+          sha: 'abc123',
+        },
+      }),
+    });
+    await launch({
+      prompt: 'Look into it',
+      environmentId: NO_REPOSITORIES,
+      parentSessionId: 'fast-1',
+      postKickoff: vi.fn(),
+    });
+
+    const params = mocks.createFastAgentTaskLauncher.mock.calls[0]?.[0] as {
+      buildTask: (input: Record<string, unknown>) => {
+        payload: Record<string, unknown>;
+      };
+    };
+    const task = params.buildTask({
+      prompt: 'Look into it',
+      environmentId: NO_REPOSITORIES,
+      parentSessionId: 'fast-1',
+    });
+    expect(task.payload).toMatchObject({ repo: 'acme/api' });
+    expect(task.payload).not.toHaveProperty('environmentId');
   });
 
   it('refuses to launch a pull request child when the head branch is unknown', async () => {
