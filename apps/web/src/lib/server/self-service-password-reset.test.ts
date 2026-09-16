@@ -96,4 +96,22 @@ describe('self-service password reset', () => {
       }),
     ).resolves.toBe(false);
   });
+
+  it('applies the shared client limit when no trusted address is available', async () => {
+    redisEvalMock
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(21);
+
+    await expect(
+      isSelfServicePasswordResetAllowed({
+        email: 'ada@example.com',
+        clientAddress: null,
+      }),
+    ).resolves.toBe(false);
+    expect(redisEvalMock).toHaveBeenCalledTimes(3);
+    expect(redisEvalMock.mock.calls[2]?.[2]).toMatch(
+      /^password-reset:client:/u,
+    );
+  });
 });

@@ -44,6 +44,8 @@ x-roomote-base-env: &roomote-base-env
   ROOMOTE_APP_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
   R_PUBLIC_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
   ROOMOTE_PUBLIC_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
+  # The bundled Caddy edge overwrites X-Forwarded-For before proxying here.
+  R_TRUSTED_PROXY_CLIENT_IP_HEADER: x-forwarded-for
   R_INSTANCE_ID: ${R_INSTANCE_ID:-}
   R_GITHUB_ADDITIONAL_APP_SLUGS: ${R_GITHUB_ADDITIONAL_APP_SLUGS:-}
   TRPC_URL: ${TRPC_URL:-https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}/_roomote-api}
