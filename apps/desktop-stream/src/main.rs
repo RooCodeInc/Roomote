@@ -221,8 +221,10 @@ impl Config {
                 "8".into(),
                 "-f".into(),
                 "x11grab".into(),
+                // The viewer's own cursor is shown locally, so do not paint the
+                // sandbox cursor into the video where it would trail behind.
                 "-draw_mouse".into(),
-                "1".into(),
+                "0".into(),
                 "-framerate".into(),
                 self.fps.to_string(),
                 "-video_size".into(),
