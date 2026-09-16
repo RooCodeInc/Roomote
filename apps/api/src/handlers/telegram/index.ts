@@ -11,6 +11,7 @@ import {
   activeRunStatuses,
   isSnapshotResumable,
   isDeploymentReadOnlyError,
+  type OperationalLogFields,
 } from '@roomote/types';
 import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
 import {
@@ -31,7 +32,8 @@ import {
   telegramUpdateToQueuedCommunicationMessage,
 } from '@roomote/communication/telegram-update';
 
-import { apiLogger } from '../../logging.js';
+import { apiLogger, logApiOperationalEvent } from '../../logging.js';
+import { captureApiException } from '../../monitoring/sentry.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
   findActiveTelegramTaskRun,
@@ -139,11 +141,108 @@ const TELEGRAM_LINK_START_PAYLOAD = 'link';
 
 type TelegramWebhookVariables = {
   claimedUpdateId: number | undefined;
+  operationalFields: OperationalLogFields;
 };
 
 export const telegram = new Hono<{
   Variables: TelegramWebhookVariables;
 }>();
+
+function getTelegramTerminalOutcome(body: unknown): {
+  outcome: string;
+  reason: string;
+} {
+  if (!body || typeof body !== 'object') {
+    return { outcome: 'acknowledged', reason: 'non_json_response' };
+  }
+
+  const response = body as Record<string, unknown>;
+  if (response.ok === false) {
+    return {
+      outcome: 'rejected',
+      reason:
+        typeof response.error === 'string'
+          ? response.error
+          : 'request_rejected',
+    };
+  }
+  if (response.duplicate === true) {
+    return { outcome: 'skipped', reason: 'duplicate' };
+  }
+  if (typeof response.ignored === 'string') {
+    return { outcome: 'skipped', reason: response.ignored };
+  }
+  if (typeof response.reason === 'string' && response.queued !== true) {
+    return { outcome: 'skipped', reason: response.reason };
+  }
+  if (response.queued === false) {
+    return {
+      outcome: 'skipped',
+      reason:
+        typeof response.reason === 'string'
+          ? response.reason
+          : response.fastUnavailable === true
+            ? 'fast_session_initialization_failed'
+            : response.repliedInline === true
+              ? 'replied_inline'
+              : 'not_queued',
+    };
+  }
+  if (response.queued === true) {
+    return { outcome: 'admitted', reason: 'queued_to_task_run' };
+  }
+  if (response.fastAnswered === true || response.fastReactionQueued === true) {
+    return { outcome: 'dispatched', reason: 'fast_session_dispatch_started' };
+  }
+
+  return { outcome: 'processed', reason: 'handled_inline' };
+}
+
+telegram.use('*', async (c, next) => {
+  const startedAt = Date.now();
+  c.set('operationalFields', {
+    provider: 'telegram',
+    surface: 'telegram',
+    requestId: c.req.header('x-request-id'),
+  });
+  logApiOperationalEvent(
+    'info',
+    'communication_webhook_received',
+    c.get('operationalFields'),
+  );
+
+  try {
+    await next();
+    const responseBody = await c.res
+      .clone()
+      .json()
+      .catch(() => null);
+    const terminal =
+      c.res.status >= 500
+        ? { outcome: 'failed', reason: 'handler_error_response' }
+        : getTelegramTerminalOutcome(responseBody);
+    logApiOperationalEvent(
+      c.res.status >= 500 ? 'error' : c.res.status >= 400 ? 'warn' : 'info',
+      'communication_webhook_terminal',
+      {
+        ...c.get('operationalFields'),
+        ...terminal,
+        status: c.res.status,
+        durationMs: Date.now() - startedAt,
+      },
+    );
+  } catch (error) {
+    logApiOperationalEvent('error', 'communication_webhook_terminal', {
+      ...c.get('operationalFields'),
+      outcome: 'failed',
+      reason: error instanceof Error ? error.name : 'unknown_error',
+      status: 500,
+      durationMs: Date.now() - startedAt,
+      retryable: true,
+    });
+    throw error;
+  }
+});
 
 telegram.onError(async (error, c) => {
   const claimedUpdateId = c.get('claimedUpdateId');
@@ -187,6 +286,11 @@ telegram.post('/', async (c) => {
   }
 
   const update = parsed.data;
+  c.set('operationalFields', {
+    ...c.get('operationalFields'),
+    updateId: update.update_id,
+    externalEventId: String(update.update_id),
+  });
   const messageReaction = getTelegramUpdateMessageReaction(update);
 
   if (messageReaction) {
@@ -310,6 +414,15 @@ telegram.post('/', async (c) => {
   if (!message) {
     return c.json({ ok: true, ignored: 'unsupported_update' });
   }
+  c.set('operationalFields', {
+    ...c.get('operationalFields'),
+    workspaceId: String(message.chat.id),
+    channelId: String(message.chat.id),
+    threadId: message.message_thread_id
+      ? String(message.message_thread_id)
+      : undefined,
+    messageId: String(message.message_id),
+  });
 
   const claimed = await claimTelegramUpdate(update.update_id);
 
@@ -596,6 +709,12 @@ telegram.post('/', async (c) => {
       ? attentionResolution.attention
       : null;
   if (attentionReply && !newTaskCommand && !goalCommand) {
+    c.set('operationalFields', {
+      ...c.get('operationalFields'),
+      sessionId: attentionReply.sessionId,
+      taskId: attentionReply.taskId ?? undefined,
+      runId: attentionReply.runId ?? undefined,
+    });
     const fastMessage = hasMedia
       ? await attachTelegramMediaToQueuedMessage({
           message,
@@ -634,6 +753,18 @@ telegram.post('/', async (c) => {
         ? { attachmentTexts: fastMessage.attachmentTexts }
         : {}),
     });
+    logApiOperationalEvent(
+      continued ? 'info' : 'warn',
+      'communication_dispatch_terminal',
+      {
+        ...c.get('operationalFields'),
+        outcome: continued ? 'dispatched' : 'failed',
+        reason: continued
+          ? 'attention_session_continued'
+          : 'fast_session_delivery_unavailable',
+        retryable: !continued,
+      },
+    );
     return c.json(
       continued
         ? { ok: true, fastAnswered: true, fastContinued: true }
@@ -679,6 +810,10 @@ telegram.post('/', async (c) => {
     }
   }
   if (fastSession && !goalCommand) {
+    c.set('operationalFields', {
+      ...c.get('operationalFields'),
+      sessionId: fastSession.id,
+    });
     if (fastSession.userId !== senderUserId) {
       return c.json({
         ok: true,
@@ -735,6 +870,18 @@ telegram.post('/', async (c) => {
         ? { attachmentTexts: fastMessage.attachmentTexts }
         : {}),
     });
+    logApiOperationalEvent(
+      continued ? 'info' : 'warn',
+      'communication_dispatch_terminal',
+      {
+        ...c.get('operationalFields'),
+        outcome: continued ? 'dispatched' : 'failed',
+        reason: continued
+          ? 'fast_session_reply_queued'
+          : 'fast_session_delivery_unavailable',
+        retryable: !continued,
+      },
+    );
     if (!continued) {
       apiLogger.warn(
         `[telegram] Fast session ${fastSession.id} could not resolve an active delivery route`,
@@ -850,6 +997,11 @@ telegram.post('/', async (c) => {
   // `/new` opens a fresh conversation even while a task is running here; it
   // is handled below. Other messages continue the active run.
   if (activeRun && !newTaskCommand) {
+    c.set('operationalFields', {
+      ...c.get('operationalFields'),
+      taskId: activeRun.taskId,
+      runId: activeRun.id,
+    });
     if (!queuedMessage) {
       return c.json({ ok: true, ignored: 'unsupported_update' });
     }
@@ -907,6 +1059,11 @@ telegram.post('/', async (c) => {
       activeRun.id,
       queuedMessage,
     );
+    logApiOperationalEvent('info', 'communication_message_admitted', {
+      ...c.get('operationalFields'),
+      outcome: 'persisted',
+      reason: 'active_run_queue',
+    });
     // A typed reply supersedes any pending PR review offers in the chat.
     retireTelegramPrReviewOffersBestEffort({
       chatId: conversation.chatId,
@@ -1141,6 +1298,10 @@ telegram.post('/', async (c) => {
       userId: senderUserId,
       conversation: fastConversation,
     });
+    c.set('operationalFields', {
+      ...c.get('operationalFields'),
+      sessionId: session.id,
+    });
   } catch (error) {
     apiLogger.error(
       `[telegram] Failed to initialize the Fast session for chat ${metadata.communicationChannelId}: ${
@@ -1198,6 +1359,18 @@ telegram.post('/', async (c) => {
       : {}),
   })
     .then((continued) => {
+      logApiOperationalEvent(
+        continued ? 'info' : 'warn',
+        'communication_dispatch_terminal',
+        {
+          ...c.get('operationalFields'),
+          outcome: continued ? 'dispatched' : 'failed',
+          reason: continued
+            ? 'fast_session_continued'
+            : 'fast_session_delivery_unavailable',
+          retryable: !continued,
+        },
+      );
       if (!continued) {
         apiLogger.warn(
           `[telegram] Fast session ${session.id} could not resolve an active delivery route`,
@@ -1205,6 +1378,22 @@ telegram.post('/', async (c) => {
       }
     })
     .catch((error) => {
+      logApiOperationalEvent('error', 'communication_dispatch_terminal', {
+        ...c.get('operationalFields'),
+        outcome: 'failed',
+        reason: error instanceof Error ? error.name : 'unknown_error',
+        retryable: true,
+      });
+      captureApiException(
+        new Error('Telegram Fast dispatch failed'),
+        undefined,
+        {
+          component: 'telegram_fast_dispatch',
+          errorType: error instanceof Error ? error.name : 'unknown_error',
+          updateId: update.update_id,
+          sessionId: session.id,
+        },
+      );
       apiLogger.error(
         `[telegram] Fast response failed: ${
           error instanceof Error ? error.message : String(error)

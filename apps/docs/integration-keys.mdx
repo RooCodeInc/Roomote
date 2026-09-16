@@ -26,11 +26,14 @@ services, not a replacement for [connected integrations](/integrations).
 2. The agent reads the service's documentation and prepares an approval with
    only nonsecret policy: a label, the exact HTTPS origin (for example
    `https://api.stripe.com`), the header that carries the key, and the HTTP
-   methods the work needs (read-only by default). It replies with a secure
-   link into the Session. The approval waits 24 hours for the key.
-3. You open the link and enter the key. The form bypasses chat and is excluded
-   from capture and replay. If the agent asked for write methods, the form
-   shows them and you confirm them.
+   methods the work needs (read-only by default). The approval waits 24 hours
+   for the key.
+3. While you are viewing the Session, the key form opens automatically. If you
+   dismiss it, a service-specific card such as **Add your Figma key** remains at
+   the end of the conversation, and the agent's secure link opens the same
+   form. Enter the key there; the form bypasses chat and is excluded from
+   capture and replay. If the agent asked for write methods, the form shows
+   them and you confirm them.
 4. The Session resumes on its own. The key is now an integration of yours:
    every Session you own, and every coding task launched from one, can use it
    within its policy until you revoke it.

@@ -158,8 +158,15 @@ through an allowed organization sign-in path.
 
 ## Password reset flow
 
-Roomote uses admin-created password reset links for email/password accounts.
-There is no public self-serve "forgot password" email flow.
+When the Email (AgentMail) communications provider is enabled and configured,
+email/password users can select **Forgot your password? Reset it** on the sign-in
+form. Roomote always shows the same confirmation, whether or not the address
+belongs to an active email/password account. If it does, AgentMail sends a reset
+link to that address.
+
+If AgentMail is disabled or is missing its API key or inbox configuration, the
+sign-in form keeps the admin-assisted fallback. Admin-created reset links remain
+available regardless of AgentMail configuration.
 
 To reset a user's password:
 
@@ -169,9 +176,9 @@ To reset a user's password:
 4. Create the reset link.
 5. Send the link to the user through your preferred secure channel.
 
-Reset links expire after one hour. When the user opens the link, they choose a
-new password on the Roomote reset page and then sign in again. Existing
-sessions are revoked after the password is reset.
+Self-service and admin-created reset links expire after one hour. When the user
+opens the link, they choose a new password on the Roomote reset page and then
+sign in again. Existing sessions are revoked after the password is reset.
 
 The reset action is only available for users who have an email/password
 credential. If a user signs in only through Slack, Microsoft, or another OAuth

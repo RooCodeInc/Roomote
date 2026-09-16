@@ -82,6 +82,12 @@ thread, and follow-up emails in that thread continue the same conversation; a
 running delegated task receives them as follow-ups. Start a new request with a
 new email so it opens a new thread.
 
+Roomote also requires AgentMail to report a passing DMARC result before it
+trusts the sender address. Sender domains therefore need a published DMARC
+policy and either SPF or DKIM aligned with the From domain. Mail that does not
+pass DMARC is silently dropped instead of being matched to a Roomote account or
+receiving a reply.
+
 Only verified account email addresses are recognized. Mail from any other
 address may receive a polite refusal explaining that it must come from the
 verified email on a Roomote account; resend from that address once it is
@@ -152,8 +158,9 @@ channel enabled:
   failure is shown instead of reporting success.
 - Sign-ins through Slack, Microsoft, GitHub, and the other OAuth providers
   are unaffected; those providers assert a verified email.
-- Password reset links are emailed to the user as well as shown to the
-  admin who requested them.
+- Email/password users can request a one-hour reset link from sign-in. Admins
+  can still create reset links under **Settings > Users**; those links are
+  emailed to the user and also shown to the admin.
 
 Verification and password-reset emails carry no unsubscribe link (the user
 asked for them) and are sent even to an address that unsubscribed from

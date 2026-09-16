@@ -208,6 +208,16 @@ function getPasswordResetRedirectUrl(): string {
   return new URL('/reset-password', Env.R_PUBLIC_URL ?? Env.R_APP_URL).href;
 }
 
+async function requestPasswordResetForUser(email: string): Promise<void> {
+  const auth = await getAuth();
+  await auth.api.requestPasswordReset({
+    body: {
+      email,
+      redirectTo: getPasswordResetRedirectUrl(),
+    },
+  });
+}
+
 export async function createPasswordResetLinkForUser({
   targetUserId,
 }: {
@@ -232,14 +242,8 @@ export async function createPasswordResetLinkForUser({
     return { created: false, reason: 'oauth_only' };
   }
 
-  const auth = await getAuth();
   const url = await capturePasswordResetLink(async () => {
-    await auth.api.requestPasswordReset({
-      body: {
-        email: target.email,
-        redirectTo: getPasswordResetRedirectUrl(),
-      },
-    });
+    await requestPasswordResetForUser(target.email);
   });
 
   if (!url) {
@@ -253,6 +257,36 @@ export async function createPasswordResetLinkForUser({
       Date.now() + PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS * 1000,
     ),
   };
+}
+
+/**
+ * Request an emailed reset without revealing whether the address belongs to an
+ * active credential account. The public route intentionally ignores the result.
+ */
+export async function requestSelfServicePasswordReset(
+  email: string,
+): Promise<void> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const target = await db.query.users.findFirst({
+    where: and(eq(users.email, normalizedEmail), isNull(users.deletedAt)),
+  });
+
+  if (!target) {
+    return;
+  }
+
+  const credentialAccount = await db.query.authAccounts.findFirst({
+    where: and(
+      eq(authAccounts.userId, target.id),
+      eq(authAccounts.providerId, CREDENTIAL_PROVIDER_ID),
+    ),
+  });
+
+  if (!credentialAccount) {
+    return;
+  }
+
+  await requestPasswordResetForUser(target.email);
 }
 
 export async function userHasCredentialAccount(

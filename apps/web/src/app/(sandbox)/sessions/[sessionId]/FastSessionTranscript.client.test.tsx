@@ -31,6 +31,14 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/sessions/session-1',
 }));
 
+const integrationApprovalsState: { pending: unknown[] } = { pending: [] };
+vi.mock('@/hooks/useSessionIntegrationApprovals', () => ({
+  useSessionIntegrationApprovals: () => ({
+    data: { pending: integrationApprovalsState.pending, secrets: [] },
+    refetch: vi.fn(),
+  }),
+}));
+
 vi.mock('./CapabilityOfferCard', () => ({
   CapabilityOfferCard: ({ offer }: { offer: { capability: string } }) => (
     <div>Capability offer: {offer.capability}</div>
@@ -365,6 +373,79 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
+  it('shows a pending-key card for the owner and opens the key dialog from it', async () => {
+    integrationApprovalsState.pending = [
+      {
+        pendingRef: '6a1f8f1e-0000-4000-8000-000000000009',
+        label: 'Figma',
+        origin: 'https://api.figma.com',
+        headerName: 'x-figma-token',
+        headerPrefix: '',
+        allowedMethods: ['GET', 'HEAD'],
+        lifetimeHours: null,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    // The dialog fetches the same route; a fresh Response per call, since a
+    // body can only be read once.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              secrets: [],
+              pending: integrationApprovalsState.pending,
+            }),
+          ),
+        ),
+      ),
+    );
+    window.location.hash = '';
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    expect(screen.getByText('Add your Figma key')).toBeInTheDocument();
+    expect(screen.queryByLabelText('API key')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter key' }));
+    expect(window.location.hash).toBe('#integrations');
+    // jsdom does not dispatch hashchange for a programmatic fragment change.
+    fireEvent(window, new HashChangeEvent('hashchange'));
+    await screen.findByLabelText('API key');
+    integrationApprovalsState.pending = [];
+  });
+
+  it('hides the pending-key card from viewers who do not own the Session', () => {
+    integrationApprovalsState.pending = [
+      {
+        pendingRef: '6a1f8f1e-0000-4000-8000-000000000010',
+        label: 'Figma',
+        origin: 'https://api.figma.com',
+        headerName: 'x-figma-token',
+        headerPrefix: '',
+        allowedMethods: ['GET', 'HEAD'],
+        lifetimeHours: null,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    expect(screen.queryByText('Add your Figma key')).toBeNull();
+    integrationApprovalsState.pending = [];
+  });
+
   it('reports server-owned secure-save continuation without submitting or replacing the browser composer draft', async () => {
     const secretRef = '6a1f8f1e-0000-4000-8000-000000000007';
     const fetchMock = vi.fn().mockResolvedValue(

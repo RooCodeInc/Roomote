@@ -151,10 +151,11 @@ function hasSkillDetails(msg: ToolMessage): boolean {
     return true;
   }
 
-  if (msg.kind !== 'tool_result' || !msg.data.output.trim()) return false;
+  const output = msg.kind === 'tool_result' ? msg.data.output : null;
+  if (typeof output !== 'string' || !output.trim()) return false;
 
   try {
-    const result = JSON.parse(msg.data.output) as unknown;
+    const result = JSON.parse(output) as unknown;
     if (!result || typeof result !== 'object' || Array.isArray(result)) {
       return true;
     }

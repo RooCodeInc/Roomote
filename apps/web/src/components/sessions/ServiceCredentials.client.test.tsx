@@ -96,10 +96,14 @@ it('prefills a single-key consent flow and reports server-scheduled continuation
       status: 201,
     }),
   );
+  const changed = vi.fn();
+  window.addEventListener('roomote:integration-keys-changed', changed);
   fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
   expect(await screen.findByRole('status')).toHaveTextContent(
     'Integration saved. The Session has been notified without sharing your key.',
   );
+  expect(changed).toHaveBeenCalledOnce();
+  window.removeEventListener('roomote:integration-keys-changed', changed);
   expect(fetchMock).toHaveBeenLastCalledWith(
     `/api/sessions/${sessionId}/secrets`,
     expect.objectContaining({
