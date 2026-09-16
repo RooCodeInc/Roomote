@@ -8,8 +8,10 @@ import {
 
 import {
   DesktopStreamClient,
+  LIVE_EDGE_TARGET_S,
   STREAM_START_TIMEOUT_MS,
   mapPointerToRemote,
+  trackLiveEdge,
 } from './DesktopStreamClient';
 
 class FakeWebSocket {
@@ -247,5 +249,64 @@ describe('DesktopStreamClient', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('keeps playback at the live edge of the progressive stream', () => {
+    const ranges = (end: number) =>
+      ({ length: 1, start: () => 0, end: () => end }) as unknown as TimeRanges;
+
+    const farBehind = {
+      buffered: ranges(10),
+      currentTime: 6,
+      paused: false,
+      playbackRate: 1,
+    };
+    expect(trackLiveEdge(farBehind)).toBeCloseTo(4);
+    expect(farBehind.currentTime).toBeCloseTo(10 - LIVE_EDGE_TARGET_S);
+    expect(farBehind.playbackRate).toBe(1);
+
+    const slightlyBehind = {
+      buffered: ranges(10),
+      currentTime: 9.6,
+      paused: false,
+      playbackRate: 1,
+    };
+    expect(trackLiveEdge(slightlyBehind)).toBeCloseTo(0.4);
+    expect(slightlyBehind.currentTime).toBe(9.6);
+    expect(slightlyBehind.playbackRate).toBeGreaterThan(1);
+
+    const caughtUp = {
+      buffered: ranges(10),
+      currentTime: 9.9,
+      paused: false,
+      playbackRate: 1.1,
+    };
+    expect(trackLiveEdge(caughtUp)).toBeCloseTo(0.1);
+    expect(caughtUp.playbackRate).toBe(1);
+
+    expect(
+      trackLiveEdge({
+        buffered: ranges(10),
+        currentTime: 0,
+        paused: true,
+        playbackRate: 1,
+      }),
+    ).toBeNull();
+  });
+
+  it('offers a fullscreen toggle for the desktop frame', async () => {
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(HTMLElement.prototype, 'requestFullscreen', {
+      configurable: true,
+      value: requestFullscreen,
+    });
+    render(
+      <DesktopStreamClient
+        previewUrl="https://desktop.preview.test"
+        runId={123}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Fullscreen' }));
+    await waitFor(() => expect(requestFullscreen).toHaveBeenCalledTimes(1));
   });
 });

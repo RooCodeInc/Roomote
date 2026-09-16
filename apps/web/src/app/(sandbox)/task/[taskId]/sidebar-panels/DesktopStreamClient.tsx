@@ -11,6 +11,7 @@ import {
 import {
   Button,
   Loader2,
+  Maximize2,
   SquareDashedMousePointer,
   Volume2,
 } from '@/components/system';
@@ -22,6 +23,47 @@ interface DesktopStreamSession {
 
 /** How long to wait for the first decoded frame before giving up. */
 export const STREAM_START_TIMEOUT_MS = 30_000;
+
+/**
+ * Live-edge tracking. The stream is a progressive fragmented MP4, so the
+ * browser happily buffers ahead and never catches up on its own: every stall
+ * adds permanent latency. Keep playback close to the newest buffered data.
+ */
+const LIVE_EDGE_CHECK_INTERVAL_MS = 500;
+/** Lag above which the player jumps straight to the live edge. */
+const LIVE_EDGE_SEEK_THRESHOLD_S = 0.6;
+/** Lag above which the player speeds up slightly to drift back to the edge. */
+const LIVE_EDGE_CATCH_UP_THRESHOLD_S = 0.3;
+/** How far behind the newest buffered data a seek lands, to avoid stalling. */
+export const LIVE_EDGE_TARGET_S = 0.15;
+const LIVE_EDGE_CATCH_UP_RATE = 1.1;
+
+/**
+ * Nudge a playing video toward its buffered live edge. Returns the current
+ * lag in seconds, or null when nothing is buffered yet.
+ */
+export function trackLiveEdge(
+  video: Pick<
+    HTMLVideoElement,
+    'buffered' | 'currentTime' | 'paused' | 'playbackRate'
+  >,
+): number | null {
+  const { buffered } = video;
+  if (video.paused || buffered.length === 0) {
+    return null;
+  }
+  const liveEdge = buffered.end(buffered.length - 1);
+  const lag = liveEdge - video.currentTime;
+  if (lag > LIVE_EDGE_SEEK_THRESHOLD_S) {
+    video.currentTime = Math.max(0, liveEdge - LIVE_EDGE_TARGET_S);
+    video.playbackRate = 1;
+  } else if (lag > LIVE_EDGE_CATCH_UP_THRESHOLD_S) {
+    video.playbackRate = LIVE_EDGE_CATCH_UP_RATE;
+  } else if (video.playbackRate !== 1) {
+    video.playbackRate = 1;
+  }
+  return lag;
+}
 
 // MediaError code constants, inlined because the global is not defined in
 // every runtime (jsdom, server rendering).
@@ -100,6 +142,7 @@ export function DesktopStreamClient({
   previewUrl: string;
   runId: number;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const pendingPointerRef = useRef<RemotePoint | null>(null);
@@ -122,6 +165,8 @@ export function DesktopStreamClient({
     null,
   );
   const [droppedFrames, setDroppedFrames] = useState(0);
+  const [liveLagMs, setLiveLagMs] = useState<number | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const sendControl = (event: ControlEvent) => {
     const socket = socketRef.current;
@@ -133,6 +178,42 @@ export function DesktopStreamClient({
   const releaseAll = () => {
     pendingPointerRef.current = null;
     sendControl({ type: 'release_all' });
+  };
+
+  useEffect(() => {
+    if (!isPlaying) {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      const video = videoRef.current;
+      if (!video) {
+        return;
+      }
+      const lag = trackLiveEdge(video);
+      setLiveLagMs(lag === null ? null : lag * 1000);
+    }, LIVE_EDGE_CHECK_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [isPlaying]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const active = document.fullscreenElement === containerRef.current;
+      setIsFullscreen(active);
+      if (active) {
+        videoRef.current?.focus();
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () =>
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void containerRef.current?.requestFullscreen?.();
+    }
   };
 
   const clearStartTimeout = () => {
@@ -400,7 +481,10 @@ export function DesktopStreamClient({
   };
 
   return (
-    <div className="relative flex size-full flex-col overflow-hidden bg-zinc-950">
+    <div
+      ref={containerRef}
+      className="relative flex size-full flex-col overflow-hidden bg-zinc-950"
+    >
       <div className="relative min-h-0 flex-1">
         <video
           ref={videoRef}
@@ -428,6 +512,9 @@ export function DesktopStreamClient({
             setStartupMs(performance.now() - startedAtRef.current);
             setIsStarting(false);
             setIsPlaying(true);
+            if (videoRef.current) {
+              trackLiveEdge(videoRef.current);
+            }
             videoFrameRef.current =
               videoRef.current?.requestVideoFrameCallback(frameCallback) ??
               null;
@@ -494,16 +581,33 @@ export function DesktopStreamClient({
             </span>
           ) : null}
         </span>
-        <span className="font-mono tabular-nums">
-          {renderedFps === null ? '-' : `${renderedFps.toFixed(1)} fps`}
-          {' · '}
-          {decodedBitrateKbps === null
-            ? '- kbps'
-            : `${decodedBitrateKbps.toFixed(0)} kbps`}
-          {' · '}
-          {droppedFrames} dropped
-          {' · '}
-          {startupMs === null ? '-' : `${startupMs.toFixed(0)} ms first frame`}
+        <span className="flex shrink-0 items-center gap-3">
+          <span className="font-mono tabular-nums">
+            {renderedFps === null ? '-' : `${renderedFps.toFixed(1)} fps`}
+            {' · '}
+            {decodedBitrateKbps === null
+              ? '- kbps'
+              : `${decodedBitrateKbps.toFixed(0)} kbps`}
+            {' · '}
+            {droppedFrames} dropped
+            {' · '}
+            {liveLagMs === null
+              ? '-'
+              : `${liveLagMs.toFixed(0)} ms behind live`}
+            {' · '}
+            {startupMs === null
+              ? '-'
+              : `${startupMs.toFixed(0)} ms first frame`}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleFullscreen}
+            aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            <Maximize2 />
+          </Button>
         </span>
       </div>
     </div>
