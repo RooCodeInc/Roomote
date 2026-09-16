@@ -511,6 +511,20 @@ impl X11Controller {
     /// Resizes the X screen through RandR. Xvfb only offers its configured
     /// mode, so this needs an X server with dynamic screen sizes such as
     /// TigerVNC's Xvnc.
+    /// Current root window size as reported by the X server.
+    fn screen_size(&self) -> Result<ScreenSize, String> {
+        let geometry = self
+            .connection
+            .get_geometry(self.root)
+            .map_err(|error| format!("failed to request X11 root geometry: {error}"))?
+            .reply()
+            .map_err(|error| format!("failed to read X11 root geometry: {error}"))?;
+        Ok(ScreenSize {
+            width: geometry.width,
+            height: geometry.height,
+        })
+    }
+
     fn set_screen_size(&mut self, size: ScreenSize) -> Result<(), String> {
         if size.width == self.width && size.height == self.height {
             return Ok(());
@@ -933,7 +947,15 @@ async fn main() {
         std::process::exit(2);
     });
     let address = config.address;
-    let screen = config.initial_screen();
+    // A previous service instance may have resized the X screen; capture the
+    // real size so encoders and pointer mapping match what is on screen.
+    let mut screen = config.initial_screen();
+    if config.capture_mode == CaptureMode::X11
+        && let Ok(controller) = X11Controller::connect(&config.display, screen.width, screen.height)
+        && let Ok(actual) = controller.screen_size()
+    {
+        screen = actual;
+    }
     let state = AppState {
         config: Arc::new(config),
         metrics: Arc::new(Metrics::default()),
