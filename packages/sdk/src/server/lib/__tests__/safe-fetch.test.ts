@@ -1,11 +1,14 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { gzipSync } from 'node:zlib';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   SafeFetchViolationError,
   checkAddressAllowed,
+  fetchPublicUrl,
+  fetchPublicUrlForTesting,
   parseCidrList,
   safeFetch,
   safeHeadFollowingRedirects,
@@ -29,9 +32,18 @@ describe('checkAddressAllowed', () => {
     '255.255.255.255',
     '::1',
     '::',
+    '::7f00:1',
     'fe80::1',
     'fd00::1',
+    'fec0::1',
     'ff02::1',
+    '192.0.2.1',
+    '198.51.100.1',
+    '203.0.113.1',
+    '2001:db8::1',
+    '2002:7f00:1::',
+    '3fff::1',
+    '4000::1',
   ])('blocks %s', (ip) => {
     expect(checkAddressAllowed(ip, noAllowances)).not.toBeNull();
   });
@@ -153,6 +165,42 @@ describe('safeFetch', () => {
         return;
       }
 
+      if (req.url === '/text-redirect') {
+        res.statusCode = 302;
+        res.setHeader('location', `http://redirected.example:${port}/text`);
+        res.end();
+        return;
+      }
+
+      if (req.url === '/text') {
+        res.setHeader('content-type', 'text/plain; charset=utf-8');
+        res.end('public text');
+        return;
+      }
+
+      if (req.url === '/compressed-large') {
+        const compressed = gzipSync('x'.repeat(2_000));
+        res.setHeader('content-type', 'text/plain');
+        res.setHeader('content-encoding', 'gzip');
+        res.setHeader('content-length', String(compressed.byteLength));
+        res.end(compressed);
+        return;
+      }
+
+      if (req.url === '/binary') {
+        res.setHeader('content-type', 'application/octet-stream');
+        res.end('bytes');
+        return;
+      }
+
+      if (req.url === '/slow') {
+        setTimeout(() => {
+          res.setHeader('content-type', 'text/plain');
+          res.end('late');
+        }, 100);
+        return;
+      }
+
       res.setHeader('content-type', 'application/json');
       res.setHeader('x-request-host', req.headers.host ?? '');
       res.end(JSON.stringify({ ok: true, host: req.headers.host }));
@@ -174,6 +222,21 @@ describe('safeFetch', () => {
   it('refuses hostnames that resolve to blocked addresses', async () => {
     await expect(
       safeFetch(`http://blocked.example:${port}/`, { lookup: lookupTo127 }),
+    ).rejects.toThrow(SafeFetchViolationError);
+  });
+
+  it('refuses a hostname when any DNS answer is non-public', async () => {
+    const mixedLookup = ((hostname, options, callback) => {
+      const cb = typeof options === 'function' ? options : callback;
+      const addresses = [
+        { address: '127.0.0.1', family: 4 },
+        { address: '1.1.1.1', family: 4 },
+      ];
+      (cb as (error: null, result: unknown) => void)(null, addresses);
+    }) as DnsLookupFn;
+
+    await expect(
+      safeFetch('http://mixed.example/', { lookup: mixedLookup }),
     ).rejects.toThrow(SafeFetchViolationError);
   });
 
@@ -244,5 +307,81 @@ describe('safeFetch', () => {
         },
       ),
     ).rejects.toThrow(SafeFetchViolationError);
+  });
+
+  it('fetches bounded text through pinned addresses and validated redirects', async () => {
+    const result = await fetchPublicUrlForTesting(
+      `http://public.example:${port}/text-redirect`,
+      {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        allowNonDefaultPorts: true,
+      },
+    );
+
+    expect(result).toEqual({
+      url: `http://redirected.example:${port}/text`,
+      status: 200,
+      contentType: 'text/plain; charset=utf-8',
+      text: 'public text',
+    });
+  });
+
+  it('rejects non-default ports outside controlled fixtures', async () => {
+    await expect(fetchPublicUrl('https://example.com:8443/')).rejects.toThrow(
+      /default HTTP and HTTPS ports/,
+    );
+  });
+
+  it('enforces the decompressed response size', async () => {
+    await expect(
+      fetchPublicUrlForTesting(
+        `http://public.example:${port}/compressed-large`,
+        {
+          lookup: lookupTo127,
+          allowedPrivateCidrs: '127.0.0.0/8',
+          allowNonDefaultPorts: true,
+          maxResponseBytes: 1_000,
+        },
+      ),
+    ).rejects.toThrow(/too large/);
+  });
+
+  it('rejects non-text content types', async () => {
+    await expect(
+      fetchPublicUrlForTesting(`http://public.example:${port}/binary`, {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        allowNonDefaultPorts: true,
+      }),
+    ).rejects.toThrow(/text content type/);
+  });
+
+  it('bounds total request duration', async () => {
+    await expect(
+      fetchPublicUrlForTesting(`http://public.example:${port}/slow`, {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        allowNonDefaultPorts: true,
+        timeoutMs: 10,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('honors caller cancellation while reading the response', async () => {
+    const controller = new AbortController();
+    const pending = fetchPublicUrlForTesting(
+      `http://public.example:${port}/slow`,
+      {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        allowNonDefaultPorts: true,
+        signal: controller.signal,
+        timeoutMs: 1_000,
+      },
+    );
+    controller.abort();
+
+    await expect(pending).rejects.toThrow();
   });
 });

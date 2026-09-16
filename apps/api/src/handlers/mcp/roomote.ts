@@ -55,6 +55,7 @@ import { registerRoomoteMemberTools } from './roomote-member-tools';
 import { registerRoomoteCustomAutomationsTool } from './roomote-custom-automations-tool';
 import { registerRoomoteCustomSkillsTool } from './roomote-custom-skills-tool';
 import { registerRoomoteCommunicationTools } from './roomote-communication-tools';
+import { registerRoomotePublicUrlFetchTool } from './roomote-public-url-fetch';
 
 const ROOMOTE_MCP_SERVER_INFO = {
   name: 'roomote-router-mcp',
@@ -411,6 +412,7 @@ function createRoomoteMcpServer(
   }
   registerRoomoteCustomAutomationsTool(server, toolAuth);
   registerRoomoteCustomSkillsTool(server, toolAuth);
+  registerRoomotePublicUrlFetchTool(server);
 
   server.registerTool(
     'get_about_me',

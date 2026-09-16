@@ -995,6 +995,16 @@ describe('Fast native OpenCode tool bridge', () => {
         description: 'Repository access',
         tools: [
           { name: 'search_code', description: 'Search code', inputSchema },
+          {
+            name: 'fetch_public_url',
+            description: 'Fetch public text',
+            inputSchema: {
+              type: 'object',
+              properties: { url: { type: 'string' } },
+              required: ['url'],
+              additionalProperties: false,
+            },
+          },
         ],
       },
     ]);
@@ -1046,6 +1056,16 @@ describe('Fast native OpenCode tool bridge', () => {
         }),
       ).resolves.toEqual([
         { name: 'search_code', description: 'Search code', inputSchema },
+        {
+          name: 'fetch_public_url',
+          description: 'Fetch public text',
+          inputSchema: {
+            type: 'object',
+            properties: { url: { type: 'string' } },
+            required: ['url'],
+            additionalProperties: false,
+          },
+        },
       ]);
       await expect(
         callMcpTool({

@@ -19,6 +19,7 @@ import {
   dataVisualizationInputsSchema,
   type DataVisualizationInput,
   PRODUCT_NAME,
+  PUBLIC_URL_FETCH_TOOL,
   ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
   ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION,
   ROOMOTE_TASK_RUNTIME_MANAGEMENT_ACTIONS,
@@ -106,6 +107,7 @@ import {
 } from './sessions.js';
 import { handleGetRelayUpdates } from './relay-updates.js';
 import { handleCloneRepository } from './clone-repository.js';
+import { handlePublicUrlFetch } from './public-url-fetch.js';
 import {
   CLONE_REPOSITORY_TOOL_NAME,
   ON_DEMAND_REPOSITORIES_ENV_VAR,
@@ -121,6 +123,24 @@ export const roomoteMcpServer = new NullableOptionalsMcpServer({
   name: 'roomote-mcp-server',
   version: '1.0.0',
 });
+
+roomoteMcpServer.registerTool(
+  PUBLIC_URL_FETCH_TOOL.name,
+  {
+    title: PUBLIC_URL_FETCH_TOOL.title,
+    description: PUBLIC_URL_FETCH_TOOL.description,
+    inputSchema: PUBLIC_URL_FETCH_TOOL.inputSchema,
+    annotations: PUBLIC_URL_FETCH_TOOL.annotations,
+  },
+  async (params, extra): Promise<ToolResult> => {
+    const config = getRoomoteConfig();
+    if (!config) {
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+
+    return handlePublicUrlFetch(params, config, extra.signal);
+  },
+);
 
 let hasSubmittedAutomationSlackSummary = false;
 const manageArtifactsUploadTypeSchema = z.enum(['general', 'visual-proof']);

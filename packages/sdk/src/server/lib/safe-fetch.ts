@@ -227,22 +227,36 @@ const BLOCKED_IPV4_RANGES: ParsedCidr[] = [
   ipv4Cidr('169.254.0.0/16'),
   ipv4Cidr('172.16.0.0/12'),
   ipv4Cidr('192.0.0.0/24'),
+  ipv4Cidr('192.0.2.0/24'),
+  ipv4Cidr('192.88.99.0/24'),
   ipv4Cidr('192.168.0.0/16'),
   ipv4Cidr('198.18.0.0/15'),
+  ipv4Cidr('198.51.100.0/24'),
+  ipv4Cidr('203.0.113.0/24'),
   ipv4Cidr('224.0.0.0/4'),
   ipv4Cidr('240.0.0.0/4'),
 ];
 
 const BLOCKED_IPV6_RANGES: ParsedCidr[] = [
+  ipv6Cidr('::/8'),
   ipv6Cidr('::/128'),
   ipv6Cidr('::1/128'),
+  ipv6Cidr('64:ff9b:1::/48'),
+  ipv6Cidr('100::/64'),
+  ipv6Cidr('2001::/23'),
+  ipv6Cidr('2001:db8::/32'),
+  ipv6Cidr('2002::/16'),
+  ipv6Cidr('3fff::/20'),
+  ipv6Cidr('5f00::/16'),
   ipv6Cidr('fc00::/7'),
+  ipv6Cidr('fec0::/10'),
   ipv6Cidr('fe80::/10'),
   ipv6Cidr('ff00::/8'),
 ];
 
 const IPV4_MAPPED_PREFIX = ipv6Cidr('::ffff:0:0/96');
 const NAT64_PREFIX = ipv6Cidr('64:ff9b::/96');
+const IPV6_GLOBAL_UNICAST = ipv6Cidr('2000::/3');
 
 /**
  * Returns null when the address is allowed, or a human-readable reason when
@@ -283,6 +297,13 @@ export function checkAddressAllowed(
     )
   ) {
     return null;
+  }
+
+  if (
+    parsed.family === 6 &&
+    !cidrContains(IPV6_GLOBAL_UNICAST, 6, parsed.value)
+  ) {
+    return `Address '${ip}' is outside the public IPv6 unicast range.`;
   }
 
   const blockedRanges =
@@ -418,16 +439,19 @@ export function createGuardedConnectOptions(config: GuardedAgentConfig): any {
               : [{ address: addresses as unknown as string, family: 4 }]
           ) as { address: string; family: number }[];
 
-          const vetted = results.filter(
-            (result) => checkAddressAllowed(result.address, allowed) === null,
+          const rejected = results.find(
+            (result) => checkAddressAllowed(result.address, allowed) !== null,
           );
+          const vetted = rejected ? [] : results;
 
           if (vetted.length === 0) {
             const reason =
               results.length === 0
                 ? `DNS for '${hostname}' returned no addresses.`
-                : (checkAddressAllowed(results[0]!.address, allowed) ??
-                  'refused');
+                : (checkAddressAllowed(
+                    rejected?.address ?? results[0]!.address,
+                    allowed,
+                  ) ?? 'refused');
 
             callback(new SafeFetchViolationError(reason), '', 4);
             return;
@@ -593,4 +617,199 @@ export async function safeFetch(
     );
   }
   return response;
+}
+
+export const PUBLIC_URL_FETCH_MAX_REDIRECTS = 3;
+export const PUBLIC_URL_FETCH_MAX_RESPONSE_BYTES = 1_048_576;
+export const PUBLIC_URL_FETCH_TIMEOUT_MS = 15_000;
+
+export interface PublicUrlFetchOptions {
+  signal?: AbortSignal;
+}
+
+interface PublicUrlFetchInternalOptions extends PublicUrlFetchOptions {
+  /** Test-only DNS resolver override. */
+  lookup?: DnsLookupFn;
+  /** Test-only private fixture allowance. Never pass this from product code. */
+  allowedPrivateCidrs?: string;
+  /** Test-only non-default fixture port allowance. */
+  allowNonDefaultPorts?: boolean;
+  maxRedirects?: number;
+  maxResponseBytes?: number;
+  timeoutMs?: number;
+}
+
+export interface PublicUrlFetchResponse {
+  url: string;
+  status: number;
+  contentType: string;
+  text: string;
+}
+
+function validatePublicUrl(
+  target: string | URL,
+  allowNonDefaultPorts = false,
+): URL {
+  const url = validateEgressUrl(target);
+
+  if (url.port && !allowNonDefaultPorts) {
+    throw new SafeFetchViolationError(
+      'Public URL fetch only supports the default HTTP and HTTPS ports.',
+    );
+  }
+
+  return url;
+}
+
+function isTextContentType(contentType: string): boolean {
+  const mimeType = contentType.split(';', 1)[0]!.trim().toLowerCase();
+  return (
+    mimeType.startsWith('text/') ||
+    mimeType === 'application/json' ||
+    mimeType.endsWith('+json') ||
+    mimeType === 'application/xml' ||
+    mimeType.endsWith('+xml') ||
+    mimeType === 'application/javascript' ||
+    mimeType === 'application/x-javascript'
+  );
+}
+
+async function readBoundedTextBody(
+  response: Response,
+  maxResponseBytes: number,
+): Promise<string> {
+  const advertisedLength = response.headers.get('content-length');
+  if (advertisedLength) {
+    const parsedLength = Number(advertisedLength);
+    if (Number.isFinite(parsedLength) && parsedLength > maxResponseBytes) {
+      await response.body?.cancel();
+      throw new SafeFetchViolationError('Public URL response is too large.');
+    }
+  }
+
+  if (!response.body) {
+    return '';
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: false });
+  let byteCount = 0;
+  let text = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      byteCount += value.byteLength;
+      if (byteCount > maxResponseBytes) {
+        await reader.cancel();
+        throw new SafeFetchViolationError('Public URL response is too large.');
+      }
+
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/**
+ * Credential-free public text fetch for agent tools. Unlike the general MCP
+ * transport helpers above, this fixes the method and headers, permits only
+ * default ports, revalidates bounded redirects, and bounds decompressed bytes.
+ */
+export async function fetchPublicUrl(
+  target: string | URL,
+  options: PublicUrlFetchOptions = {},
+): Promise<PublicUrlFetchResponse> {
+  return fetchPublicUrlInternal(target, options);
+}
+
+/** @internal Controlled-fixture hook; product callers must use fetchPublicUrl. */
+export async function fetchPublicUrlForTesting(
+  target: string | URL,
+  options: PublicUrlFetchInternalOptions,
+): Promise<PublicUrlFetchResponse> {
+  return fetchPublicUrlInternal(target, options);
+}
+
+async function fetchPublicUrlInternal(
+  target: string | URL,
+  options: PublicUrlFetchInternalOptions,
+): Promise<PublicUrlFetchResponse> {
+  const maxRedirects = options.maxRedirects ?? PUBLIC_URL_FETCH_MAX_REDIRECTS;
+  const maxResponseBytes =
+    options.maxResponseBytes ?? PUBLIC_URL_FETCH_MAX_RESPONSE_BYTES;
+  const timeoutMs = options.timeoutMs ?? PUBLIC_URL_FETCH_TIMEOUT_MS;
+
+  if (!Number.isInteger(maxRedirects) || maxRedirects < 0) {
+    throw new SafeFetchViolationError(
+      'maxRedirects must be a non-negative integer.',
+    );
+  }
+  if (!Number.isInteger(maxResponseBytes) || maxResponseBytes < 1) {
+    throw new SafeFetchViolationError(
+      'maxResponseBytes must be a positive integer.',
+    );
+  }
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1) {
+    throw new SafeFetchViolationError('timeoutMs must be a positive integer.');
+  }
+
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, timeoutSignal])
+    : timeoutSignal;
+  let url = validatePublicUrl(target, options.allowNonDefaultPorts);
+
+  for (let redirects = 0; ; redirects++) {
+    const response = await safeFetchOnce(url, {
+      allowedPrivateCidrs: options.allowedPrivateCidrs,
+      lookup: options.lookup,
+      signal,
+      method: 'GET',
+      headers: {
+        accept:
+          'text/html,text/plain,application/json,application/xml,text/xml;q=0.9,*/*;q=0.1',
+        'user-agent': 'Roomote-Public-URL-Fetch/1.0',
+      },
+    });
+
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel();
+      const location = response.headers.get('location');
+      if (!location) {
+        throw new SafeFetchViolationError(
+          'Public URL returned a redirect without a Location header.',
+        );
+      }
+      if (redirects >= maxRedirects) {
+        throw new SafeFetchViolationError(
+          `Public URL exceeded the ${maxRedirects}-redirect limit.`,
+        );
+      }
+      url = validatePublicUrl(
+        new URL(location, url),
+        options.allowNonDefaultPorts,
+      );
+      continue;
+    }
+
+    const contentType = response.headers.get('content-type') ?? '';
+    if (!isTextContentType(contentType)) {
+      await response.body?.cancel();
+      throw new SafeFetchViolationError(
+        'Public URL response is not a supported text content type.',
+      );
+    }
+
+    return {
+      url: url.toString(),
+      status: response.status,
+      contentType,
+      text: await readBoundedTextBody(response, maxResponseBytes),
+    };
+  }
 }

@@ -11,6 +11,7 @@ import {
 import {
   CREATE_CUSTOM_SKILL_TOOL,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  PUBLIC_URL_FETCH_TOOL,
   UPDATE_CUSTOM_SKILL_TOOL,
 } from '@roomote/types';
 
@@ -154,6 +155,16 @@ describe('roomote MCP tool descriptions', () => {
     expect(toolNames).toContain('manage_tasks');
     expect(toolNames).not.toContain('diagnose_environment');
     expect(toolNames).not.toContain('complete_doctor_report');
+  });
+
+  it('registers the shared credential-free public URL fetch descriptor', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(registeredTools, PUBLIC_URL_FETCH_TOOL.name);
+
+    expect(tool.config.title).toBe(PUBLIC_URL_FETCH_TOOL.title);
+    expect(tool.config.description).toBe(PUBLIC_URL_FETCH_TOOL.description);
+    expect(tool.config.annotations).toEqual(PUBLIC_URL_FETCH_TOOL.annotations);
+    expect(Object.keys(tool.config.inputSchema)).toEqual(['url']);
   });
 
   it('documents every built-in custom automation schedule preset', async () => {

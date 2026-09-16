@@ -80,6 +80,17 @@ describe('createIntegrationMcpInstructions', () => {
       ]),
     ).toBeUndefined();
   });
+  it('instructs coding tasks to use the Roomote fetch replacement', () => {
+    const instructions = createIntegrationMcpInstructions([
+      { type: 'local', name: 'roomote', command: 'node' },
+    ]);
+
+    expect(instructions).toContain('Use `roomote_fetch_public_url`');
+    expect(instructions).toContain('built-in webfetch tool is disabled');
+    expect(instructions).toContain(
+      'does not restrict other network access available inside the coding sandbox',
+    );
+  });
   it.each(['gbrain', 'supermemory'])(
     'injects shared memory lifecycle guidance for %s',
     (name) => {
@@ -244,7 +255,12 @@ describe('generateOpenCodeConfig provider support', () => {
       expect(JSON.parse(refreshed.configContent).mcp).not.toHaveProperty(
         '_roomote_http_integrations',
       );
-      expect(existsSync(instructionsPath)).toBe(false);
+      expect(readFileSync(instructionsPath, 'utf8')).toContain(
+        'Use `roomote_fetch_public_url`',
+      );
+      expect(JSON.parse(refreshed.configContent).permission.webfetch).toBe(
+        'deny',
+      );
       expect(existsSync(catalogPath)).toBe(false);
       expect(refreshed.configContent).not.toContain(
         'ROOMOTE_ON_DEMAND_MCP_CATALOG_PATH',
@@ -325,14 +341,15 @@ describe('generateOpenCodeConfig provider support', () => {
       type: 'local',
       command: ['operator-mcp'],
     });
-    expect(
-      existsSync(
-        join(
-          result.openCodeConfigDir,
-          'roomote-opencode-integration-instructions.md',
-        ),
+    const instructions = readFileSync(
+      join(
+        result.openCodeConfigDir,
+        'roomote-opencode-integration-instructions.md',
       ),
-    ).toBe(false);
+      'utf8',
+    );
+    expect(instructions).toContain('Use `roomote_fetch_public_url`');
+    expect(instructions).not.toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
     expect(
       existsSync(join(result.openCodeConfigDir, 'on-demand-mcp-servers.json')),
     ).toBe(false);
