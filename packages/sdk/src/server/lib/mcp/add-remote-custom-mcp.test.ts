@@ -207,6 +207,20 @@ describe('addRemoteCustomMcpForFast', () => {
     expect(await db.query.customMcpServers.findMany()).toEqual([]);
   });
 
+  it('rejects 10,000 dashes without probing or writing', async () => {
+    await expect(
+      addRemoteCustomMcpForFast({
+        userId: adminId,
+        sessionId: crypto.randomUUID(),
+        name: '-'.repeat(10_000),
+        url: 'https://mcp.example.com/mcp',
+      }),
+    ).rejects.toThrow('Server name must be a lowercase slug');
+
+    expect(guardedFetchMock).not.toHaveBeenCalled();
+    expect(await db.query.customMcpServers.findMany()).toEqual([]);
+  });
+
   it('truncates normalized names to a valid 64-character boundary', async () => {
     guardedFetchMock
       .mockResolvedValueOnce(initializedResponse())

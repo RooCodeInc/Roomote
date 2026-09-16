@@ -92,20 +92,43 @@ function normalizeFastRemoteMcpUrl(value: string): string {
 }
 
 function normalizeFastRemoteMcpName(value: string): string {
-  const replaced = value
+  const collapsed = value
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-');
-  let start = 0;
-  let end = replaced.length;
-  while (replaced[start] === '-') start += 1;
-  while (end > start && replaced[end - 1] === '-') end -= 1;
-  const truncated = replaced.slice(start, Math.min(end, start + 64));
-  let truncatedEnd = truncated.length;
-  while (truncatedEnd > 0 && truncated[truncatedEnd - 1] === '-') {
-    truncatedEnd -= 1;
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-');
+  const withoutLeadingDash = collapsed.startsWith('-')
+    ? collapsed.slice(1)
+    : collapsed;
+  const truncated = withoutLeadingDash.slice(0, 64);
+  return truncated.endsWith('-') ? truncated.slice(0, -1) : truncated;
+}
+
+function findMatchingRemoteMcpServer(
+  servers: Array<typeof customMcpServers.$inferSelect>,
+  name: string,
+  normalizedUrl: string,
+) {
+  const nameMatch = servers.find((server) => server.name === name);
+  const urlMatch = servers.find(
+    (server) =>
+      server.url && canonicalizeRemoteMcpUrl(server.url) === normalizedUrl,
+  );
+  if (nameMatch && urlMatch && nameMatch.id !== urlMatch.id) {
+    throw new Error(
+      'The requested name and URL match different custom MCP servers. Review them in Settings.',
+    );
   }
-  return truncated.slice(0, truncatedEnd);
+  if (
+    nameMatch &&
+    (!nameMatch.url ||
+      canonicalizeRemoteMcpUrl(nameMatch.url) !== normalizedUrl)
+  ) {
+    throw new Error(
+      'A custom MCP server already uses that name or URL with different configuration. Review it in Settings.',
+    );
+  }
+  return nameMatch ?? urlMatch;
 }
 
 function parseTools(payload: unknown): RemoteMcpTool[] | null {
@@ -512,36 +535,34 @@ export async function addRemoteCustomMcpForFast(input: {
     authType: 'none',
   });
   const normalizedUrl = normalizeFastRemoteMcpUrl(parsed.url);
+  const existing = findMatchingRemoteMcpServer(
+    await db.query.customMcpServers.findMany(),
+    parsed.name,
+    normalizedUrl,
+  );
+  if (existing) {
+    return resultForServer({
+      server: existing,
+      userId: input.userId,
+      sessionId: input.sessionId,
+      reused: true,
+    });
+  }
+
+  const probe = await probeRemoteMcp(normalizedUrl);
   const selected = await db.transaction(async (tx) => {
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${normalizedUrl}, 0))`,
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${normalizedUrl}, 0))`,
     );
-    const servers = await tx.query.customMcpServers.findMany();
-    const nameMatch = servers.find((server) => server.name === parsed.name);
-    const urlMatch = servers.find(
-      (server) =>
-        server.url && canonicalizeRemoteMcpUrl(server.url) === normalizedUrl,
+    const lockedExisting = findMatchingRemoteMcpServer(
+      await tx.query.customMcpServers.findMany(),
+      parsed.name,
+      normalizedUrl,
     );
-    if (nameMatch && urlMatch && nameMatch.id !== urlMatch.id) {
-      throw new Error(
-        'The requested name and URL match different custom MCP servers. Review them in Settings.',
-      );
-    }
-    const existing = nameMatch ?? urlMatch;
-    if (existing) {
-      if (
-        nameMatch &&
-        (!nameMatch.url ||
-          canonicalizeRemoteMcpUrl(nameMatch.url) !== normalizedUrl)
-      ) {
-        throw new Error(
-          'A custom MCP server already uses that name or URL with different configuration. Review it in Settings.',
-        );
-      }
-      return { server: existing, probe: null, reused: true as const };
+    if (lockedExisting) {
+      return { server: lockedExisting, reused: true as const };
     }
 
-    const probe = await probeRemoteMcp(normalizedUrl);
     const [countRow] = await tx
       .select({ value: count() })
       .from(customMcpServers);
@@ -577,7 +598,7 @@ export async function addRemoteCustomMcpForFast(input: {
         `A custom MCP server named '${parsed.name}' already exists.`,
       );
     }
-    return { server: created, probe, reused: false as const };
+    return { server: created, reused: false as const };
   });
 
   if (selected.reused) {
@@ -589,12 +610,12 @@ export async function addRemoteCustomMcpForFast(input: {
     });
   }
 
-  if (selected.probe.status === 'connected') {
+  if (probe.status === 'connected') {
     return {
       status: 'connected',
       id: selected.server.id,
       name: selected.server.name,
-      tools: selected.probe.tools,
+      tools: probe.tools,
       reused: false,
     };
   }
