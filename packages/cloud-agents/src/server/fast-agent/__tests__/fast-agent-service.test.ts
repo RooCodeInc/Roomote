@@ -1750,7 +1750,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.prepareServiceCredential).toHaveBeenNthCalledWith(
         1,
         { sessionId: 'canonical-session-1', userId: 'user-1' },
-        { ...args, allowedMethods: ['GET', 'HEAD'] },
+        {
+          ...args,
+          allowedMethods: ['GET', 'HEAD'],
+          visibility: 'deployment',
+        },
       );
       expect(mocks.prepareServiceCredential).toHaveBeenNthCalledWith(
         2,
@@ -1761,6 +1765,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           headerName: 'x-api-key',
           headerPrefix: '',
           allowedMethods: ['GET', 'HEAD'],
+          visibility: 'deployment',
         },
       );
       expect(
@@ -2151,6 +2156,116 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(JSON.stringify(mocks.captureEvent.mock.calls)).not.toContain(
         secretRef,
       );
+    },
+  );
+
+  it('uses an existing POST-capable grant on an owner-authored task-settle turn but still refuses preparation', async () => {
+    const args = {
+      secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+      method: 'POST' as const,
+      path: '/search',
+      body: '{"query":"roomote"}',
+      contentType: 'application/json' as const,
+    };
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
+    mocks.callIntegration.mockResolvedValue({ status: 200, body: 'results' });
+    mocks.listServiceCredentialApprovals.mockResolvedValue({
+      pending: [],
+      secrets: [],
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        expect(
+          await invokeTool(nativeToolNames.listServiceCredentials, {}),
+        ).toMatchObject({ pending: [], secrets: [] });
+        expect(
+          await invokeTool(nativeToolNames.requestWithServiceCredential, args),
+        ).toEqual({ success: true, status: 200, body: 'results' });
+        expect(
+          await invokeTool(nativeToolNames.prepareServiceCredential, {
+            label: 'Another API',
+            origin: 'https://api.example.com',
+            headerName: 'authorization',
+            headerPrefix: 'Bearer ',
+          }),
+        ).toEqual({
+          success: false,
+          error: expect.stringContaining('(reason: human_turn_required)'),
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Search complete.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      turnSource: 'platform_event',
+      serviceCredentialPlatformActorUserId: 'user-1',
+      adapter: callbacks(),
+    });
+
+    expect(mocks.callIntegration).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        sessionId: 'conversation-1',
+        humanTurn: true,
+      }),
+      expect.any(Array),
+      expect.objectContaining({
+        args: expect.objectContaining({ method: 'POST', path: '/search' }),
+      }),
+    );
+    expect(mocks.prepareServiceCredential).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['no acting user', undefined, 'no_acting_user'],
+    ['actor/owner mismatch', 'user-2', 'actor_owner_mismatch'],
+  ] as const)(
+    'names the refusal for a task-settle turn with %s',
+    async (_label, actorUserId, reason) => {
+      let result: unknown;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          result = await invokeTool(
+            nativeToolNames.requestWithServiceCredential,
+            {
+              secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+              method: 'POST',
+              path: '/search',
+              body: '{}',
+              contentType: 'application/json',
+            },
+          );
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Please reply so I can continue.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        turnSource: 'platform_event',
+        ...(actorUserId
+          ? { serviceCredentialPlatformActorUserId: actorUserId }
+          : { serviceCredentialPlatformDenialReason: reason }),
+        adapter: callbacks(),
+      });
+
+      expect(result).toEqual({
+        success: false,
+        error: expect.stringContaining(`(reason: ${reason})`),
+      });
+      expect(mocks.callIntegration).not.toHaveBeenCalled();
     },
   );
 
@@ -5759,7 +5874,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ id: 'github' }),
         expect.objectContaining({ id: 'roomote' }),
       ]),
-      { surface: 'slack', serviceCredentialToolsEnabled: true },
+      {
+        surface: 'slack',
+        serviceCredentialToolsEnabled: true,
+        serviceCredentialPrepareEnabled: true,
+      },
     );
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.any(Object),

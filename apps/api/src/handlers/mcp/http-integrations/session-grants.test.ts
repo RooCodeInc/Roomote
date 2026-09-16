@@ -127,6 +127,7 @@ beforeEach(async () => {
     origin,
     headerName: 'authorization',
     headerPrefix: 'Bearer ',
+    visibility: 'owner',
   });
   ({ secretRef } = await createServiceCredential(context, {
     pendingRef: pending.pendingRef,
@@ -657,6 +658,7 @@ it('performs an approved write method with a body and still rejects methods outs
     headerName: 'authorization',
     headerPrefix: 'Bearer ',
     allowedMethods: ['GET', 'HEAD', 'POST'],
+    visibility: 'deployment',
   });
   const writable = await createServiceCredential(context, {
     pendingRef: pending.pendingRef,
@@ -687,6 +689,51 @@ it('performs an approved write method with a body and still rejects methods outs
   } finally {
     await db.execute(
       sql`delete from service_credential_audit where secret_ref = ${writable.secretRef}`,
+    );
+  }
+});
+
+it('lets another active member use a deployment-visible grant with its approved POST method', async () => {
+  const otherSession = await session(otherId);
+  const otherAuth: Extract<Auth, { tokenType: 'session-broker' }> = {
+    tokenType: 'session-broker',
+    userId: otherId,
+    fastConversationId: otherSession.fastConversationId!,
+  };
+  const pending = await prepareServiceCredential(context, {
+    label: 'Shared write credential',
+    origin,
+    headerName: 'authorization',
+    headerPrefix: 'Bearer ',
+    allowedMethods: ['GET', 'HEAD', 'POST'],
+  });
+  const shared = await createServiceCredential(context, {
+    pendingRef: pending.pendingRef,
+    secret,
+    allowedMethods: ['GET', 'HEAD', 'POST'],
+  });
+  try {
+    await integrationRequest(
+      { integrations: [] },
+      `shared:${otherSession.id}`,
+      {
+        integrationId: `session:${shared.secretRef}`,
+        method: 'POST',
+        path: '/v1/search',
+        body: '{"q":"roomote"}',
+        contentType: 'application/json',
+      },
+      otherId,
+      undefined,
+      () => resolveServiceCredentialContext(otherAuth),
+    );
+    expect(vi.mocked(fetch).mock.lastCall?.[1]).toMatchObject({
+      method: 'POST',
+      body: '{"q":"roomote"}',
+    });
+  } finally {
+    await db.execute(
+      sql`delete from service_credential_audit where secret_ref = ${shared.secretRef}`,
     );
   }
 });

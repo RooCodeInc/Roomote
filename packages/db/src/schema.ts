@@ -4304,6 +4304,10 @@ export const serviceCredentials = pgTable(
       .notNull()
       .default(sql`'{GET,HEAD}'::text[]`)
       .$type<CredentialEgressMethod[]>(),
+    visibility: text('visibility')
+      .notNull()
+      .default('deployment')
+      .$type<import('@roomote/types').ServiceCredentialVisibility>(),
     value: encryptedText('value'),
     /** Null: kept until revoked. */
     expiresAt: timestamp('expires_at'),
@@ -4341,6 +4345,10 @@ export const serviceCredentialApprovals = pgTable(
       .notNull()
       .default(sql`'{GET,HEAD}'::text[]`)
       .$type<CredentialEgressMethod[]>(),
+    visibility: text('visibility')
+      .notNull()
+      .default('deployment')
+      .$type<import('@roomote/types').ServiceCredentialVisibility>(),
     /** How long the resulting integration lives once the key is entered; null keeps it until revoked. */
     lifetimeHours: integer('lifetime_hours'),
     /** The window for entering the key, not the integration's lifetime. */

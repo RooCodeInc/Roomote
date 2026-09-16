@@ -760,7 +760,7 @@ describe('buildFastAgentSystemPrompt', () => {
       serviceCredentialToolsEnabled: false,
     });
     expect(platformEventPrompt).toContain(
-      'Integration-key tools cannot run on this turn because no human is acting',
+      'If integration-key tools are absent on this turn, ask the user to reply',
     );
     expect(platformEventPrompt).not.toContain(
       'Integration-key tools are turned off for this user',

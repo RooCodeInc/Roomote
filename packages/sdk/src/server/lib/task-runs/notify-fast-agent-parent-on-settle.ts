@@ -98,6 +98,13 @@ export async function notifyFastAgentParentOnSettle(
       return 'already_notified';
     }
 
+    // Re-read the trusted run row at settlement. The payload never accepts an
+    // actor supplied by a sandbox or event producer.
+    const settledActor = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, run.id),
+      columns: { actingUserId: true },
+      with: { task: { columns: { initiatorKind: true } } },
+    });
     const pullRequests = await listFastAgentPullRequestContexts(run.taskId);
     const customAutomationId = getCustomAutomationId(run.payload);
     let retryTaskStartRunId: number | undefined;
@@ -121,6 +128,10 @@ export async function notifyFastAgentParentOnSettle(
         type: 'task_settled',
         taskId: run.taskId,
         runId: run.id,
+        ...(settledActor?.task.initiatorKind === 'user' &&
+        settledActor.actingUserId
+          ? { actingUserId: settledActor.actingUserId }
+          : {}),
         ...(customAutomationId ? { customAutomationId } : {}),
         ...(taskTitle?.trim() ? { title: taskTitle.trim() } : {}),
         status,

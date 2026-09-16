@@ -8,6 +8,7 @@ import {
   type ServiceCredentialPendingMetadata,
   type ServiceCredentialMetadata,
   type CredentialEgressMethod,
+  type ServiceCredentialVisibility,
 } from '@roomote/types';
 
 import { db } from '../db';
@@ -119,6 +120,8 @@ const metadataColumns = {
   headerName: serviceCredentials.headerName,
   headerPrefix: serviceCredentials.headerPrefix,
   allowedMethods: serviceCredentials.allowedMethods,
+  visibility: serviceCredentials.visibility,
+  ownerUserId: serviceCredentials.ownerUserId,
   expiresAt: serviceCredentials.expiresAt,
   revokedAt: serviceCredentials.revokedAt,
   createdAt: serviceCredentials.createdAt,
@@ -134,11 +137,16 @@ function metadata(
         headerName: ServiceCredentialPrepare['headerName'];
         headerPrefix: ServiceCredentialPrepare['headerPrefix'];
         allowedMethods: CredentialEgressMethod[];
+        visibility: ServiceCredentialVisibility;
+        ownerUserId: string;
+        ownerName?: string | null;
         expiresAt: Date | null;
         revokedAt: Date | null;
         createdAt: Date;
       },
+  viewer?: { userId: string; isAdmin: boolean },
 ): ServiceCredentialMetadata {
+  const ownerUserId = row.ownerUserId;
   return {
     secretRef: 'secretRef' in row ? row.secretRef : row.id,
     label: row.label,
@@ -146,6 +154,14 @@ function metadata(
     headerName: row.headerName,
     headerPrefix: row.headerPrefix,
     allowedMethods: [...row.allowedMethods],
+    visibility: row.visibility,
+    sharedBy:
+      viewer && ownerUserId !== viewer.userId
+        ? ('ownerName' in row ? row.ownerName?.trim() : null) ||
+          'Another member'
+        : null,
+    canManage:
+      viewer === undefined || ownerUserId === viewer.userId || viewer.isAdmin,
     expiresAt: row.expiresAt?.toISOString() ?? null,
     revokedAt: row.revokedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
@@ -191,6 +207,7 @@ function pendingMetadata(
     headerName: row.headerName,
     headerPrefix: row.headerPrefix,
     allowedMethods: [...row.allowedMethods],
+    visibility: row.visibility,
     lifetimeHours: row.lifetimeHours,
     expiresAt: row.expiresAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
@@ -254,6 +271,7 @@ export async function insertServiceCredentialApproval(
         headerName: input.headerName,
         headerPrefix: input.headerPrefix,
         allowedMethods: input.allowedMethods,
+        visibility: input.visibility,
         lifetimeHours: input.lifetimeHours ?? null,
         expiresAt: sql`clock_timestamp() + ${SERVICE_CREDENTIAL_APPROVAL_WINDOW_HOURS} * interval '1 hour'`,
       })
@@ -327,6 +345,7 @@ export async function finalizeServiceCredential(
         headerPrefix: pending.headerPrefix,
         // The policy is copied from the immutable prepared approval, never from the finalizer.
         allowedMethods: pending.allowedMethods,
+        visibility: input.visibility ?? pending.visibility,
         // Always treat human input as plaintext, even if it happens to be valid ciphertext.
         value: encrypt(input.secret),
         expiresAt: lifetimeExpiry(pending.lifetimeHours),
@@ -351,13 +370,21 @@ export async function listOwnedServiceCredentials(
 }
 
 export async function listUserIntegrations(userId: string) {
+  const viewer = await db.query.users.findFirst({
+    where: and(eq(users.id, userId), isNull(users.deletedAt)),
+    columns: { id: true, role: true },
+  });
+  if (!viewer) throw new ServiceCredentialUnavailableError('owner_not_found');
   const rows = await db
-    .select(metadataColumns)
+    .select({ ...metadataColumns, ownerName: users.name })
     .from(serviceCredentials)
     .innerJoin(users, eq(users.id, serviceCredentials.ownerUserId))
     .where(
       and(
-        eq(serviceCredentials.ownerUserId, userId),
+        or(
+          eq(serviceCredentials.ownerUserId, userId),
+          eq(serviceCredentials.visibility, 'deployment'),
+        ),
         isNull(users.deletedAt),
         // Revoked and expired integrations are gone for every reader: the
         // agent's listing, the Settings page, and attached runs.
@@ -365,7 +392,9 @@ export async function listUserIntegrations(userId: string) {
       ),
     )
     .orderBy(asc(serviceCredentials.createdAt));
-  return rows.map(metadata);
+  return rows.map((row) =>
+    metadata(row, { userId, isAdmin: viewer.role === 'admin' }),
+  );
 }
 
 /** Settings path: policy and key arrive together from the owner; no approval is involved. */
@@ -390,6 +419,7 @@ export async function insertUserIntegration(
         headerName: input.headerName,
         headerPrefix: input.headerPrefix,
         allowedMethods: input.allowedMethods,
+        visibility: input.visibility,
         value: encrypt(input.secret),
         expiresAt: lifetimeExpiry(input.lifetimeHours),
       })
@@ -401,12 +431,12 @@ export async function insertUserIntegration(
 
 export async function revokeUserIntegration(userId: string, secretRef: string) {
   await db.transaction(async (tx) => {
-    const [owner] = await tx
-      .select({ id: users.id })
+    const [actor] = await tx
+      .select({ id: users.id, role: users.role })
       .from(users)
       .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .for('share');
-    if (!owner) throw new ServiceCredentialUnavailableError('owner_not_found');
+    if (!actor) throw new ServiceCredentialUnavailableError('owner_not_found');
     const [row] = await tx
       .update(serviceCredentials)
       .set({
@@ -416,7 +446,9 @@ export async function revokeUserIntegration(userId: string, secretRef: string) {
       .where(
         and(
           eq(serviceCredentials.id, secretRef),
-          eq(serviceCredentials.ownerUserId, owner.id),
+          actor.role === 'admin'
+            ? undefined
+            : eq(serviceCredentials.ownerUserId, actor.id),
         ),
       )
       .returning({ id: serviceCredentials.id });
@@ -430,13 +462,17 @@ export async function revokeOwnedServiceCredential(
   secretRef: string,
 ) {
   await db.transaction(async (tx) => {
-    const [owner] = await tx
+    const [actor] = await tx
       .select({ id: users.id })
       .from(sessions)
       .innerJoin(users, eq(users.id, sessions.ownerUserId))
       .where(ownerWhere(context, true))
       .for('share');
-    if (!owner) throw new ServiceCredentialUnavailableError('owner_not_found');
+    if (!actor) throw new ServiceCredentialUnavailableError('owner_not_found');
+    const user = await tx.query.users.findFirst({
+      where: and(eq(users.id, actor.id), isNull(users.deletedAt)),
+      columns: { role: true },
+    });
     const [row] = await tx
       .update(serviceCredentials)
       .set({
@@ -446,7 +482,9 @@ export async function revokeOwnedServiceCredential(
       .where(
         and(
           eq(serviceCredentials.id, secretRef),
-          eq(serviceCredentials.ownerUserId, owner.id),
+          user?.role === 'admin'
+            ? undefined
+            : eq(serviceCredentials.ownerUserId, actor.id),
         ),
       )
       .returning({ id: serviceCredentials.id });
@@ -472,13 +510,49 @@ export async function resolveOwnedServiceCredential(
     .where(
       and(
         eq(serviceCredentials.id, secretRef),
-        eq(serviceCredentials.ownerUserId, owner.id),
+        or(
+          eq(serviceCredentials.ownerUserId, owner.id),
+          eq(serviceCredentials.visibility, 'deployment'),
+        ),
         liveGrantWhere(),
       ),
     );
   if (!row?.secret.value)
     throw new ServiceCredentialUnavailableError('grant_not_found');
   return { ...metadata(row.secret), value: decrypt(row.secret.value) };
+}
+
+export async function updateUserIntegrationVisibility(
+  userId: string,
+  secretRef: string,
+  visibility: ServiceCredentialVisibility,
+) {
+  return db.transaction(async (tx) => {
+    const [actor] = await tx
+      .select({ id: users.id, role: users.role })
+      .from(users)
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+      .for('share');
+    if (!actor) throw new ServiceCredentialUnavailableError('owner_not_found');
+    const [row] = await tx
+      .update(serviceCredentials)
+      .set({ visibility })
+      .where(
+        and(
+          eq(serviceCredentials.id, secretRef),
+          actor.role === 'admin'
+            ? undefined
+            : eq(serviceCredentials.ownerUserId, actor.id),
+          liveGrantWhere(),
+        ),
+      )
+      .returning(metadataColumns);
+    if (!row) throw new ServiceCredentialUnavailableError('grant_not_found');
+    return metadata(row, {
+      userId: actor.id,
+      isAdmin: actor.role === 'admin',
+    });
+  });
 }
 
 export async function recordServiceCredentialAudit(

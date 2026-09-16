@@ -5,6 +5,7 @@ import {
   hasLeadingIntegrationSavedBlock,
   stripLeadingIntegrationSavedBlock,
   serviceCredentialPrepareToolSchema,
+  integrationCreateSchema,
 } from './service-credentials';
 import { isCredentialEgressCredentialHeaderName } from './credential-egress';
 
@@ -78,6 +79,35 @@ describe('credential header names', () => {
       expect(isCredentialEgressCredentialHeaderName(name), name).toBe(false);
       expect(prepare(name).success, name).toBe(false);
     }
+  });
+});
+
+describe('integration visibility', () => {
+  it('defaults new approvals and Settings integrations to the deployment', () => {
+    const prepared = serviceCredentialPrepareSchema.parse({
+      label: 'Example',
+      origin: 'https://api.example.com',
+      headerName: 'authorization',
+      headerPrefix: 'Bearer ',
+    });
+    expect(prepared.visibility).toBe('deployment');
+    expect(
+      integrationCreateSchema.parse({
+        ...prepared,
+        secret: 'disposable-key',
+      }).visibility,
+    ).toBe('deployment');
+  });
+
+  it('accepts owner-only as an explicit opt-out', () => {
+    expect(
+      serviceCredentialPrepareToolSchema.parse({
+        label: 'Example',
+        origin: 'https://api.example.com',
+        headerName: 'authorization',
+        visibility: 'owner',
+      }).visibility,
+    ).toBe('owner');
   });
 });
 

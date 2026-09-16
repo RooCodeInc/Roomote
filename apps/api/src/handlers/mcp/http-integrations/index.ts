@@ -117,7 +117,7 @@ export function createHttpIntegrationsMcp() {
         'list_integrations',
         {
           description: serviceCredentialToolsEnabled
-            ? "List allowed operator integrations and live owner-approved integration keys with their methods and paths. Credentials are never returned. integration keys need no operator manifest: use integration_request with a session: id for any of the grant's allowed methods, or, inside an attached coding run, the substitute token and base URL delivered for that grant (see ROOMOTE_CREDENTIAL_EGRESS_SERVICES) with any ordinary HTTP client and the grant's allowed methods."
+            ? "List allowed operator integrations and live integration keys available to this member with their methods and paths. Credentials are never returned. integration keys need no operator manifest: use integration_request with a session: id for any of the grant's allowed methods, or, inside an attached coding run, the substitute token and base URL delivered for that grant (see ROOMOTE_CREDENTIAL_EGRESS_SERVICES) with any ordinary HTTP client and the grant's allowed methods."
             : 'List allowed operator integrations with their methods and paths. Credentials are never returned.',
           inputSchema: {},
           annotations: {
@@ -202,7 +202,7 @@ export function createHttpIntegrationsMcp() {
         'list_integration_keys',
         {
           description:
-            "List this Session owner's nonsecret pending approvals and ready grants with origin, header, allowed HTTP methods, and expiry. A ready grant is usable through integration_request with its session: id for any of its allowed methods, and is delivered to attached coding runs as a substitute token with a base URL for ordinary clients and the grant's allowed methods.",
+            "List this Session owner's nonsecret pending approvals and the live ready grants available to them, including deployment-visible grants, with origin, header, visibility, allowed HTTP methods, and expiry. A ready grant is usable through integration_request with its session: id for any of its allowed methods, and is delivered to attached coding runs as a substitute token with a base URL for ordinary clients and the grant's allowed methods.",
           inputSchema: {},
         },
         async () => {

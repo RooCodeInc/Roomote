@@ -28,10 +28,12 @@ import {
   getSessionForFastConversation,
   getSessionWakeupById,
   inArray,
+  isNull,
   slackInstallations,
   taskArtifacts,
   taskPullRequests,
   taskRuns,
+  users,
 } from '@roomote/db/server';
 import { Env, getArtifactSigningKey } from '@roomote/env';
 import {
@@ -236,6 +238,8 @@ export type FastAgentParentEvent =
       type: 'task_settled';
       taskId: string;
       runId: number;
+      /** Trusted latest actor copied from task_runs at settle time. */
+      actingUserId?: string;
       customAutomationId?: string;
       title?: string;
       status: string;
@@ -2576,6 +2580,29 @@ function buildFastAutomationFailureReport(
     : `${subject} failed${detail}\n${event.taskUrl}`;
 }
 
+async function resolveTaskSettledCredentialActor(
+  parent: FastAgentParent,
+  event: Extract<FastAgentParentEvent, { type: 'task_settled' }>,
+): Promise<{
+  userId?: string;
+  denialReason?: 'no_acting_user' | 'actor_owner_mismatch';
+}> {
+  if (!event.actingUserId) return { denialReason: 'no_acting_user' };
+  const session = await getSessionForFastConversation(db, parent.sessionId);
+  if (
+    !session ||
+    session.ownerKind !== 'user' ||
+    session.ownerUserId !== event.actingUserId
+  ) {
+    return { denialReason: 'actor_owner_mismatch' };
+  }
+  const actor = await db.query.users.findFirst({
+    where: and(eq(users.id, event.actingUserId), isNull(users.deletedAt)),
+    columns: { id: true },
+  });
+  return actor ? { userId: actor.id } : { denialReason: 'no_acting_user' };
+}
+
 export async function deliverFastAgentParentEvent(
   params: FastAgentParentEventDeliveryParams,
 ): Promise<'delivered' | 'skipped'> {
@@ -2737,6 +2764,10 @@ export async function deliverFastAgentParentEventWithLock(
 
     const humanFollowUp =
       params.event.type === 'human_follow_up' ? params.event : null;
+    const taskSettledCredentialActor =
+      params.event.type === 'task_settled'
+        ? await resolveTaskSettledCredentialActor(params.parent, params.event)
+        : undefined;
     let parentTurn = await createFastAgentParentTurn({
       parent: params.parent,
       event: params.event,
@@ -2901,6 +2932,18 @@ export async function deliverFastAgentParentEventWithLock(
       automationReport:
         params.event.type === 'task_settled' &&
         Boolean(params.event.customAutomationId),
+      ...(taskSettledCredentialActor?.userId
+        ? {
+            serviceCredentialPlatformActorUserId:
+              taskSettledCredentialActor.userId,
+          }
+        : {}),
+      ...(taskSettledCredentialActor?.denialReason
+        ? {
+            serviceCredentialPlatformDenialReason:
+              taskSettledCredentialActor.denialReason,
+          }
+        : {}),
       ...(params.event.type === 'child_message' &&
       params.event.imageArtifactIds?.length
         ? { defaultImageArtifactIds: params.event.imageArtifactIds }

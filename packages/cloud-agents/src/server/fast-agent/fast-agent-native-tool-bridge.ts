@@ -721,7 +721,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Prepare an integration approval using only nonsecret metadata from the service documentation. Call list_integration_keys first: a ready integration for the service means no approval is needed, and a pending one means re-share its link, not prepare again. Choose the HTTPS origin and the header that carries the key (authorization, x-api-key, api-key, or the service's own header), omitting headerPrefix when the key needs no scheme, then share the returned secure link so the human can enter the key privately. Once entered, the key is an integration for every Session the human owns. Omit allowedMethods for read-only access; list the exact HTTP methods only when the requested work needs writes, and say so before the human approves. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
+  description: "Prepare an integration approval using only nonsecret metadata from the service documentation. Call list_integration_keys first: a ready integration for the service means no approval is needed, and a pending one means re-share its link, not prepare again. Choose the HTTPS origin and the header that carries the key (authorization, x-api-key, api-key, or the service's own header), omitting headerPrefix when the key needs no scheme, then share the returned secure link so the human can enter the key privately. New integrations default to everyone in the deployment; pass owner only when the human asked to keep it private, and the approval form still lets them choose. Omit allowedMethods for read-only access; list the exact HTTP methods only when the requested work needs writes, and say so before the human approves. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
   args: {
     label: z.string().trim().min(1).max(80),
     origin: z.string().min(1).max(2048),
@@ -735,6 +735,7 @@ export default {
     headerPrefix: z.enum(["Bearer", "Basic", "Token", "Bearer ", "Basic ", "Token "]).optional().describe("Scheme before the key, with or without the trailing space; omit when the header takes the bare key"),
     lifetimeHours: z.number().int().min(1).max(8760).optional().describe("Hours until the integration expires. Omit unless the human asked for a temporary key; integrations are kept until revoked."),
     allowedMethods: z.array(z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])).min(1).max(6).optional().describe("HTTP methods the approved key may be used with. Defaults to GET and HEAD."),
+    visibility: z.enum(["owner", "deployment"]).optional().describe("Who may use the integration. Defaults to deployment; use owner only when the human requested private access."),
   },
   execute: (args, context) => invoke("prepare_integration_key", args, context),
 }
@@ -744,7 +745,7 @@ export default {
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List the human's integrations (ready secret references with their origin, header, allowed methods, and expiry, whichever Session approved them) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval and before using a reference; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready references are usable by request_with_integration_key with any of their allowed methods and are delivered automatically to coding tasks launched from this Session.",
+  description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List integrations available to this human (their own and deployment-visible grants, with origin, header, allowed methods, visibility, and expiry) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval and before using a reference; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready references are usable by request_with_integration_key with any of their allowed methods and are delivered automatically to coding tasks launched from this Session.",
   args: {},
   execute: (args, context) => invoke("list_integration_keys", args, context),
 }
@@ -1558,6 +1559,7 @@ export async function getFastAgentNativeToolRuntime(
   options: {
     surface?: FastAgentSurface;
     serviceCredentialToolsEnabled?: boolean;
+    serviceCredentialPrepareEnabled?: boolean;
   } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
@@ -1616,6 +1618,8 @@ export async function getFastAgentNativeToolRuntime(
               surface: options.surface ?? 'web',
               serviceCredentialToolsEnabled:
                 options.serviceCredentialToolsEnabled === true,
+              serviceCredentialPrepareEnabled:
+                options.serviceCredentialPrepareEnabled,
             },
           ),
         },

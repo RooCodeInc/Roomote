@@ -125,8 +125,10 @@ export async function findCredentialEgressCandidateForRun(
     .from(serviceCredentials)
     .where(
       and(
-        // Every integration of the owner, whichever Session approved it.
-        eq(serviceCredentials.ownerUserId, eligible.ownerUserId),
+        or(
+          eq(serviceCredentials.ownerUserId, eligible.ownerUserId),
+          eq(serviceCredentials.visibility, 'deployment'),
+        ),
         isNull(serviceCredentials.revokedAt),
         or(
           isNull(serviceCredentials.expiresAt),
@@ -252,7 +254,10 @@ async function mintMissingSubstitutes(
     .from(serviceCredentials)
     .where(
       and(
-        eq(serviceCredentials.ownerUserId, workload.ownerUserId),
+        or(
+          eq(serviceCredentials.ownerUserId, workload.ownerUserId),
+          eq(serviceCredentials.visibility, 'deployment'),
+        ),
         isNull(serviceCredentials.revokedAt),
         or(
           isNull(serviceCredentials.expiresAt),
@@ -619,7 +624,8 @@ async function authorizeSubstitute(
     if (
       session.ownerKind !== 'user' ||
       session.ownerUserId !== workload.ownerUserId ||
-      secret.ownerUserId !== workload.ownerUserId ||
+      (secret.ownerUserId !== workload.ownerUserId &&
+        secret.visibility !== 'deployment') ||
       session.archivedAt ||
       row.ownerDeletedAt ||
       !isServiceCredentialToolsExperimentEnabled(row.ownerMetadata) ||

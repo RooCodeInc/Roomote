@@ -1758,6 +1758,8 @@ export async function answerFastAgentQuestion({
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
   automationReport = false,
+  serviceCredentialPlatformActorUserId,
+  serviceCredentialPlatformDenialReason,
   defaultImageArtifactIds = [],
   defaultCharts = [],
   allowSilentAmbientReply = false,
@@ -1801,6 +1803,11 @@ export async function answerFastAgentQuestion({
   /** The settling delegated task ran for a custom automation; its closeout is
    * the run's report and may carry launchable suggestions. */
   automationReport?: boolean;
+  /** Trusted owner actor for a task-settled continuation, resolved server-side. */
+  serviceCredentialPlatformActorUserId?: string;
+  serviceCredentialPlatformDenialReason?:
+    | 'no_acting_user'
+    | 'actor_owner_mismatch';
   /** Child-selected images to carry through when the parent model omits the
    * optional attachment argument while composing the child update. */
   defaultImageArtifactIds?: string[];
@@ -3128,14 +3135,16 @@ export async function answerFastAgentQuestion({
         );
         return [];
       }),
-      platformEvent
+      platformEvent && !serviceCredentialPlatformActorUserId
         ? Promise.resolve({
             displayName: null,
             githubLogin: null,
             isAdmin: false,
             serviceCredentialToolsEnabled: false,
           })
-        : getFastAgentUserIdentity(userId).catch((error) => {
+        : getFastAgentUserIdentity(
+            serviceCredentialPlatformActorUserId ?? userId,
+          ).catch((error) => {
             degradedContextComponents.add('user_identity');
             console.warn(
               `[Fast Agent] User identity unavailable: ${formatErrorForLog(error)}`,
@@ -4659,15 +4668,46 @@ export async function answerFastAgentQuestion({
             // The model only ever sees the generic message; the bounded reason
             // goes to server logs so operators can tell a disabled experiment
             // from a missing Session binding or a broker denial.
-            const unavailable = (reason: string) => {
+            const unavailable = (reason: string, nameReason = false) => {
               console.warn(
                 `[Fast Agent] ${call.name} unavailable (reason=${reason})`,
               );
-              return { success: false, error: 'Secret request unavailable' };
+              const guidance =
+                reason === 'human_turn_required'
+                  ? 'New integration-key approvals require a human-authored turn. Ask the user to reply so you can continue.'
+                  : reason === 'actor_owner_mismatch'
+                    ? 'Integration-key tools are unavailable because the task actor does not own this Session. Ask the Session owner to reply so you can continue.'
+                    : 'Integration-key tools are unavailable because this turn has no acting user. Ask the user to reply so you can continue.';
+              return {
+                success: false,
+                error: nameReason
+                  ? `${guidance} (reason: ${reason})`
+                  : 'Secret request unavailable',
+              };
             };
             try {
+              if (
+                platformEvent &&
+                (!serviceCredentialPlatformActorUserId ||
+                  serviceCredentialPlatformActorUserId !== userId)
+              ) {
+                const reason =
+                  serviceCredentialPlatformActorUserId &&
+                  serviceCredentialPlatformActorUserId !== userId
+                    ? 'actor_owner_mismatch'
+                    : (serviceCredentialPlatformDenialReason ??
+                      'no_acting_user');
+                return unavailable(reason, true);
+              }
               if (!currentUser.serviceCredentialToolsEnabled) {
                 return unavailable('experiment_disabled');
+              }
+              if (
+                platformEvent &&
+                call.name ===
+                  FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential
+              ) {
+                return unavailable('human_turn_required', true);
               }
               const schema =
                 call.name ===
@@ -4697,8 +4737,6 @@ export async function answerFastAgentQuestion({
                   error: `Invalid arguments: ${fields.join(', ')}. GET and HEAD carry no body; headerPrefix is Bearer, Basic, or Token; methods must be approved for the integration.`,
                 };
               }
-              // Platform events carry an owner for routing, not a human actor.
-              if (platformEvent) return unavailable('platform_event');
               if (!userId) return unavailable('actor_missing');
               const canonicalSession = await getSessionForFastConversation(
                 db,
@@ -5347,6 +5385,8 @@ export async function answerFastAgentQuestion({
             surface: conversation.surface,
             serviceCredentialToolsEnabled:
               currentUser.serviceCredentialToolsEnabled,
+            serviceCredentialPrepareEnabled:
+              currentUser.serviceCredentialToolsEnabled && !platformEvent,
           },
         );
         const unbindExecutors = new Set<() => void>();

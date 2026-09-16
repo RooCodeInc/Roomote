@@ -375,6 +375,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       'label',
       'lifetimeHours',
       'origin',
+      'visibility',
     ]);
     expect(schema).toMatchObject({
       type: 'object',
@@ -392,6 +393,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
           minItems: 1,
           maxItems: 6,
         },
+        visibility: { enum: ['owner', 'deployment'] },
       },
     });
     expect(schema.required).not.toContain('allowedMethods');
@@ -411,6 +413,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     expect(serviceCredentialPrepareSchema.parse(args)).toEqual({
       ...args,
       allowedMethods: ['GET', 'HEAD'],
+      visibility: 'deployment',
     });
     expect(
       serviceCredentialPrepareToolSchema.parse({
@@ -424,6 +427,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       headerName: 'x-api-key',
       headerPrefix: '',
       allowedMethods: ['GET', 'HEAD'],
+      visibility: 'deployment',
     });
     expect(
       serviceCredentialPrepareSchema.parse({

@@ -52,8 +52,8 @@ export function ServiceCredentials({ sessionId }: { sessionId: string }) {
         <DialogHeader>
           <DialogTitle>Approve API key</DialogTitle>
           <DialogDescription>
-            Enter it here, never in chat. It becomes an integration for every
-            Session you own; manage it under Settings → Integrations.
+            Enter it here, never in chat. Manage the saved integration under
+            Settings → Integrations.
           </DialogDescription>
         </DialogHeader>
         {open ? (
@@ -167,6 +167,9 @@ function ServiceCredentialsForm({ sessionId }: { sessionId: string }) {
                   pendingRef: selected.pendingRef,
                   secret: new FormData(event.currentTarget).get('secret'),
                   allowedMethods: selected.allowedMethods,
+                  visibility: new FormData(event.currentTarget).get(
+                    'visibility',
+                  ),
                 });
                 if (
                   !parsed.success ||
@@ -251,6 +254,27 @@ function ServiceCredentialsForm({ sessionId }: { sessionId: string }) {
                     spellCheck={false}
                     className="ph-no-capture ph-mask sentry-mask"
                   />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="service-credential-visibility">
+                    Who can use this integration?
+                  </Label>
+                  <select
+                    key={selected.pendingRef}
+                    id="service-credential-visibility"
+                    name="visibility"
+                    defaultValue={selected.visibility}
+                    className="h-9 w-full rounded-md border bg-card px-3 text-sm"
+                  >
+                    <option value="deployment">
+                      Everyone in this deployment
+                    </option>
+                    <option value="owner">Only me</option>
+                  </select>
+                  <p className="text-sm text-muted-foreground">
+                    Anyone in this deployment can make requests with a shared
+                    integration. The API key always stays server-side.
+                  </p>
                 </div>
                 <Button
                   type="submit"
