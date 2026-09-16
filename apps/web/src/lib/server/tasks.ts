@@ -192,6 +192,14 @@ const getTaskFilterConditions = ({ filters }: { filters: Filter[] }) => {
                             pullRequest.provider,
                           )
                         : undefined,
+                      pullRequest.repositoryId
+                        ? eq(
+                            taskPullRequests.repositoryId,
+                            pullRequest.repositoryId,
+                          )
+                        : pullRequest.host
+                          ? eq(taskPullRequests.host, pullRequest.host)
+                          : undefined,
                     ),
                   ),
               ),

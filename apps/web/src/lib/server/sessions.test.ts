@@ -669,6 +669,11 @@ describe('unified Session queries', () => {
       ownerUserId: owner.id,
       activityAt: 200,
     });
+    const otherHostSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 150,
+    });
     const deletedTaskSession = await sessionFactory.create({
       ownerKind: 'user',
       ownerUserId: owner.id,
@@ -678,6 +683,7 @@ describe('unified Session queries', () => {
       matchingSession,
       otherRepositorySession,
       otherProviderSession,
+      otherHostSession,
       deletedTaskSession,
     ];
     const tasksBySession = await Promise.all(
@@ -713,6 +719,7 @@ describe('unified Session queries', () => {
         prNumber: 123,
         prUrl: 'https://github.com/RooCodeInc/Roomote/pull/123',
         sourceControlProvider: 'github',
+        host: 'github.com',
       },
       {
         taskId: tasksBySession[1]!.id,
@@ -720,6 +727,7 @@ describe('unified Session queries', () => {
         prNumber: 123,
         prUrl: 'https://github.com/RooCodeInc/Other/pull/123',
         sourceControlProvider: 'github',
+        host: 'github.com',
       },
       {
         taskId: tasksBySession[2]!.id,
@@ -727,13 +735,24 @@ describe('unified Session queries', () => {
         prNumber: 123,
         prUrl: 'https://gitlab.com/RooCodeInc/Roomote/-/merge_requests/123',
         sourceControlProvider: 'gitlab',
+        host: 'gitlab.com',
       },
       {
         taskId: tasksBySession[3]!.id,
         repository: 'RooCodeInc/Roomote',
         prNumber: 123,
+        prUrl:
+          'https://gitlab.internal/RooCodeInc/Roomote/-/merge_requests/123',
+        sourceControlProvider: 'gitlab',
+        host: 'gitlab.internal',
+      },
+      {
+        taskId: tasksBySession[4]!.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
         prUrl: 'https://github.com/RooCodeInc/Roomote/pull/123',
         sourceControlProvider: 'github',
+        host: 'github.com',
       },
     ]);
     const auth = { userId: owner.id, isAdmin: false };
@@ -742,7 +761,7 @@ describe('unified Session queries', () => {
     await expect(
       getSessions(auth, {
         ids,
-        pullRequest: 'github:RooCodeInc/Roomote#123',
+        pullRequest: 'github:RooCodeInc/Roomote#123|host:github.com',
       }),
     ).resolves.toMatchObject({
       sessions: [expect.objectContaining({ id: matchingSession.id })],
@@ -750,7 +769,7 @@ describe('unified Session queries', () => {
     await expect(
       getSessions(auth, {
         ids,
-        pullRequest: 'github:RooCodeInc/Other#123',
+        pullRequest: 'github:RooCodeInc/Other#123|host:github.com',
       }),
     ).resolves.toMatchObject({
       sessions: [expect.objectContaining({ id: otherRepositorySession.id })],
@@ -758,7 +777,7 @@ describe('unified Session queries', () => {
     await expect(
       getSessions(auth, {
         ids,
-        pullRequest: 'gitlab:RooCodeInc/Roomote#123',
+        pullRequest: 'gitlab:RooCodeInc/Roomote#123|host:gitlab.com',
       }),
     ).resolves.toMatchObject({
       sessions: [expect.objectContaining({ id: otherProviderSession.id })],
@@ -766,13 +785,21 @@ describe('unified Session queries', () => {
     await expect(
       getSessions(auth, {
         ids,
+        pullRequest: 'gitlab:RooCodeInc/Roomote#123|host:gitlab.internal',
+      }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: otherHostSession.id })],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
         repository: 'RooCodeInc/Roomote',
-        pullRequest: 'github:RooCodeInc/Roomote#123',
+        pullRequest: 'github:RooCodeInc/Roomote#123|host:github.com',
       }),
     ).resolves.toMatchObject({
       sessions: [expect.objectContaining({ id: matchingSession.id })],
     });
-    expect((await getSessions(auth, { ids })).sessions).toHaveLength(4);
+    expect((await getSessions(auth, { ids })).sessions).toHaveLength(5);
   });
 
   it('lists only distinct visible sources within the list scope', async () => {

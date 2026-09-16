@@ -274,6 +274,8 @@ export async function getPullRequestsForFilterCommand(
   const results = await db
     .select({
       sourceControlProvider: taskPullRequests.sourceControlProvider,
+      repositoryId: taskPullRequests.repositoryId,
+      host: taskPullRequests.host,
       repository: taskPullRequests.repository,
       prNumber: taskPullRequests.prNumber,
       prTitle: latestPrTitle,
@@ -284,6 +286,8 @@ export async function getPullRequestsForFilterCommand(
     .where(and(...whereConditions))
     .groupBy(
       taskPullRequests.sourceControlProvider,
+      taskPullRequests.repositoryId,
+      taskPullRequests.host,
       taskPullRequests.repository,
       taskPullRequests.prNumber,
     )
@@ -304,10 +308,16 @@ export async function getPullRequestsForFilterCommand(
         provider: r.sourceControlProvider,
         repository: r.repository,
         number: r.prNumber,
+        repositoryId: r.repositoryId,
+        host: r.host,
       });
       const label = r.prTitle || `#${r.prNumber}`;
+      const provider =
+        sourceControlProviderDescriptors[r.sourceControlProvider];
       const providerLabel =
-        sourceControlProviderDescriptors[r.sourceControlProvider].label;
+        r.host && r.host !== provider.defaultHost
+          ? `${provider.label} (${r.host})`
+          : provider.label;
       const subLabel = `${providerLabel} · ${formatRepositoryName(r.repository)}#${r.prNumber}`;
       return { value, label, subLabel };
     });
