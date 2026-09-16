@@ -27,6 +27,11 @@ describe('buildSharedDesktopStartupScript', () => {
     expect(reexec).toBeGreaterThan(-1);
     expect(pulse).toBeGreaterThan(reexec);
     expect(script).toContain('mkdir -p /tmp/.X11-unix');
+    // Xvnc supports RandR resizes; keep Xvfb only as a fallback, and never
+    // expose an RFB listener.
+    expect(script).toMatch(
+      /if command -v Xvnc[\s\S]*Xvnc "\$DISPLAY"[\s\S]*-rfbport -1 -localhost[\s\S]*else[\s\S]*Xvfb "\$DISPLAY"/,
+    );
     expect(script).toMatch(
       /--preserve-env=DISPLAY,PULSE_SINK,[A-Z_,]*ROOMOTE_DESKTOP_STREAM_ALLOWED_CONTROL_ORIGIN/,
     );

@@ -6,7 +6,7 @@ use std::{
     process::Stdio,
     str::FromStr,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, RwLock,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::Instant,
@@ -30,11 +30,13 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::TcpListener,
     process::Command,
+    sync::watch,
 };
 use tokio_util::io::ReaderStream;
 use x11rb::{
     connection::Connection,
     protocol::{
+        randr::ConnectionExt as RandrConnectionExt,
         xproto::{
             BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ConnectionExt as XprotoConnectionExt,
             KEY_PRESS_EVENT, KEY_RELEASE_EVENT, MOTION_NOTIFY_EVENT, Window,
@@ -83,6 +85,42 @@ impl FromStr for AudioMode {
             "test" => Ok(Self::Test),
             _ => Err(format!("unsupported audio mode: {value}")),
         }
+    }
+}
+
+/// Current X screen dimensions. The initial size comes from configuration;
+/// viewers may resize the screen through the control channel so the desktop
+/// matches their viewport instead of being letterboxed.
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+struct ScreenSize {
+    width: u16,
+    height: u16,
+}
+
+const MIN_SCREEN_DIMENSION: u16 = 320;
+const MAX_SCREEN_DIMENSION: u16 = 4_096;
+
+impl ScreenSize {
+    /// Validates a viewer-requested size: both dimensions must land within the
+    /// supported range and are rounded down to even numbers because the
+    /// encoder's 4:2:0 output needs even dimensions.
+    fn from_request(width: u16, height: u16) -> Result<Self, String> {
+        let width = width & !1;
+        let height = height & !1;
+        if !(MIN_SCREEN_DIMENSION..=MAX_SCREEN_DIMENSION).contains(&width)
+            || !(MIN_SCREEN_DIMENSION..=MAX_SCREEN_DIMENSION).contains(&height)
+        {
+            return Err(format!(
+                "screen size must be {MIN_SCREEN_DIMENSION}-{MAX_SCREEN_DIMENSION} pixels in each dimension"
+            ));
+        }
+        Ok(Self { width, height })
+    }
+
+    /// Physical size reported to X11 for a nominal 96 DPI screen.
+    fn millimeters(self) -> (u32, u32) {
+        let to_mm = |pixels: u16| (f64::from(pixels) * 25.4 / 96.0).round() as u32;
+        (to_mm(self.width), to_mm(self.height))
     }
 }
 
@@ -161,7 +199,14 @@ impl Config {
         })
     }
 
-    fn ffmpeg_args(&self) -> Vec<String> {
+    fn initial_screen(&self) -> ScreenSize {
+        ScreenSize {
+            width: self.width,
+            height: self.height,
+        }
+    }
+
+    fn ffmpeg_args(&self, screen: ScreenSize) -> Vec<String> {
         let mut args = vec![
             "-hide_banner".into(),
             "-loglevel".into(),
@@ -180,7 +225,7 @@ impl Config {
                 "-framerate".into(),
                 self.fps.to_string(),
                 "-video_size".into(),
-                format!("{}x{}", self.width, self.height),
+                format!("{}x{}", screen.width, screen.height),
                 "-i".into(),
                 self.display.clone(),
             ]),
@@ -191,7 +236,7 @@ impl Config {
                 "-i".into(),
                 format!(
                     "testsrc2=size={}x{}:rate={}",
-                    self.width, self.height, self.fps
+                    screen.width, screen.height, self.fps
                 ),
             ]),
         }
@@ -338,16 +383,44 @@ struct AppState {
     metrics: Arc<Metrics>,
     control_connected: Arc<AtomicBool>,
     started_at: Instant,
+    /// Current screen size, updated by viewer resize requests.
+    screen: Arc<RwLock<ScreenSize>>,
+    /// Bumped whenever the screen is resized so running encoders, which
+    /// captured at the old size, stop and let the viewer reconnect.
+    stream_generation: Arc<watch::Sender<u64>>,
+}
+
+impl AppState {
+    fn screen(&self) -> ScreenSize {
+        *self.screen.read().unwrap()
+    }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum ControlEvent {
-    PointerMove { x: f64, y: f64 },
-    PointerButton { button: u8, down: bool },
-    Wheel { delta_x: f64, delta_y: f64 },
-    Key { code: String, down: bool },
+    PointerMove {
+        x: f64,
+        y: f64,
+    },
+    PointerButton {
+        button: u8,
+        down: bool,
+    },
+    Wheel {
+        delta_x: f64,
+        delta_y: f64,
+    },
+    Key {
+        code: String,
+        down: bool,
+    },
     ReleaseAll,
+    /// Resize the X screen to match the viewer's viewport.
+    Resize {
+        width: u16,
+        height: u16,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -433,6 +506,24 @@ impl X11Controller {
             width,
             height,
         })
+    }
+
+    /// Resizes the X screen through RandR. Xvfb only offers its configured
+    /// mode, so this needs an X server with dynamic screen sizes such as
+    /// TigerVNC's Xvnc.
+    fn set_screen_size(&mut self, size: ScreenSize) -> Result<(), String> {
+        if size.width == self.width && size.height == self.height {
+            return Ok(());
+        }
+        let (mm_width, mm_height) = size.millimeters();
+        self.connection
+            .randr_set_screen_size(self.root, size.width, size.height, mm_width, mm_height)
+            .map_err(|error| format!("failed to request X11 screen resize: {error}"))?
+            .check()
+            .map_err(|error| format!("X11 server rejected screen resize: {error}"))?;
+        self.width = size.width;
+        self.height = size.height;
+        Ok(())
     }
 
     fn apply(&mut self, event: ControlEvent) -> Result<(), String> {
@@ -557,6 +648,7 @@ where
             append_wheel_actions(&mut actions, delta_x, 6, 7);
             Ok(actions)
         }
+        ControlEvent::Resize { .. } => Err("resize must be handled by the control session".into()),
         ControlEvent::Key { code, down } => {
             if code.len() > 32 || !code.is_ascii() {
                 return Err("invalid keyboard code".into());
@@ -667,14 +759,14 @@ struct PublicConfig {
     max_clients: usize,
 }
 
-impl From<&Config> for PublicConfig {
-    fn from(config: &Config) -> Self {
+impl PublicConfig {
+    fn new(config: &Config, screen: ScreenSize) -> Self {
         Self {
             capture_mode: config.capture_mode,
             audio_mode: config.audio_mode,
             audio_enabled: config.audio_mode != AudioMode::Disabled,
-            width: config.width,
-            height: config.height,
+            width: screen.width,
+            height: screen.height,
             target_fps: config.fps,
             target_video_bitrate_kbps: config.video_bitrate_kbps,
             max_clients: config.max_clients,
@@ -727,11 +819,14 @@ async fn main() {
         std::process::exit(2);
     });
     let address = config.address;
+    let screen = config.initial_screen();
     let state = AppState {
         config: Arc::new(config),
         metrics: Arc::new(Metrics::default()),
         control_connected: Arc::new(AtomicBool::new(false)),
         started_at: Instant::now(),
+        screen: Arc::new(RwLock::new(screen)),
+        stream_generation: Arc::new(watch::Sender::new(0)),
     };
     let app = Router::new()
         .route("/", get(player))
@@ -782,7 +877,7 @@ async fn player() -> impl IntoResponse {
 }
 
 async fn public_config(State(state): State<AppState>) -> Json<PublicConfig> {
-    Json(PublicConfig::from(state.config.as_ref()))
+    Json(PublicConfig::new(state.config.as_ref(), state.screen()))
 }
 
 async fn health(State(state): State<AppState>) -> impl IntoResponse {
@@ -792,12 +887,10 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
             format!("ffmpeg is unavailable at {}", state.config.ffmpeg.display()),
         );
     }
+    let screen = state.screen();
     if state.config.capture_mode == CaptureMode::X11
-        && let Err(error) = X11Controller::connect(
-            &state.config.display,
-            state.config.width,
-            state.config.height,
-        )
+        && let Err(error) =
+            X11Controller::connect(&state.config.display, screen.width, screen.height)
     {
         return (StatusCode::SERVICE_UNAVAILABLE, error);
     }
@@ -856,18 +949,16 @@ async fn control(
 
 async fn control_socket(mut socket: WebSocket, state: AppState) {
     let _connection_guard = ControlConnectionGuard(state.control_connected.clone());
-    let mut controller = match X11Controller::connect(
-        &state.config.display,
-        state.config.width,
-        state.config.height,
-    ) {
-        Ok(controller) => controller,
-        Err(error) => {
-            let payload = serde_json::json!({ "error": error }).to_string();
-            let _ = socket.send(Message::Text(payload.into())).await;
-            return;
-        }
-    };
+    let screen = state.screen();
+    let mut controller =
+        match X11Controller::connect(&state.config.display, screen.width, screen.height) {
+            Ok(controller) => controller,
+            Err(error) => {
+                let payload = serde_json::json!({ "error": error }).to_string();
+                let _ = socket.send(Message::Text(payload.into())).await;
+                return;
+            }
+        };
     let _ = socket.send(Message::Text("{\"ready\":true}".into())).await;
 
     while let Some(message) = socket.next().await {
@@ -880,6 +971,16 @@ async fn control_socket(mut socket: WebSocket, state: AppState) {
                     }) => {
                         controller.release_all();
                         record_input_latency(&state.metrics, sent_at_ms);
+                    }
+                    Ok(ControlEnvelope {
+                        event: ControlEvent::Resize { width, height },
+                        ..
+                    }) => {
+                        let payload = match resize_screen(&state, &mut controller, width, height) {
+                            Ok(size) => serde_json::json!({ "resized": size }).to_string(),
+                            Err(error) => serde_json::json!({ "error": error }).to_string(),
+                        };
+                        let _ = socket.send(Message::Text(payload.into())).await;
                     }
                     Ok(ControlEnvelope { event, sent_at_ms }) => {
                         if let Err(error) = controller.apply(event) {
@@ -908,6 +1009,27 @@ async fn control_socket(mut socket: WebSocket, state: AppState) {
     }
 
     controller.release_all();
+}
+
+/// Applies a viewer resize: validates the size, resizes the X screen, records
+/// the new size for future encoders and control sessions, and ends running
+/// encoders so the viewer reconnects at the new size.
+fn resize_screen(
+    state: &AppState,
+    controller: &mut X11Controller,
+    width: u16,
+    height: u16,
+) -> Result<ScreenSize, String> {
+    let size = ScreenSize::from_request(width, height)?;
+    if size == state.screen() {
+        return Ok(size);
+    }
+    controller.set_screen_size(size)?;
+    *state.screen.write().unwrap() = size;
+    state
+        .stream_generation
+        .send_modify(|generation| *generation += 1);
+    Ok(size)
 }
 
 fn record_input_latency(metrics: &Metrics, sent_at_ms: Option<u64>) {
@@ -989,9 +1111,11 @@ async fn stream(State(state): State<AppState>) -> Response {
     let guard = ClientGuard(state.metrics.clone());
     state.metrics.total_clients.fetch_add(1, Ordering::Relaxed);
 
+    let mut generation = state.stream_generation.subscribe();
+    generation.mark_unchanged();
     let mut command = Command::new(&state.config.ffmpeg);
     command
-        .args(state.config.ffmpeg_args())
+        .args(state.config.ffmpeg_args(state.screen()))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1019,14 +1143,25 @@ async fn stream(State(state): State<AppState>) -> Response {
     let body_stream = async_stream! {
         let _guard = guard;
         let mut chunks = ReaderStream::new(stdout);
-        while let Some(chunk) = chunks.next().await {
-            match chunk {
-                Ok(chunk) => {
-                    stream_metrics.bytes_served.fetch_add(chunk.len() as u64, Ordering::Relaxed);
-                    yield Ok::<_, std::io::Error>(chunk);
+        loop {
+            tokio::select! {
+                chunk = chunks.next() => {
+                    match chunk {
+                        Some(Ok(chunk)) => {
+                            stream_metrics.bytes_served.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+                            yield Ok::<_, std::io::Error>(chunk);
+                        }
+                        Some(Err(error)) => {
+                            yield Err(error);
+                            break;
+                        }
+                        None => break,
+                    }
                 }
-                Err(error) => {
-                    yield Err(error);
+                // The screen was resized: this encoder captures at the old
+                // size, so stop it and let the viewer reconnect.
+                _ = generation.changed() => {
+                    let _ = child.start_kill();
                     break;
                 }
             }
@@ -1109,7 +1244,7 @@ mod tests {
 
     #[test]
     fn builds_low_latency_x11_video_arguments() {
-        let args = test_config().ffmpeg_args();
+        let args = test_config().ffmpeg_args(test_config().initial_screen());
         assert!(args.windows(2).any(|pair| pair == ["-f", "x11grab"]));
         assert!(args.windows(2).any(|pair| pair == ["-preset", "ultrafast"]));
         assert!(args.windows(2).any(|pair| pair == ["-threads", "1"]));
@@ -1125,7 +1260,7 @@ mod tests {
     fn adds_pulse_audio_to_the_same_fragmented_mp4() {
         let mut config = test_config();
         config.audio_mode = AudioMode::Pulse;
-        let args = config.ffmpeg_args();
+        let args = config.ffmpeg_args(config.initial_screen());
         assert!(
             args.windows(3)
                 .any(|values| values == ["-f", "pulse", "-i"])
@@ -1139,7 +1274,7 @@ mod tests {
         let mut config = test_config();
         config.capture_mode = CaptureMode::Test;
         config.audio_mode = AudioMode::Test;
-        let args = config.ffmpeg_args();
+        let args = config.ffmpeg_args(config.initial_screen());
         assert!(
             args.iter()
                 .any(|argument| argument == "testsrc2=size=1920x1080:rate=60")
@@ -1284,6 +1419,36 @@ mod tests {
         );
         headers.insert(header::ORIGIN, "https://app.roomote.test".parse().unwrap());
         assert!(has_allowed_origin(&headers, None));
+    }
+
+    #[test]
+    fn screen_size_requests_are_validated_and_snapped_to_even_dimensions() {
+        assert_eq!(
+            ScreenSize::from_request(1281, 721).unwrap(),
+            ScreenSize {
+                width: 1280,
+                height: 720
+            }
+        );
+        assert!(ScreenSize::from_request(200, 720).is_err());
+        assert!(ScreenSize::from_request(1280, 5_000).is_err());
+        assert_eq!(
+            ScreenSize {
+                width: 1920,
+                height: 1080
+            }
+            .millimeters(),
+            (508, 286)
+        );
+        let resize: ControlEnvelope =
+            serde_json::from_str(r#"{"type":"resize","width":1280,"height":720}"#).unwrap();
+        assert!(matches!(
+            resize.event,
+            ControlEvent::Resize {
+                width: 1280,
+                height: 720
+            }
+        ));
     }
 
     #[test]

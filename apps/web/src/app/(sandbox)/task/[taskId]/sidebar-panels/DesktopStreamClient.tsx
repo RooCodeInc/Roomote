@@ -91,7 +91,48 @@ type ControlEvent =
   | { type: 'pointer_button'; button: number; down: boolean }
   | { type: 'wheel'; delta_x: number; delta_y: number }
   | { type: 'key'; code: string; down: boolean }
-  | { type: 'release_all' };
+  | { type: 'release_all' }
+  | { type: 'resize'; width: number; height: number };
+
+/** Upper bound on remote pixels so encode cost stays near 1080p. */
+const MAX_REMOTE_PIXELS = 1920 * 1080;
+const MIN_REMOTE_WIDTH = 320;
+const MIN_REMOTE_HEIGHT = 200;
+/** Ignore panel size changes smaller than this, in remote pixels. */
+const RESIZE_MIN_DELTA_PX = 8;
+const RESIZE_DEBOUNCE_MS = 300;
+
+interface RemoteSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * Remote screen size that fills the panel: the panel's CSS box scaled by the
+ * device pixel ratio (capped at 2x), reduced proportionally when that exceeds
+ * the pixel budget, and rounded to even dimensions for the encoder.
+ */
+export function computeRemoteSize(
+  panel: { width: number; height: number },
+  devicePixelRatio: number,
+): RemoteSize | null {
+  const ratio = Math.min(Math.max(devicePixelRatio, 1), 2);
+  let width = panel.width * ratio;
+  let height = panel.height * ratio;
+  if (width < MIN_REMOTE_WIDTH || height < MIN_REMOTE_HEIGHT) {
+    return null;
+  }
+  const pixels = width * height;
+  if (pixels > MAX_REMOTE_PIXELS) {
+    const scale = Math.sqrt(MAX_REMOTE_PIXELS / pixels);
+    width *= scale;
+    height *= scale;
+  }
+  return {
+    width: Math.max(MIN_REMOTE_WIDTH, Math.floor(width / 2) * 2),
+    height: Math.max(MIN_REMOTE_HEIGHT, Math.floor(height / 2) * 2),
+  };
+}
 
 interface RemotePoint {
   x: number;
@@ -166,6 +207,15 @@ export function DesktopStreamClient({
   );
   const [droppedFrames, setDroppedFrames] = useState(0);
   const [liveLagMs, setLiveLagMs] = useState<number | null>(null);
+  const [remoteSize, setRemoteSize] = useState<RemoteSize | null>(null);
+  const sentRemoteSizeRef = useRef<RemoteSize | null>(null);
+  const resizeTimerRef = useRef<number | null>(null);
+  /** Set while the server restarts the encoder after a resize. */
+  const restartPendingRef = useRef(false);
+  /** Set between Start and the first stream load. */
+  const pendingInitialPlayRef = useRef(false);
+  const sessionRef = useRef<DesktopStreamSession | null>(null);
+  sessionRef.current = session;
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const sendControl = (event: ControlEvent) => {
@@ -226,6 +276,8 @@ export function DesktopStreamClient({
   /** Tear down a stream that failed before or after playback began. */
   const failStream = (message: string) => {
     clearStartTimeout();
+    pendingInitialPlayRef.current = false;
+    restartPendingRef.current = false;
     releaseAll();
     socketRef.current?.close();
     const video = videoRef.current;
@@ -359,22 +411,118 @@ export function DesktopStreamClient({
     };
   }, []);
 
+  /**
+   * Ask the sandbox to resize its screen to the panel's current size.
+   * Returns whether a request was sent.
+   */
+  const sendPanelSize = (): boolean => {
+    const container = videoRef.current?.parentElement;
+    const socket = socketRef.current;
+    if (!container || socket?.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    const rect = container.getBoundingClientRect();
+    const size = computeRemoteSize(rect, window.devicePixelRatio || 1);
+    if (!size) {
+      return false;
+    }
+    const last = sentRemoteSizeRef.current;
+    if (
+      last &&
+      Math.abs(last.width - size.width) < RESIZE_MIN_DELTA_PX &&
+      Math.abs(last.height - size.height) < RESIZE_MIN_DELTA_PX
+    ) {
+      return false;
+    }
+    sentRemoteSizeRef.current = size;
+    // The server ends the current encoder as part of the resize; that must
+    // not be mistaken for a playback failure.
+    restartPendingRef.current = true;
+    sendControl({ type: 'resize', ...size });
+    return true;
+  };
+
+  /** Load (or reload) the stream at the sandbox's current screen size. */
+  const loadStream = () => {
+    const video = videoRef.current;
+    const streamUrl = sessionRef.current?.streamUrl;
+    if (!video || !streamUrl) {
+      return;
+    }
+    pendingInitialPlayRef.current = false;
+    // Replacing the source aborts the previous load without an error event,
+    // so anything that fails from here on is a real playback problem.
+    restartPendingRef.current = false;
+    const url = new URL(streamUrl, window.location.href);
+    url.searchParams.set('restart', String(Date.now()));
+    video.src = url.toString();
+    void video.play().catch((error: unknown) => {
+      failStream(
+        error instanceof Error
+          ? error.message
+          : 'Remote desktop playback failed',
+      );
+    });
+  };
+
+  useEffect(() => {
+    const container = videoRef.current?.parentElement;
+    if (!container || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      if (resizeTimerRef.current !== null) {
+        window.clearTimeout(resizeTimerRef.current);
+      }
+      resizeTimerRef.current = window.setTimeout(() => {
+        resizeTimerRef.current = null;
+        sendPanelSize();
+      }, RESIZE_DEBOUNCE_MS);
+    });
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+      if (resizeTimerRef.current !== null) {
+        window.clearTimeout(resizeTimerRef.current);
+      }
+    };
+    // sendPanelSize reads refs only, so it does not need to be a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const connectControl = (controlUrl: string) => {
     socketRef.current?.close();
     const socket = new WebSocket(controlUrl);
     socketRef.current = socket;
+    sentRemoteSizeRef.current = null;
     socket.addEventListener('message', (event) => {
       try {
         const message = JSON.parse(String(event.data)) as {
           error?: string;
           ready?: boolean;
+          resized?: RemoteSize;
         };
         if (message.ready) {
           setControlReady(true);
           videoRef.current?.focus();
+          // Match the panel before the first stream starts so the encoder
+          // does not start at the default size only to restart at once.
+          if (!sendPanelSize() && pendingInitialPlayRef.current) {
+            loadStream();
+          }
+        }
+        if (message.resized) {
+          setRemoteSize(message.resized);
+          if (restartPendingRef.current || pendingInitialPlayRef.current) {
+            loadStream();
+          }
         }
         if (message.error) {
+          restartPendingRef.current = false;
           setSessionError(message.error);
+          if (pendingInitialPlayRef.current) {
+            loadStream();
+          }
         }
       } catch {
         setSessionError('Remote desktop control returned an invalid response');
@@ -385,13 +533,17 @@ export function DesktopStreamClient({
       if (socketRef.current === socket) {
         socketRef.current = null;
       }
+      // Video still works without control, so never hold the stream back.
+      if (pendingInitialPlayRef.current) {
+        loadStream();
+      }
     });
     socket.addEventListener('error', () => {
       setSessionError('Remote desktop control could not connect');
     });
   };
 
-  const start = async () => {
+  const start = () => {
     const video = videoRef.current;
     if (!video || !session) {
       return;
@@ -403,8 +555,6 @@ export function DesktopStreamClient({
     sampleFramesRef.current = 0;
     sampleTimeRef.current = performance.now();
     decodedBytesRef.current = 0;
-    video.src = session.streamUrl;
-    connectControl(session.controlUrl);
     clearStartTimeout();
     startTimeoutRef.current = window.setTimeout(() => {
       startTimeoutRef.current = null;
@@ -412,15 +562,10 @@ export function DesktopStreamClient({
         'Remote desktop did not start in time. The sandbox desktop service may not be running.',
       );
     }, STREAM_START_TIMEOUT_MS);
-    try {
-      await video.play();
-    } catch (error) {
-      failStream(
-        error instanceof Error
-          ? error.message
-          : 'Remote desktop playback failed',
-      );
-    }
+    // The control channel negotiates the screen size first; the stream loads
+    // once the sandbox confirms it (or immediately if control is unavailable).
+    pendingInitialPlayRef.current = true;
+    connectControl(session.controlUrl);
   };
 
   const pointForEvent = (
@@ -505,9 +650,24 @@ export function DesktopStreamClient({
             sendControl({ type: 'key', code: event.code, down: false });
           }}
           onError={() => {
+            if (restartPendingRef.current) {
+              // The previous encoder was stopped for a resize; the new
+              // stream is already loading.
+              return;
+            }
             failStream(describeMediaError(videoRef.current?.error));
           }}
+          onLoadedMetadata={() => {
+            const video = videoRef.current;
+            if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+              setRemoteSize({
+                width: video.videoWidth,
+                height: video.videoHeight,
+              });
+            }
+          }}
           onLoadedData={() => {
+            restartPendingRef.current = false;
             clearStartTimeout();
             setStartupMs(performance.now() - startedAtRef.current);
             setIsStarting(false);
@@ -594,6 +754,7 @@ export function DesktopStreamClient({
             {liveLagMs === null
               ? '-'
               : `${liveLagMs.toFixed(0)} ms behind live`}
+            {remoteSize ? ` · ${remoteSize.width}×${remoteSize.height}` : ''}
             {' · '}
             {startupMs === null
               ? '-'

@@ -56,7 +56,11 @@ The defaults capture `:99.0` at 1920x1080, 60 fps, 6 Mbps, with audio disabled.
 Set these variables as needed:
 
 - `ROOMOTE_DESKTOP_STREAM_DISPLAY` for the existing X11 display
-- `ROOMOTE_DESKTOP_STREAM_WIDTH` and `ROOMOTE_DESKTOP_STREAM_HEIGHT`
+- `ROOMOTE_DESKTOP_STREAM_WIDTH` and `ROOMOTE_DESKTOP_STREAM_HEIGHT` for the
+  initial screen size; a viewer can send a `resize` control event and the
+  service resizes the X screen through RandR and restarts the encoder. This
+  requires an X server with dynamic screen sizes (TigerVNC's Xvnc); Xvfb only
+  offers its configured mode
 - `ROOMOTE_DESKTOP_STREAM_FPS`
 - `ROOMOTE_DESKTOP_STREAM_VIDEO_BITRATE_KBPS`
 - `ROOMOTE_DESKTOP_STREAM_AUDIO_MODE=pulse` to capture a PulseAudio source

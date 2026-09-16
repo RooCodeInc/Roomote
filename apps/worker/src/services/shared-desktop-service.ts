@@ -31,7 +31,8 @@ const FORWARDED_ENV_VARS = [
 ] as const;
 
 /**
- * Shell script that starts Xvfb, PulseAudio, and the streaming service.
+ * Shell script that starts the X server (Xvnc, or Xvfb as a fallback),
+ * PulseAudio, and the streaming service.
  *
  * It is written to disk and launched as a single command because the
  * command executor splits multi-line `run` strings into one command per
@@ -65,8 +66,16 @@ cleanup() {
   fi
 }
 trap cleanup EXIT INT TERM
+screen_size="\${ROOMOTE_DESKTOP_STREAM_WIDTH:-1920}x\${ROOMOTE_DESKTOP_STREAM_HEIGHT:-1080}"
 if [ ! -S "/tmp/.X11-unix/X$display_number" ]; then
-  Xvfb "$DISPLAY" -screen 0 "\${ROOMOTE_DESKTOP_STREAM_WIDTH:-1920}x\${ROOMOTE_DESKTOP_STREAM_HEIGHT:-1080}x24" -nolisten tcp &
+  # Prefer TigerVNC's Xvnc as the X server: unlike Xvfb it supports RandR
+  # screen resizes, which lets the desktop follow the viewer's panel size.
+  # It runs purely as an X server; the RFB listener is disabled.
+  if command -v Xvnc >/dev/null 2>&1; then
+    Xvnc "$DISPLAY" -geometry "$screen_size" -depth 24 -SecurityTypes None -rfbport -1 -localhost -nolisten tcp &
+  else
+    Xvfb "$DISPLAY" -screen 0 "\${screen_size}x24" -nolisten tcp &
+  fi
   xvfb_pid="$!"
 fi
 pulseaudio --start --exit-idle-time=-1

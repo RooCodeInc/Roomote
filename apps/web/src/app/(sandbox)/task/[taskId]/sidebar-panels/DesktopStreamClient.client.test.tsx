@@ -10,6 +10,7 @@ import {
   DesktopStreamClient,
   LIVE_EDGE_TARGET_S,
   STREAM_START_TIMEOUT_MS,
+  computeRemoteSize,
   mapPointerToRemote,
   trackLiveEdge,
 } from './DesktopStreamClient';
@@ -308,5 +309,86 @@ describe('DesktopStreamClient', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Fullscreen' }));
     await waitFor(() => expect(requestFullscreen).toHaveBeenCalledTimes(1));
+  });
+
+  it('sizes the remote screen to the panel within the pixel budget', () => {
+    expect(computeRemoteSize({ width: 641, height: 481 }, 1)).toEqual({
+      width: 640,
+      height: 480,
+    });
+    // Retina panels double the request until they exceed roughly 1080p.
+    expect(computeRemoteSize({ width: 700, height: 500 }, 2)).toEqual({
+      width: 1400,
+      height: 1000,
+    });
+    const capped = computeRemoteSize({ width: 1600, height: 1000 }, 2);
+    expect(capped).not.toBeNull();
+    expect(capped!.width * capped!.height).toBeLessThanOrEqual(1920 * 1080);
+    expect(capped!.width / capped!.height).toBeCloseTo(1.6, 1);
+    expect(computeRemoteSize({ width: 100, height: 100 }, 1)).toBeNull();
+  });
+
+  it('asks the sandbox to match the panel size and reconnects after the resize', async () => {
+    render(
+      <DesktopStreamClient
+        previewUrl="https://desktop.preview.test"
+        runId={123}
+      />,
+    );
+    const start = await screen.findByRole('button', {
+      name: 'Start remote desktop',
+    });
+    await waitFor(() => expect(start).toBeEnabled());
+    const video = screen.getByLabelText('Remote desktop');
+    Object.defineProperty(video.parentElement!, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+    });
+    fireEvent.click(start);
+
+    const socket = FakeWebSocket.instances[0]!;
+    act(() => socket.open());
+
+    const resize = socket.sent
+      .map((payload) => JSON.parse(payload))
+      .find((event) => event.type === 'resize');
+    expect(resize).toMatchObject({ type: 'resize', width: 800, height: 600 });
+
+    // The stream waits for the sandbox to confirm the size, and an encoder
+    // stopping for the resize is not reported as a failure.
+    expect(video).not.toHaveAttribute('src');
+    Object.defineProperty(video, 'error', {
+      configurable: true,
+      value: { code: 2 },
+    });
+    fireEvent.error(video);
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    act(() =>
+      socket.emit('message', {
+        data: '{"resized":{"width":800,"height":600}}',
+      } as MessageEvent),
+    );
+    expect(video.getAttribute('src')).toContain('restart=');
+    expect(video.getAttribute('src')).toContain('stream.mp4');
+  });
+
+  it('starts the stream without control when the control channel is rejected', async () => {
+    render(
+      <DesktopStreamClient
+        previewUrl="https://desktop.preview.test"
+        runId={123}
+      />,
+    );
+    const start = await screen.findByRole('button', {
+      name: 'Start remote desktop',
+    });
+    await waitFor(() => expect(start).toBeEnabled());
+    fireEvent.click(start);
+    const video = screen.getByLabelText('Remote desktop');
+    expect(video).not.toHaveAttribute('src');
+
+    act(() => FakeWebSocket.instances[0]!.close());
+    expect(video.getAttribute('src')).toContain('stream.mp4');
   });
 });

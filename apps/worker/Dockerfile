@@ -47,6 +47,7 @@ RUN apt-get update \
     locales \
     pulseaudio \
     pulseaudio-utils \
+    tigervnc-standalone-server \
     xvfb \
     fontconfig \
     fonts-noto-core \
