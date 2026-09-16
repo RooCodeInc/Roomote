@@ -78,7 +78,11 @@ function publicUrl(path: string): string {
   return new URL(path, Env.R_PUBLIC_URL ?? Env.R_APP_URL).toString();
 }
 
-function normalizeRemoteMcpUrl(value: string): string {
+function canonicalizeRemoteMcpUrl(value: string): string {
+  return new URL(value).toString();
+}
+
+function normalizeFastRemoteMcpUrl(value: string): string {
   const url = new URL(value);
   if (url.protocol !== 'https:') {
     throw new Error('Remote MCP server URLs must use HTTPS.');
@@ -489,12 +493,12 @@ export async function addRemoteCustomMcpForFast(input: {
     url: input.url,
     authType: 'none',
   });
-  const normalizedUrl = normalizeRemoteMcpUrl(parsed.url);
+  const normalizedUrl = normalizeFastRemoteMcpUrl(parsed.url);
   const servers = await db.query.customMcpServers.findMany();
   const nameMatch = servers.find((server) => server.name === parsed.name);
   const urlMatch = servers.find(
     (server) =>
-      server.url && normalizeRemoteMcpUrl(server.url) === normalizedUrl,
+      server.url && canonicalizeRemoteMcpUrl(server.url) === normalizedUrl,
   );
   if (nameMatch && urlMatch && nameMatch.id !== urlMatch.id) {
     throw new Error(
@@ -505,7 +509,8 @@ export async function addRemoteCustomMcpForFast(input: {
   if (existing) {
     if (
       nameMatch &&
-      (!nameMatch.url || normalizeRemoteMcpUrl(nameMatch.url) !== normalizedUrl)
+      (!nameMatch.url ||
+        canonicalizeRemoteMcpUrl(nameMatch.url) !== normalizedUrl)
     ) {
       throw new Error(
         'A custom MCP server already uses that name or URL with different configuration. Review it in Settings.',

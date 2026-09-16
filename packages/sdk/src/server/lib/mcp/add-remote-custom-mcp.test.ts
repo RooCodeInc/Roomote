@@ -97,6 +97,28 @@ describe('addRemoteCustomMcpForFast', () => {
     expect(await db.query.customMcpServers.findMany()).toEqual([]);
   });
 
+  it('ignores unrelated legacy HTTP servers while adding an HTTPS server', async () => {
+    await db.insert(customMcpServers).values({
+      name: 'legacy-http',
+      url: 'http://legacy.example.com/mcp',
+      authType: 'none',
+      createdByUserId: adminId,
+    });
+    guardedFetchMock
+      .mockResolvedValueOnce(initializedResponse())
+      .mockResolvedValueOnce(toolsResponse());
+
+    const result = await addRemoteCustomMcpForFast({
+      userId: adminId,
+      sessionId: crypto.randomUUID(),
+      name: 'records',
+      url: 'https://mcp.example.com/mcp',
+    });
+
+    expect(result).toMatchObject({ status: 'connected', name: 'records' });
+    expect(await db.query.customMcpServers.findMany()).toHaveLength(2);
+  });
+
   it('verifies an unauthenticated server before creating it', async () => {
     guardedFetchMock
       .mockResolvedValueOnce(initializedResponse())
