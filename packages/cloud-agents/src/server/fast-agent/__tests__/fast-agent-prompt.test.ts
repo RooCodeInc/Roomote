@@ -1564,6 +1564,11 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'Assume the user may know their domain better than you do',
     );
+    // Deference is about the user's choices; a terse trigger is a reason to
+    // investigate, not to ask.
+    expect(prompt).toContain(
+      'find the specifics yourself first from the conversation, the repositories, recent failures, and memory, and ask a question only when that search leaves the work genuinely ambiguous',
+    );
     expect(prompt).toContain(
       'do not present your work as corrected, verified, reviewed, or a verdict unless the user asked for that review',
     );
