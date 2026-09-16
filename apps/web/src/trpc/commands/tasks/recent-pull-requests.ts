@@ -7,6 +7,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  sql,
   tasks,
   taskPullRequests,
 } from '@roomote/db/server';
@@ -36,12 +37,18 @@ export async function getRecentPullRequestsCommand(
     isNotNull(taskPullRequests.repository),
     isNotNull(taskPullRequests.prNumber),
   );
+  // Legacy associations may predate host backfills, but their PR URL still
+  // identifies the source-control instance.
+  const normalizedPullRequestHost = sql<string>`coalesce(
+    nullif(lower(${taskPullRequests.host}), ''),
+    nullif(lower(split_part(split_part(${taskPullRequests.prUrl}, '://', 2), '/', 1)), '')
+  )`;
 
   const latestPullRequestStatuses = db
     .selectDistinctOn(
       [
         taskPullRequests.sourceControlProvider,
-        taskPullRequests.host,
+        normalizedPullRequestHost,
         taskPullRequests.repository,
         taskPullRequests.prNumber,
       ],
@@ -52,7 +59,7 @@ export async function getRecentPullRequestsCommand(
     .where(eligiblePullRequests)
     .orderBy(
       taskPullRequests.sourceControlProvider,
-      taskPullRequests.host,
+      normalizedPullRequestHost,
       taskPullRequests.repository,
       taskPullRequests.prNumber,
       desc(taskPullRequests.detectedAt),

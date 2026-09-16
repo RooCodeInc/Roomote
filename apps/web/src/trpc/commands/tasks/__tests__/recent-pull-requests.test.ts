@@ -40,6 +40,7 @@ describe('getRecentPullRequestsCommand', () => {
       {
         taskId: duplicateTask.id,
         sourceControlProvider: 'github',
+        host: 'github.com',
         prUrl: 'https://github.com/roomote/app/pull/1',
         prNumber: 1,
         repository: 'roomote/app',
