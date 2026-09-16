@@ -34,6 +34,8 @@ import { slackMcp } from './slack';
 import { snowflakeMcp } from './snowflake';
 import { vercelMcp } from './vercel';
 import { createHttpIntegrationsMcp } from './http-integrations';
+import { developmentFixturesMcp } from './development-fixtures';
+import { publicUrlFetchRoute } from './public-url-fetch-route';
 
 export const mcp = new Hono<{ Variables: Variables }>();
 
@@ -70,6 +72,9 @@ const requireCustomMcp: MiddlewareHandler<{
 
 mcp.use('/custom/*', requireCustomMcp);
 mcp.route('/custom/:serverId', createCustomMcpProxy());
+mcp.route('/development-fixtures', developmentFixturesMcp);
+mcp.use('/public-url-fetch', mcpAuthMiddleware);
+mcp.route('/public-url-fetch', publicUrlFetchRoute);
 
 // Brain (deployment-hosted gbrain): a native-mode catalog
 // integration with a custom handler, like snowflake/grafana below. The

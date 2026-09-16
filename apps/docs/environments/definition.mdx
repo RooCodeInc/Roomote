@@ -483,8 +483,12 @@ Environments**. Each rule maps a description, such as “Messages sent in the
 hospital-bugs Slack channel,” to an environment or the broad **All repositories**
 workspace. An **All repositories** sandbox does not clone every repository up
 front; it starts with a `REPOSITORIES.md` index of the active repositories and
-the agent checks out the ones the task needs. A rule can also recommend a coding
-model for work that Fast delegates.
+the agent checks out the ones the task needs. Environment and repository-scoped
+sandboxes expose the same index after preparing their initial repositories. The
+selected workspace controls initial checkout and tooling; checking out another
+authorized repository does not run another environment's setup commands or
+provision its services. A rule can also recommend a coding model for work that
+Fast delegates.
 
 Rules are guidance rather than exact string matchers. An environment explicitly
 named in a request takes precedence, and a specific rule takes precedence over a

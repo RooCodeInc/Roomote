@@ -9,6 +9,7 @@ import {
 import {
   db,
   desc,
+  demoSeedDevelopmentIntegration,
   mcpConnections,
   deploymentMcpEnablements,
   customMcpServers,
@@ -26,6 +27,7 @@ import {
   getMcpIntegrationUpstreamUrl,
   MCP_INTEGRATIONS,
   isMcpConnectionAsanaConfig,
+  isMcpConnectionExaConfig,
   isMcpConnectionNotionConfig,
   isMcpConnectionGranolaConfig,
   isMcpConnectionGbrainConfig,
@@ -377,6 +379,16 @@ async function buildCustomMcpServerConfigs(
       continue;
     }
 
+    if (row.id === demoSeedDevelopmentIntegration.id) {
+      if (Env.APP_ENV !== 'development') continue;
+      servers[row.name] = {
+        url: `${requestOrigin ?? ''}/api/mcp/development-fixtures`,
+        headers: {},
+        cacheRevision: `${row.updatedAt?.getTime() ?? 0}`,
+      };
+      continue;
+    }
+
     let connectionUpdatedAt: Date | undefined;
     if (row.authType === 'oauth') {
       const connection = await db.query.mcpConnections.findFirst({
@@ -486,6 +498,29 @@ async function buildCuratedMcpServerConfigs(ctx: {
     ]),
   );
   const requestOrigin = ctx.requestOrigin;
+
+  for (const entry of enabledConnections) {
+    if (entry.connection) {
+      continue;
+    }
+
+    const integration = getMcpIntegration(entry.enabledMcpId);
+    if (!integration?.supportsKeylessAccess) {
+      continue;
+    }
+
+    servers[integration.id] = {
+      url: buildProxyUrl(integration.id, requestOrigin),
+      headers: { 'X-MCP-Client': PRODUCT_NAME },
+      ...(entry.disabledTools?.length
+        ? { disabledTools: entry.disabledTools }
+        : {}),
+    };
+    logInfo('[getMcpServerConfigs] Included keyless integration:', {
+      mcpId: integration.id,
+      via: 'keyless_proxy',
+    });
+  }
 
   for (const connection of connections) {
     logInfo('[getMcpServerConfigs] Processing connection:', {
@@ -616,6 +651,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
         isMcpConnectionVercelConfig(authConfig) ||
         isMcpConnectionGrafanaConfig(authConfig) ||
         isMcpConnectionGbrainConfig(authConfig) ||
+        isMcpConnectionExaConfig(authConfig) ||
         isMcpConnectionXConfig(authConfig)
       ) {
         servers[connection.mcpId] = {

@@ -337,6 +337,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       acceptGhostSuggestion,
       consumeSuggestion,
       handleSuggestionKeyDown,
+      handleSuggestionPointerDown,
     } = useGhostSuggestion({
       suggestion,
       active: !prompt && !sending && isAwaitingHuman,
@@ -799,7 +800,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
                     <button
                       type="button"
                       aria-label="Insert suggested message"
-                      onPointerDown={(event) => event.preventDefault()}
+                      onPointerDown={handleSuggestionPointerDown}
                       onClick={acceptGhostSuggestion}
                       className="mt-4 mr-4 shrink-0 whitespace-nowrap rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
                     >

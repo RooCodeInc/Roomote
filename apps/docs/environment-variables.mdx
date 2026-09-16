@@ -437,6 +437,7 @@ apply semantics.
 | `API_EXTERNAL_REQUEST_TIMEOUT_MS`        | Optional         | Default external request timeout. Defaults to 10 seconds.                             |
 | `API_SLOW_REQUEST_THRESHOLD_MS`          | Optional         | Threshold for slow API request logging. Defaults to 5 seconds.                        |
 | `API_SLOW_EXTERNAL_REQUEST_THRESHOLD_MS` | Optional         | Threshold for slow external request logging. Defaults to 2 seconds.                   |
+| `R_TRUSTED_PROXY_CLIENT_IP_HEADER`        | Optional         | Header used for client-IP abuse limits: `fly-client-ip`, `x-forwarded-for`, or `x-real-ip`. Set this only when the deployment ingress overwrites that header; otherwise callers share a safe fallback bucket. |
 | `RELEASE_VERSION`                        | Release images   | Baked release version used for release tagging and worker image derivation.           |
 | `RELEASE_PRODUCT_VERSION`                | Release images   | Baked product (changelog) version shown by in-app release notices on channel builds.  |
 | `GITHUB_SHA`                             | Release metadata | Commit SHA fallback for monitoring release metadata.                                  |

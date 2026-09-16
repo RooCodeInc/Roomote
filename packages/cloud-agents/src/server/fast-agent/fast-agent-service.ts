@@ -186,6 +186,7 @@ import {
 import {
   getFastAgentNativeAcpKind,
   isFastAgentNativeIntegration,
+  isFastAgentNativeToolEnabled,
 } from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
@@ -1719,6 +1720,20 @@ function isSuccessfulChatReactionResult(
   );
 }
 
+/**
+ * What the model is told when the API names why an integration-key request
+ * was refused. Only reasons that carry no request values are ever named.
+ */
+const INTEGRATION_REFUSAL_GUIDANCE: Readonly<Record<string, string>> = {
+  method_not_allowed:
+    'That method is not approved for this integration. Use one of its allowed methods, or prepare a new approval that includes it.',
+  credential_echo:
+    "The service's response contained the key itself, so it was withheld. Use an endpoint that does not echo request headers.",
+  credential_echo_encoded:
+    "The service's response contained the key itself, so it was withheld. Use an endpoint that does not echo request headers.",
+  path_too_long: 'The request path is too long; shorten it.',
+};
+
 export async function answerFastAgentQuestion({
   question,
   images = [],
@@ -1744,6 +1759,8 @@ export async function answerFastAgentQuestion({
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
   automationReport = false,
+  serviceCredentialPlatformActorUserId,
+  serviceCredentialPlatformDenialReason,
   defaultImageArtifactIds = [],
   defaultCharts = [],
   allowSilentAmbientReply = false,
@@ -1787,6 +1804,11 @@ export async function answerFastAgentQuestion({
   /** The settling delegated task ran for a custom automation; its closeout is
    * the run's report and may carry launchable suggestions. */
   automationReport?: boolean;
+  /** Trusted owner actor for a task-settled continuation, resolved server-side. */
+  serviceCredentialPlatformActorUserId?: string;
+  serviceCredentialPlatformDenialReason?:
+    | 'no_acting_user'
+    | 'actor_owner_mismatch';
   /** Child-selected images to carry through when the parent model omits the
    * optional attachment argument while composing the child update. */
   defaultImageArtifactIds?: string[];
@@ -3114,14 +3136,16 @@ export async function answerFastAgentQuestion({
         );
         return [];
       }),
-      platformEvent
+      platformEvent && !serviceCredentialPlatformActorUserId
         ? Promise.resolve({
             displayName: null,
             githubLogin: null,
             isAdmin: false,
             serviceCredentialToolsEnabled: false,
           })
-        : getFastAgentUserIdentity(userId).catch((error) => {
+        : getFastAgentUserIdentity(
+            serviceCredentialPlatformActorUserId ?? userId,
+          ).catch((error) => {
             degradedContextComponents.add('user_identity');
             console.warn(
               `[Fast Agent] User identity unavailable: ${formatErrorForLog(error)}`,
@@ -3919,8 +3943,6 @@ export async function answerFastAgentQuestion({
             apiBaseUrl,
             sessionId: session.id,
             humanTurn: !platformEvent,
-            conversation,
-            messageId: currentMessageId ?? conversation.conversationId,
           },
           availableIntegrations,
           {
@@ -4035,11 +4057,18 @@ export async function answerFastAgentQuestion({
     };
     // Subagents may look up and call on-demand deployment MCP tools; every
     // other Fast tool stays with the parent. Calls run through the parent's
-    // MCP executor, so gating, duplicate detection, and auditing are shared.
+    // MCP executor, so gating and duplicate detection are shared.
     const executeSubagentNativeTool = async (
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
       try {
+        if (!isFastAgentNativeToolEnabled(call.name)) {
+          return {
+            success: false,
+            error:
+              'request_with_integration_key is unavailable in Fast mode. Launch a coding task from this Session to use the approved integration.',
+          };
+        }
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools) {
           return describeIntegrationTools(
             findIntegrationToolsArgsSchema.parse(call.args),
@@ -4071,6 +4100,13 @@ export async function answerFastAgentQuestion({
       const instructionVersion = getInstructionVersion(call.messageId);
 
       try {
+        if (!isFastAgentNativeToolEnabled(call.name)) {
+          return {
+            success: false,
+            error:
+              'request_with_integration_key is unavailable in Fast mode. Launch a coding task from this Session to use the approved integration.',
+          };
+        }
         const closedError = requireOpen(call.messageId);
         if (closedError) return closedError;
         const ownershipError = requireLockOwnership();
@@ -4645,15 +4681,46 @@ export async function answerFastAgentQuestion({
             // The model only ever sees the generic message; the bounded reason
             // goes to server logs so operators can tell a disabled experiment
             // from a missing Session binding or a broker denial.
-            const unavailable = (reason: string) => {
+            const unavailable = (reason: string, nameReason = false) => {
               console.warn(
                 `[Fast Agent] ${call.name} unavailable (reason=${reason})`,
               );
-              return { success: false, error: 'Secret request unavailable' };
+              const guidance =
+                reason === 'human_turn_required'
+                  ? 'New integration-key approvals require a human-authored turn. Ask the user to reply so you can continue.'
+                  : reason === 'actor_owner_mismatch'
+                    ? 'Integration-key tools are unavailable because the task actor does not own this Session. Ask the Session owner to reply so you can continue.'
+                    : 'Integration-key tools are unavailable because this turn has no acting user. Ask the user to reply so you can continue.';
+              return {
+                success: false,
+                error: nameReason
+                  ? `${guidance} (reason: ${reason})`
+                  : 'Secret request unavailable',
+              };
             };
             try {
+              if (
+                platformEvent &&
+                (!serviceCredentialPlatformActorUserId ||
+                  serviceCredentialPlatformActorUserId !== userId)
+              ) {
+                const reason =
+                  serviceCredentialPlatformActorUserId &&
+                  serviceCredentialPlatformActorUserId !== userId
+                    ? 'actor_owner_mismatch'
+                    : (serviceCredentialPlatformDenialReason ??
+                      'no_acting_user');
+                return unavailable(reason, true);
+              }
               if (!currentUser.serviceCredentialToolsEnabled) {
                 return unavailable('experiment_disabled');
+              }
+              if (
+                platformEvent &&
+                call.name ===
+                  FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential
+              ) {
+                return unavailable('human_turn_required', true);
               }
               const schema =
                 call.name ===
@@ -4664,9 +4731,25 @@ export async function answerFastAgentQuestion({
                     ? z.object({}).strict()
                     : serviceCredentialRequestSchema;
               const args = schema.safeParse(call.args);
-              if (!args.success) return unavailable('invalid_arguments');
-              // Platform events carry an owner for routing, not a human actor.
-              if (platformEvent) return unavailable('platform_event');
+              if (!args.success) {
+                // Argument paths are the model's own field names, never values;
+                // the JSON tool schema cannot express cross-field rules such as
+                // "GET/HEAD carry no body", so the runtime says which field failed.
+                const fields = [
+                  ...new Set(
+                    args.error.issues.map((issue) =>
+                      issue.path.length ? issue.path.join('.') : 'arguments',
+                    ),
+                  ),
+                ];
+                console.warn(
+                  `[Fast Agent] ${call.name} unavailable (reason=invalid_arguments)`,
+                );
+                return {
+                  success: false,
+                  error: `Invalid arguments: ${fields.join(', ')}. GET and HEAD carry no body; headerPrefix is Bearer, Basic, or Token; methods must be approved for the integration.`,
+                };
+              }
               if (!userId) return unavailable('actor_missing');
               const canonicalSession = await getSessionForFastConversation(
                 db,
@@ -4709,8 +4792,6 @@ export async function answerFastAgentQuestion({
                   apiBaseUrl,
                   sessionId: session.id,
                   humanTurn: true,
-                  conversation,
-                  messageId: currentMessageId ?? conversation.conversationId,
                 },
                 availableIntegrations,
                 {
@@ -4721,6 +4802,7 @@ export async function answerFastAgentQuestion({
                     method: request.method,
                     path: request.path,
                     body: request.body,
+                    contentType: request.contentType,
                     accept: request.accept,
                   },
                 },
@@ -4731,6 +4813,21 @@ export async function answerFastAgentQuestion({
               // safe to classify (never to log); anything else is logged by
               // class name only because SDK/database messages can echo bound
               // values.
+              const named =
+                error instanceof McpToolCallError
+                  ? /\(reason: ([a-z_]+)\)$/u.exec(
+                      error.upstreamText ?? '',
+                    )?.[1]
+                  : undefined;
+              const guidance = named
+                ? INTEGRATION_REFUSAL_GUIDANCE[named]
+                : undefined;
+              if (guidance) {
+                console.warn(
+                  `[Fast Agent] ${call.name} unavailable (reason=${named})`,
+                );
+                return { success: false, error: guidance };
+              }
               return unavailable(
                 error instanceof McpToolCallError
                   ? error.upstreamText?.startsWith(
@@ -5299,6 +5396,8 @@ export async function answerFastAgentQuestion({
             surface: conversation.surface,
             serviceCredentialToolsEnabled:
               currentUser.serviceCredentialToolsEnabled,
+            serviceCredentialPrepareEnabled:
+              currentUser.serviceCredentialToolsEnabled && !platformEvent,
           },
         );
         const unbindExecutors = new Set<() => void>();

@@ -82,6 +82,8 @@ swap_size_mb = 512
   PORT = '8080'
   ROOMOTE_DOCKER_LOAD_ENV_FILE = 'false'
   R_AUTO_GENERATE_KEYS = 'true'
+  # Fly Proxy removes any inbound value and supplies this header itself.
+  R_TRUSTED_PROXY_CLIENT_IP_HEADER = 'fly-client-ip'
   DEFAULT_COMPUTE_PROVIDER = 'modal'
   EXCLUDED_COMPUTE_PROVIDERS = 'docker'
   # The single canonical-origin knob: the URL users browse. To attach a

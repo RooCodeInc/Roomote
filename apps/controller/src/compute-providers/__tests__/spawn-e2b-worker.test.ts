@@ -65,8 +65,7 @@ vi.mock('../../sandbox-oidc', () => ({
 }));
 
 const { spawnE2bWorker } = await import('../spawn-e2b-worker');
-const { buildE2bWorkerEnv, cleanupE2bInstance } =
-  await import('@roomote/compute-providers');
+const { cleanupE2bInstance } = await import('@roomote/compute-providers');
 
 const config = {
   e2bApiKey: 'api-key',
@@ -159,9 +158,7 @@ describe('spawnE2bWorker', () => {
     });
 
     expect(planApiProxy).toHaveBeenCalledWith({ taskRun, provider: 'e2b' });
-    expect(
-      vi.mocked(buildE2bWorkerEnv).mock.calls.at(-1)![0].extraEnv,
-    ).toMatchObject({
+    expect(mockRunCommand.mock.calls.at(-1)![0].env).toMatchObject({
       ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
       ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
     });

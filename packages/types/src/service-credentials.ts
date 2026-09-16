@@ -4,6 +4,7 @@ import {
   CREDENTIAL_EGRESS_READ_METHODS,
   credentialEgressAllowedMethodsSchema,
   credentialEgressHeaderNameSchema,
+  credentialEgressMethodSchema,
   type CredentialEgressMethod,
 } from './credential-egress';
 
@@ -27,6 +28,14 @@ export function isServiceCredentialToolsExperimentEnabled(
 export const SERVICE_CREDENTIAL_MAX_LIFETIME_HOURS = 8760;
 /** How long a prepared approval waits for the human to enter the key. */
 export const SERVICE_CREDENTIAL_APPROVAL_WINDOW_HOURS = 24;
+export const serviceCredentialVisibilitySchema = z.enum([
+  'owner',
+  'deployment',
+]);
+export type ServiceCredentialVisibility = z.infer<
+  typeof serviceCredentialVisibilitySchema
+>;
+export const DEFAULT_SERVICE_CREDENTIAL_VISIBILITY = 'deployment' as const;
 
 const serviceCredentialPrepareFields = {
   label: z.string().trim().min(1).max(80),
@@ -47,6 +56,9 @@ const serviceCredentialPrepareFields = {
   allowedMethods: credentialEgressAllowedMethodsSchema.default([
     ...CREDENTIAL_EGRESS_READ_METHODS,
   ]),
+  visibility: serviceCredentialVisibilitySchema.default(
+    DEFAULT_SERVICE_CREDENTIAL_VISIBILITY,
+  ),
 };
 
 export const serviceCredentialPrepareSchema = z
@@ -61,10 +73,12 @@ export const serviceCredentialPrepareSchema = z
 export const serviceCredentialPrepareToolSchema = z
   .object({
     ...serviceCredentialPrepareFields,
+    // Models routinely drop the trailing space; accept both spellings and
+    // normalize to the persisted form.
     headerPrefix: z
-      .enum(['Bearer ', 'Basic ', 'Token '])
+      .enum(['Bearer', 'Basic', 'Token', 'Bearer ', 'Basic ', 'Token '])
       .optional()
-      .transform((prefix) => prefix ?? ''),
+      .transform((prefix) => (prefix ? `${prefix.trimEnd()} ` : '')),
   })
   .strict();
 
@@ -78,12 +92,20 @@ export const serviceCredentialCreateSchema = z
      * show and echo the method policy cannot approve a write-capable grant.
      */
     allowedMethods: credentialEgressAllowedMethodsSchema.optional(),
+    visibility: serviceCredentialVisibilitySchema.optional(),
   })
   .strict();
 
 export const serviceCredentialRevokeSchema = z
   .object({
     secretRef: z.string().uuid(),
+  })
+  .strict();
+
+export const serviceCredentialVisibilityUpdateSchema = z
+  .object({
+    secretRef: z.string().uuid(),
+    visibility: serviceCredentialVisibilitySchema,
   })
   .strict();
 
@@ -100,26 +122,41 @@ export const integrationCreateSchema = z
   .strict();
 
 /**
- * @deprecated Mediated integration-key requests (`request_with_integration_key`
- * / `integration_request` with a `session:` ID) are a GET/HEAD-only
- * compatibility path, not the required resource path. Grants are meant to be
- * used by ordinary HTTP clients at the real service URL through the session
- * egress gateway; see `credential-egress.ts`.
+ * Mediated integration-key requests (`request_with_integration_key` /
+ * `integration_request` with a `session:` ID) use the same approved-method
+ * policy as the credential egress gateway.
  */
+export const SERVICE_CREDENTIAL_REQUEST_BODY_MAX_BYTES = 65_536;
+
 export const serviceCredentialRequestSchema = z
   .object({
     secretRef: z.string().uuid(),
-    method: z.enum(['GET', 'HEAD']),
+    /** Any method; the broker enforces the grant's approved methods. */
+    method: credentialEgressMethodSchema,
     path: z.string().min(1).max(2048),
     accept: z.enum(['application/json', 'text/plain']).optional(),
     body: z
-      .literal('')
+      .string()
+      .max(SERVICE_CREDENTIAL_REQUEST_BODY_MAX_BYTES)
       .nullish()
       .describe(
-        'GET/HEAD have no body. Omit, use null, or use an empty string.',
+        'Request body for an approved write method. GET/HEAD have no body: omit, use null, or use an empty string.',
       ),
+    contentType: z
+      .enum([
+        'application/json',
+        'text/plain',
+        'application/x-www-form-urlencoded',
+      ])
+      .optional()
+      .describe('Content type of the body; ignored for GET/HEAD.'),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      !((value.method === 'GET' || value.method === 'HEAD') && value.body),
+    { message: 'GET/HEAD requests cannot carry a body' },
+  );
 
 export type ServiceCredentialCreate = z.infer<
   typeof serviceCredentialCreateSchema
@@ -139,6 +176,11 @@ export interface ServiceCredentialMetadata {
   headerName: ServiceCredentialPrepare['headerName'];
   headerPrefix: ServiceCredentialPrepare['headerPrefix'];
   allowedMethods: CredentialEgressMethod[];
+  visibility: ServiceCredentialVisibility;
+  /** The owner, only when this integration belongs to someone else. */
+  ownerName: string | null;
+  /** Whether the current viewer may revoke it or change its visibility. */
+  canManage: boolean;
   /** Null: kept until revoked. */
   expiresAt: string | null;
   revokedAt: string | null;
@@ -147,7 +189,7 @@ export interface ServiceCredentialMetadata {
 
 export interface ServiceCredentialPendingMetadata extends Omit<
   ServiceCredentialMetadata,
-  'secretRef' | 'revokedAt' | 'expiresAt'
+  'secretRef' | 'revokedAt' | 'expiresAt' | 'ownerName' | 'canManage'
 > {
   pendingRef: string;
   /** How long the integration will live once the key is entered; null keeps it until revoked. */

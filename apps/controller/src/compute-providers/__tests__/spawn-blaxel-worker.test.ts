@@ -65,7 +65,6 @@ vi.mock('../../sandbox-oidc', () => ({
 }));
 
 const { spawnBlaxelWorker } = await import('../spawn-blaxel-worker');
-const { buildBlaxelWorkerEnv } = await import('@roomote/compute-providers');
 
 describe('spawnBlaxelWorker', () => {
   beforeEach(() => {
@@ -240,9 +239,7 @@ describe('spawnBlaxelWorker', () => {
     });
 
     expect(planApiProxy).toHaveBeenCalledWith({ taskRun, provider: 'blaxel' });
-    expect(
-      vi.mocked(buildBlaxelWorkerEnv).mock.calls.at(-1)![0].extraEnv,
-    ).toMatchObject({
+    expect(mockRunCommand.mock.calls.at(-1)![0].env).toMatchObject({
       ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
       ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
     });
@@ -251,5 +248,41 @@ describe('spawnBlaxelWorker', () => {
     expect(admit.mock.invocationCallOrder[0]!).toBeGreaterThan(
       mockRunCommand.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it('restores standby when Credential egress admission fails after a resumed launch', async () => {
+    const admit = vi.fn().mockRejectedValue(new Error('admission failed'));
+
+    await expect(
+      spawnBlaxelWorker(
+        {
+          id: 322,
+          taskId: 'task-322',
+          vendor: 'blaxel',
+          payloadKind: TaskPayloadKind.SnapshotResume,
+          sourceSnapshotId: 'roomote-blaxel-standby',
+          payload: { repo: 'test/repo' },
+        } as TaskRun,
+        'auth-token',
+        {
+          blaxelApiKey: 'key',
+          blaxelWorkspace: 'workspace',
+          blaxelImage: 'sandbox/roomote-worker:test',
+          blaxelTimeoutMs: 5 * 60 * 60 * 1_000,
+          credentialEgress: {
+            planApiProxy: vi.fn().mockResolvedValue({
+              required: true,
+              bootstrapEnv: {},
+              admit,
+            }),
+          } as never,
+        },
+      ),
+    ).rejects.toThrow('admission failed');
+    expect(mockEnterStandby).toHaveBeenCalledWith({
+      instanceId: 'roomote-blaxel-standby',
+      commandId: 'worker-command-2',
+    });
+    expect(mockDestroyInstance).not.toHaveBeenCalled();
   });
 });

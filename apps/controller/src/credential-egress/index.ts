@@ -11,6 +11,7 @@ import { CredentialEgressLifecycle } from './lifecycle';
 
 export * from './lifecycle';
 export * from './api-proxy';
+export * from './hosted-launch';
 
 /**
  * Production wiring: the typed SDK control-plane client against the API

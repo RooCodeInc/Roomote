@@ -1,10 +1,11 @@
-import { DELETE, GET, POST } from './route';
+import { DELETE, GET, PATCH, POST } from './route';
 
 const mocks = vi.hoisted(() => ({
   authorize: vi.fn(),
   list: vi.fn(),
   create: vi.fn(),
   revoke: vi.fn(),
+  updateVisibility: vi.fn(),
   env: {
     R_PUBLIC_URL: 'https://roomote.example' as string | undefined,
     R_APP_URL: 'http://localhost:3000',
@@ -16,6 +17,7 @@ vi.mock('@roomote/sdk/server/service-credentials', () => ({
   createIntegration: mocks.create,
   listIntegrations: mocks.list,
   revokeIntegration: mocks.revoke,
+  updateIntegrationVisibility: mocks.updateVisibility,
 }));
 
 const secretRef = '9912344c-fbef-42f1-9d24-0fc2a196001a';
@@ -29,7 +31,7 @@ const createArgs = {
   secret: 'never-expose-this-secret',
 };
 function request(
-  method: 'POST' | 'DELETE',
+  method: 'POST' | 'DELETE' | 'PATCH',
   body: unknown,
   headers: Record<string, string> = {},
 ) {
@@ -51,14 +53,44 @@ beforeEach(() => {
   mocks.list.mockResolvedValue([metadata]);
   mocks.create.mockResolvedValue(metadata);
   mocks.revoke.mockResolvedValue(undefined);
+  mocks.updateVisibility.mockResolvedValue(metadata);
 });
 
 it("lists the signed-in user's integrations from the server identity only", async () => {
-  const response = await GET();
+  const response = await GET(
+    new Request('http://internal:3000/api/account/integrations'),
+  );
   expect(response.status).toBe(200);
   expect(response.headers.get('cache-control')).toBe('no-store');
   expect(await response.json()).toEqual({ secrets: [metadata] });
   expect(mocks.list).toHaveBeenCalledExactlyOnceWith('cookie-user');
+});
+
+it('separates shared integrations from only the current owner personal integrations', async () => {
+  const shared = { ...metadata, visibility: 'deployment', ownerName: null };
+  const ownPersonal = {
+    ...metadata,
+    secretRef: '9912344c-fbef-42f1-9d24-0fc2a196001b',
+    visibility: 'owner',
+    ownerName: null,
+  };
+  const otherPersonal = {
+    ...metadata,
+    secretRef: '9912344c-fbef-42f1-9d24-0fc2a196001c',
+    visibility: 'owner',
+    ownerName: 'Another member',
+  };
+  mocks.list.mockResolvedValue([shared, ownPersonal, otherPersonal]);
+
+  const sharedResponse = await GET(
+    new Request('http://internal:3000/api/account/integrations?view=shared'),
+  );
+  const personalResponse = await GET(
+    new Request('http://internal:3000/api/account/integrations?view=personal'),
+  );
+
+  expect(await sharedResponse.json()).toEqual({ secrets: [shared] });
+  expect(await personalResponse.json()).toEqual({ secrets: [ownPersonal] });
 });
 
 it('adds an integration with defaults applied and the key passed only to the SDK', async () => {
@@ -68,7 +100,19 @@ it('adds an integration with defaults applied and the key passed only to the SDK
   expect(mocks.create).toHaveBeenCalledExactlyOnceWith('cookie-user', {
     ...createArgs,
     allowedMethods: ['GET', 'HEAD'],
+    visibility: 'deployment',
   });
+});
+
+it('updates visibility for the signed-in user', async () => {
+  const response = await PATCH(
+    request('PATCH', { secretRef, visibility: 'owner' }),
+  );
+  expect(response.status).toBe(200);
+  expect(mocks.updateVisibility).toHaveBeenCalledExactlyOnceWith(
+    'cookie-user',
+    { secretRef, visibility: 'owner' },
+  );
 });
 
 it('revokes with the strict reference body for the signed-in user', async () => {
@@ -127,5 +171,8 @@ it('contains SDK failures without echoing them', async () => {
     'contains-a-secret-value',
   );
   mocks.list.mockRejectedValue(new Error('contains-a-secret-value'));
-  expect((await GET()).status).toBe(500);
+  expect(
+    (await GET(new Request('http://internal:3000/api/account/integrations')))
+      .status,
+  ).toBe(500);
 });

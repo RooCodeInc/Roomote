@@ -121,14 +121,17 @@ describe('environment GitHub repository scope', () => {
       );
     }
     const assertion = assertRepositoryInTaskRunScope(run, target.fullName);
-    if (scenario === 'same installation') {
+    if (
+      scenario === 'same installation' ||
+      scenario === 'explicit other provider'
+    ) {
       await expect(assertion).resolves.toBeUndefined();
       expect(
         resolveSourceControlProviderForRepositoryFromPayload(
           run.payload,
           target.fullName,
         ),
-      ).toBe('github');
+      ).toBe(scenario === 'explicit other provider' ? 'gitlab' : 'github');
       expect(
         resolveSourceControlHostForRepositoryFromPayload(
           run.payload,
@@ -136,15 +139,7 @@ describe('environment GitHub repository scope', () => {
         ),
       ).toBeUndefined();
     } else {
-      await expect(assertion).rejects.toThrow(
-        [
-          'inactive anchor',
-          'non-GitHub mapped anchor',
-          'unmapped anchor',
-        ].includes(scenario)
-          ? 'GitHub installations'
-          : 'outside this task',
-      );
+      await expect(assertion).rejects.toThrow('outside this task');
     }
     expect(run.payload).toEqual(originalPayload);
     await expect(

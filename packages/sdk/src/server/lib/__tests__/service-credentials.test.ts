@@ -20,6 +20,7 @@ import {
   listServiceCredentials,
   revokeIntegration,
   revokeServiceCredential,
+  updateIntegrationVisibility,
 } from '../service-credentials';
 
 const secret = 'Test-Key/A+b=<"&>123';
@@ -49,7 +50,10 @@ beforeEach(async () => {
   const owner = await userFactory.create();
   userIds.push(owner.id);
   context = { userId: owner.id, sessionId: await session(owner.id) };
-  const pending = await prepareServiceCredential(context, policy);
+  const pending = await prepareServiceCredential(context, {
+    ...policy,
+    visibility: 'owner',
+  });
   ({ secretRef } = await createServiceCredential(context, {
     pendingRef: pending.pendingRef,
     secret,
@@ -77,6 +81,7 @@ it('persists immutable nonsecret approvals, waits 24 hours for the key, and fina
     'lifetimeHours',
     'origin',
     'pendingRef',
+    'visibility',
   ]);
   for (const extra of [
     { origin: 'https://evil.example' },
@@ -218,14 +223,17 @@ it('encrypts SQL storage, lists metadata only and wipes ciphertext on revoke', a
   expect(listed[0]!.allowedMethods).toEqual(['GET', 'HEAD']);
   expect(Object.keys(listed[0]!).sort()).toEqual([
     'allowedMethods',
+    'canManage',
     'createdAt',
     'expiresAt',
     'headerName',
     'headerPrefix',
     'label',
     'origin',
+    'ownerName',
     'revokedAt',
     'secretRef',
+    'visibility',
   ]);
   expect(JSON.stringify(listed)).not.toContain(secret);
   await revokeServiceCredential(context, { secretRef });
@@ -324,12 +332,138 @@ it('shares an integration across every Session of its owner and rejects other ow
   ).rejects.toThrow('Secret unavailable');
 });
 
+it('shares new grants with active deployment members by default while owner grants stay private', async () => {
+  const sharedPending = await prepareServiceCredential(context, policy);
+  expect(sharedPending.visibility).toBe('deployment');
+  const shared = await createServiceCredential(context, {
+    pendingRef: sharedPending.pendingRef,
+    secret,
+  });
+  const stranger = await userFactory.create({ name: 'Shared bystander' });
+  userIds.push(stranger.id);
+  const foreign = {
+    userId: stranger.id,
+    sessionId: await session(stranger.id),
+  };
+
+  const listed = await listServiceCredentials(foreign);
+  expect(listed).toEqual([
+    expect.objectContaining({
+      secretRef: shared.secretRef,
+      visibility: 'deployment',
+      canManage: false,
+    }),
+  ]);
+  expect(
+    (await resolveOwnedServiceCredential(foreign, shared.secretRef)).value,
+  ).toBe(secret);
+  await expect(
+    resolveOwnedServiceCredential(foreign, secretRef),
+  ).rejects.toThrow('Secret unavailable');
+  await expect(
+    revokeIntegration(stranger.id, { secretRef: shared.secretRef }),
+  ).rejects.toThrow('Secret request unavailable');
+});
+
+it.each(['deactivated', 'deleted'] as const)(
+  'removes a deployment-visible grant when its owner is %s',
+  async (state) => {
+    const sharedPending = await prepareServiceCredential(context, policy);
+    const shared = await createServiceCredential(context, {
+      pendingRef: sharedPending.pendingRef,
+      secret,
+    });
+    const member = await userFactory.create();
+    userIds.push(member.id);
+    const memberContext = {
+      userId: member.id,
+      sessionId: await session(member.id),
+    };
+    expect(
+      (await listServiceCredentials(memberContext)).map(
+        (item) => item.secretRef,
+      ),
+    ).toContain(shared.secretRef);
+
+    if (state === 'deactivated') {
+      await db
+        .update(users)
+        .set({ deletedAt: new Date() })
+        .where(eq(users.id, context.userId!));
+    } else {
+      await db.delete(users).where(eq(users.id, context.userId!));
+    }
+
+    expect(await listServiceCredentials(memberContext)).toEqual([]);
+    await expect(
+      resolveOwnedServiceCredential(memberContext, shared.secretRef),
+    ).rejects.toThrow('Secret unavailable');
+  },
+);
+
+it('lists every active grant for Settings admins but not ordinary members', async () => {
+  const admin = await userFactory.create({ role: 'admin' });
+  const member = await userFactory.create({ role: 'member' });
+  userIds.push(admin.id, member.id);
+
+  expect(await listIntegrations(member.id)).toEqual([]);
+  expect(await listIntegrations(admin.id)).toEqual([
+    expect.objectContaining({
+      secretRef,
+      visibility: 'owner',
+      ownerName: expect.any(String),
+      canManage: true,
+    }),
+  ]);
+});
+
+it('omits revoked and expired deployment grants from another member listing', async () => {
+  const stranger = await userFactory.create();
+  userIds.push(stranger.id);
+  const makeShared = async (label: string) => {
+    const pending = await prepareServiceCredential(context, {
+      ...policy,
+      label,
+    });
+    return createServiceCredential(context, {
+      pendingRef: pending.pendingRef,
+      secret,
+    });
+  };
+  const revoked = await makeShared('Revoked shared');
+  const expired = await makeShared('Expired shared');
+  const live = await makeShared('Live shared');
+  await revokeIntegration(context.userId!, { secretRef: revoked.secretRef });
+  await db.execute(
+    sql`update service_credentials set expires_at = clock_timestamp() - interval '1 second' where id = ${expired.secretRef}`,
+  );
+
+  expect(
+    (await listIntegrations(stranger.id)).map((item) => item.secretRef),
+  ).toEqual([live.secretRef]);
+});
+
+it('lets owners and admins change or revoke shared grants', async () => {
+  const updated = await updateIntegrationVisibility(context.userId!, {
+    secretRef,
+    visibility: 'deployment',
+  });
+  expect(updated.visibility).toBe('deployment');
+  const admin = await userFactory.create({ role: 'admin' });
+  userIds.push(admin.id);
+  await revokeIntegration(admin.id, { secretRef });
+  await expect(
+    resolveOwnedServiceCredential(context, secretRef),
+  ).rejects.toThrow('Secret unavailable');
+});
+
 it('keeps integrations until revoked unless a lifetime is set, and manages them from Settings', async () => {
   expect((await listServiceCredentials(context))[0]!.expiresAt).toBeNull();
   const timed = await prepareServiceCredential(context, {
     ...policy,
     label: 'Temporary',
     lifetimeHours: 2,
+    visibility: 'owner',
   });
   expect(timed.lifetimeHours).toBe(2);
   const saved = await createServiceCredential(context, {
@@ -346,6 +480,7 @@ it('keeps integrations until revoked unless a lifetime is set, and manages them 
     headerName: 'x-api-key',
     headerPrefix: '',
     allowedMethods: ['GET', 'POST'],
+    visibility: 'owner',
     secret,
   });
   expect(added).toMatchObject({
@@ -416,7 +551,8 @@ it('blocks creation and use after archive while retaining owner list and revoke 
   );
   expect(await listServiceCredentials(context)).toHaveLength(1);
   await revokeServiceCredential(context, { secretRef });
-  expect((await listServiceCredentials(context))[0]!.revokedAt).not.toBeNull();
+  // A revoked integration leaves every listing.
+  expect(await listServiceCredentials(context)).toHaveLength(0);
 });
 
 it('rejects unsafe origins with the real egress validator and normalizes default HTTPS ports', async () => {

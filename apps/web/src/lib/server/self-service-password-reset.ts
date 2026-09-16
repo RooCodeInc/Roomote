@@ -50,12 +50,10 @@ export async function isSelfServicePasswordResetAllowed(input: {
     incrementRateLimit('password-reset:global', GLOBAL_WINDOW_SECONDS).then(
       (count) => count <= GLOBAL_MAX_ATTEMPTS,
     ),
-    input.clientAddress
-      ? incrementRateLimit(
-          `password-reset:client:${hashRateLimitValue(input.clientAddress)}`,
-          CLIENT_WINDOW_SECONDS,
-        ).then((count) => count <= CLIENT_MAX_ATTEMPTS)
-      : Promise.resolve(true),
+    incrementRateLimit(
+      `password-reset:client:${hashRateLimitValue(input.clientAddress ?? 'unknown')}`,
+      CLIENT_WINDOW_SECONDS,
+    ).then((count) => count <= CLIENT_MAX_ATTEMPTS),
   ]);
 
   return limits.every(Boolean);

@@ -9,6 +9,7 @@ import {
   fastAgentConversations,
   gt,
   inArray,
+  isDemoSeedPreservedStatusSession,
   isNull,
   lt,
   or,
@@ -20,6 +21,7 @@ import {
   tasks,
   touchSessionActivity,
 } from '@roomote/db/server';
+import { Env } from '@roomote/env';
 const LOG_PREFIX = '[sessions]';
 const BACKFILL_KEY = 'unified-sessions-v1';
 /**
@@ -279,7 +281,12 @@ async function reconcileRecentSessions(watermark: Date | null): Promise<void> {
     .limit(BATCH_SIZE);
   for (const session of recent) {
     try {
-      await touchSessionActivity(db, session.id, session.activityAt);
+      const preserveFixtureStatus =
+        Env.APP_ENV === 'development' &&
+        isDemoSeedPreservedStatusSession(session.id);
+      await touchSessionActivity(db, session.id, session.activityAt, {
+        recomputeStatus: !preserveFixtureStatus,
+      });
     } catch (error) {
       console.error(
         `${LOG_PREFIX} refresh failed for session ${session.id}`,

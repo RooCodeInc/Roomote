@@ -32,7 +32,13 @@ import {
   postSlackThreadMessageWithStickyFooter,
   SlackNotifier,
 } from '@roomote/slack';
-import { PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE } from '@roomote/types';
+import {
+  formatOperationalEvent,
+  getFastAgentParentFromPayload,
+  getOperationalLogRuntimeFields,
+  PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE,
+  type OperationalLogFields,
+} from '@roomote/types';
 
 type GraphQlMergeability = 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN';
 type GraphQlPullRequest = {
@@ -44,6 +50,45 @@ type GraphQlPullRequest = {
 type GraphQlMergeabilityResponse = {
   repository: Record<string, GraphQlPullRequest | null> | null;
 };
+
+type PullRequestMergeabilityJob = Job<
+  PullRequestMergeabilityCheckRequest,
+  void,
+  string
+>;
+
+function logPullRequestConflictEvent(
+  level: 'info' | 'warn' | 'error',
+  event: string,
+  fields: OperationalLogFields,
+): void {
+  const writer =
+    level === 'error'
+      ? console.error
+      : level === 'warn'
+        ? console.warn
+        : console.log;
+  writer(
+    formatOperationalEvent(event, {
+      ...getOperationalLogRuntimeFields('bullmq', process.env),
+      provider: 'github',
+      surface: 'github',
+      ...fields,
+    }),
+  );
+}
+
+function getJobOperationalFields(
+  job: PullRequestMergeabilityJob,
+  data: PullRequestMergeabilityCheckRequest,
+): OperationalLogFields {
+  return {
+    repository: data.repository,
+    prNumber: data.prNumber,
+    jobId: job.id,
+    attempt: (job.attemptsMade ?? 0) + 1,
+  };
+}
 
 export function buildPullRequestMergeabilityQuery(prNumbers: number[]): {
   query: string;
@@ -93,12 +138,27 @@ function buildCandidateConflictText(
 async function postConflictNotification(params: {
   candidate: TrackedPullRequestMergeabilityCandidate;
   conflictDetectedAt: Date;
-}): Promise<boolean> {
+}): Promise<{
+  accepted: boolean;
+  level: 'info' | 'warn' | 'error';
+  outcome: 'delivered' | 'skipped' | 'failed';
+  reason: string;
+  runId?: number;
+  sessionId?: string;
+  routeProvider?: string;
+}> {
   const latestRun = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.taskId, params.candidate.taskId),
     orderBy: [desc(taskRuns.createdAt)],
   });
-  if (!latestRun) return false;
+  if (!latestRun) {
+    return {
+      accepted: false,
+      level: 'warn',
+      outcome: 'skipped',
+      reason: 'task_run_missing',
+    };
+  }
 
   const title =
     params.candidate.prTitle ?? `Pull request #${params.candidate.prNumber}`;
@@ -115,11 +175,20 @@ async function postConflictNotification(params: {
       },
       conflictDetectedAt: params.conflictDetectedAt,
     });
-  if (deliveredToFastParent) return true;
+  if (deliveredToFastParent) {
+    return {
+      accepted: true,
+      level: 'info',
+      outcome: 'delivered',
+      reason: 'fast_parent_notified',
+      runId: latestRun.id,
+      sessionId: getFastAgentParentFromPayload(latestRun.payload)?.sessionId,
+    };
+  }
 
   const route = await resolvePrReviewNotificationRoute(latestRun);
   const text = buildCandidateConflictText(params.candidate);
-  const messageTs = route
+  const routeResult = route
     ? await postConflictNotificationToRoute(
         route,
         params.candidate.taskId,
@@ -127,22 +196,46 @@ async function postConflictNotification(params: {
       )
     : null;
 
-  await recordPrReviewNotificationDeliveryBestEffort({
+  const recorded = await recordPrReviewNotificationDeliveryBestEffort({
     runId: latestRun.id,
     taskId: params.candidate.taskId,
     text,
     route,
-    messageTs,
+    messageTs: routeResult?.messageId,
     source: PR_CONFLICT_NOTIFICATION_TASK_MESSAGE_SOURCE,
   });
-  return true;
+
+  if (!route) {
+    return {
+      accepted: true,
+      level: recorded ? 'info' : 'error',
+      outcome: recorded ? 'skipped' : 'failed',
+      reason: recorded
+        ? 'no_notification_route'
+        : 'task_history_persistence_failed',
+      runId: latestRun.id,
+    };
+  }
+
+  return {
+    accepted: true,
+    level: routeResult?.delivered ? 'info' : 'error',
+    outcome: routeResult?.delivered ? 'delivered' : 'failed',
+    reason: routeResult?.reason ?? 'notification_route_failed',
+    runId: latestRun.id,
+    routeProvider: route.provider,
+  };
 }
 
 async function postConflictNotificationToRoute(
   route: PrReviewNotificationRoute,
   taskId: string,
   text: string,
-): Promise<string | null> {
+): Promise<{
+  delivered: boolean;
+  messageId: string | null;
+  reason: string;
+}> {
   if (route.provider === 'slack') {
     const installation = await db.query.slackInstallations.findFirst({
       where: and(
@@ -155,7 +248,11 @@ async function postConflictNotificationToRoute(
       console.warn(
         '[PullRequestMergeabilityCheck] Slack is not connected, skipping conflict notification',
       );
-      return null;
+      return {
+        delivered: false,
+        messageId: null,
+        reason: 'provider_not_connected',
+      };
     }
 
     const messageTs = await postSlackThreadMessageWithStickyFooter({
@@ -167,7 +264,17 @@ async function postConflictNotificationToRoute(
       blocks: [{ type: 'markdown', text }],
       utmCampaign: 'slack.pr_conflict',
     });
-    return messageTs ?? null;
+    return messageTs
+      ? {
+          delivered: true,
+          messageId: messageTs,
+          reason: 'conversation_notification_posted',
+        }
+      : {
+          delivered: false,
+          messageId: null,
+          reason: 'provider_message_id_missing',
+        };
   }
 
   const adapter = await getCommunicationProviderAdapter(route.provider);
@@ -175,43 +282,110 @@ async function postConflictNotificationToRoute(
     console.warn(
       `[PullRequestMergeabilityCheck] ${route.provider} is not connected, skipping conflict notification`,
     );
-    return null;
+    return {
+      delivered: false,
+      messageId: null,
+      reason: 'provider_not_connected',
+    };
   }
 
   await adapter.postMessage(buildPrReviewNotificationPostInput(route, text));
-  return null;
+  return {
+    delivered: true,
+    messageId: null,
+    reason: 'conversation_notification_posted',
+  };
 }
 
 async function notifyConflictTransition(
   candidate: TrackedPullRequestMergeabilityCandidate,
   conflictDetectedAt: Date,
+  jobFields: OperationalLogFields,
 ): Promise<void> {
   const generation = { id: candidate.id, conflictDetectedAt };
   const conflictNotificationClaimedAt =
     await claimPullRequestConflictNotification(generation);
-  if (!conflictNotificationClaimedAt) return;
+  if (!conflictNotificationClaimedAt) {
+    logPullRequestConflictEvent(
+      'info',
+      'source_control_pr_conflict_notification',
+      {
+        ...jobFields,
+        prNumber: candidate.prNumber,
+        taskId: candidate.taskId,
+        outcome: 'skipped',
+        reason: 'notification_claim_unavailable',
+      },
+    );
+    return;
+  }
   const claim = { ...generation, conflictNotificationClaimedAt };
+  let terminalLogged = false;
 
   try {
-    const delivered = await postConflictNotification({
+    const result = await postConflictNotification({
       candidate,
       conflictDetectedAt,
     });
-    if (!delivered) {
+    if (!result.accepted) {
       await releasePullRequestConflictNotificationClaim(claim);
+      logPullRequestConflictEvent(
+        result.level,
+        'source_control_pr_conflict_notification',
+        {
+          ...jobFields,
+          prNumber: candidate.prNumber,
+          taskId: candidate.taskId,
+          outcome: result.outcome,
+          reason: result.reason,
+          retryable: false,
+        },
+      );
+      terminalLogged = true;
       return;
     }
     await markPullRequestConflictNotified(claim);
+    logPullRequestConflictEvent(
+      result.level,
+      'source_control_pr_conflict_notification',
+      {
+        ...jobFields,
+        prNumber: candidate.prNumber,
+        taskId: candidate.taskId,
+        runId: result.runId,
+        sessionId: result.sessionId,
+        routeProvider: result.routeProvider,
+        outcome: result.outcome,
+        reason: result.reason,
+        retryable: false,
+      },
+    );
+    terminalLogged = true;
   } catch (error) {
     await releasePullRequestConflictNotificationClaim(claim).catch(() => {});
+    if (!terminalLogged) {
+      logPullRequestConflictEvent(
+        'error',
+        'source_control_pr_conflict_notification',
+        {
+          ...jobFields,
+          prNumber: candidate.prNumber,
+          taskId: candidate.taskId,
+          outcome: 'failed',
+          reason: error instanceof Error ? error.name : 'unknown_error',
+          retryable: false,
+        },
+      );
+    }
     throw error;
   }
 }
 
-export async function pullRequestMergeabilityCheckJob(
-  job: Job<PullRequestMergeabilityCheckRequest, void, string>,
+async function runPullRequestMergeabilityCheck(
+  data: PullRequestMergeabilityCheckRequest,
+  operationalFields: OperationalLogFields,
+  startedAt: number,
 ): Promise<void> {
-  const data = pullRequestMergeabilityCheckRequestSchema.parse(job.data);
   const candidates = await listTrackedPullRequestsForMergeability({
     repository: data.repository,
     ...(data.baseRef !== undefined ? { baseRef: data.baseRef } : {}),
@@ -221,7 +395,20 @@ export async function pullRequestMergeabilityCheckJob(
       : {}),
     skipNotifiedConflicts: !data.allowNotifiedConflictCheck,
   });
-  if (candidates.length === 0) return;
+  if (candidates.length === 0) {
+    logPullRequestConflictEvent(
+      'info',
+      'source_control_pr_mergeability_check',
+      {
+        ...operationalFields,
+        outcome: 'skipped',
+        reason: 'no_eligible_tracked_pull_requests',
+        durationMs: Date.now() - startedAt,
+        retryable: false,
+      },
+    );
+    return;
+  }
 
   const [owner, repo] = data.repository.split('/');
   if (!owner || !repo) {
@@ -262,7 +449,23 @@ export async function pullRequestMergeabilityCheckJob(
     prNumbers.map(async (prNumber, index) => {
       const pullRequest = response.repository?.[`pr${index}`];
       const links = candidatesByNumber.get(prNumber) ?? [];
-      if (!pullRequest || pullRequest.state !== 'OPEN') return;
+      if (!pullRequest || pullRequest.state !== 'OPEN') {
+        logPullRequestConflictEvent(
+          'info',
+          'source_control_pr_mergeability_check',
+          {
+            ...operationalFields,
+            prNumber,
+            outcome: 'skipped',
+            reason: pullRequest
+              ? 'pull_request_not_open'
+              : 'pull_request_not_found',
+            durationMs: Date.now() - startedAt,
+            retryable: false,
+          },
+        );
+        return;
+      }
 
       if (links.some((link) => link.prBaseRef !== pullRequest.baseRefName)) {
         await updateTrackedPullRequestBaseRef({
@@ -280,20 +483,61 @@ export async function pullRequestMergeabilityCheckJob(
           });
           unknownIds.push(link.id);
         }
+        logPullRequestConflictEvent(
+          'warn',
+          'source_control_pr_mergeability_check',
+          {
+            ...operationalFields,
+            prNumber,
+            outcome: 'unknown',
+            reason: 'provider_mergeability_unknown',
+            durationMs: Date.now() - startedAt,
+            retryable: data.retryAttempt === 0,
+          },
+        );
         return;
       }
+
+      const conflicting = pullRequest.mergeable === 'CONFLICTING';
+      logPullRequestConflictEvent(
+        'info',
+        'source_control_pr_mergeability_check',
+        {
+          ...operationalFields,
+          prNumber,
+          outcome: conflicting ? 'conflicting' : 'clean',
+          reason: conflicting
+            ? 'provider_reported_conflicting'
+            : 'provider_reported_mergeable',
+          durationMs: Date.now() - startedAt,
+          retryable: false,
+        },
+      );
 
       await Promise.all(
         links.map(async (link) => {
           const observation = await recordPullRequestMergeability({
             id: link.id,
-            status:
-              pullRequest.mergeable === 'CONFLICTING' ? 'conflicting' : 'clean',
+            status: conflicting ? 'conflicting' : 'clean',
           });
           if (observation.shouldNotify && observation.conflictDetectedAt) {
             await notifyConflictTransition(
               link,
               observation.conflictDetectedAt,
+              operationalFields,
+            );
+          } else if (conflicting) {
+            logPullRequestConflictEvent(
+              'info',
+              'source_control_pr_conflict_notification',
+              {
+                ...operationalFields,
+                prNumber: link.prNumber,
+                taskId: link.taskId,
+                outcome: 'skipped',
+                reason: 'conflict_transition_not_notifiable',
+                retryable: false,
+              },
             );
           }
         }),
@@ -310,5 +554,35 @@ export async function pullRequestMergeabilityCheckJob(
       retryAttempt: 1,
       allowNotifiedConflictCheck: data.allowNotifiedConflictCheck,
     });
+  }
+}
+
+export async function pullRequestMergeabilityCheckJob(
+  job: PullRequestMergeabilityJob,
+): Promise<void> {
+  const data = pullRequestMergeabilityCheckRequestSchema.parse(job.data);
+  const operationalFields = getJobOperationalFields(job, data);
+  const startedAt = Date.now();
+  logPullRequestConflictEvent('info', 'source_control_pr_mergeability_check', {
+    ...operationalFields,
+    outcome: 'started',
+    reason: 'job_received',
+  });
+
+  try {
+    await runPullRequestMergeabilityCheck(data, operationalFields, startedAt);
+  } catch (error) {
+    logPullRequestConflictEvent(
+      'error',
+      'source_control_pr_mergeability_check',
+      {
+        ...operationalFields,
+        outcome: 'failed',
+        reason: error instanceof Error ? error.name : 'unknown_error',
+        durationMs: Date.now() - startedAt,
+        retryable: false,
+      },
+    );
+    throw error;
   }
 }

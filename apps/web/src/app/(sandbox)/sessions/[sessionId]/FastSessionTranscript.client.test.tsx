@@ -1,5 +1,6 @@
 import {
   act,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -58,6 +59,7 @@ const {
   voiceStatusQuery,
   recordVoiceTurnMutate,
   recordVoiceCallEventMutate,
+  waitForVoiceCallLease,
   liveVoiceState,
   authenticatedUserState,
 } = vi.hoisted(() => ({
@@ -75,6 +77,7 @@ const {
   voiceStatusQuery: vi.fn(),
   recordVoiceTurnMutate: vi.fn(),
   recordVoiceCallEventMutate: vi.fn(),
+  waitForVoiceCallLease: vi.fn(),
   authenticatedUserState: {
     user: null as null | {
       userId: string;
@@ -157,6 +160,10 @@ vi.mock('@/hooks/useLiveVoice', () => ({
       deliveringUtterances: liveVoiceState.deliveringUtterances,
     };
   },
+}));
+
+vi.mock('@/hooks/useSessionVoiceCallLease', () => ({
+  useSessionVoiceCallLease: () => waitForVoiceCallLease,
 }));
 
 vi.mock('@/hooks/useNarrationMode', () => ({
@@ -349,6 +356,8 @@ beforeEach(() => {
   recordVoiceTurnMutate.mockResolvedValue({ eventId: 'voice:1' });
   recordVoiceCallEventMutate.mockReset();
   recordVoiceCallEventMutate.mockResolvedValue({ eventId: 'voice-call:1' });
+  waitForVoiceCallLease.mockReset();
+  waitForVoiceCallLease.mockResolvedValue(undefined);
   liveVoiceState.startedAt = null;
   liveVoiceState.inputLevel = 0;
   liveVoiceState.micMuted = false;
@@ -460,6 +469,7 @@ describe('FastSessionTranscript', () => {
               headerName: 'authorization',
               headerPrefix: 'Bearer ',
               allowedMethods: ['GET', 'HEAD'],
+              visibility: 'deployment',
               expiresAt: new Date(Date.now() + 3600000).toISOString(),
               revokedAt: null,
               createdAt: new Date().toISOString(),
@@ -519,9 +529,9 @@ describe('FastSessionTranscript', () => {
         { status: 201 },
       ),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
-    await screen.findByText(
-      'Integration saved. The Session has been notified without sharing your key.',
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
     );
     expect(replyMutate).not.toHaveBeenCalled();
     expect(preparePromptAttachments).not.toHaveBeenCalled();
@@ -531,10 +541,14 @@ describe('FastSessionTranscript', () => {
       '/api/sessions/canonical-session/secrets',
       expect.objectContaining({
         method: 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           pendingRef: secretRef,
           secret: 'disposable-test-credential',
           allowedMethods: ['GET', 'HEAD'],
+          visibility: 'deployment',
         }),
       }),
     );
@@ -2239,9 +2253,25 @@ describe('FastSessionTranscript', () => {
         choice: 'yes',
       }),
     );
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('pr-review-action-offer'),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not render a persisted resolved offer', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="22222222-2222-4222-8222-222222222222"
+        initialMessages={[reviewOfferMessage('resolved')]}
+      />,
+    );
+
     expect(
-      await screen.findByText('Resolving the current review issues.'),
-    ).toBeInTheDocument();
+      screen.queryByTestId('pr-review-action-offer'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Review feedback remains.')).toBeVisible();
   });
 
   it('hides dismissed offers and renders late-click states without controls', async () => {
@@ -2823,14 +2853,15 @@ describe('FastSessionTranscript', () => {
         const focusedHint = screen.getByRole('button', {
           name: 'Insert suggested message',
         });
-        expect(
-          fireEvent.pointerDown(focusedHint, {
-            pointerType: action,
-            cancelable: true,
-          }),
-        ).toBe(false);
+        const pointerDown = createEvent.pointerDown(focusedHint, {
+          cancelable: true,
+        });
+        Object.defineProperty(pointerDown, 'pointerType', { value: action });
+        expect(fireEvent(focusedHint, pointerDown)).toBe(false);
         expect(input).toHaveFocus();
-        fireEvent.click(focusedHint);
+        if (action === 'mouse') {
+          fireEvent.click(focusedHint);
+        }
       } else {
         fireEvent.keyDown(input, { key: action, code: action });
       }
@@ -3436,6 +3467,36 @@ describe('FastSessionTranscript', () => {
       expect(screen.getByPlaceholderText('Message agent')).toHaveValue(
         'Keep this draft',
       );
+    });
+
+    it('waits for the voice-call lease before sending the first spoken request', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      let releaseLease!: () => void;
+      waitForVoiceCallLease.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          releaseLease = resolve;
+        }),
+      );
+      replyMutate.mockResolvedValue({ success: true });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        liveVoiceState.onUtterance?.('Check the build', 'item_1');
+      });
+      expect(waitForVoiceCallLease).toHaveBeenCalledOnce();
+      expect(replyMutate).not.toHaveBeenCalled();
+
+      releaseLease();
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledOnce());
     });
 
     it('reads the answer to a spoken request to Live as it streams, and leaves typed replies on screen', async () => {

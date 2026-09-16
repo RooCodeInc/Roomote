@@ -172,6 +172,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
       'Keep access read-only and limited by the Granola key configuration',
     ],
   },
+  exa: {
+    capabilities: [
+      'Search the web and fetch full page content with free keyless access',
+      'Use advanced filters while Exa rate limits apply',
+      'Optionally add a deployment API key for usage-based Exa Agent research',
+    ],
+  },
   elevenlabs: {
     capabilities: [
       'Narrate feature-demo videos in a configured ElevenLabs voice',

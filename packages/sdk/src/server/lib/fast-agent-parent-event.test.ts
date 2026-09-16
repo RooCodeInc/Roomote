@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   findTaskRun: vi.fn(),
   findWakeup: vi.fn(),
   findWakeupSession: vi.fn(),
+  findUser: vi.fn(),
   findTaskRuns: vi.fn(),
   getConversationLookupIds: vi.fn(),
   findTaskPullRequests: vi.fn(),
@@ -192,11 +193,13 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: mocks.findTaskRun,
         findMany: mocks.findTaskRuns,
       },
+      users: { findFirst: mocks.findUser },
     },
   },
   and: vi.fn((...args: unknown[]) => args),
   eq: vi.fn((...args: unknown[]) => args),
   inArray: vi.fn((...args: unknown[]) => args),
+  isNull: vi.fn((value: unknown) => ['isNull', value]),
   getCustomAutomationById: mocks.findCustomAutomation,
   recordCustomAutomationResult: mocks.recordCustomAutomationResult,
   getSessionWakeupById: mocks.findWakeup,
@@ -211,6 +214,7 @@ vi.mock('@roomote/db/server', () => ({
     id: 'task_runs.id',
     fastAgentSessionId: 'task_runs.fast_agent_session_id',
   },
+  users: { id: 'users.id', deletedAt: 'users.deleted_at' },
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -345,7 +349,12 @@ describe('deliverFastAgentParentEvent', () => {
   beforeEach(() => {
     mocks.redisStore.clear();
     vi.clearAllMocks();
-    mocks.findWakeupSession.mockResolvedValue({ id: originSessionId });
+    mocks.findWakeupSession.mockResolvedValue({
+      id: originSessionId,
+      ownerKind: 'user',
+      ownerUserId: 'u1',
+    });
+    mocks.findUser.mockResolvedValue({ id: 'u1' });
     mocks.releaseTurnLock.signal = new AbortController().signal;
     mocks.acquireTurnLock.mockResolvedValue(mocks.releaseTurnLock);
     mocks.acquireRootBindingLock.mockResolvedValue(
@@ -1233,6 +1242,28 @@ describe('deliverFastAgentParentEvent', () => {
     },
   );
 
+  it('keeps integration-key tools unavailable when the settled task actor is inactive', async () => {
+    mocks.findUser.mockResolvedValueOnce(null);
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        actingUserId: 'u1',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serviceCredentialPlatformDenialReason: 'no_acting_user',
+      }),
+    );
+  });
+
   it('updates the Slack root for a channel-backed automation turn', async () => {
     const chart = {
       title: 'Weekly findings',
@@ -2099,6 +2130,57 @@ describe('deliverFastAgentParentEvent', () => {
     );
     expect(mocks.postMessage).not.toHaveBeenCalled();
   });
+
+  it('authorizes integration-key consumption only for the active Session owner recorded on the settled run', async () => {
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        actingUserId: 'u1',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serviceCredentialPlatformActorUserId: 'u1',
+      }),
+    );
+  });
+
+  it.each([
+    ['missing actor', undefined, 'no_acting_user'],
+    ['different Session owner', 'u2', 'actor_owner_mismatch'],
+  ] as const)(
+    'keeps integration-key tools unavailable for a settled task with %s',
+    async (_label, actingUserId, denialReason) => {
+      await deliverFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'task_settled',
+          taskId: 'child-task-1',
+          runId: 42,
+          ...(actingUserId ? { actingUserId } : {}),
+          status: 'completed',
+          taskUrl: 'https://roomote.example/task/child-task-1',
+          pullRequests: [],
+        },
+      });
+
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          serviceCredentialPlatformDenialReason: denialReason,
+        }),
+      );
+      expect(mocks.answerQuestion.mock.calls[0]![0]).not.toHaveProperty(
+        'serviceCredentialPlatformActorUserId',
+      );
+    },
+  );
 
   it.each([undefined, 'anthropic/claude-sonnet-5'])(
     'keeps child model selection independent of the automation session: %s',

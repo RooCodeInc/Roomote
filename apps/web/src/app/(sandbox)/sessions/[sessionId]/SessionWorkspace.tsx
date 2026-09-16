@@ -821,8 +821,12 @@ export function SessionWorkspace({
   const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
   const sessionPullRequests = getSessionPullRequests(sessionTasks);
   const sessionPreviewCount = getSessionPreviews(taskCards).length;
-  const runningTasks = taskCards.filter((task) =>
-    isTaskExecutingTurn(task.latestRun?.status, task.latestRun?.taskPhase),
+  const runningTasks = useMemo(
+    () =>
+      taskCards.filter((task) =>
+        isTaskExecutingTurn(task.latestRun?.status, task.latestRun?.taskPhase),
+      ),
+    [taskCards],
   );
   const runningTaskCount = runningTasks.length;
   const taskStateRevision = useMemo(
@@ -842,6 +846,17 @@ export function SessionWorkspace({
     () => taskCards.map((task) => task.taskId),
     [taskCards],
   );
+  const runningTaskIds = useMemo(
+    () => runningTasks.map((task) => task.taskId),
+    [runningTasks],
+  );
+  const automaticTaskPanelIds = useMemo(() => {
+    const runningTaskIdSet = new Set(runningTaskIds);
+    return [
+      ...runningTaskIds,
+      ...taskIds.filter((taskId) => !runningTaskIdSet.has(taskId)),
+    ];
+  }, [runningTaskIds, taskIds]);
   const {
     utilityPanel,
     taskArtifacts,
@@ -867,6 +882,8 @@ export function SessionWorkspace({
   } = useSessionWorkspacePanels({
     sessionId: session.id,
     taskIds,
+    automaticTaskPanelIds,
+    runningTaskIds,
     singleRunningTaskId: singleRunningTaskId ?? null,
     taskPanelCapacity,
     isMdOrLarger,

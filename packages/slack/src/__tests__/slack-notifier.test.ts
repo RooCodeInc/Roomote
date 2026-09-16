@@ -1650,8 +1650,12 @@ describe('SlackNotifier', () => {
           }),
         }),
       );
+      const attachmentContext =
+        'Slack attachment:\nText:\nForwarded body lives here';
       expect(message).toEqual({
-        text: 'Ship it',
+        text: `Ship it\n\n${attachmentContext}`,
+        authoredText: 'Ship it',
+        agentContext: attachmentContext,
         ts: '123.456',
         thread_ts: '120.000',
         user: 'U123',

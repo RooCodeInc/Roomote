@@ -16,6 +16,7 @@ import {
   isRoomoteCloudEnabled,
   rehydrateEnv,
   resolveAppEnv,
+  resolveTrustedClientAddress,
   shouldAutoGenerateAuthKeypairs,
 } from '../index';
 
@@ -49,6 +50,25 @@ const productionCoreEnv: NodeJS.ProcessEnv = {
 };
 
 describe('Env', () => {
+  it('resolves client addresses only from the configured trusted proxy header', () => {
+    const first = new Headers({
+      'fly-client-ip': '203.0.113.10',
+      'x-forwarded-for': '198.51.100.1',
+    });
+    const second = new Headers({
+      'fly-client-ip': '203.0.113.10',
+      'x-forwarded-for': '198.51.100.2',
+    });
+
+    expect(resolveTrustedClientAddress(first, 'fly-client-ip')).toBe(
+      '203.0.113.10',
+    );
+    expect(resolveTrustedClientAddress(second, 'fly-client-ip')).toBe(
+      '203.0.113.10',
+    );
+    expect(resolveTrustedClientAddress(first, undefined)).toBeNull();
+  });
+
   it('defaults HTTP integrations off and parses explicit opt-in values', () => {
     expect(
       createRoomoteEnv(productionCoreEnv).R_HTTP_INTEGRATIONS_ENABLED,

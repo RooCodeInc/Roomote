@@ -157,9 +157,7 @@ describe('spawnModalWorker', () => {
       credentialEgress: { planApiProxy } as never,
     });
     expect(planApiProxy).toHaveBeenCalledWith({ taskRun, provider: 'modal' });
-    const extraEnv = vi.mocked(buildModalWorkerEnv).mock.calls.at(-1)![0]
-      .extraEnv as Record<string, string>;
-    expect(extraEnv).toMatchObject({
+    expect(mockRunCommand.mock.calls.at(-1)![0].env).toMatchObject({
       ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
       ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
     });
