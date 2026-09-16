@@ -1012,6 +1012,7 @@ describe('Fast native OpenCode tool bridge', () => {
       task: true,
       'roomote_*': true,
     });
+    expect(config.agent.build.tools.webfetch).not.toBe(true);
     const serverConfig = JSON.parse(
       buildOpenCodeCliEnv(runtime.env, {
         preserveReasoning: true,
