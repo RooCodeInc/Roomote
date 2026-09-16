@@ -9,7 +9,6 @@ import {
   refreshSessionPresence,
   refreshSessionVoiceCall,
   SESSION_PRESENCE_LEASE_MS,
-  SESSION_VOICE_CALL_LEASE_MS,
 } from '../session-presence';
 
 class PresenceRedis {
@@ -245,7 +244,7 @@ describe('Session voice-call leases', () => {
     ).resolves.toBe(true);
     await expect(
       isSessionVoiceCallActive(identity, {
-        now: 2_000 + SESSION_VOICE_CALL_LEASE_MS,
+        now: 2_000 + SESSION_PRESENCE_LEASE_MS,
         redis,
       }),
     ).resolves.toBe(false);

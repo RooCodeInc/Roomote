@@ -11,7 +11,6 @@ export {
   refreshSessionPresence,
   refreshSessionVoiceCall,
   SESSION_PRESENCE_LEASE_MS,
-  SESSION_VOICE_CALL_LEASE_MS,
 } from './session-presence';
 
 export const REDIS_KEYS = {

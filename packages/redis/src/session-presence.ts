@@ -3,7 +3,6 @@ import type { Redis } from 'ioredis';
 import { getRedis } from './client';
 
 export const SESSION_PRESENCE_LEASE_MS = 30_000;
-export const SESSION_VOICE_CALL_LEASE_MS = SESSION_PRESENCE_LEASE_MS;
 
 type SessionPresenceIdentity = {
   sessionId: string;
@@ -139,7 +138,7 @@ export async function refreshSessionVoiceCall(
   options: SessionPresenceOptions = {},
 ): Promise<{ expiresAt: number }> {
   const now = options.now ?? Date.now();
-  const expiresAt = now + SESSION_VOICE_CALL_LEASE_MS;
+  const expiresAt = now + SESSION_PRESENCE_LEASE_MS;
   const redis = options.redis ?? getRedis();
   await refreshLease(lease, sessionVoiceCallKey(lease), expiresAt, now, redis);
   return { expiresAt };
