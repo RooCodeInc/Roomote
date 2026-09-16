@@ -16,6 +16,8 @@ import {
   Play,
 } from '@/components/system';
 
+import { SidePanelHeader } from './SidePanelHeader';
+
 interface DesktopStreamSession {
   controlUrl: string;
   streamUrl: string;
@@ -176,12 +178,20 @@ export function mapPointerToRemote(params: {
   };
 }
 
+/** Why the control channel is not connected, shown in the footer. */
+type ControlState = 'off' | 'connecting' | 'on' | 'released' | 'taken';
+
+const RECONNECT_DELAY_MS = 1_500;
+const MAX_AUTO_RECOVERIES = 20;
+
 export function DesktopStreamClient({
   previewUrl,
   runId,
+  onClose,
 }: {
   previewUrl: string;
   runId: number;
+  onClose?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -200,6 +210,12 @@ export function DesktopStreamClient({
   const [isStarting, setIsStarting] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [controlReady, setControlReady] = useState(false);
+  const [controlState, setControlState] = useState<ControlState>('off');
+  /** True after the viewer explicitly released control: no auto-reconnect. */
+  const releasedRef = useRef(false);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const recoveryAttemptsRef = useRef(0);
+  const unmountedRef = useRef(false);
   const [renderedFps, setRenderedFps] = useState<number | null>(null);
   const [startupMs, setStartupMs] = useState<number | null>(null);
   const [decodedBitrateKbps, setDecodedBitrateKbps] = useState<number | null>(
@@ -279,8 +295,16 @@ export function DesktopStreamClient({
   };
 
   /** Tear down a stream that failed before or after playback began. */
+  const clearReconnectTimer = () => {
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  };
+
   const failStream = (message: string) => {
     clearStartTimeout();
+    clearReconnectTimer();
     pendingInitialPlayRef.current = false;
     restartPendingRef.current = false;
     releaseAll();
@@ -394,6 +418,10 @@ export function DesktopStreamClient({
   useEffect(() => {
     const video = videoRef.current;
     return () => {
+      unmountedRef.current = true;
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+      }
       pendingPointerRef.current = null;
       const socket = socketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
@@ -419,7 +447,9 @@ export function DesktopStreamClient({
 
   /**
    * Ask the sandbox to resize its screen to the panel's current size.
-   * Returns whether a request was sent.
+   * Returns whether a request was sent. Resizing travels over the control
+   * socket, so only the viewer who holds control can change the screen;
+   * everyone else sees the desktop at the controller's size.
    */
   const sendPanelSize = (): boolean => {
     const container = videoRef.current?.parentElement;
@@ -525,6 +555,9 @@ export function DesktopStreamClient({
     const socket = new WebSocket(controlUrl);
     socketRef.current = socket;
     sentRemoteSizeRef.current = null;
+    releasedRef.current = false;
+    setControlState('connecting');
+    let supersededByOther = false;
     socket.addEventListener('message', (event) => {
       try {
         const message = JSON.parse(String(event.data)) as {
@@ -534,6 +567,8 @@ export function DesktopStreamClient({
         };
         if (message.ready) {
           setControlReady(true);
+          setControlState('on');
+          recoveryAttemptsRef.current = 0;
           videoRef.current?.focus();
           // Match the panel before the first stream starts so the encoder
           // does not start at the default size only to restart at once.
@@ -562,7 +597,14 @@ export function DesktopStreamClient({
         }
         if (message.error) {
           restartPendingRef.current = false;
-          setSessionError(message.error);
+          if (/another viewer took control/i.test(message.error)) {
+            // Do not fight the other viewer; the header button or a click
+            // on the desktop takes control back deliberately.
+            supersededByOther = true;
+            setControlState('taken');
+          } else {
+            setSessionError(message.error);
+          }
           if (pendingInitialPlayRef.current) {
             loadStream();
           }
@@ -573,17 +615,88 @@ export function DesktopStreamClient({
     });
     socket.addEventListener('close', () => {
       setControlReady(false);
-      if (socketRef.current === socket) {
+      const wasCurrent = socketRef.current === socket;
+      if (wasCurrent) {
         socketRef.current = null;
       }
       // Video still works without control, so never hold the stream back.
       if (pendingInitialPlayRef.current) {
         loadStream();
       }
+      if (!wasCurrent || unmountedRef.current) {
+        return;
+      }
+      if (supersededByOther) {
+        setControlState('taken');
+      } else if (releasedRef.current) {
+        setControlState('released');
+      } else {
+        // Lost involuntarily (service restart, proxy hiccup): come back on
+        // our own while the desktop is open.
+        setControlState('off');
+        if (recoveryAttemptsRef.current < MAX_AUTO_RECOVERIES) {
+          recoveryAttemptsRef.current += 1;
+          clearReconnectTimer();
+          reconnectTimerRef.current = window.setTimeout(() => {
+            reconnectTimerRef.current = null;
+            const url = sessionRef.current?.controlUrl;
+            if (url && !releasedRef.current && !unmountedRef.current) {
+              connectControl(url);
+            }
+          }, RECONNECT_DELAY_MS);
+        }
+      }
     });
     socket.addEventListener('error', () => {
-      setSessionError('Remote desktop control could not connect');
+      // The close handler decides whether to reconnect or report.
     });
+  };
+
+  /** Give up input control on purpose; the stream keeps playing. */
+  const releaseControl = () => {
+    releasedRef.current = true;
+    clearReconnectTimer();
+    releaseAll();
+    setControlState('released');
+    socketRef.current?.close(1000, 'control released');
+  };
+
+  /** Claim (or reclaim) input control. */
+  const takeControl = () => {
+    const url = sessionRef.current?.controlUrl;
+    if (!url) {
+      return;
+    }
+    setSessionError(null);
+    recoveryAttemptsRef.current = 0;
+    connectControl(url);
+  };
+
+  /**
+   * The stream dropped while it was playing (service restart, encoder
+   * evicted, proxy hiccup). Reload it a few times before giving up, so a
+   * hiccup never strands the viewer on a Start button.
+   */
+  const recoverStream = (message: string) => {
+    if (
+      !isPlaying ||
+      unmountedRef.current ||
+      recoveryAttemptsRef.current >= MAX_AUTO_RECOVERIES
+    ) {
+      failStream(message);
+      return;
+    }
+    recoveryAttemptsRef.current += 1;
+    setSessionError(`${message}; reconnecting`);
+    clearReconnectTimer();
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null;
+      if (unmountedRef.current) {
+        return;
+      }
+      setSessionError(null);
+      loadStream();
+    }, RECONNECT_DELAY_MS);
   };
 
   const start = () => {
@@ -652,17 +765,17 @@ export function DesktopStreamClient({
       return;
     }
     if (!controlReady) {
-      // Control was never established or was taken over by another viewer.
-      // Clicking the desktop reclaims it.
+      // Another viewer took control: clicking the desktop takes it back.
+      // After an explicit release, only the header button reconnects.
       if (
         down &&
         isPlaying &&
+        !releasedRef.current &&
         sessionRef.current &&
         socketRef.current?.readyState !== WebSocket.OPEN &&
         socketRef.current?.readyState !== WebSocket.CONNECTING
       ) {
-        setSessionError(null);
-        connectControl(sessionRef.current.controlUrl);
+        takeControl();
       }
       return;
     }
@@ -688,6 +801,22 @@ export function DesktopStreamClient({
       ref={containerRef}
       className="relative flex size-full flex-col overflow-hidden bg-zinc-950"
     >
+      {onClose ? (
+        <SidePanelHeader
+          title="Shared Desktop"
+          onClose={onClose}
+          actions={
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!session || controlState === 'connecting'}
+              onClick={controlState === 'on' ? releaseControl : takeControl}
+            >
+              {controlState === 'on' ? 'Release control' : 'Take control'}
+            </Button>
+          }
+        />
+      ) : null}
       <div className="relative min-h-0 flex-1">
         <video
           ref={videoRef}
@@ -715,7 +844,10 @@ export function DesktopStreamClient({
               // stream is already loading.
               return;
             }
-            failStream(describeMediaError(videoRef.current?.error));
+            recoverStream(describeMediaError(videoRef.current?.error));
+          }}
+          onEnded={() => {
+            recoverStream('Remote desktop stream ended');
           }}
           onLoadedMetadata={() => {
             const video = videoRef.current;
@@ -788,9 +920,15 @@ export function DesktopStreamClient({
 
       <div className="flex min-h-10 items-center justify-between gap-3 border-t border-zinc-800 bg-zinc-900 px-3 text-xs text-zinc-400">
         <span className="min-w-0 truncate">
-          {controlReady
+          {controlState === 'on'
             ? `Control connected · ${sentEvents} events sent`
-            : 'Control disconnected'}
+            : controlState === 'connecting'
+              ? 'Connecting control'
+              : controlState === 'released'
+                ? 'Control released'
+                : controlState === 'taken'
+                  ? 'Another viewer has control'
+                  : 'Control disconnected'}
           {isPlaying && sessionError ? (
             <span role="alert" className="text-destructive">
               {' · '}

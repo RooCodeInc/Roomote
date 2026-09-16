@@ -20,16 +20,22 @@ export function SharedDesktopSidePanel({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-      <SidePanelHeader title="Shared Desktop" onClose={onClose} />
-      <div className="relative min-h-0 flex-1 bg-card">
-        {desktopUrl ? (
-          <DesktopStreamClient previewUrl={desktopUrl} runId={taskRun.id} />
-        ) : (
+      {desktopUrl ? (
+        <div className="relative min-h-0 flex-1 bg-card">
+          <DesktopStreamClient
+            previewUrl={desktopUrl}
+            runId={taskRun.id}
+            onClose={onClose}
+          />
+        </div>
+      ) : (
+        <>
+          <SidePanelHeader title="Shared Desktop" onClose={onClose} />
           <div className="grid size-full place-items-center p-6 text-center text-sm text-muted-foreground">
             Shared Desktop is unavailable for this task.
           </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }

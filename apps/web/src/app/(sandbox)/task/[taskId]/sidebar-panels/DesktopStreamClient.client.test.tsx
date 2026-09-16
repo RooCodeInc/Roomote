@@ -1,3 +1,5 @@
+import type React from 'react';
+
 import {
   act,
   fireEvent,
@@ -14,6 +16,21 @@ import {
   mapPointerToRemote,
   trackLiveEdge,
 } from './DesktopStreamClient';
+
+vi.mock('./SidePanelHeader', () => ({
+  SidePanelHeader: ({
+    title,
+    actions,
+  }: {
+    title: string;
+    actions?: React.ReactNode;
+  }) => (
+    <div>
+      <div>{title}</div>
+      {actions}
+    </div>
+  ),
+}));
 
 class FakeWebSocket {
   static readonly CONNECTING = 0;
@@ -87,6 +104,14 @@ describe('DesktopStreamClient', () => {
           }),
         ok: true,
       }),
+    );
+    Object.defineProperty(
+      HTMLVideoElement.prototype,
+      'getVideoPlaybackQuality',
+      {
+        configurable: true,
+        value: () => ({ totalVideoFrames: 0, droppedVideoFrames: 0 }),
+      },
     );
     Object.defineProperty(
       HTMLVideoElement.prototype,
@@ -422,7 +447,7 @@ describe('DesktopStreamClient', () => {
       } as MessageEvent),
     );
     act(() => first.close());
-    await screen.findByText('Control disconnected');
+    await screen.findByText('Another viewer has control');
 
     fireEvent.pointerDown(video, {
       button: 0,
@@ -433,5 +458,80 @@ describe('DesktopStreamClient', () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
     act(() => FakeWebSocket.instances[1]!.open());
     await screen.findByText(/Control connected/);
+  });
+
+  it('offers release and take control in the header', async () => {
+    render(
+      <DesktopStreamClient
+        previewUrl="https://desktop.preview.test"
+        runId={123}
+        onClose={() => {}}
+      />,
+    );
+    const start = await screen.findByRole('button', {
+      name: 'Start remote desktop',
+    });
+    await waitFor(() => expect(start).toBeEnabled());
+    fireEvent.click(start);
+    const first = FakeWebSocket.instances[0]!;
+    act(() => first.open());
+    await screen.findByText(/Control connected/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Release control' }));
+    expect(first.readyState).toBe(FakeWebSocket.CLOSED);
+    await screen.findByText('Control released');
+    // A released viewer does not reconnect on its own.
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Take control' }));
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    act(() => FakeWebSocket.instances[1]!.open());
+    await screen.findByText(/Control connected/);
+  });
+
+  it('reconnects control and reloads the stream after an unexpected drop', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(
+        <DesktopStreamClient
+          previewUrl="https://desktop.preview.test"
+          runId={123}
+        />,
+      );
+      const start = await screen.findByRole('button', {
+        name: 'Start remote desktop',
+      });
+      await waitFor(() => expect(start).toBeEnabled());
+      fireEvent.click(start);
+      const first = FakeWebSocket.instances[0]!;
+      act(() => first.open());
+      await screen.findByText(/Control connected/);
+      const video = screen.getByLabelText('Remote desktop');
+      fireEvent.loadedData(video);
+
+      // Service restart: control closes without a supersession message.
+      act(() => first.close());
+      await screen.findByText('Control disconnected');
+      act(() => {
+        vi.advanceTimersByTime(2_000);
+      });
+      expect(FakeWebSocket.instances).toHaveLength(2);
+
+      // The stream errors too: it reloads instead of failing.
+      Object.defineProperty(video, 'error', {
+        configurable: true,
+        value: { code: 2 },
+      });
+      fireEvent.error(video);
+      expect(
+        screen.queryByRole('button', { name: 'Start remote desktop' }),
+      ).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(2_000);
+      });
+      expect(video.getAttribute('src')).toContain('restart=');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
