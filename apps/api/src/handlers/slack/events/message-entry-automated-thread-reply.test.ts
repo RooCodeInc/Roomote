@@ -200,7 +200,43 @@ describe('automated Slack thread replies', () => {
     );
   });
 
-  it('ignores the reply when the thread has no Session', async () => {
+  it('waits for the Session binding while the summoning mention is still routing', async () => {
+    mocks.getFastAgentSessionOwner
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ kind: 'user', userId: 'USER_INSTALLER' });
+    mocks.redis.get.mockImplementation(async (key: string) =>
+      key.endsWith(ROOT_TS) ? '1' : null,
+    );
+    const { handleMessageOrAppMentionEvent } =
+      await import('./message-entry.js');
+
+    await handleMessageOrAppMentionEvent({ event: replyEvent(), context });
+
+    await vi.waitFor(() =>
+      expect(mocks.processFastAgentMessage).toHaveBeenCalledTimes(1),
+    );
+    expect(mocks.getFastAgentSessionOwner).toHaveBeenCalledTimes(3);
+  });
+
+  it('matches the root by app id when the workflow has no bot id', async () => {
+    mocks.fetchThreadMessages.mockResolvedValue([
+      rootMessage({ bot_id: undefined }),
+    ]);
+    const { handleMessageOrAppMentionEvent } =
+      await import('./message-entry.js');
+
+    await handleMessageOrAppMentionEvent({
+      event: replyEvent({ bot_id: undefined }),
+      context,
+    });
+
+    await vi.waitFor(() =>
+      expect(mocks.processFastAgentMessage).toHaveBeenCalledTimes(1),
+    );
+  });
+
+  it('ignores the reply when the thread has no Session and no mention is routing', async () => {
     mocks.getFastAgentSessionOwner.mockResolvedValue(null);
     const { handleMessageOrAppMentionEvent } =
       await import('./message-entry.js');
@@ -209,6 +245,8 @@ describe('automated Slack thread replies', () => {
 
     expect(mocks.processFastAgentMessage).not.toHaveBeenCalled();
     expect(mocks.automationLaunchIdentity).not.toHaveBeenCalled();
+    // One lookup from this router, one from the ordinary follow-up path.
+    expect(mocks.getFastAgentSessionOwner).toHaveBeenCalledTimes(2);
   });
 
   it('ignores a reply from a different app than the root author', async () => {

@@ -96,7 +96,14 @@ const REMOVED_EVAL_COMMAND_PATTERN = /^!eval(?:\s|$)/iu;
  * detail within seconds of the mention; a bot that returns to the thread
  * much later is a new conversation and needs a fresh mention.
  */
-export const AUTOMATED_THREAD_REPLY_WINDOW_SECONDS = 15 * 60;
+const AUTOMATED_THREAD_REPLY_WINDOW_SECONDS = 15 * 60;
+
+/**
+ * A reply can land before the automated mention that summoned Roomote has
+ * finished binding its Session. While that mention's routing lock is held
+ * the binding is on its way, so the owner lookup is retried briefly.
+ */
+const AUTOMATED_THREAD_REPLY_BINDING_RETRY = { attempts: 12, delayMs: 250 };
 
 async function getBoundSlackFastAgentSessionOwner(params: {
   teamId: string;
@@ -1071,6 +1078,35 @@ function isSameAutomatedAuthor(
  * it to Fast under the automation identity like the mention itself: an
  * active turn is steered, an idle Session gets a new turn.
  */
+async function waitForAutomatedThreadSessionOwner(params: {
+  teamId: string;
+  channelId: string;
+  threadId: string;
+}): ReturnType<typeof getBoundSlackFastAgentSessionOwner> {
+  const redis = getRedis();
+  const routingLockKey = `${SLACK_ROUTING_LOCK_PREFIX}${params.threadId}`;
+  for (
+    let attempt = 0;
+    attempt < AUTOMATED_THREAD_REPLY_BINDING_RETRY.attempts;
+    attempt += 1
+  ) {
+    const owner = await getBoundSlackFastAgentSessionOwner(params);
+    if (owner) {
+      return owner;
+    }
+    const mentionRoutingInFlight = await redis
+      .get(routingLockKey)
+      .catch(() => null);
+    if (!mentionRoutingInFlight) {
+      return null;
+    }
+    await new Promise((resolve) =>
+      setTimeout(resolve, AUTOMATED_THREAD_REPLY_BINDING_RETRY.delayMs),
+    );
+  }
+  return null;
+}
+
 async function maybeRouteAutomatedThreadReply(params: {
   event: SlackEvent;
   context: SlackWebhookContext;
@@ -1083,23 +1119,20 @@ async function maybeRouteAutomatedThreadReply(params: {
   }
 
   const threadId = event.thread_ts;
-  const sessionOwner = await getBoundSlackFastAgentSessionOwner({
+  const threadMessages = await slack
+    .fetchThreadMessages({ channel: event.channel, threadTs: threadId })
+    .catch(() => []);
+  const root = threadMessages.find((message) => message.ts === threadId);
+  if (!root || !isSameAutomatedAuthor(root, event)) {
+    return false;
+  }
+
+  const sessionOwner = await waitForAutomatedThreadSessionOwner({
     teamId,
     channelId: event.channel,
     threadId,
   });
   if (!sessionOwner) {
-    return false;
-  }
-
-  const threadMessages = await slack
-    .fetchThreadMessages({ channel: event.channel, threadTs: threadId })
-    .catch(() => []);
-  const root = threadMessages.find((message) => message.ts === threadId);
-  if (
-    !root ||
-    !isSameAutomatedAuthor(root as { bot_id?: string; app_id?: string }, event)
-  ) {
     return false;
   }
 

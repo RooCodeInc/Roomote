@@ -56,6 +56,7 @@ export interface SlackThreadMessage {
   authoredText?: string;
   ts: string;
   bot_id?: string;
+  app_id?: string;
   type: string;
   blocks?: unknown[];
   attachments?: unknown[];

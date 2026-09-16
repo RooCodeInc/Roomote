@@ -43,6 +43,7 @@ type SlackApiThreadMessage = {
   ts: string;
   thread_ts?: string;
   bot_id?: string;
+  app_id?: string;
   type: string;
   reply_count?: number;
   latest_reply?: string;
