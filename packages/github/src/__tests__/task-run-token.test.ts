@@ -328,6 +328,53 @@ describe('createTaskRunGitHubToken', () => {
     expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
   });
 
+  it('uses the stamped GitHub scope for an environment with no GitHub repositories', async () => {
+    mockFindEnvironmentFirst.mockResolvedValue({
+      id: 'gitlab-environment',
+      config: buildEnvironmentConfig(['group/gitlab-app']),
+    });
+    mockFindMappings.mockResolvedValue([
+      {
+        repository: {
+          fullName: 'group/gitlab-app',
+          installationId: null,
+          githubRepoId: null,
+          isActive: true,
+          sourceControlProvider: 'gitlab',
+        },
+      },
+    ]);
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'Roomote/additional-app',
+        installationId: 'install-roomote',
+        githubRepoId: 401,
+      },
+    ]);
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: 'group/gitlab-app',
+          environmentId: 'gitlab-environment',
+          repositoryProviders: {
+            'group/gitlab-app': 'gitlab',
+            'Roomote/additional-app': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).resolves.toBe('ghs_test_token');
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      {
+        type: 'installationId',
+        installationId: 'install-roomote',
+        repositoryIds: [401],
+      },
+      undefined,
+      undefined,
+    );
+  });
+
   it('does not anchor a GitHub installation from a same-name GitLab mapping', async () => {
     mockFindEnvironmentFirst.mockResolvedValue({
       id: 'environment-id',
@@ -346,7 +393,7 @@ describe('createTaskRunGitHubToken', () => {
     ]);
     mockFindMany.mockResolvedValue([
       {
-        fullName: 'acme/app',
+        fullName: 'acme/other',
         sourceControlProvider: 'github',
         isActive: true,
         installationId: 'github-install',
@@ -359,10 +406,10 @@ describe('createTaskRunGitHubToken', () => {
         buildTaskRun({
           repo: 'acme/app',
           environmentId: 'environment-id',
-          repositoryProviders: { 'acme/app': 'github' },
+          repositoryProviders: { 'acme/app': 'gitlab', 'acme/other': 'github' },
         } as TaskRun['payload']),
       ),
-    ).rejects.toThrow('Environment repositories');
+    ).resolves.toBe('ghs_test_token');
     expect(mockFindMappings).toHaveBeenCalledWith({
       where: {
         type: 'eq',
@@ -371,8 +418,15 @@ describe('createTaskRunGitHubToken', () => {
       },
       with: { repository: true },
     });
-    expect(mockFindMany).not.toHaveBeenCalled();
-    expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
+    expect(mockCreateGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      {
+        type: 'installationId',
+        installationId: 'github-install',
+        repositoryIds: [301],
+      },
+      undefined,
+      undefined,
+    );
   });
 
   it('rejects environment repository sets that span multiple installations', async () => {

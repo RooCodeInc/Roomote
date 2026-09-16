@@ -223,6 +223,8 @@ export async function resolveTaskRunEnvironmentGitHubRepositories(
         repository.isActive &&
         repository.sourceControlProvider === DEFAULT_SOURCE_CONTROL_PROVIDER,
     );
+  if (repositoryRows.length === 0) return null;
+
   const options = await resolveTokenOptionsForRepositoryNames({
     taskRun,
     repositoryNames: repositoryRows.map((row) => row.fullName),
