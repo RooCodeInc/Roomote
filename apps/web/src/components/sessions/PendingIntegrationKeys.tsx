@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from 'react';
 
-import { Button, KeyRound } from '@/components/system';
+import { Button, KeyRound, RetryableLoadError } from '@/components/system';
 import { useSessionIntegrationApprovals } from '@/hooks/useSessionIntegrationApprovals';
 
 import {
@@ -24,7 +24,8 @@ export function PendingIntegrationKeys({
   /** Event id of the newest key request in the transcript; a change refetches. */
   latestRequestId: string | null;
 }) {
-  const { data, refetch } = useSessionIntegrationApprovals(sessionId);
+  const { data, error, isFetching, refetch } =
+    useSessionIntegrationApprovals(sessionId);
   useEffect(() => {
     if (latestRequestId) void refetch();
   }, [latestRequestId, refetch]);
@@ -57,6 +58,16 @@ export function PendingIntegrationKeys({
     return () => window.clearTimeout(timer);
   }, [nextExpiry, refetch]);
 
+  if (error && !data) {
+    return (
+      <RetryableLoadError
+        className="mt-4 border"
+        message="Failed to load pending integration keys."
+        isRetrying={isFetching}
+        onRetry={() => void refetch()}
+      />
+    );
+  }
   if (pending.length === 0) return null;
   return (
     <div className="mt-4 space-y-2" data-testid="pending-integration-keys">

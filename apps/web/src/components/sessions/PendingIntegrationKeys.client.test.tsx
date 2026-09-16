@@ -6,11 +6,18 @@ import { notifyIntegrationKeysChanged } from './integration-key-dialog';
 import { PendingIntegrationKeys } from './PendingIntegrationKeys';
 
 const refetch = vi.fn();
-const state: { pending: unknown[] } = { pending: [] };
+const state: {
+  pending: unknown[];
+  hasData: boolean;
+  error: Error | null;
+  isFetching: boolean;
+} = { pending: [], hasData: true, error: null, isFetching: false };
 
 vi.mock('@/hooks/useSessionIntegrationApprovals', () => ({
   useSessionIntegrationApprovals: () => ({
-    data: { pending: state.pending, secrets: [] },
+    data: state.hasData ? { pending: state.pending, secrets: [] } : undefined,
+    error: state.error,
+    isFetching: state.isFetching,
     refetch,
   }),
 }));
@@ -36,6 +43,27 @@ describe('PendingIntegrationKeys', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('shows a retryable error when the initial load fails', () => {
+    state.hasData = false;
+    state.error = new Error('Unavailable');
+    render(<PendingIntegrationKeys sessionId="s1" latestRequestId={null} />);
+
+    expect(
+      screen.getByText('Failed to load pending integration keys.'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(refetch).toHaveBeenCalledOnce();
+  });
+
+  it('disables retry while the initial load is fetching', () => {
+    state.hasData = false;
+    state.error = new Error('Unavailable');
+    state.isFetching = true;
+    render(<PendingIntegrationKeys sessionId="s1" latestRequestId={null} />);
+
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled();
+  });
+
   it('shows one card per pending approval and opens the dialog fragment', () => {
     state.pending = [demo];
     window.location.hash = '';
@@ -47,6 +75,17 @@ describe('PendingIntegrationKeys', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Enter key' }));
     expect(window.location.hash).toBe('#integrations');
     expect(refetch).toHaveBeenCalled();
+  });
+
+  it('keeps cached pending approvals visible after a refetch fails', () => {
+    state.pending = [demo];
+    state.error = new Error('Unavailable');
+    render(<PendingIntegrationKeys sessionId="s1" latestRequestId={null} />);
+
+    expect(screen.getByText('Add your Figma key')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Failed to load pending integration keys.'),
+    ).not.toBeInTheDocument();
   });
 
   it('refetches after a key is saved', () => {
@@ -77,4 +116,8 @@ describe('PendingIntegrationKeys', () => {
 
 afterEach(() => {
   state.pending = [];
+  state.hasData = true;
+  state.error = null;
+  state.isFetching = false;
+  refetch.mockClear();
 });
