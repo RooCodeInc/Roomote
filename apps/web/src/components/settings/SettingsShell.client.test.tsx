@@ -110,9 +110,7 @@ describe('SettingsShell', () => {
       screen.getByRole('link', { name: /sandboxes/i }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
-        'Your API keys for services agents can call on your behalf, and the deployment integrations an admin enables. Individual users can optionally link their own accounts when an integration supports it.',
-      ),
+      screen.getByText('Connect Roomote with tools your team uses.'),
     ).toBeInTheDocument();
     expect(screen.getByText('content')).toBeInTheDocument();
   });
