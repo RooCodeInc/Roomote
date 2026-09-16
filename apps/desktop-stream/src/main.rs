@@ -7,7 +7,7 @@ use std::{
     str::FromStr,
     sync::{
         Arc, Mutex, RwLock,
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Instant,
 };
@@ -352,7 +352,6 @@ struct BrowserTelemetry {
 
 #[derive(Default)]
 struct Metrics {
-    active_clients: AtomicUsize,
     total_clients: AtomicU64,
     bytes_served: AtomicU64,
     progress: Mutex<EncoderProgress>,
@@ -378,6 +377,15 @@ impl InputLatency {
     }
 }
 
+/// A running per-viewer encoder. Tracked out of band so it can be killed
+/// even when its viewer has stopped reading the response, which otherwise
+/// blocks the encoder on a full pipe and pins the viewer slot forever.
+#[derive(Clone, Copy, Debug)]
+struct EncoderHandle {
+    id: u64,
+    pid: u32,
+}
+
 #[derive(Clone)]
 struct AppState {
     config: Arc<Config>,
@@ -389,12 +397,72 @@ struct AppState {
     /// Bumped whenever the screen is resized so running encoders, which
     /// captured at the old size, stop and let the viewer reconnect.
     stream_generation: Arc<watch::Sender<u64>>,
+    /// Encoders currently serving viewers, oldest first.
+    encoders: Arc<Mutex<Vec<EncoderHandle>>>,
+    next_encoder_id: Arc<AtomicU64>,
+    /// Bumped when a new control client connects so the previous one is
+    /// released: the newest viewer always wins control.
+    control_generation: Arc<watch::Sender<u64>>,
 }
 
 impl AppState {
     fn screen(&self) -> ScreenSize {
         *self.screen.read().unwrap()
     }
+
+    /// Registers an encoder, evicting the oldest ones when the viewer limit
+    /// is reached so a new viewer always replaces a stale one.
+    fn register_encoder(&self, pid: u32) -> EncoderHandle {
+        let handle = EncoderHandle {
+            id: self.next_encoder_id.fetch_add(1, Ordering::Relaxed),
+            pid,
+        };
+        let evicted = {
+            let mut encoders = self.encoders.lock().unwrap();
+            let mut evicted = Vec::new();
+            while encoders.len() >= self.config.max_clients.max(1) {
+                evicted.push(encoders.remove(0));
+            }
+            encoders.push(handle);
+            evicted
+        };
+        for encoder in evicted {
+            kill_encoder(encoder);
+        }
+        handle
+    }
+
+    fn unregister_encoder(&self, handle: EncoderHandle) {
+        self.encoders
+            .lock()
+            .unwrap()
+            .retain(|encoder| encoder.id != handle.id);
+    }
+
+    /// Kills every running encoder, for example after a screen resize, so
+    /// viewers reconnect at the new size even if one had stopped reading.
+    fn stop_encoders(&self) {
+        let encoders = std::mem::take(&mut *self.encoders.lock().unwrap());
+        for encoder in encoders {
+            kill_encoder(encoder);
+        }
+    }
+
+    fn active_clients(&self) -> usize {
+        self.encoders.lock().unwrap().len()
+    }
+}
+
+/// Sends SIGKILL to an encoder by pid. The response stream that owns the
+/// child reaps it once it is polled again; a viewer that never reads again
+/// simply ends when its connection closes.
+fn kill_encoder(encoder: EncoderHandle) {
+    tokio::spawn(async move {
+        let _ = Command::new("kill")
+            .args(["-KILL", &encoder.pid.to_string()])
+            .status()
+            .await;
+    });
 }
 
 #[derive(Debug, Deserialize)]
@@ -971,19 +1039,30 @@ struct MetricsResponse {
     browser_to_x_input_latency: InputLatency,
 }
 
-struct ClientGuard(Arc<Metrics>);
+struct ClientGuard {
+    state: AppState,
+    handle: EncoderHandle,
+}
 
 impl Drop for ClientGuard {
     fn drop(&mut self) {
-        self.0.active_clients.fetch_sub(1, Ordering::Relaxed);
+        self.state.unregister_encoder(self.handle);
     }
 }
 
-struct ControlConnectionGuard(Arc<AtomicBool>);
+/// Clears the control flag when the session that currently owns control
+/// ends; a superseded session must not clear its successor's flag.
+struct ControlConnectionGuard {
+    connected: Arc<AtomicBool>,
+    generation: u64,
+    current: watch::Receiver<u64>,
+}
 
 impl Drop for ControlConnectionGuard {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
+        if *self.current.borrow() == self.generation {
+            self.connected.store(false, Ordering::Release);
+        }
     }
 }
 
@@ -1020,6 +1099,9 @@ async fn main() {
         started_at: Instant::now(),
         screen: Arc::new(RwLock::new(screen)),
         stream_generation: Arc::new(watch::Sender::new(0)),
+        encoders: Arc::new(Mutex::new(Vec::new())),
+        next_encoder_id: Arc::new(AtomicU64::new(1)),
+        control_generation: Arc::new(watch::Sender::new(0)),
     };
     let app = Router::new()
         .route("/", get(player))
@@ -1093,7 +1175,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
 async fn metrics(State(state): State<AppState>) -> Json<MetricsResponse> {
     Json(MetricsResponse {
         uptime_seconds: state.started_at.elapsed().as_secs(),
-        active_clients: state.metrics.active_clients.load(Ordering::Relaxed),
+        active_clients: state.active_clients(),
         total_clients: state.metrics.total_clients.load(Ordering::Relaxed),
         bytes_served: state.metrics.bytes_served.load(Ordering::Relaxed),
         control_connected: state.control_connected.load(Ordering::Relaxed),
@@ -1123,25 +1205,28 @@ async fn control(
         )
             .into_response();
     }
-    if state
-        .control_connected
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
-        .is_err()
-    {
-        return (
-            StatusCode::CONFLICT,
-            "another remote control client is active",
-        )
-            .into_response();
-    }
+    // The newest viewer wins: bump the generation so any previous control
+    // session releases its held input and closes.
+    let mut generation = 0;
+    state.control_generation.send_modify(|current| {
+        *current += 1;
+        generation = *current;
+    });
+    state.control_connected.store(true, Ordering::Release);
 
     websocket
         .max_message_size(4 * 1024)
-        .on_upgrade(move |socket| control_socket(socket, state))
+        .on_upgrade(move |socket| control_socket(socket, state, generation))
 }
 
-async fn control_socket(mut socket: WebSocket, state: AppState) {
-    let _connection_guard = ControlConnectionGuard(state.control_connected.clone());
+async fn control_socket(mut socket: WebSocket, state: AppState, generation: u64) {
+    let mut superseded = state.control_generation.subscribe();
+    superseded.mark_unchanged();
+    let _connection_guard = ControlConnectionGuard {
+        connected: state.control_connected.clone(),
+        generation,
+        current: state.control_generation.subscribe(),
+    };
     let screen = state.screen();
     let mut controller =
         match X11Controller::connect(&state.config.display, screen.width, screen.height) {
@@ -1154,7 +1239,23 @@ async fn control_socket(mut socket: WebSocket, state: AppState) {
         };
     let _ = socket.send(Message::Text("{\"ready\":true}".into())).await;
 
-    while let Some(message) = socket.next().await {
+    loop {
+        let message = tokio::select! {
+            message = socket.next() => match message {
+                Some(message) => message,
+                None => break,
+            },
+            _ = superseded.changed() => {
+                controller.release_all();
+                let _ = socket
+                    .send(Message::Text(
+                        "{\"error\":\"another viewer took control of the desktop\"}".into(),
+                    ))
+                    .await;
+                let _ = socket.send(Message::Close(None)).await;
+                return;
+            }
+        };
         match message {
             Ok(Message::Text(payload)) => {
                 match serde_json::from_str::<ControlEnvelope>(&payload) {
@@ -1222,6 +1323,7 @@ fn resize_screen(
     state
         .stream_generation
         .send_modify(|generation| *generation += 1);
+    state.stop_encoders();
     Ok(size)
 }
 
@@ -1288,20 +1390,6 @@ fn has_allowed_origin(headers: &HeaderMap, explicitly_allowed: Option<&str>) -> 
 }
 
 async fn stream(State(state): State<AppState>) -> Response {
-    let reserved = state.metrics.active_clients.fetch_update(
-        Ordering::Relaxed,
-        Ordering::Relaxed,
-        |clients| (clients < state.config.max_clients).then_some(clients + 1),
-    );
-    if reserved.is_err() {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            "desktop stream is at capacity",
-        )
-            .into_response();
-    }
-
-    let guard = ClientGuard(state.metrics.clone());
     state.metrics.total_clients.fetch_add(1, Ordering::Relaxed);
 
     let mut generation = state.stream_generation.subscribe();
@@ -1316,13 +1404,25 @@ async fn stream(State(state): State<AppState>) -> Response {
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
-            drop(guard);
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("failed to start ffmpeg: {error}"),
             )
                 .into_response();
         }
+    };
+    let Some(pid) = child.id() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "ffmpeg exited before streaming started",
+        )
+            .into_response();
+    };
+    // Registering may evict an older viewer's encoder: the newest viewer
+    // always wins the slot instead of being refused.
+    let guard = ClientGuard {
+        state: state.clone(),
+        handle: state.register_encoder(pid),
     };
 
     let stdout = child.stdout.take().expect("ffmpeg stdout is piped");

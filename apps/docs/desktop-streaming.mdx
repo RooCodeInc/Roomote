@@ -35,8 +35,10 @@ you resize it. `ROOMOTE_DESKTOP_STREAM_WIDTH` and
 `ROOMOTE_DESKTOP_STREAM_HEIGHT` set the initial size before a viewer connects.
 The default target is 60 fps and 6 Mbps; tune `ROOMOTE_DESKTOP_STREAM_FPS` and
 `ROOMOTE_DESKTOP_STREAM_VIDEO_BITRATE_KBPS` for the workload and available CPU.
-Each viewer gets a dedicated encoder; the default one-viewer limit avoids
-accidentally multiplying CPU use.
+Each viewer gets a dedicated encoder. The default one-viewer limit avoids
+accidentally multiplying CPU use: when a second viewer opens the desktop, it
+takes over the stream and input control from the previous one rather than
+being refused, so a stale tab can never lock the desktop.
 
 ## Verify performance
 
