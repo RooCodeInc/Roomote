@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   listMcpTools: vi.fn(),
   callMcpTool: vi.fn(),
   findGithubInstallation: vi.fn(),
+  findGithubAccount: vi.fn(),
   isRouterMcpServerEnabled: vi.fn(),
   findGitlabRepository: vi.fn(),
   findGitlabConnection: vi.fn(),
@@ -67,6 +68,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       githubInstallations: { findFirst: mocks.findGithubInstallation },
+      githubUserMappings: { findFirst: mocks.findGithubAccount },
       repositories: {
         findFirst: (options: { where: [string, unknown][] }) => {
           const provider = options.where.find(
@@ -85,6 +87,7 @@ vi.mock('@roomote/db/server', () => ({
     },
   },
   githubInstallations: { suspendedAt: 'suspendedAt' },
+  githubUserMappings: { userId: 'github-user-id' },
   deploymentSecrets: { name: 'name' },
   users: { id: 'user-id', deletedAt: 'deletedAt' },
   repositories: {
@@ -150,6 +153,7 @@ describe('fast-agent integration broker', () => {
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
     mocks.createSessionBrokerToken.mockResolvedValue('session-broker-token');
     mocks.findGithubInstallation.mockResolvedValue(undefined);
+    mocks.findGithubAccount.mockResolvedValue(undefined);
     mocks.isRouterMcpServerEnabled.mockReturnValue(false);
     mocks.env.R_CURATED_INTEGRATIONS_DISABLED = false;
     mocks.resolveGitLabInstanceHost.mockResolvedValue(
@@ -796,6 +800,7 @@ describe('fast-agent integration broker', () => {
         name: 'add_reply_to_pull_request_comment',
         inputSchema: { type: 'object' },
       },
+      { name: 'create_gist', inputSchema: { type: 'object' } },
     ]);
 
     const integrations = await listFastAgentIntegrations({
@@ -814,9 +819,13 @@ describe('fast-agent integration broker', () => {
       'merge_pull_request',
       'add_issue_comment',
       'add_reply_to_pull_request_comment',
+      'create_gist',
     ]);
     expect(integrations[0]?.description).toContain(
       'including reviewer requests, draft status, merges, and comment reactions',
+    );
+    expect(integrations[0]?.description).toContain(
+      'secret, link-accessible gist, not a private gist',
     );
     expect(integrations[0]?.description).toContain(
       'Follow the discovered native tool descriptions and schemas',
@@ -825,6 +834,29 @@ describe('fast-agent integration broker', () => {
       url: 'https://api.example.com/api/mcp-routing/github',
       headers: { Authorization: 'Bearer control-plane-token' },
       signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('exposes account-owned gist creation for a linked member without a repository installation', async () => {
+    mocks.isRouterMcpServerEnabled.mockReturnValue(true);
+    mocks.findGithubAccount.mockResolvedValue({ id: 'mapping-1' });
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'create_gist', inputSchema: { type: 'object' } },
+    ]);
+
+    const integrations = await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+
+    expect(integrations).toHaveLength(1);
+    expect(integrations[0]?.id).toBe('github');
+    expect(integrations[0]?.tools.map((tool) => tool.name)).toEqual([
+      'create_gist',
+    ]);
+    expect(mocks.findGithubAccount).toHaveBeenCalledWith({
+      where: ['github-user-id', 'user-1'],
+      columns: { id: true },
     });
   });
 

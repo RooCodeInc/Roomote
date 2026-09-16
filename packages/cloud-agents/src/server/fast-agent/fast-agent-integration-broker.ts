@@ -20,6 +20,7 @@ import {
   deploymentSecrets,
   eq,
   githubInstallations,
+  githubUserMappings,
   isNull,
   repositories,
   users,
@@ -485,6 +486,7 @@ export async function listFastAgentIntegrations(
   const [
     configuredServers,
     githubInstallation,
+    githubAccount,
     gitlabConnection,
     bitbucketAvailable,
     giteaAvailable,
@@ -497,6 +499,12 @@ export async function listFastAgentIntegrations(
           columns: { id: true },
         })
       : Promise.resolve(undefined),
+    isRouterMcpServerEnabled('github')
+      ? db.query.githubUserMappings.findFirst({
+          where: eq(githubUserMappings.userId, context.userId),
+          columns: { id: true },
+        })
+      : Promise.resolve(undefined),
     hasGitLabDiscoveryConnection().catch(() => false),
     isBitbucketAvailable(context.userId),
     isNativeProviderMergeAvailable(context.userId, 'gitea').catch(() => false),
@@ -506,6 +514,7 @@ export async function listFastAgentIntegrations(
   if (
     Object.keys(configuredServers).length === 0 &&
     !githubInstallation &&
+    !githubAccount &&
     !gitlabConnection &&
     !bitbucketAvailable &&
     !giteaAvailable &&
@@ -529,12 +538,12 @@ export async function listFastAgentIntegrations(
     disabledTools: new Set(config.disabledTools ?? []),
   }));
 
-  if (githubInstallation && !configuredServers.github) {
+  if ((githubInstallation || githubAccount) && !configuredServers.github) {
     candidates.push({
       id: 'github',
       name: 'GitHub',
       description:
-        'Read public github.com repositories and connected private repositories using the deployment GitHub App. Public repositories do not need to be connected. In active connected repositories, use native update_pull_request, merge_pull_request, add_issue_comment, and add_reply_to_pull_request_comment capabilities, including reviewer requests, draft status, merges, and comment reactions. Follow the discovered native tool descriptions and schemas for supported arguments.',
+        'Read public github.com repositories and connected private repositories using the deployment GitHub App. Public repositories do not need to be connected. In active connected repositories, use native update_pull_request, merge_pull_request, add_issue_comment, and add_reply_to_pull_request_comment capabilities, including reviewer requests, draft status, merges, and comment reactions. A linked GitHub account can create account-owned gists with explicit visibility; false creates a secret, link-accessible gist, not a private gist. Follow the discovered native tool descriptions and schemas for supported arguments.',
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'github'),
         headers: { Authorization: `Bearer ${authToken}` },
