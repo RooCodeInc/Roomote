@@ -23,15 +23,19 @@ import {
   KeyRound,
   Label,
   Pencil,
+  Plus,
+  Plug,
   Skeleton,
   Trash2,
 } from '@/components/system';
 
 import type { IntegrationItem } from './integration-card';
 import { IntegrationListRow } from './integration-card';
+import { Section } from './Section';
 
 const endpoint = '/api/account/integrations';
 const readOnly: CredentialEgressMethod[] = ['GET', 'HEAD'];
+type IntegrationView = 'shared' | 'personal';
 
 function describeExpiry(secret: ServiceCredentialMetadata) {
   return secret.expiresAt
@@ -43,7 +47,7 @@ function describeExpiry(secret: ServiceCredentialMetadata) {
  * API keys available to the user for HTTPS services. Metadata only: the key
  * is never returned, so nothing here can be copied out.
  */
-export function useYourIntegrations(): {
+export function useYourIntegrations(view: IntegrationView = 'shared'): {
   items: IntegrationItem[];
   isLoading: boolean;
   error: string | null;
@@ -59,24 +63,27 @@ export function useYourIntegrations(): {
   const [configuring, setConfiguring] =
     useState<ServiceCredentialMetadata | null>(null);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const response = await fetch(endpoint, {
-        cache: 'no-store',
-        credentials: 'same-origin',
-        signal,
-      });
-      if (!response.ok) throw new Error('Unavailable');
-      const data = (await response.json()) as {
-        secrets: ServiceCredentialMetadata[];
-      };
-      if (signal?.aborted) return;
-      setSecrets(data.secrets);
-      setError(null);
-    } catch {
-      if (!signal?.aborted) setError('Integrations are unavailable.');
-    }
-  }, []);
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const response = await fetch(`${endpoint}?view=${view}`, {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          signal,
+        });
+        if (!response.ok) throw new Error('Unavailable');
+        const data = (await response.json()) as {
+          secrets: ServiceCredentialMetadata[];
+        };
+        if (signal?.aborted) return;
+        setSecrets(data.secrets);
+        setError(null);
+      } catch {
+        if (!signal?.aborted) setError('Integrations are unavailable.');
+      }
+    },
+    [view],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -84,11 +91,16 @@ export function useYourIntegrations(): {
     return () => controller.abort();
   }, [load]);
 
-  const active = (secrets ?? []).filter(
-    (secret) =>
+  const active = (secrets ?? []).filter((secret) => {
+    const isLive =
       !secret.revokedAt &&
-      (!secret.expiresAt || new Date(secret.expiresAt).getTime() > Date.now()),
-  );
+      (!secret.expiresAt || new Date(secret.expiresAt).getTime() > Date.now());
+    const isInView =
+      view === 'shared'
+        ? secret.visibility === 'deployment'
+        : secret.visibility === 'owner' && !secret.ownerName;
+    return isLive && isInView;
+  });
 
   const updateVisibility = async (
     secret: ServiceCredentialMetadata,
@@ -104,7 +116,11 @@ export function useYourIntegrations(): {
         body: JSON.stringify({ secretRef: secret.secretRef, visibility }),
       });
       if (!response.ok) throw new Error('Unavailable');
-      toast.success(`Updated ${secret.label}.`);
+      toast.success(
+        visibility === 'owner'
+          ? `${secret.label} moved to Personal settings.`
+          : `Updated ${secret.label}.`,
+      );
       setConfiguring(null);
       await load();
     } catch {
@@ -144,16 +160,20 @@ export function useYourIntegrations(): {
         enabled: true,
         isMcpBased: false,
         isPending: busyRef === secret.secretRef,
-        status: secret.ownerName ? `Owned by ${secret.ownerName}` : undefined,
-        configureAction: secret.canManage
-          ? {
-              label: 'Configure',
-              ariaLabel: `Configure ${secret.label}`,
-              onAction: () => setConfiguring(secret),
-              isPending: busyRef === secret.secretRef,
-              icon: <Pencil />,
-            }
-          : undefined,
+        status:
+          view === 'shared' && secret.ownerName
+            ? `Owned by ${secret.ownerName}`
+            : undefined,
+        configureAction:
+          view === 'shared' && secret.canManage
+            ? {
+                label: 'Configure',
+                ariaLabel: `Configure ${secret.label}`,
+                onAction: () => setConfiguring(secret),
+                isPending: busyRef === secret.secretRef,
+                icon: <Pencil />,
+              }
+            : undefined,
         removeAction: secret.canManage
           ? {
               label: 'Remove',
@@ -168,7 +188,7 @@ export function useYourIntegrations(): {
       })),
     // `active` is derived from the latest fetch and intentionally rebuilt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [secrets, busyRef],
+    [secrets, busyRef, view],
   );
 
   const dialogs = (
@@ -187,6 +207,7 @@ export function useYourIntegrations(): {
           </DialogHeader>
           {adding ? (
             <AddIntegrationForm
+              visibility={view === 'personal' ? 'owner' : 'deployment'}
               onSaved={async () => {
                 setAdding(false);
                 await load();
@@ -277,7 +298,51 @@ export function YourIntegrations() {
   );
 }
 
-function AddIntegrationForm({ onSaved }: { onSaved: () => Promise<void> }) {
+export function PersonalIntegrations() {
+  const { items, isLoading, error, openAddDialog, dialogs } =
+    useYourIntegrations('personal');
+
+  return (
+    <Section
+      icon={Plug}
+      title="Personal integrations"
+      action={
+        <Button variant="outline" size="sm" onClick={openAddDialog}>
+          <Plus />
+          Add personal integration
+        </Button>
+      }
+    >
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      <div role="table" aria-label="Personal integrations">
+        <div role="rowgroup" className="divide-y divide-background">
+          {isLoading ? <Skeleton className="h-16 w-full" /> : null}
+          {items.map((item) => (
+            <IntegrationListRow key={item.id} item={item} stackDescription />
+          ))}
+          {!isLoading && items.length === 0 && !error ? (
+            <p className="px-4 py-3 text-sm text-muted-foreground">
+              No personal integrations yet.
+            </p>
+          ) : null}
+        </div>
+      </div>
+      {dialogs}
+    </Section>
+  );
+}
+
+function AddIntegrationForm({
+  onSaved,
+  visibility,
+}: {
+  onSaved: () => Promise<void>;
+  visibility?: ServiceCredentialVisibility;
+}) {
   const formRef = useRef<HTMLFormElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -301,7 +366,7 @@ function AddIntegrationForm({ onSaved }: { onSaved: () => Promise<void> }) {
           headerPrefix:
             headerName === 'authorization' ? form.get('headerPrefix') : '',
           allowedMethods: methods,
-          visibility: form.get('visibility'),
+          visibility: visibility ?? form.get('visibility'),
           ...(lifetime ? { lifetimeHours: Number(lifetime) } : {}),
           secret: form.get('secret'),
         });
@@ -416,24 +481,26 @@ function AddIntegrationForm({ onSaved }: { onSaved: () => Promise<void> }) {
             inputMode="numeric"
           />
         </div>
-        <div className="space-y-1">
-          <Label htmlFor="integration-visibility">
-            Who can use this integration?
-          </Label>
-          <select
-            id="integration-visibility"
-            name="visibility"
-            defaultValue="deployment"
-            className="h-9 w-full rounded-md border bg-card px-3 text-sm"
-          >
-            <option value="deployment">Everyone in this deployment</option>
-            <option value="owner">Only me</option>
-          </select>
-          <p className="text-sm text-muted-foreground">
-            Anyone in this deployment can make requests with a shared
-            integration. The API key always stays server-side.
-          </p>
-        </div>
+        {visibility === undefined ? (
+          <div className="space-y-1">
+            <Label htmlFor="integration-visibility">
+              Who can use this integration?
+            </Label>
+            <select
+              id="integration-visibility"
+              name="visibility"
+              defaultValue="deployment"
+              className="h-9 w-full rounded-md border bg-card px-3 text-sm"
+            >
+              <option value="deployment">Everyone in this deployment</option>
+              <option value="owner">Only me</option>
+            </select>
+            <p className="text-sm text-muted-foreground">
+              Anyone in this deployment can make requests with a shared
+              integration. The API key always stays server-side.
+            </p>
+          </div>
+        ) : null}
         <div className="space-y-1">
           <Label htmlFor="integration-secret">API key</Label>
           <Input
