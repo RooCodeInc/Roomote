@@ -47,8 +47,6 @@ import {
   mentionsSlackUserOtherThanBotOrUser,
 } from '../helpers/mention-routing.js';
 
-const AUTOMATED_THREAD_SETTLE_MS = 2_500;
-
 export async function processFastAgentMessage(params: {
   event: SlackEvent;
   slack: SlackNotifier;
@@ -64,8 +62,6 @@ export async function processFastAgentMessage(params: {
   originSessionId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
   onRejected?: () => void;
-  /** How long to wait for an automated author's thread replies to land. */
-  automatedThreadSettleMs?: number;
 }): Promise<void> {
   const {
     event,
@@ -119,41 +115,22 @@ export async function processFastAgentMessage(params: {
           .join('\n\n')
       : messageContext;
 
-  const fetchThreadContext = () =>
-    slack
-      .fetchThreadMessages({
-        channel: event.channel,
-        threadTs: threadId,
-      })
-      .catch((error: unknown) => {
-        console.error(
-          `[SlackWebhook] Failed to fetch thread context for fast agent: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return [] as Awaited<ReturnType<typeof slack.fetchThreadMessages>>;
-      });
   // Every Slack round trip from the control plane costs a few hundred
   // milliseconds. Start the thread history lookup as soon as the turn is
   // serialized so it overlaps with session resolution.
-  const threadContextPromise = fetchThreadContext().then(async (messages) => {
-    // A workflow or app that summons Roomote usually posts its detail as
-    // thread replies right after the parent, and the mention arrives before
-    // those replies exist. When an automated author's thread is still just
-    // the parent, look once more after a short settle so the turn sees the
-    // analysis it was told to read instead of a headline.
-    const automatedAuthor = Boolean(event.bot_id || event.app_id);
-    const onlyParent = messages.every((message) => message.ts === threadId);
-    if (!automatedAuthor || !onlyParent) {
-      return messages;
-    }
-    await new Promise((resolve) =>
-      setTimeout(
-        resolve,
-        params.automatedThreadSettleMs ?? AUTOMATED_THREAD_SETTLE_MS,
-      ),
-    );
-    const settled = await fetchThreadContext();
-    return settled.length > messages.length ? settled : messages;
-  });
+  const threadContextPromise: Promise<
+    Awaited<ReturnType<typeof slack.fetchThreadMessages>>
+  > = slack
+    .fetchThreadMessages({
+      channel: event.channel,
+      threadTs: threadId,
+    })
+    .catch((error: unknown) => {
+      console.error(
+        `[SlackWebhook] Failed to fetch thread context for fast agent: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return [];
+    });
 
   let releaseCanonicalFastAgentLock: Awaited<
     ReturnType<typeof acquireFastAgentTurnLock>
