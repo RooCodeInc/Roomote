@@ -52,7 +52,8 @@ chose to start a task or Session, then falls back through Slack, Teams, Telegram
 Discord, and verified email without retrying the preferred platform. Later
 notifications reuse that Session's successful provider thread when it remains
 available, and the standard footer moves to the latest supported message.
-Roomote skips the notification while the initiator is present in the Session.
+Roomote skips the notification while the initiator is present in the Session or
+has an active Voice call there.
 
 If you continue the conversation on the web and then leave again, the next
 notification in that same provider thread marks the messages that were not
