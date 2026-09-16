@@ -43,6 +43,7 @@ import { syncFastAgentSlackTitleBestEffort } from '@roomote/sdk/server';
 import type { UserAuthSuccess } from '@/types';
 import { parseCreatorFilterValue } from '@/lib/task-creator-filter';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
+import { parsePullRequestFilterValue } from '@/lib/pull-request-filter';
 
 import { getFastSessionById } from './fast-sessions';
 import { customAutomationSessionAccess } from './custom-automation-session-access';
@@ -406,9 +407,9 @@ function listConditions(
   const cursor = decodeCursor(input.before);
   const scope = input.scope ?? 'all';
   const period = input.period ?? 'all';
-  const [pullRequestRepository, pullRequestNumberPart] =
-    input.pullRequest?.split('#') ?? [];
-  const pullRequestNumber = Number.parseInt(pullRequestNumberPart ?? '', 10);
+  const pullRequest = input.pullRequest
+    ? parsePullRequestFilterValue(input.pullRequest)
+    : null;
 
   return and(
     sessionListScope(auth),
@@ -463,9 +464,7 @@ function listConditions(
       ? taskExistsCondition(eq(tasks.repositoryName, input.repository))
       : undefined,
     input.model ? taskExistsCondition(eq(tasks.model, input.model)) : undefined,
-    pullRequestRepository &&
-      Number.isFinite(pullRequestNumber) &&
-      pullRequestNumber > 0
+    pullRequest
       ? exists(
           db
             .select({ one: sql`1` })
@@ -479,8 +478,14 @@ function listConditions(
               and(
                 eq(sessionTasks.sessionId, sessions.id),
                 isNull(tasks.deletedAt),
-                eq(taskPullRequests.repository, pullRequestRepository),
-                eq(taskPullRequests.prNumber, pullRequestNumber),
+                eq(taskPullRequests.repository, pullRequest.repository),
+                eq(taskPullRequests.prNumber, pullRequest.number),
+                pullRequest.provider
+                  ? eq(
+                      taskPullRequests.sourceControlProvider,
+                      pullRequest.provider,
+                    )
+                  : undefined,
               ),
             ),
         )

@@ -15,6 +15,7 @@ import {
   taskInferenceUsageEvents,
   users,
   eq,
+  exists,
   and,
   desc,
   asc,
@@ -35,6 +36,7 @@ import {
   HAS_PULL_REQUEST_FILTER_VALUE,
 } from '@/types';
 import { getTaskCategoryById, isTaskWorkflow } from '@/lib';
+import { parsePullRequestFilterValue } from '@/lib/pull-request-filter';
 import {
   formatAutomationAttributionLabel,
   parseCreatorFilterValue,
@@ -170,20 +172,29 @@ const getTaskFilterConditions = ({ filters }: { filters: Filter[] }) => {
           break;
         }
 
-        // Expected format: "owner/repo#123"
         {
-          const [repoPart, numberPart] = filter.value.split('#');
-          const prNumber = Number.parseInt(numberPart ?? '', 10);
+          const pullRequest = parsePullRequestFilterValue(filter.value);
 
-          if (repoPart && Number.isFinite(prNumber) && prNumber > 0) {
+          if (pullRequest) {
             conditions.push(
-              sql`EXISTS (
-                SELECT 1
-                FROM ${taskPullRequests}
-                WHERE ${taskPullRequests.taskId} = ${tasks.id}
-                  AND ${taskPullRequests.repository} = ${repoPart}
-                  AND ${taskPullRequests.prNumber} = ${prNumber}
-              )`,
+              exists(
+                db
+                  .select({ one: sql`1` })
+                  .from(taskPullRequests)
+                  .where(
+                    and(
+                      eq(taskPullRequests.taskId, tasks.id),
+                      eq(taskPullRequests.repository, pullRequest.repository),
+                      eq(taskPullRequests.prNumber, pullRequest.number),
+                      pullRequest.provider
+                        ? eq(
+                            taskPullRequests.sourceControlProvider,
+                            pullRequest.provider,
+                          )
+                        : undefined,
+                    ),
+                  ),
+              ),
             );
           }
         }
