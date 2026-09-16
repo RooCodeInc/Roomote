@@ -2,10 +2,10 @@ import { Env } from '@roomote/env';
 
 import { createGuardedFetch } from '../safe-fetch';
 
-export const CUSTOM_MCP_FETCH_TIMEOUT_MS = 10_000;
-export const CUSTOM_MCP_RESPONSE_MAX_BYTES = 1024 * 1024;
+const CUSTOM_MCP_FETCH_TIMEOUT_MS = 10_000;
+const CUSTOM_MCP_RESPONSE_MAX_BYTES = 1024 * 1024;
 
-export class CustomMcpResponseTooLargeError extends Error {
+class CustomMcpResponseTooLargeError extends Error {
   constructor() {
     super(
       `Custom MCP response exceeds ${CUSTOM_MCP_RESPONSE_MAX_BYTES} bytes.`,
@@ -14,7 +14,7 @@ export class CustomMcpResponseTooLargeError extends Error {
   }
 }
 
-export async function readBoundedCustomMcpResponse(
+async function readBoundedCustomMcpResponse(
   response: Response,
 ): Promise<Uint8Array> {
   const declaredLength = Number(response.headers.get('content-length'));
