@@ -19,6 +19,7 @@ import {
 import type { UserRole } from '@roomote/types';
 
 import {
+  capturePasswordResetDelivery,
   capturePasswordResetLink,
   getAuth,
   PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS,
@@ -45,6 +46,16 @@ type RemoveUserResult =
 type PasswordResetLinkResult =
   | { created: true; url: string; expiresAt: Date }
   | { created: false; reason: 'not_found' | 'oauth_only' | 'not_generated' };
+
+type SelfServicePasswordResetOutcome =
+  | 'no_active_user'
+  | 'no_credential_account'
+  | 'channel_disabled'
+  | 'not_configured'
+  | 'suppressed'
+  | 'send_failed'
+  | 'sent'
+  | 'not_generated';
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -265,14 +276,14 @@ export async function createPasswordResetLinkForUser({
  */
 export async function requestSelfServicePasswordReset(
   email: string,
-): Promise<void> {
+): Promise<SelfServicePasswordResetOutcome> {
   const normalizedEmail = email.trim().toLowerCase();
   const target = await db.query.users.findFirst({
     where: and(eq(users.email, normalizedEmail), isNull(users.deletedAt)),
   });
 
   if (!target) {
-    return;
+    return 'no_active_user';
   }
 
   const credentialAccount = await db.query.authAccounts.findFirst({
@@ -283,10 +294,17 @@ export async function requestSelfServicePasswordReset(
   });
 
   if (!credentialAccount) {
-    return;
+    return 'no_credential_account';
   }
 
-  await requestPasswordResetForUser(target.email);
+  const delivery = await capturePasswordResetDelivery(() =>
+    requestPasswordResetForUser(target.email),
+  );
+  if (!delivery) {
+    return 'not_generated';
+  }
+
+  return delivery.sent ? 'sent' : delivery.reason;
 }
 
 export async function userHasCredentialAccount(
