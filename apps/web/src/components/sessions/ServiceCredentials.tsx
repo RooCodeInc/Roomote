@@ -213,9 +213,17 @@ function ServiceCredentialsForm({
                   clearForm();
                   const response = await request;
                   if (!response.ok) throw new Error('Unavailable');
-                  await response.json();
+                  const data = (await response.json()) as {
+                    resumed: boolean;
+                  };
                   notifyIntegrationKeysChanged();
-                  toast.success('Integration saved.');
+                  if (data.resumed) {
+                    toast.success('Integration saved.');
+                  } else {
+                    toast.warning(
+                      'Integration saved. The Session could not be notified. Ask the agent to check list_integration_keys and continue.',
+                    );
+                  }
                   onCancel();
                 } catch {
                   clearForm();

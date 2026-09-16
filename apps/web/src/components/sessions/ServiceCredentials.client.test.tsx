@@ -1,12 +1,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ServiceCredentials } from './ServiceCredentials';
 
-const { toastSuccessMock } = vi.hoisted(() => ({
+const { toastSuccessMock, toastWarningMock } = vi.hoisted(() => ({
   toastSuccessMock: vi.fn(),
+  toastWarningMock: vi.fn(),
 }));
 
 vi.mock('sonner', () => ({
-  toast: { success: toastSuccessMock },
+  toast: { success: toastSuccessMock, warning: toastWarningMock },
 }));
 
 const sessionId = '6a1f8f1e-0000-4000-8000-000000000006';
@@ -28,6 +29,7 @@ const metadata = { ...policy, secretRef, revokedAt: null };
 const fetchMock = vi.fn();
 beforeEach(() => {
   toastSuccessMock.mockReset();
+  toastWarningMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockReset();
   fetchMock.mockImplementation(
@@ -140,6 +142,7 @@ it('prefills a single-key consent flow, then dismisses with a toast while the se
   );
   expect(toastSuccessMock).toHaveBeenCalledOnce();
   expect(toastSuccessMock).toHaveBeenCalledWith('Integration saved.');
+  expect(toastWarningMock).not.toHaveBeenCalled();
   expect(changed).toHaveBeenCalledOnce();
   window.removeEventListener('roomote:integration-keys-changed', changed);
   expect(fetchMock).toHaveBeenLastCalledWith(
@@ -400,6 +403,7 @@ it.each([400, 500])(
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await screen.findByRole('alert');
     expect(toastSuccessMock).not.toHaveBeenCalled();
+    expect(toastWarningMock).not.toHaveBeenCalled();
     expect(screen.getByLabelText('API key')).toHaveValue('');
     expect(screen.getByLabelText('API key')).toHaveAttribute(
       'type',
@@ -430,7 +434,7 @@ it('does not expose approved-secret management metadata or controls', async () =
   expect(screen.queryByText('"Bearer "')).not.toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledOnce();
 });
-it('closes with the same success toast when the saved response reports no scheduled continuation', async () => {
+it('closes with recovery feedback when the saved response reports no scheduled continuation', async () => {
   await open();
   fill();
   fetchMock.mockResolvedValueOnce(
@@ -442,7 +446,10 @@ it('closes with the same success toast when the saved response reports no schedu
   await waitFor(() =>
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
   );
-  expect(toastSuccessMock).toHaveBeenCalledWith('Integration saved.');
+  expect(toastSuccessMock).not.toHaveBeenCalled();
+  expect(toastWarningMock).toHaveBeenCalledWith(
+    'Integration saved. The Session could not be notified. Ask the agent to check list_integration_keys and continue.',
+  );
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(document.body.textContent).not.toContain(credential);
 });
