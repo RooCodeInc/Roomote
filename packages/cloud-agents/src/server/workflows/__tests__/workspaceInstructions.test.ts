@@ -33,6 +33,21 @@ describe('getWorkspaceInstructions', () => {
     );
   });
 
+  it('distinguishes prepared repositories from optional authorized checkouts', () => {
+    const instructions = getWorkspaceInstructions(['acme/api'], undefined, {
+      additionalRepositoriesOnDemand: true,
+    });
+
+    expect(instructions).toContain(
+      '`REPOSITORIES.md` at the workspace root lists the active repositories authorized for this task',
+    );
+    expect(instructions).toContain('call the `clone_repository` tool');
+    expect(instructions).toContain(
+      "does not run another environment's setup commands or provision its services",
+    );
+    expect(instructions).toContain('Available repositories:\n- acme/api');
+  });
+
   it('tells Blank slate tasks how to check out repositories when source control is connected', () => {
     const instructions = getWorkspaceInstructions([], undefined, {
       blankSlate: true,
