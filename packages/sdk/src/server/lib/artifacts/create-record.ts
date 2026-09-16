@@ -19,6 +19,7 @@ type CreateArtifactRecordInput = ArtifactRecordOwner & {
   contentType: string;
   path: string;
   size: number;
+  uploadUrlExpiresAt?: Date | null;
 };
 
 export async function createArtifactRecord(input: CreateArtifactRecordInput) {
@@ -27,24 +28,18 @@ export async function createArtifactRecord(input: CreateArtifactRecordInput) {
 
     const [owner] = taskOwned
       ? await tx
-          .select({ id: tasks.id, privacy: tasks.privacy })
+          .select({ id: tasks.id })
           .from(tasks)
           .where(eq(tasks.id, input.taskId))
           .for('key share')
       : await tx
-          .select({ id: sessions.id, privacy: sessions.privacy })
+          .select({ id: sessions.id })
           .from(sessions)
           .where(eq(sessions.id, input.sessionId))
           .for('key share');
     if (!owner) {
       throw new Error(taskOwned ? 'Task not found.' : 'Session not found.');
     }
-    if (owner.privacy === 'private') {
-      throw new Error(
-        'Artifact publishing is unavailable in private Sessions.',
-      );
-    }
-
     const ownerId = taskOwned ? input.taskId : input.sessionId;
     const lockOwner = taskOwned ? ownerId : `session:${ownerId}`;
     await tx.execute(
@@ -75,6 +70,7 @@ export async function createArtifactRecord(input: CreateArtifactRecordInput) {
         version: newVersion,
         size: input.size,
         uploaded: false,
+        uploadUrlExpiresAt: input.uploadUrlExpiresAt ?? null,
       })
       .returning();
 
@@ -100,17 +96,11 @@ export async function authorizeTaskArtifactUpload(input: {
 }): Promise<void> {
   await db.transaction(async (tx) => {
     const [task] = await tx
-      .select({ id: tasks.id, privacy: tasks.privacy })
+      .select({ id: tasks.id })
       .from(tasks)
       .where(eq(tasks.id, input.taskId))
       .for('key share');
     if (!task) throw new Error('Task not found.');
-    if (task.privacy === 'private') {
-      throw new Error(
-        'Artifact publishing is unavailable in private Sessions.',
-      );
-    }
-
     const [authorized] = await tx
       .update(taskArtifacts)
       .set({ uploadUrlExpiresAt: input.expiresAt, updatedAt: new Date() })

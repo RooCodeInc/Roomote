@@ -1,18 +1,17 @@
 'use client';
 
-import { usePersonalPreferences } from './usePersonalPreferences';
+import { useQuery } from '@tanstack/react-query';
+
+import { useTRPC } from '@/trpc/client';
 
 export function usePrivateSessionsExperiment() {
-  const { preferences, isLoading, isUpdating, setPreferences } =
-    usePersonalPreferences({
-      errorMessage: 'Failed to update Private Sessions.',
-    });
+  const trpc = useTRPC();
+  const experiment = useQuery(
+    trpc.miscSettings.privateSessionsExperiment.queryOptions(),
+  );
 
   return {
-    enabled: preferences.privateSessionsExperimentEnabled === true,
-    isLoading,
-    isUpdating,
-    setEnabled: (enabled: boolean) =>
-      setPreferences({ privateSessionsExperimentEnabled: enabled }),
+    enabled: experiment.data === true,
+    isLoading: experiment.isPending,
   };
 }

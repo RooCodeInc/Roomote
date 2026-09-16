@@ -67,10 +67,6 @@ function mergeResultForUpdatedFields(
       updates.serviceCredentialToolsEnabled === undefined
         ? mergedPreferences.serviceCredentialToolsEnabled
         : result.serviceCredentialToolsEnabled,
-    privateSessionsExperimentEnabled:
-      updates.privateSessionsExperimentEnabled === undefined
-        ? mergedPreferences.privateSessionsExperimentEnabled
-        : result.privateSessionsExperimentEnabled,
   };
 }
 
@@ -125,12 +121,6 @@ function rollbackUpdatedFields(
         optimisticPreferences.serviceCredentialToolsEnabled
         ? previousPreferences.serviceCredentialToolsEnabled
         : mergedPreferences.serviceCredentialToolsEnabled,
-    privateSessionsExperimentEnabled:
-      updates.privateSessionsExperimentEnabled !== undefined &&
-      mergedPreferences.privateSessionsExperimentEnabled ===
-        optimisticPreferences.privateSessionsExperimentEnabled
-        ? previousPreferences.privateSessionsExperimentEnabled
-        : mergedPreferences.privateSessionsExperimentEnabled,
   };
 }
 

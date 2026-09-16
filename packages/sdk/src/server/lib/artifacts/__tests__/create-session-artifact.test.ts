@@ -103,6 +103,34 @@ describe('createSessionArtifact', () => {
     expect(row).toMatchObject({ sessionId: session!.id, taskId: null });
   });
 
+  it('creates private Session artifacts with an upload lease that settles', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+
+    const artifact = await createSessionArtifact({
+      sessionId: session.id,
+      path: 'notes/private.md',
+      content: '# Private',
+      contentType: 'text/markdown',
+      artifactType: 'general',
+    });
+
+    expect(artifact).toMatchObject({
+      sessionId: session.id,
+      taskId: null,
+      uploaded: true,
+      uploadUrlExpiresAt: expect.any(Date),
+    });
+    expect(artifact.uploadUrlExpiresAt!.getTime()).toBeLessThanOrEqual(
+      Date.now(),
+    );
+  });
+
   it('leaves an incomplete row hidden when object storage fails', async () => {
     const owner = await userFactory.create();
     const session = await sessionFactory.create({

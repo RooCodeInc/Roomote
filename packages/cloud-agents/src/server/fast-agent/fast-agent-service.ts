@@ -68,7 +68,7 @@ import {
   getSessionForTask,
   inArray,
   isBrainEnabled,
-  isPrivateSessionsExperimentEnabledForUser,
+  isPrivateSessionsExperimentEnabled,
   isNull,
   markSessionGoalForConversation,
   releaseSessionGoalContinuation,
@@ -3261,7 +3261,7 @@ export async function answerFastAgentQuestion({
     currentPrivateOwnerUserId = session.privateOwnerUserId ?? null;
     privateSessionsExperimentEnabled =
       currentSessionPrivacy === 'private'
-        ? await isPrivateSessionsExperimentEnabledForUser(userId)
+        ? await isPrivateSessionsExperimentEnabled()
         : false;
     availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
@@ -4352,13 +4352,6 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact: {
-            if (currentSessionPrivacy === 'private') {
-              return {
-                success: false,
-                error:
-                  'Artifact publishing is unavailable in private Sessions.',
-              };
-            }
             if (!adapter.createArtifact) {
               return {
                 success: false,

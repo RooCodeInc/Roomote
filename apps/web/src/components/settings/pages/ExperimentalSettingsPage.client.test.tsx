@@ -51,10 +51,6 @@ vi.mock(
   }),
 );
 
-vi.mock('@/components/settings/PrivateSessionsExperimentalSetting', () => ({
-  PrivateSessionsExperimentalSetting: () => <div>Private Sessions setting</div>,
-}));
-
 import { ExperimentalSettingsPage } from './ExperimentalSettingsPage';
 
 describe('ExperimentalSettingsPage', () => {
@@ -82,9 +78,6 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.queryByText('Slack peer conversations setting'),
     ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText('Private Sessions setting'),
-    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(refetchMock).toHaveBeenCalledOnce();
@@ -98,7 +91,6 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.getByText('Slack peer conversations setting'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Private Sessions setting')).toBeInTheDocument();
     expect(screen.getByText('Integration keys setting')).toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental preferences.'),
@@ -130,7 +122,6 @@ describe('ExperimentalSettingsPage', () => {
     expect(
       screen.getByText('Slack peer conversations setting'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Private Sessions setting')).toBeInTheDocument();
     expect(screen.getByText('Integration keys setting')).toBeInTheDocument();
     expect(
       screen.queryByText('Failed to load experimental preferences.'),

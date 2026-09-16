@@ -1,11 +1,9 @@
 import { renderHook } from '@testing-library/react';
-import { DEFAULT_PERSONAL_PREFERENCES } from '@/types/preferences';
 
 type PersonalPreferences = {
   colorTheme: 'light' | 'dark' | 'system';
   mindReaderMode: boolean;
   narrationMode: boolean;
-  privateSessionsExperimentEnabled?: boolean;
 };
 
 type MutationContext = {
@@ -162,7 +160,6 @@ describe('usePersonalPreferences', () => {
       homeComposerSuggestionsEnabled: false,
       serviceCredentialToolsEnabled: false,
       slackPeerConversationsExperimentEnabled: false,
-      privateSessionsExperimentEnabled: false,
     });
   });
 
@@ -255,55 +252,6 @@ describe('usePersonalPreferences', () => {
     expect(queryClientMock.invalidateQueries).toHaveBeenCalledWith({
       queryKey: preferencesQueryKey,
     });
-  });
-
-  it('keeps the Private Sessions experiment enabled after a successful update', async () => {
-    renderHook(() => usePersonalPreferences());
-    const options = getMutationOptions();
-    const variables = {
-      privateSessionsExperimentEnabled: true,
-    } as const satisfies PersonalPreferencesUpdate;
-    const context = await options.onMutate?.(variables);
-
-    options.onSuccess?.(
-      {
-        ...DEFAULT_PERSONAL_PREFERENCES,
-        privateSessionsExperimentEnabled: true,
-      },
-      variables,
-      context,
-    );
-
-    const updateCall = queryClientMock.setQueryData.mock.calls.at(-1);
-    expect(
-      updateCall?.[1]({
-        ...DEFAULT_PERSONAL_PREFERENCES,
-        privateSessionsExperimentEnabled: true,
-      }),
-    ).toMatchObject({ privateSessionsExperimentEnabled: true });
-  });
-
-  it('rolls back a failed Private Sessions experiment update', async () => {
-    queryClientMock.getQueryData.mockReturnValue({
-      ...DEFAULT_PERSONAL_PREFERENCES,
-      privateSessionsExperimentEnabled: false,
-    });
-    renderHook(() => usePersonalPreferences());
-    const options = getMutationOptions();
-    const variables = {
-      privateSessionsExperimentEnabled: true,
-    } as const satisfies PersonalPreferencesUpdate;
-    const context = await options.onMutate?.(variables);
-
-    options.onError?.(new Error('network'), variables, context);
-
-    const rollbackCall = queryClientMock.setQueryData.mock.calls.at(-1);
-    expect(
-      rollbackCall?.[1]({
-        ...DEFAULT_PERSONAL_PREFERENCES,
-        privateSessionsExperimentEnabled: true,
-      }),
-    ).toMatchObject({ privateSessionsExperimentEnabled: false });
   });
 
   it('rolls back the optimistic cache update and shows an error when the mutation fails', async () => {

@@ -19,6 +19,7 @@ import {
   getSessionGoal,
   inArray,
   markSessionGoal,
+  or,
   sessions,
   sessionTasks,
   taskArtifacts,
@@ -91,56 +92,71 @@ export async function deletePrivateSessionCommand(
             .for('update')
         : [];
     const taskIds = lockedTasks.map(({ id }) => id);
-    if (taskIds.length > 0) {
-      const artifacts = await tx
-        .select({
-          id: taskArtifacts.id,
-          taskId: taskArtifacts.taskId,
-          path: taskArtifacts.path,
-          version: taskArtifacts.version,
-          uploadUrlExpiresAt: taskArtifacts.uploadUrlExpiresAt,
-        })
-        .from(taskArtifacts)
-        .where(inArray(taskArtifacts.taskId, taskIds));
-      const now = new Date();
-      const legacyExpiry = new Date(
-        now.getTime() + ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS * 1_000,
+    const artifacts = await tx
+      .select({
+        id: taskArtifacts.id,
+        taskId: taskArtifacts.taskId,
+        sessionId: taskArtifacts.sessionId,
+        path: taskArtifacts.path,
+        version: taskArtifacts.version,
+        uploadUrlExpiresAt: taskArtifacts.uploadUrlExpiresAt,
+      })
+      .from(taskArtifacts)
+      .where(
+        or(
+          eq(taskArtifacts.sessionId, session.id),
+          taskIds.length > 0
+            ? inArray(taskArtifacts.taskId, taskIds)
+            : undefined,
+        ),
       );
-      const legacyArtifactIds = artifacts
-        .filter((artifact) => artifact.uploadUrlExpiresAt === null)
-        .map((artifact) => artifact.id);
-      if (legacyArtifactIds.length > 0) {
-        await tx
-          .update(taskArtifacts)
-          .set({ uploadUrlExpiresAt: legacyExpiry, updatedAt: now })
-          .where(inArray(taskArtifacts.id, legacyArtifactIds));
-      }
-      const latestExpiry = artifacts.reduce((latest, artifact) => {
-        const expiry = artifact.uploadUrlExpiresAt ?? legacyExpiry;
-        return expiry > latest ? expiry : latest;
-      }, now);
-      if (latestExpiry > now) {
-        return {
-          deleted: false,
-          retryAfter: latestExpiry.toISOString(),
-          reason: 'artifact_uploads_pending' as const,
-        };
-      }
-      if (artifacts.length > 0) {
-        const result = await deleteArtifactsBatch(
-          artifacts.map((artifact) => ({
-            taskId: artifact.taskId!,
-            artifactId: artifact.id,
-            path: artifact.path,
-            version: artifact.version,
-          })),
+    const now = new Date();
+    const legacyExpiry = new Date(
+      now.getTime() + ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS * 1_000,
+    );
+    const legacyArtifactIds = artifacts
+      .filter(
+        (artifact) =>
+          artifact.taskId !== null && artifact.uploadUrlExpiresAt === null,
+      )
+      .map((artifact) => artifact.id);
+    if (legacyArtifactIds.length > 0) {
+      await tx
+        .update(taskArtifacts)
+        .set({ uploadUrlExpiresAt: legacyExpiry, updatedAt: now })
+        .where(inArray(taskArtifacts.id, legacyArtifactIds));
+    }
+    const latestExpiry = artifacts.reduce((latest, artifact) => {
+      const expiry =
+        artifact.uploadUrlExpiresAt ??
+        (artifact.taskId === null ? now : legacyExpiry);
+      return expiry > latest ? expiry : latest;
+    }, now);
+    if (latestExpiry > now) {
+      return {
+        deleted: false,
+        retryAfter: latestExpiry.toISOString(),
+        reason: 'artifact_uploads_pending' as const,
+      };
+    }
+    if (artifacts.length > 0) {
+      const result = await deleteArtifactsBatch(
+        artifacts.map((artifact) => ({
+          ...(artifact.taskId
+            ? { taskId: artifact.taskId }
+            : { sessionId: artifact.sessionId! }),
+          artifactId: artifact.id,
+          path: artifact.path,
+          version: artifact.version,
+        })),
+      );
+      if (result.errors > 0) {
+        throw new Error(
+          `Failed to delete ${result.errors} private Session artifact object(s).`,
         );
-        if (result.errors > 0) {
-          throw new Error(
-            `Failed to delete ${result.errors} private Session artifact object(s).`,
-          );
-        }
       }
+    }
+    if (taskIds.length > 0) {
       await tx
         .delete(tasks)
         .where(

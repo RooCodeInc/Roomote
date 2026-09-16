@@ -10,6 +10,7 @@ import {
   Button,
   CopyIconButton,
   EarOff,
+  Lock,
   Mail,
   MessageSquarePlus,
   Skeleton,
@@ -35,6 +36,9 @@ export function MiscSettings() {
   const updateMutation = useMutation(
     trpc.miscSettings.setAnonymousAnalytics.mutationOptions(),
   );
+  const privateSessionsMutation = useMutation(
+    trpc.miscSettings.setPrivateSessionsExperiment.mutationOptions(),
+  );
 
   const handleToggle = async (nextValue: boolean) => {
     const previous = settingsQuery.data;
@@ -54,6 +58,33 @@ export function MiscSettings() {
         error instanceof Error
           ? error.message
           : 'Failed to update anonymous analytics.',
+      );
+    }
+  };
+
+  const handlePrivateSessionsToggle = async (nextValue: boolean) => {
+    const previous = settingsQuery.data;
+    queryClient.setQueryData<MiscSettingsData>(queryKey, (current) =>
+      current
+        ? { ...current, privateSessionsExperimentEnabled: nextValue }
+        : current,
+    );
+
+    try {
+      const updated = await privateSessionsMutation.mutateAsync({
+        enabled: nextValue,
+      });
+      queryClient.setQueryData<MiscSettingsData>(queryKey, updated);
+      await queryClient.invalidateQueries({
+        queryKey: trpc.miscSettings.privateSessionsExperiment.queryKey(),
+      });
+      toast.success(`Private Sessions ${nextValue ? 'enabled' : 'disabled'}`);
+    } catch (error) {
+      queryClient.setQueryData<MiscSettingsData>(queryKey, previous);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Failed to update Private Sessions.',
       );
     }
   };
@@ -78,6 +109,26 @@ export function MiscSettings() {
     <div className="space-y-4">
       <Section title="Regional settings">
         <DeploymentTimeZoneSetting />
+      </Section>
+      <Section icon={Lock} title="Experiments">
+        <div className="flex gap-3">
+          <Switch
+            aria-label="Toggle Private Sessions"
+            checked={settingsQuery.data.privateSessionsExperimentEnabled}
+            disabled={privateSessionsMutation.isPending}
+            onCheckedChange={(checked) =>
+              void handlePrivateSessionsToggle(checked === true)
+            }
+          />
+          <div className="space-y-1">
+            <p className="text-sm font-semibold">Private Sessions</p>
+            <p className="text-sm text-muted-foreground">
+              Let members create owner-only web Sessions without writing to
+              shared memory or publishing to shared destinations. Disabled by
+              default.
+            </p>
+          </div>
+        </div>
       </Section>
       <Section title="Feedback" icon={Mail}>
         <p className="text-muted-foreground">Help us make Roomote better!</p>

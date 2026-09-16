@@ -204,7 +204,7 @@ vi.mock('@roomote/db/server', () => ({
   appendLearnedUserPreference: mocks.appendLearnedPreference,
   getUserPersonalizationRuntimeContext: mocks.getPersonalization,
   isBrainEnabled: mocks.isBrainEnabled,
-  isPrivateSessionsExperimentEnabledForUser: mocks.privateSessionsEnabled,
+  isPrivateSessionsExperimentEnabled: mocks.privateSessionsEnabled,
   db: {
     execute: mocks.executeDb,
     query: {
@@ -5262,7 +5262,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('creates a durable Session artifact with inferred content type', async () => {
+  it('creates a durable private Session artifact with inferred content type', async () => {
+    mocks.getUnifiedSession.mockResolvedValue({
+      id: 'session-1',
+      privacy: 'private',
+      privateOwnerUserId: 'user-1',
+    });
     const createArtifact = vi.fn().mockResolvedValue({
       id: 'artifact-1',
       path: 'notes/decision.md',

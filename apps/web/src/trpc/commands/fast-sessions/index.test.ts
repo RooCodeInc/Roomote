@@ -68,7 +68,7 @@ vi.mock('@roomote/db/server', () => ({
   sessions: {},
   getSessionForFastConversation: mocks.getUnifiedSession,
   ensureSessionForFastConversation: mocks.getUnifiedSession,
-  isPrivateSessionsExperimentEnabledForUser: mocks.privateSessionsEnabled,
+  isPrivateSessionsExperimentEnabled: mocks.privateSessionsEnabled,
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -812,7 +812,7 @@ describe('startFastSessionCommand', () => {
         text: 'Review private context',
         privacy: 'private',
       }),
-    ).rejects.toThrow('not enabled for this user');
+    ).rejects.toThrow('not enabled for this deployment');
     expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
   });
 

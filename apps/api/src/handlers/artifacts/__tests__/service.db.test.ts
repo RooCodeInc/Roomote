@@ -65,7 +65,7 @@ describe('getArtifactByPath', () => {
     ).resolves.toBeNull();
   });
 
-  it('allows artifact publishing only for shared tasks', async () => {
+  it('allows bound artifact creation for shared and private tasks', async () => {
     await expect(verifyTaskAccessForArtifact(taskId, {})).resolves.toBe(true);
 
     const owner = await userFactory.create();
@@ -75,7 +75,7 @@ describe('getArtifactByPath', () => {
       privateOwnerUserId: owner.id,
     });
     await expect(verifyTaskAccessForArtifact(privateTask.id, {})).resolves.toBe(
-      false,
+      true,
     );
   });
 });

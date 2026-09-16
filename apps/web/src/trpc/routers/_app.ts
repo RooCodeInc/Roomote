@@ -496,8 +496,10 @@ import {
 } from '../commands/analytics';
 import {
   getMiscSettingsCommand,
+  getPrivateSessionsExperimentCommand,
   setDeploymentTimeZoneCommand,
   setAnonymousAnalyticsCommand,
+  setPrivateSessionsExperimentCommand,
 } from '../commands/misc-settings';
 import {
   backfillBrainTaskMemoriesCommand,
@@ -1640,7 +1642,6 @@ export const appRouter = createRouter({
             resultsPageEnabled: z.boolean().optional(),
             slackPeerConversationsExperimentEnabled: z.boolean().optional(),
             homeComposerSuggestionsEnabled: z.boolean().optional(),
-            privateSessionsExperimentEnabled: z.boolean().optional(),
             serviceCredentialToolsEnabled: z.boolean().optional(),
           })
           .refine(
@@ -1651,7 +1652,6 @@ export const appRouter = createRouter({
               input.resultsPageEnabled !== undefined ||
               input.slackPeerConversationsExperimentEnabled !== undefined ||
               input.homeComposerSuggestionsEnabled !== undefined ||
-              input.privateSessionsExperimentEnabled !== undefined ||
               input.serviceCredentialToolsEnabled !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
@@ -3449,6 +3449,9 @@ export const appRouter = createRouter({
   }),
 
   miscSettings: createRouter({
+    privateSessionsExperiment: protectedProcedure.query(() =>
+      getPrivateSessionsExperimentCommand(),
+    ),
     get: protectedProcedure.query(({ ctx: { auth } }) =>
       getMiscSettingsCommand(auth),
     ),
@@ -3461,6 +3464,11 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setAnonymousAnalyticsCommand(auth, input),
+      ),
+    setPrivateSessionsExperiment: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setPrivateSessionsExperimentCommand(auth, input),
       ),
     setTimeZone: protectedProcedure
       .input(z.object({ timeZone: z.string().trim().min(1).max(100) }))

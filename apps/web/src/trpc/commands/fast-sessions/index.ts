@@ -39,7 +39,7 @@ import {
   getSessionForFastConversation,
   retireCanonicalPrReviewActionsForDestinationKey,
   sessions,
-  isPrivateSessionsExperimentEnabledForUser,
+  isPrivateSessionsExperimentEnabled,
   sql,
 } from '@roomote/db/server';
 import {
@@ -440,9 +440,9 @@ export async function startFastSessionCommand(
 }> {
   if (
     input.privacy === 'private' &&
-    !(await isPrivateSessionsExperimentEnabledForUser(auth.userId))
+    !(await isPrivateSessionsExperimentEnabled())
   ) {
-    throw new Error('Private Sessions are not enabled for this user.');
+    throw new Error('Private Sessions are not enabled for this deployment.');
   }
   if (input.privacy === 'private' && input.voiceCall) {
     throw new Error('Private Sessions cannot start as voice calls.');

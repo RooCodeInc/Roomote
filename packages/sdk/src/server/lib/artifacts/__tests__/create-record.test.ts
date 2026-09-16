@@ -12,7 +12,7 @@ import {
 } from '../create-record';
 
 describe('createTaskArtifactRecord', () => {
-  it('rejects private tasks before creating an upload record', async () => {
+  it('creates upload records for private tasks under their inherited owner', async () => {
     const owner = await userFactory.create();
     const task = await taskFactory.create({
       initiatorUserId: owner.id,
@@ -20,15 +20,26 @@ describe('createTaskArtifactRecord', () => {
       privateOwnerUserId: owner.id,
     });
 
+    const artifact = await createTaskArtifactRecord({
+      taskId: task.id,
+      artifactType: 'general',
+      contentType: 'text/plain',
+      path: 'private.txt',
+      size: 10,
+    });
+    expect(artifact).toMatchObject({ taskId: task.id, uploaded: false });
+
+    const expiresAt = new Date(Date.now() + 60_000);
+    await authorizeTaskArtifactUpload({
+      taskId: task.id,
+      artifactId: artifact!.id,
+      expiresAt,
+    });
     await expect(
-      createTaskArtifactRecord({
-        taskId: task.id,
-        artifactType: 'general',
-        contentType: 'text/plain',
-        path: 'private.txt',
-        size: 10,
+      db.query.taskArtifacts.findFirst({
+        where: eq(taskArtifacts.id, artifact!.id),
       }),
-    ).rejects.toThrow('Artifact publishing is unavailable in private Sessions');
+    ).resolves.toMatchObject({ uploadUrlExpiresAt: expiresAt });
   });
 
   it('allocates versions independently for each task owner', async () => {
