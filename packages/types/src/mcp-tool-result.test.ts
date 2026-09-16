@@ -79,4 +79,19 @@ describe('parseMcpToolResult', () => {
       },
     });
   });
+
+  it('preserves fetched text alongside structured text metadata', () => {
+    const result = {
+      structuredContent: { kind: 'text', format: 'markdown' },
+      content: [{ type: 'text', text: '# Fetched page' }],
+    };
+
+    expect(parseMcpToolResult(result)).toMatchObject({
+      payload: {
+        kind: 'text',
+        format: 'markdown',
+        text: '# Fetched page',
+      },
+    });
+  });
 });

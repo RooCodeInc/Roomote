@@ -50,14 +50,22 @@ export function parseMcpToolResult(result: unknown): McpToolResultSemantics {
   }
 
   if (toolResult.structuredContent != null) {
+    const structuredText =
+      textPart &&
+      typeof toolResult.structuredContent === 'object' &&
+      !Array.isArray(toolResult.structuredContent) &&
+      (toolResult.structuredContent as { kind?: unknown }).kind === 'text'
+        ? { text: textPart.text }
+        : {};
     const payload =
-      imagePart &&
       typeof toolResult.structuredContent === 'object' &&
       !Array.isArray(toolResult.structuredContent)
         ? {
             ...(toolResult.structuredContent as Record<string, unknown>),
-            data: imagePart.data,
-            mimeType: imagePart.mimeType,
+            ...structuredText,
+            ...(imagePart
+              ? { data: imagePart.data, mimeType: imagePart.mimeType }
+              : {}),
           }
         : toolResult.structuredContent;
     return {

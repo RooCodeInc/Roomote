@@ -32,6 +32,8 @@ import {
   MCP_INTEGRATION_PROXY_PATH_PREFIX,
   MCP_ROUTING_PROXY_PATH_PREFIX,
   ROOMOTE_MCP_ID,
+  PUBLIC_URL_FETCH_DEFAULT_TIMEOUT_SECONDS,
+  PUBLIC_URL_FETCH_MAX_TIMEOUT_SECONDS,
   getMcpIntegration,
   getMemoryMcpDisplayName,
   formatErrorForLog,
@@ -87,6 +89,30 @@ const FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS = 30_000;
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_MAX_ENTRIES = 1_000;
 const FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS = 10_000;
 const FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS = 60_000;
+const FAST_AGENT_PUBLIC_FETCH_TIMEOUT_GRACE_MS = 5_000;
+
+function resolveFastIntegrationCallTimeoutMs(request: {
+  integrationId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+}): number {
+  if (
+    request.integrationId !== ROOMOTE_MCP_ID ||
+    request.toolName !== 'fetch_public_url'
+  ) {
+    return FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS;
+  }
+
+  const requested =
+    typeof request.args.timeout === 'number' &&
+    Number.isFinite(request.args.timeout) &&
+    request.args.timeout > 0
+      ? Math.min(request.args.timeout, PUBLIC_URL_FETCH_MAX_TIMEOUT_SECONDS)
+      : PUBLIC_URL_FETCH_DEFAULT_TIMEOUT_SECONDS;
+  return (
+    Math.ceil(requested * 1_000) + FAST_AGENT_PUBLIC_FETCH_TIMEOUT_GRACE_MS
+  );
+}
 
 type IntegrationToolCacheEntry = {
   expiresAt: number;
@@ -748,7 +774,7 @@ export async function callFastAgentIntegration(
           toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,
           signal,
         }),
-      FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS,
+      resolveFastIntegrationCallTimeoutMs(request),
       `Fast ${integration.id}/${request.toolName} integration call`,
     );
 

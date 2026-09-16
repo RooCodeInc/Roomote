@@ -1627,6 +1627,29 @@ describe('fast-agent integration broker', () => {
     );
   });
 
+  it('honors the public-fetch timeout beyond the generic Fast integration deadline', async () => {
+    vi.useFakeTimers();
+    mocks.configuredServers = {
+      roomote: { url: 'https://app.example.test/mcp', headers: {} },
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'fetch_public_url', inputSchema: { type: 'object' } },
+    ]);
+    const available = await listFastAgentIntegrations(auditContext);
+    mocks.callMcpTool.mockImplementation(() => new Promise(() => undefined));
+
+    const call = callFastAgentIntegration(auditContext, available, {
+      integrationId: 'roomote',
+      toolName: 'fetch_public_url',
+      args: { url: 'https://public.example/', timeout: 120 },
+    });
+    const timedOut = expect(call).rejects.toThrow(
+      'Fast roomote/fetch_public_url integration call timed out after 125000ms.',
+    );
+    await vi.advanceTimersByTimeAsync(125_000);
+    await timedOut;
+  });
+
   it('omits manage_tasks when its schema cannot safely remove task launch', async () => {
     mocks.configuredServers = {
       roomote: {
