@@ -6,8 +6,10 @@ import {
   type ServiceCredentialPendingMetadata,
   type ServiceCredentialApprovals,
 } from '@roomote/types';
+import { toast } from 'sonner';
 import {
   Button,
+  Check,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -15,6 +17,8 @@ import {
   DialogTitle,
   Input,
   Label,
+  RadioGroup,
+  RadioGroupItem,
   Skeleton,
 } from '@/components/system';
 
@@ -25,6 +29,16 @@ import {
 
 export function ServiceCredentials({ sessionId }: { sessionId: string }) {
   const [open, setOpen] = useState(false);
+  const [integrationName, setIntegrationName] = useState('integration');
+  function handleOpenChange(nextOpen: boolean) {
+    setOpen(nextOpen);
+    if (!nextOpen) setIntegrationName('integration');
+    if (!nextOpen && window.location.hash === INTEGRATION_KEY_DIALOG_HASH) {
+      const url = new URL(window.location.href);
+      url.hash = '';
+      window.history.replaceState(window.history.state, '', url);
+    }
+  }
   useEffect(() => {
     const handleHash = () => {
       if (window.location.hash === INTEGRATION_KEY_DIALOG_HASH) setOpen(true);
@@ -34,37 +48,42 @@ export function ServiceCredentials({ sessionId }: { sessionId: string }) {
     return () => window.removeEventListener('hashchange', handleHash);
   }, [sessionId]);
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
-        if (!nextOpen && window.location.hash === INTEGRATION_KEY_DIALOG_HASH) {
-          const url = new URL(window.location.href);
-          url.hash = '';
-          window.history.replaceState(window.history.state, '', url);
-        }
-      }}
-    >
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         size="lg"
         className="ph-no-capture ph-mask ph-no-recording sentry-block"
       >
         <DialogHeader>
-          <DialogTitle>Approve API key</DialogTitle>
+          <DialogTitle>
+            Add API key integration for {integrationName}
+          </DialogTitle>
           <DialogDescription>
-            Enter it here, never in chat. Manage the saved integration under
-            Settings → Integrations.
+            The key is encrypted in our deployment database and never sent to
+            the provider. Manage in Settings → Integrations.
           </DialogDescription>
         </DialogHeader>
         {open ? (
-          <ServiceCredentialsForm key={sessionId} sessionId={sessionId} />
+          <ServiceCredentialsForm
+            key={sessionId}
+            sessionId={sessionId}
+            onCancel={() => handleOpenChange(false)}
+            onIntegrationNameChange={setIntegrationName}
+          />
         ) : null}
       </DialogContent>
     </Dialog>
   );
 }
 
-function ServiceCredentialsForm({ sessionId }: { sessionId: string }) {
+function ServiceCredentialsForm({
+  sessionId,
+  onCancel,
+  onIntegrationNameChange,
+}: {
+  sessionId: string;
+  onCancel: () => void;
+  onIntegrationNameChange: (name: string) => void;
+}) {
   const [pending, setPending] = useState<ServiceCredentialPendingMetadata[]>(
     [],
   );
@@ -73,7 +92,6 @@ function ServiceCredentialsForm({ sessionId }: { sessionId: string }) {
   const [available, setAvailable] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [inputVersion, setInputVersion] = useState(0);
   const formRef = useRef<HTMLFormElement>(null);
   const endpoint = `/api/sessions/${encodeURIComponent(sessionId)}/secrets`;
@@ -97,6 +115,7 @@ function ServiceCredentialsForm({ sessionId }: { sessionId: string }) {
         if (controller.signal.aborted) return;
         setPending(data.pending);
         setSelectedRef(data.pending[0]?.pendingRef ?? '');
+        onIntegrationNameChange(data.pending[0]?.label ?? 'integration');
         setAvailable(true);
       } catch {
         if (!controller.signal.aborted)
@@ -108,7 +127,7 @@ function ServiceCredentialsForm({ sessionId }: { sessionId: string }) {
       }
     })();
     return () => controller.abort();
-  }, [endpoint]);
+  }, [endpoint, onIntegrationNameChange]);
 
   return (
     <div className="space-y-4">
@@ -116,11 +135,6 @@ function ServiceCredentialsForm({ sessionId }: { sessionId: string }) {
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
-        </p>
-      ) : null}
-      {notice ? (
-        <p role="status" className="text-sm">
-          {notice}
         </p>
       ) : null}
       {available ? (
@@ -138,6 +152,11 @@ function ServiceCredentialsForm({ sessionId }: { sessionId: string }) {
                 onChange={(event) => {
                   clearForm();
                   setSelectedRef(event.target.value);
+                  onIntegrationNameChange(
+                    pending.find(
+                      (item) => item.pendingRef === event.target.value,
+                    )?.label ?? 'integration',
+                  );
                   setError(null);
                 }}
               >
@@ -182,7 +201,6 @@ function ServiceCredentialsForm({ sessionId }: { sessionId: string }) {
                 }
                 setBusy(true);
                 setError(null);
-                setNotice(null);
                 try {
                   // Keep the credential out of conversation state and telemetry.
                   const request = fetch(endpoint, {
@@ -195,20 +213,10 @@ function ServiceCredentialsForm({ sessionId }: { sessionId: string }) {
                   clearForm();
                   const response = await request;
                   if (!response.ok) throw new Error('Unavailable');
-                  const data = (await response.json()) as {
-                    resumed: boolean;
-                  };
-                  const remaining = pending.filter(
-                    (item) => item.pendingRef !== selected.pendingRef,
-                  );
-                  setPending(remaining);
-                  setSelectedRef(remaining[0]?.pendingRef ?? '');
+                  await response.json();
                   notifyIntegrationKeysChanged();
-                  setNotice(
-                    data.resumed
-                      ? 'Integration saved. The Session has been notified without sharing your key.'
-                      : 'Integration saved. The Session could not be notified. Ask the agent to check list_integration_keys and continue.',
-                  );
+                  toast.success('Integration saved.');
+                  onCancel();
                 } catch {
                   clearForm();
                   setError(
@@ -220,26 +228,6 @@ function ServiceCredentialsForm({ sessionId }: { sessionId: string }) {
               }}
             >
               <fieldset disabled={busy} className="space-y-3">
-                <h3 className="break-words text-sm font-medium">
-                  Add your {selected.label} API key
-                </h3>
-                <p
-                  id="service-credential-destination"
-                  className="break-all text-sm text-muted-foreground"
-                >
-                  For {new URL(selected.origin).origin} -{' '}
-                  {selected.allowedMethods.join(', ')}
-                  {selected.allowedMethods.some(
-                    (method) => method !== 'GET' && method !== 'HEAD',
-                  )
-                    ? ' (allows writes)'
-                    : ''}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {selected.lifetimeHours
-                    ? `Expires ${selected.lifetimeHours} hours after you save it.`
-                    : 'Kept until you revoke it under Settings → Integrations.'}
-                </p>
                 <div className="space-y-1">
                   <Label htmlFor="service-credential-value">API key</Label>
                   <Input
@@ -255,34 +243,36 @@ function ServiceCredentialsForm({ sessionId }: { sessionId: string }) {
                     className="ph-no-capture ph-mask sentry-mask"
                   />
                 </div>
-                <div className="space-y-1">
-                  <Label htmlFor="service-credential-visibility">
+                <div className="space-y-2">
+                  <Label id="service-credential-visibility-label">
                     Who can use this integration?
                   </Label>
-                  <select
+                  <RadioGroup
                     key={selected.pendingRef}
-                    id="service-credential-visibility"
                     name="visibility"
                     defaultValue={selected.visibility}
-                    className="h-9 w-full rounded-md border bg-card px-3 text-sm"
+                    aria-labelledby="service-credential-visibility-label"
+                    className="grid grid-cols-2 gap-3"
                   >
-                    <option value="deployment">
+                    <Label className="flex cursor-pointer items-center gap-2 rounded-md border p-3 font-normal">
+                      <RadioGroupItem value="owner" />
+                      Only me
+                    </Label>
+                    <Label className="flex cursor-pointer items-center gap-2 rounded-md border p-3 font-normal">
+                      <RadioGroupItem value="deployment" />
                       Everyone in this deployment
-                    </option>
-                    <option value="owner">Only me</option>
-                  </select>
-                  <p className="text-sm text-muted-foreground">
-                    Anyone in this deployment can make requests with a shared
-                    integration. The API key always stays server-side.
-                  </p>
+                    </Label>
+                  </RadioGroup>
                 </div>
-                <Button
-                  type="submit"
-                  disabled={busy}
-                  aria-describedby="service-credential-destination"
-                >
-                  Save integration
-                </Button>
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={onCancel}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={busy}>
+                    <Check />
+                    Save
+                  </Button>
+                </div>
               </fieldset>
             </form>
           ) : (

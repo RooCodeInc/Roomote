@@ -1,6 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ServiceCredentials } from './ServiceCredentials';
 
+const { toastSuccessMock } = vi.hoisted(() => ({
+  toastSuccessMock: vi.fn(),
+}));
+
+vi.mock('sonner', () => ({
+  toast: { success: toastSuccessMock },
+}));
+
 const sessionId = '6a1f8f1e-0000-4000-8000-000000000006';
 const secretRef = '6a1f8f1e-0000-4000-8000-000000000007';
 const pendingRef = '6a1f8f1e-0000-4000-8000-000000000008';
@@ -19,6 +27,7 @@ const pending = { ...policy, pendingRef };
 const metadata = { ...policy, secretRef, revokedAt: null };
 const fetchMock = vi.fn();
 beforeEach(() => {
+  toastSuccessMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockReset();
   fetchMock.mockImplementation(
@@ -52,7 +61,7 @@ it('does not approve while requests are loading', async () => {
   render(<ServiceCredentials sessionId={sessionId} />);
   expect(screen.queryByLabelText('API key')).not.toBeInTheDocument();
   expect(
-    screen.queryByRole('button', { name: 'Save integration' }),
+    screen.queryByRole('button', { name: 'Save' }),
   ).not.toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledOnce();
   expect(fetchMock.mock.calls[0]![1].method).toBeUndefined();
@@ -60,19 +69,21 @@ it('does not approve while requests are loading', async () => {
   await screen.findByLabelText('API key');
   expect(fetchMock).toHaveBeenCalledOnce();
 });
-it('prefills a single-key consent flow and reports server-scheduled continuation without another client request', async () => {
+it('prefills a single-key consent flow, then dismisses with a toast while the server continues it', async () => {
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   const error = vi.spyOn(console, 'error').mockImplementation(() => {});
   await open();
   expect(
-    screen.getByRole('heading', { name: 'Add your Demo service API key' }),
+    screen.getByRole('heading', {
+      name: 'Add API key integration for Demo service',
+    }),
   ).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   expect(
-    screen.getByRole('button', { name: 'Save integration' }),
-  ).toBeEnabled();
-  expect(
-    screen.getByRole('button', { name: 'Save integration' }),
-  ).toHaveAccessibleDescription('For https://api.example.com:8443 - GET, HEAD');
+    screen.getByText(
+      'The key is encrypted in our deployment database and never sent to the provider. Manage in Settings → Integrations.',
+    ),
+  ).toBeInTheDocument();
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(
     screen.queryByText(
@@ -82,12 +93,31 @@ it('prefills a single-key consent flow and reports server-scheduled continuation
   expect(screen.queryByText('authorization')).not.toBeInTheDocument();
   expect(screen.queryByText('"Bearer "')).not.toBeInTheDocument();
   expect(document.querySelectorAll('input[type="password"]')).toHaveLength(1);
-  expect(screen.getByLabelText('Who can use this integration?')).toHaveValue(
-    'deployment',
-  );
   expect(
-    screen.getByText(/Anyone in this deployment can make requests/),
+    screen.getByRole('radiogroup', {
+      name: 'Who can use this integration?',
+    }),
   ).toBeInTheDocument();
+  expect(screen.getByRole('radio', { name: 'Only me' })).not.toBeChecked();
+  expect(
+    screen.getByRole('radio', { name: 'Everyone in this deployment' }),
+  ).toBeChecked();
+  expect(
+    screen.queryByText(/Anyone in this deployment can make requests/),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(/For https:\/\/api\.example\.com:8443/),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(/Kept until|Expires .* hours after/),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('heading', { name: /Add your .* API key/ }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Cancel' })).toHaveAttribute(
+    'type',
+    'button',
+  );
   const password = screen.getByLabelText('API key');
   expect(password).toHaveAttribute('autocomplete', 'off');
   expect(password.closest('[role="dialog"]')).toHaveClass(
@@ -104,10 +134,12 @@ it('prefills a single-key consent flow and reports server-scheduled continuation
   );
   const changed = vi.fn();
   window.addEventListener('roomote:integration-keys-changed', changed);
-  fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
-  expect(await screen.findByRole('status')).toHaveTextContent(
-    'Integration saved. The Session has been notified without sharing your key.',
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
   );
+  expect(toastSuccessMock).toHaveBeenCalledOnce();
+  expect(toastSuccessMock).toHaveBeenCalledWith('Integration saved.');
   expect(changed).toHaveBeenCalledOnce();
   window.removeEventListener('roomote:integration-keys-changed', changed);
   expect(fetchMock).toHaveBeenLastCalledWith(
@@ -154,14 +186,9 @@ it.each([
       ),
     );
     await open();
-    const scope = allowedMethods.some(
-      (method) => !['GET', 'HEAD'].includes(method),
-    )
-      ? ' (allows writes)'
-      : '';
-    const destination = document.getElementById(
-      'service-credential-destination',
-    )!.textContent;
+    expect(
+      document.getElementById('service-credential-destination'),
+    ).toBeNull();
     fill();
     fetchMock.mockResolvedValueOnce(
       new Response(
@@ -172,17 +199,14 @@ it.each([
         { status: 201 },
       ),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
-    await screen.findByRole('status');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledOnce());
     expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toEqual({
       pendingRef,
       secret: credential,
       allowedMethods,
       visibility: 'deployment',
     });
-    expect(destination).toBe(
-      `For ${policy.origin} - ${allowedMethods.join(', ')}${scope}`,
-    );
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(
       fetchMock.mock.calls.every(
@@ -195,6 +219,23 @@ it.each([
     ).not.toBeInTheDocument();
   },
 );
+it('submits the owner visibility when Only me is selected', async () => {
+  await open();
+  fireEvent.click(screen.getByRole('radio', { name: 'Only me' }));
+  fill();
+  fetchMock.mockResolvedValueOnce(
+    new Response(JSON.stringify({ secret: metadata, resumed: true }), {
+      status: 201,
+    }),
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledOnce());
+  expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toEqual(
+    expect.objectContaining({ visibility: 'owner' }),
+  );
+});
 it.each([401, 403, 500])(
   'does not echo failed loading response %s',
   async (status) => {
@@ -243,12 +284,12 @@ it.each([
     );
     await open();
     expect(
-      screen.getByRole('heading', { name: `Add your ${label} API key` }),
+      screen.getByRole('heading', {
+        name: `Add API key integration for ${label}`,
+      }),
     ).toBeInTheDocument();
     expect(document.querySelector('img')).toBeNull();
-    expect(
-      screen.getByText(`For ${canonicalOrigin} - GET, HEAD`),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(`For ${canonicalOrigin} - GET, HEAD`)).toBeNull();
     expect(fetchMock).toHaveBeenCalledOnce();
     fill();
     expect(
@@ -266,7 +307,7 @@ it.each([
     expect(fetchMock).toHaveBeenCalledOnce();
   },
 );
-it('clears the revealed key immediately on save and leaves the next request masked', async () => {
+it('clears the revealed key immediately and closes after save succeeds', async () => {
   fetchMock.mockResolvedValueOnce(
     new Response(
       JSON.stringify({
@@ -287,24 +328,20 @@ it('clears the revealed key immediately on save and leaves the next request mask
       finish = resolve;
     }),
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
   expect(screen.getByLabelText('API key')).toHaveValue('');
   expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password');
-  expect(
-    screen.getByRole('button', { name: 'Save integration' }),
-  ).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   finish(
     new Response(JSON.stringify({ secret: metadata, resumed: true }), {
       status: 201,
     }),
   );
-  await screen.findByRole('status');
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+  );
   expect(fetchMock).toHaveBeenCalledTimes(2);
-  expect(
-    screen.getByRole('heading', { name: 'Add your Second API key' }),
-  ).toBeInTheDocument();
-  expect(screen.getByLabelText('API key')).toHaveValue('');
-  expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password');
+  expect(toastSuccessMock).toHaveBeenCalledWith('Integration saved.');
 });
 it('clears key and reveal state when selecting a different prepared request', async () => {
   fetchMock.mockResolvedValueOnce(
@@ -332,8 +369,8 @@ it('clears key and reveal state when selecting a different prepared request', as
   expect(screen.getByLabelText('API key')).toHaveValue('');
   expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password');
   expect(
-    screen.getByText('For https://second.example - GET, HEAD'),
-  ).toBeInTheDocument();
+    screen.queryByText('For https://second.example - GET, HEAD'),
+  ).not.toBeInTheDocument();
 });
 it('clears the key and asks for a new request when the prepared approval has expired', async () => {
   fetchMock.mockResolvedValueOnce(
@@ -346,7 +383,7 @@ it('clears the key and asks for a new request when the prepared approval has exp
   );
   await open();
   fill();
-  fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
   expect(await screen.findByRole('alert')).toHaveTextContent(
     'This request has expired',
   );
@@ -360,8 +397,9 @@ it.each([400, 500])(
     fill();
     fireEvent.click(screen.getByRole('button', { name: 'Show value' }));
     fetchMock.mockResolvedValueOnce(new Response(credential, { status }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await screen.findByRole('alert');
+    expect(toastSuccessMock).not.toHaveBeenCalled();
     expect(screen.getByLabelText('API key')).toHaveValue('');
     expect(screen.getByLabelText('API key')).toHaveAttribute(
       'type',
@@ -392,7 +430,7 @@ it('does not expose approved-secret management metadata or controls', async () =
   expect(screen.queryByText('"Bearer "')).not.toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledOnce();
 });
-it('keeps saved status with native-tool fallback when server continuation was not scheduled', async () => {
+it('closes with the same success toast when the saved response reports no scheduled continuation', async () => {
   await open();
   fill();
   fetchMock.mockResolvedValueOnce(
@@ -400,21 +438,15 @@ it('keeps saved status with native-tool fallback when server continuation was no
       status: 201,
     }),
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
-  expect(await screen.findByRole('status')).toHaveTextContent(
-    'Integration saved. The Session could not be notified. Ask the agent to check list_integration_keys and continue.',
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
   );
-  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  expect(fetchMock).toHaveBeenCalledTimes(2);
-  expect(screen.queryByLabelText('API key')).not.toBeInTheDocument();
-  expect(screen.queryByText('Manage approved secrets')).not.toBeInTheDocument();
-  expect(
-    screen.queryByRole('button', { name: 'Revoke' }),
-  ).not.toBeInTheDocument();
+  expect(toastSuccessMock).toHaveBeenCalledWith('Integration saved.');
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(document.body.textContent).not.toContain(credential);
 });
-it('opens only from approval links and clears the hash when closed', async () => {
+it('opens only from approval links and Cancel closes without submitting or adding history', async () => {
   render(<ServiceCredentials sessionId={sessionId} />);
   expect(
     screen.queryByRole('button', { name: 'Integration keys' }),
@@ -424,11 +456,12 @@ it('opens only from approval links and clears the hash when closed', async () =>
   await screen.findByLabelText('API key');
   const historyLength = window.history.length;
   const replaceState = vi.spyOn(window.history, 'replaceState');
-  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   await waitFor(() => expect(replaceState).toHaveBeenCalledOnce());
   const replacementUrl = replaceState.mock.calls[0]![2] as URL;
   expect(replacementUrl.hash).toBe('');
   expect(window.history.length).toBe(historyLength);
+  expect(fetchMock).toHaveBeenCalledOnce();
   window.location.hash = '#integrations';
   fireEvent(window, new HashChangeEvent('hashchange'));
   await screen.findByLabelText('API key');

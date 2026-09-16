@@ -468,6 +468,7 @@ describe('FastSessionTranscript', () => {
               headerName: 'authorization',
               headerPrefix: 'Bearer ',
               allowedMethods: ['GET', 'HEAD'],
+              visibility: 'deployment',
               expiresAt: new Date(Date.now() + 3600000).toISOString(),
               revokedAt: null,
               createdAt: new Date().toISOString(),
@@ -527,9 +528,9 @@ describe('FastSessionTranscript', () => {
         { status: 201 },
       ),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
-    await screen.findByText(
-      'Integration saved. The Session has been notified without sharing your key.',
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
     );
     expect(replyMutate).not.toHaveBeenCalled();
     expect(preparePromptAttachments).not.toHaveBeenCalled();
