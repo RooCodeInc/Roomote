@@ -1,5 +1,6 @@
 import {
   act,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -2835,14 +2836,15 @@ describe('FastSessionTranscript', () => {
         const focusedHint = screen.getByRole('button', {
           name: 'Insert suggested message',
         });
-        expect(
-          fireEvent.pointerDown(focusedHint, {
-            pointerType: action,
-            cancelable: true,
-          }),
-        ).toBe(false);
+        const pointerDown = createEvent.pointerDown(focusedHint, {
+          cancelable: true,
+        });
+        Object.defineProperty(pointerDown, 'pointerType', { value: action });
+        expect(fireEvent(focusedHint, pointerDown)).toBe(false);
         expect(input).toHaveFocus();
-        fireEvent.click(focusedHint);
+        if (action === 'mouse') {
+          fireEvent.click(focusedHint);
+        }
       } else {
         fireEvent.keyDown(input, { key: action, code: action });
       }
