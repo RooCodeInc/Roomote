@@ -243,10 +243,11 @@ describe('automated Slack thread replies', () => {
 
     await handleMessageOrAppMentionEvent({ event: replyEvent(), context });
 
+    await vi.waitFor(() =>
+      expect(mocks.getFastAgentSessionOwner).toHaveBeenCalledTimes(1),
+    );
     expect(mocks.processFastAgentMessage).not.toHaveBeenCalled();
     expect(mocks.automationLaunchIdentity).not.toHaveBeenCalled();
-    // One lookup from this router, one from the ordinary follow-up path.
-    expect(mocks.getFastAgentSessionOwner).toHaveBeenCalledTimes(2);
   });
 
   it('ignores a reply from a different app than the root author', async () => {

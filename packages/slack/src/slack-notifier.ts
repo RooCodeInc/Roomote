@@ -515,6 +515,7 @@ export class SlackNotifier {
         ? { thread_ts: msg.thread_ts }
         : {}),
       bot_id: msg.bot_id,
+      ...(msg.app_id ? { app_id: msg.app_id } : {}),
       type: msg.type,
       ...(msg.blocks ? { blocks: msg.blocks } : {}),
       ...(msg.attachments ? { attachments: msg.attachments } : {}),

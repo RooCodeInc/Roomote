@@ -2209,6 +2209,47 @@ describe('SlackNotifier', () => {
       ]);
     });
 
+    it('keeps the app id on app-authored thread messages', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          messages: [
+            {
+              user: 'Uworkflow',
+              text: 'Suite — tests need updates',
+              ts: '111.000',
+              type: 'message',
+              bot_id: 'B123',
+              app_id: 'A123',
+            },
+            {
+              user: 'Uhuman',
+              text: 'thanks',
+              ts: '112.000',
+              type: 'message',
+            },
+          ],
+        }),
+      });
+      vi.spyOn(
+        SlackNotifier.prototype as unknown as {
+          getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+        },
+        'getUsersInfo',
+      ).mockResolvedValue(new Map([['Uhuman', 'Human']]));
+
+      const messages = await notifier.fetchThreadMessages({
+        channel: 'C123',
+        threadTs: '111.000',
+      });
+
+      expect(messages[0]).toEqual(
+        expect.objectContaining({ bot_id: 'B123', app_id: 'A123' }),
+      );
+      expect(messages[1]).not.toHaveProperty('app_id');
+    });
+
     it('returns Roomote bot messages by default when no filtering opt-in is requested', async () => {
       const getUsersInfoSpy = vi
         .spyOn(

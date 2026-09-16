@@ -101,9 +101,11 @@ const AUTOMATED_THREAD_REPLY_WINDOW_SECONDS = 15 * 60;
 /**
  * A reply can land before the automated mention that summoned Roomote has
  * finished binding its Session. While that mention's routing lock is held
- * the binding is on its way, so the owner lookup is retried briefly.
+ * the binding is on its way, so the owner lookup keeps retrying for as
+ * long as the lock can live; the lock expiring ends the wait.
  */
-const AUTOMATED_THREAD_REPLY_BINDING_RETRY = { attempts: 12, delayMs: 250 };
+const AUTOMATED_THREAD_REPLY_BINDING_POLL_MS = 250;
+const AUTOMATED_THREAD_REPLY_BINDING_MAX_MS = ROUTING_LOCK_TTL_SECONDS * 1000;
 
 async function getBoundSlackFastAgentSessionOwner(params: {
   teamId: string;
@@ -1085,11 +1087,8 @@ async function waitForAutomatedThreadSessionOwner(params: {
 }): ReturnType<typeof getBoundSlackFastAgentSessionOwner> {
   const redis = getRedis();
   const routingLockKey = `${SLACK_ROUTING_LOCK_PREFIX}${params.threadId}`;
-  for (
-    let attempt = 0;
-    attempt < AUTOMATED_THREAD_REPLY_BINDING_RETRY.attempts;
-    attempt += 1
-  ) {
+  const deadline = Date.now() + AUTOMATED_THREAD_REPLY_BINDING_MAX_MS;
+  while (true) {
     const owner = await getBoundSlackFastAgentSessionOwner(params);
     if (owner) {
       return owner;
@@ -1097,14 +1096,13 @@ async function waitForAutomatedThreadSessionOwner(params: {
     const mentionRoutingInFlight = await redis
       .get(routingLockKey)
       .catch(() => null);
-    if (!mentionRoutingInFlight) {
+    if (!mentionRoutingInFlight || Date.now() >= deadline) {
       return null;
     }
     await new Promise((resolve) =>
-      setTimeout(resolve, AUTOMATED_THREAD_REPLY_BINDING_RETRY.delayMs),
+      setTimeout(resolve, AUTOMATED_THREAD_REPLY_BINDING_POLL_MS),
     );
   }
-  return null;
 }
 
 async function maybeRouteAutomatedThreadReply(params: {
@@ -1112,7 +1110,7 @@ async function maybeRouteAutomatedThreadReply(params: {
   context: SlackWebhookContext;
 }): Promise<boolean> {
   const { event, context } = params;
-  const { slackInstallation, slack, teamId } = context;
+  const { slackInstallation, slack } = context;
 
   if (!isAutomatedThreadReplyCandidate(event, slackInstallation)) {
     return false;
@@ -1127,13 +1125,39 @@ async function maybeRouteAutomatedThreadReply(params: {
     return false;
   }
 
+  // The webhook is acknowledged when this handler returns, and the Session
+  // binding may still be seconds away; the wait and the Fast hand-off run
+  // detached so the request never holds for it.
+  deliverAutomatedThreadReply({
+    event: { ...event, thread_ts: threadId },
+    context,
+  }).catch((error) => {
+    console.error(
+      `❌ Background automated thread reply delivery failed for thread ${threadId}:`,
+      error instanceof Error ? error.message : String(error),
+    );
+  });
+  return true;
+}
+
+async function deliverAutomatedThreadReply(params: {
+  event: SlackEvent & { thread_ts: string };
+  context: SlackWebhookContext;
+}): Promise<void> {
+  const { event, context } = params;
+  const { slackInstallation, slack, teamId } = context;
+  const threadId = event.thread_ts;
+
   const sessionOwner = await waitForAutomatedThreadSessionOwner({
     teamId,
     channelId: event.channel,
     threadId,
   });
   if (!sessionOwner) {
-    return false;
+    apiLogger.debug(
+      `[SlackWebhook] Automated thread reply dropped: no Session bound for thread ${threadId}`,
+    );
+    return;
   }
 
   const launchIdentity = await getSlackAutomationLaunchIdentity({
@@ -1182,8 +1206,6 @@ async function maybeRouteAutomatedThreadReply(params: {
       `[SlackWebhook] Automated thread reply Fast entry not accepted (${fastStart.reason}) for thread ${threadId}`,
     );
   }
-
-  return true;
 }
 
 async function startAutomatedAppMentionTaskWithLock(params: {
