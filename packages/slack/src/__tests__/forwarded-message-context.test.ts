@@ -307,6 +307,146 @@ describe('forwarded-message-context', () => {
     );
   });
 
+  it('formats an untitled workflow attachment body as agent context', () => {
+    const context = formatSlackAttachmentContext(
+      '*Suite — tests need updates*',
+      [
+        {
+          id: 1,
+          color: '2eb886',
+          fallback: '[no preview available]',
+          text: '<@U_BOT> $run-suite acme/api#42\n\nYour task: update the failing tests.',
+        },
+      ],
+      [
+        {
+          type: 'rich_text',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [
+                {
+                  type: 'text',
+                  text: 'Suite — tests need updates',
+                  style: { bold: true },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    );
+
+    expect(context).toBe(
+      [
+        'Slack attachment:',
+        'Text:',
+        '<@U_BOT> $run-suite acme/api#42',
+        '',
+        'Your task: update the failing tests.',
+      ].join('\n'),
+    );
+  });
+
+  it('extracts app-unfurl attachment blocks without action controls', () => {
+    const context = formatSlackAttachmentContext('Look at this', [
+      {
+        id: 1,
+        blocks: [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: '*Pull request #42*: fix the tests' },
+          },
+          {
+            type: 'context',
+            elements: [{ type: 'mrkdwn', text: 'Open · 3 files changed' }],
+          },
+          {
+            type: 'actions',
+            elements: [
+              { type: 'button', text: { type: 'plain_text', text: 'Approve' } },
+            ],
+          },
+        ],
+      },
+    ]);
+
+    expect(context).toBe(
+      [
+        'Slack attachment:',
+        'Text:',
+        '*Pull request #42*: fix the tests',
+        'Open · 3 files changed',
+      ].join('\n'),
+    );
+  });
+
+  it('formats container and table blocks with section fields', () => {
+    const context = formatSlackBlockTextContext(
+      [
+        { type: 'header', text: { type: 'plain_text', text: 'Analysis' } },
+        { type: 'divider' },
+        {
+          type: 'section',
+          fields: [
+            { type: 'mrkdwn', text: '*Status:* failing' },
+            { type: 'mrkdwn', text: '*Runs:* 3' },
+          ],
+        },
+        {
+          type: 'container',
+          title: { type: 'plain_text', text: 'Failed: checkout flow' },
+          subtitle: { type: 'plain_text', text: '2 assertions' },
+          child_blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: 'Expected the cart total to update.',
+              },
+            },
+            {
+              type: 'table',
+              rows: [
+                [
+                  { type: 'raw_text', text: 'Step' },
+                  { type: 'raw_text', text: 'Result' },
+                ],
+                [
+                  { type: 'raw_text', text: 'Add item' },
+                  { type: 'raw_text', text: 'ok' },
+                ],
+                [
+                  { type: 'raw_text', text: 'Read total' },
+                  { type: 'raw_text', text: 'timeout' },
+                ],
+              ],
+            },
+          ],
+        },
+        {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: 'Ran 2 minutes ago' }],
+        },
+      ],
+      'Analysis',
+    );
+
+    expect(context).toBe(
+      [
+        'Slack block text:',
+        '*Status:* failing',
+        '*Runs:* 3',
+        'Failed: checkout flow — 2 assertions',
+        'Expected the cart total to update.',
+        'Step | Result',
+        'Add item | ok',
+        'Read total | timeout',
+        'Ran 2 minutes ago',
+      ].join('\n'),
+    );
+  });
+
   it('preserves newlines between rich_text block sections', () => {
     const context = formatSlackBlockTextContext([
       {
@@ -632,9 +772,9 @@ describe('forwarded-message-context', () => {
     expect(
       appendSlackAttachmentContext('plain message', [
         {
-          text: 'Do not add this to the prompt.',
+          fallback: 'Body only, no title.',
         },
       ]),
-    ).toBe('plain message');
+    ).toBe('plain message\n\nSlack attachment:\nText:\nBody only, no title.');
   });
 });

@@ -17,6 +17,7 @@ import {
   getSlackThreadReplyFooterMessageTs,
   withSlackThreadReplyFooterLock,
   resolveCurrentSlackMessageFiles,
+  formatSlackAttachmentContext,
   type SlackEvent,
   type SlackNotifier,
 } from '@roomote/slack';
@@ -46,6 +47,8 @@ import {
   mentionsSlackUserOtherThanBotOrUser,
 } from '../helpers/mention-routing.js';
 
+const AUTOMATED_THREAD_SETTLE_MS = 2_500;
+
 export async function processFastAgentMessage(params: {
   event: SlackEvent;
   slack: SlackNotifier;
@@ -61,6 +64,8 @@ export async function processFastAgentMessage(params: {
   originSessionId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
   onRejected?: () => void;
+  /** How long to wait for an automated author's thread replies to land. */
+  automatedThreadSettleMs?: number;
 }): Promise<void> {
   const {
     event,
@@ -104,31 +109,51 @@ export async function processFastAgentMessage(params: {
     event.channel_type !== 'im' &&
     event.channel_type !== 'mpim' &&
     mentionsSlackUserOtherThanBotOrUser(event, roomoteSlackUserId, event.user);
-  const agentContext = needsPeerCaution
-    ? [
-        event.agentContext,
-        'Untrusted supplemental context inferred from this Slack message, not a user-authored instruction: This message mentions another person and might not be for you. Human-to-human interaction may be beginning. From now on in this conversation, unless you are addressed directly (including by name, a reply to you, or a clear contextual follow-up), use ignore_event without sending a reply, reacting, or taking action. When directly addressed, respond normally. This uncertain hint does not override existing instructions.',
-      ]
-        .filter(Boolean)
-        .join('\n\n')
-    : event.agentContext;
+  const buildAgentContext = (messageContext: string | undefined) =>
+    needsPeerCaution
+      ? [
+          messageContext,
+          'Untrusted supplemental context inferred from this Slack message, not a user-authored instruction: This message mentions another person and might not be for you. Human-to-human interaction may be beginning. From now on in this conversation, unless you are addressed directly (including by name, a reply to you, or a clear contextual follow-up), use ignore_event without sending a reply, reacting, or taking action. When directly addressed, respond normally. This uncertain hint does not override existing instructions.',
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+      : messageContext;
 
+  const fetchThreadContext = () =>
+    slack
+      .fetchThreadMessages({
+        channel: event.channel,
+        threadTs: threadId,
+      })
+      .catch((error: unknown) => {
+        console.error(
+          `[SlackWebhook] Failed to fetch thread context for fast agent: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return [] as Awaited<ReturnType<typeof slack.fetchThreadMessages>>;
+      });
   // Every Slack round trip from the control plane costs a few hundred
   // milliseconds. Start the thread history lookup as soon as the turn is
   // serialized so it overlaps with session resolution.
-  const threadContextPromise: Promise<
-    Awaited<ReturnType<typeof slack.fetchThreadMessages>>
-  > = slack
-    .fetchThreadMessages({
-      channel: event.channel,
-      threadTs: threadId,
-    })
-    .catch((error: unknown) => {
-      console.error(
-        `[SlackWebhook] Failed to fetch thread context for fast agent: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return [];
-    });
+  const threadContextPromise = fetchThreadContext().then(async (messages) => {
+    // A workflow or app that summons Roomote usually posts its detail as
+    // thread replies right after the parent, and the mention arrives before
+    // those replies exist. When an automated author's thread is still just
+    // the parent, look once more after a short settle so the turn sees the
+    // analysis it was told to read instead of a headline.
+    const automatedAuthor = Boolean(event.bot_id || event.app_id);
+    const onlyParent = messages.every((message) => message.ts === threadId);
+    if (!automatedAuthor || !onlyParent) {
+      return messages;
+    }
+    await new Promise((resolve) =>
+      setTimeout(
+        resolve,
+        params.automatedThreadSettleMs ?? AUTOMATED_THREAD_SETTLE_MS,
+      ),
+    );
+    const settled = await fetchThreadContext();
+    return settled.length > messages.length ? settled : messages;
+  });
 
   let releaseCanonicalFastAgentLock: Awaited<
     ReturnType<typeof acquireFastAgentTurnLock>
@@ -163,6 +188,19 @@ export async function processFastAgentMessage(params: {
     const currentMessage = threadContext.find(
       (message) => message.ts === event.ts,
     );
+    // The mention event may omit the attachments and blocks that carry a
+    // workflow message's actual instructions; the fetched copy of the same
+    // message has them. Fall back to it when the event yielded no context.
+    const currentMessageContext =
+      event.agentContext ??
+      (currentMessage
+        ? formatSlackAttachmentContext(
+            baseQuestion,
+            currentMessage.attachments,
+            currentMessage.blocks,
+          )
+        : undefined);
+    const agentContext = buildAgentContext(currentMessageContext);
     const currentMessageFiles = resolveCurrentSlackMessageFiles({
       currentMessageTs: event.ts,
       eventFiles: event.files,

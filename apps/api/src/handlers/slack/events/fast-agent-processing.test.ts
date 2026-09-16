@@ -612,6 +612,133 @@ describe('processFastAgentMessage', () => {
     expect(slack.normalizeIncomingText).not.toHaveBeenCalled();
   });
 
+  it('derives context from the fetched parent when the event carried none', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        {
+          ts: '100.001',
+          user: 'U123',
+          text: '<@UROOMOTE> *Suite — tests need updates*',
+          attachments: [
+            {
+              id: 1,
+              fallback: '[no preview available]',
+              text: '<@UROOMOTE> $run-suite acme/api#42\n\nYour task: update the failing tests.',
+            },
+          ],
+        },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@UROOMOTE> *Suite — tests need updates*',
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      roomoteSlackUserId: 'UROOMOTE',
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: '<@UROOMOTE> *Suite — tests need updates*',
+        currentMessageAgentContext: [
+          'Slack attachment:',
+          'Text:',
+          '<@UROOMOTE> $run-suite acme/api#42',
+          '',
+          'Your task: update the failing tests.',
+        ].join('\n'),
+      }),
+    );
+  });
+
+  it('refetches an automated thread once when the mention outran its replies', async () => {
+    const parent = {
+      ts: '100.000',
+      bot_id: 'B123',
+      text: '<@UROOMOTE> *Suite — tests need updates*',
+    };
+    const reply = {
+      ts: '100.002',
+      bot_id: 'B123',
+      text: 'Analysis: the checkout assertion timed out.',
+    };
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi
+        .fn()
+        .mockResolvedValueOnce([parent])
+        .mockResolvedValueOnce([parent, reply]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        bot_id: 'B123',
+        text: '<@UROOMOTE> *Suite — tests need updates*',
+        ts: '100.000',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      roomoteSlackUserId: 'UROOMOTE',
+      automatedThreadSettleMs: 1,
+    });
+
+    expect(slack.fetchThreadMessages).toHaveBeenCalledTimes(2);
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadContext: [
+          expect.objectContaining({
+            ts: '100.002',
+            text: 'Analysis: the checkout assertion timed out.',
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('does not refetch a human thread that has only its parent', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        { ts: '100.000', user: 'U123', text: '<@UROOMOTE> hello' },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@UROOMOTE> hello',
+        ts: '100.000',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      roomoteSlackUserId: 'UROOMOTE',
+      automatedThreadSettleMs: 1,
+    });
+
+    expect(slack.fetchThreadMessages).toHaveBeenCalledOnce();
+  });
+
   it('resumes the canonical Fast session bound to a delayed Slack root', async () => {
     const canonicalConversation = {
       surface: 'slack' as const,

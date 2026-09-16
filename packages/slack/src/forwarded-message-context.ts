@@ -280,6 +280,41 @@ function formatDataVisualizationBlockText(
   ].join('\n');
 }
 
+function getSlackTableCellText(cell: unknown): string {
+  if (typeof cell === 'string') {
+    return cell;
+  }
+  if (!isRecord(cell)) {
+    return '';
+  }
+  if (typeof cell.text === 'string') {
+    return cell.text;
+  }
+  if (isRecord(cell.text) && typeof cell.text.text === 'string') {
+    return cell.text.text;
+  }
+  const elements = Array.isArray(cell.elements) ? cell.elements : [];
+  return elements
+    .map((element) => extractPlainTextFromRichTextElement(element))
+    .filter((part) => part.length > 0)
+    .join(' ');
+}
+
+/** Renders a Block Kit table as one pipe-separated line per row. */
+function formatSlackTableBlockText(
+  block: Record<string, unknown>,
+): string | undefined {
+  const rows = Array.isArray(block.rows) ? block.rows : [];
+  const lines = rows
+    .map((row) =>
+      (Array.isArray(row) ? row : [])
+        .map((cell) => getSlackTableCellText(cell).replace(/\s+/g, ' ').trim())
+        .join(' | '),
+    )
+    .filter((line) => line.replace(/[\s|]/g, '').length > 0);
+  return lines.length > 0 ? lines.join('\n') : undefined;
+}
+
 function extractBlockText(
   blocks: unknown,
   parts: string[],
@@ -295,12 +330,54 @@ function extractBlockText(
     }
 
     switch (getStringField(block, 'type')) {
-      case 'section':
+      case 'section': {
+        appendUniqueSlackBlockText(
+          parts,
+          seenParts,
+          getSlackTextObjectText(block.text) ?? '',
+        );
+        const fields = Array.isArray(block.fields) ? block.fields : [];
+        for (const field of fields) {
+          appendUniqueSlackBlockText(
+            parts,
+            seenParts,
+            getSlackTextObjectText(field) ?? '',
+          );
+        }
+        break;
+      }
       case 'header':
         appendUniqueSlackBlockText(
           parts,
           seenParts,
           getSlackTextObjectText(block.text) ?? '',
+        );
+        break;
+      // Collapsible groups (workflow and app reports use them for per-item
+      // detail) carry their own title and subtitle and nest ordinary blocks.
+      case 'container': {
+        const heading = [
+          getSlackTextObjectText(block.title),
+          getSlackTextObjectText(block.subtitle),
+        ]
+          .filter((part): part is string => Boolean(part))
+          .join(' — ');
+        appendUniqueSlackBlockText(parts, seenParts, heading);
+        extractBlockText(block.child_blocks, parts, seenParts);
+        break;
+      }
+      case 'table':
+        appendUniqueSlackBlockText(
+          parts,
+          seenParts,
+          formatSlackTableBlockText(block) ?? '',
+        );
+        break;
+      case 'raw_text':
+        appendUniqueSlackBlockText(
+          parts,
+          seenParts,
+          typeof block.text === 'string' ? block.text : '',
         );
         break;
       case 'context': {
@@ -357,6 +434,9 @@ function extractBlockLinks(
     }
 
     switch (getStringField(block, 'type')) {
+      case 'container':
+        extractBlockLinks(block.child_blocks, links, seenKeys);
+        break;
       case 'section': {
         const text = getSlackTextObjectText(block.text);
         if (text) {
@@ -949,13 +1029,19 @@ function formatSlackAttachmentTitleContext(
 
   const title = getStringField(attachment, 'title');
   const titleLink = getStringField(attachment, 'title_link');
+  const text = getStringField(attachment, 'text');
+  const fallback = getStringField(attachment, 'fallback');
+  // App unfurls and workflow attachments often carry their content as
+  // blocks rather than text; a bare body with no title is still content.
+  const blockParts: string[] = [];
+  extractBlockText(attachment.blocks, blockParts, new Set<string>());
+  const blockText = blockParts.length > 0 ? blockParts.join('\n') : undefined;
+  const body = text ?? blockText ?? fallback;
 
-  if (!title && !titleLink) {
+  if (!title && !titleLink && !body) {
     return undefined;
   }
 
-  const text = getStringField(attachment, 'text');
-  const fallback = getStringField(attachment, 'fallback');
   const authorName =
     getStringField(attachment, 'author_name') ??
     getStringField(attachment, 'author_id') ??
@@ -974,7 +1060,6 @@ function formatSlackAttachmentTitleContext(
     lines.push(`URL: ${titleLink}`);
   }
 
-  const body = text ?? fallback;
   if (body && body !== title && body !== titleLink) {
     lines.push('Text:', normalizeForwardedMessageText(body));
   }
