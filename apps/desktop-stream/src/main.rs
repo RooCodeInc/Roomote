@@ -444,14 +444,25 @@ impl Broadcaster {
     }
 
     fn viewer_count(&self) -> usize {
-        self.inner.lock().unwrap().viewers.len()
+        let mut inner = self.inner.lock().unwrap();
+        inner.viewers.retain(|viewer| !viewer.sender.is_closed());
+        inner.viewers.len()
     }
 
     /// Adds a viewer. Returns its receiver and whether an encoder must be
-    /// started for it.
-    fn subscribe(&self) -> (mpsc::Receiver<Bytes>, bool) {
+    /// started for it, or `None` when a configured viewer limit is reached.
+    /// The limit is checked under the lock so concurrent connects cannot
+    /// exceed it, and viewers whose connection has already gone away are
+    /// pruned first so they never count against it.
+    fn subscribe(&self, limit: usize) -> Option<(mpsc::Receiver<Bytes>, bool)> {
         let (sender, receiver) = mpsc::channel(VIEWER_QUEUE_CAPACITY);
         let mut inner = self.inner.lock().unwrap();
+        if limit > 0 {
+            inner.viewers.retain(|viewer| !viewer.sender.is_closed());
+            if inner.viewers.len() >= limit {
+                return None;
+            }
+        }
         let mut viewer = Viewer {
             id: self.next_viewer_id.fetch_add(1, Ordering::Relaxed),
             sender,
@@ -472,7 +483,7 @@ impl Broadcaster {
                 pid: None,
             });
         }
-        (receiver, needs_encoder)
+        Some((receiver, needs_encoder))
     }
 
     /// Claims the encoder slot for a starting encoder task.
@@ -1577,17 +1588,16 @@ fn has_allowed_origin(headers: &HeaderMap, explicitly_allowed: Option<&str>) -> 
 }
 
 async fn stream(State(state): State<AppState>) -> Response {
-    let limit = state.config.max_clients;
-    if limit > 0 && state.broadcaster.viewer_count() >= limit {
+    let Some((mut receiver, needs_encoder)) = state.broadcaster.subscribe(state.config.max_clients)
+    else {
         return (
             StatusCode::TOO_MANY_REQUESTS,
             "desktop stream is already being watched by the maximum number of viewers",
         )
             .into_response();
-    }
+    };
     state.metrics.total_clients.fetch_add(1, Ordering::Relaxed);
 
-    let (mut receiver, needs_encoder) = state.broadcaster.subscribe();
     if needs_encoder {
         let generation = state
             .next_encoder_generation
@@ -2158,6 +2168,20 @@ mod tests {
             FragmentEvent::Fragment { keyframe, .. } => assert!(!keyframe),
             FragmentEvent::Init(_) => panic!("fragment expected"),
         }
+    }
+
+    #[test]
+    fn viewer_limit_is_enforced_under_the_lock_and_ignores_gone_viewers() {
+        let broadcaster = Broadcaster::new();
+        let first = broadcaster.subscribe(1).expect("first viewer admitted");
+        assert!(first.1, "first viewer starts the encoder");
+        assert!(broadcaster.subscribe(1).is_none(), "limit reached");
+        // Once the first viewer's connection is gone, its slot frees up
+        // immediately rather than after its queue fills.
+        drop(first);
+        let second = broadcaster.subscribe(1).expect("slot reclaimed");
+        assert!(!second.1, "the encoder slot is still claimed");
+        assert_eq!(broadcaster.viewer_count(), 1);
     }
 
     #[test]
