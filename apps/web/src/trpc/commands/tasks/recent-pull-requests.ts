@@ -41,6 +41,7 @@ export async function getRecentPullRequestsCommand(
     .selectDistinctOn(
       [
         taskPullRequests.sourceControlProvider,
+        taskPullRequests.host,
         taskPullRequests.repository,
         taskPullRequests.prNumber,
       ],
@@ -51,6 +52,7 @@ export async function getRecentPullRequestsCommand(
     .where(eligiblePullRequests)
     .orderBy(
       taskPullRequests.sourceControlProvider,
+      taskPullRequests.host,
       taskPullRequests.repository,
       taskPullRequests.prNumber,
       desc(taskPullRequests.detectedAt),

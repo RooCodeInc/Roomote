@@ -71,6 +71,24 @@ describe('getRecentPullRequestsCommand', () => {
         repository: 'roomote/app',
         status: 'open',
       },
+      {
+        taskId: ownerTask.id,
+        sourceControlProvider: 'gitea',
+        host: 'gitea.example.com',
+        prUrl: 'https://gitea.example.com/roomote/app/pulls/1',
+        prNumber: 1,
+        repository: 'roomote/app',
+        status: 'open',
+      },
+      {
+        taskId: ownerTask.id,
+        sourceControlProvider: 'gitea',
+        host: 'code.example.com',
+        prUrl: 'https://code.example.com/roomote/app/pulls/1',
+        prNumber: 1,
+        repository: 'roomote/app',
+        status: 'closed',
+      },
     ]);
 
     const auth = {
@@ -85,6 +103,6 @@ describe('getRecentPullRequestsCommand', () => {
     const result = await getRecentPullRequestsCommand(auth);
 
     expect(result.pullRequests).toHaveLength(15);
-    expect(result.openCount).toBe(15);
+    expect(result.openCount).toBe(16);
   });
 });
