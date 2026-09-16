@@ -157,14 +157,19 @@ describe('roomote MCP tool descriptions', () => {
     expect(toolNames).not.toContain('complete_doctor_report');
   });
 
-  it('registers the shared credential-free public URL fetch descriptor', async () => {
+  it('registers the shared guarded public URL fetch descriptor', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const tool = getRegisteredTool(registeredTools, PUBLIC_URL_FETCH_TOOL.name);
 
     expect(tool.config.title).toBe(PUBLIC_URL_FETCH_TOOL.title);
     expect(tool.config.description).toBe(PUBLIC_URL_FETCH_TOOL.description);
     expect(tool.config.annotations).toEqual(PUBLIC_URL_FETCH_TOOL.annotations);
-    expect(Object.keys(tool.config.inputSchema)).toEqual(['url']);
+    expect(Object.keys(tool.config.inputSchema)).toEqual([
+      'url',
+      'format',
+      'timeout',
+      'headers',
+    ]);
   });
 
   it('documents every built-in custom automation schedule preset', async () => {

@@ -18,12 +18,25 @@ export function parseMcpToolResult(result: unknown): McpToolResultSemantics {
   const toolResult = result as {
     isError?: boolean;
     structuredContent?: unknown;
-    content?: Array<{ type?: string; text?: string }>;
+    content?: Array<{
+      type?: string;
+      text?: string;
+      data?: string;
+      mimeType?: string;
+    }>;
   };
   const textPart = Array.isArray(toolResult.content)
     ? toolResult.content.find(
         (part): part is { type: 'text'; text: string } =>
           part.type === 'text' && typeof part.text === 'string',
+      )
+    : undefined;
+  const imagePart = Array.isArray(toolResult.content)
+    ? toolResult.content.find(
+        (part): part is { type: 'image'; data: string; mimeType: string } =>
+          part.type === 'image' &&
+          typeof part.data === 'string' &&
+          typeof part.mimeType === 'string',
       )
     : undefined;
 
@@ -37,15 +50,34 @@ export function parseMcpToolResult(result: unknown): McpToolResultSemantics {
   }
 
   if (toolResult.structuredContent != null) {
+    const payload =
+      imagePart &&
+      typeof toolResult.structuredContent === 'object' &&
+      !Array.isArray(toolResult.structuredContent)
+        ? {
+            ...(toolResult.structuredContent as Record<string, unknown>),
+            data: imagePart.data,
+            mimeType: imagePart.mimeType,
+          }
+        : toolResult.structuredContent;
     return {
       result,
       isError: false,
       errorText: null,
-      payload: toolResult.structuredContent,
+      payload,
     };
   }
 
   if (Array.isArray(toolResult.content)) {
+    if (toolResult.content.some((part) => part.type !== 'text')) {
+      return {
+        result,
+        isError: false,
+        errorText: null,
+        payload: toolResult.content,
+      };
+    }
+
     if (!textPart) {
       return {
         result,

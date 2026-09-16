@@ -87,6 +87,10 @@ describe('createIntegrationMcpInstructions', () => {
 
     expect(instructions).toContain('Use `roomote_fetch_public_url`');
     expect(instructions).toContain('built-in webfetch tool is disabled');
+    expect(instructions).toContain('markdown, plain text, and raw HTML output');
+    expect(instructions).toContain(
+      'sensitive headers are stripped on cross-origin redirects',
+    );
     expect(instructions).toContain(
       'does not restrict other network access available inside the coding sandbox',
     );

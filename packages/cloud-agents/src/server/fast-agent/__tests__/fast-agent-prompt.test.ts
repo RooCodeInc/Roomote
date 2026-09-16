@@ -627,8 +627,13 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('no generic filesystem');
     expect(prompt).toContain('Use `roomote_fetch_public_url`');
     expect(prompt).toContain(
-      'application-level public-destination, timeout, and response-size checks',
+      'application-level public-destination, timeout, and decompressed-size checks',
     );
+    expect(prompt).toContain('markdown, plain text, and raw HTML output');
+    expect(prompt).toContain(
+      'sensitive headers are stripped on cross-origin redirects',
+    );
+    expect(prompt).toContain('adds no ambient credentials or cookies');
     expect(prompt).toContain('hard network egress isolation');
     expect(prompt).toContain('use `spill_grep` first');
     expect(prompt).toContain('per-turn call and output budget');

@@ -124,6 +124,7 @@ describe('validateEgressUrl', () => {
 describe('safeFetch', () => {
   let server: Server;
   let port: number;
+  let cloudflareAttempts = 0;
 
   const lookupTo127: DnsLookupFn = ((hostname, options, callback) => {
     const cb = typeof options === 'function' ? options : callback;
@@ -178,6 +179,20 @@ describe('safeFetch', () => {
         return;
       }
 
+      if (req.url === '/html') {
+        res.setHeader('content-type', 'text/html; charset=utf-8');
+        res.end(
+          '<h1>Hello</h1><p>Useful <strong>content</strong>.</p><script>ignore()</script>',
+        );
+        return;
+      }
+
+      if (req.url === '/image') {
+        res.setHeader('content-type', 'image/png');
+        res.end(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+        return;
+      }
+
       if (req.url === '/compressed-large') {
         const compressed = gzipSync('x'.repeat(2_000));
         res.setHeader('content-type', 'text/plain');
@@ -190,6 +205,80 @@ describe('safeFetch', () => {
       if (req.url === '/binary') {
         res.setHeader('content-type', 'application/octet-stream');
         res.end('bytes');
+        return;
+      }
+
+      if (req.url === '/missing-content-type') {
+        res.end('untyped');
+        return;
+      }
+
+      if (req.url === '/latin1') {
+        res.setHeader('content-type', 'text/plain; charset=iso-8859-1');
+        res.end(Buffer.from([0x63, 0x61, 0x66, 0xe9]));
+        return;
+      }
+
+      if (req.url === '/meta-latin1') {
+        res.setHeader('content-type', 'text/html');
+        res.end(
+          Buffer.concat([
+            Buffer.from('<meta charset="windows-1252"><p>caf'),
+            Buffer.from([0xe9]),
+            Buffer.from('</p>'),
+          ]),
+        );
+        return;
+      }
+
+      if (req.url === '/large-html') {
+        res.setHeader('content-type', 'text/html; charset=utf-8');
+        res.end(`<p>${'x'.repeat(1_024 * 1_024)}</p>`);
+        return;
+      }
+
+      if (req.url === '/unsupported-charset') {
+        res.setHeader('content-type', 'text/plain; charset=made-up-encoding');
+        res.end('text');
+        return;
+      }
+
+      if (req.url === '/invalid-utf8') {
+        res.setHeader('content-type', 'text/plain; charset=utf-8');
+        res.end(Buffer.from([0xc3, 0x28]));
+        return;
+      }
+
+      if (req.url === '/same-origin-redirect') {
+        res.statusCode = 302;
+        res.setHeader('location', '/headers');
+        res.end();
+        return;
+      }
+
+      if (req.url === '/cross-origin-redirect') {
+        res.statusCode = 302;
+        res.setHeader('location', `http://redirected.example:${port}/headers`);
+        res.end();
+        return;
+      }
+
+      if (req.url === '/headers') {
+        res.setHeader('content-type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify(req.headers));
+        return;
+      }
+
+      if (req.url === '/cloudflare') {
+        cloudflareAttempts += 1;
+        if (req.headers['user-agent'] !== 'Roomote-Public-URL-Fetch/1.0') {
+          res.statusCode = 403;
+          res.setHeader('cf-mitigated', 'challenge');
+          res.end();
+          return;
+        }
+        res.setHeader('content-type', 'text/plain; charset=utf-8');
+        res.end('retry succeeded');
         return;
       }
 
@@ -320,10 +409,54 @@ describe('safeFetch', () => {
     );
 
     expect(result).toEqual({
+      kind: 'text',
       url: `http://redirected.example:${port}/text`,
       status: 200,
       contentType: 'text/plain; charset=utf-8',
+      format: 'markdown',
       text: 'public text',
+    });
+  });
+
+  it.each([
+    ['markdown', '# Hello\n\nUseful **content**.'],
+    ['text', 'HelloUseful content.'],
+    [
+      'html',
+      '<h1>Hello</h1><p>Useful <strong>content</strong>.</p><script>ignore()</script>',
+    ],
+  ] as const)('returns HTML as %s', async (format, expected) => {
+    const result = await fetchPublicUrlForTesting(
+      `http://public.example:${port}/html`,
+      {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        allowNonDefaultPorts: true,
+        format,
+      },
+    );
+
+    expect(result).toMatchObject({ kind: 'text', format, text: expected });
+  });
+
+  it('returns supported images as bounded base64 content', async () => {
+    const result = await fetchPublicUrlForTesting(
+      `http://public.example:${port}/image`,
+      {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        allowNonDefaultPorts: true,
+      },
+    );
+
+    expect(result).toEqual({
+      kind: 'image',
+      url: `http://public.example:${port}/image`,
+      status: 200,
+      contentType: 'image/png',
+      mimeType: 'image/png',
+      data: 'iVBORw==',
+      size: 4,
     });
   });
 
@@ -357,6 +490,163 @@ describe('safeFetch', () => {
     ).rejects.toThrow(/text content type/);
   });
 
+  it('fails closed when a response omits its content type', async () => {
+    await expect(
+      fetchPublicUrlForTesting(
+        `http://public.example:${port}/missing-content-type`,
+        {
+          lookup: lookupTo127,
+          allowedPrivateCidrs: '127.0.0.0/8',
+          allowNonDefaultPorts: true,
+        },
+      ),
+    ).rejects.toThrow(/text content type/);
+  });
+
+  it('decodes a supported declared charset without replacement', async () => {
+    const result = await fetchPublicUrlForTesting(
+      `http://public.example:${port}/latin1`,
+      {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        allowNonDefaultPorts: true,
+      },
+    );
+    expect(result).toMatchObject({ kind: 'text', text: 'café' });
+  });
+
+  it('uses an HTML meta charset when the response header omits one', async () => {
+    const result = await fetchPublicUrlForTesting(
+      `http://public.example:${port}/meta-latin1`,
+      {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        allowNonDefaultPorts: true,
+        format: 'text',
+      },
+    );
+    expect(result).toMatchObject({ kind: 'text', text: 'café' });
+  });
+
+  it('rejects unsupported declared charsets', async () => {
+    await expect(
+      fetchPublicUrlForTesting(
+        `http://public.example:${port}/unsupported-charset`,
+        {
+          lookup: lookupTo127,
+          allowedPrivateCidrs: '127.0.0.0/8',
+          allowNonDefaultPorts: true,
+        },
+      ),
+    ).rejects.toThrow(/unsupported charset/);
+  });
+
+  it('rejects malformed UTF-8 payloads', async () => {
+    await expect(
+      fetchPublicUrlForTesting(`http://public.example:${port}/invalid-utf8`, {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        allowNonDefaultPorts: true,
+      }),
+    ).rejects.toThrow(/not valid utf-8 text/i);
+  });
+
+  it('bounds control-plane HTML-to-markdown conversion work', async () => {
+    await expect(
+      fetchPublicUrlForTesting(`http://public.example:${port}/large-html`, {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        allowNonDefaultPorts: true,
+        format: 'markdown',
+      }),
+    ).rejects.toThrow(/too large to convert to markdown/);
+
+    const raw = await fetchPublicUrlForTesting(
+      `http://public.example:${port}/large-html`,
+      {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        allowNonDefaultPorts: true,
+        format: 'html',
+      },
+    );
+    expect(raw).toMatchObject({ kind: 'text', format: 'html' });
+  });
+
+  it('sends explicit caller headers on same-origin redirects', async () => {
+    const result = await fetchPublicUrlForTesting(
+      `http://public.example:${port}/same-origin-redirect`,
+      {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        allowNonDefaultPorts: true,
+        format: 'text',
+        headers: {
+          Authorization: 'Bearer explicit',
+          Cookie: 'session=explicit',
+          'X-Trace': 'same-origin',
+        },
+      },
+    );
+    expect(result.kind).toBe('text');
+    const headers = JSON.parse(
+      result.kind === 'text' ? result.text : '{}',
+    ) as Record<string, string>;
+    expect(headers.authorization).toBe('Bearer explicit');
+    expect(headers.cookie).toBe('session=explicit');
+    expect(headers['x-trace']).toBe('same-origin');
+    expect(headers.accept).toContain('text/plain');
+  });
+
+  it('strips sensitive caller headers on cross-origin redirects', async () => {
+    const result = await fetchPublicUrlForTesting(
+      `http://public.example:${port}/cross-origin-redirect`,
+      {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        allowNonDefaultPorts: true,
+        headers: {
+          Authorization: 'Bearer explicit',
+          Cookie: 'session=explicit',
+          'X-Api-Key': 'explicit-key',
+          'X-Auth-Token': 'explicit-token',
+          'X-Trace': 'cross-origin',
+        },
+      },
+    );
+    expect(result.kind).toBe('text');
+    const headers = JSON.parse(
+      result.kind === 'text' ? result.text : '{}',
+    ) as Record<string, string>;
+    expect(headers).not.toHaveProperty('authorization');
+    expect(headers).not.toHaveProperty('cookie');
+    expect(headers).not.toHaveProperty('x-api-key');
+    expect(headers).not.toHaveProperty('x-auth-token');
+    expect(headers['x-trace']).toBe('cross-origin');
+  });
+
+  it('rejects caller control of transport headers', async () => {
+    await expect(
+      fetchPublicUrl('https://example.com/', {
+        headers: { Host: 'internal.example' },
+      }),
+    ).rejects.toThrow(/does not allow the 'host' header/);
+  });
+
+  it('retries Cloudflare challenges with an honest user agent', async () => {
+    cloudflareAttempts = 0;
+    const result = await fetchPublicUrlForTesting(
+      `http://public.example:${port}/cloudflare`,
+      {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        allowNonDefaultPorts: true,
+      },
+    );
+    expect(result).toMatchObject({ kind: 'text', text: 'retry succeeded' });
+    expect(cloudflareAttempts).toBe(2);
+  });
+
   it('bounds total request duration', async () => {
     await expect(
       fetchPublicUrlForTesting(`http://public.example:${port}/slow`, {
@@ -366,6 +656,12 @@ describe('safeFetch', () => {
         timeoutMs: 10,
       }),
     ).rejects.toThrow();
+  });
+
+  it('rejects caller timeouts above the 120-second ceiling', async () => {
+    await expect(
+      fetchPublicUrl('https://example.com/', { timeout: 121 }),
+    ).rejects.toThrow(/at most 120 seconds/);
   });
 
   it('honors caller cancellation while reading the response', async () => {

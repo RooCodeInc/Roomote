@@ -132,7 +132,7 @@ roomoteMcpServer.registerTool(
     inputSchema: PUBLIC_URL_FETCH_TOOL.inputSchema,
     annotations: PUBLIC_URL_FETCH_TOOL.annotations,
   },
-  async (params, extra): Promise<ToolResult> => {
+  async (params, extra) => {
     const config = getRoomoteConfig();
     if (!config) {
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');

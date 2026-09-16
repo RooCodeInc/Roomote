@@ -1,5 +1,7 @@
 import {
   publicUrlFetchInputSchema,
+  publicUrlFetchMcpResult,
+  PUBLIC_URL_FETCH_DEFAULT_TIMEOUT_SECONDS,
   type PublicUrlFetchResult,
 } from '@roomote/types';
 
@@ -8,16 +10,19 @@ import {
   fetchWithTimeout,
   parseApiError,
 } from './api-client.js';
-import { catchError, jsonResult } from './tool-result.js';
-import type { RoomoteConfig, ToolResult } from './types.js';
+import { catchError } from './tool-result.js';
+import type { RoomoteConfig } from './types.js';
 
 export async function handlePublicUrlFetch(
   input: unknown,
   config: RoomoteConfig,
   signal?: AbortSignal,
-): Promise<ToolResult> {
+) {
   try {
     const params = publicUrlFetchInputSchema.parse(input);
+    const timeoutMs =
+      (params.timeout ?? PUBLIC_URL_FETCH_DEFAULT_TIMEOUT_SECONDS) * 1_000 +
+      5_000;
     const response = await fetchWithTimeout(
       `${config.platformApiUrl}/api/mcp/public-url-fetch`,
       {
@@ -28,14 +33,16 @@ export async function handlePublicUrlFetch(
         body: JSON.stringify(params),
         signal,
       },
-      { label: 'Public URL fetch failed', timeoutMs: 20_000 },
+      { label: 'Public URL fetch failed', timeoutMs },
     );
 
     if (!response.ok) {
       throw new Error(await parseApiError(response));
     }
 
-    return jsonResult((await response.json()) as PublicUrlFetchResult);
+    return publicUrlFetchMcpResult(
+      (await response.json()) as PublicUrlFetchResult,
+    );
   } catch (error) {
     return catchError(error);
   }

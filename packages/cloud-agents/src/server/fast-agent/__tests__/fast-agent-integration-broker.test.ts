@@ -1574,6 +1574,59 @@ describe('fast-agent integration broker', () => {
     });
   });
 
+  it('does not retain public-fetch header values in Fast audit records', async () => {
+    mocks.configuredServers = {
+      roomote: { url: 'https://app.example.test/mcp', headers: {} },
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'fetch_public_url', inputSchema: { type: 'object' } },
+    ]);
+    const available = await listFastAgentIntegrations(auditContext);
+    const result = {
+      kind: 'text',
+      url: 'https://public.example/docs?token=not-audited',
+      status: 200,
+      contentType: 'text/plain',
+      format: 'text',
+    };
+    mocks.callMcpTool.mockResolvedValue(result);
+
+    await expect(
+      callFastAgentIntegration(auditContext, available, {
+        integrationId: 'roomote',
+        toolName: 'fetch_public_url',
+        args: {
+          url: 'https://public.example/docs?token=secret-query',
+          format: 'text',
+          timeout: 45,
+          headers: {
+            Authorization: 'Bearer secret',
+            'X-Trace': 'trace-value',
+          },
+        },
+      }),
+    ).resolves.toEqual(result);
+
+    expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        integrationId: 'roomote',
+        toolName: 'fetch_public_url',
+        arguments: {
+          destination: 'https://public.example',
+          format: 'text',
+          timeout: 45,
+          headerNames: ['Authorization', 'X-Trace'],
+        },
+      }),
+    );
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'succeeded',
+        resultPreview: '[Broker result omitted]',
+      }),
+    );
+  });
+
   it('omits manage_tasks when its schema cannot safely remove task launch', async () => {
     mocks.configuredServers = {
       roomote: {

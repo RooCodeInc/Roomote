@@ -5,12 +5,12 @@ import {
 } from '@roomote/sdk/server/safe-fetch';
 import {
   PUBLIC_URL_FETCH_TOOL,
+  publicUrlFetchMcpResult,
   publicUrlFetchInputSchema,
   type PublicUrlFetchResult,
 } from '@roomote/types';
 
 import { toolError } from './in-process-api';
-import { toMcpToolResult } from './proxy-utils';
 
 export class PublicUrlFetchToolError extends Error {
   constructor(message: string) {
@@ -22,7 +22,9 @@ export class PublicUrlFetchToolError extends Error {
 function safeFetchErrorMessage(error: unknown): string {
   if (error instanceof SafeFetchViolationError) {
     if (
+      error.message.startsWith('Public URL fetch') ||
       error.message.startsWith('Public URL response') ||
+      error.message.startsWith('Public URL returned') ||
       error.message.startsWith('Public URL exceeded') ||
       error.message.includes('default HTTP and HTTPS ports')
     ) {
@@ -52,7 +54,12 @@ export async function executePublicUrlFetch(
   }
 
   try {
-    return await fetchPublicUrl(parsed.data.url, { signal });
+    return await fetchPublicUrl(parsed.data.url, {
+      format: parsed.data.format,
+      timeout: parsed.data.timeout,
+      headers: parsed.data.headers,
+      signal,
+    });
   } catch (error) {
     throw new PublicUrlFetchToolError(safeFetchErrorMessage(error));
   }
@@ -69,9 +76,9 @@ export function registerRoomotePublicUrlFetchTool(server: McpServer): void {
     },
     async (input, extra) => {
       try {
-        return toMcpToolResult({
-          ...(await executePublicUrlFetch(input, extra.signal)),
-        });
+        return publicUrlFetchMcpResult(
+          await executePublicUrlFetch(input, extra.signal),
+        );
       } catch (error) {
         return toolError({
           error:
