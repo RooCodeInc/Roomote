@@ -6,21 +6,21 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 
 import {
-  Badge,
   Button,
   Checkbox,
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   Input,
   Label,
   Pencil,
+  Plug,
   Plus,
   RadioGroup,
   RadioGroupItem,
-  ServerCog,
   Skeleton,
   Switch,
   Trash2,
@@ -723,7 +723,7 @@ function CustomToolManagementDialog({
       <DialogContent size="xl">
         <DialogHeader>
           <DialogTitle>
-            Manage tools{server ? ` — ${server.name}` : ''}
+            Manage tools for {server?.name ?? 'integration'}
           </DialogTitle>
           <DialogDescription>
             Disabled tools are blocked at the Roomote proxy and hidden from
@@ -780,10 +780,10 @@ function CustomToolManagementDialog({
           </div>
         )}
 
-        <div className="flex justify-end gap-2">
+        <DialogFooter>
           <Button
             type="button"
-            variant="secondary"
+            variant="outline"
             onClick={() => onOpenChange(false)}
           >
             Cancel
@@ -795,7 +795,7 @@ function CustomToolManagementDialog({
           >
             {setDisabledTools.isPending ? <Loading /> : 'Save'}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -804,9 +804,9 @@ function CustomToolManagementDialog({
 /**
  * Custom MCP servers rendered as regular integration cards.
  *
- * They live in the same Connected/Configured grids as the built-in catalog
- * (a "Custom" badge is the only visual difference), so this exposes items
- * plus the dialogs they drive rather than owning a section of its own.
+ * They live in the same Connected/Configured grids as the built-in catalog,
+ * so this exposes items plus the dialogs they drive rather than owning a
+ * section of its own.
  */
 export function useCustomMcpServers(): {
   isEnabled: boolean;
@@ -837,6 +837,8 @@ export function useCustomMcpServers(): {
   const [formOpen, setFormOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<ListedServer | null>(null);
   const [toolsServer, setToolsServer] = useState<ListedServer | null>(null);
+  const [serverPendingRemoval, setServerPendingRemoval] =
+    useState<ListedServer | null>(null);
 
   const refresh = () =>
     queryClient.invalidateQueries({
@@ -868,12 +870,7 @@ export function useCustomMcpServers(): {
         id: `custom-${server.id}`,
         name: server.name,
         description,
-        icon: <ServerCog className="size-5" />,
-        badge: (
-          <Badge variant="outline" className="shrink-0">
-            Custom
-          </Badge>
-        ),
+        icon: <Plug className="size-5" />,
         enabled: server.enabled,
         connected: server.enabled && !needsConnection,
         // Custom servers are always deployment-defined, so a disabled one
@@ -923,16 +920,7 @@ export function useCustomMcpServers(): {
         removeAction: {
           label: 'Remove',
           ariaLabel: `Remove ${server.name}`,
-          onAction: async () => {
-            if (
-              confirm(
-                `Delete custom MCP server '${server.name}'? Stored credentials are removed as well.`,
-              )
-            ) {
-              await deleteServer.mutateAsync({ id: server.id });
-              refresh();
-            }
-          },
+          onAction: () => setServerPendingRemoval(server),
           isPending:
             deleteServer.isPending && deleteServer.variables?.id === server.id,
           icon: <Trash2 />,
@@ -979,16 +967,7 @@ export function useCustomMcpServers(): {
         headerAction: {
           label: 'Remove',
           ariaLabel: `Remove ${server.name}`,
-          onAction: async () => {
-            if (
-              confirm(
-                `Delete custom MCP server '${server.name}'? Stored credentials are removed as well.`,
-              )
-            ) {
-              await deleteServer.mutateAsync({ id: server.id });
-              refresh();
-            }
-          },
+          onAction: () => setServerPendingRemoval(server),
           isPending:
             deleteServer.isPending && deleteServer.variables?.id === server.id,
           icon: <Trash2 className="size-4" />,
@@ -1031,6 +1010,59 @@ export function useCustomMcpServers(): {
         }}
         onSaved={refresh}
       />
+      <Dialog
+        open={serverPendingRemoval != null}
+        onOpenChange={(open) => {
+          if (!open && !deleteServer.isPending) {
+            setServerPendingRemoval(null);
+          }
+        }}
+      >
+        <DialogContent size="md">
+          <DialogHeader>
+            <DialogTitle>
+              Remove {serverPendingRemoval?.name ?? 'custom integration'}?
+            </DialogTitle>
+            <DialogDescription>
+              This custom MCP server and its stored credentials will be
+              permanently removed. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={deleteServer.isPending}
+              onClick={() => setServerPendingRemoval(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deleteServer.isPending}
+              onClick={() => {
+                if (!serverPendingRemoval) {
+                  return;
+                }
+
+                deleteServer.mutate(
+                  { id: serverPendingRemoval.id },
+                  {
+                    onSuccess: () => {
+                      setServerPendingRemoval(null);
+                      void refresh();
+                    },
+                  },
+                );
+              }}
+            >
+              <Trash2 />
+              {deleteServer.isPending ? 'Removing...' : 'Remove'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 

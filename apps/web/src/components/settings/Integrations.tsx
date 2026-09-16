@@ -100,6 +100,7 @@ import {
   Spinner,
   Textarea,
   TriangleAlert,
+  Wrench,
 } from '@/components/system';
 import { McpToolManagementDialog } from './McpToolManagementDialog';
 import { McpIcon } from './McpIcon';
@@ -594,7 +595,7 @@ function buildAdminConfiguredIntegrationItem({
             ariaLabel: `Manage ${integration.name} tools`,
             onAction: openToolDialog,
             isPending: false,
-            icon: <Settings2 />,
+            icon: <Wrench />,
           }
         : undefined,
     removeAction:
@@ -626,7 +627,7 @@ function buildAdminConfiguredIntegrationItem({
             ariaLabel: `Manage ${integration.name} tools`,
             onAction: openToolDialog,
             isPending: false,
-            icon: <Settings2 className="size-4" />,
+            icon: <Wrench className="size-4" />,
           }
         : undefined,
     onAction: canConfigure
@@ -2553,7 +2554,7 @@ export function Integrations({
                         integrationName: displayName,
                       }),
                     isPending: false,
-                    icon: <Settings2 className="size-4" />,
+                    icon: <Wrench className="size-4" />,
                   }
                 : enabled && isDeploymentScoped && !isConnected
                   ? {

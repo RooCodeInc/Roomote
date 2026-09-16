@@ -558,6 +558,7 @@ vi.mock('@/components/system', () => ({
   ),
   ToggleLeft: () => <svg aria-hidden="true" />,
   ToggleRight: () => <svg aria-hidden="true" />,
+  Wrench: () => <svg aria-hidden="true" data-icon="wrench" />,
   X: () => <svg aria-hidden="true" />,
 }));
 
@@ -1520,7 +1521,7 @@ describe('Integrations settings', () => {
     );
 
     expect(
-      screen.getByRole('heading', { name: 'Manage Sentry tools' }),
+      screen.getByRole('heading', { name: 'Manage tools for Sentry' }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Disable get_sentry_resource' }),
@@ -2392,7 +2393,7 @@ describe('Integrations settings', () => {
     rerender(<Integrations />);
 
     expect(
-      screen.getByRole('heading', { name: 'Manage Sentry tools' }),
+      screen.getByRole('heading', { name: 'Manage tools for Sentry' }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Enable get_sentry_resource' }),

@@ -161,6 +161,24 @@ function Harness() {
             <span data-testid="configured">{String(item.configured)}</span>
             <span data-testid="item-enabled">{String(item.enabled)}</span>
             <span data-testid="item-connected">{String(item.connected)}</span>
+            {item.manageToolsAction ? (
+              <button
+                type="button"
+                onClick={item.manageToolsAction.onAction}
+                aria-label={item.manageToolsAction.ariaLabel}
+              >
+                Manage tools
+              </button>
+            ) : null}
+            {item.removeAction ? (
+              <button
+                type="button"
+                onClick={item.removeAction.onAction}
+                aria-label={item.removeAction.ariaLabel}
+              >
+                Remove
+              </button>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -214,7 +232,7 @@ describe('useCustomMcpServers', () => {
     expect(screen.queryAllByTestId('item')).toHaveLength(0);
   });
 
-  it('renders a remote server as a Custom-badged item without leaking secrets', async () => {
+  it('renders a remote server without a type badge or leaking secrets', async () => {
     state.servers = [buildServer()];
 
     renderHarness();
@@ -222,7 +240,7 @@ describe('useCustomMcpServers', () => {
     expect(await screen.findByTestId('name')).toHaveTextContent(
       'internal-tools',
     );
-    expect(screen.getByTestId('badge')).toHaveTextContent('Custom');
+    expect(screen.getByTestId('badge')).toBeEmptyDOMElement();
     expect(screen.getByTestId('description')).toHaveTextContent(
       'https://mcp.example.com/mcp',
     );
@@ -230,6 +248,49 @@ describe('useCustomMcpServers', () => {
     expect(screen.getByTestId('configured')).toHaveTextContent('true');
     expect(screen.getByTestId('utility')).toHaveTextContent('Manage tools');
     expect(screen.getByTestId('secondary')).toHaveTextContent('Edit');
+  });
+
+  it('uses a dialog to confirm removing a custom server', async () => {
+    const server = buildServer();
+    state.servers = [server];
+
+    renderHarness();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Remove internal-tools' }),
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Remove internal-tools?' }),
+    ).toBeInTheDocument();
+    expect(deleteMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() =>
+      expect(deleteMock).toHaveBeenCalledWith(
+        { id: server.id },
+        expect.anything(),
+      ),
+    );
+  });
+
+  it('names the tools dialog for the selected integration', async () => {
+    state.servers = [buildServer()];
+
+    renderHarness();
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Manage internal-tools tools',
+      }),
+    );
+
+    expect(
+      screen.getByRole('heading', {
+        name: 'Manage tools for internal-tools',
+      }),
+    ).toBeInTheDocument();
   });
 
   it('offers Connect and a status for unauthenticated oauth servers', async () => {

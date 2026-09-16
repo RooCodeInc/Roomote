@@ -18,6 +18,7 @@ import {
   Settings2,
   Spinner,
   Trash2,
+  Wrench,
   X,
 } from '@/components/system';
 
@@ -313,7 +314,7 @@ export function IntegrationListRow({ item }: { item: IntegrationItem }) {
         {manageToolsAction ? (
           <IntegrationIconAction
             action={manageToolsAction}
-            fallbackIcon={<Settings2 />}
+            fallbackIcon={<Wrench />}
           />
         ) : null}
         {removeAction ? (
