@@ -1,24 +1,22 @@
 ---
 title: Shared Desktop
 icon: monitor-play
-description: View and control an X11 desktop with synchronized audio from an environment sandbox.
+description: View and control an X11 desktop from an environment sandbox.
 ---
 
 Roomote includes a shared remote desktop for environment-backed tasks. Open the
 dedicated **Shared Desktop** tab in the task sidebar to view and control the
-sandbox display, hear sandbox audio, type, click, and scroll without leaving
+sandbox display, type, click, and scroll without leaving
 Roomote.
 
-The sandbox-side Rust service captures X11, encodes H.264 video with
-synchronized AAC audio, and accepts validated input over an authenticated
-control connection. Shared Desktop uses the same task-scoped preview security
+The sandbox-side Rust service captures X11, encodes low-latency H.264 video,
+and accepts validated input over an authenticated control connection. Shared Desktop uses the same task-scoped preview security
 boundary, but it is separate from [Live Preview](/live-previews) and does not
 appear in the Live Preview service selector.
 
 Roomote starts the virtual display (TigerVNC's Xvnc, used purely as an X
-server with no VNC listener), the audio sink, and the streaming service. Graphical
-applications must open on the sandbox's inherited `DISPLAY`; application audio
-must use the inherited `PULSE_SINK`.
+server with no VNC listener) and the streaming service. Graphical applications
+must open on the sandbox's inherited `DISPLAY`.
 
 ## Prerequisites
 
@@ -47,13 +45,11 @@ reports browser-rendered FPS and time from starting the stream to the first
 decoded frame. The service's `/metrics` endpoint additionally reports encoder
 FPS and bitrate for diagnostics.
 
-For a deterministic transport test without a desktop or audio server, start
-the service with synthetic inputs:
+For a deterministic transport test without a desktop, start the service with
+a synthetic input:
 
 ```bash
-ROOMOTE_DESKTOP_STREAM_CAPTURE_MODE=test \
-ROOMOTE_DESKTOP_STREAM_AUDIO_MODE=test \
-roomote-desktop-stream
+ROOMOTE_DESKTOP_STREAM_CAPTURE_MODE=test roomote-desktop-stream
 ```
 
 Performance depends on resolution, scene complexity, sandbox CPU allocation,
@@ -65,8 +61,8 @@ production defaults.
 
 - clipboard transfer and file drag-and-drop are not included
 - X11 is supported; Wayland and direct DRM capture are not yet supported
-- audio requires routing application output into the configured PulseAudio
-  sink monitor
+- audio is not streamed; a silent audio track would stall the browser's media
+  clock and freeze the picture
 - browser playback uses fragmented MP4 over HTTP, not adaptive bitrate or
   WebRTC congestion control
 - additional viewers create additional encoders and CPU load

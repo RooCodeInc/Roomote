@@ -13,7 +13,7 @@ import {
   Loader2,
   Maximize2,
   SquareDashedMousePointer,
-  Volume2,
+  Play,
 } from '@/components/system';
 
 interface DesktopStreamSession {
@@ -744,16 +744,11 @@ export function DesktopStreamClient({
                   Interactive remote desktop
                 </p>
                 <p className="text-sm text-zinc-400">
-                  Video and sandbox audio start together. Click the desktop to
-                  send mouse and keyboard input.
+                  Click the desktop to send mouse and keyboard input.
                 </p>
               </div>
               <Button onClick={start} disabled={!session || isStarting}>
-                {isStarting ? (
-                  <Loader2 className="animate-spin" />
-                ) : (
-                  <Volume2 />
-                )}
+                {isStarting ? <Loader2 className="animate-spin" /> : <Play />}
                 {isStarting ? 'Starting...' : 'Start remote desktop'}
               </Button>
               {sessionError ? (

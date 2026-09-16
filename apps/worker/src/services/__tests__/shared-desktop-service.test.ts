@@ -19,13 +19,15 @@ vi.mock('../../command-executor', () => ({
 }));
 
 describe('buildSharedDesktopStartupScript', () => {
-  it('drops root privileges before starting PulseAudio and forwards the stream env', () => {
+  it('drops root privileges before starting the X server and forwards the stream env', () => {
     const script = buildSharedDesktopStartupScript();
     const reexec = script.indexOf('exec sudo -n -u roomote -H');
-    const pulse = script.indexOf('pulseaudio --start');
+    const xserver = script.indexOf('Xvnc "$DISPLAY"');
 
     expect(reexec).toBeGreaterThan(-1);
-    expect(pulse).toBeGreaterThan(reexec);
+    expect(xserver).toBeGreaterThan(reexec);
+    // Audio capture starves the browser media clock on a silent sandbox.
+    expect(script).not.toContain('pulseaudio');
     expect(script).toContain('mkdir -p /tmp/.X11-unix');
     // Xvnc supports RandR resizes; keep Xvfb only as a fallback, and never
     // expose an RFB listener.
@@ -33,7 +35,7 @@ describe('buildSharedDesktopStartupScript', () => {
       /if command -v Xvnc[\s\S]*Xvnc "\$DISPLAY"[\s\S]*-rfbport -1 -localhost[\s\S]*else[\s\S]*Xvfb "\$DISPLAY"/,
     );
     expect(script).toMatch(
-      /--preserve-env=DISPLAY,PULSE_SINK,[A-Z_,]*ROOMOTE_DESKTOP_STREAM_ALLOWED_CONTROL_ORIGIN/,
+      /--preserve-env=DISPLAY,[A-Z_,]*ROOMOTE_DESKTOP_STREAM_ALLOWED_CONTROL_ORIGIN/,
     );
     // Unset optional settings must stay unset rather than become empty strings.
     expect(script).not.toContain(':-}"');
@@ -78,8 +80,7 @@ describe('startSharedDesktop', () => {
 
     expect(env).toMatchObject({
       DISPLAY: ':99',
-      PULSE_SINK: 'roomote_stream',
-      ROOMOTE_DESKTOP_STREAM_AUDIO_MODE: 'pulse',
+      ROOMOTE_DESKTOP_STREAM_AUDIO_MODE: 'disabled',
       ROOMOTE_DESKTOP_STREAM_PORT: '6080',
       ROOMOTE_DESKTOP_STREAM_ALLOWED_CONTROL_ORIGIN: 'https://app.roomote.dev',
     });

@@ -45,8 +45,6 @@ RUN apt-get update \
     python3 \
     ffmpeg \
     locales \
-    pulseaudio \
-    pulseaudio-utils \
     tigervnc-standalone-server \
     xvfb \
     fontconfig \

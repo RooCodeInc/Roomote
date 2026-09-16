@@ -15,7 +15,6 @@ const HEALTH_CHECK_ATTEMPTS = 30;
  */
 const FORWARDED_ENV_VARS = [
   'DISPLAY',
-  'PULSE_SINK',
   'ROOMOTE_DESKTOP_STREAM_DISPLAY',
   'ROOMOTE_DESKTOP_STREAM_AUDIO_MODE',
   'ROOMOTE_DESKTOP_STREAM_PULSE_SOURCE',
@@ -31,17 +30,22 @@ const FORWARDED_ENV_VARS = [
 ] as const;
 
 /**
- * Shell script that starts the X server (Xvnc, or Xvfb as a fallback),
- * PulseAudio, and the streaming service.
+ * Shell script that starts the X server (Xvnc, or Xvfb as a fallback) and
+ * the streaming service.
  *
  * It is written to disk and launched as a single command because the
  * command executor splits multi-line `run` strings into one command per
  * line, which would start each line as its own detached process.
  *
- * Some compute providers run the worker as root. PulseAudio refuses to start
- * as root and Xvfb cannot create `/tmp/.X11-unix` as a regular user, so the
- * script prepares the socket directory as root and then re-executes itself as
- * the sandbox user with the relevant environment forwarded.
+ * Some compute providers run the worker as root. The X server should run as
+ * the sandbox user like the applications it hosts, and Xvfb cannot create
+ * `/tmp/.X11-unix` as a regular user, so the script prepares the socket
+ * directory as root and then re-executes itself as the sandbox user with the
+ * relevant environment forwarded.
+ *
+ * Audio is intentionally not captured: browsers drive the media clock from
+ * the audio track, and a mostly silent sandbox starves it, which freezes the
+ * picture. The service still supports audio when configured explicitly.
  */
 export function buildSharedDesktopStartupScript(): string {
   // Only variables that are actually set are forwarded; the service rejects
@@ -78,10 +82,6 @@ if [ ! -S "/tmp/.X11-unix/X$display_number" ]; then
   fi
   xvfb_pid="$!"
 fi
-pulseaudio --start --exit-idle-time=-1
-if ! pactl list short sinks | grep -q '[[:space:]]roomote_stream[[:space:]]'; then
-  pactl load-module module-null-sink sink_name=roomote_stream >/dev/null
-fi
 exec ${SHARED_DESKTOP_BINARY}
 `;
 }
@@ -105,10 +105,8 @@ export async function startSharedDesktop(params: {
     return false;
   }
   params.env.DISPLAY ??= ':99';
-  params.env.PULSE_SINK ??= 'roomote_stream';
   params.env.ROOMOTE_DESKTOP_STREAM_DISPLAY ??= params.env.DISPLAY;
-  params.env.ROOMOTE_DESKTOP_STREAM_AUDIO_MODE ??= 'pulse';
-  params.env.ROOMOTE_DESKTOP_STREAM_PULSE_SOURCE ??= 'roomote_stream.monitor';
+  params.env.ROOMOTE_DESKTOP_STREAM_AUDIO_MODE ??= 'disabled';
   params.env.ROOMOTE_DESKTOP_STREAM_PORT ??= String(
     SHARED_DESKTOP_NAMED_PORT.port,
   );
