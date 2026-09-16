@@ -56,7 +56,6 @@ describe('getPullRequestsForFilterCommand', () => {
         repositoryId: linkedRepository.id,
         prNumber: 123,
         prUrl: `https://gitlab.com/${repository}/-/merge_requests/123?linked=1`,
-        host: 'gitlab.com',
       },
       {
         taskId: unstampedGitlabTask.id,

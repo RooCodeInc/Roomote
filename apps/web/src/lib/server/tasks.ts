@@ -207,10 +207,7 @@ const getTaskFilterConditions = ({ filters }: { filters: Filter[] }) => {
                         : pullRequest.host
                           ? or(
                               eq(taskPullRequests.host, pullRequest.host),
-                              and(
-                                isNull(taskPullRequests.host),
-                                isNull(taskPullRequests.repositoryId),
-                              ),
+                              isNull(taskPullRequests.host),
                             )
                           : undefined,
                     ),

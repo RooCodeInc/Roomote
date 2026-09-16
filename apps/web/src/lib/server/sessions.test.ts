@@ -762,7 +762,6 @@ describe('unified Session queries', () => {
         prUrl:
           'https://gitlab.com/RooCodeInc/Roomote/-/merge_requests/123?linked=1',
         sourceControlProvider: 'gitlab',
-        host: 'gitlab.com',
         repositoryId: linkedRepository.id,
       },
       {
@@ -829,6 +828,7 @@ describe('unified Session queries', () => {
       }),
     ).resolves.toMatchObject({
       sessions: [
+        expect.objectContaining({ id: linkedSameHostSession.id }),
         expect.objectContaining({ id: unstampedSession.id }),
         expect.objectContaining({ id: otherHostSession.id }),
       ],
