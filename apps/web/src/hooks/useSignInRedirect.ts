@@ -3,15 +3,9 @@
 import { useEffect, useMemo } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
+import { buildSignInRedirectUrl } from '@/lib/sign-in-redirect';
+
 import { useSetupBootstrapOpen } from './useUser';
-
-function buildSignInRedirectUrl(relativePath: string): string {
-  const params = new URLSearchParams({
-    redirect_url: relativePath || '/',
-  });
-
-  return `/sign-in?${params.toString()}`;
-}
 
 function useSignInRedirectUrl(): string {
   const pathname = usePathname();
