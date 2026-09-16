@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { Queue } from 'bullmq';
 import { z } from 'zod';
 
@@ -79,6 +81,7 @@ export async function enqueuePullRequestMergeabilityCheck(
       ? PULL_REQUEST_MERGEABILITY_INITIAL_DELAY_MS
       : PULL_REQUEST_MERGEABILITY_RETRY_DELAY_MS;
   const deduplicationId = `pr-mergeability:${data.deduplicationKey}:attempt-${data.retryAttempt}`;
+  const requestedJobId = randomUUID();
 
   const operationalFields = {
     ...getOperationalLogRuntimeFields(
@@ -97,6 +100,7 @@ export async function enqueuePullRequestMergeabilityCheck(
       'check-pr-mergeability',
       data,
       {
+        jobId: requestedJobId,
         delay,
         deduplication: {
           id: deduplicationId,
@@ -112,8 +116,8 @@ export async function enqueuePullRequestMergeabilityCheck(
     console.log(
       formatOperationalEvent('source_control_pr_mergeability_enqueue', {
         ...operationalFields,
-        jobId: job.id,
-        outcome: 'enqueued',
+        jobId: job.id === requestedJobId ? job.id : undefined,
+        outcome: job.id === requestedJobId ? 'enqueued' : 'deduplicated',
         reason:
           data.retryAttempt === 0
             ? 'provider_event_check'
