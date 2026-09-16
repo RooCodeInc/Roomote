@@ -209,6 +209,9 @@ export function DesktopStreamClient({
   const [liveLagMs, setLiveLagMs] = useState<number | null>(null);
   const [remoteSize, setRemoteSize] = useState<RemoteSize | null>(null);
   const [sentEvents, setSentEvents] = useState(0);
+  // Counted in a ref and published on the stats interval: a state update per
+  // pointer move would schedule a render at display refresh rate.
+  const sentEventsRef = useRef(0);
   const sentRemoteSizeRef = useRef<RemoteSize | null>(null);
   const resizeTimerRef = useRef<number | null>(null);
   /** Set while the server restarts the encoder after a resize. */
@@ -223,7 +226,7 @@ export function DesktopStreamClient({
     const socket = socketRef.current;
     if (socket?.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ ...event, sent_at_ms: Date.now() }));
-      setSentEvents((count) => count + 1);
+      sentEventsRef.current += 1;
     }
   };
 
@@ -377,6 +380,7 @@ export function DesktopStreamClient({
           );
         }
         decodedBytesRef.current = decodedBytes;
+        setSentEvents(sentEventsRef.current);
         setDroppedFrames(
           videoRef.current?.getVideoPlaybackQuality().droppedVideoFrames ?? 0,
         );
@@ -464,9 +468,18 @@ export function DesktopStreamClient({
         // play() with an AbortError. Keep the source and retry once the
         // tab is visible again instead of tearing the stream down.
         if (error instanceof DOMException && error.name === 'AbortError') {
+          // Do not let the startup timeout fail a deliberately deferred
+          // stream; re-arm it once playback is attempted again.
+          clearStartTimeout();
           const retry = () => {
             if (document.visibilityState === 'visible') {
               document.removeEventListener('visibilitychange', retry);
+              startTimeoutRef.current = window.setTimeout(() => {
+                startTimeoutRef.current = null;
+                failStream(
+                  'Remote desktop did not start in time. The sandbox desktop service may not be running.',
+                );
+              }, STREAM_START_TIMEOUT_MS);
               void play();
             }
           };

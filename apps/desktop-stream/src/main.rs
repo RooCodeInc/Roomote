@@ -100,6 +100,10 @@ struct ScreenSize {
 
 const MIN_SCREEN_DIMENSION: u16 = 320;
 const MAX_SCREEN_DIMENSION: u16 = 4_096;
+/// Upper bound on total screen pixels a viewer may request. It matches the
+/// web client's budget (1080p worth of pixels with a little slack) so a raw
+/// control client cannot demand a 16 MP capture at 60 FPS.
+const MAX_SCREEN_PIXELS: u32 = 1_920 * 1_200;
 
 impl ScreenSize {
     /// Validates a viewer-requested size: both dimensions must land within the
@@ -113,6 +117,11 @@ impl ScreenSize {
         {
             return Err(format!(
                 "screen size must be {MIN_SCREEN_DIMENSION}-{MAX_SCREEN_DIMENSION} pixels in each dimension"
+            ));
+        }
+        if u32::from(width) * u32::from(height) > MAX_SCREEN_PIXELS {
+            return Err(format!(
+                "screen size must not exceed {MAX_SCREEN_PIXELS} pixels in total"
             ));
         }
         Ok(Self { width, height })
@@ -1234,6 +1243,9 @@ async fn control(
     }
     // The newest viewer wins: bump the generation so any previous control
     // session releases its held input and closes.
+    // Subscribe before publishing our generation so a newer client that
+    // connects between this point and the upgrade is not missed.
+    let superseded = state.control_generation.subscribe();
     let mut generation = 0;
     state.control_generation.send_modify(|current| {
         *current += 1;
@@ -1243,12 +1255,26 @@ async fn control(
 
     websocket
         .max_message_size(4 * 1024)
-        .on_upgrade(move |socket| control_socket(socket, state, generation))
+        .on_upgrade(move |socket| control_socket(socket, state, generation, superseded))
 }
 
-async fn control_socket(mut socket: WebSocket, state: AppState, generation: u64) {
-    let mut superseded = state.control_generation.subscribe();
-    superseded.mark_unchanged();
+async fn control_socket(
+    mut socket: WebSocket,
+    state: AppState,
+    generation: u64,
+    mut superseded: watch::Receiver<u64>,
+) {
+    // Consume our own generation bump; anything newer means a later client
+    // already took control while this upgrade was pending.
+    if *superseded.borrow_and_update() != generation {
+        let _ = socket
+            .send(Message::Text(
+                "{\"error\":\"another viewer took control of the desktop\"}".into(),
+            ))
+            .await;
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    }
     let _connection_guard = ControlConnectionGuard {
         connected: state.control_connected.clone(),
         generation,
@@ -1769,6 +1795,9 @@ mod tests {
         );
         assert!(ScreenSize::from_request(200, 720).is_err());
         assert!(ScreenSize::from_request(1280, 5_000).is_err());
+        // Each dimension is in range but the total exceeds the pixel budget.
+        assert!(ScreenSize::from_request(4_096, 4_096).is_err());
+        assert!(ScreenSize::from_request(1_920, 1_200).is_ok());
         assert_eq!(
             ScreenSize {
                 width: 1920,
