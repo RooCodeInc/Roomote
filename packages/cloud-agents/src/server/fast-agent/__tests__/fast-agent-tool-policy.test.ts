@@ -67,6 +67,24 @@ describe('getFastAgentNativeAcpKind', () => {
     );
   });
 
+  it('exposes remote MCP creation only when the caller enables the admin tool', () => {
+    expect(
+      buildFastAgentToolFilter([], {})[
+        FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp
+      ],
+    ).toBe(false);
+    expect(
+      buildFastAgentToolFilter([], { addRemoteMcpEnabled: true })[
+        FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp
+      ],
+    ).toBe(true);
+    expect(
+      FAST_AGENT_SUBAGENT_TOOL_FILTER[
+        FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp
+      ],
+    ).toBe(false);
+  });
+
   it.each(FAST_AGENT_NATIVE_TOOL_CATALOG)(
     'maps every catalogued tool (%s) to its ACP kind',
     ({ name, kind }) => {

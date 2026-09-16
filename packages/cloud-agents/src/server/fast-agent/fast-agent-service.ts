@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
+import { addRemoteCustomMcpForFast } from '@roomote/sdk/server';
 import {
   listServiceCredentialApprovals,
   prepareServiceCredential,
@@ -1733,6 +1734,13 @@ const INTEGRATION_REFUSAL_GUIDANCE: Readonly<Record<string, string>> = {
   path_too_long: 'The request path is too long; shorten it.',
 };
 
+const addRemoteMcpArgsSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    url: z.string().url().max(2_048),
+  })
+  .strict();
+
 export async function answerFastAgentQuestion({
   question,
   images = [],
@@ -3461,6 +3469,7 @@ export async function answerFastAgentQuestion({
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
       serviceCredentialToolsEnabled: currentUser.serviceCredentialToolsEnabled,
+      addRemoteMcpEnabled: currentUser.isAdmin && !platformEvent,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
@@ -3784,6 +3793,7 @@ export async function answerFastAgentQuestion({
       // no extra reply. This does not bypass the live actor/grant checks.
       ...(conversation.surface === 'web'
         ? [
+            FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp,
             FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
             FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
             FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
@@ -4117,6 +4127,58 @@ export async function answerFastAgentQuestion({
           };
         }
         switch (call.name) {
+          case FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp: {
+            if (platformEvent) {
+              return {
+                success: false,
+                error:
+                  'A deployment administrator must request this connection in a human-authored turn.',
+              };
+            }
+            if (!currentUser.isAdmin) {
+              return {
+                success: false,
+                error:
+                  'Only a deployment administrator can add a custom remote MCP integration.',
+              };
+            }
+            const args = addRemoteMcpArgsSchema.parse(call.args);
+            const canonicalSession = await getSessionForFastConversation(
+              db,
+              session.id,
+            );
+            if (!canonicalSession) {
+              return {
+                success: false,
+                error: 'This Fast conversation is not attached to a Session.',
+              };
+            }
+            const result = await addRemoteCustomMcpForFast({
+              userId,
+              sessionId: canonicalSession.id,
+              ...args,
+            });
+            if (result.status === 'connected') {
+              const refreshedIntegrations = await listFastAgentIntegrations(
+                { userId, apiBaseUrl },
+                adapter.resolveMcpServerConfigs,
+              );
+              availableIntegrations.splice(
+                0,
+                availableIntegrations.length,
+                ...refreshedIntegrations,
+              );
+              onDemandIntegrations.splice(
+                0,
+                onDemandIntegrations.length,
+                ...refreshedIntegrations.filter(
+                  (integration) =>
+                    !isFastAgentNativeIntegration(integration.id),
+                ),
+              );
+            }
+            return { success: true, ...result };
+          }
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
             const args = chatReplyArgsSchema.parse(call.args);
             if (args.message === undefined) await waitForSettledReplyText();
@@ -5256,7 +5318,10 @@ export async function answerFastAgentQuestion({
           return await executeNativeToolInner(call);
         }
         const canonicalToolEvent = await beginCanonicalToolEvent({
-          title: call.name,
+          title:
+            call.name === FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp
+              ? 'Add remote MCP'
+              : call.name,
           args: call.args,
           nativeSessionId: call.sessionId,
           kind: getFastAgentNativeAcpKind(call.name),
@@ -5387,6 +5452,7 @@ export async function answerFastAgentQuestion({
               currentUser.serviceCredentialToolsEnabled,
             serviceCredentialPrepareEnabled:
               currentUser.serviceCredentialToolsEnabled && !platformEvent,
+            addRemoteMcpEnabled: currentUser.isAdmin && !platformEvent,
           },
         );
         const unbindExecutors = new Set<() => void>();

@@ -641,6 +641,20 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Add or reconnect one deployment-shared remote MCP integration from its HTTPS endpoint. Use this when an administrator asks to connect a service or provides a remote MCP URL that is not already available. The server verifies the endpoint before saving it, reuses an existing matching integration, and returns either connected tools, a secure OAuth authorization link, or the existing Settings link for static headers/manual OAuth client setup. Never ask for or accept secrets in chat or tool arguments.",
+  args: {
+    name: z.string().trim().min(1).max(80).describe("Short deployment-visible integration name"),
+    url: z.string().url().max(2048).describe("HTTPS streamable-HTTP MCP endpoint"),
+  },
+  execute: (args, context) => invoke("add_remote_mcp", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
@@ -1560,6 +1574,7 @@ export async function getFastAgentNativeToolRuntime(
     surface?: FastAgentSurface;
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
+    addRemoteMcpEnabled?: boolean;
   } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
@@ -1620,6 +1635,7 @@ export async function getFastAgentNativeToolRuntime(
                 options.serviceCredentialToolsEnabled === true,
               serviceCredentialPrepareEnabled:
                 options.serviceCredentialPrepareEnabled,
+              addRemoteMcpEnabled: options.addRemoteMcpEnabled,
             },
           ),
         },

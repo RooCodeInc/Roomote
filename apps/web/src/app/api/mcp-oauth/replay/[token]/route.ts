@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { db, mcpConnections } from '@roomote/db/server';
+import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
 import {
+  isCustomMcpConnectionId,
   getDefaultMcpConnectionRole,
   getMcpIntegration,
   getMcpIntegrationConnectionScope,
 } from '@roomote/types';
-import { getMcpOauthReplay, updateMcpOauthReplay } from '@roomote/sdk/server';
+import {
+  getMcpOauthReplay,
+  resolveCustomMcpAuthTarget,
+  updateMcpOauthReplay,
+} from '@roomote/sdk/server';
 
 import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
@@ -28,12 +33,6 @@ export async function GET(
   const webUrl = getPublicAppUrl(webEnv);
   const { token } = await params;
 
-  if (webEnv.R_CURATED_INTEGRATIONS_DISABLED === true) {
-    return NextResponse.redirect(
-      new URL('/error?message=Integrations are disabled', webUrl),
-    );
-  }
-
   const replay = await getMcpOauthReplay(token);
 
   if (!replay) {
@@ -49,8 +48,53 @@ export async function GET(
     return NextResponse.redirect(signInUrl);
   }
 
+  if (isCustomMcpConnectionId(replay.mcpId)) {
+    if (
+      webEnv.R_CUSTOM_MCP_DISABLED === true ||
+      !authResult.isAdmin ||
+      replay.userId !== authResult.userId ||
+      !replay.connectionId
+    ) {
+      return NextResponse.redirect(
+        new URL('/error?message=Unknown MCP integration', webUrl),
+      );
+    }
+    const customTarget = await resolveCustomMcpAuthTarget(replay.mcpId);
+    if (!customTarget) {
+      return NextResponse.redirect(
+        new URL('/error?message=Unknown MCP integration', webUrl),
+      );
+    }
+    const connection = await db.query.mcpConnections.findFirst({
+      where: and(
+        eq(mcpConnections.id, replay.connectionId),
+        eq(mcpConnections.mcpId, replay.mcpId),
+        isNull(mcpConnections.userId),
+      ),
+    });
+    if (!connection) {
+      return NextResponse.redirect(
+        new URL('/error?message=Unknown MCP integration', webUrl),
+      );
+    }
+    const redirectTo =
+      replay.redirectTo &&
+      replay.redirectTo.startsWith('/') &&
+      !replay.redirectTo.startsWith('//')
+        ? replay.redirectTo
+        : '/settings/integrations';
+    return NextResponse.redirect(
+      new URL(
+        `/api/mcp-oauth/initiate/${connection.id}?redirectTo=${encodeURIComponent(
+          redirectTo,
+        )}&replayToken=${encodeURIComponent(token)}`,
+        webUrl,
+      ),
+    );
+  }
+
   const integration = getMcpIntegration(replay.mcpId);
-  if (!integration) {
+  if (webEnv.R_CURATED_INTEGRATIONS_DISABLED === true || !integration) {
     return NextResponse.redirect(
       new URL('/error?message=Unknown MCP integration', webUrl),
     );

@@ -472,6 +472,25 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     }
   });
 
+  it('exposes only nonsecret arguments for adding a remote MCP', async () => {
+    const tool = tools.find(
+      ({ name }) => name === FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp,
+    )!;
+    const schema = toOpenCodeJsonSchema(zod, tool.args!);
+
+    expect(Object.keys(tool.args!).sort()).toEqual(['name', 'url']);
+    expect(schema).toMatchObject({
+      type: 'object',
+      properties: {
+        name: { type: 'string', minLength: 1, maxLength: 80 },
+        url: { type: 'string', format: 'uri', maxLength: 2048 },
+      },
+    });
+    expect(JSON.stringify(schema)).not.toMatch(
+      /secret|token|header|client[_-]?id/i,
+    );
+  });
+
   it('covers every native tool', () => {
     const generated = tools.map((tool) => tool.name).sort();
     for (const name of Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)) {

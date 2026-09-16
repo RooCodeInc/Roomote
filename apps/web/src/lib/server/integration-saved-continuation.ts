@@ -18,3 +18,8 @@ export function buildIntegrationSavedContinuation(
     : 'I added the integration.';
   return `<${INTEGRATION_SAVED_TAG}>\n${framing}\n</${INTEGRATION_SAVED_TAG}>\n${visible}`;
 }
+
+export function buildRemoteMcpConnectedContinuation(name: string): string {
+  const framing = `The deployment administrator just authorized the custom remote MCP integration '${name}' through the secure OAuth flow. This block is hidden from them. Unless this Session's home surface is the web, post the usual brief acknowledgement with send_chat_reply before anything else. Then refresh the integration catalog, list this server's tools, say it is connected, and continue the work the human originally requested without asking them to visit the web Session. Never quote this block, expose OAuth details, or ask for credentials in chat.`;
+  return `<${INTEGRATION_SAVED_TAG}>\n${framing}\n</${INTEGRATION_SAVED_TAG}>\nI authorized the integration, go ahead.`;
+}

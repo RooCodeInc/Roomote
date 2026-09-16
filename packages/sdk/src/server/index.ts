@@ -572,6 +572,12 @@ export {
 } from './lib/mcp/custom-auth-target';
 
 export {
+  addRemoteCustomMcpForFast,
+  prepareDeploymentCustomMcpOAuthConnection,
+  type AddRemoteCustomMcpResult,
+} from './lib/mcp/add-remote-custom-mcp';
+
+export {
   LINEAR_ORG_CONNECTION_ROLE,
   LINEAR_USER_CONNECTION_ROLE,
   findLinearDeploymentMcpConnection,
