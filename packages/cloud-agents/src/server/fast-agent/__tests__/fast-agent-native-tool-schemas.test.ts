@@ -483,7 +483,12 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       type: 'object',
       properties: {
         name: { type: 'string', minLength: 1, maxLength: 80 },
-        url: { type: 'string', format: 'uri', maxLength: 2048 },
+        url: {
+          type: 'string',
+          format: 'uri',
+          pattern: '^https:\\/\\/.*',
+          maxLength: 2048,
+        },
       },
     });
     expect(JSON.stringify(schema)).not.toMatch(

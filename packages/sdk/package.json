@@ -68,6 +68,10 @@
       "import": "./src/server/lib/service-credentials.ts",
       "require": "./src/server/lib/service-credentials.ts"
     },
+    "./server/add-remote-custom-mcp": {
+      "import": "./src/server/lib/mcp/add-remote-custom-mcp.ts",
+      "require": "./src/server/lib/mcp/add-remote-custom-mcp.ts"
+    },
     "./server/credential-egress": {
       "import": "./src/server/lib/credential-egress.ts",
       "require": "./src/server/lib/credential-egress.ts"

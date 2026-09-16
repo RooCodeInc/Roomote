@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
-import { addRemoteCustomMcpForFast } from '@roomote/sdk/server';
+import { addRemoteCustomMcpForFast } from '@roomote/sdk/server/add-remote-custom-mcp';
 import {
   listServiceCredentialApprovals,
   prepareServiceCredential,
@@ -1737,7 +1737,7 @@ const INTEGRATION_REFUSAL_GUIDANCE: Readonly<Record<string, string>> = {
 const addRemoteMcpArgsSchema = z
   .object({
     name: z.string().trim().min(1).max(80),
-    url: z.string().url().max(2_048),
+    url: z.string().url().startsWith('https://').max(2_048),
   })
   .strict();
 

@@ -649,7 +649,7 @@ export default {
   description: "Add or reconnect one deployment-shared remote MCP integration from its HTTPS endpoint. Use this when an administrator asks to connect a service or provides a remote MCP URL that is not already available. The server verifies the endpoint before saving it, reuses an existing matching integration, and returns either connected tools, a secure OAuth authorization link, or the existing Settings link for static headers/manual OAuth client setup. Never ask for or accept secrets in chat or tool arguments.",
   args: {
     name: z.string().trim().min(1).max(80).describe("Short deployment-visible integration name"),
-    url: z.string().url().max(2048).describe("HTTPS streamable-HTTP MCP endpoint"),
+    url: z.string().url().startsWith("https://").max(2048).describe("HTTPS streamable-HTTP MCP endpoint"),
   },
   execute: (args, context) => invoke("add_remote_mcp", args, context),
 }

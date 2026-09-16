@@ -83,6 +83,20 @@ describe('addRemoteCustomMcpForFast', () => {
     expect(await db.query.customMcpServers.findMany()).toEqual([]);
   });
 
+  it('rejects HTTP before probing or persistence', async () => {
+    await expect(
+      addRemoteCustomMcpForFast({
+        userId: adminId,
+        sessionId: crypto.randomUUID(),
+        name: 'records',
+        url: 'http://mcp.example.com/mcp',
+      }),
+    ).rejects.toThrow('must use HTTPS');
+
+    expect(guardedFetchMock).not.toHaveBeenCalled();
+    expect(await db.query.customMcpServers.findMany()).toEqual([]);
+  });
+
   it('verifies an unauthenticated server before creating it', async () => {
     guardedFetchMock
       .mockResolvedValueOnce(initializedResponse())
@@ -159,6 +173,33 @@ describe('addRemoteCustomMcpForFast', () => {
 
     expect(guardedFetchMock).not.toHaveBeenCalled();
     expect(await db.query.customMcpServers.findMany()).toHaveLength(2);
+  });
+
+  it('returns Settings instead of connected tools for a reused disabled server', async () => {
+    await db.insert(customMcpServers).values({
+      name: 'records',
+      url: 'https://mcp.example.com/mcp',
+      authType: 'none',
+      enabled: false,
+      createdByUserId: adminId,
+    });
+
+    const result = await addRemoteCustomMcpForFast({
+      userId: adminId,
+      sessionId: crypto.randomUUID(),
+      name: 'records',
+      url: 'https://mcp.example.com/mcp',
+    });
+
+    expect(result).toMatchObject({
+      status: 'disabled',
+      name: 'records',
+      reused: true,
+    });
+    expect((result as { settingsUrl: string }).settingsUrl).toContain(
+      '/settings/integrations',
+    );
+    expect(guardedFetchMock).not.toHaveBeenCalled();
   });
 
   it('returns a replay authorization link for discoverable OAuth', async () => {

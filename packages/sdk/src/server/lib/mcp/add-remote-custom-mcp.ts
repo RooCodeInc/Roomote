@@ -60,6 +60,13 @@ export type AddRemoteCustomMcpResult =
       authorizeUrl: string;
       settingsUrl: string;
       reused: boolean;
+    }
+  | {
+      status: 'disabled';
+      id: string;
+      name: string;
+      settingsUrl: string;
+      reused: true;
     };
 
 type RemoteMcpProbe =
@@ -72,7 +79,11 @@ function publicUrl(path: string): string {
 }
 
 function normalizeRemoteMcpUrl(value: string): string {
-  return new URL(value).toString();
+  const url = new URL(value);
+  if (url.protocol !== 'https:') {
+    throw new Error('Remote MCP server URLs must use HTTPS.');
+  }
+  return url.toString();
 }
 
 function parseTools(payload: unknown): RemoteMcpTool[] | null {
@@ -338,6 +349,15 @@ async function resultForServer(input: {
 }): Promise<AddRemoteCustomMcpResult> {
   const { server } = input;
   if (!server.url) throw new Error('The matching custom MCP is not remote.');
+  if (!server.enabled) {
+    return {
+      status: 'disabled',
+      id: server.id,
+      name: server.name,
+      settingsUrl: publicUrl(SETTINGS_PATH),
+      reused: true,
+    };
+  }
 
   if (server.authType === 'none') {
     return {
