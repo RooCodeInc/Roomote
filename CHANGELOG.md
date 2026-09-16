@@ -2,6 +2,36 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.10.0 (2026-09-16)
+
+Roomote 1.10 expands agent research and multi-repository work, reorganizes personal and shared integrations, and improves Session reliability, mobile input, artifact previews, and operator diagnostics.
+
+### Highlights
+
+- Research the public web through guarded URL fetching or the new opt-in Exa integration.
+- Check out additional authorized repositories from any sandbox workspace while preserving its original tooling and services.
+- Manage personal integration keys separately from deployment-wide integrations and keep key-backed requests inside delegated coding tasks.
+- Keep Sessions moving with stronger mobile input, artifact previews, pull-request views, authentication recovery, and delivery diagnostics.
+
+### Minor changes
+
+- Sandbox tasks can now check out additional authorized repositories from environment, repository, repository-set, all-repositories, and connected Blank slate workspaces while keeping the selected workspace responsible for initial tooling and services.
+- Add guarded public URL fetching to the Roomote MCP for Fast Sessions, coding tasks, and external clients, with text formatting, image support, bounded time and size, explicit caller headers, and public-destination checks on every redirect while unrestricted runtime fetching remains disabled.
+
+### Patch changes
+
+- Add an opt-in deployment-wide Exa integration with free keyless search, an optional encrypted API key for authenticated Exa Agent access, secure proxy mediation, Fast and sandbox availability, tool management, and public setup documentation.
+- Roomote agents now read nested Slack workflow attachments, look up available context before asking about terse triggers, and identify the exact task-memory field limit when a saved summary is too large.
+- Artifact galleries now show bounded real content for CSV and TSV files and reliably load Markdown previews instead of leaving supported files on abstract or stuck placeholders.
+- Fix `/health/bullmq` reporting every deployment unhealthy: the overdue queued-event count bound a Date inside a raw SQL fragment, which Postgres rejected, so the check failed on every probe since 1.9.3.
+- Integration keys now separate personal and deployment-wide access: members manage private keys in Personal Settings, admins manage shared keys in Integrations, inactive owners immediately invalidate shared grants, and listings omit revoked or expired entries. Fast can discover and prepare keys, while delegated coding tasks make approved-method requests through scoped substitute tokens. Approval dialogs, transcript labels, save continuation, error guidance, and owner-aware task-settlement handling are clearer and safer.
+- Mobile composers now keep Enter available for multiline prompts and accept suggested text on the first tap without a soft-keyboard blur discarding the suggestion.
+- Operators get trustworthy password-reset delivery and pull-request conflict diagnostics, while abuse limits no longer trust caller-supplied forwarding headers that can be rotated to evade request ceilings.
+- Resolved pull-request review offers now leave the conversation once follow-up work starts, and nested tool calls keep the correct tool-specific icons inside expanded activity groups.
+- Expired web Sessions now return through sign-in to the interrupted page, and Blank slate task launches from Discord, pull-request discussions, and Linear no longer fail by treating the workspace sentinel as an environment ID.
+- Session workspaces now prioritize running task panels, show the total number of open recent pull requests on Home, and filter Sessions by the full pull-request provider, host, repository, and number identity.
+- Active voice conversations no longer send duplicate reply notifications through connected chat or email providers, while ordinary web Sessions keep the existing fallback delivery behavior.
+
 ## 1.9.4 (2026-09-15)
 
 Roomote 1.9.4 adds self-service password recovery and clearer cross-surface Telegram replies while making integration keys easier to enter, strengthening inbound email safety, and improving delivery diagnostics, artifact tables, and transcript resilience.
