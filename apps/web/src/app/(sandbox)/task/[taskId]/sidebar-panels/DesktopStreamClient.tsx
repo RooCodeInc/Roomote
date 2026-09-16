@@ -458,13 +458,28 @@ export function DesktopStreamClient({
     const url = new URL(streamUrl, window.location.href);
     url.searchParams.set('restart', String(Date.now()));
     video.src = url.toString();
-    void video.play().catch((error: unknown) => {
-      failStream(
-        error instanceof Error
-          ? error.message
-          : 'Remote desktop playback failed',
-      );
-    });
+    const play = () =>
+      video.play().catch((error: unknown) => {
+        // Browsers pause video-only media in background tabs and reject
+        // play() with an AbortError. Keep the source and retry once the
+        // tab is visible again instead of tearing the stream down.
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          const retry = () => {
+            if (document.visibilityState === 'visible') {
+              document.removeEventListener('visibilitychange', retry);
+              void play();
+            }
+          };
+          document.addEventListener('visibilitychange', retry);
+          return;
+        }
+        failStream(
+          error instanceof Error
+            ? error.message
+            : 'Remote desktop playback failed',
+        );
+      });
+    void play();
   };
 
   useEffect(() => {
