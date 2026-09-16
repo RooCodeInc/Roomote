@@ -186,6 +186,7 @@ import {
 import {
   getFastAgentNativeAcpKind,
   isFastAgentNativeIntegration,
+  isFastAgentNativeToolEnabled,
 } from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
@@ -4063,6 +4064,13 @@ export async function answerFastAgentQuestion({
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
       try {
+        if (!isFastAgentNativeToolEnabled(call.name)) {
+          return {
+            success: false,
+            error:
+              'request_with_integration_key is unavailable in Fast mode. Launch a coding task from this Session to use the approved integration.',
+          };
+        }
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools) {
           return describeIntegrationTools(
             findIntegrationToolsArgsSchema.parse(call.args),
@@ -4094,6 +4102,13 @@ export async function answerFastAgentQuestion({
       const instructionVersion = getInstructionVersion(call.messageId);
 
       try {
+        if (!isFastAgentNativeToolEnabled(call.name)) {
+          return {
+            success: false,
+            error:
+              'request_with_integration_key is unavailable in Fast mode. Launch a coding task from this Session to use the approved integration.',
+          };
+        }
         const closedError = requireOpen(call.messageId);
         if (closedError) return closedError;
         const ownershipError = requireLockOwnership();
