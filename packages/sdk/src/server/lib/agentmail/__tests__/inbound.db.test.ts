@@ -221,15 +221,12 @@ describe('agentmail webhook event outbox (real database)', () => {
     expect(turns).toHaveLength(1);
   });
 
-  it('refuses a known sender whose message did not pass DMARC, before any turn', async () => {
+  it('silently drops a known sender whose message did not pass DMARC, without consuming refusal budget', async () => {
     const { senderEmail } = await createVerifiedSender();
     const originalFetch = globalThis.fetch;
-    const replies: string[] = [];
-    globalThis.fetch = (async (
-      _url: string | URL | Request,
-      init?: RequestInit,
-    ) => {
-      replies.push(String(init?.body ?? ''));
+    let outboundRequests = 0;
+    globalThis.fetch = (async () => {
+      outboundRequests += 1;
       return new Response(JSON.stringify({ message_id: 'm-refusal' }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -238,6 +235,9 @@ describe('agentmail webhook event outbox (real database)', () => {
     try {
       const deliveryId = `msg_${randomUUID()}`;
       const threadId = `thread-${randomUUID()}`;
+      const redis = getRedis();
+      const dailyKey = `agentmail:stranger_refusal:daily:${new Date().toISOString().slice(0, 10)}`;
+      const dailyCountBefore = await redis.get(dailyKey);
       await recordAgentMailWebhookEvent({
         deliveryId,
         eventId: null,
@@ -264,9 +264,16 @@ describe('agentmail webhook event outbox (real database)', () => {
         where: eq(agentmailConversations.providerThreadId, threadId),
       });
       expect(conversation).toBeUndefined();
-      expect(replies).toHaveLength(1);
-      expect(replies[0]).toContain('did not pass DMARC');
-      expect(replies[0]).not.toContain('verified email on a Roomote account');
+      expect(outboundRequests).toBe(0);
+      expect(await redis.get(dailyKey)).toBe(dailyCountBefore);
+      expect(
+        await redis.get(
+          `agentmail:stranger_refusal:${INBOX}:${threadId}:${senderEmail}`,
+        ),
+      ).toBeNull();
+      expect(
+        await redis.get(`agentmail:stranger_refusal:sender:${senderEmail}`),
+      ).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
     }
