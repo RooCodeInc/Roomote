@@ -178,16 +178,54 @@ jobs:
           pnpm-version: ${{ env.PNPM_VERSION }}
           turbo-cache-scope: test
       - name: Setup database schema
+        id: test-schema
         run: pnpm --filter @roomote/db db:push:test --force
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/test
       - name: Run unit tests
+        id: unit-tests
         run: pnpm test:ci
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/test
           REDIS_URL: redis://localhost:6379
       - name: Run release script unit tests
+        id: release-tests
         run: pnpm test:release-scripts
+      - name: Summarize test failure
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          SCHEMA_OUTCOME: ${{ steps.test-schema.outcome }}
+          UNIT_OUTCOME: ${{ steps.unit-tests.outcome }}
+          RELEASE_OUTCOME: ${{ steps.release-tests.outcome }}
+        run: |
+          {
+            echo '## Test job failed'
+            echo
+            echo '| Step | Outcome |'
+            echo '| --- | --- |'
+            echo "| Database schema | ${SCHEMA_OUTCOME:-not run} |"
+            echo "| Workspace unit tests | ${UNIT_OUTCOME:-not run} |"
+            echo "| Release-script tests | ${RELEASE_OUTCOME:-not run} |"
+            echo
+            if [ "$RELEASE_OUTCOME" = 'skipped' ]; then
+              echo '**Release-script tests did not run because an earlier step failed.**'
+              echo
+            fi
+            echo 'Open the failed step above for the first failing package, test name, and assertion. A skipped step is not a passing test.'
+            echo
+            echo '### Reproduce locally'
+            echo 'Check out the commit tested by this run, start Docker, then run:'
+            echo '```sh'
+            echo 'mise install'
+            echo 'pnpm install --frozen-lockfile'
+            echo 'pnpm db:up'
+            echo 'pnpm test:ci'
+            echo 'pnpm test:release-scripts'
+            echo '```'
+            echo
+            echo 'For a focused rerun, use `pnpm exec dotenvx run -f .env.test -- pnpm --filter <package> exec vitest run <test-file>` (web tests also accept `--project client` or `--project server`). Local setup uses local service ports; CI uses PostgreSQL on 5432 and Redis on 6379.'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   backup-restore:
     name: Fresh-host Backup Restore

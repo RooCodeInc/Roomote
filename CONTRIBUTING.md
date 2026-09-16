@@ -20,9 +20,14 @@ helps far more than an unrequested diff.
 
 ## Developer Setup
 
+Start Docker Engine (or Docker Desktop) before running database-backed tests.
+The setup below starts the local PostgreSQL, Redis, and artifact-storage services
+and prepares the development and test schemas.
+
 ```sh
 mise install
 pnpm install
+pnpm db:up
 pnpm lint
 pnpm check-types
 pnpm test
