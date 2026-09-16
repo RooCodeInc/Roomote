@@ -56,7 +56,8 @@
           "integration-keys",
           "memory",
           "file-attachments",
-          "voice"
+          "voice",
+          "ios-app"
         ]
       },
       {

@@ -29,6 +29,7 @@ import {
   useGranolaConnection,
   useElevenLabsConnection,
   useVoiceConnection,
+  useIosAppConnection,
   useEffectiveMcpIntegrations,
   useNotionConnection,
   useRipplingConnection,
@@ -39,6 +40,7 @@ import {
   useSaveGranolaConnection,
   useSaveElevenLabsConnection,
   useSaveVoiceConnection,
+  useSaveIosAppConnection,
   usePreviewVoice,
   useSaveSnowflakeConnection,
   useSaveVercelConnection,
@@ -63,6 +65,7 @@ import {
   saveGranolaConnectionSchema,
   saveElevenLabsConnectionSchema,
   saveVoiceConnectionSchema,
+  saveIosAppConnectionSchema,
   saveSnowflakeConnectionSchema,
   saveVercelConnectionSchema,
   saveXConnectionSchema,
@@ -114,6 +117,8 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will use one deployment-wide ElevenLabs connection to narrate feature-demo videos. The key stays on the control plane; agents get no ElevenLabs tools.',
   voice:
     'Roomote will use one deployment-wide OpenAI key with GPT-Live access to hold voice calls on Sessions. The key stays on the control plane; agents get no tools from it.',
+  ios_app:
+    "Roomote will send push notifications to this deployment's build of the iOS app with its own Apple push key. The key stays on the control plane; agents get no tools from it.",
   github:
     'Roomote will be able to inspect PRs, issues, and repository context.',
   jira: 'Roomote will be able to inspect Jira issues, workflows, and JQL search results.',
@@ -230,6 +235,21 @@ type VoiceConnectionData = {
   voiceId?: OpenAiRealtimeVoiceId;
 };
 
+type IosAppFormState = {
+  teamId: string;
+  keyId: string;
+  bundleId: string;
+  privateKey: string;
+};
+
+type IosAppConnectionData = {
+  authStatus?: 'pending' | 'authenticated' | 'error' | null;
+  teamId: string;
+  keyId: string;
+  bundleId: string;
+  deviceCount: number;
+};
+
 type GrafanaFormState = {
   baseUrl: string;
   serviceAccountToken: string;
@@ -294,6 +314,25 @@ function buildVoiceForm(
   return {
     apiKey: '',
     voiceId: connection?.voiceId ?? DEFAULT_OPENAI_REALTIME_VOICE_ID,
+  };
+}
+
+function buildEmptyIosAppForm(): IosAppFormState {
+  return { teamId: '', keyId: '', bundleId: '', privateKey: '' };
+}
+
+function buildIosAppForm(
+  connection: IosAppConnectionData | null | undefined,
+): IosAppFormState {
+  if (!connection) {
+    return buildEmptyIosAppForm();
+  }
+
+  return {
+    teamId: connection.teamId,
+    keyId: connection.keyId,
+    bundleId: connection.bundleId,
+    privateKey: '',
   };
 }
 
@@ -442,6 +481,23 @@ function getVoiceFieldErrors(
 
   const fieldErrors = result.error.flatten().fieldErrors;
   return { apiKey: fieldErrors.apiKey, voiceId: fieldErrors.voiceId };
+}
+
+function getIosAppFieldErrors(
+  result: ReturnType<typeof saveIosAppConnectionSchema.safeParse>,
+): Partial<Record<keyof IosAppFormState, string[]>> {
+  if (result.success) {
+    return {};
+  }
+
+  const fieldErrors = result.error.flatten().fieldErrors;
+
+  return {
+    teamId: fieldErrors.teamId,
+    keyId: fieldErrors.keyId,
+    bundleId: fieldErrors.bundleId,
+    privateKey: fieldErrors.privateKey,
+  };
 }
 
 function getElevenLabsFieldErrors(
@@ -1360,6 +1416,146 @@ function VoiceConnectionFields({
   );
 }
 
+function IosAppConnectionFields({
+  form,
+  fieldErrors,
+  formError,
+  allowBlankPrivateKey,
+  deviceCount,
+  onFieldChange,
+}: {
+  form: IosAppFormState;
+  fieldErrors: Partial<Record<keyof IosAppFormState, string[]>>;
+  formError: string | null;
+  allowBlankPrivateKey: boolean;
+  deviceCount: number | null;
+  onFieldChange: (field: keyof IosAppFormState, value: string) => void;
+}) {
+  const fieldClassName =
+    'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
+
+  return (
+    <>
+      <p className="text-sm text-muted-foreground">
+        Each deployment builds its own copy of the Roomote iOS app and sends
+        push notifications with its own Apple key, the same way it has its own
+        Slack app. See the{' '}
+        <a
+          href="https://docs.roomote.dev/ios-app"
+          target="_blank"
+          rel="noreferrer"
+          className="underline underline-offset-2"
+        >
+          iOS app guide
+        </a>{' '}
+        for the Apple Developer setup.
+        {deviceCount !== null && deviceCount > 0
+          ? ` ${deviceCount} ${deviceCount === 1 ? 'device is' : 'devices are'} registered for push.`
+          : null}
+      </p>
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="ios-app-team-id">Team ID</Label>
+          <Input
+            id="ios-app-team-id"
+            placeholder="ABCDE12345"
+            value={form.teamId}
+            onChange={(event) => onFieldChange('teamId', event.target.value)}
+            {...getFieldErrorAttributes('ios-app-team-id', fieldErrors.teamId)}
+            className={fieldClassName}
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <p className="text-sm text-muted-foreground">
+            From Apple Developer membership details.
+          </p>
+          <FieldError fieldId="ios-app-team-id" errors={fieldErrors.teamId} />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="ios-app-key-id">Key ID</Label>
+          <Input
+            id="ios-app-key-id"
+            placeholder="ABC123DEFG"
+            value={form.keyId}
+            onChange={(event) => onFieldChange('keyId', event.target.value)}
+            {...getFieldErrorAttributes('ios-app-key-id', fieldErrors.keyId)}
+            className={fieldClassName}
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <p className="text-sm text-muted-foreground">
+            The id of the APNs key created under Certificates, Identifiers &amp;
+            Profiles.
+          </p>
+          <FieldError fieldId="ios-app-key-id" errors={fieldErrors.keyId} />
+        </div>
+        <div className="space-y-2 md:col-span-2">
+          <Label htmlFor="ios-app-bundle-id">Bundle ID</Label>
+          <Input
+            id="ios-app-bundle-id"
+            placeholder="com.example.roomote"
+            value={form.bundleId}
+            onChange={(event) => onFieldChange('bundleId', event.target.value)}
+            {...getFieldErrorAttributes(
+              'ios-app-bundle-id',
+              fieldErrors.bundleId,
+            )}
+            className={fieldClassName}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <p className="text-sm text-muted-foreground">
+            The bundle identifier of your build of the app. Also used as the
+            APNs topic and for universal links.
+          </p>
+          <FieldError
+            fieldId="ios-app-bundle-id"
+            errors={fieldErrors.bundleId}
+          />
+        </div>
+        <div className="space-y-2 md:col-span-2">
+          <Label htmlFor="ios-app-private-key">APNs key (.p8)</Label>
+          <Textarea
+            id="ios-app-private-key"
+            rows={6}
+            placeholder="-----BEGIN PRIVATE KEY-----"
+            value={form.privateKey}
+            onChange={(event) =>
+              onFieldChange('privateKey', event.target.value)
+            }
+            {...getFieldErrorAttributes(
+              'ios-app-private-key',
+              fieldErrors.privateKey,
+            )}
+            className={fieldClassName}
+            data-1p-ignore
+          />
+          <p className="text-sm text-muted-foreground">
+            Paste the whole AuthKey_&lt;Key ID&gt;.p8 file. It is stored
+            encrypted and used only by this deployment&apos;s control plane to
+            sign push requests; it is never sent to agents or task sandboxes.
+          </p>
+          {allowBlankPrivateKey ? (
+            <p className="text-sm text-muted-foreground">
+              Leave blank to keep the existing key.
+            </p>
+          ) : null}
+          <FieldError
+            fieldId="ios-app-private-key"
+            errors={fieldErrors.privateKey}
+          />
+        </div>
+      </div>
+      {formError ? (
+        <p className="text-sm text-destructive">{formError}</p>
+      ) : null}
+    </>
+  );
+}
+
 function ElevenLabsConnectionFields({
   form,
   fieldErrors,
@@ -1681,6 +1877,14 @@ export function Integrations({
     Partial<Record<keyof VoiceFormState, string[]>>
   >({});
   const [voiceFormError, setVoiceFormError] = useState<string | null>(null);
+  const [isIosAppDialogOpen, setIsIosAppDialogOpen] = useState(false);
+  const [iosAppForm, setIosAppForm] = useState<IosAppFormState>(
+    buildEmptyIosAppForm(),
+  );
+  const [iosAppFieldErrors, setIosAppFieldErrors] = useState<
+    Partial<Record<keyof IosAppFormState, string[]>>
+  >({});
+  const [iosAppFormError, setIosAppFormError] = useState<string | null>(null);
   const [isElevenLabsDialogOpen, setIsElevenLabsDialogOpen] = useState(false);
   const [elevenLabsForm, setElevenLabsForm] = useState<ElevenLabsFormState>(
     buildEmptyElevenLabsForm(),
@@ -1758,6 +1962,7 @@ export function Integrations({
   const saveGranolaConnection = useSaveGranolaConnection();
   const saveElevenLabsConnection = useSaveElevenLabsConnection();
   const saveVoiceConnection = useSaveVoiceConnection();
+  const saveIosAppConnection = useSaveIosAppConnection();
   const saveSnowflakeConnection = useSaveSnowflakeConnection();
   const saveVercelConnection = useSaveVercelConnection();
   const saveXConnection = useSaveXConnection();
@@ -1825,6 +2030,18 @@ export function Integrations({
   const voiceConnection = useVoiceConnection(isAdmin);
   const voiceConfiguredByEnvironment =
     voiceConnection.data?.source === 'environment';
+  const iosAppConnectionSummary = useMemo(
+    () =>
+      (effectiveIntegrations.data ?? []).find(
+        (entry) => entry.id === 'ios_app',
+      ),
+    [effectiveIntegrations.data],
+  );
+  const isIosAppConnected =
+    iosAppConnectionSummary?.authStatus === 'authenticated';
+  const iosAppConnection = useIosAppConnection(
+    isAdmin && (isIosAppConnected || isIosAppDialogOpen),
+  );
   const elevenLabsConnectionSummary = useMemo(() => {
     const connection = (effectiveIntegrations.data ?? []).find(
       (entry) => entry.id === 'elevenlabs',
@@ -1952,6 +2169,25 @@ export function Integrations({
     voiceConnection.isPending,
     isVoiceConnected,
     isVoiceDialogOpen,
+  ]);
+
+  useEffect(() => {
+    if (!isIosAppDialogOpen) {
+      return;
+    }
+
+    if (iosAppConnection.isPending && isIosAppConnected) {
+      return;
+    }
+
+    setIosAppFieldErrors({});
+    setIosAppFormError(null);
+    setIosAppForm(buildIosAppForm(iosAppConnection.data));
+  }, [
+    iosAppConnection.data,
+    iosAppConnection.isPending,
+    isIosAppConnected,
+    isIosAppDialogOpen,
   ]);
 
   useEffect(() => {
@@ -2355,6 +2591,27 @@ export function Integrations({
             });
           }
 
+          if (integration.id === 'ios_app') {
+            return buildAdminConfiguredIntegrationItem({
+              integration,
+              connection: userConnectionMap.get(integration.id),
+              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
+              highlightedIntegrationId,
+              savePending: saveIosAppConnection.isPending,
+              disconnectPending: disconnectMcp.isPending,
+              disconnectingMcpId: disconnectMcp.variables?.mcpId,
+              dialogOpen: isIosAppDialogOpen,
+              connectionPending: iosAppConnection.isPending,
+              canConfigure: isAdmin,
+              // Credential-only: no agent tools to manage.
+              canManageTools: false,
+              openDialog: () => setIsIosAppDialogOpen(true),
+              openToolDialog: () => openMcpToolDialog(integration),
+              disconnectIntegration: () =>
+                disconnectAdminConfiguredIntegration(integration),
+            });
+          }
+
           if (integration.id === 'elevenlabs') {
             return buildAdminConfiguredIntegrationItem({
               integration,
@@ -2605,6 +2862,7 @@ export function Integrations({
     granolaConnection.isPending,
     elevenLabsConnection.isPending,
     voiceConnection.isPending,
+    iosAppConnection.isPending,
     voiceConfiguredByEnvironment,
     voiceConnection.data?.enabled,
     linearInstallation.data,
@@ -2618,6 +2876,7 @@ export function Integrations({
     isGranolaDialogOpen,
     isElevenLabsDialogOpen,
     isVoiceDialogOpen,
+    isIosAppDialogOpen,
     isLinearOauthSetupOpen,
     saveAsanaConnection.isPending,
     saveNotionConnection.isPending,
@@ -2626,6 +2885,7 @@ export function Integrations({
     saveGranolaConnection.isPending,
     saveElevenLabsConnection.isPending,
     saveVoiceConnection.isPending,
+    saveIosAppConnection.isPending,
     saveVercelConnection.isPending,
     effectiveIntegrations.data,
     pathname,
@@ -2862,6 +3122,21 @@ export function Integrations({
     });
   };
 
+  const handleIosAppFieldChange = (
+    field: keyof IosAppFormState,
+    value: string,
+  ) => {
+    setIosAppForm((current) => ({ ...current, [field]: value }));
+    setIosAppFieldErrors((current) => {
+      if (!current[field]) {
+        return current;
+      }
+
+      return { ...current, [field]: undefined };
+    });
+    setIosAppFormError(null);
+  };
+
   const handleElevenLabsFieldChange = (
     field: keyof ElevenLabsFormState,
     value: string,
@@ -3022,6 +3297,19 @@ export function Integrations({
     }
 
     setVoiceForm(buildEmptyVoiceForm());
+  };
+
+  const handleIosAppDialogOpenChange = (open: boolean) => {
+    setIsIosAppDialogOpen(open);
+
+    setIosAppFieldErrors({});
+    setIosAppFormError(null);
+
+    if (!open) {
+      return;
+    }
+
+    setIosAppForm(buildIosAppForm(iosAppConnection.data));
   };
 
   const handleElevenLabsDialogOpenChange = (open: boolean) => {
@@ -3211,6 +3499,43 @@ export function Integrations({
       },
       onError: (error) => {
         setGranolaFormError(error.message);
+      },
+    });
+  };
+
+  const handleIosAppSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const parsed = saveIosAppConnectionSchema.safeParse({
+      teamId: iosAppForm.teamId,
+      keyId: iosAppForm.keyId,
+      bundleId: iosAppForm.bundleId,
+      privateKey: iosAppForm.privateKey,
+    });
+    if (!parsed.success) {
+      setIosAppFieldErrors(getIosAppFieldErrors(parsed));
+      return;
+    }
+
+    if (!isIosAppConnected && parsed.data.privateKey.length === 0) {
+      setIosAppFieldErrors({ privateKey: ['APNs key is required'] });
+      return;
+    }
+
+    setIosAppFieldErrors({});
+    setIosAppFormError(null);
+
+    saveIosAppConnection.mutate(parsed.data, {
+      onSuccess: () => {
+        toast.success(
+          isIosAppConnected
+            ? 'iOS app settings updated for this deployment.'
+            : 'iOS app push notifications enabled for this deployment.',
+        );
+        handleIosAppDialogOpenChange(false);
+      },
+      onError: (error) => {
+        setIosAppFormError(error.message);
       },
     });
   };
@@ -3561,6 +3886,30 @@ export function Integrations({
           formError={voiceFormError}
           allowBlankApiKey={isVoiceConnected}
           onFieldChange={handleVoiceFieldChange}
+        />
+      </AdminConfiguredIntegrationDialog>
+      <AdminConfiguredIntegrationDialog
+        integrationName="iOS app"
+        open={isIosAppDialogOpen}
+        onOpenChange={handleIosAppDialogOpenChange}
+        isEditing={isIosAppConnected}
+        isPending={saveIosAppConnection.isPending}
+        isLoading={isIosAppConnected && iosAppConnection.isPending}
+        description={
+          <>
+            Store the Apple push credentials for this deployment&apos;s build of
+            the Roomote iOS app. The key stays encrypted server-side.
+          </>
+        }
+        onSubmit={handleIosAppSubmit}
+      >
+        <IosAppConnectionFields
+          form={iosAppForm}
+          fieldErrors={iosAppFieldErrors}
+          formError={iosAppFormError}
+          allowBlankPrivateKey={isIosAppConnected}
+          deviceCount={iosAppConnection.data?.deviceCount ?? null}
+          onFieldChange={handleIosAppFieldChange}
         />
       </AdminConfiguredIntegrationDialog>
       <AdminConfiguredIntegrationDialog

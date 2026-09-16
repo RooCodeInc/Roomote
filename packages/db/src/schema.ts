@@ -94,6 +94,11 @@ import type {
   AutomationResultPriority,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
+import type {
+  UserDeviceEnvironment,
+  UserDevicePlatform,
+  UserDevicePushCategories,
+} from '@roomote/types';
 
 import { encryptedJson, encryptedText } from './lib/custom-types';
 import type {
@@ -2858,6 +2863,62 @@ export const telegramUserMappingsRelations = relations(
     }),
   }),
 );
+
+/**
+ * user_devices
+ *
+ * Push-notification registrations for native clients (the Roomote iOS app).
+ * One row per (platform, token); a device re-registering under another user
+ * moves the row. `disabled_at` is set when APNs reports the token as gone
+ * (410 Unregistered / 400 BadDeviceToken) and cleared on the next register.
+ */
+export const userDevices = pgTable(
+  'user_devices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    platform: text('platform').notNull().$type<UserDevicePlatform>(),
+    token: text('token').notNull(),
+    environment: text('environment').notNull().$type<UserDeviceEnvironment>(),
+    bundleId: text('bundle_id').notNull(),
+    appVersion: text('app_version'),
+    deviceName: text('device_name'),
+    categories: jsonb('categories')
+      .$type<UserDevicePushCategories>()
+      .notNull()
+      .default({
+        user_input: true,
+        capability_offer: true,
+        task_settled: true,
+        reply: true,
+      }),
+    lastSeenAt: timestamp('last_seen_at').notNull().defaultNow(),
+    disabledAt: timestamp('disabled_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('user_devices_user_id_idx').on(table.userId),
+    unique('user_devices_platform_token_unique').on(
+      table.platform,
+      table.token,
+    ),
+    check('user_devices_platform_check', sql`${table.platform} in ('ios')`),
+    check(
+      'user_devices_environment_check',
+      sql`${table.environment} in ('production', 'sandbox')`,
+    ),
+  ],
+);
+
+export const userDevicesRelations = relations(userDevices, ({ one }) => ({
+  user: one(users, {
+    fields: [userDevices.userId],
+    references: [users.id],
+  }),
+}));
 
 /**
  * agentmail_user_mappings

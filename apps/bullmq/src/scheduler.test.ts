@@ -1,4 +1,5 @@
 const mocks = vi.hoisted(() => ({
+  iosPushNotificationJob: vi.fn(),
   queue: {
     add: vi.fn(),
     close: vi.fn(),
@@ -72,6 +73,7 @@ vi.mock('./scheduled-jobs', () => ({
   brainMaintenanceJob: vi.fn(),
   sessionsReconcileJob: vi.fn(),
   threadFooterRefreshJob: mocks.threadFooterRefreshJob,
+  iosPushNotificationJob: mocks.iosPushNotificationJob,
 }));
 
 import { ScheduledJobName } from './types';
@@ -113,6 +115,25 @@ describe('startScheduler', () => {
       { id: 42, taskId: 'task-1' },
       'completed',
     );
+  });
+
+  it('routes iOS push jobs to the push handler', async () => {
+    mocks.iosPushNotificationJob.mockResolvedValue(undefined);
+    await startScheduler();
+    const handler = mocks.workerConstructor.mock.calls[0]![1] as (job: {
+      name: string;
+      data: unknown;
+    }) => Promise<void>;
+    const data = {
+      userId: 'user-1',
+      kind: 'reply',
+      title: 'Session',
+      body: 'Done.',
+      sessionId: 'session-1',
+    };
+
+    await handler({ name: ScheduledJobName.IosPushNotification, data });
+    expect(mocks.iosPushNotificationJob).toHaveBeenCalledWith(data);
   });
 
   it('retries failed attention notifications through BullMQ', async () => {

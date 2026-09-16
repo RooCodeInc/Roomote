@@ -14,6 +14,7 @@ import {
   suggesterJob,
   notifyWebTaskInitiatorOnSettle,
   processSessionAttentionNotificationJob,
+  type IosPushNotificationJob,
   type SessionAttentionNotificationJob,
   type WebTaskInitiatorSettleNotificationJob,
   type AutomationJobResult,
@@ -41,6 +42,7 @@ import {
   brainMaintenanceJob,
   sessionsReconcileJob,
   threadFooterRefreshJob,
+  iosPushNotificationJob,
 } from './scheduled-jobs';
 
 const QUEUE_NAME = 'scheduled-jobs';
@@ -311,6 +313,9 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       }
       return;
     }
+    case ScheduledJobName.IosPushNotification:
+      await iosPushNotificationJob(job.data as IosPushNotificationJob);
+      return;
     case ScheduledJobName.CustomAutomations:
       await customAutomationsJob();
       return;

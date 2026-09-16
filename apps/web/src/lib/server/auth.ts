@@ -3,7 +3,12 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { betterAuth } from 'better-auth';
 import { APIError } from 'better-auth/api';
 import { nextCookies } from 'better-auth/next-js';
-import { genericOAuth, microsoftEntraId, slack } from 'better-auth/plugins';
+import {
+  bearer,
+  genericOAuth,
+  microsoftEntraId,
+  slack,
+} from 'better-auth/plugins';
 import { drizzleAdapter } from '@better-auth/drizzle-adapter';
 import { normalizeAdoLinkedAccountKey } from '@roomote/ado';
 // Subpath import on purpose: the SDK barrel drags the whole server graph
@@ -1260,6 +1265,13 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
       ...(genericOAuthConfigs.length > 0
         ? [genericOAuth({ config: genericOAuthConfigs })]
         : []),
+      // Native clients (the iOS app) carry the session as
+      // `Authorization: Bearer <signed session token>` instead of a cookie.
+      // The plugin rewrites the header into the session cookie before every
+      // handler, so `auth.api.getSession` and the web `authorize()` resolver
+      // see the same session either way. Sign-in responses echo the signed
+      // token in a `set-auth-token` header for the client to store.
+      bearer({ requireSignature: true }),
       nextCookies(),
     ],
   });

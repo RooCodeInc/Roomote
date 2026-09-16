@@ -233,6 +233,24 @@ export interface McpConnectionVoiceConfig {
 }
 
 /**
+ * Deployment-scoped iOS app connection config stored in
+ * mcpConnections.authConfig.
+ *
+ * Credential-only: each deployment builds its own copy of the Roomote iOS
+ * app and sends push notifications through its own Apple Push Notification
+ * service key. The `.p8` key contents are expected to be encrypted before
+ * persistence; team, key, and bundle ids are plain configuration. Never
+ * delivered to task sandboxes.
+ */
+export interface McpConnectionIosAppConfig {
+  type: 'ios_app';
+  teamId: string;
+  keyId: string;
+  bundleId: string;
+  encryptedPrivateKey: string;
+}
+
+/**
  * Deployment-scoped X connection config stored in mcpConnections.authConfig.
  *
  * Holds an X API app-only bearer token that the integration proxy forwards to
@@ -314,6 +332,7 @@ export type McpConnectionAuthConfig =
   | McpConnectionGranolaConfig
   | McpConnectionElevenLabsConfig
   | McpConnectionVoiceConfig
+  | McpConnectionIosAppConfig
   | McpConnectionVercelConfig
   | McpConnectionGrafanaConfig
   | McpConnectionGbrainConfig
@@ -747,6 +766,15 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     serverMode: 'credential_only',
   },
   {
+    id: 'ios_app',
+    name: 'iOS app',
+    description: `Add your Apple push key so this deployment's build of the ${PRODUCT_NAME} iOS app can send notifications`,
+    icon: 'ios_app',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'credential_only',
+  },
+  {
     id: 'supermemory',
     name: 'Supermemory',
     url: 'https://mcp.supermemory.ai/mcp',
@@ -1152,6 +1180,29 @@ export function isMcpConnectionVoiceConfig(
     (!('voiceId' in authConfig) ||
       authConfig.voiceId === undefined ||
       isOpenAiRealtimeVoiceId(authConfig.voiceId)),
+  );
+}
+
+export function isMcpConnectionIosAppConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionIosAppConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'ios_app' &&
+    'teamId' in authConfig &&
+    typeof authConfig.teamId === 'string' &&
+    authConfig.teamId.length > 0 &&
+    'keyId' in authConfig &&
+    typeof authConfig.keyId === 'string' &&
+    authConfig.keyId.length > 0 &&
+    'bundleId' in authConfig &&
+    typeof authConfig.bundleId === 'string' &&
+    authConfig.bundleId.length > 0 &&
+    'encryptedPrivateKey' in authConfig &&
+    typeof authConfig.encryptedPrivateKey === 'string' &&
+    authConfig.encryptedPrivateKey.length > 0,
   );
 }
 

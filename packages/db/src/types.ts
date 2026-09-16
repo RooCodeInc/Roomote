@@ -31,6 +31,7 @@ import type {
   sessionBackfillState,
   taskPullRequests,
   taskRuns,
+  userDevices,
   taskRunEvents,
   taskStartParallelCounts,
   workItems,
@@ -651,3 +652,9 @@ export type CreateSessionWakeup = Omit<
   typeof sessionWakeups.$inferInsert,
   Timestamp
 >;
+
+/**
+ * userDevices
+ */
+
+export type UserDevice = typeof userDevices.$inferSelect;

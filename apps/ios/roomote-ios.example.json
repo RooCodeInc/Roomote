@@ -1,0 +1,7 @@
+{
+  "bundleId": "dev.roomote.app",
+  "teamId": "",
+  "displayName": "Roomote",
+  "deploymentUrl": "http://localhost:3000",
+  "associatedDomains": []
+}

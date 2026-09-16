@@ -11,6 +11,7 @@ import {
   isMcpConnectionRipplingConfig,
   isMcpConnectionElevenLabsConfig,
   isMcpConnectionVoiceConfig,
+  isMcpConnectionIosAppConfig,
   OPENAI_REALTIME_VOICE_OPTIONS,
   isMcpConnectionGbrainConfig,
   LINEAR_APP_OAUTH_SCOPES,
@@ -327,5 +328,39 @@ describe('Voice credential-only integration', () => {
         (voice) => voice.id,
       ),
     ).toEqual(['cedar', 'marin']);
+  });
+});
+
+describe('iOS app credential-only integration', () => {
+  it('is a deployment-scoped credential_only entry with no MCP url', () => {
+    expect(getMcpIntegration('ios_app')).toMatchObject({
+      name: 'iOS app',
+      connectionScope: 'deployment',
+      connectionMode: 'admin_configured',
+      serverMode: 'credential_only',
+    });
+    expect(getMcpIntegration('ios_app')?.url).toBeUndefined();
+    expect(getMcpIntegrationDefaultDisabledTools('ios_app')).toEqual([]);
+  });
+
+  it('recognizes a complete stored iOS app config and rejects partial ones', () => {
+    const config = {
+      type: 'ios_app' as const,
+      teamId: 'TEAM123456',
+      keyId: 'KEY1234567',
+      bundleId: 'dev.roomote.app',
+      encryptedPrivateKey: 'enc',
+    };
+    expect(isMcpConnectionIosAppConfig(config)).toBe(true);
+    expect(
+      isMcpConnectionIosAppConfig({ ...config, encryptedPrivateKey: '' }),
+    ).toBe(false);
+    expect(isMcpConnectionIosAppConfig({ ...config, bundleId: '' })).toBe(
+      false,
+    );
+    expect(
+      isMcpConnectionIosAppConfig({ type: 'voice', encryptedApiKey: 'enc' }),
+    ).toBe(false);
+    expect(isMcpConnectionIosAppConfig(null)).toBe(false);
   });
 });

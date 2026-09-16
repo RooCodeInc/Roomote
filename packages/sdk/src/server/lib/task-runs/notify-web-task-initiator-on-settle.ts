@@ -23,6 +23,7 @@ import {
   resolveSessionAttentionPresentation,
 } from '../session-attention-notification';
 import { buildDeterministicMessageId } from '../deterministic-message-id';
+import { enqueueIosPush } from '../ios-push/enqueue';
 import {
   buildDeliveryClaimMarker,
   buildDeliveryClaimPredicate,
@@ -57,6 +58,20 @@ function statusText(status: SettledStatus): string {
   }
 }
 
+function pushBodyText(
+  status: SettledStatus,
+  error: string | null | undefined,
+): string {
+  switch (status) {
+    case RunStatus.Completed:
+      return 'Completed';
+    case RunStatus.Canceled:
+      return 'Canceled';
+    case RunStatus.Failed:
+      return error?.trim() ? `Failed: ${error.trim()}` : 'Failed';
+  }
+}
+
 /** Notifies an absent web-task initiator through the shared personal waterfall. */
 export async function notifyWebTaskInitiatorOnSettle(
   run: Pick<TaskRun, 'id' | 'taskId'>,
@@ -72,10 +87,17 @@ export async function notifyWebTaskInitiatorOnSettle(
       trigger: true,
       initiatorKind: true,
       prompt: true,
+      title: true,
     },
     with: {
       runs: {
-        columns: { id: true, status: true, startedAt: true, payload: true },
+        columns: {
+          id: true,
+          status: true,
+          startedAt: true,
+          payload: true,
+          error: true,
+        },
       },
     },
   });
@@ -116,6 +138,23 @@ export async function notifyWebTaskInitiatorOnSettle(
 
   try {
     const session = await getSessionForTask(db, task.id);
+    // The phone buzz is the point of the iOS app, so it goes out whether or
+    // not the person has a browser tab open; the chat DM below still honors
+    // presence. Never lets a queue problem fail the settlement.
+    await enqueueIosPush({
+      userId: task.initiatorUserId,
+      kind: 'task_settled',
+      title: task.title?.trim() || 'Task',
+      body: pushBodyText(status, settledRun?.error),
+      taskId: task.id,
+      ...(session ? { sessionId: session.id } : {}),
+      eventKey: `run:${run.id}:${status}`,
+      collapseId: `task_settled:${task.id}`,
+    }).catch((error: unknown) => {
+      console.warn(
+        `[notifyWebTaskInitiatorOnSettle] iOS push enqueue failed for run ${run.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
     const present = session
       ? await isSessionUserPresent({
           sessionId: session.id,

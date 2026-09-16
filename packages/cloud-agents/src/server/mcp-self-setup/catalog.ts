@@ -186,6 +186,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
       'Configure once per deployment with a key that has GPT-Live access',
     ],
   },
+  ios_app: {
+    capabilities: [
+      "Send push notifications to this deployment's build of the Roomote iOS app",
+      'Keep the Apple push key on the control plane, never exposed to agents',
+      'Configure once per deployment with an APNs key from your Apple Developer account',
+    ],
+  },
   x: {
     capabilities: [
       'Search public X posts and pull post context into tasks',
