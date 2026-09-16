@@ -47,7 +47,7 @@ type PasswordResetLinkResult =
   | { created: true; url: string; expiresAt: Date }
   | { created: false; reason: 'not_found' | 'oauth_only' | 'not_generated' };
 
-export type SelfServicePasswordResetOutcome =
+type SelfServicePasswordResetOutcome =
   | 'no_active_user'
   | 'no_credential_account'
   | 'channel_disabled'
