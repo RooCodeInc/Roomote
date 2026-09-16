@@ -312,6 +312,7 @@ describe('initializeRepositories', () => {
   });
 
   it('resolves repository providers from the map before the scalar fallback', async () => {
+    createTempWorkspaceRoot();
     vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
       undefined,
     );
@@ -351,6 +352,7 @@ describe('initializeRepositories', () => {
   });
 
   it('uses a mapped provider for a single-repository workspace', async () => {
+    createTempWorkspaceRoot();
     vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
       undefined,
     );
@@ -797,6 +799,7 @@ describe('initializeRepositories', () => {
   });
 
   it('passes repository provider overrides to environment preparation', async () => {
+    createTempWorkspaceRoot();
     vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
       undefined,
     );
