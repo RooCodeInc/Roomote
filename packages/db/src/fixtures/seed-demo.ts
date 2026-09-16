@@ -53,7 +53,7 @@ async function main() {
   const inSandbox = isInsideRoomoteSandbox();
   const appEnv = resolveAppEnv(process.env);
 
-  if (!inSandbox && appEnv === 'production') {
+  if (appEnv === 'production') {
     console.error(
       'Refusing to seed demo data: the app environment resolves to "production".',
     );

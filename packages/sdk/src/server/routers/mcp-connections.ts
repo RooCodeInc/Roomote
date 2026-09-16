@@ -9,6 +9,7 @@ import {
 import {
   db,
   desc,
+  demoSeedDevelopmentIntegration,
   mcpConnections,
   deploymentMcpEnablements,
   customMcpServers,
@@ -374,6 +375,16 @@ async function buildCustomMcpServerConfigs(
   for (const row of rows) {
     // stdio servers ride the worker merge path via getCustomStdioMcpServers.
     if (row.stdio || !row.url) {
+      continue;
+    }
+
+    if (row.id === demoSeedDevelopmentIntegration.id) {
+      if (Env.APP_ENV !== 'development') continue;
+      servers[row.name] = {
+        url: `${requestOrigin ?? ''}/api/mcp/development-fixtures`,
+        headers: {},
+        cacheRevision: `${row.updatedAt?.getTime() ?? 0}`,
+      };
       continue;
     }
 

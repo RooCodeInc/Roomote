@@ -1,6 +1,7 @@
 import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 const mockEnv = vi.hoisted(() => ({
+  APP_ENV: 'development',
   R_CURATED_INTEGRATIONS_DISABLED: false,
   R_CUSTOM_MCP_DISABLED: false,
   R_GBRAIN_URL: undefined as string | undefined,
@@ -82,6 +83,9 @@ const {
 });
 
 vi.mock('@roomote/db/server', () => ({
+  demoSeedDevelopmentIntegration: {
+    id: '00000000-0000-4000-8000-000000000301',
+  },
   db: {
     select: mockSelect,
     query: {
@@ -245,6 +249,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnv.R_CURATED_INTEGRATIONS_DISABLED = false;
+    mockEnv.APP_ENV = 'development';
     mockEnv.R_GBRAIN_URL = undefined;
     mockEnv.R_HTTP_INTEGRATIONS_ENABLED = false;
     mockIsBrainEnabled.mockResolvedValue(false);
@@ -253,6 +258,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     });
     mockFindEnablements.mockResolvedValue([]);
     mockFindConnections.mockResolvedValue([]);
+    mockFindCustomServers.mockResolvedValue([]);
     mockOrderBy.mockResolvedValue([buildJoinedConnectionRow()]);
   });
 
@@ -310,6 +316,50 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
       url: 'https://api.preview.roomote.run/mcp',
       headers: {},
     });
+  });
+
+  it('routes the seeded development fixture to the local inert adapter', async () => {
+    mockFindCustomServers.mockResolvedValue([
+      {
+        id: '00000000-0000-4000-8000-000000000301',
+        name: 'Development fixtures',
+        url: 'http://127.0.0.1/development-fixtures',
+        stdio: null,
+        authType: 'none',
+        updatedAt: new Date('2026-09-16T00:00:00.000Z'),
+      },
+    ]);
+
+    const result = await resolveUserMcpServerConfigs({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.preview.roomote.run',
+    });
+
+    expect(result['Development fixtures']).toEqual({
+      url: 'https://api.preview.roomote.run/api/mcp/development-fixtures',
+      headers: {},
+      cacheRevision: '1789516800000',
+    });
+  });
+
+  it('does not expose a stale development fixture outside development', async () => {
+    mockEnv.APP_ENV = 'production';
+    mockFindCustomServers.mockResolvedValue([
+      {
+        id: '00000000-0000-4000-8000-000000000301',
+        name: 'Development fixtures',
+        url: 'http://127.0.0.1/development-fixtures',
+        stdio: null,
+        authType: 'none',
+        updatedAt: new Date(),
+      },
+    ]);
+
+    const result = await resolveUserMcpServerConfigs({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+    expect(result).not.toHaveProperty('Development fixtures');
   });
 
   it('carries deployment-disabled tools with the resolved server config', async () => {
