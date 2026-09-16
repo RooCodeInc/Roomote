@@ -1,5 +1,6 @@
 import {
   db,
+  repositories,
   tasks,
   users,
   environments,
@@ -270,13 +271,17 @@ export async function getPullRequestsForFilterCommand(
   const latestDetectedAt = max(taskPullRequests.detectedAt).as(
     'latest_detected_at',
   );
+  const effectiveHost = sql<string | null>`coalesce(
+    ${taskPullRequests.host},
+    ${repositories.host}
+  )`;
 
   const results = await db
     .select({
       sourceControlProvider: taskPullRequests.sourceControlProvider,
       hosts: sql<string[]>`coalesce(
-        array_agg(distinct ${taskPullRequests.host})
-          filter (where ${taskPullRequests.host} is not null),
+        array_agg(distinct ${effectiveHost})
+          filter (where ${effectiveHost} is not null),
         '{}'
       )`,
       repositoryIds: sql<string[]>`coalesce(
@@ -291,6 +296,7 @@ export async function getPullRequestsForFilterCommand(
     })
     .from(tasks)
     .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id))
+    .leftJoin(repositories, eq(repositories.id, taskPullRequests.repositoryId))
     .where(and(...whereConditions))
     .groupBy(
       taskPullRequests.sourceControlProvider,

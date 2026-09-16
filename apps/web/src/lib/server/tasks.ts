@@ -8,6 +8,7 @@ import {
 import {
   type SQL,
   db,
+  repositories,
   tasks,
   taskMessages,
   taskRuns,
@@ -182,6 +183,10 @@ const getTaskFilterConditions = ({ filters }: { filters: Filter[] }) => {
                 db
                   .select({ one: sql`1` })
                   .from(taskPullRequests)
+                  .leftJoin(
+                    repositories,
+                    eq(repositories.id, taskPullRequests.repositoryId),
+                  )
                   .where(
                     and(
                       eq(taskPullRequests.taskId, tasks.id),
@@ -206,8 +211,14 @@ const getTaskFilterConditions = ({ filters }: { filters: Filter[] }) => {
                           )
                         : pullRequest.host
                           ? or(
-                              eq(taskPullRequests.host, pullRequest.host),
-                              isNull(taskPullRequests.host),
+                              eq(
+                                sql`coalesce(${taskPullRequests.host}, ${repositories.host})`,
+                                pullRequest.host,
+                              ),
+                              and(
+                                isNull(taskPullRequests.host),
+                                isNull(taskPullRequests.repositoryId),
+                              ),
                             )
                           : undefined,
                     ),

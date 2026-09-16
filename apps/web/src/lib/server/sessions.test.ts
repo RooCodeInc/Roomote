@@ -828,7 +828,6 @@ describe('unified Session queries', () => {
       }),
     ).resolves.toMatchObject({
       sessions: [
-        expect.objectContaining({ id: linkedSameHostSession.id }),
         expect.objectContaining({ id: unstampedSession.id }),
         expect.objectContaining({ id: otherHostSession.id }),
       ],

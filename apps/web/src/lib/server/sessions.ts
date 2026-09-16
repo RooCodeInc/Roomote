@@ -21,6 +21,7 @@ import {
   llmUsageEvents,
   lt,
   or,
+  repositories,
   sessionParticipants,
   sessionPins,
   sessions,
@@ -474,6 +475,10 @@ function listConditions(
               taskPullRequests,
               eq(taskPullRequests.taskId, sessionTasks.taskId),
             )
+            .leftJoin(
+              repositories,
+              eq(repositories.id, taskPullRequests.repositoryId),
+            )
             .where(
               and(
                 eq(sessionTasks.sessionId, sessions.id),
@@ -499,8 +504,14 @@ function listConditions(
                     )
                   : pullRequest.host
                     ? or(
-                        eq(taskPullRequests.host, pullRequest.host),
-                        isNull(taskPullRequests.host),
+                        eq(
+                          sql`coalesce(${taskPullRequests.host}, ${repositories.host})`,
+                          pullRequest.host,
+                        ),
+                        and(
+                          isNull(taskPullRequests.host),
+                          isNull(taskPullRequests.repositoryId),
+                        ),
                       )
                     : undefined,
               ),
