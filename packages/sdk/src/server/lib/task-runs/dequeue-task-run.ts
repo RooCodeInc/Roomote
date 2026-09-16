@@ -436,27 +436,49 @@ export const dequeueTaskRun = async (
     const sourceControlProvider = resolveSourceControlProviderFromPayload(
       txResult.taskRun.payload,
     );
-    const sourceControlToken = await recordBootstrapPhase({
-      runId: txResult.taskRun.id,
-      taskId: txResult.taskRun.taskId,
-      label: 'createSourceControlToken',
-      details: {
-        payloadKind: txResult.taskRun.payloadKind,
-        provider: sourceControlProvider,
-      },
-      classifyResult: (token) =>
-        token
-          ? undefined
-          : {
-              outcome: 'failed',
-              error:
-                'Source control token creation exhausted retries and returned no token.',
-            },
-      fn: async () =>
-        await createSourceControlTokenForTaskRun(txResult.taskRun, tag, {
-          readOnly: txResult.task.privacy === 'private',
-        }),
-    });
+    let sourceControlToken;
+    try {
+      sourceControlToken = await recordBootstrapPhase({
+        runId: txResult.taskRun.id,
+        taskId: txResult.taskRun.taskId,
+        label: 'createSourceControlToken',
+        details: {
+          payloadKind: txResult.taskRun.payloadKind,
+          provider: sourceControlProvider,
+        },
+        classifyResult: (token) =>
+          token
+            ? undefined
+            : {
+                outcome: 'failed',
+                error:
+                  'Source control token creation exhausted retries and returned no token.',
+              },
+        fn: async () =>
+          await createSourceControlTokenForTaskRun(txResult.taskRun, tag, {
+            readOnly: txResult.task.privacy === 'private',
+          }),
+      });
+    } catch (error) {
+      await recordTaskRunLifecycleEventSafe({
+        runId: txResult.taskRun.id,
+        taskId: txResult.taskRun.taskId,
+        eventType: 'failed',
+        message: `Source control token creation failed for task run #${txResult.taskRun.id}.`,
+        details: {
+          reason: 'source_control_token_creation_failed',
+          payloadKind: txResult.taskRun.payloadKind,
+          provider: sourceControlProvider,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+      await cancelAndReleaseTaskRun(
+        txResult.taskRun,
+        'Failed to create source control token.',
+        tag,
+      );
+      return undefined;
+    }
 
     if (!sourceControlToken) {
       await recordTaskRunLifecycleEventSafe({

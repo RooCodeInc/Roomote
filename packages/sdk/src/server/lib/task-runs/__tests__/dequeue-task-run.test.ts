@@ -589,7 +589,7 @@ describe('dequeueTaskRun', () => {
   });
 
   it.each(['github', 'gitlab'] as const)(
-    'cancels and releases a private %s run when credential creation returns null',
+    'cancels and releases a private %s run when read-only credential setup throws',
     async (provider) => {
       const taskRun = makeStandardTaskRun({
         payload: {
@@ -606,7 +606,11 @@ describe('dequeueTaskRun', () => {
       mockTxExecute.mockResolvedValue([{ id: taskRun.id }]);
       mockTxFindFirstTaskRuns.mockResolvedValue(taskRun);
       mockResolveTaskRunSourceControlProviders.mockResolvedValue([provider]);
-      mockCreateSourceControlTokenForTaskRun.mockResolvedValueOnce(null);
+      mockCreateSourceControlTokenForTaskRun.mockRejectedValueOnce(
+        new Error(
+          'Private tasks require proxy-held read-only source-control credentials.',
+        ),
+      );
 
       const result = await dequeueTaskRun({ orgId: 'org-1' } as never, {
         runId: taskRun.id,
@@ -629,7 +633,7 @@ describe('dequeueTaskRun', () => {
             phase: 'createSourceControlToken',
             outcome: 'failed',
             durationMs: expect.any(Number),
-            error: expect.stringContaining('returned no token'),
+            error: expect.stringContaining('proxy-held read-only'),
             payloadKind: TaskPayloadKind.StandardTask,
             provider,
           }),

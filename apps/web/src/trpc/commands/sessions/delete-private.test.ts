@@ -207,19 +207,21 @@ describe('deletePrivateSessionCommand', () => {
     });
     let concurrentArtifactId: string | undefined;
     mockDeleteArtifactsBatch.mockImplementation(async () => {
-      const [concurrentArtifact] = await db
-        .insert(taskArtifacts)
-        .values({
-          taskId: task.id,
-          contentType: 'text/plain',
-          path: 'too-late.txt',
-          version: 0,
-          size: 8,
-          uploaded: true,
-          uploadUrlExpiresAt: new Date(0),
-        })
-        .returning({ id: taskArtifacts.id });
-      concurrentArtifactId = concurrentArtifact!.id;
+      if (!concurrentArtifactId) {
+        const [concurrentArtifact] = await db
+          .insert(taskArtifacts)
+          .values({
+            taskId: task.id,
+            contentType: 'text/plain',
+            path: 'too-late.txt',
+            version: 0,
+            size: 8,
+            uploaded: true,
+            uploadUrlExpiresAt: new Date(0),
+          })
+          .returning({ id: taskArtifacts.id });
+        concurrentArtifactId = concurrentArtifact!.id;
+      }
       return { deleted: 0, errors: 0 };
     });
 
@@ -228,14 +230,15 @@ describe('deletePrivateSessionCommand', () => {
         { userId: owner.id, isAdmin: false } as UserAuthSuccess,
         session.id,
       ),
-    ).resolves.toEqual({ deleted: false, reason: 'artifacts_changed' });
+    ).resolves.toEqual({ deleted: true });
     expect(concurrentArtifactId).toBeDefined();
+    expect(mockDeleteArtifactsBatch).toHaveBeenCalledTimes(2);
     await expect(
       db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
-    ).resolves.toBeDefined();
+    ).resolves.toBeUndefined();
     await expect(
       db.query.tasks.findFirst({ where: eq(tasks.id, task.id) }),
-    ).resolves.toBeDefined();
+    ).resolves.toBeUndefined();
   });
 
   it('waits for authorized uploads to expire before deleting objects or rows', async () => {
