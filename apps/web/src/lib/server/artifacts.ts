@@ -206,6 +206,7 @@ export async function getArtifactsForTask({
       contentType: taskArtifacts.contentType,
       size: taskArtifacts.size,
       createdAt: taskArtifacts.createdAt,
+      privacy: tasks.privacy,
     })
     .from(taskArtifacts)
     .innerJoin(tasks, eq(taskArtifacts.taskId, tasks.id))
