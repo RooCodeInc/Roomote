@@ -513,8 +513,21 @@ export function DesktopStreamClient({
         }
         if (message.resized) {
           setRemoteSize(message.resized);
-          if (restartPendingRef.current || pendingInitialPlayRef.current) {
+          const video = videoRef.current;
+          const sizeChanged =
+            !video ||
+            video.videoWidth !== message.resized.width ||
+            video.videoHeight !== message.resized.height;
+          if (pendingInitialPlayRef.current) {
             loadStream();
+          } else if (restartPendingRef.current) {
+            // The server only restarts the encoder when the size actually
+            // changed; otherwise the current stream is still valid.
+            if (sizeChanged) {
+              loadStream();
+            } else {
+              restartPendingRef.current = false;
+            }
           }
         }
         if (message.error) {
@@ -605,7 +618,22 @@ export function DesktopStreamClient({
     down: boolean,
   ) => {
     const point = pointForEvent(event);
-    if (!point || !controlReady) {
+    if (!point) {
+      return;
+    }
+    if (!controlReady) {
+      // Control was never established or was taken over by another viewer.
+      // Clicking the desktop reclaims it.
+      if (
+        down &&
+        isPlaying &&
+        sessionRef.current &&
+        socketRef.current?.readyState !== WebSocket.OPEN &&
+        socketRef.current?.readyState !== WebSocket.CONNECTING
+      ) {
+        setSessionError(null);
+        connectControl(sessionRef.current.controlUrl);
+      }
       return;
     }
     event.preventDefault();

@@ -386,4 +386,52 @@ describe('DesktopStreamClient', () => {
     act(() => FakeWebSocket.instances[0]!.close());
     expect(video.getAttribute('src')).toContain('stream.mp4');
   });
+
+  it('reclaims control with a click after another viewer took it over', async () => {
+    render(
+      <DesktopStreamClient
+        previewUrl="https://desktop.preview.test"
+        runId={123}
+      />,
+    );
+    const start = await screen.findByRole('button', {
+      name: 'Start remote desktop',
+    });
+    await waitFor(() => expect(start).toBeEnabled());
+    fireEvent.click(start);
+    const first = FakeWebSocket.instances[0]!;
+    act(() => first.open());
+    await screen.findByText('Control connected');
+
+    const video = screen.getByLabelText('Remote desktop');
+    Object.defineProperties(video, {
+      videoWidth: { configurable: true, value: 1280 },
+      videoHeight: { configurable: true, value: 720 },
+      getBoundingClientRect: {
+        configurable: true,
+        value: () => ({ left: 0, top: 0, width: 1280, height: 720 }),
+      },
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      hasPointerCapture: { configurable: true, value: vi.fn(() => false) },
+    });
+    fireEvent.loadedData(video);
+
+    act(() =>
+      first.emit('message', {
+        data: '{"error":"another viewer took control of the desktop"}',
+      } as MessageEvent),
+    );
+    act(() => first.close());
+    await screen.findByText('Control disconnected');
+
+    fireEvent.pointerDown(video, {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+      pointerId: 1,
+    });
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    act(() => FakeWebSocket.instances[1]!.open());
+    await screen.findByText('Control connected');
+  });
 });
