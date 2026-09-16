@@ -19,13 +19,19 @@ describe('getPullRequestsForFilterCommand', () => {
       fullName: repository,
       linkedByUserId: linkedBy.id,
     });
-    const [githubTask, gitlabTask, linkedGitlabTask, selfManagedGitlabTask] =
-      await Promise.all([
-        taskFactory.create({ repositoryName: repository }),
-        taskFactory.create({ repositoryName: repository }),
-        taskFactory.create({ repositoryName: repository }),
-        taskFactory.create({ repositoryName: repository }),
-      ]);
+    const [
+      githubTask,
+      gitlabTask,
+      linkedGitlabTask,
+      unstampedGitlabTask,
+      selfManagedGitlabTask,
+    ] = await Promise.all([
+      taskFactory.create({ repositoryName: repository }),
+      taskFactory.create({ repositoryName: repository }),
+      taskFactory.create({ repositoryName: repository }),
+      taskFactory.create({ repositoryName: repository }),
+      taskFactory.create({ repositoryName: repository }),
+    ]);
     await db.insert(taskPullRequests).values([
       {
         taskId: githubTask.id,
@@ -51,6 +57,13 @@ describe('getPullRequestsForFilterCommand', () => {
         prNumber: 123,
         prUrl: `https://gitlab.com/${repository}/-/merge_requests/123?linked=1`,
         host: 'gitlab.com',
+      },
+      {
+        taskId: unstampedGitlabTask.id,
+        sourceControlProvider: 'gitlab',
+        repository,
+        prNumber: 123,
+        prUrl: `https://gitlab.com/${repository}/-/merge_requests/123?legacy=1`,
       },
       {
         taskId: selfManagedGitlabTask.id,

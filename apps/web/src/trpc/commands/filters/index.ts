@@ -270,17 +270,20 @@ export async function getPullRequestsForFilterCommand(
   const latestDetectedAt = max(taskPullRequests.detectedAt).as(
     'latest_detected_at',
   );
-  const pullRequestScopeExpression = sql<string | null>`case
-    when ${taskPullRequests.host} is not null then 'host:' || ${taskPullRequests.host}
-    when ${taskPullRequests.repositoryId} is not null then 'repositoryId:' || ${taskPullRequests.repositoryId}::text
-    else null
-  end`;
-  const pullRequestScope = pullRequestScopeExpression.as('pull_request_scope');
 
   const results = await db
     .select({
       sourceControlProvider: taskPullRequests.sourceControlProvider,
-      scope: pullRequestScope,
+      hosts: sql<string[]>`coalesce(
+        array_agg(distinct ${taskPullRequests.host})
+          filter (where ${taskPullRequests.host} is not null),
+        '{}'
+      )`,
+      repositoryIds: sql<string[]>`coalesce(
+        array_agg(distinct ${taskPullRequests.repositoryId}::text)
+          filter (where ${taskPullRequests.repositoryId} is not null),
+        '{}'
+      )`,
       repository: taskPullRequests.repository,
       prNumber: taskPullRequests.prNumber,
       prTitle: latestPrTitle,
@@ -291,7 +294,6 @@ export async function getPullRequestsForFilterCommand(
     .where(and(...whereConditions))
     .groupBy(
       taskPullRequests.sourceControlProvider,
-      pullRequestScopeExpression,
       taskPullRequests.repository,
       taskPullRequests.prNumber,
     )
@@ -307,30 +309,34 @@ export async function getPullRequestsForFilterCommand(
         prNumber: number;
       } => !!r.repository && r.prNumber !== null,
     )
-    .map((r) => {
-      const host = r.scope?.startsWith('host:')
-        ? r.scope.slice('host:'.length)
-        : undefined;
-      const repositoryId = r.scope?.startsWith('repositoryId:')
-        ? r.scope.slice('repositoryId:'.length)
-        : undefined;
-      const value = buildPullRequestFilterValue({
-        provider: r.sourceControlProvider,
-        repository: r.repository,
-        number: r.prNumber,
-        repositoryId,
-        host,
+    .flatMap((r) => {
+      const scopes: Array<{ host?: string; repositoryId?: string }> =
+        r.hosts.length > 0
+          ? r.hosts.map((host) => ({ host }))
+          : r.repositoryIds.length > 0
+            ? r.repositoryIds.map((repositoryId) => ({ repositoryId }))
+            : [{}];
+
+      return scopes.map(({ host, repositoryId }) => {
+        const value = buildPullRequestFilterValue({
+          provider: r.sourceControlProvider,
+          repository: r.repository,
+          number: r.prNumber,
+          repositoryId,
+          host,
+        });
+        const label = r.prTitle || `#${r.prNumber}`;
+        const provider =
+          sourceControlProviderDescriptors[r.sourceControlProvider];
+        const providerLabel =
+          host && host !== provider.defaultHost
+            ? `${provider.label} (${host})`
+            : provider.label;
+        const subLabel = `${providerLabel} · ${formatRepositoryName(r.repository)}#${r.prNumber}`;
+        return { value, label, subLabel };
       });
-      const label = r.prTitle || `#${r.prNumber}`;
-      const provider =
-        sourceControlProviderDescriptors[r.sourceControlProvider];
-      const providerLabel =
-        host && host !== provider.defaultHost
-          ? `${provider.label} (${host})`
-          : provider.label;
-      const subLabel = `${providerLabel} · ${formatRepositoryName(r.repository)}#${r.prNumber}`;
-      return { value, label, subLabel };
-    });
+    })
+    .slice(0, 20);
 }
 
 export async function getModelsForFilterCommand(

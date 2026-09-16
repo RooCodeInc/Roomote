@@ -487,9 +487,24 @@ function listConditions(
                     )
                   : undefined,
                 pullRequest.repositoryId
-                  ? eq(taskPullRequests.repositoryId, pullRequest.repositoryId)
+                  ? or(
+                      eq(
+                        taskPullRequests.repositoryId,
+                        pullRequest.repositoryId,
+                      ),
+                      and(
+                        isNull(taskPullRequests.host),
+                        isNull(taskPullRequests.repositoryId),
+                      ),
+                    )
                   : pullRequest.host
-                    ? eq(taskPullRequests.host, pullRequest.host)
+                    ? or(
+                        eq(taskPullRequests.host, pullRequest.host),
+                        and(
+                          isNull(taskPullRequests.host),
+                          isNull(taskPullRequests.repositoryId),
+                        ),
+                      )
                     : undefined,
               ),
             ),

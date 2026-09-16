@@ -675,6 +675,11 @@ describe('unified Session queries', () => {
       ownerUserId: owner.id,
       activityAt: 175,
     });
+    const unstampedSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 160,
+    });
     const otherHostSession = await sessionFactory.create({
       ownerKind: 'user',
       ownerUserId: owner.id,
@@ -690,6 +695,7 @@ describe('unified Session queries', () => {
       otherRepositorySession,
       otherProviderSession,
       linkedSameHostSession,
+      unstampedSession,
       otherHostSession,
       deletedTaskSession,
     ];
@@ -764,12 +770,20 @@ describe('unified Session queries', () => {
         repository: 'RooCodeInc/Roomote',
         prNumber: 123,
         prUrl:
+          'https://gitlab.com/RooCodeInc/Roomote/-/merge_requests/123?legacy=1',
+        sourceControlProvider: 'gitlab',
+      },
+      {
+        taskId: tasksBySession[5]!.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl:
           'https://gitlab.internal/RooCodeInc/Roomote/-/merge_requests/123',
         sourceControlProvider: 'gitlab',
         host: 'gitlab.internal',
       },
       {
-        taskId: tasksBySession[5]!.id,
+        taskId: tasksBySession[6]!.id,
         repository: 'RooCodeInc/Roomote',
         prNumber: 123,
         prUrl: 'https://github.com/RooCodeInc/Roomote/pull/123',
@@ -805,6 +819,7 @@ describe('unified Session queries', () => {
       sessions: [
         expect.objectContaining({ id: otherProviderSession.id }),
         expect.objectContaining({ id: linkedSameHostSession.id }),
+        expect.objectContaining({ id: unstampedSession.id }),
       ],
     });
     await expect(
@@ -813,7 +828,10 @@ describe('unified Session queries', () => {
         pullRequest: 'gitlab:RooCodeInc/Roomote#123|host:gitlab.internal',
       }),
     ).resolves.toMatchObject({
-      sessions: [expect.objectContaining({ id: otherHostSession.id })],
+      sessions: [
+        expect.objectContaining({ id: unstampedSession.id }),
+        expect.objectContaining({ id: otherHostSession.id }),
+      ],
     });
     await expect(
       getSessions(auth, {
@@ -824,7 +842,7 @@ describe('unified Session queries', () => {
     ).resolves.toMatchObject({
       sessions: [expect.objectContaining({ id: matchingSession.id })],
     });
-    expect((await getSessions(auth, { ids })).sessions).toHaveLength(6);
+    expect((await getSessions(auth, { ids })).sessions).toHaveLength(7);
   });
 
   it('lists only distinct visible sources within the list scope', async () => {
