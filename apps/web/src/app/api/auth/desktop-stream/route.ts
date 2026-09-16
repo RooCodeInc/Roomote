@@ -7,7 +7,7 @@ import {
 
 export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest) {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const previewUrl = request.nextUrl.searchParams.get('preview_url');
     const runId = request.nextUrl.searchParams.get('task_run_id');
