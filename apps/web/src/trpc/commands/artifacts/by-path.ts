@@ -9,7 +9,11 @@ import {
   currentEpochSeconds,
 } from '@/lib/server';
 import { findReadableSession } from '@/lib/server/sessions';
-import { isHtmlArtifact, isTabularArtifact } from '@/lib/artifact-types';
+import {
+  isHtmlArtifact,
+  isMarkdownArtifact,
+  isTabularArtifact,
+} from '@/lib/artifact-types';
 
 const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024; // 1MB
 const MAX_THUMBNAIL_PREVIEW_BYTES = 1024;
@@ -51,7 +55,7 @@ async function readTextWithByteLimit(
         chunks.push(value.subarray(0, remainingBytes));
         totalBytes += remainingBytes;
       }
-      await reader.cancel();
+      void reader.cancel().catch(() => {});
       if (!truncate) return undefined;
       break;
     }
@@ -59,7 +63,7 @@ async function readTextWithByteLimit(
     chunks.push(value);
     totalBytes += value.byteLength;
     if (truncate && totalBytes === maxBytes) {
-      await reader.cancel();
+      void reader.cancel().catch(() => {});
       break;
     }
   }
@@ -156,6 +160,7 @@ export async function getArtifactByPathCommand(
     normalizedContentType.includes('+json') ||
     textBasedApplicationTypes.has(normalizedContentType) ||
     isHtmlArtifact(artifact.contentType, artifact.path) ||
+    isMarkdownArtifact(artifact.contentType, artifact.path) ||
     isTabularArtifact(artifact.contentType, artifact.path);
 
   if (isTextBased && (preview || artifact.size <= MAX_TEXT_PREVIEW_BYTES)) {
@@ -170,9 +175,12 @@ export async function getArtifactByPathCommand(
 
       if (response.ok) {
         content = await readTextWithByteLimit(response, maxBytes, preview);
+      } else if (preview) {
+        throw new Error(`Artifact preview fetch returned ${response.status}`);
       }
     } catch (error) {
       console.error('Failed to fetch artifact content:', error);
+      if (preview) throw new Error('Failed to fetch artifact preview');
     }
   }
 

@@ -35,6 +35,23 @@ describe('getFastAgentNativeAcpKind', () => {
     expect(getFastAgentNativeAcpKind(name)).toBe(kind);
   });
 
+  it('can expose existing grants without allowing a platform event to prepare one', () => {
+    const filter = buildFastAgentToolFilter([], {
+      surface: 'web',
+      serviceCredentialToolsEnabled: true,
+      serviceCredentialPrepareEnabled: false,
+    });
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]).toBe(
+      true,
+    );
+    expect(
+      filter[FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential],
+    ).toBe(true);
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]).toBe(
+      false,
+    );
+  });
+
   it.each(FAST_AGENT_NATIVE_TOOL_CATALOG)(
     'maps every catalogued tool (%s) to its ACP kind',
     ({ name, kind }) => {

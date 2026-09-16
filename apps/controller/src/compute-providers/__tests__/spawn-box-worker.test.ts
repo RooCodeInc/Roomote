@@ -67,7 +67,6 @@ vi.mock('../../sandbox-oidc', () => ({
 
 const { resolveBoxMachineType, spawnBoxWorker } =
   await import('../spawn-box-worker');
-const { buildBoxWorkerEnv } = await import('@roomote/compute-providers');
 
 const config = {
   boxApiKey: 'key',
@@ -330,9 +329,7 @@ describe('spawnBoxWorker', () => {
       taskRun: run,
       provider: 'box',
     });
-    expect(
-      vi.mocked(buildBoxWorkerEnv).mock.calls.at(-1)![0].extraEnv,
-    ).toMatchObject({
+    expect(mockRunCommand.mock.calls.at(-1)![0].env).toMatchObject({
       ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
       ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
     });
@@ -341,5 +338,24 @@ describe('spawnBoxWorker', () => {
     expect(admit.mock.invocationCallOrder[0]!).toBeGreaterThan(
       mockRunCommand.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it('destroys a fresh sandbox when Credential egress admission fails after launch', async () => {
+    const admit = vi.fn().mockRejectedValue(new Error('admission failed'));
+
+    await expect(
+      spawnBoxWorker(taskRun(), 'auth-token', {
+        ...config,
+        credentialEgress: {
+          planApiProxy: vi.fn().mockResolvedValue({
+            required: true,
+            bootstrapEnv: {},
+            admit,
+          }),
+        } as never,
+      }),
+    ).rejects.toThrow('admission failed');
+    expect(mockDestroyInstance).toHaveBeenCalledWith({ instanceId: 'box-1' });
+    expect(mockEnterStandby).not.toHaveBeenCalled();
   });
 });

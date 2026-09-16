@@ -24,7 +24,7 @@ import {
   fastAgentMessages,
   users,
 } from '@roomote/db/server';
-import { isSessionUserPresent } from '@roomote/redis';
+import { isSessionUserPresent, isSessionVoiceCallActive } from '@roomote/redis';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   extractAcpMessageText,
@@ -177,6 +177,21 @@ async function deliverNotification(
       `[sessionAttentionNotification] Presence check for ${subject.eventKey}: ${present ? 'present' : 'absent'}`,
     );
     if (present) {
+      await markOutcome(claim.id, claim.leaseToken, 'skipped_present', tx);
+      return 'skipped';
+    }
+    const voiceCallActive = subject.fastConversationId
+      ? await isSessionVoiceCallActive({
+          sessionId: subject.sessionId,
+          userId: subject.userId,
+        }).catch((error) => {
+          console.warn(
+            `[sessionAttentionNotification] Voice state lookup failed for ${subject.eventKey}; notifying defensively: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return false;
+        })
+      : false;
+    if (voiceCallActive) {
       await markOutcome(claim.id, claim.leaseToken, 'skipped_present', tx);
       return 'skipped';
     }

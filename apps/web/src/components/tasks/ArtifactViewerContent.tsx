@@ -211,7 +211,7 @@ function TabularArtifactPreview({
               <TableRow key={rowIndex}>
                 <TableHead
                   scope="row"
-                  className="sticky left-0 z-10 border-r bg-background text-right text-muted-foreground"
+                  className="sticky left-0 z-10 border-r bg-background text-right align-top text-muted-foreground"
                 >
                   {rowIndex + (firstRowIsHeader ? 2 : 1)}
                 </TableHead>

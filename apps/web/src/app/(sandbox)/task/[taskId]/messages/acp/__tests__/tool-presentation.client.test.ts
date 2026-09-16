@@ -388,6 +388,33 @@ describe('tool presentation resolver', () => {
     ).toMatchObject({ verb: 'Failed to Start', object: 'coding task' });
   });
 
+  it('describes integration key tools in plain words', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'prepare_integration_key',
+          rawInput: {
+            arguments: { label: 'Kagi', origin: 'https://kagi.com' },
+          },
+        }),
+      ),
+    ).toMatchObject({ verb: 'Requested', object: 'a key for Kagi' });
+    expect(
+      resolveToolPresentation(toolData({ toolName: 'list_integration_keys' })),
+    ).toMatchObject({ verb: 'Checked', object: 'your integrations' });
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'request_with_integration_key',
+          rawInput: {
+            arguments: { method: 'post', path: '/api/v1/search' },
+          },
+          output: JSON.stringify({ success: true, status: 200 }),
+        }),
+      ),
+    ).toMatchObject({ verb: 'Called', object: 'POST /api/v1/search (200)' });
+  });
+
   it('never uses native fallback titles for headers or identity', () => {
     expect(
       resolveToolPresentation(
@@ -801,6 +828,15 @@ describe('tool presentation policy', () => {
   );
 
   it('only expands skill receipts when they contain meaningful detail', () => {
+    const missingOutput = toolMessage({
+      toolName: 'skill',
+      rawInput: { name: 'implement-changes' },
+    });
+    delete (missingOutput.data as Partial<AcpToolResultPayload>).output;
+
+    expect(resolveToolPresentationPolicy(missingOutput).detailMode).toBe(
+      'none',
+    );
     expect(
       resolveToolPresentationPolicy(
         toolMessage({

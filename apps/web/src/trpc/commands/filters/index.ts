@@ -1,5 +1,6 @@
 import {
   db,
+  repositories,
   tasks,
   users,
   environments,
@@ -21,6 +22,7 @@ import {
   formatExternalActorLabel,
   type TaskSurface,
   getTaskModelDisplayName,
+  sourceControlProviderDescriptors,
 } from '@roomote/types';
 
 import type { TimePeriodFilter, UserAuthSuccess } from '@/types';
@@ -31,6 +33,7 @@ import {
 } from '@/lib/task-creator-filter';
 import { formatRepositoryName } from '@/lib';
 import { getTaskSurfaceLabel } from '@/lib/task-surface-label';
+import { buildPullRequestFilterValue } from '@/lib/pull-request-filter';
 import { getCreatorFilterCondition } from '@/lib/server/tasks';
 import { customAutomationTaskAccess } from '@/lib/server/custom-automation-task-access';
 
@@ -267,9 +270,27 @@ export async function getPullRequestsForFilterCommand(
   const latestDetectedAt = max(taskPullRequests.detectedAt).as(
     'latest_detected_at',
   );
+  const effectiveHost = sql<string | null>`coalesce(
+    ${taskPullRequests.host},
+    ${repositories.host}
+  )`;
 
   const results = await db
     .select({
+      sourceControlProvider: taskPullRequests.sourceControlProvider,
+      hosts: sql<string[]>`coalesce(
+        array_agg(distinct ${effectiveHost})
+          filter (where ${effectiveHost} is not null),
+        '{}'
+      )`,
+      repositoryIds: sql<string[]>`coalesce(
+        array_agg(distinct ${taskPullRequests.repositoryId}::text)
+          filter (
+            where ${taskPullRequests.repositoryId} is not null
+              and ${effectiveHost} is null
+          ),
+        '{}'
+      )`,
       repository: taskPullRequests.repository,
       prNumber: taskPullRequests.prNumber,
       prTitle: latestPrTitle,
@@ -277,8 +298,13 @@ export async function getPullRequestsForFilterCommand(
     })
     .from(tasks)
     .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id))
+    .leftJoin(repositories, eq(repositories.id, taskPullRequests.repositoryId))
     .where(and(...whereConditions))
-    .groupBy(taskPullRequests.repository, taskPullRequests.prNumber)
+    .groupBy(
+      taskPullRequests.sourceControlProvider,
+      taskPullRequests.repository,
+      taskPullRequests.prNumber,
+    )
     .orderBy(desc(latestDetectedAt))
     .limit(20);
 
@@ -291,12 +317,35 @@ export async function getPullRequestsForFilterCommand(
         prNumber: number;
       } => !!r.repository && r.prNumber !== null,
     )
-    .map((r) => {
-      const value = `${r.repository}#${r.prNumber}`;
-      const label = r.prTitle || `#${r.prNumber}`;
-      const subLabel = `${formatRepositoryName(r.repository)}#${r.prNumber}`;
-      return { value, label, subLabel };
-    });
+    .flatMap((r) => {
+      const scopes: Array<{ host?: string; repositoryId?: string }> =
+        r.hosts.length > 0 || r.repositoryIds.length > 0
+          ? [
+              ...r.hosts.map((host) => ({ host })),
+              ...r.repositoryIds.map((repositoryId) => ({ repositoryId })),
+            ]
+          : [{}];
+
+      return scopes.map(({ host, repositoryId }) => {
+        const value = buildPullRequestFilterValue({
+          provider: r.sourceControlProvider,
+          repository: r.repository,
+          number: r.prNumber,
+          repositoryId,
+          host,
+        });
+        const label = r.prTitle || `#${r.prNumber}`;
+        const provider =
+          sourceControlProviderDescriptors[r.sourceControlProvider];
+        const providerLabel =
+          host && host !== provider.defaultHost
+            ? `${provider.label} (${host})`
+            : provider.label;
+        const subLabel = `${providerLabel} · ${formatRepositoryName(r.repository)}#${r.prNumber}`;
+        return { value, label, subLabel };
+      });
+    })
+    .slice(0, 20);
 }
 
 export async function getModelsForFilterCommand(

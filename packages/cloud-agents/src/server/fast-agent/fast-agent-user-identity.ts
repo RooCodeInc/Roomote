@@ -16,7 +16,7 @@ export async function getFastAgentUserIdentity(
   const [user, githubIdentity] = await Promise.all([
     db.query.users.findFirst({
       where: eq(users.id, userId),
-      columns: { name: true, role: true, metadata: true },
+      columns: { name: true, role: true, metadata: true, deletedAt: true },
     }),
     findLatestGithubIdentityForUser(db, userId),
   ]);
@@ -25,8 +25,8 @@ export async function getFastAgentUserIdentity(
     displayName: user?.name?.trim() || null,
     githubLogin: githubIdentity.githubLogin,
     isAdmin: user?.role === 'admin',
-    serviceCredentialToolsEnabled: isServiceCredentialToolsExperimentEnabled(
-      user?.metadata,
-    ),
+    serviceCredentialToolsEnabled:
+      !user?.deletedAt &&
+      isServiceCredentialToolsExperimentEnabled(user?.metadata),
   };
 }

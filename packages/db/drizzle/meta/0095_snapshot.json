@@ -1,5 +1,5 @@
 {
-  "id": "eb4a9810-e0a8-4a1e-afbb-9114911668ef",
+  "id": "1e87d54d-55a2-4489-b154-8e4825358575",
   "prevId": "f5017db8-bdb0-4112-9637-a641129532c6",
   "version": "7",
   "dialect": "postgresql",
@@ -4480,19 +4480,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "privacy": {
-          "name": "privacy",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'shared'"
-        },
-        "private_owner_user_id": {
-          "name": "private_owner_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "surface": {
           "name": "surface",
           "type": "text",
@@ -4685,15 +4672,6 @@
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
-        },
-        "fast_agent_conversations_private_owner_user_id_users_id_fk": {
-          "name": "fast_agent_conversations_private_owner_user_id_users_id_fk",
-          "tableFrom": "fast_agent_conversations",
-          "tableTo": "users",
-          "columnsFrom": ["private_owner_user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4703,14 +4681,6 @@
         "fast_agent_conversations_owner_shape_check": {
           "name": "fast_agent_conversations_owner_shape_check",
           "value": "(\n        (\"fast_agent_conversations\".\"user_id\" is not null and \"fast_agent_conversations\".\"owner_automation\" is null)\n        or\n        (\"fast_agent_conversations\".\"user_id\" is null and \"fast_agent_conversations\".\"owner_automation\" is not null)\n      )"
-        },
-        "fast_agent_conversations_privacy_check": {
-          "name": "fast_agent_conversations_privacy_check",
-          "value": "\"fast_agent_conversations\".\"privacy\" in ('shared', 'private')"
-        },
-        "fast_agent_conversations_private_owner_check": {
-          "name": "fast_agent_conversations_private_owner_check",
-          "value": "(\"fast_agent_conversations\".\"privacy\" = 'shared' AND \"fast_agent_conversations\".\"private_owner_user_id\" IS NULL) OR (\"fast_agent_conversations\".\"privacy\" = 'private' AND \"fast_agent_conversations\".\"private_owner_user_id\" IS NOT NULL AND \"fast_agent_conversations\".\"private_owner_user_id\" = \"fast_agent_conversations\".\"user_id\")"
         }
       },
       "isRLSEnabled": false
@@ -10476,6 +10446,13 @@
           "notNull": true,
           "default": "'{GET,HEAD}'::text[]"
         },
+        "visibility": {
+          "name": "visibility",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'owner'"
+        },
         "lifetime_hours": {
           "name": "lifetime_hours",
           "type": "integer",
@@ -10661,6 +10638,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'{GET,HEAD}'::text[]"
+        },
+        "visibility": {
+          "name": "visibility",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'owner'"
         },
         "value": {
           "name": "value",
@@ -11925,19 +11909,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "privacy": {
-          "name": "privacy",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'shared'"
-        },
-        "private_owner_user_id": {
-          "name": "private_owner_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "source_surface": {
           "name": "source_surface",
           "type": "text",
@@ -12081,15 +12052,6 @@
           "onDelete": "set null",
           "onUpdate": "no action"
         },
-        "sessions_private_owner_user_id_users_id_fk": {
-          "name": "sessions_private_owner_user_id_users_id_fk",
-          "tableFrom": "sessions",
-          "tableTo": "users",
-          "columnsFrom": ["private_owner_user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "sessions_fast_conversation_id_fast_agent_conversations_id_fk": {
           "name": "sessions_fast_conversation_id_fast_agent_conversations_id_fk",
           "tableFrom": "sessions",
@@ -12111,14 +12073,6 @@
         "sessions_owner_kind_check": {
           "name": "sessions_owner_kind_check",
           "value": "\"sessions\".\"owner_kind\" in ('user', 'automation', 'system')"
-        },
-        "sessions_privacy_check": {
-          "name": "sessions_privacy_check",
-          "value": "\"sessions\".\"privacy\" in ('shared', 'private')"
-        },
-        "sessions_private_owner_check": {
-          "name": "sessions_private_owner_check",
-          "value": "(\"sessions\".\"privacy\" = 'shared' AND \"sessions\".\"private_owner_user_id\" IS NULL) OR (\"sessions\".\"privacy\" = 'private' AND \"sessions\".\"private_owner_user_id\" IS NOT NULL AND \"sessions\".\"private_owner_user_id\" = \"sessions\".\"owner_user_id\")"
         },
         "sessions_source_surface_check": {
           "name": "sessions_source_surface_check",
@@ -13605,12 +13559,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
-        },
-        "upload_url_expires_at": {
-          "name": "upload_url_expires_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -15690,19 +15638,6 @@
           "notNull": true,
           "default": "'visible'"
         },
-        "privacy": {
-          "name": "privacy",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'shared'"
-        },
-        "private_owner_user_id": {
-          "name": "private_owner_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "state": {
           "name": "state",
           "type": "text",
@@ -16081,15 +16016,6 @@
         }
       },
       "foreignKeys": {
-        "tasks_private_owner_user_id_users_id_fk": {
-          "name": "tasks_private_owner_user_id_users_id_fk",
-          "tableFrom": "tasks",
-          "tableTo": "users",
-          "columnsFrom": ["private_owner_user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "tasks_initiator_user_id_users_id_fk": {
           "name": "tasks_initiator_user_id_users_id_fk",
           "tableFrom": "tasks",
@@ -16141,14 +16067,6 @@
         "tasks_visibility_check": {
           "name": "tasks_visibility_check",
           "value": "\"tasks\".\"visibility\" in ('visible', 'hidden')"
-        },
-        "tasks_privacy_check": {
-          "name": "tasks_privacy_check",
-          "value": "\"tasks\".\"privacy\" in ('shared', 'private')"
-        },
-        "tasks_private_owner_check": {
-          "name": "tasks_private_owner_check",
-          "value": "(\"tasks\".\"privacy\" = 'shared' AND \"tasks\".\"private_owner_user_id\" IS NULL) OR (\"tasks\".\"privacy\" = 'private' AND \"tasks\".\"private_owner_user_id\" IS NOT NULL)"
         },
         "tasks_state_check": {
           "name": "tasks_state_check",

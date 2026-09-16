@@ -11,6 +11,7 @@ const policy = {
   headerName: 'authorization',
   headerPrefix: 'Bearer ',
   allowedMethods: ['GET', 'HEAD'],
+  visibility: 'deployment' as const,
   expiresAt: new Date(Date.now() + 3600000).toISOString(),
   createdAt: new Date().toISOString(),
 };
@@ -81,7 +82,12 @@ it('prefills a single-key consent flow and reports server-scheduled continuation
   expect(screen.queryByText('authorization')).not.toBeInTheDocument();
   expect(screen.queryByText('"Bearer "')).not.toBeInTheDocument();
   expect(document.querySelectorAll('input[type="password"]')).toHaveLength(1);
-  expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Who can use this integration?')).toHaveValue(
+    'deployment',
+  );
+  expect(
+    screen.getByText(/Anyone in this deployment can make requests/),
+  ).toBeInTheDocument();
   const password = screen.getByLabelText('API key');
   expect(password).toHaveAttribute('autocomplete', 'off');
   expect(password.closest('[role="dialog"]')).toHaveClass(
@@ -96,10 +102,14 @@ it('prefills a single-key consent flow and reports server-scheduled continuation
       status: 201,
     }),
   );
+  const changed = vi.fn();
+  window.addEventListener('roomote:integration-keys-changed', changed);
   fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
   expect(await screen.findByRole('status')).toHaveTextContent(
     'Integration saved. The Session has been notified without sharing your key.',
   );
+  expect(changed).toHaveBeenCalledOnce();
+  window.removeEventListener('roomote:integration-keys-changed', changed);
   expect(fetchMock).toHaveBeenLastCalledWith(
     `/api/sessions/${sessionId}/secrets`,
     expect.objectContaining({
@@ -110,6 +120,7 @@ it('prefills a single-key consent flow and reports server-scheduled continuation
         pendingRef,
         secret: credential,
         allowedMethods: policy.allowedMethods,
+        visibility: 'deployment',
       }),
     }),
   );
@@ -167,6 +178,7 @@ it.each([
       pendingRef,
       secret: credential,
       allowedMethods,
+      visibility: 'deployment',
     });
     expect(destination).toBe(
       `For ${policy.origin} - ${allowedMethods.join(', ')}${scope}`,

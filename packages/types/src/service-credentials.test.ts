@@ -4,6 +4,8 @@ import {
   serviceCredentialPrepareSchema,
   hasLeadingIntegrationSavedBlock,
   stripLeadingIntegrationSavedBlock,
+  serviceCredentialPrepareToolSchema,
+  integrationCreateSchema,
 } from './service-credentials';
 import { isCredentialEgressCredentialHeaderName } from './credential-egress';
 
@@ -80,6 +82,35 @@ describe('credential header names', () => {
   });
 });
 
+describe('integration visibility', () => {
+  it('defaults new approvals and Settings integrations to the deployment', () => {
+    const prepared = serviceCredentialPrepareSchema.parse({
+      label: 'Example',
+      origin: 'https://api.example.com',
+      headerName: 'authorization',
+      headerPrefix: 'Bearer ',
+    });
+    expect(prepared.visibility).toBe('deployment');
+    expect(
+      integrationCreateSchema.parse({
+        ...prepared,
+        secret: 'disposable-key',
+      }).visibility,
+    ).toBe('deployment');
+  });
+
+  it('accepts owner-only as an explicit opt-out', () => {
+    expect(
+      serviceCredentialPrepareToolSchema.parse({
+        label: 'Example',
+        origin: 'https://api.example.com',
+        headerName: 'authorization',
+        visibility: 'owner',
+      }).visibility,
+    ).toBe('owner');
+  });
+});
+
 describe('integration saved block', () => {
   const envelope =
     '<integration_saved>\nhidden instruction\n</integration_saved>\nI added the integration, go ahead.';
@@ -119,5 +150,28 @@ describe('integration saved block', () => {
     const started = performance.now();
     expect(stripLeadingIntegrationSavedBlock(hostile)).toBe(hostile);
     expect(performance.now() - started).toBeLessThan(50);
+  });
+
+  it('normalizes a header prefix typed without its trailing space', () => {
+    const base = {
+      label: 'Postman Echo',
+      origin: 'https://postman-echo.com',
+      headerName: 'authorization',
+    };
+    expect(
+      serviceCredentialPrepareToolSchema.parse({
+        ...base,
+        headerPrefix: 'Basic',
+      }).headerPrefix,
+    ).toBe('Basic ');
+    expect(
+      serviceCredentialPrepareToolSchema.parse({
+        ...base,
+        headerPrefix: 'Bearer ',
+      }).headerPrefix,
+    ).toBe('Bearer ');
+    expect(serviceCredentialPrepareToolSchema.parse(base).headerPrefix).toBe(
+      '',
+    );
   });
 });

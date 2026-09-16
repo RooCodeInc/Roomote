@@ -66,8 +66,7 @@ vi.mock('../../sandbox-oidc', () => ({
 }));
 
 const { spawnDaytonaWorker } = await import('../spawn-daytona-worker');
-const { buildDaytonaWorkerEnv, cleanupDaytonaInstance } =
-  await import('@roomote/compute-providers');
+const { cleanupDaytonaInstance } = await import('@roomote/compute-providers');
 
 describe('spawnDaytonaWorker', () => {
   beforeEach(() => {
@@ -217,9 +216,7 @@ describe('spawnDaytonaWorker', () => {
     });
 
     expect(planApiProxy).toHaveBeenCalledWith({ taskRun, provider: 'daytona' });
-    expect(
-      vi.mocked(buildDaytonaWorkerEnv).mock.calls.at(-1)![0].extraEnv,
-    ).toMatchObject({
+    expect(mockRunCommand.mock.calls.at(-1)![0].env).toMatchObject({
       ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
       ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
     });

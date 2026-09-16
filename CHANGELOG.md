@@ -2,6 +2,58 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.9.4 (2026-09-15)
+
+Roomote 1.9.4 adds self-service password recovery and clearer cross-surface Telegram replies while making integration keys easier to enter, strengthening inbound email safety, and improving delivery diagnostics, artifact tables, and transcript resilience.
+
+### Highlights
+
+- Request a password reset directly from sign-in on deployments configured with Email (AgentMail).
+- See the originating web message quoted when a cross-surface conversation replies in Telegram.
+- Open requested integration-key forms automatically and return to them from a persistent Session card.
+- Strengthen inbound email protection and delivery diagnostics while keeping artifact tables and transcripts resilient.
+
+### Minor changes
+
+- Telegram replies now quote the authenticated sender and message when a follow-up was sent from the Roomote web app, keeping cross-surface context visible above text and image responses without changing ordinary Telegram replies.
+- Email/password users can now request a one-hour password reset link directly from sign-in when Email (AgentMail) is configured, while deployments without AgentMail keep the admin-assisted recovery path and public responses do not reveal whether an account exists.
+
+### Patch changes
+
+- CSV and TSV artifact previews now align row numbers with the first line of adjacent cell content, including rows with multiline values and whether the first row is treated as headers or data.
+- Inbound email now requires a passing DMARC result before Roomote trusts the sender as a verified account. Messages without a pass are silently dropped before account matching, replies, or refusal limits, preventing spoofed sender addresses from triggering email to victims.
+- When an agent asks for an integration key in a Session, the key dialog now opens on its own for the Session owner, and a small "Add your <service> key" card stays at the end of the conversation until the key is saved, so the dialog is always one click away even after it was dismissed. The agent's link keeps working as before.
+- Session and task transcripts now render skill results that omit output instead of falling back to the client-side exception page.
+- Webhook and pull-request review delivery outcomes now emit searchable, correlation-friendly operational events, so operators can follow Telegram and GitHub activity from receipt through persistence, dispatch, and final delivery without logging message content or credentials.
+
+## 1.9.3 (2026-09-15)
+
+Roomote 1.9.3 makes integration keys personal and reusable, improves artifact and activity inspection, routes notifications more intelligently, and strengthens background delivery, upgrades, and pull-request review workflows.
+
+### Highlights
+
+- Add, reuse, and revoke personal integration keys across every Session and coding task you own.
+- Scan tabular artifacts more easily and inspect the skills, reasoning, and tool details behind agent activity.
+- Keep background Session delivery moving with deadlock prevention, worker recovery, queue health diagnostics, and stale-review guards.
+- Route notifications to the chat platform you chose most recently and recover self-hosted upgrades from transient Postgres disconnects.
+
+### Patch changes
+
+- Background Session delivery is more resilient: review-feedback dispatch no longer stalls BullMQ through a database lock cycle, and operators get a queue-processing watchdog plus `/health/bullmq` diagnostics when a worker is alive but no longer processing jobs.
+- After an integration key is saved through a Session, the transcript now shows a short, friendly continuation instead of exposing the technical instruction used to resume Fast.
+- Expanded activity groups now preserve reasoning and nested Session details while letting users inspect each tool call through the same shared detail view used elsewhere in task and Fast Session transcripts.
+- Fast now prepares an integration key directly when a linked SaaS resource needs one, without first probing public access or delegating that probe to a coding task. The secure approval link opens the integration-key dialog correctly, and Fast no longer asks users to enable a setting that is already available.
+- Fast now recognizes when a request needs a service with no connected integration and offers to use an owner-provided integration key instead of asking for screenshots, requiring an administrator-installed connector, or launching work to build one. When integration keys are disabled, Fast points to the correct Experimental setting.
+- Integration keys now belong to their owner instead of one Session, so every Session and coding task that owner starts can use them until they expire or are revoked. Users can add, review, and revoke keys directly under Settings > Integrations without first asking an agent to prepare an approval.
+- Session secrets are now called integration keys throughout Roomote and live under Settings > Integrations for every user. Self-hosted deployments using the optional dedicated proxy hostname should replace `R_SESSION_EGRESS_PROXY_HOST` with `R_CREDENTIAL_EGRESS_PROXY_HOST`; the API path and worker settings now use the credential-egress name as well.
+- Roomote code-review checks now recover from transient GitHub summary-read failures and report a neutral, linked diagnostic when the summary remains unavailable instead of incorrectly failing as though no review result was published.
+- CSV and TSV artifacts are easier to scan: gallery cards show abstract table previews, wide tables scroll without clipping columns, and users can choose whether the first row should be treated as column headers.
+- Telegram now resolves automatic pull-request review offers in place, removing stale controls and keeping the confirmation with the original review summary instead of posting a separate reply.
+- Fast Session and coding-task transcripts now show which skills were actually loaded, keep skill instructions private, and prevent agents from claiming that a listed but unloaded skill was used.
+- When an absent web user needs a new personal notification thread, Roomote now prefers the Slack, Teams, Telegram, or Discord platform that user most recently chose to start work while preserving existing Session threads and the standard provider fallback order.
+- Self-hosted upgrades now retry the bundled database migration runner when Postgres briefly drops its connection, avoiding a failed deployment when the transaction can safely restart while still failing immediately for migration and SQL errors.
+- Automatic pull-request review follow-ups now confirm the pull request is still open before launching or resuming work, and retire deliveries that have remained stuck for too long, preventing stale feedback from reopening completed work days after a pull request merged.
+
 ## 1.9.2 (2026-09-15)
 
 Roomote 1.9.2 makes artifacts easier to inspect, restores reliable Session starts and sandbox provisioning, and improves live activity, Settings clarity, and Session-secret operations.

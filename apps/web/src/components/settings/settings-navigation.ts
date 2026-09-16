@@ -108,8 +108,7 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     id: 'integrations',
     label: 'Integrations',
     title: 'Integrations',
-    description:
-      'Your API keys for services agents can call on your behalf, and the deployment integrations an admin enables. Individual users can optionally link their own accounts when an integration supports it.',
+    description: 'Connect Roomote with tools your team uses.',
     href: SETTINGS_PATHS.integrations,
     icon: PlugIcon,
     adminOnly: false,

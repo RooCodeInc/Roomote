@@ -4,9 +4,12 @@ export type { Redis } from 'ioredis';
 export { getRedis } from './client';
 export {
   disconnectSessionPresence,
+  disconnectSessionVoiceCall,
+  isSessionVoiceCallActive,
   isSessionUserPresent,
   listSessionPresentUserIds,
   refreshSessionPresence,
+  refreshSessionVoiceCall,
   SESSION_PRESENCE_LEASE_MS,
 } from './session-presence';
 

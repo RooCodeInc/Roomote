@@ -159,6 +159,11 @@ Roomote keeps the footer on the latest reply current as delegated tasks start
 and finish (checking about every 30 seconds while work is running), and
 earlier replies drop their footer when a new reply posts.
 
+When someone continues a Telegram conversation from the Roomote web app, the
+next Telegram reply quotes that authenticated sender and web message above the
+response. The quote is also sent before an image-only response. Replies to
+messages that originated in Telegram remain unquoted.
+
 Photos and supported image documents are passed as image input. Supported text
 documents are downloaded server-side and their extracted content is added to the
 request; voice and audio messages are transcribed, and supported video documents

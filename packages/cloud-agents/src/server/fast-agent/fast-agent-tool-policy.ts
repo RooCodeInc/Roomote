@@ -57,11 +57,13 @@ export function buildFastAgentToolFilter(
   options: {
     surface?: FastAgentSurface;
     serviceCredentialToolsEnabled?: boolean;
+    serviceCredentialPrepareEnabled?: boolean;
   } = {},
 ): Record<string, boolean> {
   return {
     ...FAST_AGENT_NATIVE_TOOL_FILTER,
     [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]:
+      options.serviceCredentialPrepareEnabled ??
       options.serviceCredentialToolsEnabled === true,
     [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]:
       options.serviceCredentialToolsEnabled === true,

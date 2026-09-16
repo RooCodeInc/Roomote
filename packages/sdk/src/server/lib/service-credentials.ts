@@ -7,6 +7,7 @@ import {
   listUserIntegrations,
   revokeOwnedServiceCredential,
   revokeUserIntegration,
+  updateUserIntegrationVisibility,
   type ServiceCredentialContext,
 } from '@roomote/db/server';
 import {
@@ -15,6 +16,7 @@ import {
   serviceCredentialCreateSchema,
   serviceCredentialPrepareSchema,
   serviceCredentialRevokeSchema,
+  serviceCredentialVisibilityUpdateSchema,
 } from '@roomote/types';
 
 import { assertEgressUrlAllowed } from './safe-fetch';
@@ -218,10 +220,10 @@ export async function revokeServiceCredential(
   }
 }
 
-/** Settings: the owner's integrations, metadata only. */
+/** Settings: integrations visible to the member, with an all-grants admin view. */
 export async function listIntegrations(userId: string) {
   try {
-    return await listUserIntegrations(userId);
+    return await listUserIntegrations(userId, { includeAllForAdmin: true });
   } catch {
     throw new Error(ERROR);
   }
@@ -254,6 +256,19 @@ export async function revokeIntegration(userId: string, rawArgs: unknown) {
   try {
     const { secretRef } = serviceCredentialRevokeSchema.parse(rawArgs);
     await revokeUserIntegration(userId, secretRef);
+  } catch {
+    throw new Error(ERROR);
+  }
+}
+
+export async function updateIntegrationVisibility(
+  userId: string,
+  rawArgs: unknown,
+) {
+  try {
+    const { secretRef, visibility } =
+      serviceCredentialVisibilityUpdateSchema.parse(rawArgs);
+    return await updateUserIntegrationVisibility(userId, secretRef, visibility);
   } catch {
     throw new Error(ERROR);
   }

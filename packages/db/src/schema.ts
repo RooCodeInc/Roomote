@@ -4354,6 +4354,10 @@ export const serviceCredentials = pgTable(
       .notNull()
       .default(sql`'{GET,HEAD}'::text[]`)
       .$type<CredentialEgressMethod[]>(),
+    visibility: text('visibility')
+      .notNull()
+      .default('owner')
+      .$type<import('@roomote/types').ServiceCredentialVisibility>(),
     value: encryptedText('value'),
     /** Null: kept until revoked. */
     expiresAt: timestamp('expires_at'),
@@ -4391,6 +4395,10 @@ export const serviceCredentialApprovals = pgTable(
       .notNull()
       .default(sql`'{GET,HEAD}'::text[]`)
       .$type<CredentialEgressMethod[]>(),
+    visibility: text('visibility')
+      .notNull()
+      .default('owner')
+      .$type<import('@roomote/types').ServiceCredentialVisibility>(),
     /** How long the resulting integration lives once the key is entered; null keeps it until revoked. */
     lifetimeHours: integer('lifetime_hours'),
     /** The window for entering the key, not the integration's lifetime. */
@@ -4411,7 +4419,9 @@ export const serviceCredentialAudit = pgTable('service_credential_audit', {
   id: uuid('id').primaryKey().defaultRandom(),
   actorUserId: text('actor_user_id'),
   secretRef: uuid('secret_ref'),
-  method: text('method').$type<'GET' | 'HEAD'>(),
+  method: text('method').$type<
+    'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  >(),
   destination: text('destination'),
   outcome: text('outcome')
     .notNull()

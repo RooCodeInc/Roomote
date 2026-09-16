@@ -10,6 +10,8 @@ import {
   fastAgentParentEvents,
   inArray,
   llmUsageEvents,
+  repositories,
+  repositoryFactory,
   runFactory,
   sessionFactory,
   sessionParticipants,
@@ -679,6 +681,211 @@ describe('unified Session queries', () => {
         url: 'https://github.com/RooCodeInc/Roomote/pull/1939',
       },
     ]);
+  });
+
+  it('filters Sessions by pull requests from their linked tasks', async () => {
+    const owner = await userFactory.create();
+    const matchingSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 400,
+    });
+    const otherRepositorySession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 300,
+    });
+    const otherProviderSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 200,
+    });
+    const linkedSameHostSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 175,
+    });
+    const unstampedSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 160,
+    });
+    const otherHostSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 150,
+    });
+    const deletedTaskSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 100,
+    });
+    const candidateSessions = [
+      matchingSession,
+      otherRepositorySession,
+      otherProviderSession,
+      linkedSameHostSession,
+      unstampedSession,
+      otherHostSession,
+      deletedTaskSession,
+    ];
+    const tasksBySession = await Promise.all(
+      candidateSessions.map((session) =>
+        taskFactory.create({
+          initiatorUserId: owner.id,
+          repositoryName: 'RooCodeInc/Roomote',
+          deletedAt:
+            session.id === deletedTaskSession.id ? new Date() : undefined,
+        }),
+      ),
+    );
+    const matchingPrTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      repositoryName: 'RooCodeInc/Other',
+    });
+    const linkedRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitlab',
+      fullName: 'RooCodeInc/Roomote',
+      linkedByUserId: owner.id,
+    });
+    await db
+      .update(repositories)
+      .set({ host: null })
+      .where(eq(repositories.id, linkedRepository.id));
+    await db.insert(sessionTasks).values([
+      ...tasksBySession.map((task, index) => ({
+        sessionId: candidateSessions[index]!.id,
+        taskId: task.id,
+        origin: 'direct_launch' as const,
+      })),
+      {
+        sessionId: matchingSession.id,
+        taskId: matchingPrTask.id,
+        origin: 'fast_delegation',
+      },
+    ]);
+    await db.insert(taskPullRequests).values([
+      {
+        taskId: matchingPrTask.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl: 'https://github.com/RooCodeInc/Roomote/pull/123',
+        sourceControlProvider: 'github',
+        host: 'github.com',
+      },
+      {
+        taskId: tasksBySession[1]!.id,
+        repository: 'RooCodeInc/Other',
+        prNumber: 123,
+        prUrl: 'https://github.com/RooCodeInc/Other/pull/123',
+        sourceControlProvider: 'github',
+        host: 'github.com',
+      },
+      {
+        taskId: tasksBySession[2]!.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl: 'https://gitlab.com/RooCodeInc/Roomote/-/merge_requests/123',
+        sourceControlProvider: 'gitlab',
+        host: 'gitlab.com',
+      },
+      {
+        taskId: tasksBySession[3]!.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl:
+          'https://gitlab.com/RooCodeInc/Roomote/-/merge_requests/123?linked=1',
+        sourceControlProvider: 'gitlab',
+        repositoryId: linkedRepository.id,
+      },
+      {
+        taskId: tasksBySession[4]!.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl:
+          'https://gitlab.com/RooCodeInc/Roomote/-/merge_requests/123?legacy=1',
+        sourceControlProvider: 'gitlab',
+      },
+      {
+        taskId: tasksBySession[5]!.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl:
+          'https://gitlab.internal/RooCodeInc/Roomote/-/merge_requests/123',
+        sourceControlProvider: 'gitlab',
+        host: 'gitlab.internal',
+      },
+      {
+        taskId: tasksBySession[6]!.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl: 'https://github.com/RooCodeInc/Roomote/pull/123',
+        sourceControlProvider: 'github',
+        host: 'github.com',
+      },
+    ]);
+    const auth = { userId: owner.id, isAdmin: false };
+    const ids = candidateSessions.map((session) => session.id);
+
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: 'github:RooCodeInc/Roomote#123|host:github.com',
+      }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: matchingSession.id })],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: 'github:RooCodeInc/Other#123|host:github.com',
+      }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: otherRepositorySession.id })],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: 'gitlab:RooCodeInc/Roomote#123|host:gitlab.com',
+      }),
+    ).resolves.toMatchObject({
+      sessions: [
+        expect.objectContaining({ id: otherProviderSession.id }),
+        expect.objectContaining({ id: unstampedSession.id }),
+      ],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: `gitlab:RooCodeInc/Roomote#123|repositoryId:${linkedRepository.id}`,
+      }),
+    ).resolves.toMatchObject({
+      sessions: [
+        expect.objectContaining({ id: linkedSameHostSession.id }),
+        expect.objectContaining({ id: unstampedSession.id }),
+      ],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: 'gitlab:RooCodeInc/Roomote#123|host:gitlab.internal',
+      }),
+    ).resolves.toMatchObject({
+      sessions: [
+        expect.objectContaining({ id: unstampedSession.id }),
+        expect.objectContaining({ id: otherHostSession.id }),
+      ],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        repository: 'RooCodeInc/Roomote',
+        pullRequest: 'github:RooCodeInc/Roomote#123|host:github.com',
+      }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: matchingSession.id })],
+    });
+    expect((await getSessions(auth, { ids })).sessions).toHaveLength(7);
   });
 
   it('lists only distinct visible sources within the list scope', async () => {

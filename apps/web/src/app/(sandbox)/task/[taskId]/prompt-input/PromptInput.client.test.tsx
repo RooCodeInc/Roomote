@@ -7,6 +7,7 @@ import {
 import {
   act,
   cleanup,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -1487,11 +1488,13 @@ describe('PromptInput ghost suggestion', () => {
         name: 'Insert suggested message',
       });
 
-      expect(
-        fireEvent.pointerDown(hint, { pointerType, cancelable: true }),
-      ).toBe(false);
+      const pointerDown = createEvent.pointerDown(hint, { cancelable: true });
+      Object.defineProperty(pointerDown, 'pointerType', { value: pointerType });
+      expect(fireEvent(hint, pointerDown)).toBe(false);
       expect(textarea).toHaveFocus();
-      fireEvent.click(hint);
+      if (pointerType === 'mouse') {
+        fireEvent.click(hint);
+      }
 
       expect(textarea).toHaveValue(suggestion);
       expect(textarea).toHaveFocus();

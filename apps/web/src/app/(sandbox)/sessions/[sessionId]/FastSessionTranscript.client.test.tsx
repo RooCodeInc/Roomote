@@ -1,5 +1,6 @@
 import {
   act,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -31,6 +32,14 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/sessions/session-1',
 }));
 
+const integrationApprovalsState: { pending: unknown[] } = { pending: [] };
+vi.mock('@/hooks/useSessionIntegrationApprovals', () => ({
+  useSessionIntegrationApprovals: () => ({
+    data: { pending: integrationApprovalsState.pending, secrets: [] },
+    refetch: vi.fn(),
+  }),
+}));
+
 vi.mock('./CapabilityOfferCard', () => ({
   CapabilityOfferCard: ({ offer }: { offer: { capability: string } }) => (
     <div>Capability offer: {offer.capability}</div>
@@ -50,6 +59,7 @@ const {
   voiceStatusQuery,
   recordVoiceTurnMutate,
   recordVoiceCallEventMutate,
+  waitForVoiceCallLease,
   liveVoiceState,
   authenticatedUserState,
 } = vi.hoisted(() => ({
@@ -67,6 +77,7 @@ const {
   voiceStatusQuery: vi.fn(),
   recordVoiceTurnMutate: vi.fn(),
   recordVoiceCallEventMutate: vi.fn(),
+  waitForVoiceCallLease: vi.fn(),
   authenticatedUserState: {
     user: null as null | {
       userId: string;
@@ -149,6 +160,10 @@ vi.mock('@/hooks/useLiveVoice', () => ({
       deliveringUtterances: liveVoiceState.deliveringUtterances,
     };
   },
+}));
+
+vi.mock('@/hooks/useSessionVoiceCallLease', () => ({
+  useSessionVoiceCallLease: () => waitForVoiceCallLease,
 }));
 
 vi.mock('@/hooks/useNarrationMode', () => ({
@@ -341,6 +356,8 @@ beforeEach(() => {
   recordVoiceTurnMutate.mockResolvedValue({ eventId: 'voice:1' });
   recordVoiceCallEventMutate.mockReset();
   recordVoiceCallEventMutate.mockResolvedValue({ eventId: 'voice-call:1' });
+  waitForVoiceCallLease.mockReset();
+  waitForVoiceCallLease.mockResolvedValue(undefined);
   liveVoiceState.startedAt = null;
   liveVoiceState.inputLevel = 0;
   liveVoiceState.micMuted = false;
@@ -365,6 +382,79 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
+  it('shows a pending-key card for the owner and opens the key dialog from it', async () => {
+    integrationApprovalsState.pending = [
+      {
+        pendingRef: '6a1f8f1e-0000-4000-8000-000000000009',
+        label: 'Figma',
+        origin: 'https://api.figma.com',
+        headerName: 'x-figma-token',
+        headerPrefix: '',
+        allowedMethods: ['GET', 'HEAD'],
+        lifetimeHours: null,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    // The dialog fetches the same route; a fresh Response per call, since a
+    // body can only be read once.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              secrets: [],
+              pending: integrationApprovalsState.pending,
+            }),
+          ),
+        ),
+      ),
+    );
+    window.location.hash = '';
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    expect(screen.getByText('Add your Figma key')).toBeInTheDocument();
+    expect(screen.queryByLabelText('API key')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter key' }));
+    expect(window.location.hash).toBe('#integrations');
+    // jsdom does not dispatch hashchange for a programmatic fragment change.
+    fireEvent(window, new HashChangeEvent('hashchange'));
+    await screen.findByLabelText('API key');
+    integrationApprovalsState.pending = [];
+  });
+
+  it('hides the pending-key card from viewers who do not own the Session', () => {
+    integrationApprovalsState.pending = [
+      {
+        pendingRef: '6a1f8f1e-0000-4000-8000-000000000010',
+        label: 'Figma',
+        origin: 'https://api.figma.com',
+        headerName: 'x-figma-token',
+        headerPrefix: '',
+        allowedMethods: ['GET', 'HEAD'],
+        lifetimeHours: null,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    expect(screen.queryByText('Add your Figma key')).toBeNull();
+    integrationApprovalsState.pending = [];
+  });
+
   it('reports server-owned secure-save continuation without submitting or replacing the browser composer draft', async () => {
     const secretRef = '6a1f8f1e-0000-4000-8000-000000000007';
     const fetchMock = vi.fn().mockResolvedValue(
@@ -450,10 +540,14 @@ describe('FastSessionTranscript', () => {
       '/api/sessions/canonical-session/secrets',
       expect.objectContaining({
         method: 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           pendingRef: secretRef,
           secret: 'disposable-test-credential',
           allowedMethods: ['GET', 'HEAD'],
+          visibility: 'deployment',
         }),
       }),
     );
@@ -2742,14 +2836,15 @@ describe('FastSessionTranscript', () => {
         const focusedHint = screen.getByRole('button', {
           name: 'Insert suggested message',
         });
-        expect(
-          fireEvent.pointerDown(focusedHint, {
-            pointerType: action,
-            cancelable: true,
-          }),
-        ).toBe(false);
+        const pointerDown = createEvent.pointerDown(focusedHint, {
+          cancelable: true,
+        });
+        Object.defineProperty(pointerDown, 'pointerType', { value: action });
+        expect(fireEvent(focusedHint, pointerDown)).toBe(false);
         expect(input).toHaveFocus();
-        fireEvent.click(focusedHint);
+        if (action === 'mouse') {
+          fireEvent.click(focusedHint);
+        }
       } else {
         fireEvent.keyDown(input, { key: action, code: action });
       }
@@ -3355,6 +3450,36 @@ describe('FastSessionTranscript', () => {
       expect(screen.getByPlaceholderText('Message agent')).toHaveValue(
         'Keep this draft',
       );
+    });
+
+    it('waits for the voice-call lease before sending the first spoken request', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      let releaseLease!: () => void;
+      waitForVoiceCallLease.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          releaseLease = resolve;
+        }),
+      );
+      replyMutate.mockResolvedValue({ success: true });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        liveVoiceState.onUtterance?.('Check the build', 'item_1');
+      });
+      expect(waitForVoiceCallLease).toHaveBeenCalledOnce();
+      expect(replyMutate).not.toHaveBeenCalled();
+
+      releaseLease();
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledOnce());
     });
 
     it('reads the answer to a spoken request to Live as it streams, and leaves typed replies on screen', async () => {

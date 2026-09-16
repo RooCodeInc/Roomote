@@ -65,8 +65,7 @@ vi.mock('../../sandbox-oidc', () => ({
 }));
 
 const { spawnAzureWorker } = await import('../spawn-azure-worker');
-const { buildAzureWorkerEnv, cleanupAzureInstance } =
-  await import('@roomote/compute-providers');
+const { cleanupAzureInstance } = await import('@roomote/compute-providers');
 
 const config = {
   azureSubscriptionId: 'subscription',
@@ -162,9 +161,7 @@ describe('spawnAzureWorker', () => {
     });
 
     expect(planApiProxy).toHaveBeenCalledWith({ taskRun, provider: 'azure' });
-    expect(
-      vi.mocked(buildAzureWorkerEnv).mock.calls.at(-1)![0].extraEnv,
-    ).toMatchObject({
+    expect(mockRunCommand.mock.calls.at(-1)![0].env).toMatchObject({
       ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
       ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
     });

@@ -1,3 +1,4 @@
+import { stripLeadingIntegrationSavedBlock } from '@roomote/types';
 import { createHash } from 'node:crypto';
 
 import {
@@ -174,6 +175,9 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   externalInput?: FastAgentReactionExternalInput;
   deliveryConversation?: FastAgentConversation;
 }): Promise<FastAgentSurfaceReplyDelivery | null> {
+  // A turn Roomote framed for the agent (the post-save continuation) is
+  // quoted on side surfaces exactly as the human sees it on the web.
+  const visibleQuestion = stripLeadingIntegrationSavedBlock(params.question);
   const session = await fastAgentConversationRepository.findById({
     id: params.sessionId,
   });
@@ -237,7 +241,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       ? null
       : buildSlackReplyQuote({
           senderDisplayName: params.senderDisplayName,
-          text: params.question,
+          text: visibleQuestion,
         });
     // Streaming a reply outside a DM needs the Slack user it is addressed
     // to; a sender without a linked Slack account gets whole replies.
@@ -365,7 +369,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       ? null
       : buildMarkdownReplyQuote({
           senderDisplayName: params.senderDisplayName,
-          text: params.question,
+          text: visibleQuestion,
         });
 
     const activity = createFastAgentTypingActivity({
@@ -560,7 +564,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           sessionId: session.id,
           quote: params.externalInput
             ? null
-            : buildSourceControlReplyQuote({ text: params.question }),
+            : buildSourceControlReplyQuote({ text: visibleQuestion }),
         }),
       },
     });

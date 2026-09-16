@@ -22,6 +22,7 @@ import {
   lt,
   or,
   privateSessionAccess,
+  repositories,
   sessionParticipants,
   sessionPins,
   sessions,
@@ -44,6 +45,7 @@ import { syncFastAgentSlackTitleBestEffort } from '@roomote/sdk/server';
 import type { UserAuthSuccess } from '@/types';
 import { parseCreatorFilterValue } from '@/lib/task-creator-filter';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
+import { parsePullRequestFilterValue } from '@/lib/pull-request-filter';
 
 import { getFastSessionById } from './fast-sessions';
 import { customAutomationSessionAccess } from './custom-automation-session-access';
@@ -407,7 +409,9 @@ function listConditions(
   const cursor = decodeCursor(input.before);
   const scope = input.scope ?? 'all';
   const period = input.period ?? 'all';
-  const pullRequestNumber = Number(input.pullRequest);
+  const pullRequest = input.pullRequest
+    ? parsePullRequestFilterValue(input.pullRequest)
+    : null;
 
   return and(
     sessionListScope(auth),
@@ -462,19 +466,55 @@ function listConditions(
       ? taskExistsCondition(eq(tasks.repositoryName, input.repository))
       : undefined,
     input.model ? taskExistsCondition(eq(tasks.model, input.model)) : undefined,
-    input.pullRequest && Number.isFinite(pullRequestNumber)
+    pullRequest
       ? exists(
           db
             .select({ one: sql`1` })
             .from(sessionTasks)
+            .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
             .innerJoin(
               taskPullRequests,
               eq(taskPullRequests.taskId, sessionTasks.taskId),
             )
+            .leftJoin(
+              repositories,
+              eq(repositories.id, taskPullRequests.repositoryId),
+            )
             .where(
               and(
                 eq(sessionTasks.sessionId, sessions.id),
-                eq(taskPullRequests.prNumber, pullRequestNumber),
+                isNull(tasks.deletedAt),
+                eq(taskPullRequests.repository, pullRequest.repository),
+                eq(taskPullRequests.prNumber, pullRequest.number),
+                pullRequest.provider
+                  ? eq(
+                      taskPullRequests.sourceControlProvider,
+                      pullRequest.provider,
+                    )
+                  : undefined,
+                pullRequest.repositoryId
+                  ? or(
+                      eq(
+                        taskPullRequests.repositoryId,
+                        pullRequest.repositoryId,
+                      ),
+                      and(
+                        isNull(taskPullRequests.host),
+                        isNull(taskPullRequests.repositoryId),
+                      ),
+                    )
+                  : pullRequest.host
+                    ? or(
+                        eq(
+                          sql`coalesce(${taskPullRequests.host}, ${repositories.host})`,
+                          pullRequest.host,
+                        ),
+                        and(
+                          isNull(taskPullRequests.host),
+                          isNull(taskPullRequests.repositoryId),
+                        ),
+                      )
+                    : undefined,
               ),
             ),
         )

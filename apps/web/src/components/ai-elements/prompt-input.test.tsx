@@ -6,7 +6,23 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { useState } from 'react';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
+
+const { mobileViewport } = vi.hoisted(() => ({
+  mobileViewport: { value: false },
+}));
+
+vi.mock('@/hooks/useIsMobile', () => ({
+  useIsMobile: () => mobileViewport.value,
+}));
 
 import {
   PromptInput,
@@ -51,6 +67,10 @@ function createClipboardStringItem(type: string): DataTransferItem {
 }
 
 describe('PromptInput', () => {
+  beforeEach(() => {
+    mobileViewport.value = false;
+  });
+
   beforeAll(() => {
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
@@ -301,6 +321,7 @@ describe('PromptInput', () => {
 
     const textarea = screen.getByLabelText('Prompt');
 
+    expect(textarea).toHaveAttribute('enterkeyhint', 'send');
     fireEvent.change(textarea, { target: { value: 'Wake up and continue' } });
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
 
@@ -311,6 +332,63 @@ describe('PromptInput', () => {
         files: [],
       });
     });
+  });
+
+  it('leaves mobile Enter to insert a newline without submitting', () => {
+    mobileViewport.value = true;
+    const onSubmit = vi.fn();
+    const onKeyDown = vi.fn();
+
+    render(
+      <PromptInput clearOnSubmit={false} onSubmit={onSubmit}>
+        <PromptInputBody>
+          <PromptInputTextarea aria-label="Prompt" onKeyDown={onKeyDown} />
+        </PromptInputBody>
+        <button type="submit">Send</button>
+      </PromptInput>,
+    );
+
+    const textarea = screen.getByLabelText('Prompt');
+    const enter = createEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+    });
+
+    expect(textarea).toHaveAttribute('enterkeyhint', 'enter');
+    fireEvent.change(textarea, { target: { value: 'First line' } });
+    fireEvent(textarea, enter);
+
+    expect(enter.defaultPrevented).toBe(false);
+    expect(onKeyDown).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.change(textarea, { target: { value: 'First line\n' } });
+    expect(textarea).toHaveValue('First line\n');
+  });
+
+  it('leaves desktop Shift+Enter to insert a newline without submitting', () => {
+    const onSubmit = vi.fn();
+
+    render(
+      <PromptInput clearOnSubmit={false} onSubmit={onSubmit}>
+        <PromptInputBody>
+          <PromptInputTextarea aria-label="Prompt" />
+        </PromptInputBody>
+        <button type="submit">Send</button>
+      </PromptInput>,
+    );
+
+    const textarea = screen.getByLabelText('Prompt');
+    const shiftEnter = createEvent.keyDown(textarea, {
+      key: 'Enter',
+      code: 'Enter',
+      shiftKey: true,
+    });
+
+    fireEvent(textarea, shiftEnter);
+
+    expect(shiftEnter.defaultPrevented).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('requires Cmd/Ctrl+Enter when submitWithMetaKey is enabled', () => {

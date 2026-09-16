@@ -7,19 +7,16 @@ import { getTabularArtifactFormat } from '@/lib/artifact-types';
 import { parseTabularArtifact } from '@/lib/tabular-artifacts';
 import { cn } from '@/lib/utils';
 
-const THUMBNAIL_ROWS = 6;
-const THUMBNAIL_COLUMNS = 5;
+const THUMBNAIL_ROWS = 10;
+const THUMBNAIL_COLUMNS = 8;
+const THUMBNAIL_CELL_CHARACTERS = 24;
 const FALLBACK_ROWS = 5;
 const FALLBACK_COLUMNS = 4;
 
-type CellLength = 'empty' | 'short' | 'medium' | 'long';
-
-function getCellLength(value: string): CellLength {
-  const length = value.trim().length;
-  if (length === 0) return 'empty';
-  if (length <= 4) return 'short';
-  if (length <= 12) return 'medium';
-  return 'long';
+function getThumbnailCell(value: string): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= THUMBNAIL_CELL_CHARACTERS) return normalized;
+  return normalized.slice(0, THUMBNAIL_CELL_CHARACTERS);
 }
 
 type TabularArtifactPreviewProps = {
@@ -59,42 +56,62 @@ export function TabularArtifactPreview({
   const columnCount = hasRows
     ? Math.min(preview.columnCount, THUMBNAIL_COLUMNS)
     : FALLBACK_COLUMNS;
-  const cells = hasRows
+  const rows = hasRows
     ? preview.rows
         .slice(0, THUMBNAIL_ROWS)
-        .flatMap((row) =>
+        .map((row) =>
           Array.from({ length: columnCount }, (_, index) =>
-            getCellLength(row[index] ?? ''),
+            getThumbnailCell(row[index] ?? ''),
           ),
         )
-    : Array.from({ length: FALLBACK_ROWS * FALLBACK_COLUMNS }, (_, index) =>
-        index % 3 === 0 ? 'short' : index % 3 === 1 ? 'long' : 'medium',
-      );
+    : [];
 
   return (
     <span
       aria-hidden="true"
       className={cn('artifact-paper-preview', className)}
+      data-kind="tabular"
     >
       <span className="artifact-paper-shadow" />
       <span className="artifact-paper">
-        <span
-          className={cn('tabular-artifact-grid', isPending && 'animate-pulse')}
-          data-state={isPending ? 'loading' : hasRows ? 'ready' : 'unavailable'}
-          style={{
-            gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
-          }}
-        >
-          {cells.map((length, index) => (
-            <span
-              className="tabular-artifact-cell"
-              data-length={length}
-              key={index}
-            >
-              <span className="tabular-artifact-bar" />
-            </span>
-          ))}
-        </span>
+        {hasRows ? (
+          <span
+            className="tabular-artifact-grid"
+            data-state="ready"
+            style={{
+              gridTemplateColumns: `repeat(${columnCount}, clamp(4rem, 30cqw, 5.25rem))`,
+            }}
+          >
+            {rows.flatMap((row, rowIndex) =>
+              row.map((cell, columnIndex) => (
+                <span
+                  className="tabular-artifact-cell"
+                  data-first-row={rowIndex === 0}
+                  key={`${rowIndex}-${columnIndex}`}
+                >
+                  {cell}
+                </span>
+              )),
+            )}
+          </span>
+        ) : (
+          <span
+            className={cn(
+              'tabular-artifact-placeholder',
+              isPending && 'animate-pulse',
+            )}
+            data-state={isPending ? 'loading' : 'unavailable'}
+          >
+            {Array.from(
+              { length: FALLBACK_ROWS * FALLBACK_COLUMNS },
+              (_, index) => (
+                <span key={index}>
+                  <span />
+                </span>
+              ),
+            )}
+          </span>
+        )}
       </span>
     </span>
   );

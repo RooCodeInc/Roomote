@@ -1,10 +1,12 @@
 import { and, eq } from 'drizzle-orm';
 
+import { resolveAppEnv } from '@roomote/env';
 import { ACP_ENVELOPE_EVENT_TYPES, RunStatus } from '@roomote/types';
 
 import type { CreateUser } from '../types';
 import {
   taskRuns,
+  customMcpServers,
   deploymentSettings,
   environments,
   fastAgentConversations,
@@ -12,6 +14,7 @@ import {
   githubInstallations,
   repositories,
   sessionParticipants,
+  sessionTasks,
   sessions,
   tasks,
   taskPullRequests,
@@ -27,6 +30,16 @@ import {
   taskFactory,
   userFactory,
 } from './factories';
+import {
+  demoSeedArtifactSessionId,
+  demoSeedDevelopmentIntegration,
+  demoSeedLifecycleSessions,
+} from './development-fixtures';
+
+export {
+  demoSeedDevelopmentIntegration,
+  demoSeedLifecycleSessions,
+} from './development-fixtures';
 
 export const demoSeedUserId = 'demo-seed-user';
 const demoSeedUserEmail = 'demo@roomote.dev';
@@ -35,7 +48,7 @@ export const demoSeedEnvironmentName = 'Roomote Demo Environment';
 
 export const demoSeedFastSession = {
   conversationId: '00000000-0000-4000-8000-000000000101',
-  sessionId: '00000000-0000-4000-8000-000000000102',
+  sessionId: demoSeedArtifactSessionId,
   participantId: '00000000-0000-4000-8000-000000000103',
   title: 'Summarize launch readiness',
   workspaceId: 'TROOMOTEDEMO',
@@ -102,6 +115,14 @@ export const demoSeedTasks = [
     taskRunStatus: RunStatus.Running,
     repositoryFullName: 'roomote-demo/demo-api',
   },
+  {
+    id: 'demo-seed-task-lifecycle-active',
+    title: 'Fixture lifecycle active control',
+    mode: 'ask',
+    state: 'active',
+    taskRunStatus: RunStatus.Running,
+    repositoryFullName: 'roomote-demo/demo-api',
+  },
 ] as const;
 
 export const demoSeedPullRequests = [
@@ -148,6 +169,10 @@ interface DemoSeedSummary {
  * fields from older seed versions are backfilled in place.
  */
 export async function seedDemoData(): Promise<DemoSeedSummary> {
+  if (resolveAppEnv(process.env) === 'production') {
+    throw new Error('Refusing to seed demo data in production.');
+  }
+
   const summary: DemoSeedSummary = { created: [], skipped: [] };
 
   const record = (label: string, created: boolean) => {
@@ -219,13 +244,21 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
       workspaceId: demoSeedFastSession.workspaceId,
       conversationId: demoSeedFastSession.providerConversationId,
       currentReplyChannelId: demoSeedFastSession.channelId,
-      currentReplyThreadId: demoSeedFastSession.threadId,
-      replyTargetVerified: true,
+      currentReplyThreadId: null,
+      replyTargetVerified: false,
       title: demoSeedFastSession.title,
       llmTitleCheckpoint: 1,
       createdAt: now,
       updatedAt: now,
     });
+  } else if (
+    existingFastConversation.currentReplyThreadId !== null ||
+    existingFastConversation.replyTargetVerified
+  ) {
+    await db
+      .update(fastAgentConversations)
+      .set({ currentReplyThreadId: null, replyTargetVerified: false })
+      .where(eq(fastAgentConversations.id, demoSeedFastSession.conversationId));
   }
 
   record('Fast conversation demo', !existingFastConversation);
@@ -441,6 +474,98 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
     }
 
     record(`task run for ${task.id}`, taskRunChanged);
+  }
+
+  // This deployment-scoped custom server resolves to a development-only,
+  // read-only local MCP adapter. It has no credentials or external egress.
+  const existingDevelopmentIntegration =
+    await db.query.customMcpServers.findFirst({
+      where: eq(customMcpServers.id, demoSeedDevelopmentIntegration.id),
+    });
+  if (!existingDevelopmentIntegration) {
+    await db.insert(customMcpServers).values({
+      ...demoSeedDevelopmentIntegration,
+      authType: 'none',
+      createdByUserId: demoSeedUserId,
+    });
+  }
+  record('development fixture integration', !existingDevelopmentIntegration);
+
+  // Stable lifecycle records support real Ready-filter checks while services
+  // keep running. The active control derives from its linked running task. The
+  // legacy null-status row is the one development-only reconciliation preserve.
+  for (const fixture of Object.values(demoSeedLifecycleSessions)) {
+    const existingSession = await db.query.sessions.findFirst({
+      where: eq(sessions.id, fixture.id),
+    });
+    if (!existingSession) {
+      await db.insert(sessions).values({
+        id: fixture.id,
+        title: fixture.title,
+        ownerKind: 'user',
+        ownerUserId: demoSeedUserId,
+        sourceSurface: 'web',
+        sourceTrigger: 'manual',
+        visibility: 'visible',
+        activityAt: Math.floor(now.getTime() / 1_000),
+        cachedStatus: fixture.cachedStatus,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    record(`lifecycle Session ${fixture.title}`, !existingSession);
+
+    const existingParticipant = await db.query.sessionParticipants.findFirst({
+      where: and(
+        eq(sessionParticipants.sessionId, fixture.id),
+        eq(sessionParticipants.userId, demoSeedUserId),
+      ),
+    });
+    if (!existingParticipant) {
+      await db.insert(sessionParticipants).values({
+        id: fixture.participantId,
+        sessionId: fixture.id,
+        userId: demoSeedUserId,
+        role: 'owner',
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    record(
+      `participant for lifecycle Session ${fixture.title}`,
+      !existingParticipant,
+    );
+
+    if ('taskId' in fixture) {
+      const insertedTaskLink = await db
+        .insert(sessionTasks)
+        .values({
+          sessionId: fixture.id,
+          taskId: fixture.taskId,
+          origin: 'backfill',
+        })
+        .onConflictDoNothing()
+        .returning({ taskId: sessionTasks.taskId });
+      const existingTaskLink = await db.query.sessionTasks.findFirst({
+        where: eq(sessionTasks.taskId, fixture.taskId),
+      });
+      let taskLinkChanged = insertedTaskLink.length > 0;
+      if (existingTaskLink?.sessionId !== fixture.id) {
+        await db
+          .update(sessionTasks)
+          .set({
+            sessionId: fixture.id,
+            attachedAt: now,
+            origin: 'backfill',
+          })
+          .where(eq(sessionTasks.taskId, fixture.taskId));
+        taskLinkChanged = true;
+      }
+      record(
+        `task link for lifecycle Session ${fixture.title}`,
+        taskLinkChanged,
+      );
+    }
   }
 
   // A single-PR task and a split task keep the seeded dashboard useful for

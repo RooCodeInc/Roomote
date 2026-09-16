@@ -46,11 +46,13 @@ When a manually started web Session has a new response or its task needs input
 while the initiator is away, Roomote sends a personal notification. Automation
 and scheduled results do not send these attention notifications. The first
 notification quotes the initial request, includes Roomote's response, and uses
-the standard Session footer. It goes to the first successful personal
-destination in this order: Slack, Teams, Telegram, Discord, then verified email.
-Later notifications reuse that provider thread when it remains available, and
-the standard footer moves to the latest supported message. Roomote skips the
-notification while the initiator is present in the Session.
+the standard Session footer. When it needs a new provider thread, Roomote first
+tries the Slack, Teams, Telegram, or Discord platform the user most recently
+chose to start a task or Session, then falls back through Slack, Teams, Telegram,
+Discord, and verified email without retrying the preferred platform. Later
+notifications reuse that Session's successful provider thread when it remains
+available, and the standard footer moves to the latest supported message.
+Roomote skips the notification while the initiator is present in the Session.
 
 If you continue the conversation on the web and then leave again, the next
 notification in that same provider thread marks the messages that were not
@@ -112,10 +114,11 @@ Generated HTML artifacts open in a sandboxed **Preview** by default. Switch to
 **Code** to inspect the saved HTML source without executing it in the page that
 runs the Roomote dashboard.
 
-CSV and TSV artifacts open as tables by default. The preview keeps the first row
-as data rather than assuming it contains headings, preserves quoted fields and
-line breaks, and reports malformed or truncated data. Switch to **Source** to
-inspect the complete loaded text.
+CSV and TSV artifacts use abstract table thumbnails in the gallery and open as
+tables by default. The preview keeps the first row as data unless you turn on
+**First row is a header**, preserves quoted fields and line breaks, and reports
+malformed or truncated data. Wide tables scroll horizontally. Switch to
+**Source** to inspect the complete loaded text.
 
 ### Native widget styling
 
