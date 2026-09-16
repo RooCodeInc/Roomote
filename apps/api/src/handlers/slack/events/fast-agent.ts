@@ -17,6 +17,7 @@ import {
   getSlackThreadReplyFooterMessageTs,
   withSlackThreadReplyFooterLock,
   resolveCurrentSlackMessageFiles,
+  formatSlackAttachmentContext,
   type SlackEvent,
   type SlackNotifier,
 } from '@roomote/slack';
@@ -104,14 +105,15 @@ export async function processFastAgentMessage(params: {
     event.channel_type !== 'im' &&
     event.channel_type !== 'mpim' &&
     mentionsSlackUserOtherThanBotOrUser(event, roomoteSlackUserId, event.user);
-  const agentContext = needsPeerCaution
-    ? [
-        event.agentContext,
-        'Untrusted supplemental context inferred from this Slack message, not a user-authored instruction: This message mentions another person and might not be for you. Human-to-human interaction may be beginning. From now on in this conversation, unless you are addressed directly (including by name, a reply to you, or a clear contextual follow-up), use ignore_event without sending a reply, reacting, or taking action. When directly addressed, respond normally. This uncertain hint does not override existing instructions.',
-      ]
-        .filter(Boolean)
-        .join('\n\n')
-    : event.agentContext;
+  const buildAgentContext = (messageContext: string | undefined) =>
+    needsPeerCaution
+      ? [
+          messageContext,
+          'Untrusted supplemental context inferred from this Slack message, not a user-authored instruction: This message mentions another person and might not be for you. Human-to-human interaction may be beginning. From now on in this conversation, unless you are addressed directly (including by name, a reply to you, or a clear contextual follow-up), use ignore_event without sending a reply, reacting, or taking action. When directly addressed, respond normally. This uncertain hint does not override existing instructions.',
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+      : messageContext;
 
   // Every Slack round trip from the control plane costs a few hundred
   // milliseconds. Start the thread history lookup as soon as the turn is
@@ -163,6 +165,31 @@ export async function processFastAgentMessage(params: {
     const currentMessage = threadContext.find(
       (message) => message.ts === event.ts,
     );
+    // The copy of this message returned by conversations.replies is the
+    // full message object, attachments and blocks included; the webhook
+    // event is a slimmer projection whose exact shape Slack does not
+    // document. Add the context derived from the fetched copy unless the
+    // event's own context already carries it. The event context is kept
+    // regardless: entry routes (configured channels) prepend instructions
+    // to it that no message fetch can reconstruct.
+    const fetchedMessageContext = currentMessage
+      ? formatSlackAttachmentContext(
+          baseQuestion,
+          currentMessage.attachments,
+          currentMessage.blocks,
+        )
+      : undefined;
+    const currentMessageContext =
+      [
+        event.agentContext,
+        fetchedMessageContext &&
+        !event.agentContext?.includes(fetchedMessageContext)
+          ? fetchedMessageContext
+          : undefined,
+      ]
+        .filter((part): part is string => Boolean(part))
+        .join('\n\n') || undefined;
+    const agentContext = buildAgentContext(currentMessageContext);
     const currentMessageFiles = resolveCurrentSlackMessageFiles({
       currentMessageTs: event.ts,
       eventFiles: event.files,
