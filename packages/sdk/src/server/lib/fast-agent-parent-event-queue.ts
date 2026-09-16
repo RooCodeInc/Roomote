@@ -580,11 +580,15 @@ const queueEligibleSince = () => sql`GREATEST(
 export async function countOverdueQueuedFastAgentParentEvents(
   olderThan: Date,
 ): Promise<number> {
+  // A Date inside a raw fragment binds as Date#toString, which Postgres
+  // rejects; the drizzle column serializer only runs for column-typed
+  // comparisons. Bind the ISO text and cast to the columns' own type.
+  const olderThanParam = sql`${olderThan.toISOString()}::timestamp`;
   const [row] = await db
     .select({ count: count() })
     .from(fastAgentParentEvents)
     .where(
-      and(pendingPredicate(), sql`${queueEligibleSince()} < ${olderThan}`),
+      and(pendingPredicate(), sql`${queueEligibleSince()} < ${olderThanParam}`),
     );
   return row?.count ?? 0;
 }
