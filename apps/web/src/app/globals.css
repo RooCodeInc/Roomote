@@ -1087,31 +1087,27 @@ html[data-status-banner-visible='true'] {
 }
 
 .tabular-artifact-grid {
-  @apply grid w-full overflow-hidden rounded-[2px] border-l border-t border-zinc-300 bg-white;
+  @apply grid w-max overflow-hidden rounded-[2px] border-l border-t border-zinc-300 bg-white text-[6px] leading-none text-zinc-600;
 }
 
 .tabular-artifact-cell {
-  @apply flex h-3 min-w-0 items-center border-b border-r border-zinc-300 px-1;
+  @apply block h-3 min-w-0 truncate whitespace-nowrap border-b border-r border-zinc-300 px-1.5 py-[3px];
 }
 
-.tabular-artifact-bar {
-  @apply block h-1 rounded-full bg-zinc-300;
+.tabular-artifact-cell[data-first-row='true'] {
+  @apply bg-zinc-100 font-semibold text-zinc-700;
 }
 
-.tabular-artifact-cell[data-length='empty'] .tabular-artifact-bar {
-  @apply hidden;
+.tabular-artifact-placeholder {
+  @apply grid w-full grid-cols-4 overflow-hidden rounded-[2px] border-l border-t border-zinc-300;
 }
 
-.tabular-artifact-cell[data-length='short'] .tabular-artifact-bar {
-  @apply w-2/5;
+.tabular-artifact-placeholder > span {
+  @apply flex h-3 items-center border-b border-r border-zinc-300 px-1;
 }
 
-.tabular-artifact-cell[data-length='medium'] .tabular-artifact-bar {
-  @apply w-3/5;
-}
-
-.tabular-artifact-cell[data-length='long'] .tabular-artifact-bar {
-  @apply w-[85%];
+.tabular-artifact-placeholder > span > span {
+  @apply block h-1 w-3/5 rounded-full bg-zinc-300;
 }
 
 /* ==========================================================================

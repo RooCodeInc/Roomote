@@ -44,8 +44,8 @@ describe('TabularArtifactPreview', () => {
         2,
         'preview',
       );
-      expect(container).not.toHaveTextContent('name');
-      expect(container).not.toHaveTextContent('98');
+      expect(container).toHaveTextContent('name');
+      expect(container).toHaveTextContent('98');
       expect(
         container.querySelector('[aria-hidden="true"]'),
       ).toBeInTheDocument();
@@ -55,9 +55,9 @@ describe('TabularArtifactPreview', () => {
     },
   );
 
-  it('renders no more than six rows and five columns', () => {
+  it('renders no more than six rows and eight fixed-width columns', () => {
     const content = Array.from({ length: 8 }, (_, row) =>
-      Array.from({ length: 7 }, (_, column) => `${row}-${column}`).join(','),
+      Array.from({ length: 10 }, (_, column) => `${row}-${column}`).join(','),
     ).join('\n');
     useArtifactByPathMock.mockReturnValue({
       data: {
@@ -78,23 +78,24 @@ describe('TabularArtifactPreview', () => {
     );
 
     expect(container.querySelectorAll('.tabular-artifact-cell')).toHaveLength(
-      30,
+      48,
     );
     expect(container.querySelector('.tabular-artifact-grid')).toHaveStyle({
-      gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+      gridTemplateColumns: 'repeat(8, 4rem)',
     });
-    expect(container).not.toHaveTextContent('5-4');
     expect(container).not.toHaveTextContent('6-0');
-    expect(container).not.toHaveTextContent('0-5');
+    expect(container).toHaveTextContent('0-7');
+    expect(container).toHaveTextContent('5-7');
   });
 
-  it('abstracts cell lengths without exposing their values', () => {
+  it('normalizes and truncates long cell text', () => {
     useArtifactByPathMock.mockReturnValue({
       data: {
         path: 'reports/results.csv',
         version: 1,
         contentType: 'text/csv',
-        content: 'a,,averyveryverylongvalue\none,two',
+        content:
+          'name,notes\nAda,"line one\nline two"\nGrace,abcdefghijklmnopqrstuvwxyz0123456789',
       },
       isPending: false,
     });
@@ -106,12 +107,11 @@ describe('TabularArtifactPreview', () => {
         version={1}
       />,
     );
-    const cells = container.querySelectorAll('.tabular-artifact-cell');
-
-    expect(
-      Array.from(cells, (cell) => cell.getAttribute('data-length')),
-    ).toEqual(['short', 'empty', 'long', 'short', 'short', 'empty']);
-    expect(container).not.toHaveTextContent('averyveryverylongvalue');
+    expect(container).toHaveTextContent('line one line two');
+    expect(container).toHaveTextContent('abcdefghijklmnopqrstu...');
+    expect(container).not.toHaveTextContent(
+      'abcdefghijklmnopqrstuvwxyz0123456789',
+    );
   });
 
   it.each([
@@ -136,13 +136,15 @@ describe('TabularArtifactPreview', () => {
       />,
     );
 
-    expect(container.querySelector('.tabular-artifact-grid')).toHaveAttribute(
-      'data-state',
-      state,
-    );
+    expect(
+      container.querySelector('.tabular-artifact-placeholder'),
+    ).toHaveAttribute('data-state', state);
     expect(container.querySelectorAll('.tabular-artifact-cell')).toHaveLength(
-      20,
+      0,
     );
+    expect(
+      container.querySelectorAll('.tabular-artifact-placeholder > span'),
+    ).toHaveLength(20);
     expect(container).not.toHaveTextContent('stale');
   });
 });
