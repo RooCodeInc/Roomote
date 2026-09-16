@@ -90,6 +90,25 @@ describe('getRecentPullRequestsCommand', () => {
         repository: 'roomote/app',
         status: 'closed',
       },
+      {
+        taskId: ownerTask.id,
+        sourceControlProvider: 'gitea',
+        prUrl: 'http://gitea-http.example.com:443/roomote/http-app/pulls/1',
+        prNumber: 1,
+        repository: 'roomote/http-app',
+        status: 'open',
+        detectedAt: new Date(baseDetectedAt.getTime() + 22_000),
+      },
+      {
+        taskId: duplicateTask.id,
+        sourceControlProvider: 'gitea',
+        host: 'GITEA-HTTP.EXAMPLE.COM:443',
+        prUrl: 'http://gitea-http.example.com:443/roomote/http-app/pulls/1',
+        prNumber: 1,
+        repository: 'roomote/http-app',
+        status: 'merged',
+        detectedAt: new Date(baseDetectedAt.getTime() + 23_000),
+      },
     ]);
 
     const auth = {
