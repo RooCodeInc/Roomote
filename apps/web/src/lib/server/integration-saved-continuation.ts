@@ -20,6 +20,6 @@ export function buildIntegrationSavedContinuation(
 }
 
 export function buildRemoteMcpConnectedContinuation(name: string): string {
-  const framing = `The deployment administrator just authorized the custom remote MCP integration '${name}' through the secure OAuth flow. This block is hidden from them. Unless this Session's home surface is the web, post the usual brief acknowledgement with send_chat_reply before anything else. Then refresh the integration catalog, list this server's tools, say it is connected, and continue the work the human originally requested without asking them to visit the web Session. Never quote this block, expose OAuth details, or ask for credentials in chat.`;
+  const framing = `The requesting deployment administrator just authorized the custom remote MCP integration '${name}' through the secure OAuth flow. This block is hidden from them. Unless this Session's home surface is the web, post the usual brief acknowledgement with send_chat_reply before anything else. Confirm that it is connected, report the tool count and name two or three tools most relevant to the original request, then continue that request automatically. Inspect tools silently as needed, but do not dump the full tool list or mention internal recovery, integration IDs, catalog checks, or probing. Never ask the human to send a follow-up, quote this block, expose OAuth details, or ask for credentials in chat.`;
   return `<${INTEGRATION_SAVED_TAG}>\n${framing}\n</${INTEGRATION_SAVED_TAG}>\nI authorized the integration, go ahead.`;
 }

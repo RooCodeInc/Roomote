@@ -1926,4 +1926,23 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('Use `manage_goal`');
   });
+
+  it('keeps remote MCP setup links exact and resumes automatically', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      addRemoteMcpEnabled: true,
+    });
+
+    expect(prompt).toContain(
+      'Share `authorizeUrl` and `settingsUrl` exactly unchanged',
+    );
+    expect(prompt).toContain('`Authorize <name>` and `Integration settings`');
+    expect(prompt).toContain(
+      'The conversation resumes automatically after authorization',
+    );
+    expect(prompt).toContain('never ask the human to send a follow-up');
+    expect(prompt).toContain(
+      'do not mention integration IDs, catalog checks, probing, or internal recovery',
+    );
+  });
 });
