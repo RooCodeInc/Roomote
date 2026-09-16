@@ -55,8 +55,8 @@ describe('TabularArtifactPreview', () => {
     },
   );
 
-  it('renders no more than six rows and eight fixed-width columns', () => {
-    const content = Array.from({ length: 8 }, (_, row) =>
+  it('renders no more than ten rows and eight fixed-width columns', () => {
+    const content = Array.from({ length: 12 }, (_, row) =>
       Array.from({ length: 10 }, (_, column) => `${row}-${column}`).join(','),
     ).join('\n');
     useArtifactByPathMock.mockReturnValue({
@@ -78,14 +78,14 @@ describe('TabularArtifactPreview', () => {
     );
 
     expect(container.querySelectorAll('.tabular-artifact-cell')).toHaveLength(
-      48,
+      80,
     );
     expect(container.querySelector('.tabular-artifact-grid')).toHaveStyle({
-      gridTemplateColumns: 'repeat(8, 4rem)',
+      gridTemplateColumns: 'repeat(8, clamp(4rem, 30cqw, 5.25rem))',
     });
-    expect(container).not.toHaveTextContent('6-0');
+    expect(container).not.toHaveTextContent('10-0');
     expect(container).toHaveTextContent('0-7');
-    expect(container).toHaveTextContent('5-7');
+    expect(container).toHaveTextContent('9-7');
   });
 
   it('normalizes and truncates long cell text', () => {
@@ -108,7 +108,7 @@ describe('TabularArtifactPreview', () => {
       />,
     );
     expect(container).toHaveTextContent('line one line two');
-    expect(container).toHaveTextContent('abcdefghijklmnopqrstu...');
+    expect(container).toHaveTextContent('abcdefghijklmnopqrstuvwx');
     expect(container).not.toHaveTextContent(
       'abcdefghijklmnopqrstuvwxyz0123456789',
     );

@@ -1014,6 +1014,7 @@ html[data-status-banner-visible='true'] {
 /* A static, photographed-paper treatment for document gallery thumbnails. */
 .artifact-paper-preview {
   @apply relative flex aspect-video w-full items-start justify-center overflow-hidden bg-zinc-200 dark:bg-zinc-800;
+  container-type: inline-size;
   perspective: 520px;
   isolation: isolate;
 }
@@ -1045,6 +1046,26 @@ html[data-status-banner-visible='true'] {
       ellipse at center,
       transparent 58%,
       rgb(24 24 27 / 0.08) 100%
+    );
+}
+
+.artifact-paper-preview[data-kind='tabular'] .artifact-paper {
+  @apply h-[175%] w-[130%];
+}
+
+.artifact-paper-preview[data-kind='tabular']::after {
+  background:
+    linear-gradient(
+      to bottom,
+      rgb(0 0 0 / 0.035),
+      transparent 20%,
+      transparent 88%,
+      rgb(0 0 0 / 0.045)
+    ),
+    radial-gradient(
+      ellipse at center,
+      transparent 70%,
+      rgb(24 24 27 / 0.04) 100%
     );
 }
 
@@ -1087,15 +1108,19 @@ html[data-status-banner-visible='true'] {
 }
 
 .tabular-artifact-grid {
-  @apply grid w-max overflow-hidden rounded-[2px] border-l border-t border-zinc-300 bg-white text-[6px] leading-none text-zinc-600;
+  @apply grid w-max overflow-hidden text-zinc-700 [font-variant-numeric:tabular-nums];
+  font-size: clamp(6px, 3.2cqw, 8px);
+  line-height: 1;
 }
 
 .tabular-artifact-cell {
-  @apply block h-3 min-w-0 truncate whitespace-nowrap border-b border-r border-zinc-300 px-1.5 py-[3px];
+  @apply block min-w-0 overflow-hidden whitespace-nowrap border-b border-zinc-200/80;
+  height: clamp(14px, 6cqw, 17px);
+  padding: clamp(3px, 1.5cqw, 4px);
 }
 
 .tabular-artifact-cell[data-first-row='true'] {
-  @apply bg-zinc-100 font-semibold text-zinc-700;
+  @apply border-b border-zinc-400 font-semibold text-zinc-900;
 }
 
 .tabular-artifact-placeholder {

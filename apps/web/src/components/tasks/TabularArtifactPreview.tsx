@@ -7,7 +7,7 @@ import { getTabularArtifactFormat } from '@/lib/artifact-types';
 import { parseTabularArtifact } from '@/lib/tabular-artifacts';
 import { cn } from '@/lib/utils';
 
-const THUMBNAIL_ROWS = 6;
+const THUMBNAIL_ROWS = 10;
 const THUMBNAIL_COLUMNS = 8;
 const THUMBNAIL_CELL_CHARACTERS = 24;
 const FALLBACK_ROWS = 5;
@@ -16,7 +16,7 @@ const FALLBACK_COLUMNS = 4;
 function getThumbnailCell(value: string): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
   if (normalized.length <= THUMBNAIL_CELL_CHARACTERS) return normalized;
-  return `${normalized.slice(0, THUMBNAIL_CELL_CHARACTERS - 3)}...`;
+  return normalized.slice(0, THUMBNAIL_CELL_CHARACTERS);
 }
 
 type TabularArtifactPreviewProps = {
@@ -70,6 +70,7 @@ export function TabularArtifactPreview({
     <span
       aria-hidden="true"
       className={cn('artifact-paper-preview', className)}
+      data-kind="tabular"
     >
       <span className="artifact-paper-shadow" />
       <span className="artifact-paper">
@@ -78,7 +79,7 @@ export function TabularArtifactPreview({
             className="tabular-artifact-grid"
             data-state="ready"
             style={{
-              gridTemplateColumns: `repeat(${columnCount}, 4rem)`,
+              gridTemplateColumns: `repeat(${columnCount}, clamp(4rem, 30cqw, 5.25rem))`,
             }}
           >
             {rows.flatMap((row, rowIndex) =>
