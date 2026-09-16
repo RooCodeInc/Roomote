@@ -16,7 +16,7 @@ import {
   UserRoundKey,
 } from '@/components/system';
 
-export type AddIntegrationRequest = {
+type AddIntegrationRequest = {
   type: 'catalog' | 'custom-mcp' | 'api-key';
   sequence: number;
 };
