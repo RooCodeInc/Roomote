@@ -357,6 +357,8 @@ struct Metrics {
     progress: Mutex<EncoderProgress>,
     browser: Mutex<BrowserTelemetry>,
     input_latency: Mutex<InputLatency>,
+    /// Last pointer position applied through XTest, in screen pixels.
+    last_motion: Mutex<Option<(i16, i16)>>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -537,6 +539,7 @@ struct X11Controller {
     held: HeldInputs,
     width: u16,
     height: u16,
+    metrics: Option<Arc<Metrics>>,
 }
 
 impl X11Controller {
@@ -574,7 +577,19 @@ impl X11Controller {
             held: HeldInputs::default(),
             width,
             height,
+            metrics: None,
         })
+    }
+
+    /// Current pointer position on the root window.
+    fn pointer_position(&self) -> Result<(i16, i16), String> {
+        let reply = self
+            .connection
+            .query_pointer(self.root)
+            .map_err(|error| format!("failed to query X11 pointer: {error}"))?
+            .reply()
+            .map_err(|error| format!("failed to read X11 pointer: {error}"))?;
+        Ok((reply.root_x, reply.root_y))
     }
 
     /// Resizes the X screen through RandR. Xvfb only offers its configured
@@ -816,7 +831,11 @@ impl X11Controller {
                     return Ok(());
                 }
             }
-            InputAction::Motion { .. } => {}
+            InputAction::Motion { x, y } => {
+                if let Some(metrics) = &self.metrics {
+                    *metrics.last_motion.lock().unwrap() = Some((x, y));
+                }
+            }
         }
         self.inject(action)
     }
@@ -1037,6 +1056,10 @@ struct MetricsResponse {
     encoder: EncoderProgress,
     browser: BrowserTelemetry,
     browser_to_x_input_latency: InputLatency,
+    /// Last pointer position the control channel injected.
+    last_injected_pointer: Option<(i16, i16)>,
+    /// Pointer position the X server currently reports, when reachable.
+    x_pointer: Option<(i16, i16)>,
 }
 
 struct ClientGuard {
@@ -1182,6 +1205,8 @@ async fn metrics(State(state): State<AppState>) -> Json<MetricsResponse> {
         encoder: state.metrics.progress.lock().unwrap().clone(),
         browser: state.metrics.browser.lock().unwrap().clone(),
         browser_to_x_input_latency: state.metrics.input_latency.lock().unwrap().clone(),
+        last_injected_pointer: *state.metrics.last_motion.lock().unwrap(),
+        x_pointer: query_x_pointer(&state.config),
     })
 }
 
@@ -1230,7 +1255,10 @@ async fn control_socket(mut socket: WebSocket, state: AppState, generation: u64)
     let screen = state.screen();
     let mut controller =
         match X11Controller::connect(&state.config.display, screen.width, screen.height) {
-            Ok(controller) => controller,
+            Ok(mut controller) => {
+                controller.metrics = Some(state.metrics.clone());
+                controller
+            }
             Err(error) => {
                 let payload = serde_json::json!({ "error": error }).to_string();
                 let _ = socket.send(Message::Text(payload.into())).await;
@@ -1325,6 +1353,20 @@ fn resize_screen(
         .send_modify(|generation| *generation += 1);
     state.stop_encoders();
     Ok(size)
+}
+
+/// Reads the X pointer through a short-lived connection for diagnostics.
+fn query_x_pointer(config: &Config) -> Option<(i16, i16)> {
+    if config.capture_mode != CaptureMode::X11 {
+        return None;
+    }
+    let screen = ScreenSize {
+        width: config.width,
+        height: config.height,
+    };
+    X11Controller::connect(&config.display, screen.width, screen.height)
+        .ok()
+        .and_then(|controller| controller.pointer_position().ok())
 }
 
 fn record_input_latency(metrics: &Metrics, sent_at_ms: Option<u64>) {
