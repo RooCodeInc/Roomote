@@ -4,6 +4,7 @@ import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
   filterRepositoryNamesForSourceControlProvider,
+  resolveRepositoryNamesForSourceControlProviderFromPayload,
   stripCloneUrlUserInfo,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -1558,6 +1559,14 @@ async function resolveAdoRepositoryNamesForTaskRun(
       ADO_PROVIDER,
     );
   };
+  const stampedRepositories =
+    resolveRepositoryNamesForSourceControlProviderFromPayload(
+      taskRun.payload,
+      ADO_PROVIDER,
+    );
+  if (stampedRepositories) {
+    return stampedRepositories;
+  }
 
   if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({

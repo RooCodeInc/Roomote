@@ -136,6 +136,7 @@ describe('initializeRepositories', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockListRepositories.mockResolvedValue([]);
   });
 
   it('prepares only the selected repository subset for scoped multi-repo workspaces', async () => {
@@ -193,6 +194,49 @@ describe('initializeRepositories', () => {
         'initializeRepositories: prepare acme/web (done in ',
       ),
     );
+  });
+
+  it('indexes additional authorized repositories after preparing a scoped workspace', async () => {
+    const workspaceRoot = createTempWorkspaceRoot();
+    vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
+      undefined,
+    );
+    vi.spyOn(
+      WorkspaceManager.prototype,
+      'prepareRepository',
+    ).mockImplementation(async (repo) => path.join(workspaceRoot, repo));
+    mockListRepositories.mockResolvedValue([
+      { fullName: 'acme/api', sourceControlProvider: 'github' },
+      { fullName: 'acme/web', sourceControlProvider: 'github' },
+    ]);
+
+    const result = await initializeRepositories(createLogger(), {
+      workspace: {
+        type: 'repository_set',
+        repositories: ['acme/api'],
+      },
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+      repositoryProviders: {
+        'acme/api': 'github',
+        'acme/web': 'github',
+      },
+    });
+
+    expect(result.repoPaths).toEqual({
+      'acme/api': path.join(workspaceRoot, 'acme/api'),
+    });
+    expect(
+      result.onDemandRepositories?.map((repository) => repository.fullName),
+    ).toEqual(['acme/api', 'acme/web']);
+    const manifest = fs.readFileSync(
+      path.join(workspaceRoot, 'REPOSITORIES.md'),
+      'utf8',
+    );
+    expect(manifest).toContain(
+      `| \`acme/api\` | yes (\`${path.join(workspaceRoot, 'acme/api')}\`) |`,
+    );
+    expect(manifest).toContain('| `acme/web` | no |');
   });
 
   it('configures git for a Blank slate workspace without listing or preparing repositories', async () => {
@@ -314,7 +358,11 @@ describe('initializeRepositories', () => {
       .spyOn(WorkspaceManager.prototype, 'prepareRepository')
       .mockResolvedValue('/tmp/acme/app');
 
-    await initializeRepositories(createLogger(), {
+    mockListRepositories.mockResolvedValue([
+      { fullName: 'acme/app', sourceControlProvider: 'gitlab' },
+    ]);
+
+    const result = await initializeRepositories(createLogger(), {
       workspace: {
         type: 'repository',
         repository: 'acme/app',
@@ -332,6 +380,7 @@ describe('initializeRepositories', () => {
       false,
       { sourceControlProvider: 'gitlab' },
     );
+    expect(result.onDemandRepositories).toHaveLength(1);
   });
 
   it('continues scoped multi-repo workspace setup when at least one selected repository prepares successfully', async () => {
@@ -618,6 +667,51 @@ describe('initializeRepositories', () => {
       node: '22.14.0',
     });
     expect(result.usesSharedWorkspaceRoot).toBe(true);
+  });
+
+  it('indexes additional authorized repositories without preparing their environment', async () => {
+    const workspaceRoot = createTempWorkspaceRoot();
+    vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
+      undefined,
+    );
+    const prepareEnvironmentRepositoriesSpy = vi
+      .spyOn(WorkspaceManager.prototype, 'prepareEnvironmentRepositories')
+      .mockResolvedValue({
+        repoPaths: { 'acme/api': path.join(workspaceRoot, 'acme/api') },
+      });
+    vi.spyOn(
+      WorkspaceManager.prototype,
+      'installWorkspaceToolVersions',
+    ).mockResolvedValue(undefined);
+    mockListRepositories.mockResolvedValue([
+      { fullName: 'acme/api', sourceControlProvider: 'github' },
+      { fullName: 'acme/web', sourceControlProvider: 'github' },
+    ]);
+
+    const result = await initializeRepositories(createLogger(), {
+      workspace: {
+        type: 'environment',
+        environmentId: 'env_123',
+        environmentConfig: {
+          name: 'API Environment',
+          repositories: [{ repository: 'acme/api' }],
+        },
+      } as WorkspaceConfig,
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+      repositoryProviders: {
+        'acme/api': 'github',
+        'acme/web': 'github',
+      },
+    });
+
+    expect(prepareEnvironmentRepositoriesSpy).toHaveBeenCalledTimes(1);
+    expect(
+      result.onDemandRepositories?.map((repository) => repository.fullName),
+    ).toEqual(['acme/api', 'acme/web']);
+    expect(
+      fs.readFileSync(path.join(workspaceRoot, 'REPOSITORIES.md'), 'utf8'),
+    ).toContain('| `acme/web` | no |');
   });
 
   it('prepares repository-free environments without repository paths', async () => {

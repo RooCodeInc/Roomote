@@ -2522,7 +2522,14 @@ describe('enqueueTask source-control provider stamping', () => {
       fullName: 'group/project',
       isActive: true,
     });
-    createdRepositoryIds.push(repository.id);
+    const additionalRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
+      linkedByUserId: userId,
+      fullName: 'group/additional-project',
+      isActive: true,
+    });
+    createdRepositoryIds.push(repository.id, additionalRepository.id);
 
     const environment = await environmentFactory.create({
       createdByUserId: userId,
@@ -2567,8 +2574,9 @@ describe('enqueueTask source-control provider stamping', () => {
       provider: 'gitea',
       host: 'gitea.example.com',
     });
-    expect(persistedRun!.payload.repositoryProviders).toEqual({
+    expect(persistedRun!.payload.repositoryProviders).toMatchObject({
       'group/project': 'gitea',
+      'group/additional-project': 'gitea',
     });
   });
 

@@ -121,14 +121,17 @@ describe('environment GitHub repository scope', () => {
       );
     }
     const assertion = assertRepositoryInTaskRunScope(run, target.fullName);
-    if (scenario === 'same installation') {
+    if (
+      scenario === 'same installation' ||
+      scenario === 'explicit other provider'
+    ) {
       await expect(assertion).resolves.toBeUndefined();
       expect(
         resolveSourceControlProviderForRepositoryFromPayload(
           run.payload,
           target.fullName,
         ),
-      ).toBe('github');
+      ).toBe(scenario === 'explicit other provider' ? 'gitlab' : 'github');
       expect(
         resolveSourceControlHostForRepositoryFromPayload(
           run.payload,

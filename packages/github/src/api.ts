@@ -15,6 +15,7 @@ import {
   DEFAULT_SOURCE_CONTROL_PROVIDER,
   filterRepositoryNamesForSourceControlProvider,
   normalizePemEnvValue,
+  resolveRepositoryNamesForSourceControlProviderFromPayload,
 } from '@roomote/types';
 import {
   type GitHubInstallation,
@@ -250,6 +251,20 @@ async function resolveTaskRunGitHubTokenOptions(
       repositoryRows,
       missingMessagePrefix: 'Environment repositories not found',
       spanningMessagePrefix: 'Environment repositories',
+    });
+  }
+
+  const stampedRepositories =
+    resolveRepositoryNamesForSourceControlProviderFromPayload(
+      taskRun.payload,
+      DEFAULT_SOURCE_CONTROL_PROVIDER,
+    );
+  if (stampedRepositories && stampedRepositories.length > 0) {
+    return resolveTokenOptionsForRepositoryNames({
+      taskRun,
+      repositoryNames: stampedRepositories,
+      missingMessagePrefix: 'Stamped repositories not found',
+      spanningMessagePrefix: 'Stamped repositories',
     });
   }
 

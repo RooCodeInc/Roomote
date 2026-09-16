@@ -108,8 +108,8 @@ import { handleGetRelayUpdates } from './relay-updates.js';
 import { handleCloneRepository } from './clone-repository.js';
 import {
   CLONE_REPOSITORY_TOOL_NAME,
-  ON_DEMAND_REPOSITORIES_ENV_VAR,
   ON_DEMAND_REPOSITORIES_MANIFEST_FILE,
+  shouldRegisterCloneRepositoryTool,
 } from '../../workspace/on-demand-repositories.js';
 
 export {
@@ -1315,14 +1315,14 @@ roomoteMcpServer.registerTool(
   async (input) => handleUpdatePersonalization(input),
 );
 
-if (process.env[ON_DEMAND_REPOSITORIES_ENV_VAR] === 'true') {
+if (shouldRegisterCloneRepositoryTool()) {
   roomoteMcpServer.registerTool(
     CLONE_REPOSITORY_TOOL_NAME,
     {
       title: 'Clone Repository',
       description:
         "Check out one of the deployment's repositories into the shared workspace root. " +
-        `This workspace lists its repositories in ${ON_DEMAND_REPOSITORIES_MANIFEST_FILE} at the workspace root but does not clone them up front; ` +
+        `This workspace lists its authorized repositories and current checkout state in ${ON_DEMAND_REPOSITORIES_MANIFEST_FILE} at the workspace root; ` +
         'call this before reading, searching, or changing any repository that has no directory yet, and only for the repositories the task needs. ' +
         'Returns the checkout path. An existing checkout is returned as-is without touching its working tree. ' +
         'Large repositories can take a minute or two. Do not run `git clone` yourself.',

@@ -7,6 +7,7 @@ import {
   getSourceControlProviderCapabilities,
   normalizeSourceControlProvider,
   parsePullRequestUrl,
+  resolveRepositoryNamesForSourceControlProviderFromPayload,
   resolveSourceControlProviderFromPayload,
   stripCloneUrlUserInfo,
   supportsPullRequestDraftTransition,
@@ -94,6 +95,19 @@ describe('source control provider helpers', () => {
         'github',
       ),
     ).toEqual(repositoryNames);
+
+    expect(
+      resolveRepositoryNamesForSourceControlProviderFromPayload(
+        payload,
+        'github',
+      ),
+    ).toEqual(['octo/api']);
+    expect(
+      resolveRepositoryNamesForSourceControlProviderFromPayload(payload, 'ado'),
+    ).toEqual([]);
+    expect(
+      resolveRepositoryNamesForSourceControlProviderFromPayload({}, 'github'),
+    ).toBeUndefined();
   });
 
   it('maps providers to their runtime token environment variable', () => {

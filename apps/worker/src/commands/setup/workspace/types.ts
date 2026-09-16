@@ -55,9 +55,9 @@ export interface PrepareWorkspaceResult {
   usesSharedWorkspaceRoot?: boolean;
   /**
    * Repositories the task may check out on demand through the
-   * `clone_repository` tool instead of having them cloned during setup.
-   * `repoPaths` then lists only the checkouts that already exist. Set for
-   * all-repositories workspaces.
+   * `clone_repository` tool. `repoPaths` lists the initial and already-present
+   * checkouts; environment and scoped workspace selection still controls only
+   * initial preparation and tooling.
    */
   onDemandRepositories?: OnDemandRepository[];
   repositoryPreparationOutcome?: WorkspaceRepositoryPreparationContinued;
