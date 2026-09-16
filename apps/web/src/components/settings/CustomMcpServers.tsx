@@ -247,11 +247,19 @@ function ServerFormDialog({
   open,
   onOpenChange,
   editingServer,
+  disabledServers,
+  enablingServerId,
+  onEnableServer,
+  onEditServer,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editingServer: ListedServer | null;
+  disabledServers: ListedServer[];
+  enablingServerId: string | null;
+  onEnableServer: (server: ListedServer) => void;
+  onEditServer: (server: ListedServer) => void;
   onSaved: () => void;
 }) {
   const trpc = useTRPC();
@@ -326,6 +334,61 @@ function ServerFormDialog({
             same privileges as the agent.
           </DialogDescription>
         </DialogHeader>
+
+        {!isEdit && disabledServers.length > 0 ? (
+          <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold">
+                Disabled custom MCP servers
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Re-enable a saved server without re-entering its credentials, or
+                edit its configuration first.
+              </p>
+            </div>
+            <div className="divide-y divide-background">
+              {disabledServers.map((server) => (
+                <div
+                  key={server.id}
+                  className="flex items-center justify-between gap-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {server.name}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {server.transport === 'remote'
+                        ? server.url
+                        : [server.stdioCommand, ...server.stdioArgs].join(' ')}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onEditServer(server)}
+                    >
+                      <Pencil />
+                      Edit
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={enablingServerId != null}
+                      onClick={() => onEnableServer(server)}
+                    >
+                      {enablingServerId === server.id
+                        ? 'Enabling...'
+                        : 'Enable'}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         <form onSubmit={onSubmit} className="space-y-4">
           {!isEdit && (
@@ -941,6 +1004,18 @@ export function useCustomMcpServers(): {
         open={formOpen}
         onOpenChange={setFormOpen}
         editingServer={editingServer}
+        disabledServers={servers.filter((server) => !server.enabled)}
+        enablingServerId={
+          setEnabled.isPending && setEnabled.variables?.enabled
+            ? setEnabled.variables.id
+            : null
+        }
+        onEnableServer={(server) => {
+          void setEnabled
+            .mutateAsync({ id: server.id, enabled: true })
+            .then(refresh);
+        }}
+        onEditServer={(server) => setEditingServer(server)}
         onSaved={() => {
           setFormOpen(false);
           refresh();

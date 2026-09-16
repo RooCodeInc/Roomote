@@ -293,6 +293,43 @@ describe('useCustomMcpServers', () => {
     );
   });
 
+  it('lets admins manage and re-enable saved disabled servers from the add dialog', async () => {
+    const server = buildServer({ enabled: false });
+    state.servers = [server];
+
+    renderHarness();
+    fireEvent.click(await screen.findByTestId('open-add'));
+
+    expect(screen.getByText('Disabled custom MCP servers')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Re-enable a saved server without re-entering its credentials, or edit its configuration first.',
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
+
+    await waitFor(() =>
+      expect(setEnabledMock).toHaveBeenCalledWith(
+        { id: server.id, enabled: true },
+        expect.anything(),
+      ),
+    );
+  });
+
+  it('opens disabled server configuration from the add dialog', async () => {
+    state.servers = [buildServer({ enabled: false })];
+
+    renderHarness();
+    fireEvent.click(await screen.findByTestId('open-add'));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Edit custom MCP server' }),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('e.g. internal-tools')).toBeDisabled();
+  });
+
   it('prefills the add dialog from a pasted JSON snippet', async () => {
     renderHarness();
 
