@@ -664,7 +664,12 @@ export function DesktopStreamClient({
         <video
           ref={videoRef}
           aria-label="Remote desktop"
-          className="size-full cursor-default object-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+          className={`size-full object-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${
+            // The sandbox cursor is drawn into the video, so hide the local
+            // one while input is live; two cursors on top of each other
+            // make the remote one look frozen.
+            controlReady ? 'cursor-none' : 'cursor-default'
+          }`}
           playsInline
           tabIndex={0}
           onBlur={releaseAll}
