@@ -10,10 +10,9 @@ import { Button, Check, CheckCheck, X } from '@/components/system';
 import { cn } from '@/lib/utils';
 
 const STATUS_TEXT: Record<
-  Exclude<PrReviewActionOfferStatus, 'pending' | 'dismissed'>,
+  Exclude<PrReviewActionOfferStatus, 'pending' | 'resolved' | 'dismissed'>,
   string
 > = {
-  resolved: 'Resolving the current review issues.',
   auto_resolved: 'Auto-resolve is enabled for this pull request.',
   stale: 'This offer was already handled or has expired.',
 };
@@ -46,7 +45,7 @@ export function PrReviewActionOffer({
     }
   };
 
-  if (status === 'dismissed') return null;
+  if (status === 'resolved' || status === 'dismissed') return null;
 
   return (
     <div className={cn(className)} data-testid={testId}>

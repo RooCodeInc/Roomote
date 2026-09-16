@@ -172,7 +172,10 @@ Each custom automation row summarizes its cadence, workspace target, report
 destination, creator, and most recent run. Its runs also appear as Sessions in
 the normal Session history. Blank slate runs clone nothing up front; when
 source control is connected the agent can still check out any active repository
-on demand, and otherwise the run needs no source-control credentials.
+on demand, and otherwise the run needs no source-control credentials. Named
+environment and repository-scoped runs prepare their selected repositories
+first, but can use the same checkout mechanism for other authorized active
+repositories without provisioning another environment's services.
 
 When creating an automation through Roomote chat, ask for **suggested tasks** or
 **launchable follow-ups** if qualifying findings should become tasks that

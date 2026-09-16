@@ -6,6 +6,7 @@ import {
   buildRepositoriesManifest,
   discoverClonedRepositoryPaths,
   resolveOnDemandRepositoryPath,
+  shouldRegisterCloneRepositoryTool,
   writeRepositoriesManifest,
   type OnDemandRepository,
 } from '../on-demand-repositories';
@@ -37,6 +38,22 @@ const repositories: OnDemandRepository[] = [
 function createWorkspaceRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'on-demand-repositories-'));
 }
+
+describe('shouldRegisterCloneRepositoryTool', () => {
+  it('registers only when setup stamped an authorized checkout scope', () => {
+    expect(
+      shouldRegisterCloneRepositoryTool({
+        ROOMOTE_ON_DEMAND_REPOSITORIES: 'true',
+      }),
+    ).toBe(true);
+    expect(shouldRegisterCloneRepositoryTool({})).toBe(false);
+    expect(
+      shouldRegisterCloneRepositoryTool({
+        ROOMOTE_ON_DEMAND_REPOSITORIES: 'false',
+      }),
+    ).toBe(false);
+  });
+});
 
 describe('resolveOnDemandRepositoryPath', () => {
   it('rejects names that escape the workspace root', () => {

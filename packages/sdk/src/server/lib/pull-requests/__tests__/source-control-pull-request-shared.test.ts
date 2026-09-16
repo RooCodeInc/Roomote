@@ -121,14 +121,17 @@ describe('environment GitHub repository scope', () => {
       );
     }
     const assertion = assertRepositoryInTaskRunScope(run, target.fullName);
-    if (scenario === 'same installation') {
+    if (
+      scenario === 'same installation' ||
+      scenario === 'explicit other provider'
+    ) {
       await expect(assertion).resolves.toBeUndefined();
       expect(
         resolveSourceControlProviderForRepositoryFromPayload(
           run.payload,
           target.fullName,
         ),
-      ).toBe('github');
+      ).toBe(scenario === 'explicit other provider' ? 'gitlab' : 'github');
       expect(
         resolveSourceControlHostForRepositoryFromPayload(
           run.payload,
@@ -136,18 +139,7 @@ describe('environment GitHub repository scope', () => {
         ),
       ).toBeUndefined();
     } else {
-      // Invalid environment mappings can fail either while resolving a GitHub
-      // installation or at the final scope gate. Both paths must deny access;
-      // the exact diagnostic depends on the surrounding installation state.
-      await expect(assertion).rejects.toThrow(
-        [
-          'inactive anchor',
-          'non-GitHub mapped anchor',
-          'unmapped anchor',
-        ].includes(scenario)
-          ? /GitHub installations|outside this task/
-          : 'outside this task',
-      );
+      await expect(assertion).rejects.toThrow('outside this task');
     }
     expect(run.payload).toEqual(originalPayload);
     await expect(
