@@ -9,6 +9,7 @@ import {
   isNull,
   mcpConnections,
   mcpOauthReplays,
+  sql,
   users,
 } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
@@ -91,14 +92,20 @@ function normalizeFastRemoteMcpUrl(value: string): string {
 }
 
 function normalizeFastRemoteMcpName(value: string): string {
-  return value
+  const replaced = value
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64)
-    .replace(/-+$/g, '');
+    .replace(/[^a-z0-9]+/g, '-');
+  let start = 0;
+  let end = replaced.length;
+  while (replaced[start] === '-') start += 1;
+  while (end > start && replaced[end - 1] === '-') end -= 1;
+  const truncated = replaced.slice(start, Math.min(end, start + 64));
+  let truncatedEnd = truncated.length;
+  while (truncatedEnd > 0 && truncated[truncatedEnd - 1] === '-') {
+    truncatedEnd -= 1;
+  }
+  return truncated.slice(0, truncatedEnd);
 }
 
 function parseTools(payload: unknown): RemoteMcpTool[] | null {
@@ -505,82 +512,94 @@ export async function addRemoteCustomMcpForFast(input: {
     authType: 'none',
   });
   const normalizedUrl = normalizeFastRemoteMcpUrl(parsed.url);
-  const servers = await db.query.customMcpServers.findMany();
-  const nameMatch = servers.find((server) => server.name === parsed.name);
-  const urlMatch = servers.find(
-    (server) =>
-      server.url && canonicalizeRemoteMcpUrl(server.url) === normalizedUrl,
-  );
-  if (nameMatch && urlMatch && nameMatch.id !== urlMatch.id) {
-    throw new Error(
-      'The requested name and URL match different custom MCP servers. Review them in Settings.',
+  const selected = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${normalizedUrl}, 0))`,
     );
-  }
-  const existing = nameMatch ?? urlMatch;
-  if (existing) {
-    if (
-      nameMatch &&
-      (!nameMatch.url ||
-        canonicalizeRemoteMcpUrl(nameMatch.url) !== normalizedUrl)
-    ) {
+    const servers = await tx.query.customMcpServers.findMany();
+    const nameMatch = servers.find((server) => server.name === parsed.name);
+    const urlMatch = servers.find(
+      (server) =>
+        server.url && canonicalizeRemoteMcpUrl(server.url) === normalizedUrl,
+    );
+    if (nameMatch && urlMatch && nameMatch.id !== urlMatch.id) {
       throw new Error(
-        'A custom MCP server already uses that name or URL with different configuration. Review it in Settings.',
+        'The requested name and URL match different custom MCP servers. Review them in Settings.',
       );
     }
+    const existing = nameMatch ?? urlMatch;
+    if (existing) {
+      if (
+        nameMatch &&
+        (!nameMatch.url ||
+          canonicalizeRemoteMcpUrl(nameMatch.url) !== normalizedUrl)
+      ) {
+        throw new Error(
+          'A custom MCP server already uses that name or URL with different configuration. Review it in Settings.',
+        );
+      }
+      return { server: existing, probe: null, reused: true as const };
+    }
+
+    const probe = await probeRemoteMcp(normalizedUrl);
+    const [countRow] = await tx
+      .select({ value: count() })
+      .from(customMcpServers);
+    if ((countRow?.value ?? 0) >= MAX_CUSTOM_MCP_SERVERS) {
+      throw new Error(
+        `At most ${MAX_CUSTOM_MCP_SERVERS} custom MCP servers are supported.`,
+      );
+    }
+    const authType =
+      probe.status === 'oauth'
+        ? ('oauth' as const)
+        : probe.status === 'needs_static_headers'
+          ? ('static_headers' as const)
+          : ('none' as const);
+    const [created] = await tx
+      .insert(customMcpServers)
+      .values({
+        name: parsed.name,
+        url: normalizedUrl,
+        authType,
+        createdByUserId: input.userId,
+        ...(probe.status === 'oauth'
+          ? {
+              oauthServerMetadata: probe.metadata,
+              oauthServerMetadataFetchedAt: new Date(),
+            }
+          : {}),
+      })
+      .onConflictDoNothing({ target: [customMcpServers.name] })
+      .returning();
+    if (!created) {
+      throw new Error(
+        `A custom MCP server named '${parsed.name}' already exists.`,
+      );
+    }
+    return { server: created, probe, reused: false as const };
+  });
+
+  if (selected.reused) {
     return resultForServer({
-      server: existing,
+      server: selected.server,
       userId: input.userId,
       sessionId: input.sessionId,
       reused: true,
     });
   }
 
-  const probe = await probeRemoteMcp(normalizedUrl);
-  const [countRow] = await db.select({ value: count() }).from(customMcpServers);
-  if ((countRow?.value ?? 0) >= MAX_CUSTOM_MCP_SERVERS) {
-    throw new Error(
-      `At most ${MAX_CUSTOM_MCP_SERVERS} custom MCP servers are supported.`,
-    );
-  }
-  const authType =
-    probe.status === 'oauth'
-      ? ('oauth' as const)
-      : probe.status === 'needs_static_headers'
-        ? ('static_headers' as const)
-        : ('none' as const);
-  const [created] = await db
-    .insert(customMcpServers)
-    .values({
-      name: parsed.name,
-      url: normalizedUrl,
-      authType,
-      createdByUserId: input.userId,
-      ...(probe.status === 'oauth'
-        ? {
-            oauthServerMetadata: probe.metadata,
-            oauthServerMetadataFetchedAt: new Date(),
-          }
-        : {}),
-    })
-    .onConflictDoNothing({ target: [customMcpServers.name] })
-    .returning();
-  if (!created) {
-    throw new Error(
-      `A custom MCP server named '${parsed.name}' already exists.`,
-    );
-  }
-
-  if (probe.status === 'connected') {
+  if (selected.probe.status === 'connected') {
     return {
       status: 'connected',
-      id: created.id,
-      name: created.name,
-      tools: probe.tools,
+      id: selected.server.id,
+      name: selected.server.name,
+      tools: selected.probe.tools,
       reused: false,
     };
   }
   return resultForServer({
-    server: created,
+    server: selected.server,
     userId: input.userId,
     sessionId: input.sessionId,
     reused: false,

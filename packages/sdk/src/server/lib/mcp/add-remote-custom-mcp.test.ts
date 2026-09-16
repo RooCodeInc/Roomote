@@ -164,6 +164,35 @@ describe('addRemoteCustomMcpForFast', () => {
     expect(await db.query.customMcpServers.findMany()).toHaveLength(1);
   });
 
+  it('atomically reuses one URL across concurrent Fast Sessions', async () => {
+    guardedFetchMock.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { method?: string };
+      return body.method === 'initialize'
+        ? initializedResponse()
+        : toolsResponse();
+    });
+
+    const [first, second] = await Promise.all([
+      addRemoteCustomMcpForFast({
+        userId: adminId,
+        sessionId: crypto.randomUUID(),
+        name: 'First Name',
+        url: 'https://mcp.example.com/mcp',
+      }),
+      addRemoteCustomMcpForFast({
+        userId: adminId,
+        sessionId: crypto.randomUUID(),
+        name: 'Second Name',
+        url: 'https://MCP.EXAMPLE.com:443/mcp',
+      }),
+    ]);
+
+    expect(new Set([first.id, second.id]).size).toBe(1);
+    expect(new Set([first.name, second.name]).size).toBe(1);
+    expect([first.reused, second.reused].sort()).toEqual([false, true]);
+    expect(await db.query.customMcpServers.findMany()).toHaveLength(1);
+  });
+
   it('rejects a name that normalizes to empty before probing or writing', async () => {
     await expect(
       addRemoteCustomMcpForFast({
