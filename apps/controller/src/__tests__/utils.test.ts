@@ -4,6 +4,7 @@ import {
   type ComputeProvider,
   type EnvironmentConfig,
   SANDBOX_SERVER_NAMED_PORT,
+  SHARED_DESKTOP_NAMED_PORT,
 } from '@roomote/types';
 import { db } from '@roomote/db/server';
 
@@ -149,6 +150,7 @@ describe('getNamedPortsForTaskRun', () => {
     const result = await getNamedPortsForTaskRun(taskRun);
 
     expect(result.namedPorts).toContainEqual(SANDBOX_SERVER_NAMED_PORT);
+    expect(result.namedPorts).toContainEqual(SHARED_DESKTOP_NAMED_PORT);
   });
 
   it('exposes configured preview ports', async () => {
@@ -173,6 +175,7 @@ describe('getNamedPortsForTaskRun', () => {
 
     expect(result.namedPorts).toEqual([
       SANDBOX_SERVER_NAMED_PORT,
+      SHARED_DESKTOP_NAMED_PORT,
       { name: 'WEB', port: 3000 },
     ]);
     expect(result.environmentConfig?.ports).toEqual([
@@ -207,6 +210,7 @@ describe('getNamedPortsForTaskRun', () => {
 
     expect(result.namedPorts).toEqual([
       SANDBOX_SERVER_NAMED_PORT,
+      SHARED_DESKTOP_NAMED_PORT,
       { name: 'WEB', port: 3000 },
     ]);
   });
@@ -234,6 +238,7 @@ describe('getNamedPortsForTaskRun', () => {
 
     expect(result.namedPorts).toEqual([
       SANDBOX_SERVER_NAMED_PORT,
+      SHARED_DESKTOP_NAMED_PORT,
       { name: 'WEB', port: 3000 },
     ]);
   });
@@ -289,7 +294,10 @@ describe('getNamedPortsForTaskRun', () => {
 
     const result = await getNamedPortsForTaskRun(taskRun);
 
-    expect(result.namedPorts).toEqual([SANDBOX_SERVER_NAMED_PORT]);
+    expect(result.namedPorts).toEqual([
+      SANDBOX_SERVER_NAMED_PORT,
+      SHARED_DESKTOP_NAMED_PORT,
+    ]);
   });
 
   describe('environment snapshots', () => {

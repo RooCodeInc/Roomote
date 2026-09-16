@@ -1,6 +1,7 @@
 import {
   CODE_SERVER_NAMED_PORT,
   SANDBOX_SERVER_NAMED_PORT,
+  SHARED_DESKTOP_NAMED_PORT,
   type NamedPort,
 } from '@roomote/types';
 
@@ -46,6 +47,7 @@ describe('getNamedPortsForEnvironment', () => {
 
   it('includes configured environment ports alongside the sandbox server', () => {
     const namedPorts = getNamedPortsForEnvironment({
+      sharedDesktop: true,
       ports: [
         { name: 'WEB', port: 3000 },
         { name: 'API', port: 3001 },
@@ -53,6 +55,7 @@ describe('getNamedPortsForEnvironment', () => {
     });
 
     expect(namedPorts).toContainEqual(SANDBOX_SERVER_NAMED_PORT);
+    expect(namedPorts).toContainEqual(SHARED_DESKTOP_NAMED_PORT);
     expect(namedPorts).toContainEqual({
       name: 'WEB',
       port: 3000,

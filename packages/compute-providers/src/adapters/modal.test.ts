@@ -1229,6 +1229,18 @@ describe('ModalClient', () => {
     expect(dockerfile).not.toContain('sudo dpkg -i "/tmp/${KASM_DEB}"');
   });
 
+  it('builds the optional Rust desktop streaming service with capture dependencies', () => {
+    const dockerfile = fs.readFileSync(
+      new URL('../../../../apps/worker/Dockerfile', import.meta.url),
+      'utf8',
+    );
+
+    expect(dockerfile).toContain('apps/desktop-stream');
+    expect(dockerfile).toContain('/usr/local/bin/roomote-desktop-stream');
+    expect(dockerfile).toContain('    ffmpeg \\');
+    expect(dockerfile).toContain('    pulseaudio \\');
+  });
+
   it('bakes shared runtime tooling and the OpenCode entrypoint into the worker image', () => {
     const dockerfile = fs.readFileSync(
       new URL('../../../../apps/worker/Dockerfile', import.meta.url),

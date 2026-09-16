@@ -122,6 +122,30 @@ describe('useTaskSidePanel URL sync', () => {
     });
   });
 
+  it('opens and parses the dedicated Shared Desktop route', async () => {
+    pathname = '/task/task-1';
+    searchParams = new URLSearchParams();
+    replaceLocation(pathname);
+    const replaceStateSpy = vi.spyOn(window.history, 'replaceState');
+    const { result, rerender } = renderHook(() => useTaskSidePanel(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => result.current.openSharedDesktopView());
+    expect(replaceStateSpy).toHaveBeenCalledWith(
+      window.history.state,
+      '',
+      '/task/task-1/shared-desktop',
+    );
+
+    pathname = '/task/task-1/shared-desktop';
+    replaceLocation(pathname);
+    rerender();
+    await waitFor(() => {
+      expect(result.current.activeView).toBe('shared-desktop');
+    });
+  });
+
   it('updates the URL when opening the logs view', async () => {
     pathname = '/task/task-1';
     searchParams = new URLSearchParams();

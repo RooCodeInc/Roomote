@@ -19,6 +19,7 @@ type TaskSidePanelView =
   | 'artifacts'
   | 'task-info'
   | 'diff'
+  | 'shared-desktop'
   | 'terminal'
   | 'logs';
 type ArtifactsMode = 'browser' | 'detail';
@@ -42,6 +43,7 @@ interface TaskSidePanelContextType {
   openDiffView: () => void;
   openArtifactDetail: (path: string, version?: number) => void;
   openTaskInfoView: () => void;
+  openSharedDesktopView: () => void;
   openTerminalView: () => void;
   openLogsView: () => void;
   closeSidePanel: () => void;
@@ -72,6 +74,7 @@ const defaultValue: TaskSidePanelContextType = {
   openDiffView: noop,
   openArtifactDetail: noop,
   openTaskInfoView: noop,
+  openSharedDesktopView: noop,
   openTerminalView: noop,
   openLogsView: noop,
   closeSidePanel: noop,
@@ -97,7 +100,7 @@ export function useTaskSidePanel() {
 /** Strip any panel sub-path to get the bare `/task/[id]` base path. */
 function computeBasePath(pathname: string): string {
   return pathname.replace(
-    /\/(artifacts|previews|info|diff|terminal|logs)(\/.*)?$/,
+    /\/(artifacts|previews|info|diff|shared-desktop|terminal|logs)(\/.*)?$/,
     '',
   );
 }
@@ -189,6 +192,18 @@ function parseViewFromPathname(
   if (/\/diff\/?$/.test(pathname)) {
     return {
       view: 'diff',
+      artifactsMode: 'browser',
+      artifactPath: null,
+      artifactVersion: undefined,
+      previewServiceName: null,
+      previewPath: null,
+    };
+  }
+
+  // /task/[id]/terminal
+  if (/\/shared-desktop\/?$/.test(pathname)) {
+    return {
+      view: 'shared-desktop',
       artifactsMode: 'browser',
       artifactPath: null,
       artifactVersion: undefined,
@@ -392,6 +407,15 @@ export function TaskSidePanelProvider({
     );
   }, [basePath]);
 
+  const openSharedDesktopView = useCallback(() => {
+    setActiveView('shared-desktop');
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${basePath}/shared-desktop`,
+    );
+  }, [basePath]);
+
   // -------------------------------------------------------------------
   // Open logs view
   // -------------------------------------------------------------------
@@ -551,6 +575,7 @@ export function TaskSidePanelProvider({
       openArtifactsBrowser,
       openArtifactDetail,
       openTaskInfoView,
+      openSharedDesktopView,
       openTerminalView,
       openLogsView,
       openDiffView,
@@ -578,6 +603,7 @@ export function TaskSidePanelProvider({
       openPreviewSetupView,
       openTerminalView,
       openTaskInfoView,
+      openSharedDesktopView,
       openDiffView,
       previewPath,
       previewServiceName,

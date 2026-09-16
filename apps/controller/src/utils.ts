@@ -107,6 +107,7 @@ export async function getNamedPortsForTaskRun(
 
       namedPorts = getNamedPortsForEnvironment({
         ports: previewRuntimeReady ? environmentConfig.ports : undefined,
+        sharedDesktop: previewRuntimeReady,
       });
 
       // Check if environment has a ready snapshot we can use.

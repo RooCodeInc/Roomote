@@ -20,6 +20,12 @@ vi.mock('./LivePreviewButton', () => ({
   ),
 }));
 
+vi.mock('./SharedDesktopButton', () => ({
+  SharedDesktopButton: ({ disabled }: { disabled?: boolean }) => (
+    <button type="button" data-testid="shared-desktop" disabled={disabled} />
+  ),
+}));
+
 vi.mock('./DiffButton', () => ({
   DiffButton: ({ disabled }: { disabled?: boolean }) => (
     <button type="button" data-testid="diff" disabled={disabled} />
@@ -107,6 +113,7 @@ describe('SidebarActions', () => {
     );
 
     expect(screen.getByTestId('live-preview')).toBeDisabled();
+    expect(screen.getByTestId('shared-desktop')).toBeDisabled();
     expect(screen.getByTestId('diff')).toBeDisabled();
     expect(screen.getByTestId('artifacts')).toBeDisabled();
     expect(screen.getByTestId('task-info')).toBeDisabled();
@@ -121,6 +128,7 @@ describe('SidebarActions', () => {
     );
 
     expect(screen.getByTestId('live-preview')).toBeEnabled();
+    expect(screen.getByTestId('shared-desktop')).toBeEnabled();
     expect(screen.getByTestId('diff')).toBeEnabled();
     expect(screen.getByTestId('artifacts')).toBeEnabled();
     expect(screen.getByTestId('task-info')).toBeEnabled();

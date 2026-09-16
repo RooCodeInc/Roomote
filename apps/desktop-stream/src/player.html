@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Roomote Desktop Stream</title>
+    <style>
+      :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; background: #0b0d10; color: #f5f7fa; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; display: grid; grid-template-rows: 1fr auto; }
+      main { min-height: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 25%, #20262f, #090b0e 70%); }
+      video { display: block; width: 100%; height: 100%; max-height: calc(100vh - 88px); object-fit: contain; background: #000; }
+      .empty { position: absolute; display: grid; gap: 14px; justify-items: center; text-align: center; padding: 24px; }
+      button { appearance: none; border: 1px solid #cbe95b; border-radius: 999px; padding: 10px 18px; background: #b0cd26; color: #111; font: inherit; font-weight: 700; cursor: pointer; }
+      button:disabled { cursor: wait; opacity: .65; }
+      footer { min-height: 88px; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 14px 20px; border-top: 1px solid #2d333c; background: #12161b; }
+      .stats { display: flex; flex-wrap: wrap; gap: 8px 20px; font-variant-numeric: tabular-nums; font-size: 13px; }
+      .stats span { color: #aeb6c2; }
+      .stats strong { color: #fff; }
+      .status { max-width: 48ch; color: #aeb6c2; font-size: 13px; text-align: right; }
+      @media (max-width: 720px) { footer { align-items: flex-start; flex-direction: column; gap: 8px; } .status { text-align: left; } video { max-height: calc(100vh - 128px); } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <video id="video" playsinline controls></video>
+      <div class="empty" id="empty">
+        <div><strong>Desktop stream is ready</strong><br /><span id="summary">Loading capture configuration...</span></div>
+        <button id="start" type="button">Start stream</button>
+      </div>
+    </main>
+    <footer>
+      <div class="stats">
+        <span>Rendered <strong id="fps">-</strong> fps</span>
+        <span>Encoder <strong id="encoder-fps">-</strong> fps</span>
+        <span>Bitrate <strong id="bitrate">-</strong> kbps</span>
+        <span>First frame <strong id="startup">-</strong> ms</span>
+      </div>
+      <div class="status" id="status">The browser must start playback before audio can be enabled.</div>
+    </footer>
+    <script>
+      const video = document.querySelector('#video');
+      const start = document.querySelector('#start');
+      const empty = document.querySelector('#empty');
+      const summary = document.querySelector('#summary');
+      const status = document.querySelector('#status');
+      const fields = {
+        fps: document.querySelector('#fps'),
+        encoderFps: document.querySelector('#encoder-fps'),
+        bitrate: document.querySelector('#bitrate'),
+        startup: document.querySelector('#startup'),
+      };
+      let config;
+      let startedAt = 0;
+      let firstFrameMs;
+      let frames = 0;
+      let lastFrames = 0;
+      let lastSample = performance.now();
+      let renderedFps;
+
+      fetch('./config').then((response) => response.json()).then((value) => {
+        config = value;
+        summary.textContent = `${value.width}x${value.height} at ${value.target_fps} fps; audio ${value.audio_enabled ? 'enabled' : 'disabled'}`;
+      }).catch(() => { summary.textContent = 'Capture configuration is unavailable.'; });
+
+      function countFrame() {
+        frames += 1;
+        video.requestVideoFrameCallback(countFrame);
+      }
+
+      start.addEventListener('click', async () => {
+        start.disabled = true;
+        status.textContent = 'Starting encoder and waiting for the first fragment...';
+        startedAt = performance.now();
+        video.src = `./stream.mp4?started=${Date.now()}`;
+        try {
+          await video.play();
+        } catch (error) {
+          status.textContent = `Playback could not start: ${error.message}`;
+          start.disabled = false;
+        }
+      });
+
+      video.addEventListener('loadeddata', () => {
+        firstFrameMs = performance.now() - startedAt;
+        fields.startup.textContent = firstFrameMs.toFixed(0);
+        empty.hidden = true;
+        status.textContent = config?.audio_enabled
+          ? 'Video and sandbox audio share one synchronized media stream.'
+          : 'Video is live. Audio was not configured for this service.';
+        if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(countFrame);
+      }, { once: true });
+
+      video.addEventListener('error', () => {
+        status.textContent = 'The encoder stopped. Check the service logs and capture prerequisites.';
+        start.disabled = false;
+      });
+
+      setInterval(async () => {
+        const now = performance.now();
+        renderedFps = ((frames - lastFrames) * 1000) / (now - lastSample);
+        lastFrames = frames;
+        lastSample = now;
+        if (frames) fields.fps.textContent = renderedFps.toFixed(1);
+        try {
+          const response = await fetch('./metrics');
+          const metrics = await response.json();
+          fields.encoderFps.textContent = metrics.encoder.fps ? metrics.encoder.fps.toFixed(1) : '-';
+          fields.bitrate.textContent = metrics.encoder.bitrate_kbps ? metrics.encoder.bitrate_kbps.toFixed(0) : '-';
+          await fetch('./telemetry', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              rendered_fps: Number.isFinite(renderedFps) ? renderedFps : null,
+              startup_ms: firstFrameMs ?? null,
+              decoded_bytes: video.webkitVideoDecodedByteCount ?? null,
+              dropped_frames: video.getVideoPlaybackQuality?.().droppedVideoFrames ?? null,
+            }),
+          });
+        } catch {}
+      }, 2000);
+    </script>
+  </body>
+</html>

@@ -6,12 +6,14 @@ import {
   INTERNAL_PORTS,
   LEGACY_SANDBOX_GUI_NAMED_PORT_NAME,
   SANDBOX_SERVER_NAMED_PORT,
+  SHARED_DESKTOP_NAMED_PORT,
   assertNoReservedEnvironmentPorts,
   mergeNamedPortsByName,
 } from '@roomote/types';
 
 const NON_USER_FACING_PORT_NAMES = new Set([
   SANDBOX_SERVER_NAMED_PORT.name,
+  SHARED_DESKTOP_NAMED_PORT.name,
   'EDITOR',
   LEGACY_SANDBOX_GUI_NAMED_PORT_NAME,
 ]);
@@ -41,10 +43,17 @@ type MachineRoutingParams = {
 
 export function getNamedPortsForEnvironment(params: {
   ports?: NamedPort[];
+  sharedDesktop?: boolean;
 }): NamedPort[] {
   assertNoReservedEnvironmentPorts({ ports: params.ports });
 
-  return mergeNamedPortsByName([SANDBOX_SERVER_NAMED_PORT], params.ports ?? []);
+  return mergeNamedPortsByName(
+    [
+      SANDBOX_SERVER_NAMED_PORT,
+      ...(params.sharedDesktop ? [SHARED_DESKTOP_NAMED_PORT] : []),
+    ],
+    params.ports ?? [],
+  );
 }
 
 function buildMachineDomains(

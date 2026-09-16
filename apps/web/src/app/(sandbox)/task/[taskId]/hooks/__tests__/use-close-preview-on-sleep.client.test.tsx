@@ -50,6 +50,7 @@ function buildTaskSidePanelContext({
     openDiffView: vi.fn(),
     openArtifactDetail: vi.fn(),
     openTaskInfoView: vi.fn(),
+    openSharedDesktopView: vi.fn(),
     openTerminalView: vi.fn(),
     openLogsView: vi.fn(),
     closeSidePanel,

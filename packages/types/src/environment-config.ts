@@ -285,8 +285,12 @@ export type EnvironmentRepositoryConfig = z.infer<
   typeof environmentRepositoryConfigSchema
 >;
 
-const RESERVED_NAMED_PORT_NAMES = new Set(['SANDBOX_SERVER', 'EDITOR']);
-const RESERVED_ENVIRONMENT_PORT_NUMBERS = new Set<number>();
+const RESERVED_NAMED_PORT_NAMES = new Set([
+  'SANDBOX_SERVER',
+  'SHARED_DESKTOP',
+  'EDITOR',
+]);
+const RESERVED_ENVIRONMENT_PORT_NUMBERS = new Set([6080]);
 
 export const namedPortSchema = z.object({
   name: z

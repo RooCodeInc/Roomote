@@ -9,6 +9,11 @@ export const SANDBOX_SERVER_NAMED_PORT: NamedPort = {
   port: SANDBOX_SERVER_PORT,
 };
 
+export const SHARED_DESKTOP_NAMED_PORT: NamedPort = {
+  name: 'SHARED_DESKTOP',
+  port: 6080,
+};
+
 /**
  * Legacy editor port identity retained so stale URLs remain classified as
  * system-managed. Roomote does not provide an editor service.
@@ -36,6 +41,7 @@ export const INTERNAL_PORTS = new Set([SANDBOX_SERVER_NAMED_PORT.name]);
  */
 export const SYSTEM_PORT_NAMES = new Set([
   SANDBOX_SERVER_NAMED_PORT.name,
+  SHARED_DESKTOP_NAMED_PORT.name,
   CODE_SERVER_NAMED_PORT.name,
   LEGACY_SANDBOX_GUI_NAMED_PORT_NAME,
 ]);

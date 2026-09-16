@@ -17,6 +17,14 @@ interface PreviewSession {
   wsUrl: string;
 }
 
+export interface DesktopStreamSession {
+  configUrl: string;
+  controlUrl: string;
+  metricsUrl: string;
+  streamUrl: string;
+  telemetryUrl: string;
+}
+
 export class PreviewSessionError extends Error {
   constructor(
     readonly status: number,
@@ -81,10 +89,24 @@ function buildPreviewWebSocketUrl(previewUrl: URL, token: string): string {
   return wsUrl.toString();
 }
 
-export async function createPreviewSession(params: {
+function buildPreviewResourceUrl(
+  previewUrl: URL,
+  path: string,
+  token: string,
+  websocket = false,
+): string {
+  const resourceUrl = new URL(path, previewUrl);
+  if (websocket) {
+    resourceUrl.protocol = previewUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  }
+  resourceUrl.searchParams.set('__preview_token', token);
+  return resourceUrl.toString();
+}
+
+async function authorizePreviewSession(params: {
   runId: string;
   previewUrl: string;
-}): Promise<PreviewSession> {
+}): Promise<{ previewUrl: URL; token: string }> {
   const previewUrl = parsePreviewUrl(params.previewUrl);
   const runId = validateRunId(params.runId);
 
@@ -109,6 +131,15 @@ export async function createPreviewSession(params: {
     timeoutSeconds: Env.PREVIEW_TOKEN_TTL_SECONDS,
   });
 
+  return { previewUrl, token };
+}
+
+export async function createPreviewSession(params: {
+  runId: string;
+  previewUrl: string;
+}): Promise<PreviewSession> {
+  const { previewUrl, token } = await authorizePreviewSession(params);
+
   return {
     enableHiDpi: previewUrl.searchParams.get('enable_hidpi') === 'true',
     httpUrl: (() => {
@@ -119,5 +150,19 @@ export async function createPreviewSession(params: {
     resizeMode: 'remote',
     viewOnly: previewUrl.searchParams.get('view_only') === 'true',
     wsUrl: buildPreviewWebSocketUrl(previewUrl, token),
+  };
+}
+
+export async function createDesktopStreamSession(params: {
+  runId: string;
+  previewUrl: string;
+}): Promise<DesktopStreamSession> {
+  const { previewUrl, token } = await authorizePreviewSession(params);
+  return {
+    configUrl: buildPreviewResourceUrl(previewUrl, '/config', token),
+    controlUrl: buildPreviewResourceUrl(previewUrl, '/control', token, true),
+    metricsUrl: buildPreviewResourceUrl(previewUrl, '/metrics', token),
+    streamUrl: buildPreviewResourceUrl(previewUrl, '/stream.mp4', token),
+    telemetryUrl: buildPreviewResourceUrl(previewUrl, '/telemetry', token),
   };
 }

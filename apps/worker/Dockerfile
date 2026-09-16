@@ -43,7 +43,10 @@ RUN apt-get update \
     procps \
     build-essential \
     python3 \
+    ffmpeg \
     locales \
+    pulseaudio \
+    pulseaudio-utils \
     xvfb \
     fontconfig \
     fonts-noto-core \
@@ -189,6 +192,14 @@ RUN ~/.local/bin/mise install -y node@22.17.1 pnpm@10.29.3 ripgrep@15.1.0 uv@0.1
   && test -L "$MISE_DATA_DIR/installs/rust/1.92.0" \
   && test "$(rg --version | awk 'NR == 1 { print $2 }')" = "15.1.0" \
   && test "$(uv --version | awk 'NR == 1 { print $2 }')" = "0.11.8"
+
+COPY --chown=roomote:roomote apps/desktop-stream /tmp/roomote-desktop-stream
+RUN cd /tmp/roomote-desktop-stream \
+  && cargo build --locked --release \
+  && sudo cp target/release/roomote-desktop-stream /usr/local/bin/roomote-desktop-stream \
+  && sudo chmod 0755 /usr/local/bin/roomote-desktop-stream \
+  && rm -rf /tmp/roomote-desktop-stream \
+  && roomote-desktop-stream --help >/dev/null 2>&1 || test "$?" = "2"
 
 RUN UV_ROOT="$(~/.local/bin/mise where uv)" \
   && UV_BIN="$(find "$UV_ROOT" -type f -name uv -perm -111 | head -n 1)" \

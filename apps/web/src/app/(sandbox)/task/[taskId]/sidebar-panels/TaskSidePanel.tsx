@@ -8,6 +8,7 @@ import type { TaskSession, GitDiffResponse } from '../hooks';
 import { useTaskSidePanel } from '../hooks';
 
 import { PreviewSidePanel } from './PreviewSidePanel';
+import { SharedDesktopSidePanel } from './SharedDesktopSidePanel';
 import { DiffSidePanel } from './DiffSidePanel';
 import { ArtifactsSidePanel } from './ArtifactsSidePanel';
 import { LogsSidePanel } from './LogsSidePanel';
@@ -39,6 +40,20 @@ export function TaskSidePanelDesktop({
       frameClassName="p-0"
       surfaceClassName="relative flex flex-col overflow-hidden "
     >
+      <div
+        className={cn(
+          'absolute inset-0 min-h-0 min-w-0 flex-col',
+          activeView === 'shared-desktop' ? 'flex' : 'hidden',
+        )}
+      >
+        {activeView === 'shared-desktop' && session.taskRun ? (
+          <SharedDesktopSidePanel
+            taskRun={session.taskRun}
+            onClose={closeSidePanel}
+          />
+        ) : null}
+      </div>
+
       <div
         className={cn(
           'absolute inset-0 min-h-0 min-w-0',

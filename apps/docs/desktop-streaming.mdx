@@ -1,0 +1,67 @@
+---
+title: Shared Desktop
+icon: monitor-play
+description: View and control an X11 desktop with synchronized audio from an environment sandbox.
+---
+
+Roomote includes a shared remote desktop for environment-backed tasks. Open the
+dedicated **Shared Desktop** tab in the task sidebar to view and control the
+sandbox display, hear sandbox audio, type, click, and scroll without leaving
+Roomote.
+
+The sandbox-side Rust service captures X11, encodes H.264 video with
+synchronized AAC audio, and accepts validated input over an authenticated
+control connection. Shared Desktop uses the same task-scoped preview security
+boundary, but it is separate from [Live Preview](/live-previews) and does not
+appear in the Live Preview service selector.
+
+Roomote starts the virtual display, audio sink, and streaming service. Graphical
+applications must open on the sandbox's inherited `DISPLAY`; application audio
+must use the inherited `PULSE_SINK`.
+
+## Prerequisites
+
+- an environment-backed task using a worker image that includes Shared Desktop
+- a graphical X11 application running in the sandbox when you need more than
+  the initially empty desktop
+
+The managed desktop port is reserved and authenticated by Roomote. Do not add a
+separate environment port for it or expose port `6080` as unauthenticated.
+
+The default target is 1920x1080 at 60 fps and 6 Mbps. Tune
+`ROOMOTE_DESKTOP_STREAM_WIDTH`, `ROOMOTE_DESKTOP_STREAM_HEIGHT`,
+`ROOMOTE_DESKTOP_STREAM_FPS`, and
+`ROOMOTE_DESKTOP_STREAM_VIDEO_BITRATE_KBPS` for the workload and available CPU.
+Each viewer gets a dedicated encoder; the default one-viewer limit avoids
+accidentally multiplying CPU use.
+
+## Verify performance
+
+Open **Shared Desktop** and select **Start remote desktop**. The player
+reports browser-rendered FPS and time from starting the stream to the first
+decoded frame. The service's `/metrics` endpoint additionally reports encoder
+FPS and bitrate for diagnostics.
+
+For a deterministic transport test without a desktop or audio server, start
+the service with synthetic inputs:
+
+```bash
+ROOMOTE_DESKTOP_STREAM_CAPTURE_MODE=test \
+ROOMOTE_DESKTOP_STREAM_AUDIO_MODE=test \
+roomote-desktop-stream
+```
+
+Performance depends on resolution, scene complexity, sandbox CPU allocation,
+encoder availability, and network conditions. The service does not imply a
+1080p60 or 1-vCPU guarantee; validate the actual environment before selecting
+production defaults.
+
+## Limitations
+
+- clipboard transfer and file drag-and-drop are not included
+- X11 is supported; Wayland and direct DRM capture are not yet supported
+- audio requires routing application output into the configured PulseAudio
+  sink monitor
+- browser playback uses fragmented MP4 over HTTP, not adaptive bitrate or
+  WebRTC congestion control
+- additional viewers create additional encoders and CPU load
