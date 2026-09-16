@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 import { Search } from '@/components/system';
 
-import { Tool, ToolHeader } from './tool';
+import { Tool, ToolContent, ToolHeader } from './tool';
 
 vi.mock('@/components/system', async (importOriginal) => {
   const system = await importOriginal<typeof import('@/components/system')>();
@@ -109,6 +109,52 @@ describe('ToolHeader', () => {
       </Tool>,
     );
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('scopes nested tool icon state to each tool trigger', () => {
+    render(
+      <Tool>
+        <ToolHeader
+          action="Outer tool"
+          icon={Search}
+          state="output-available"
+        />
+        <ToolContent>
+          <Tool>
+            <ToolHeader
+              action="Inner tool"
+              icon={Search}
+              state="output-available"
+            />
+          </Tool>
+        </ToolContent>
+      </Tool>,
+    );
+
+    const outerTrigger = screen.getByRole('button', {
+      name: 'Outer tool Completed',
+    });
+    fireEvent.click(outerTrigger);
+
+    const innerTrigger = screen.getByRole('button', {
+      name: 'Inner tool Completed',
+    });
+    const innerCaret = innerTrigger.querySelector('.lucide-chevron-up');
+    const innerToolIcon = innerTrigger.querySelector('.lucide-search');
+
+    expect(outerTrigger).toHaveAttribute('data-state', 'open');
+    expect(innerTrigger).toHaveAttribute('data-state', 'closed');
+    expect(innerTrigger).toHaveClass('group/collapsible-icon-trigger');
+    expect(innerCaret).toHaveClass(
+      'group-data-[state=open]/collapsible-icon-trigger:opacity-100',
+    );
+    expect(innerCaret).not.toHaveClass('group-data-[state=open]:opacity-100');
+    expect(innerToolIcon).toHaveClass(
+      'group-data-[state=open]/collapsible-icon-trigger:opacity-0',
+    );
+
+    fireEvent.click(innerTrigger);
+    expect(innerTrigger).toHaveAttribute('data-state', 'open');
   });
 
   it('keeps a custom icon action separate from the expansion trigger', () => {
