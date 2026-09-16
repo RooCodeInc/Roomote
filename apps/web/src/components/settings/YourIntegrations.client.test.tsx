@@ -260,6 +260,9 @@ it('shows who shared an integration and lets an authorized viewer change visibil
       visibility: 'owner',
     }),
   });
+  expect(toastSuccessMock).toHaveBeenCalledWith(
+    'Stripe moved to Personal settings.',
+  );
 });
 
 it('reports load failures', async () => {

@@ -116,7 +116,11 @@ export function useYourIntegrations(view: IntegrationView = 'shared'): {
         body: JSON.stringify({ secretRef: secret.secretRef, visibility }),
       });
       if (!response.ok) throw new Error('Unavailable');
-      toast.success(`Updated ${secret.label}.`);
+      toast.success(
+        visibility === 'owner'
+          ? `${secret.label} moved to Personal settings.`
+          : `Updated ${secret.label}.`,
+      );
       setConfiguring(null);
       await load();
     } catch {
