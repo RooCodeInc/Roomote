@@ -288,6 +288,46 @@ describe('createTaskRunGitHubToken', () => {
     });
   });
 
+  it('fails closed when an environment checkout stamp spans GitHub installations', async () => {
+    mockFindEnvironmentFirst.mockResolvedValue({
+      id: 'environment-id',
+      config: buildEnvironmentConfig(['Roomote/example-app']),
+    });
+    const prepared = {
+      fullName: 'Roomote/example-app',
+      installationId: 'install-roomote',
+      githubRepoId: 201,
+      isActive: true,
+      sourceControlProvider: 'github',
+    };
+    const otherInstallation = {
+      ...prepared,
+      fullName: 'Other/app',
+      installationId: 'install-other',
+      githubRepoId: 301,
+    };
+    mockFindMappings.mockResolvedValue([{ repository: prepared }]);
+    mockFindMany
+      .mockResolvedValueOnce([prepared])
+      .mockResolvedValueOnce([prepared, otherInstallation]);
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: 'Roomote/example-app',
+          environmentId: 'environment-id',
+          repositoryProviders: {
+            'Roomote/example-app': 'github',
+            'Other/app': 'github',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).rejects.toThrow(
+      'Stamped repositories for task run 123 span multiple GitHub installations',
+    );
+    expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
+  });
+
   it('does not anchor a GitHub installation from a same-name GitLab mapping', async () => {
     mockFindEnvironmentFirst.mockResolvedValue({
       id: 'environment-id',

@@ -72,6 +72,7 @@ import { getPrSha } from '../workflows/utils';
 
 const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
+const createdRepositoryIds: string[] = [];
 
 const explicitWorkKind = {
   kind: 'implement',
@@ -213,6 +214,12 @@ afterAll(async () => {
       .delete(taskPullRequests)
       .where(inArray(taskPullRequests.taskId, createdTaskIds));
     await db.delete(tasks).where(inArray(tasks.id, createdTaskIds));
+  }
+
+  if (createdRepositoryIds.length > 0) {
+    await db
+      .delete(repositories)
+      .where(inArray(repositories.id, createdRepositoryIds));
   }
 
   if (createdUserIds.length > 0) {
@@ -1425,17 +1432,34 @@ describe('enqueueTask snapshot resume', () => {
 
   it('inherits source-control stamps from the source run payload', async () => {
     const userId = await createUser();
+    const suffix = crypto.randomUUID();
+    const adoRepositoryFullName = `roomote/Test ADO/Test ADO-${suffix}`;
+    const gitLabRepositoryFullName = `group/web-${suffix}`;
+    const adoRepository = await repositoryFactory.create({
+      linkedByUserId: userId,
+      fullName: adoRepositoryFullName,
+      sourceControlProvider: 'ado',
+      host: 'dev.azure.com',
+      isActive: true,
+    });
+    const gitLabRepository = await repositoryFactory.create({
+      linkedByUserId: userId,
+      fullName: gitLabRepositoryFullName,
+      sourceControlProvider: 'gitlab',
+      isActive: true,
+    });
+    createdRepositoryIds.push(adoRepository.id, gitLabRepository.id);
 
     const freshRun = await launchFresh({
       task: standardTaskInput({
         payload: {
-          repo: 'roomote/Test ADO/Test ADO',
+          repo: adoRepositoryFullName,
           description: 'Do the thing',
           sourceControlProvider: 'ado',
           sourceControlHost: 'dev.azure.com',
           repositoryProviders: {
-            'roomote/Test ADO/Test ADO': 'ado',
-            'group/web': 'gitlab',
+            [adoRepositoryFullName]: 'ado',
+            [gitLabRepositoryFullName]: 'gitlab',
           },
         },
       }),
@@ -1451,7 +1475,7 @@ describe('enqueueTask snapshot resume', () => {
     const resumeTask: SnapshotResumeTask = {
       type: TaskPayloadKind.SnapshotResume,
       payload: {
-        repo: 'roomote/Test ADO/Test ADO',
+        repo: adoRepositoryFullName,
         sourceSnapshotId: 'snap-ado-1',
         sourceRunId: freshRun.id,
       },
@@ -1470,10 +1494,13 @@ describe('enqueueTask snapshot resume', () => {
 
     expect(resumePayload.sourceControlProvider).toBe('ado');
     expect(resumePayload.sourceControlHost).toBe('dev.azure.com');
-    expect(resumePayload.repositoryProviders).toEqual({
-      'roomote/Test ADO/Test ADO': 'ado',
-      'group/web': 'gitlab',
+    expect(freshRun.payload.repositoryProviders).toMatchObject({
+      [adoRepositoryFullName]: 'ado',
+      [gitLabRepositoryFullName]: 'gitlab',
     });
+    expect(resumePayload.repositoryProviders).toEqual(
+      freshRun.payload.repositoryProviders,
+    );
   });
 
   it('preserves Fast parent routing and communication isolation across resume', async () => {

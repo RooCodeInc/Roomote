@@ -242,8 +242,35 @@ export async function resolveTaskRunEnvironmentGitHubRepositories(
 async function resolveTaskRunGitHubTokenOptions(
   taskRun: TaskRun,
 ): Promise<CreateGitHubTokenOptions> {
+  const stampedRepositories =
+    resolveRepositoryNamesForSourceControlProviderFromPayload(
+      taskRun.payload,
+      DEFAULT_SOURCE_CONTROL_PROVIDER,
+    );
   const repositoryRows =
     await resolveTaskRunEnvironmentGitHubRepositories(taskRun);
+
+  // Legacy environment payloads only stamped their initially prepared
+  // repositories, so retain the same-installation expansion for those runs.
+  // New checkout-scope stamps include every advertised GitHub repository. If
+  // one falls outside the environment installation, resolve the full stamp so
+  // token creation fails closed instead of advertising an unusable checkout.
+  const environmentRepositoryNames = new Set(
+    repositoryRows?.map((repository) => repository.fullName) ?? [],
+  );
+  if (
+    stampedRepositories?.some(
+      (repository) => !environmentRepositoryNames.has(repository),
+    )
+  ) {
+    return resolveTokenOptionsForRepositoryNames({
+      taskRun,
+      repositoryNames: stampedRepositories,
+      missingMessagePrefix: 'Stamped repositories not found',
+      spanningMessagePrefix: 'Stamped repositories',
+    });
+  }
+
   if (repositoryRows !== null) {
     return resolveTokenOptionsForRepositoryNames({
       taskRun,
@@ -254,11 +281,6 @@ async function resolveTaskRunGitHubTokenOptions(
     });
   }
 
-  const stampedRepositories =
-    resolveRepositoryNamesForSourceControlProviderFromPayload(
-      taskRun.payload,
-      DEFAULT_SOURCE_CONTROL_PROVIDER,
-    );
   if (stampedRepositories && stampedRepositories.length > 0) {
     return resolveTokenOptionsForRepositoryNames({
       taskRun,
