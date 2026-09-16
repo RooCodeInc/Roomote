@@ -2,6 +2,9 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   acquireTurnLock: vi.fn(),
   answerQuestion: vi.fn(),
+  listIntegrations: vi.fn(),
+  resolveApiBaseUrl: vi.fn(),
+  resolveMcpConfigs: vi.fn(),
   findAccessibleSession: vi.fn(),
   getOfferStatus: vi.fn(),
   handleReviewAction: vi.fn(),
@@ -41,7 +44,8 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   createFastAgentWebTaskLauncher: mocks.createWebTaskLauncher,
   FastAgentDurableRetryScheduledError: class FastAgentDurableRetryScheduledError extends Error {},
   getOrCreateFastAgentSession: mocks.getOrCreateSession,
-  resolveApiBaseUrl: vi.fn(),
+  listFastAgentIntegrations: mocks.listIntegrations,
+  resolveApiBaseUrl: mocks.resolveApiBaseUrl,
   upsertFastAgentMessage: mocks.upsertMessage,
 }));
 
@@ -50,7 +54,7 @@ vi.mock('@roomote/sdk/server', () => ({
   buildFastAgentSurfaceReplyDelivery: mocks.buildReplyDelivery,
   createFastAgentSessionArtifact: mocks.createSessionArtifact,
   persistFastAgentInlineHumanTurn: vi.fn().mockResolvedValue(null),
-  resolveUserMcpServerConfigs: vi.fn(),
+  resolveUserMcpServerConfigs: mocks.resolveMcpConfigs,
   wakeFastAgentParentEventAt: vi.fn(),
   wakeFastAgentParentEventNow: vi.fn(),
   startFastSessionGoal: mocks.startSessionGoal,
@@ -103,6 +107,7 @@ vi.mock('../setup/setup-session', () => ({
 
 import {
   getFastSessionTasksCommand,
+  getFastSessionIntegrationMentionsCommand,
   handleFastSessionPrReviewActionCommand,
   replyToFastSessionCommand,
   scheduleWebFastAgentTurn,
@@ -224,6 +229,9 @@ describe('setup context on ordinary Fast session input', () => {
       }),
     );
     mocks.answerQuestion.mockResolvedValue('Ready');
+    mocks.listIntegrations.mockResolvedValue([]);
+    mocks.resolveApiBaseUrl.mockReturnValue('https://roomote.test');
+    mocks.resolveMcpConfigs.mockResolvedValue({});
     mocks.buildReplyDelivery.mockResolvedValue({
       conversation: {
         surface: 'web',
@@ -285,6 +293,117 @@ describe('setup context on ordinary Fast session input', () => {
     expect(turn.setupSession).toBeUndefined();
     expect(turn.setupSnapshot).toBeUndefined();
     expect(turn.adapter.resolveUserInputPreset).toBeUndefined();
+  });
+
+  it('resolves selected integration IDs to trusted durable message context', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'sentry',
+        name: 'Sentry',
+        description: '  Inspect errors and\nperformance data.  ',
+        tools: [{ name: 'search_issues' }],
+      },
+      {
+        id: 'notion',
+        name: 'Notion',
+        description: 'Read shared pages.',
+        tools: [{ name: 'search' }],
+      },
+    ]);
+
+    await replyToFastSessionCommand(auth, {
+      sessionId: session.id,
+      text: '@Sentry investigate this',
+      integrationIds: ['sentry', 'forged-integration'],
+    });
+    const turn = await runScheduled();
+
+    expect(turn.currentMessageAgentContext).toContain(
+      '- Sentry [id: sentry]: Inspect errors and performance data.',
+    );
+    expect(turn.currentMessageAgentContext).not.toContain('Notion');
+    expect(turn.currentMessageAgentContext).not.toContain('forged-integration');
+    const { persistFastAgentInlineHumanTurn } =
+      await import('@roomote/sdk/server');
+    expect(vi.mocked(persistFastAgentInlineHumanTurn)).toHaveBeenCalledWith({
+      parent: expect.objectContaining({ sessionId: session.id }),
+      event: expect.objectContaining({
+        agentContext: turn.currentMessageAgentContext,
+      }),
+    });
+    expect(mocks.listIntegrations).toHaveBeenCalledWith(
+      { userId: 'user-1', apiBaseUrl: 'https://roomote.test' },
+      expect.any(Function),
+    );
+  });
+
+  it('ignores selected integration IDs that are no longer available', async () => {
+    mocks.listIntegrations.mockResolvedValue([]);
+
+    await replyToFastSessionCommand(auth, {
+      sessionId: session.id,
+      text: '@Sentry investigate this',
+      integrationIds: ['sentry'],
+    });
+    const turn = await runScheduled();
+
+    expect(turn.currentMessageAgentContext).toBeUndefined();
+  });
+
+  it('does not expose integration mentions for an inaccessible Session', async () => {
+    mocks.findAccessibleSession.mockResolvedValueOnce(null);
+
+    await expect(
+      getFastSessionIntegrationMentionsCommand(auth, {
+        sessionId: '33333333-3333-4333-8333-333333333333',
+      }),
+    ).rejects.toThrow('Fast session not found');
+    expect(mocks.listIntegrations).not.toHaveBeenCalled();
+  });
+
+  it('lists only actor-authorized user-facing integrations', async () => {
+    mocks.listIntegrations.mockImplementation(
+      async (_context, resolveConfigs) => {
+        await resolveConfigs();
+        return [
+          {
+            id: 'roomote',
+            name: 'Roomote',
+            description: 'Internal deployment tools.',
+            tools: [{ name: 'manage_tasks' }],
+          },
+          {
+            id: '_roomote_http_integrations',
+            name: 'HTTP integrations',
+            description: 'Generic credential broker.',
+            tools: [{ name: 'request' }],
+          },
+          {
+            id: 'sentry',
+            name: 'Sentry',
+            description: 'Inspect errors and performance data.',
+            tools: [{ name: 'search_issues' }],
+          },
+        ];
+      },
+    );
+
+    await expect(
+      getFastSessionIntegrationMentionsCommand(auth, { sessionId: session.id }),
+    ).resolves.toEqual({
+      integrations: [
+        {
+          id: 'sentry',
+          name: 'Sentry',
+          description: 'Inspect errors and performance data.',
+        },
+      ],
+    });
+    expect(mocks.resolveMcpConfigs).toHaveBeenCalledWith({
+      userId: 'user-1',
+      apiBaseUrl: 'https://roomote.test',
+      includeRoomoteMemberTools: true,
+    });
   });
 
   it('refreshes setup snapshots after category response persistence, overriding stale caller context', async () => {

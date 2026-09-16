@@ -37,6 +37,7 @@ import {
 import {
   getFastSessionMessagesCommand,
   getFastSessionComposerSuggestionCommand,
+  getFastSessionIntegrationMentionsCommand,
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
   resolveFastSessionCapabilityOfferCommand,
@@ -3049,6 +3050,11 @@ export const appRouter = createRouter({
   automations: automationsRouter,
 
   fastSessions: createRouter({
+    integrationMentions: protectedProcedure
+      .input(z.object({ sessionId: z.string().uuid().optional() }))
+      .query(({ ctx: { auth }, input }) =>
+        getFastSessionIntegrationMentionsCommand(auth, input),
+      ),
     start: protectedProcedure
       .input(startFastSessionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>

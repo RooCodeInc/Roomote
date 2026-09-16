@@ -43,6 +43,7 @@ import {
   X,
 } from '@/components/system';
 import { SessionModelSwitcher } from '@/components/tasks/SessionModelSwitcher';
+import { useSessionIntegrationMentions } from '@/components/tasks/useSessionIntegrationMentions';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/AttachmentsDisplay';
@@ -51,6 +52,7 @@ import { SessionWakeups } from './SessionWakeups';
 export type SessionPromptSubmission = PromptInputMessage & {
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
+  integrationIds?: string[];
 };
 
 export type SessionModelSelection = {
@@ -273,6 +275,12 @@ export function SessionPromptInput({
   const [isUpdatingModelSelection, setIsUpdatingModelSelection] =
     useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const integrationMentions = useSessionIntegrationMentions({
+    sessionId,
+    value: prompt,
+    onValueChange: setPrompt,
+    textareaRef,
+  });
   useAutoFocusOnce(textareaRef, !isBusy && shouldAutoFocus);
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => setPrompt(text),
@@ -349,16 +357,21 @@ export function SessionPromptInput({
       toast.success(`Pursuing goal: ${objective}`);
       sent = true;
     } else {
+      const integrationIds = integrationMentions.getSelectedIntegrationIds(
+        message.text,
+      );
       // Always send the current picker state: it round-trips the persisted
       // choice and clears it when the picker is reset to the default.
       sent = await onSend({
         ...message,
         model: model || null,
         reasoningEffort,
+        ...(integrationIds.length > 0 ? { integrationIds } : {}),
       });
     }
     if (sent) {
       setPrompt('');
+      integrationMentions.resetSelectedIntegrations();
     }
     return sent;
   };
@@ -429,6 +442,7 @@ export function SessionPromptInput({
       >
         {!voice?.active ? <AttachmentsDisplay /> : null}
         <PromptInputBody>
+          {integrationMentions.suggestions}
           {voice?.active ? (
             <VoiceConversationPanel
               voice={{ ...voice, onToggle: handleVoiceToggle }}
@@ -439,10 +453,32 @@ export function SessionPromptInput({
                 className="min-w-0 flex-1"
                 ref={textareaRef}
                 value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                onFocus={() => setIsTextareaFocused(true)}
-                onBlur={() => setIsTextareaFocused(false)}
+                onChange={(event) =>
+                  integrationMentions.handleValueChange(
+                    event.target.value,
+                    event.target.selectionStart,
+                  )
+                }
+                onSelect={(event) =>
+                  integrationMentions.handleCursorChange(
+                    event.currentTarget.selectionStart,
+                  )
+                }
+                onClick={(event) =>
+                  integrationMentions.handleCursorChange(
+                    event.currentTarget.selectionStart,
+                  )
+                }
+                onFocus={() => {
+                  setIsTextareaFocused(true);
+                  integrationMentions.handleFocus();
+                }}
+                onBlur={() => {
+                  setIsTextareaFocused(false);
+                  integrationMentions.handleBlur();
+                }}
                 onKeyDown={(event) => {
+                  if (integrationMentions.handleKeyDown(event)) return;
                   handleSuggestionKeyDown(event);
                 }}
                 placeholder={ghostSuggestion ?? 'Message agent'}
@@ -450,6 +486,7 @@ export function SessionPromptInput({
                   ghostSuggestion ? suggestionHintId : undefined
                 }
                 disabled={isBusy}
+                {...integrationMentions.inputProps}
               />
               {ghostSuggestion && (
                 <>
