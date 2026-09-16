@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import { YourIntegrations } from './YourIntegrations';
+import { PersonalIntegrations, YourIntegrations } from './YourIntegrations';
 
 const { toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
   toastSuccessMock: vi.fn(),
@@ -51,7 +51,9 @@ it('lists integrations without credentials and removes with a same-origin JSON b
   expect(screen.getByText(/api\.stripe\.com/)).toHaveTextContent(
     'GET, POST · kept until revoked',
   );
-  expect(fetchMock.mock.calls[0]![0]).toBe('/api/account/integrations');
+  expect(fetchMock.mock.calls[0]![0]).toBe(
+    '/api/account/integrations?view=shared',
+  );
   fireEvent.click(screen.getByRole('button', { name: 'Remove Stripe' }));
   expect(
     screen.getByRole('heading', { name: 'Remove Stripe?' }),
@@ -107,6 +109,108 @@ it('adds an integration with the policy and key entered by the human', async () 
     secret: 'disposable-test-credential',
   });
   expect(await screen.findByText('Stripe')).toBeInTheDocument();
+});
+
+it('keeps private integrations out of the shared list', async () => {
+  fetchMock.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        secrets: [
+          secret,
+          {
+            ...secret,
+            secretRef: '6a1f8f1e-0000-4000-8000-000000000012',
+            label: 'Private API',
+            visibility: 'owner',
+          },
+          {
+            ...secret,
+            secretRef: '6a1f8f1e-0000-4000-8000-000000000013',
+            label: 'Someone else private API',
+            visibility: 'owner',
+            ownerName: 'Taylor',
+          },
+        ],
+      }),
+    ),
+  );
+
+  render(<YourIntegrations />);
+
+  expect(await screen.findByText('Stripe')).toBeInTheDocument();
+  expect(screen.queryByText('Private API')).not.toBeInTheDocument();
+  expect(
+    screen.queryByText('Someone else private API'),
+  ).not.toBeInTheDocument();
+});
+
+it('shows only owned private integrations and always submits personal scope', async () => {
+  const personalSecret = {
+    ...secret,
+    label: 'Personal API',
+    visibility: 'owner',
+  };
+  fetchMock
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          secrets: [
+            personalSecret,
+            { ...secret, label: 'Shared API' },
+            {
+              ...personalSecret,
+              secretRef: '6a1f8f1e-0000-4000-8000-000000000014',
+              label: 'Other private API',
+              ownerName: 'Taylor',
+            },
+          ],
+        }),
+      ),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ secret: personalSecret }), { status: 201 }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ secrets: [personalSecret] })),
+    );
+
+  render(<PersonalIntegrations />);
+
+  expect(await screen.findByText('Personal API')).toBeInTheDocument();
+  expect(screen.queryByRole('columnheader')).not.toBeInTheDocument();
+  expect(screen.queryByText('Shared API')).not.toBeInTheDocument();
+  expect(screen.queryByText('Other private API')).not.toBeInTheDocument();
+  expect(screen.queryByText(/Owned by/)).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: 'Configure Personal API' }),
+  ).not.toBeInTheDocument();
+  const personalRow = screen.getByText('Personal API').closest('[role="row"]');
+  expect(personalRow).not.toBeNull();
+  expect(personalRow?.querySelectorAll('[role="cell"]')).toHaveLength(3);
+  expect(screen.getByText(/api\.stripe\.com/).closest('[role="cell"]')).toBe(
+    screen.getByText('Personal API').closest('[role="cell"]'),
+  );
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Add personal integration' }),
+  );
+  expect(
+    screen.queryByLabelText('Who can use this integration?'),
+  ).not.toBeInTheDocument();
+  fireEvent.change(await screen.findByLabelText('Name'), {
+    target: { value: 'Personal API' },
+  });
+  fireEvent.change(screen.getByLabelText('Service origin'), {
+    target: { value: 'https://api.example.com' },
+  });
+  fireEvent.change(screen.getByLabelText('API key'), {
+    target: { value: 'personal-test-credential' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toMatchObject({
+    visibility: 'owner',
+  });
 });
 
 it('shows who shared an integration and lets an authorized viewer change visibility', async () => {
