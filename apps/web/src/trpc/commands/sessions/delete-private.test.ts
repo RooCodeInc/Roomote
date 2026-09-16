@@ -170,7 +170,7 @@ describe('deletePrivateSessionCommand', () => {
     ).resolves.toBeDefined();
     await expect(
       db.query.tasks.findFirst({ where: eq(tasks.id, task.id) }),
-    ).resolves.toBeDefined();
+    ).resolves.toMatchObject({ state: 'active' });
     await expect(
       db.query.taskArtifacts.findFirst({
         where: eq(taskArtifacts.id, artifact!.id),

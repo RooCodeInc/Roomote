@@ -187,12 +187,6 @@ export async function deletePrivateSessionCommand(
           reason: 'artifact_uploads_pending' as const,
         };
       }
-      if (taskIds.length > 0) {
-        await tx
-          .update(tasks)
-          .set({ state: 'canceled', updatedAt: now })
-          .where(inArray(tasks.id, taskIds));
-      }
       return { ready: true as const, session, taskIds, artifacts };
     });
 
@@ -319,12 +313,6 @@ export async function deletePrivateSessionCommand(
           taskIds.join('\0') !== deletion.taskIds.join('\0') ||
           artifactIds.join('\0') !== preparedArtifactIds.join('\0')
         ) {
-          if (taskIds.length > 0) {
-            await tx
-              .update(tasks)
-              .set({ state: 'canceled', updatedAt: now })
-              .where(inArray(tasks.id, taskIds));
-          }
           return { ready: true as const, session, taskIds, artifacts };
         }
 
