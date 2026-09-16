@@ -155,6 +155,7 @@
           "integrations/better-stack",
           "integrations/braintrust",
           "integrations/elevenlabs",
+          "integrations/exa",
           "integrations/grafana",
           "integrations/granola",
           "integrations/jira",

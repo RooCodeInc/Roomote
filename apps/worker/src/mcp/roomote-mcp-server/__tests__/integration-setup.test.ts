@@ -63,6 +63,19 @@ describe('integration setup guide', () => {
     );
   });
 
+  it('documents the opt-in Exa keyless and optional API-key flow', () => {
+    expect(INTEGRATION_SETUP_CONTENT).toContain('# Exa');
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'Exa supports free keyless access with an optional admin-managed API key',
+    );
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'Exa rate limits apply, and Exa Agent is unavailable.',
+    );
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'Removing the key returns an enabled integration to keyless access',
+    );
+  });
+
   it('documents the admin-managed Vercel setup flow', () => {
     expect(INTEGRATION_SETUP_CONTENT).toContain('# Vercel');
     expect(INTEGRATION_SETUP_CONTENT).toContain(

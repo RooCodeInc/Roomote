@@ -35,7 +35,10 @@ conversation around that task.
 
 Fast is the default for unpinned requests across the web dashboard and
 supported chat providers. Choose an environment or repository explicitly when
-you already know where the work should run.
+you already know where the work should run. That choice controls the initial
+checkout and tooling, while the sandbox can still check out other active
+repositories authorized for the task through its `REPOSITORIES.md` index. An
+additional checkout does not provision another environment's services.
 
 When work needs a sandbox but no source code, ask Fast to delegate it to
 **Blank slate**. The delegated task starts with an empty workspace and clones

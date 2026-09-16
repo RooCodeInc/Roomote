@@ -4022,8 +4022,6 @@ export async function answerFastAgentQuestion({
             privateOwnerUserId: currentPrivateOwnerUserId,
             privateSessionsExperimentEnabled,
             humanTurn: !platformEvent,
-            conversation,
-            messageId: currentMessageId ?? conversation.conversationId,
           },
           availableIntegrations,
           {
@@ -4138,7 +4136,7 @@ export async function answerFastAgentQuestion({
     };
     // Subagents may look up and call on-demand deployment MCP tools; every
     // other Fast tool stays with the parent. Calls run through the parent's
-    // MCP executor, so gating, duplicate detection, and auditing are shared.
+    // MCP executor, so gating and duplicate detection are shared.
     const executeSubagentNativeTool = async (
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
@@ -4883,8 +4881,6 @@ export async function answerFastAgentQuestion({
                   apiBaseUrl,
                   sessionId: session.id,
                   humanTurn: true,
-                  conversation,
-                  messageId: currentMessageId ?? conversation.conversationId,
                 },
                 availableIntegrations,
                 {

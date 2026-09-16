@@ -4,6 +4,7 @@ import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
   filterRepositoryNamesForSourceControlProvider,
+  resolveRepositoryNamesForSourceControlProviderFromPayload,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
@@ -858,6 +859,14 @@ async function resolveBitbucketRepositoryNamesForTaskRun(
       BITBUCKET_PROVIDER,
     );
   };
+  const stampedRepositories =
+    resolveRepositoryNamesForSourceControlProviderFromPayload(
+      taskRun.payload,
+      BITBUCKET_PROVIDER,
+    );
+  if (stampedRepositories) {
+    return stampedRepositories;
+  }
 
   if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({

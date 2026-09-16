@@ -26,6 +26,7 @@ import {
   FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+  isPublicUrlFetchImageResult,
   NO_REPOSITORIES,
   REASONING_EFFORT_VALUES,
   MANAGE_WAKEUPS_TOOL_DESCRIPTION,
@@ -1132,6 +1133,18 @@ async function handleMcpRequest(
       args: params.arguments ?? {},
     });
     assertFastTurnActive(isActive);
+    if (isPublicUrlFetchImageResult(result)) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Image fetched successfully' },
+          {
+            type: 'image' as const,
+            data: result.data,
+            mimeType: result.mimeType,
+          },
+        ],
+      };
+    }
     return {
       content: [
         {

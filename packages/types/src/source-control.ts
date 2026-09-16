@@ -211,6 +211,23 @@ export function filterRepositoryNamesForSourceControlProvider(
 }
 
 /**
+ * Returns the repositories explicitly stamped for a provider, or undefined
+ * for legacy payloads without an authoritative repository map.
+ */
+export function resolveRepositoryNamesForSourceControlProviderFromPayload(
+  payload: { repositoryProviders?: unknown },
+  provider: SourceControlProvider,
+): string[] | undefined {
+  const repositoryProviders = resolveRepositoryProvidersFromPayload(payload);
+
+  return repositoryProviders
+    ? Object.entries(repositoryProviders)
+        .filter(([, repositoryProvider]) => repositoryProvider === provider)
+        .map(([repositoryName]) => repositoryName)
+    : undefined;
+}
+
+/**
  * Reads the optional `sourceControlHost` field from a task payload. Returns
  * the trimmed host, or undefined when the payload carries no usable host so
  * repository resolution falls back to (provider, fullName) alone.

@@ -115,6 +115,7 @@ export function resolveStandardTaskSurface({
 }
 
 export function resolveAggregateSourceControl({
+  repo,
   sourceControlProvider,
   sourceControlHost,
   repositoryProviders,
@@ -125,24 +126,33 @@ export function resolveAggregateSourceControl({
   | 'sourceControlHost'
   | 'repositoryProviders'
   | 'selectedRepositories'
->): RepositorySourceControl | undefined {
+> & { repo?: string }): RepositorySourceControl | undefined {
   if (!sourceControlProvider) {
     return undefined;
   }
 
-  const providers = repositoryProviders
-    ? new Set(Object.values(repositoryProviders))
-    : null;
   const selectedRepositoryNames = selectedRepositories
     ? [...new Set(selectedRepositories)]
-    : [];
+    : repo && repo !== ALL_REPOSITORIES
+      ? [repo]
+      : [];
+  const providers = repositoryProviders
+    ? new Set(
+        selectedRepositoryNames.length > 0
+          ? selectedRepositoryNames.flatMap((repository) => {
+              const provider = repositoryProviders[repository];
+              return provider ? [provider] : [];
+            })
+          : sourceControlHost
+            ? [sourceControlProvider]
+            : Object.values(repositoryProviders),
+      )
+    : null;
   const hasCompleteSelection =
     selectedRepositoryNames.length === 0 ||
-    (Object.keys(repositoryProviders ?? {}).length ===
-      selectedRepositoryNames.length &&
-      selectedRepositoryNames.every((repository) =>
-        Object.hasOwn(repositoryProviders ?? {}, repository),
-      ));
+    selectedRepositoryNames.every((repository) =>
+      Object.hasOwn(repositoryProviders ?? {}, repository),
+    );
 
   if (
     !hasCompleteSelection ||

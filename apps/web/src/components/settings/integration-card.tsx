@@ -269,7 +269,13 @@ export function IntegrationListHeader() {
   );
 }
 
-export function IntegrationListRow({ item }: { item: IntegrationItem }) {
+export function IntegrationListRow({
+  item,
+  stackDescription = false,
+}: {
+  item: IntegrationItem;
+  stackDescription?: boolean;
+}) {
   const configureAction = item.configureAction;
   const manageToolsAction = item.manageToolsAction;
   const removeAction = item.removeAction;
@@ -281,7 +287,7 @@ export function IntegrationListRow({ item }: { item: IntegrationItem }) {
         id={`integration-${item.id}`}
         role="row"
         data-highlighted={item.highlighted ? 'true' : undefined}
-        className={`grid grid-cols-[1rem_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[1rem_minmax(0,4fr)_minmax(0,6fr)_7rem] md:items-center md:gap-4 md:px-4 md:py-3 ${item.highlighted ? 'bg-primary/5 ring-1 ring-inset ring-primary/40' : ''}`}
+        className={`grid grid-cols-[1rem_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:items-center md:gap-4 md:px-4 md:py-3 ${stackDescription ? 'md:grid-cols-[1rem_minmax(0,1fr)_7rem]' : 'md:grid-cols-[1rem_minmax(0,4fr)_minmax(0,6fr)_7rem]'} ${item.highlighted ? 'bg-primary/5 ring-1 ring-inset ring-primary/40' : ''}`}
       >
         <div role="cell" className="col-start-1 row-start-1 pt-0.5 md:pt-0">
           <div className="flex size-4 items-center justify-center">
@@ -303,16 +309,23 @@ export function IntegrationListRow({ item }: { item: IntegrationItem }) {
               <span>{item.status}</span>
             </div>
           ) : null}
+          {stackDescription ? (
+            <p className="text-sm font-normal text-muted-foreground/80">
+              {item.description}
+            </p>
+          ) : null}
         </div>
+        {!stackDescription ? (
+          <div
+            role="cell"
+            className="col-span-2 col-start-2 row-start-2 min-w-0 text-sm text-muted-foreground/80 md:col-span-1 md:col-start-3 md:row-start-1"
+          >
+            {item.description}
+          </div>
+        ) : null}
         <div
           role="cell"
-          className="col-span-2 col-start-2 row-start-2 min-w-0 text-sm text-muted-foreground/80 md:col-span-1 md:col-start-3 md:row-start-1"
-        >
-          {item.description}
-        </div>
-        <div
-          role="cell"
-          className="col-start-3 row-start-1 flex shrink-0 items-center justify-end gap-1 md:col-start-4"
+          className={`col-start-3 row-start-1 flex shrink-0 items-center justify-end gap-1 ${stackDescription ? 'md:col-start-3' : 'md:col-start-4'}`}
         >
           {configureAction ? (
             <IntegrationIconAction

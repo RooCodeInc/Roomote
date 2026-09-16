@@ -27,7 +27,7 @@ function formatOnDemandRepositoriesGuidance({
 
   return [
     '',
-    'Repositories are checked out on demand:',
+    'Additional repositories are checked out on demand:',
     `- This task can use ${total} ${total === 1 ? 'repository' : 'repositories'}; ${clonedCount} ${clonedCount === 1 ? 'is' : 'are'} checked out right now. \`${ON_DEMAND_REPOSITORIES_MANIFEST_FILE}\` in this directory lists every repository with its default branch and description; read it to pick the right one.`,
     `- Before reading, searching, or changing a repository that is not checked out, call the \`${CLONE_REPOSITORY_TOOL_NAME}\` tool with \`repositoryFullName\` (for example \`${example}\`). It clones the repository under this directory, returns the path, and updates \`${ON_DEMAND_REPOSITORIES_MANIFEST_FILE}\`. Large repositories can take a minute or two.`,
     '- Check out only the repositories the task needs. Do not run `git clone` yourself, and do not assume a repository is missing from the deployment because it has no directory here.',

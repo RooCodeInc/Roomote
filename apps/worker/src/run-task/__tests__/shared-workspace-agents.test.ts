@@ -117,7 +117,9 @@ describe('on-demand repositories', () => {
       onDemandRepositories,
     });
 
-    expect(content).toContain('Repositories are checked out on demand:');
+    expect(content).toContain(
+      'Additional repositories are checked out on demand:',
+    );
     expect(content).toContain(
       'This task can use 2 repositories; 0 are checked out right now. `REPOSITORIES.md`',
     );

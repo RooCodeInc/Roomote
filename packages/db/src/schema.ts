@@ -201,7 +201,6 @@ export const userRelations = relations(users, ({ many }) => ({
   taskPins: many(taskPins),
   ownedSessions: many(sessions, { relationName: 'sessionOwnerUser' }),
   sessionParticipants: many(sessionParticipants),
-  slackFastIntegrationCalls: many(slackFastIntegrationCalls),
   workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
 }));
@@ -4048,17 +4047,13 @@ export const slackConversationMessagesRelations = relations(
   }),
 );
 
-export type SlackFastIntegrationCallStatus =
-  | 'executing'
-  | 'succeeded'
-  | 'failed';
-
 /**
  * slack_fast_integration_calls
  *
- * Durable audit trail for deployment MCP tools executed directly by runless
- * Fast conversations. An `executing` row is inserted before the external call
- * so a missing terminal update remains visibly ambiguous.
+ * N-1 rollback: no longer written after removal of the dedicated Fast
+ * integration-call audit. The previous release still inserts and updates this
+ * table; drop it only after that release is no longer the supported rollback
+ * target. Existing rows are retained until that follow-up migration.
  */
 export const slackFastIntegrationCalls = pgTable(
   'slack_fast_integration_calls',
@@ -4077,7 +4072,9 @@ export const slackFastIntegrationCalls = pgTable(
     integrationId: text('integration_id').notNull(),
     toolName: text('tool_name').notNull(),
     arguments: jsonb('arguments').notNull().$type<Record<string, unknown>>(),
-    status: text('status').notNull().$type<SlackFastIntegrationCallStatus>(),
+    status: text('status')
+      .notNull()
+      .$type<'executing' | 'succeeded' | 'failed'>(),
     resultPreview: text('result_preview'),
     error: text('error'),
     startedAt: timestamp('started_at').notNull().defaultNow(),
@@ -4100,20 +4097,6 @@ export const slackFastIntegrationCalls = pgTable(
       table.createdAt,
     ),
   ],
-);
-
-export const slackFastIntegrationCallsRelations = relations(
-  slackFastIntegrationCalls,
-  ({ one }) => ({
-    fastAgentConversation: one(fastAgentConversations, {
-      fields: [slackFastIntegrationCalls.fastAgentConversationId],
-      references: [fastAgentConversations.id],
-    }),
-    user: one(users, {
-      fields: [slackFastIntegrationCalls.userId],
-      references: [users.id],
-    }),
-  }),
 );
 
 /**

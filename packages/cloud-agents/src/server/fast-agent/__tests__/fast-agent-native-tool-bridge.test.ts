@@ -988,6 +988,20 @@ describe('Fast native OpenCode tool bridge', () => {
       required: ['query'],
       additionalProperties: false,
     };
+    const fetchInputSchema = {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        format: { type: 'string', enum: ['text', 'markdown', 'html'] },
+        timeout: { type: 'number', maximum: 120 },
+        headers: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+        },
+      },
+      required: ['url'],
+      additionalProperties: false,
+    };
     const runtime = await getFastAgentNativeToolRuntime('native-mcp', [
       {
         id: 'roomote',
@@ -995,6 +1009,11 @@ describe('Fast native OpenCode tool bridge', () => {
         description: 'Repository access',
         tools: [
           { name: 'search_code', description: 'Search code', inputSchema },
+          {
+            name: 'fetch_url',
+            description: 'Fetch public content',
+            inputSchema: fetchInputSchema,
+          },
         ],
       },
     ]);
@@ -1004,7 +1023,19 @@ describe('Fast native OpenCode tool bridge', () => {
       agent: { build: { tools: Record<string, boolean> } };
       mcp: Record<string, { url: string; headers: Record<string, string> }>;
     };
-    const executor = vi.fn(async ({ args }) => ({ matches: [args.query] }));
+    const executor = vi.fn(async ({ toolName, args }) =>
+      toolName === 'fetch_url'
+        ? {
+            kind: 'image',
+            url: 'https://example.com/image.png',
+            status: 200,
+            contentType: 'image/png',
+            mimeType: 'image/png',
+            data: 'aW1hZ2U=',
+            size: 5,
+          }
+        : { matches: [args.query] },
+    );
     expect(config.mcp.roomote!.headers.Authorization).toBe(
       `Bearer ${runtime.mcpCapability}`,
     );
@@ -1046,6 +1077,11 @@ describe('Fast native OpenCode tool bridge', () => {
         }),
       ).resolves.toEqual([
         { name: 'search_code', description: 'Search code', inputSchema },
+        {
+          name: 'fetch_url',
+          description: 'Fetch public content',
+          inputSchema: fetchInputSchema,
+        },
       ]);
       await expect(
         callMcpTool({
@@ -1060,6 +1096,17 @@ describe('Fast native OpenCode tool bridge', () => {
         toolName: 'search_code',
         args: { query: 'Fast', filters: null },
       });
+      await expect(
+        callMcpTool({
+          url: config.mcp.roomote!.url,
+          headers: config.mcp.roomote!.headers,
+          toolName: 'fetch_url',
+          args: { url: 'https://example.com/image.png' },
+        }),
+      ).resolves.toEqual([
+        { type: 'text', text: 'Image fetched successfully' },
+        { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
+      ]);
     } finally {
       unbind();
     }

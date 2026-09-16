@@ -12,6 +12,7 @@ import {
   getMcpIntegrationUpstreamUrl,
   getMcpIntegrationConnectionScope,
   getAllowedIntegrationMcpToolNames,
+  isMcpConnectionExaConfig,
   isMcpConnectionXConfig,
   type McpIntegration,
 } from '@roomote/types';
@@ -23,14 +24,16 @@ import {
   resolveActingUserIdOrNull,
 } from './proxy-utils';
 
-async function resolveUpstreamAccessToken(
-  mcpId: string,
+async function resolveUpstreamCredentials(
+  integration: McpIntegration,
   mcpUrl: string,
   userId: string | null,
 ): Promise<{
-  accessToken: string | null;
+  authHeader: string | null;
+  extraHeaders?: Record<string, string>;
+  upstream?: string;
 }> {
-  const connectionScope = getMcpIntegrationConnectionScope(mcpId);
+  const connectionScope = getMcpIntegrationConnectionScope(integration);
   const connectionOwnerFilter =
     connectionScope === 'deployment'
       ? isNull(mcpConnections.userId)
@@ -42,13 +45,13 @@ async function resolveUpstreamAccessToken(
   // actor to look up.
   if (!connectionOwnerFilter) {
     return {
-      accessToken: null,
+      authHeader: null,
     };
   }
 
   const connection = await db.query.mcpConnections.findFirst({
     where: and(
-      eq(mcpConnections.mcpId, mcpId),
+      eq(mcpConnections.mcpId, integration.id),
       eq(mcpConnections.enabled, true),
       connectionOwnerFilter,
     ),
@@ -56,7 +59,19 @@ async function resolveUpstreamAccessToken(
 
   if (!connection) {
     return {
-      accessToken: null,
+      authHeader: null,
+    };
+  }
+
+  if (isMcpConnectionExaConfig(connection.authConfig)) {
+    const apiKey = decrypt(connection.authConfig.encryptedApiKey).trim();
+
+    return {
+      authHeader: null,
+      ...(apiKey.length > 0 ? { extraHeaders: { 'x-api-key': apiKey } } : {}),
+      ...(apiKey.length > 0 && integration.authenticatedUrl
+        ? { upstream: integration.authenticatedUrl }
+        : {}),
     };
   }
 
@@ -68,12 +83,12 @@ async function resolveUpstreamAccessToken(
     ).trim();
 
     return {
-      accessToken: bearerToken.length > 0 ? bearerToken : null,
+      authHeader: bearerToken.length > 0 ? bearerToken : null,
     };
   }
 
   return {
-    accessToken: (await getValidAccessToken(connection.id, mcpUrl)) ?? null,
+    authHeader: (await getValidAccessToken(connection.id, mcpUrl)) ?? null,
   };
 }
 
@@ -89,6 +104,7 @@ async function resolveDeploymentToolPolicy(mcpId: string) {
   });
 
   return {
+    enabled: Boolean(enablement),
     disabledToolNames: enablement?.disabledTools ?? null,
     allowedToolNames: getAllowedIntegrationMcpToolNames(mcpId) ?? null,
   };
@@ -129,15 +145,14 @@ export function createIntegrationMcpProxy(
           ? await resolveActingUserIdOrNull(auth)
           : await resolveActingUserId(auth);
 
-      let accessToken: string | null;
+      let credentials: Awaited<ReturnType<typeof resolveUpstreamCredentials>>;
       let toolPolicy: Awaited<ReturnType<typeof resolveDeploymentToolPolicy>>;
       try {
-        const resolvedConnection = await resolveUpstreamAccessToken(
-          integration.id,
+        credentials = await resolveUpstreamCredentials(
+          integration,
           upstreamUrl,
           actingUserId,
         );
-        accessToken = resolvedConnection.accessToken;
         toolPolicy = await resolveDeploymentToolPolicy(integration.id);
       } catch (error) {
         if (error instanceof McpProxyError) {
@@ -152,7 +167,11 @@ export function createIntegrationMcpProxy(
         );
       }
 
-      if (!accessToken) {
+      if (
+        !credentials.authHeader &&
+        !credentials.extraHeaders &&
+        !integration.supportsKeylessAccess
+      ) {
         throw new McpProxyError(
           404,
           getMcpIntegrationConnectionScope(integration) === 'deployment'
@@ -161,9 +180,18 @@ export function createIntegrationMcpProxy(
         );
       }
 
+      if (integration.supportsKeylessAccess && !toolPolicy.enabled) {
+        throw new McpProxyError(
+          404,
+          `${integration.name} is not enabled for this workspace`,
+        );
+      }
+
+      const { enabled: _enabled, ...resolvedToolPolicy } = toolPolicy;
+
       return {
-        authHeader: accessToken,
-        ...toolPolicy,
+        ...credentials,
+        ...resolvedToolPolicy,
       };
     },
   });

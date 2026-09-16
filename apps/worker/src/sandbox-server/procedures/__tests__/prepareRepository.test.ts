@@ -227,7 +227,11 @@ describe('prepareRepository procedure', () => {
   it.each([
     [
       'single-repository',
-      { repo: 'acme/api', sourceControlProvider: 'github' },
+      {
+        repo: 'acme/api',
+        sourceControlProvider: 'github',
+        repositoryProviders: { 'acme/api': 'github', 'acme/web': 'github' },
+      },
     ],
     [
       'repository-set',
@@ -235,27 +239,44 @@ describe('prepareRepository procedure', () => {
         repo: '__all_repositories__',
         selectedRepositories: ['acme/api'],
         sourceControlProvider: 'github',
+        repositoryProviders: { 'acme/api': 'github', 'acme/web': 'github' },
       },
     ],
-    ['environment', { environmentId: 'env-1', repo: 'acme/api' }],
+    [
+      'environment',
+      {
+        environmentId: 'env-1',
+        repo: 'acme/api',
+        sourceControlProvider: 'github',
+        repositoryProviders: { 'acme/api': 'github', 'acme/web': 'github' },
+      },
+    ],
   ])(
-    'refuses to widen a %s workspace with another deployment repository',
+    'checks out an authorized additional repository in a %s workspace',
     async (_label, payload) => {
       stubTaskRun(payload);
-      const prepareSpy = vi.spyOn(
-        WorkspaceManager.prototype,
-        'prepareRepository',
-      );
+      mockFindRepository.mockResolvedValue({
+        ...apiRepository,
+        fullName: 'acme/web',
+      });
+      const prepareSpy = vi
+        .spyOn(WorkspaceManager.prototype, 'prepareRepository')
+        .mockImplementation(async (fullName) => {
+          const repoPath = path.join(workspaceRootRef.current, fullName);
+          fs.mkdirSync(path.join(repoPath, '.git'), { recursive: true });
+          return repoPath;
+        });
 
-      await expect(
-        createCaller().commands.prepareRepository({
-          repositoryFullName: 'acme/web',
-        }),
-      ).rejects.toThrow(
-        'Repository checkout on demand is only available in all-repositories and Blank slate workspaces',
-      );
-      expect(mockFindRepository).not.toHaveBeenCalled();
-      expect(prepareSpy).not.toHaveBeenCalled();
+      const result = await createCaller().commands.prepareRepository({
+        repositoryFullName: 'acme/web',
+      });
+
+      expect(prepareSpy).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({
+        success: true,
+        repositoryFullName: 'acme/web',
+        alreadyCheckedOut: false,
+      });
     },
   );
 
@@ -275,6 +296,17 @@ describe('prepareRepository procedure', () => {
     );
     expect(mockFindRepository).not.toHaveBeenCalled();
     expect(prepareSpy).not.toHaveBeenCalled();
+  });
+
+  it('refuses a scoped run without a stamped repository scope', async () => {
+    stubTaskRun({ environmentId: 'env-1', repo: 'acme/api' });
+
+    await expect(
+      createCaller().commands.prepareRepository({
+        repositoryFullName: 'acme/web',
+      }),
+    ).rejects.toThrow('this run has no authorized repository scope');
+    expect(mockFindRepository).not.toHaveBeenCalled();
   });
 
   it('checks a stamped deployment repository out for a Blank slate run', async () => {
@@ -316,6 +348,12 @@ describe('prepareRepository procedure', () => {
   });
 
   it('leaves an existing checkout untouched', async () => {
+    stubTaskRun({
+      environmentId: 'env-1',
+      repo: 'acme/api',
+      sourceControlProvider: 'github',
+      repositoryProviders: { 'acme/api': 'github' },
+    });
     mockFindRepository.mockResolvedValue(apiRepository);
     const repoPath = path.join(workspaceRootRef.current, 'acme', 'api');
     fs.mkdirSync(path.join(repoPath, '.git'), { recursive: true });

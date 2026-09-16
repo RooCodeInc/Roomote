@@ -12,8 +12,6 @@ const mocks = vi.hoisted(() => ({
   createSessionBrokerToken: vi.fn(),
   listMcpTools: vi.fn(),
   callMcpTool: vi.fn(),
-  beginIntegrationCall: vi.fn(),
-  completeIntegrationCall: vi.fn(),
   findGithubInstallation: vi.fn(),
   isRouterMcpServerEnabled: vi.fn(),
   findGitlabRepository: vi.fn(),
@@ -66,8 +64,6 @@ vi.mock('@roomote/gitlab', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  beginSlackFastIntegrationCall: mocks.beginIntegrationCall,
-  completeSlackFastIntegrationCall: mocks.completeIntegrationCall,
   db: {
     query: {
       githubInstallations: { findFirst: mocks.findGithubInstallation },
@@ -171,11 +167,6 @@ describe('fast-agent integration broker', () => {
     });
     mocks.findNativeMergeRepository.mockResolvedValue(undefined);
     mocks.getMcpIntegrationDataPolicy.mockReturnValue('shared');
-    mocks.beginIntegrationCall.mockResolvedValue({
-      id: 'audit-1',
-      startedAt: new Date('2026-08-16T00:00:00.000Z'),
-    });
-    mocks.completeIntegrationCall.mockResolvedValue(undefined);
     mocks.listMcpTools.mockResolvedValue([
       { name: 'search', inputSchema: { type: 'object' } },
     ]);
@@ -185,7 +176,7 @@ describe('fast-agent integration broker', () => {
     vi.useRealTimers();
   });
 
-  it('discovers only HTTP integration infrastructure and schemas, audits the fresh actor, and refreshes availability', async () => {
+  it('discovers only HTTP integration infrastructure and schemas, uses the fresh actor, and refreshes availability', async () => {
     mocks.configuredServers = {
       _roomote_http_integrations: {
         url: 'https://api.example.com/api/mcp/http-integrations',
@@ -268,13 +259,6 @@ describe('fast-agent integration broker', () => {
         },
       ),
     ).toEqual(response);
-    expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: 'current-actor',
-        integrationId: '_roomote_http_integrations',
-        arguments: { toolName: 'integration_request' },
-      }),
-    );
     expect(mocks.callMcpTool).toHaveBeenCalledWith(
       expect.objectContaining({
         headers: { Authorization: 'Bearer fresh-actor-token' },
@@ -285,9 +269,6 @@ describe('fast-agent integration broker', () => {
       userId: 'current-actor',
       timeoutMs: 2 * 60_000,
     });
-    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'succeeded' }),
-    );
     mocks.configuredServers = {};
     const refreshed = await listFastAgentIntegrations(auditContext);
     expect(refreshed).toEqual([]);
@@ -362,25 +343,6 @@ describe('fast-agent integration broker', () => {
           },
         }),
       );
-      expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
-        expect.objectContaining({
-          userId: 'trusted-actor',
-          fastAgentConversationId: 'persisted-conversation',
-          arguments: { toolName: 'integration_request' },
-        }),
-      );
-      expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
-        expect.objectContaining({
-          status: 'succeeded',
-          resultPreview: '[Broker result omitted]',
-        }),
-      );
-      expect(
-        JSON.stringify([
-          mocks.beginIntegrationCall.mock.calls,
-          mocks.completeIntegrationCall.mock.calls,
-        ]),
-      ).not.toContain('canary');
     },
   );
 
@@ -420,7 +382,7 @@ describe('fast-agent integration broker', () => {
   );
 
   it.each(['token', 'transport'])(
-    'preserves failed Session broker audit status after %s failure',
+    'preserves Session broker %s failures',
     async (failure) => {
       const error = new Error('Broker request unavailable');
       if (failure === 'token')
@@ -449,15 +411,6 @@ describe('fast-agent integration broker', () => {
           },
         ),
       ).rejects.toBe(error);
-      expect(mocks.completeIntegrationCall).toHaveBeenCalledExactlyOnceWith({
-        id: 'audit-1',
-        status: 'failed',
-        error: 'Broker request unavailable',
-        startedAt: new Date('2026-08-16T00:00:00.000Z'),
-      });
-      expect(
-        JSON.stringify(mocks.beginIntegrationCall.mock.calls),
-      ).not.toContain('sensitive-request-canary');
       if (failure === 'token') expect(mocks.callMcpTool).not.toHaveBeenCalled();
     },
   );
@@ -776,7 +729,6 @@ describe('fast-agent integration broker', () => {
         }),
       ).rejects.toThrow('not available');
       expect(mocks.callMcpTool).not.toHaveBeenCalled();
-      expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
     },
   );
 
@@ -803,7 +755,6 @@ describe('fast-agent integration broker', () => {
       }),
     ).rejects.toThrow('not available');
     expect(mocks.callMcpTool).not.toHaveBeenCalled();
-    expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
   });
 
   it.each(['Unauthorized', 'tool unavailable'])(
@@ -828,9 +779,6 @@ describe('fast-agent integration broker', () => {
         }),
       ).rejects.toThrow(message);
       expect(mocks.callMcpTool).toHaveBeenCalledOnce();
-      expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
-        expect.objectContaining({ status: 'failed', error: message }),
-      );
     },
   );
 
@@ -1051,12 +999,6 @@ describe('fast-agent integration broker', () => {
         headers: { Authorization: 'Bearer fresh-revoked-actor-token' },
       }),
     );
-    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: 'failed',
-        error: 'Active member required',
-      }),
-    );
   });
 
   it('discovers GitLab and Bitbucket together with independent repository eligibility', async () => {
@@ -1194,7 +1136,7 @@ describe('fast-agent integration broker', () => {
   );
 
   it.each(['admin', 'member'])(
-    'dispatches discovered Bitbucket tools as a %s with fresh Roomote auth and an audit',
+    'dispatches discovered Bitbucket tools as a %s with fresh Roomote auth',
     async (role) => {
       mocks.getBitbucketOAuthConnection.mockResolvedValue({
         status: 'active',
@@ -1253,24 +1195,12 @@ describe('fast-agent integration broker', () => {
         headers: { Authorization: 'Bearer fresh-call-token' },
         toolName: 'add_pull_request_comment',
         args,
-        toolCallId: 'fast:audit-1:bitbucket:add_pull_request_comment',
         signal: expect.any(AbortSignal),
       });
       expect(mocks.createAuthToken).toHaveBeenLastCalledWith({
         userId: 'user-1',
         timeoutMs: 120_000,
       });
-      expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
-        expect.objectContaining({
-          integrationId: 'bitbucket',
-          toolName: 'add_pull_request_comment',
-          arguments: args,
-          userId: 'user-1',
-        }),
-      );
-      expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'audit-1', status: 'succeeded' }),
-      );
       await expect(
         callFastAgentIntegration(auditContext, available, {
           integrationId: 'bitbucket',
@@ -1295,9 +1225,6 @@ describe('fast-agent integration broker', () => {
         args: {},
       }),
     ).rejects.toThrow('Current deployment membership required');
-    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'failed' }),
-    );
   });
 
   it.each([
@@ -1580,6 +1507,29 @@ describe('fast-agent integration broker', () => {
       headers: { Authorization: 'Bearer control-plane-token' },
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it('honors the public-fetch timeout beyond the generic Fast integration deadline', async () => {
+    vi.useFakeTimers();
+    mocks.configuredServers = {
+      roomote: { url: 'https://app.example.test/mcp', headers: {} },
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'fetch_url', inputSchema: { type: 'object' } },
+    ]);
+    const available = await listFastAgentIntegrations(auditContext);
+    mocks.callMcpTool.mockImplementation(() => new Promise(() => undefined));
+
+    const call = callFastAgentIntegration(auditContext, available, {
+      integrationId: 'roomote',
+      toolName: 'fetch_url',
+      args: { url: 'https://public.example/', timeout: 120 },
+    });
+    const timedOut = expect(call).rejects.toThrow(
+      'Fast roomote/fetch_url integration call timed out after 125000ms.',
+    );
+    await vi.advanceTimersByTimeAsync(125_000);
+    await timedOut;
   });
 
   it('omits manage_tasks when its schema cannot safely remove task launch', async () => {
@@ -1927,7 +1877,6 @@ describe('fast-agent integration broker', () => {
       ),
     ).rejects.toThrow('tool is not available to fast mode');
     expect(mocks.callMcpTool).not.toHaveBeenCalled();
-    expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
   });
 
   it('rejects legacy manage_tasks launches before they can create an untracked Fast child', async () => {
@@ -1956,7 +1905,6 @@ describe('fast-agent integration broker', () => {
       'Fast Sessions must use launch_task so the child stays attached and reports settlement to its parent Session.',
     );
     expect(mocks.callMcpTool).not.toHaveBeenCalled();
-    expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
   });
 
   it('calls an allowlisted tool through a fixed authenticated proxy URL', async () => {
@@ -1984,29 +1932,11 @@ describe('fast-agent integration broker', () => {
       headers: { Authorization: 'Bearer control-plane-token' },
       toolName: 'search',
       args: { query: 'roadmap' },
-      toolCallId: 'fast:audit-1:notion:search',
       signal: expect.any(AbortSignal),
-    });
-    expect(mocks.beginIntegrationCall).toHaveBeenCalledWith({
-      fastAgentConversationId: 'session-1',
-      userId: 'user-1',
-      slackTeamId: 'team-1',
-      slackChannel: 'channel-1',
-      slackThreadTs: '100.1',
-      slackMessageTs: '100.2',
-      integrationId: 'notion',
-      toolName: 'search',
-      arguments: { query: 'roadmap' },
-    });
-    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith({
-      id: 'audit-1',
-      status: 'succeeded',
-      resultPreview: '{"results":["Roadmap"]}',
-      startedAt: new Date('2026-08-16T00:00:00.000Z'),
     });
   });
 
-  it('keeps private Brain reads out of audits and blocks shared-memory writes', async () => {
+  it('allows bounded private Brain reads and blocks shared-memory writes', async () => {
     mocks.callMcpTool.mockResolvedValue({ results: ['Shared fact'] });
     const privateContext = { ...auditContext, privacy: 'private' as const };
     const brain = {
@@ -2023,13 +1953,6 @@ describe('fast-agent integration broker', () => {
         args: { query: 'private canary query' },
       }),
     ).resolves.toEqual({ results: ['Shared fact'] });
-    expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
-      expect.objectContaining({ arguments: {} }),
-    );
-    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
-      expect.objectContaining({ resultPreview: null }),
-    );
-
     await expect(
       callFastAgentIntegration(privateContext, [brain], {
         integrationId: 'gbrain',
@@ -2098,12 +2021,6 @@ describe('fast-agent integration broker', () => {
         request,
       ),
     ).resolves.toEqual({ value: 'private canary result' });
-    expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
-      expect.objectContaining({ arguments: {} }),
-    );
-    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
-      expect.objectContaining({ resultPreview: null }),
-    );
     expect(mocks.callMcpTool).toHaveBeenCalledTimes(1);
 
     await expect(
@@ -2120,7 +2037,7 @@ describe('fast-agent integration broker', () => {
     ).rejects.toThrow('require a private Session');
   });
 
-  it('preserves private policy through discovery, shared rejection, and private audit scrubbing', async () => {
+  it('preserves private policy through discovery and shared rejection', async () => {
     mocks.getMcpIntegrationDataPolicy.mockReturnValue('private');
     mocks.configuredServers = {
       'private-example': {
@@ -2146,8 +2063,6 @@ describe('fast-agent integration broker', () => {
     await expect(
       callFastAgentIntegration(auditContext, integrations, request),
     ).rejects.toThrow('require a private Session');
-    expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
-
     await expect(
       callFastAgentIntegration(
         {
@@ -2160,36 +2075,9 @@ describe('fast-agent integration broker', () => {
         request,
       ),
     ).resolves.toEqual({ value: 'private canary result' });
-    expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
-      expect.objectContaining({ arguments: {} }),
-    );
-    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
-      expect.objectContaining({ resultPreview: null }),
-    );
   });
 
-  it('does not execute a tool when its durable audit cannot be created', async () => {
-    mocks.beginIntegrationCall.mockRejectedValue(new Error('database offline'));
-
-    await expect(
-      callFastAgentIntegration(
-        auditContext,
-        [
-          {
-            id: 'notion',
-            name: 'Notion',
-            description: 'Knowledge',
-            tools: [{ name: 'search' }],
-          },
-        ],
-        { integrationId: 'notion', toolName: 'search', args: {} },
-      ),
-    ).rejects.toThrow('database offline');
-
-    expect(mocks.callMcpTool).not.toHaveBeenCalled();
-  });
-
-  it('records a failed tool call and preserves its original error', async () => {
+  it('preserves a failed tool call error', async () => {
     mocks.callMcpTool.mockRejectedValue(new Error('integration unavailable'));
 
     await expect(
@@ -2206,13 +2094,6 @@ describe('fast-agent integration broker', () => {
         { integrationId: 'notion', toolName: 'search', args: {} },
       ),
     ).rejects.toThrow('integration unavailable');
-
-    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith({
-      id: 'audit-1',
-      status: 'failed',
-      error: 'integration unavailable',
-      startedAt: new Date('2026-08-16T00:00:00.000Z'),
-    });
   });
 
   it.each([
@@ -2221,90 +2102,68 @@ describe('fast-agent integration broker', () => {
     'revoked permission',
     'protocol failure',
     'transport failure',
-  ])(
-    'audits a real MCP %s call without a false succeeded record',
-    async (scenario) => {
-      const { callMcpTool, McpToolCallError } = await vi.importActual<
-        typeof import('../../mcp-tool-client')
-      >('../../mcp-tool-client');
-      mocks.callMcpTool.mockImplementation(callMcpTool);
-      const call = vi.fn(() => {
-        if (scenario === 'protocol failure') {
-          throw new McpError(ErrorCode.InvalidParams, 'Invalid tool arguments');
-        }
-        return scenario === 'allowed'
-          ? { content: [], structuredContent: { ok: true } }
-          : {
-              isError: true,
-              content: [
-                {
-                  type: 'text' as const,
-                  text: `${scenario}: synthetic-secret`,
-                },
-              ],
-            };
-      });
-      const endpoint = await startMcpToolTestServer(call, {
-        httpFailure: scenario === 'transport failure',
-      });
-      try {
-        const result = callFastAgentIntegration(
-          auditContext,
-          [
-            {
-              id: '_roomote_http_integrations',
-              name: 'HTTP integrations',
-              description: 'HTTP',
-              tools: [{ name: 'integration_request' }],
-              endpoint: { url: endpoint.url, headers: {} },
-            },
-          ],
-          {
-            integrationId: '_roomote_http_integrations',
-            toolName: 'integration_request',
-            args: { method: scenario === 'denied POST' ? 'POST' : 'GET' },
-          },
-        );
-        if (scenario === 'allowed') {
-          await expect(result).resolves.toEqual({ ok: true });
-        } else if (
-          scenario === 'denied POST' ||
-          scenario === 'revoked permission'
-        ) {
-          await expect(result).rejects.toBeInstanceOf(McpToolCallError);
-        } else {
-          await expect(result).rejects.toThrow(
-            scenario === 'protocol failure' ? 'Invalid tool arguments' : '503',
-          );
-        }
-        expect(mocks.beginIntegrationCall).toHaveBeenCalledOnce();
-        expect(mocks.completeIntegrationCall).toHaveBeenCalledExactlyOnceWith({
-          id: 'audit-1',
-          status: scenario === 'allowed' ? 'succeeded' : 'failed',
-          ...(scenario === 'allowed'
-            ? { resultPreview: '[Broker result omitted]' }
-            : {
-                error:
-                  scenario === 'denied POST' ||
-                  scenario === 'revoked permission'
-                    ? 'McpToolCallError | MCP tool reported an error (isError: true).'
-                    : expect.any(String),
-              }),
-          startedAt: new Date('2026-08-16T00:00:00.000Z'),
-        });
-        expect(
-          JSON.stringify(mocks.completeIntegrationCall.mock.calls),
-        ).not.toContain('synthetic-secret');
-        if (scenario !== 'transport failure')
-          expect(call).toHaveBeenCalledOnce();
-      } finally {
-        mocks.callMcpTool.mockReset();
-        await endpoint.close();
+  ])('handles a real MCP %s call', async (scenario) => {
+    const { callMcpTool, McpToolCallError } = await vi.importActual<
+      typeof import('../../mcp-tool-client')
+    >('../../mcp-tool-client');
+    mocks.callMcpTool.mockImplementation(callMcpTool);
+    const call = vi.fn(() => {
+      if (scenario === 'protocol failure') {
+        throw new McpError(ErrorCode.InvalidParams, 'Invalid tool arguments');
       }
-    },
-  );
+      return scenario === 'allowed'
+        ? { content: [], structuredContent: { ok: true } }
+        : {
+            isError: true,
+            content: [
+              {
+                type: 'text' as const,
+                text: `${scenario}: synthetic-secret`,
+              },
+            ],
+          };
+    });
+    const endpoint = await startMcpToolTestServer(call, {
+      httpFailure: scenario === 'transport failure',
+    });
+    try {
+      const result = callFastAgentIntegration(
+        auditContext,
+        [
+          {
+            id: '_roomote_http_integrations',
+            name: 'HTTP integrations',
+            description: 'HTTP',
+            tools: [{ name: 'integration_request' }],
+            endpoint: { url: endpoint.url, headers: {} },
+          },
+        ],
+        {
+          integrationId: '_roomote_http_integrations',
+          toolName: 'integration_request',
+          args: { method: scenario === 'denied POST' ? 'POST' : 'GET' },
+        },
+      );
+      if (scenario === 'allowed') {
+        await expect(result).resolves.toEqual({ ok: true });
+      } else if (
+        scenario === 'denied POST' ||
+        scenario === 'revoked permission'
+      ) {
+        await expect(result).rejects.toBeInstanceOf(McpToolCallError);
+      } else {
+        await expect(result).rejects.toThrow(
+          scenario === 'protocol failure' ? 'Invalid tool arguments' : '503',
+        );
+      }
+      if (scenario !== 'transport failure') expect(call).toHaveBeenCalledOnce();
+    } finally {
+      mocks.callMcpTool.mockReset();
+      await endpoint.close();
+    }
+  });
 
-  it('times out a hung integration call and records the failure', async () => {
+  it('times out a hung integration call', async () => {
     vi.useFakeTimers();
     mocks.callMcpTool.mockImplementation(() => new Promise(() => undefined));
 
@@ -2330,11 +2189,5 @@ describe('fast-agent integration broker', () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     await timedOut;
-    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith({
-      id: 'audit-1',
-      status: 'failed',
-      error: 'Fast notion/search integration call timed out after 60000ms.',
-      startedAt: new Date('2026-08-16T00:00:00.000Z'),
-    });
   });
 });

@@ -46,6 +46,9 @@ const state = vi.hoisted(() => ({
   granolaConnection: null as null | {
     authStatus?: string | null;
   },
+  exaConnection: null as null | {
+    authStatus?: string | null;
+  },
   elevenLabsConnection: null as null | {
     authStatus?: string | null;
     voiceId?: string;
@@ -118,6 +121,8 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     saveNotionConnection: vi.fn(),
     saveRipplingConnection: vi.fn(),
     saveGranolaConnection: vi.fn(),
+    saveExaConnection: vi.fn(),
+    removeExaApiKey: vi.fn(),
     saveElevenLabsConnection: vi.fn(),
     saveVoiceConnection: vi.fn(),
     previewVoice: vi.fn(),
@@ -324,6 +329,18 @@ vi.mock('@/hooks/mcp-connections', () => ({
   useGranolaConnection: () => ({
     data: state.granolaConnection,
     isPending: false,
+  }),
+  useSaveExaConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveExaConnection,
+  }),
+  useExaConnection: () => ({
+    data: state.exaConnection,
+    isPending: false,
+  }),
+  useRemoveExaApiKey: () => ({
+    isPending: false,
+    mutate: mutations.removeExaApiKey,
   }),
   useSaveElevenLabsConnection: () => ({
     isPending: false,
@@ -601,6 +618,7 @@ describe('Integrations settings', () => {
     state.notionConnection = null;
     state.ripplingConnection = null;
     state.granolaConnection = null;
+    state.exaConnection = null;
     state.grafanaConnection = null;
     state.vercelConnection = null;
     state.xConnection = null;
@@ -1819,6 +1837,24 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
   });
 
+  it('opens the Exa API-key dialog with secure deployment guidance', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Exa API key' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Add Exa API key' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Exa API Key')).toBeInTheDocument();
+    expect(
+      screen.getByText(/The key stays encrypted server-side/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Exa Agent runs are usage-based/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/free keyless access/)).toBeInTheDocument();
+  });
+
   it('submits an Asana token from the dialog', () => {
     render(<Integrations />);
 
@@ -1899,6 +1935,87 @@ describe('Integrations settings', () => {
         onError: expect.any(Function),
       }),
     );
+  });
+
+  it('submits a trimmed Exa API key from the dialog', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Exa API key' }));
+    fireEvent.change(screen.getByLabelText('Exa API Key'), {
+      target: { value: '  exa-secret-key  ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add API key' }));
+
+    expect(mutations.saveExaConnection).toHaveBeenCalledWith(
+      { apiKey: 'exa-secret-key' },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+  });
+
+  it('keeps Exa off by default and enables keyless access explicitly', () => {
+    render(<Integrations />);
+
+    expect(
+      screen.getByText(
+        'Disabled. Enable Exa for free keyless search, or add a deployment API key.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Enable Exa' }));
+
+    expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(
+      { mcpId: 'exa', enabled: true },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(mutations.saveExaConnection).not.toHaveBeenCalled();
+  });
+
+  it('shows authenticated Exa separately and removes only its API key', () => {
+    state.deploymentEnablements = [{ mcpId: 'exa', enabled: true }];
+    state.userConnections = [{ mcpId: 'exa', authStatus: 'authenticated' }];
+    state.exaConnection = { authStatus: 'authenticated' };
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByText(
+        'Enabled with a deployment API key. Exa Agent is available and usage-based.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Exa API key' }));
+    expect(
+      screen.getByText(/continue with free keyless access/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove key' }));
+
+    expect(mutations.removeExaApiKey).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(mutations.setDeploymentEnabled).not.toHaveBeenCalled();
+  });
+
+  it('labels enabled keyless Exa without advertising Exa Agent', () => {
+    state.deploymentEnablements = [{ mcpId: 'exa', enabled: true }];
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByText(
+        'Enabled with free keyless access. Exa rate limits apply, and Exa Agent is unavailable.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Disable Exa' }),
+    ).toBeInTheDocument();
   });
 
   it('shows Asana connected controls and supports editing', () => {

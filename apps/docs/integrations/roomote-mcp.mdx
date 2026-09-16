@@ -67,6 +67,33 @@ from a specific conversation.
 Roomote still applies the access rules from the connected service, so the MCP
 only returns conversations your signed-in user is allowed to read.
 
+### Read a public URL
+
+Roomote MCP's `fetch_url` tool can fetch text or supported images from a public
+HTTP or HTTPS URL.
+Text can be returned as Markdown, plain text, or raw HTML; HTML is converted
+when Markdown or text is requested. Requests default to a 30-second timeout,
+allow a caller-selected timeout up to 120 seconds, and return at most 5 MiB of
+decompressed content. HTML-to-Markdown conversion is limited to 1 MiB of HTML
+to keep parsing bounded in the application process; request plain text or raw
+HTML for larger pages.
+
+Callers may provide explicit request headers, including authorization headers.
+Roomote sends only the supplied values and never inherits deployment, user,
+integration, or task credentials or cookies. Explicit sensitive headers are
+preserved across same-origin redirects and removed before a cross-origin
+redirect. Transport-controlled headers such as `Host` and `Content-Length`
+cannot be overridden.
+
+Roomote agents use this tool instead of the client runtime's generic fetch tool
+so Fast Sessions and coding tasks get the same behavior. The tool treats every
+response as untrusted data, rejects private, internal, reserved, and other
+non-public destinations, checks and pins every resolved address, revalidates
+every redirect, and supports only default HTTP and HTTPS ports. These are
+application-level SSRF protections, not network egress isolation: they do not
+restrict shell commands, browsers, or other networking available inside a
+coding sandbox.
+
 ## Things to try
 
 - “Push what I’m working on to a remote branch, then start a Roomote task from
@@ -79,6 +106,8 @@ only returns conversations your signed-in user is allowed to read.
 - “Tell the running task to add a regression test before it opens the PR.”
 - “Read the latest messages from this Fast Session and send a follow-up.”
 - “Use this Slack message as context and explain what the team decided.”
+- “Read this public documentation page and summarize its authentication
+  requirements.”
 - “Cancel the task working on the old approach.”
 
 ## Connect your MCP client
