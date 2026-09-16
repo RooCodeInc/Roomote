@@ -507,6 +507,13 @@ describe('resolveOpenCodeSmallModel', () => {
     const onAssistantTextUpdated = vi.fn();
     const session: { id?: string } = {};
 
+    expect(FAST_AGENT_SESSION_PERMISSIONS).toEqual(
+      expect.arrayContaining([
+        { permission: 'task', pattern: '*', action: 'allow' },
+        { permission: 'webfetch', pattern: '*', action: 'deny' },
+      ]),
+    );
+
     await expect(
       generateTrackedNonTaskTextInOpenCodeSession(
         {

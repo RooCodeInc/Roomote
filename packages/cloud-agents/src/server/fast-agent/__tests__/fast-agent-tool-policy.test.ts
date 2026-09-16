@@ -8,6 +8,21 @@ import {
   getFastAgentNativeAcpKind,
 } from '../fast-agent-tool-policy';
 
+describe('buildFastAgentToolFilter', () => {
+  it('keeps unrestricted control-plane tools unavailable', () => {
+    const filter = buildFastAgentToolFilter([], { surface: 'web' });
+
+    expect(filter).toMatchObject({
+      '*': false,
+      task: true,
+    });
+    expect(filter.webfetch).not.toBe(true);
+    expect(filter.bash).not.toBe(true);
+    expect(filter.read).not.toBe(true);
+    expect(filter.edit).not.toBe(true);
+  });
+});
+
 describe('getFastAgentNativeAcpKind', () => {
   it.each([
     [

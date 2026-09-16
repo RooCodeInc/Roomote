@@ -54,6 +54,9 @@ export const FAST_AGENT_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
 ).map((permission) => ({
   permission,
   pattern: '*',
+  // `task` is the only OpenCode built-in Fast exposes. In particular,
+  // `webfetch` remains denied here as well as in the generated agent filter:
+  // it would otherwise issue model-selected requests from the control plane.
   action: permission === 'task' ? 'allow' : 'deny',
 }));
 
