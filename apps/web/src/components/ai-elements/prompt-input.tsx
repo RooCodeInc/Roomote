@@ -34,6 +34,7 @@ import {
 
 import { generateClientUuid } from '@/lib/client-uuid';
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 import {
   DropdownMenu,
@@ -863,6 +864,7 @@ export const PromptInputTextarea = ({
   onChange,
   onKeyDown,
   className,
+  enterKeyHint,
   name,
   placeholder,
   submitWithMetaKey,
@@ -872,6 +874,7 @@ export const PromptInputTextarea = ({
   const textareaId = useId().replace(/:/g, '');
   const controller = useOptionalPromptInputController();
   const attachments = usePromptInputAttachments();
+  const isMobile = useIsMobile();
   const [isComposing, setIsComposing] = useState(false);
   const internalRef = useRef<HTMLTextAreaElement>(null);
 
@@ -914,6 +917,12 @@ export const PromptInputTextarea = ({
   }, [controlledValue, autoResize]);
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
+    // Mobile keyboards use Enter for multiline input, including on callers
+    // that otherwise intercept plain Enter before the shared submit logic.
+    if (e.key === 'Enter' && isMobile) {
+      return;
+    }
+
     // Call the external onKeyDown handler first.
     onKeyDown?.(e);
 
@@ -1022,6 +1031,9 @@ export const PromptInputTextarea = ({
         className,
       )}
       data-op-ignore="true"
+      enterKeyHint={
+        enterKeyHint ?? (isMobile || submitWithMetaKey ? 'enter' : 'send')
+      }
       id={id ?? `prompt-input-textarea-${textareaId}`}
       name={name ?? 'message'}
       onCompositionEnd={() => setIsComposing(false)}
