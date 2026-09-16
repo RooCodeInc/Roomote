@@ -3,8 +3,10 @@ import { z } from 'zod';
 
 import {
   disconnectSessionPresence,
+  disconnectSessionVoiceCall,
   listSessionPresentUserIds,
   refreshSessionPresence,
+  refreshSessionVoiceCall,
 } from '@roomote/redis';
 
 import { authorize } from '@/lib/server/auth-context';
@@ -17,7 +19,10 @@ import { getUsersById } from '@/lib/server/users';
 export const runtime = 'nodejs';
 
 const paramsSchema = z.object({ sessionId: z.string().uuid() });
-const bodySchema = z.object({ clientId: z.string().uuid() });
+const bodySchema = z.object({
+  clientId: z.string().uuid(),
+  channel: z.enum(['view', 'voice']).default('view'),
+});
 
 async function authorizePresenceRequest(
   props: {
@@ -86,7 +91,11 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   }
 
-  const lease = await refreshSessionPresence({
+  const refresh =
+    body.data.channel === 'voice'
+      ? refreshSessionVoiceCall
+      : refreshSessionPresence;
+  const lease = await refresh({
     sessionId: context.sessionId,
     userId: context.auth.userId,
     clientId: body.data.clientId,
@@ -105,7 +114,11 @@ export async function DELETE(
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   }
 
-  await disconnectSessionPresence({
+  const disconnect =
+    body.data.channel === 'voice'
+      ? disconnectSessionVoiceCall
+      : disconnectSessionPresence;
+  await disconnect({
     sessionId: context.sessionId,
     userId: context.auth.userId,
     clientId: body.data.clientId,

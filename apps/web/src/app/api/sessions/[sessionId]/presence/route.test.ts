@@ -4,16 +4,20 @@ import { db, users, inArray, userFactory } from '@roomote/db/server';
 const {
   authorizeMock,
   disconnectSessionPresenceMock,
+  disconnectSessionVoiceCallMock,
   findAccessibleSessionMock,
   findReadableSessionMock,
   refreshSessionPresenceMock,
+  refreshSessionVoiceCallMock,
   listSessionPresentUserIdsMock,
 } = vi.hoisted(() => ({
   authorizeMock: vi.fn(),
   disconnectSessionPresenceMock: vi.fn(),
+  disconnectSessionVoiceCallMock: vi.fn(),
   findAccessibleSessionMock: vi.fn(),
   findReadableSessionMock: vi.fn(),
   refreshSessionPresenceMock: vi.fn(),
+  refreshSessionVoiceCallMock: vi.fn(),
   listSessionPresentUserIdsMock: vi.fn(),
 }));
 
@@ -24,7 +28,9 @@ vi.mock('@/lib/server/sessions', () => ({
 }));
 vi.mock('@roomote/redis', () => ({
   disconnectSessionPresence: disconnectSessionPresenceMock,
+  disconnectSessionVoiceCall: disconnectSessionVoiceCallMock,
   refreshSessionPresence: refreshSessionPresenceMock,
+  refreshSessionVoiceCall: refreshSessionVoiceCallMock,
   listSessionPresentUserIds: listSessionPresentUserIdsMock,
 }));
 
@@ -34,13 +40,17 @@ const SESSION_ID = '6a1f8f1e-0000-4000-8000-000000000006';
 const CLIENT_ID = '6a1f8f1e-0000-4000-8000-000000000007';
 const USER_ID = '6a1f8f1e-0000-4000-8000-000000000008';
 
-function request(method: 'POST' | 'DELETE', clientId = CLIENT_ID) {
+function request(
+  method: 'POST' | 'DELETE',
+  clientId = CLIENT_ID,
+  channel?: 'view' | 'voice',
+) {
   return new NextRequest(
     `http://localhost/api/sessions/${SESSION_ID}/presence`,
     {
       method,
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ clientId }),
+      body: JSON.stringify({ clientId, ...(channel ? { channel } : {}) }),
     },
   );
 }
@@ -65,6 +75,7 @@ describe('/api/sessions/[sessionId]/presence', () => {
     findAccessibleSessionMock.mockResolvedValue({ id: SESSION_ID });
     findReadableSessionMock.mockResolvedValue({ id: SESSION_ID });
     refreshSessionPresenceMock.mockResolvedValue({ expiresAt: 31_000 });
+    refreshSessionVoiceCallMock.mockResolvedValue({ expiresAt: 31_000 });
     listSessionPresentUserIdsMock.mockResolvedValue([]);
   });
 
@@ -144,6 +155,28 @@ describe('/api/sessions/[sessionId]/presence', () => {
       userId: USER_ID,
       clientId: CLIENT_ID,
     });
+  });
+
+  it('routes voice-call leases without changing viewer presence', async () => {
+    expect(
+      (await POST(request('POST', CLIENT_ID, 'voice'), props)).status,
+    ).toBe(200);
+    expect(refreshSessionVoiceCallMock).toHaveBeenCalledWith({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientId: CLIENT_ID,
+    });
+    expect(refreshSessionPresenceMock).not.toHaveBeenCalled();
+
+    expect(
+      (await DELETE(request('DELETE', CLIENT_ID, 'voice'), props)).status,
+    ).toBe(204);
+    expect(disconnectSessionVoiceCallMock).toHaveBeenCalledWith({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      clientId: CLIENT_ID,
+    });
+    expect(disconnectSessionPresenceMock).not.toHaveBeenCalled();
   });
 
   it('rejects unauthenticated requests', async () => {

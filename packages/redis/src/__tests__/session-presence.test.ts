@@ -2,10 +2,14 @@ import type { Redis } from 'ioredis';
 
 import {
   disconnectSessionPresence,
+  disconnectSessionVoiceCall,
+  isSessionVoiceCallActive,
   isSessionUserPresent,
   listSessionPresentUserIds,
   refreshSessionPresence,
+  refreshSessionVoiceCall,
   SESSION_PRESENCE_LEASE_MS,
+  SESSION_VOICE_CALL_LEASE_MS,
 } from '../session-presence';
 
 class PresenceRedis {
@@ -216,6 +220,40 @@ describe('Session presence leases', () => {
         { sessionId: identity.sessionId, userId: 'user-2' },
         { now: 1_000, redis },
       ),
+    ).resolves.toBe(false);
+  });
+});
+
+describe('Session voice-call leases', () => {
+  let redis: Redis;
+
+  beforeEach(() => {
+    redis = new PresenceRedis() as unknown as Redis;
+  });
+
+  it('refreshes, disconnects, and expires independently from view presence', async () => {
+    const lease = { ...identity, clientId: 'tab-1' };
+    await refreshSessionPresence(lease, { now: 1_000, redis });
+    await refreshSessionVoiceCall(lease, { now: 2_000, redis });
+
+    await disconnectSessionPresence(lease, { redis });
+    await expect(
+      isSessionUserPresent(identity, { now: 2_000, redis }),
+    ).resolves.toBe(false);
+    await expect(
+      isSessionVoiceCallActive(identity, { now: 2_000, redis }),
+    ).resolves.toBe(true);
+    await expect(
+      isSessionVoiceCallActive(identity, {
+        now: 2_000 + SESSION_VOICE_CALL_LEASE_MS,
+        redis,
+      }),
+    ).resolves.toBe(false);
+
+    await refreshSessionVoiceCall(lease, { now: 40_000, redis });
+    await disconnectSessionVoiceCall(lease, { redis });
+    await expect(
+      isSessionVoiceCallActive(identity, { now: 40_000, redis }),
     ).resolves.toBe(false);
   });
 });

@@ -50,6 +50,7 @@ import {
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
+import { useSessionVoiceCallLease } from '@/hooks/useSessionVoiceCallLease';
 import { useSessionNavigationState } from '@/hooks/useSessionNavigationState';
 import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 import {
@@ -1345,6 +1346,10 @@ export function FastSessionTranscript({
         assistant: { text, eventId: null },
       })),
   });
+  const waitForVoiceCallLease = useSessionVoiceCallLease(
+    sessionId,
+    liveVoice.active,
+  );
 
   // Utterances queue rather than dropping when one lands while the previous
   // reply is still in flight; the queue drains as each send settles.
@@ -1359,18 +1364,22 @@ export function FastSessionTranscript({
       return;
     }
 
-    void sendReply(
-      {
-        text: next.text,
-        files: [],
-        model: modelSelectionRef.current.model,
-        reasoningEffort: modelSelectionRef.current.reasoningEffort,
-      },
-      { voiceDelegationId: next.delegationId },
-    ).finally(() => {
-      setVoiceRequestsInFlight((count) => Math.max(0, count - 1));
-    });
-  }, [isSending, utteranceQueueVersion, sendReply]);
+    void waitForVoiceCallLease()
+      .then(() =>
+        sendReply(
+          {
+            text: next.text,
+            files: [],
+            model: modelSelectionRef.current.model,
+            reasoningEffort: modelSelectionRef.current.reasoningEffort,
+          },
+          { voiceDelegationId: next.delegationId },
+        ),
+      )
+      .finally(() => {
+        setVoiceRequestsInFlight((count) => Math.max(0, count - 1));
+      });
+  }, [isSending, utteranceQueueVersion, sendReply, waitForVoiceCallLease]);
 
   const agentWorking = transcriptWorking;
   const liveVoiceActive = liveVoice.active;

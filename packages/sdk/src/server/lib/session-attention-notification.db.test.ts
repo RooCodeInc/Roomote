@@ -22,11 +22,9 @@ const mocks = vi.hoisted(() => ({
   voiceActive: vi.fn(),
 }));
 
-vi.mock('@roomote/cloud-agents/server', () => ({
-  isFastAgentVoiceCallActive: mocks.voiceActive,
-}));
 vi.mock('@roomote/redis', () => ({
   isSessionUserPresent: mocks.isPresent,
+  isSessionVoiceCallActive: mocks.voiceActive,
 }));
 vi.mock('./user-direct-message', () => ({
   hasAnyUserDirectMessageIdentity: mocks.hasAny,
@@ -165,8 +163,8 @@ describe('session attention notifications', () => {
     });
   });
 
-  it('suppresses the personal fallback while voice is connected and restores it after disconnect', async () => {
-    const { conversation } = await createFastWebSession();
+  it('records suppression while voice is connected and preserves later disconnected delivery', async () => {
+    const { conversation, session, user } = await createFastWebSession();
     mocks.voiceActive.mockResolvedValueOnce(true);
 
     await expect(
@@ -179,23 +177,60 @@ describe('session attention notifications', () => {
       }),
     ).resolves.toBe('skipped');
 
-    expect(mocks.voiceActive).toHaveBeenCalledWith(conversation.id);
-    expect(mocks.hasAny).not.toHaveBeenCalled();
-    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(mocks.voiceActive).toHaveBeenCalledWith({
+      sessionId: session.id,
+      userId: user.id,
+    });
+    expect(mocks.hasAny).toHaveBeenCalledOnce();
+    expect(mocks.enqueue).toHaveBeenCalledOnce();
     expect(mocks.send).not.toHaveBeenCalled();
+
+    await expect(
+      notifyFastWebSessionAttention(
+        {
+          fastConversationId: conversation.id,
+          kind: 'result_ready',
+          eventId: 'voice-turn',
+          message: 'The answer was spoken on the call.',
+          manual: true,
+        },
+        false,
+      ),
+    ).resolves.toBe('already_claimed');
 
     await expect(
       notifyFastWebSessionAttention({
         fastConversationId: conversation.id,
         kind: 'result_ready',
-        eventId: 'voice-turn',
+        eventId: 'after-call',
         message: 'The answer now needs a notification.',
         manual: true,
       }),
     ).resolves.toBe('delivered');
 
-    expect(mocks.enqueue).toHaveBeenCalledOnce();
+    expect(mocks.enqueue).toHaveBeenCalledTimes(2);
     expect(mocks.send).toHaveBeenCalledOnce();
+  });
+
+  it('notifies defensively when the voice-call lease cannot be read', async () => {
+    const { conversation } = await createFastWebSession();
+    mocks.voiceActive.mockRejectedValueOnce(new Error('redis unavailable'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(
+      notifyFastWebSessionAttention({
+        fastConversationId: conversation.id,
+        kind: 'result_ready',
+        eventId: 'voice-state-error',
+        message: 'The answer is ready.',
+        manual: true,
+      }),
+    ).resolves.toBe('delivered');
+
+    expect(mocks.send).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Voice state lookup failed'),
+    );
   });
 
   it('notifies nonterminal direct-task completions once per completion id', async () => {
