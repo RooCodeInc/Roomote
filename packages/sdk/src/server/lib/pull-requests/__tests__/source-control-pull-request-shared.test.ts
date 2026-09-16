@@ -139,15 +139,7 @@ describe('environment GitHub repository scope', () => {
         ),
       ).toBeUndefined();
     } else {
-      await expect(assertion).rejects.toThrow(
-        [
-          'inactive anchor',
-          'non-GitHub mapped anchor',
-          'unmapped anchor',
-        ].includes(scenario)
-          ? 'GitHub installations'
-          : 'outside this task',
-      );
+      await expect(assertion).rejects.toThrow('outside this task');
     }
     expect(run.payload).toEqual(originalPayload);
     await expect(
