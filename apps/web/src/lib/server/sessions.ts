@@ -1225,7 +1225,7 @@ export async function getSessionForTask(auth: SessionAuth, taskId: string) {
     .select({ sessionId: sessions.id, title: sessions.title })
     .from(sessionTasks)
     .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
-    .where(eq(sessionTasks.taskId, taskId))
+    .where(and(eq(sessionTasks.taskId, taskId), privateSessionAccess(auth)))
     .limit(1);
   return row ?? null;
 }
@@ -1249,6 +1249,7 @@ export async function updateSessionMetadata(
       .where(
         and(
           eq(sessions.id, sessionId),
+          privateSessionAccess(auth),
           auth.isAdmin ? undefined : eq(sessions.ownerUserId, auth.userId),
         ),
       )
