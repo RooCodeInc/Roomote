@@ -53,9 +53,11 @@ temporary.
 
 ## What agents can do with it
 
-**In the Session itself**, Fast can discover existing integration keys and
-prepare secure approval requests. Fast does not make key-backed HTTP requests
-directly; it launches an attached coding task when the service must be called.
+**In a human Session turn**, Fast can discover existing integration keys,
+prepare secure approval requests, and make one or a few direct calls to an
+approved origin using any HTTP method approved for that integration. Roomote's
+API sends the request with the real key and returns the response. For scripts,
+SDKs, CLIs, or many calls, Fast launches an attached coding task instead.
 
 **In coding tasks launched from the Session**, the task receives each approved
 service as a substitute token in its environment, plus one base URL. The agent

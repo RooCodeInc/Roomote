@@ -10,7 +10,7 @@ Roomote 1.10 expands agent research and multi-repository work, reorganizes perso
 
 - Research the public web through guarded URL fetching or the new opt-in Exa integration.
 - Check out additional authorized repositories from any sandbox workspace while preserving its original tooling and services.
-- Manage personal integration keys separately from deployment-wide integrations and keep key-backed requests inside delegated coding tasks.
+- Manage personal integration keys separately from deployment-wide integrations, make bounded approved requests directly from Fast, and use task-scoped substitutes for scripts or many calls.
 - Keep Sessions moving with stronger mobile input, artifact previews, pull-request views, authentication recovery, and delivery diagnostics.
 
 ### Minor changes
@@ -24,7 +24,7 @@ Roomote 1.10 expands agent research and multi-repository work, reorganizes perso
 - Roomote agents now read nested Slack workflow attachments, look up available context before asking about terse triggers, and identify the exact task-memory field limit when a saved summary is too large.
 - Artifact galleries now show bounded real content for CSV and TSV files and reliably load Markdown previews instead of leaving supported files on abstract or stuck placeholders.
 - Fix `/health/bullmq` reporting every deployment unhealthy: the overdue queued-event count bound a Date inside a raw SQL fragment, which Postgres rejected, so the check failed on every probe since 1.9.3.
-- Integration keys now separate personal and deployment-wide access: members manage private keys in Personal Settings, admins manage shared keys in Integrations, inactive owners immediately invalidate shared grants, and listings omit revoked or expired entries. Fast can discover and prepare keys, while delegated coding tasks make approved-method requests through scoped substitute tokens. Approval dialogs, transcript labels, save continuation, error guidance, and owner-aware task-settlement handling are clearer and safer.
+- Integration keys now separate personal and deployment-wide access: members manage private keys in Personal Settings, admins manage shared keys in Integrations, inactive owners immediately invalidate shared grants, and listings omit revoked or expired entries. During human turns, Fast can make one or a few direct approved-method requests; delegated coding tasks use scoped substitute tokens for scripts, SDKs, CLIs, or many calls. Approval dialogs, transcript labels, save continuation, error guidance, and owner-aware task-settlement handling are clearer and safer.
 - Mobile composers now keep Enter available for multiline prompts and accept suggested text on the first tap without a soft-keyboard blur discarding the suggestion.
 - Operators get trustworthy password-reset delivery and pull-request conflict diagnostics, while abuse limits no longer trust caller-supplied forwarding headers that can be rotated to evade request ceilings.
 - Resolved pull-request review offers now leave the conversation once follow-up work starts, and nested tool calls keep the correct tool-specific icons inside expanded activity groups.
