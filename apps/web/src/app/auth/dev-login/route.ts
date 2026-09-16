@@ -20,6 +20,8 @@ export const runtime = 'nodejs';
 const DEFAULT_REDIRECT_PATH = '/';
 const DEFAULT_DEV_LOGIN_EMAIL = 'local@roomote.dev';
 const DEFAULT_DEV_LOGIN_NAME = 'Local Admin';
+const ONBOARDING_DEV_LOGIN_EMAIL = 'local+onboarding@roomote.dev';
+const ONBOARDING_DEV_LOGIN_NAME = 'Onboarding Admin';
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 const DEV_LOGIN_USER_AGENT = 'roomote-dev-login';
 
@@ -58,7 +60,16 @@ function isDevLoginEnabled(): boolean {
   );
 }
 
-function getDevLoginIdentity() {
+function getDevLoginIdentity(request: NextRequest) {
+  if (request.nextUrl.searchParams.get('scenario') === 'onboarding') {
+    return {
+      email: ONBOARDING_DEV_LOGIN_EMAIL,
+      id: `dev-login-${createHash('sha256').update(ONBOARDING_DEV_LOGIN_EMAIL).digest('hex').slice(0, 24)}`,
+      name: ONBOARDING_DEV_LOGIN_NAME,
+      onboardingCompletedAt: null,
+    };
+  }
+
   const email =
     Env.WEB_DEV_LOGIN_EMAIL?.trim().toLowerCase() || DEFAULT_DEV_LOGIN_EMAIL;
 
@@ -66,6 +77,7 @@ function getDevLoginIdentity() {
     email,
     id: `dev-login-${createHash('sha256').update(email).digest('hex').slice(0, 24)}`,
     name: email === DEFAULT_DEV_LOGIN_EMAIL ? DEFAULT_DEV_LOGIN_NAME : email,
+    onboardingCompletedAt: new Date(),
   };
 }
 
@@ -96,15 +108,17 @@ export async function GET(request: NextRequest) {
   const redirectParam =
     request.nextUrl.searchParams.get('redirect_url') ??
     request.nextUrl.searchParams.get('redirect');
+  const onboardingScenario =
+    request.nextUrl.searchParams.get('scenario') === 'onboarding';
   const redirectPath =
     normalizeAuthRedirect(redirectParam, appBaseUrl.origin) ??
-    DEFAULT_REDIRECT_PATH;
+    (onboardingScenario ? '/onboarding' : DEFAULT_REDIRECT_PATH);
 
   const response = NextResponse.redirect(
     new URL(redirectPath, appBaseUrl.origin),
   );
 
-  const identity = getDevLoginIdentity();
+  const identity = getDevLoginIdentity(request);
   if (!isRoomoteEmailAllowed(identity.email, Env.R_ALLOWED_EMAILS)) {
     return NextResponse.json(
       {
@@ -169,7 +183,7 @@ export async function GET(request: NextRequest) {
       },
       metadata: {},
       role: 'admin',
-      onboardingCompletedAt: now,
+      onboardingCompletedAt: identity.onboardingCompletedAt,
     })
     .onConflictDoUpdate({
       target: users.id,

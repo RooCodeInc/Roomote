@@ -4,6 +4,7 @@ import { createEmptySetupNewState, RunStatus } from '@roomote/types';
 
 import {
   taskRuns,
+  customMcpServers,
   deploymentSettings,
   environments,
   fastAgentConversations,
@@ -19,7 +20,9 @@ import {
 import { db } from '../../db';
 import {
   demoSeedEnvironmentName,
+  demoSeedDevelopmentIntegration,
   demoSeedFastSession,
+  demoSeedLifecycleSessions,
   demoSeedRepositories,
   demoSeedPullRequests,
   demoSeedTasks,
@@ -39,6 +42,12 @@ function withoutSettings(labels: string[]) {
 }
 
 async function cleanup() {
+  await db.delete(sessions).where(
+    inArray(
+      sessions.id,
+      Object.values(demoSeedLifecycleSessions).map(({ id }) => id),
+    ),
+  );
   await db
     .delete(sessions)
     .where(eq(sessions.fastConversationId, demoSeedFastSession.conversationId));
@@ -62,6 +71,9 @@ async function cleanup() {
   await db
     .delete(githubInstallations)
     .where(eq(githubInstallations.installedByUserId, demoSeedUserId));
+  await db
+    .delete(customMcpServers)
+    .where(eq(customMcpServers.id, demoSeedDevelopmentIntegration.id));
   await db.delete(users).where(eq(users.id, demoSeedUserId));
 }
 
@@ -97,7 +109,7 @@ describe('seedDemoData', () => {
     expect(withoutSettings(summary.created)).toHaveLength(
       // user + Fast conversation/messages/Session/participant + installation +
       // environment + repositories + tasks + task runs + PRs
-      6 +
+      14 +
         demoSeedFastSession.messages.length +
         demoSeedRepositories.length +
         demoSeedTasks.length * 2 +
@@ -124,7 +136,8 @@ describe('seedDemoData', () => {
       workspaceId: demoSeedFastSession.workspaceId,
       conversationId: demoSeedFastSession.providerConversationId,
       currentReplyChannelId: demoSeedFastSession.channelId,
-      currentReplyThreadId: demoSeedFastSession.threadId,
+      currentReplyThreadId: null,
+      replyTargetVerified: false,
       title: demoSeedFastSession.title,
     });
 
@@ -170,6 +183,28 @@ describe('seedDemoData', () => {
       userId: demoSeedUserId,
       role: 'owner',
     });
+
+    expect(
+      await db.query.customMcpServers.findFirst({
+        where: eq(customMcpServers.id, demoSeedDevelopmentIntegration.id),
+      }),
+    ).toMatchObject({
+      name: demoSeedDevelopmentIntegration.name,
+      authType: 'none',
+      enabled: true,
+    });
+
+    for (const fixture of Object.values(demoSeedLifecycleSessions)) {
+      expect(
+        await db.query.sessions.findFirst({
+          where: eq(sessions.id, fixture.id),
+        }),
+      ).toMatchObject({
+        title: fixture.title,
+        cachedStatus: fixture.cachedStatus,
+        ownerUserId: demoSeedUserId,
+      });
+    }
 
     const installation = await db.query.githubInstallations.findFirst({
       where: eq(githubInstallations.installedByUserId, demoSeedUserId),
@@ -298,6 +333,42 @@ describe('seedDemoData', () => {
     }
   });
 
+  it('refuses production before inserting data', async () => {
+    vi.stubEnv('R_APP_ENV', 'production');
+    vi.stubEnv('ROOMOTE_TASK_ID', 'fixture-sandbox');
+    try {
+      await expect(seedDemoData()).rejects.toThrow(
+        'Refusing to seed demo data in production.',
+      );
+      expect(
+        await db.query.users.findFirst({ where: eq(users.id, demoSeedUserId) }),
+      ).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('removes legacy external reply delivery from the Fast fixture', async () => {
+    await seedDemoData();
+    await db
+      .update(fastAgentConversations)
+      .set({
+        currentReplyThreadId: demoSeedFastSession.threadId,
+        replyTargetVerified: true,
+      })
+      .where(eq(fastAgentConversations.id, demoSeedFastSession.conversationId));
+
+    await seedDemoData();
+
+    const conversation = await db.query.fastAgentConversations.findFirst({
+      where: eq(fastAgentConversations.id, demoSeedFastSession.conversationId),
+    });
+    expect(conversation).toMatchObject({
+      currentReplyThreadId: null,
+      replyTargetVerified: false,
+    });
+  });
+
   it('is idempotent and leaves existing rows untouched on re-run', async () => {
     await seedDemoData();
 
@@ -319,7 +390,7 @@ describe('seedDemoData', () => {
 
     expect(summary.created).toEqual([]);
     expect(withoutSettings(summary.skipped)).toHaveLength(
-      6 +
+      14 +
         demoSeedFastSession.messages.length +
         demoSeedRepositories.length +
         demoSeedTasks.length * 2 +

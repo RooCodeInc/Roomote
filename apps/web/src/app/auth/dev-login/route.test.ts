@@ -94,8 +94,20 @@ async function deleteDevLoginRows() {
     );
   await db
     .delete(authUsers)
-    .where(eq(authUsers.email, envMock.WEB_DEV_LOGIN_EMAIL));
-  await db.delete(users).where(eq(users.email, envMock.WEB_DEV_LOGIN_EMAIL));
+    .where(
+      inArray(authUsers.email, [
+        envMock.WEB_DEV_LOGIN_EMAIL,
+        'local+onboarding@roomote.dev',
+      ]),
+    );
+  await db
+    .delete(users)
+    .where(
+      inArray(users.email, [
+        envMock.WEB_DEV_LOGIN_EMAIL,
+        'local+onboarding@roomote.dev',
+      ]),
+    );
   await db
     .delete(deploymentSettings)
     .where(eq(deploymentSettings.id, 'default'));
@@ -170,6 +182,28 @@ describe('GET /auth/dev-login', () => {
       email: 'local@roomote.dev',
       emailVerified: true,
       name: 'Local Admin',
+    });
+  });
+
+  it('creates an isolated incomplete-onboarding identity', async () => {
+    const response = await GET(
+      new NextRequest(
+        'http://localhost:3000/auth/dev-login?scenario=onboarding',
+        { headers: { 'user-agent': 'roomote-dev-login-test' } },
+      ),
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe(
+      'http://localhost:3000/onboarding',
+    );
+    const user = await db.query.users.findFirst({
+      where: eq(users.email, 'local+onboarding@roomote.dev'),
+    });
+    expect(user).toMatchObject({
+      name: 'Onboarding Admin',
+      role: 'admin',
+      onboardingCompletedAt: null,
     });
   });
 
