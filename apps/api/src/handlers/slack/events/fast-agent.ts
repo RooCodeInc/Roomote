@@ -165,18 +165,18 @@ export async function processFastAgentMessage(params: {
     const currentMessage = threadContext.find(
       (message) => message.ts === event.ts,
     );
-    // The mention event may omit the attachments and blocks that carry a
-    // workflow message's actual instructions; the fetched copy of the same
-    // message has them. Fall back to it when the event yielded no context.
-    const currentMessageContext =
-      event.agentContext ??
-      (currentMessage
-        ? formatSlackAttachmentContext(
-            baseQuestion,
-            currentMessage.attachments,
-            currentMessage.blocks,
-          )
-        : undefined);
+    // The copy of this message returned by conversations.replies is the
+    // full message object, attachments and blocks included; the webhook
+    // event is a slimmer projection whose exact shape Slack does not
+    // document. Build the context from the fetched copy and use the event
+    // only when the fetch failed.
+    const currentMessageContext = currentMessage
+      ? formatSlackAttachmentContext(
+          baseQuestion,
+          currentMessage.attachments,
+          currentMessage.blocks,
+        )
+      : event.agentContext;
     const agentContext = buildAgentContext(currentMessageContext);
     const currentMessageFiles = resolveCurrentSlackMessageFiles({
       currentMessageTs: event.ts,

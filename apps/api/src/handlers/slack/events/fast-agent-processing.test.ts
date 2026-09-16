@@ -612,7 +612,7 @@ describe('processFastAgentMessage', () => {
     expect(slack.normalizeIncomingText).not.toHaveBeenCalled();
   });
 
-  it('derives context from the fetched parent when the event carried none', async () => {
+  it('builds the current-message context from the fetched copy of the message', async () => {
     const slack = {
       addReaction: vi.fn().mockResolvedValue(true),
       removeReaction: vi.fn().mockResolvedValue(true),
