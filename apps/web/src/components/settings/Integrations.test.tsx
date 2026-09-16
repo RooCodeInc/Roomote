@@ -2003,6 +2003,28 @@ describe('Integrations settings', () => {
     expect(mutations.setDeploymentEnabled).not.toHaveBeenCalled();
   });
 
+  it('keeps a disabled Exa API key configurable from the catalog', () => {
+    state.userConnections = [{ mcpId: 'exa', authStatus: 'authenticated' }];
+    state.exaConnection = { authStatus: 'authenticated' };
+
+    render(
+      <ActualIntegrations addRequest={{ type: 'catalog', sequence: 1 }} />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Edit Exa API key' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Remove Exa API key' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Exa API key' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Edit Exa API key' }),
+    ).toBeInTheDocument();
+  });
+
   it('labels enabled keyless Exa without advertising Exa Agent', () => {
     state.deploymentEnablements = [{ mcpId: 'exa', enabled: true }];
 
