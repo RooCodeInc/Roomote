@@ -612,6 +612,142 @@ describe('processFastAgentMessage', () => {
     expect(slack.normalizeIncomingText).not.toHaveBeenCalled();
   });
 
+  it('builds the current-message context from the fetched copy of the message', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        {
+          ts: '100.001',
+          user: 'U123',
+          text: '<@UROOMOTE> *Suite — tests need updates*',
+          attachments: [
+            {
+              id: 1,
+              fallback: '[no preview available]',
+              text: '<@UROOMOTE> $run-suite acme/api#42\n\nYour task: update the failing tests.',
+            },
+          ],
+        },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@UROOMOTE> *Suite — tests need updates*',
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      roomoteSlackUserId: 'UROOMOTE',
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: '<@UROOMOTE> *Suite — tests need updates*',
+        currentMessageAgentContext: [
+          'Slack attachment:',
+          'Text:',
+          '<@UROOMOTE> $run-suite acme/api#42',
+          '',
+          'Your task: update the failing tests.',
+        ].join('\n'),
+      }),
+    );
+  });
+
+  it('keeps entry-route instructions ahead of the fetched message context', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        {
+          ts: '100.001',
+          user: 'U123',
+          text: 'deploy failed',
+          attachments: [
+            { id: 1, fallback: 'x', text: 'Build 42 failed on main.' },
+          ],
+        },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: 'deploy failed',
+        agentContext: 'Channel instructions: triage deploy failures.',
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      roomoteSlackUserId: 'UROOMOTE',
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentMessageAgentContext: [
+          'Channel instructions: triage deploy failures.',
+          '',
+          'Slack attachment:',
+          'Text:',
+          'Build 42 failed on main.',
+        ].join('\n'),
+      }),
+    );
+  });
+
+  it('does not repeat context the event already carried', async () => {
+    const attachmentContext =
+      'Slack attachment:\nText:\nBuild 42 failed on main.';
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        {
+          ts: '100.001',
+          user: 'U123',
+          text: 'deploy failed',
+          attachments: [
+            { id: 1, fallback: 'x', text: 'Build 42 failed on main.' },
+          ],
+        },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: 'deploy failed',
+        authoredText: 'deploy failed',
+        agentContext: attachmentContext,
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      roomoteSlackUserId: 'UROOMOTE',
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentMessageAgentContext: attachmentContext,
+      }),
+    );
+  });
+
   it('resumes the canonical Fast session bound to a delayed Slack root', async () => {
     const canonicalConversation = {
       surface: 'slack' as const,
