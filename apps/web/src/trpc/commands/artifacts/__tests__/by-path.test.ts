@@ -140,6 +140,85 @@ describe('getArtifactByPathCommand', () => {
     expect(result?.content).toHaveLength(1024);
   });
 
+  it('does not wait for stream cancellation after reading a bounded preview', async () => {
+    const cancel = vi.fn(() => new Promise<void>(() => {}));
+    const read = vi.fn().mockResolvedValueOnce({
+      done: false,
+      value: new Uint8Array(1024).fill(97),
+    });
+    mockGetArtifactByPath.mockResolvedValue(
+      createArtifact({
+        path: 'plans/large.md',
+        contentType: 'text/markdown',
+        size: 2 * 1024 * 1024,
+      }),
+    );
+    mockFetch.mockResolvedValue({
+      body: { getReader: () => ({ cancel, read }) },
+      headers: new Headers(),
+      ok: true,
+    });
+
+    const result = await Promise.race([
+      getArtifactByPathCommand(auth, {
+        taskId: 'task-1',
+        path: 'plans/large.md',
+        preview: true,
+      }),
+      new Promise<'timed-out'>((resolve) =>
+        setTimeout(() => resolve('timed-out'), 100),
+      ),
+    ]);
+
+    expect(result).not.toBe('timed-out');
+    expect(result).toMatchObject({ content: 'a'.repeat(1024) });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('loads Markdown gallery previews detected from the path extension', async () => {
+    mockGetArtifactByPath.mockResolvedValue(
+      createArtifact({
+        path: 'reports/audit.md',
+        contentType: 'application/octet-stream',
+      }),
+    );
+    mockFetch.mockResolvedValue(new Response('# Audit report'));
+
+    const result = await getArtifactByPathCommand(auth, {
+      taskId: 'task-1',
+      path: 'reports/audit.md',
+      preview: true,
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith('https://example.test/download', {
+      headers: { Range: 'bytes=0-1023' },
+    });
+    expect(result?.content).toBe('# Audit report');
+  });
+
+  it('rejects failed gallery preview fetches so the client can retry', async () => {
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => {});
+    mockGetArtifactByPath.mockResolvedValue(
+      createArtifact({
+        path: 'reports/audit.md',
+        contentType: 'text/markdown',
+      }),
+    );
+    mockFetch.mockResolvedValue(new Response(null, { status: 503 }));
+
+    await expect(
+      getArtifactByPathCommand(auth, {
+        taskId: 'task-1',
+        path: 'reports/audit.md',
+        preview: true,
+      }),
+    ).rejects.toThrow('Failed to fetch artifact preview');
+    expect(consoleError).toHaveBeenCalledOnce();
+    consoleError.mockRestore();
+  });
+
   it('loads readable Session-owned artifacts from the Session storage namespace', async () => {
     mockGetArtifactBySessionPath.mockResolvedValue(
       createArtifact({
