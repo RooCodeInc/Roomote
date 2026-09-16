@@ -5333,10 +5333,7 @@ export async function answerFastAgentQuestion({
           return await executeNativeToolInner(call);
         }
         const canonicalToolEvent = await beginCanonicalToolEvent({
-          title:
-            call.name === FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp
-              ? 'Add remote MCP'
-              : call.name,
+          title: call.name,
           args: call.args,
           nativeSessionId: call.sessionId,
           kind: getFastAgentNativeAcpKind(call.name),
