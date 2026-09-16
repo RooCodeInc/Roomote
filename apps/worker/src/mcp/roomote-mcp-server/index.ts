@@ -1252,12 +1252,16 @@ if (shouldRegisterTaskMemoryTool()) {
       inputSchema: {
         outcome: z
           .string()
+          .trim()
+          .min(1)
           .max(TASK_MEMORY_LIMITS.outcomeMaxChars)
           .describe(
             `What was accomplished, in a few sentences (at most ${TASK_MEMORY_LIMITS.outcomeMaxChars} characters). Put decisions, facts, and open questions in their own fields rather than here.`,
           ),
         decisions: z
-          .array(z.string().max(TASK_MEMORY_LIMITS.listEntryMaxChars))
+          .array(
+            z.string().trim().min(1).max(TASK_MEMORY_LIMITS.listEntryMaxChars),
+          )
           .max(TASK_MEMORY_LIMITS.listMaxEntries)
           .optional()
           .describe(
@@ -1265,20 +1269,25 @@ if (shouldRegisterTaskMemoryTool()) {
           ),
         rationale: z
           .string()
+          .trim()
           .max(TASK_MEMORY_LIMITS.rationaleMaxChars)
           .optional()
           .describe(
             `Why those decisions were made; alternatives rejected (at most ${TASK_MEMORY_LIMITS.rationaleMaxChars} characters).`,
           ),
         reusableFacts: z
-          .array(z.string().max(TASK_MEMORY_LIMITS.listEntryMaxChars))
+          .array(
+            z.string().trim().min(1).max(TASK_MEMORY_LIMITS.listEntryMaxChars),
+          )
           .max(TASK_MEMORY_LIMITS.listMaxEntries)
           .optional()
           .describe(
             `Durable facts about the codebase or systems worth remembering, one per entry (at most ${TASK_MEMORY_LIMITS.listMaxEntries} entries of ${TASK_MEMORY_LIMITS.listEntryMaxChars} characters).`,
           ),
         unresolvedQuestions: z
-          .array(z.string().max(TASK_MEMORY_LIMITS.listEntryMaxChars))
+          .array(
+            z.string().trim().min(1).max(TASK_MEMORY_LIMITS.listEntryMaxChars),
+          )
           .max(TASK_MEMORY_LIMITS.listMaxEntries)
           .optional()
           .describe(

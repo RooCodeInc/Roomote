@@ -31,7 +31,7 @@ const taskMemorySchema = z.object({
 });
 
 /** One line per violation, naming the field, so the agent can fix its call. */
-export function describeTaskMemoryIssues(
+function describeTaskMemoryIssues(
   issues: z.ZodIssue[],
   input: unknown,
 ): string {
