@@ -96,6 +96,19 @@ export function useGhostSuggestion({
     [ghostSuggestion, acceptGhostSuggestion, dismissGhostSuggestion],
   );
 
+  const handleSuggestionPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+
+      // iOS may blur the textarea and unmount the focus-only button before
+      // dispatching click, so touch acceptance must happen on pointer down.
+      if (event.pointerType === 'touch') {
+        acceptGhostSuggestion();
+      }
+    },
+    [acceptGhostSuggestion],
+  );
+
   // Count each distinct rendered suggestion once.
   const lastShownSuggestionRef = useRef<string | null>(null);
   useEffect(() => {
@@ -112,5 +125,6 @@ export function useGhostSuggestion({
     dismissGhostSuggestion,
     consumeSuggestion,
     handleSuggestionKeyDown,
+    handleSuggestionPointerDown,
   };
 }

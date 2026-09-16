@@ -164,6 +164,24 @@ describe('TaskPromptInput', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('accepts an empty suggestion on touch pointer down before focus can blur', () => {
+    render(<SuggestedPrompt />);
+    const suggestion =
+      'Add regression tests for authentication callback validation across every supported login flow';
+    const textarea = screen.getByPlaceholderText(suggestion);
+
+    fireEvent.focus(textarea);
+    const hint = screen.getByRole('button', {
+      name: 'Insert suggested task',
+    });
+    const pointerDown = createEvent.pointerDown(hint, { cancelable: true });
+    Object.defineProperty(pointerDown, 'pointerType', { value: 'touch' });
+    fireEvent(hint, pointerDown);
+
+    expect(textarea).toHaveValue(suggestion);
+    expect(hint).not.toBeInTheDocument();
+  });
+
   it('preserves normal Tab behavior after typing and during IME composition', () => {
     render(<SuggestedPrompt />);
     const textarea = screen.getByRole('textbox');
