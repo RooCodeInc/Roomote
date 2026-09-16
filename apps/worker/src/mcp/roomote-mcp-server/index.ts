@@ -22,6 +22,7 @@ import {
   ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
   ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION,
   ROOMOTE_TASK_RUNTIME_MANAGEMENT_ACTIONS,
+  TASK_MEMORY_LIMITS,
   getRoomoteSearchStatusError,
   resolveRoomoteCommunicationTarget,
   roomoteManagementFieldSchemas,
@@ -1251,25 +1252,38 @@ if (shouldRegisterTaskMemoryTool()) {
       inputSchema: {
         outcome: z
           .string()
-          .describe('What was accomplished, in a few sentences.'),
+          .max(TASK_MEMORY_LIMITS.outcomeMaxChars)
+          .describe(
+            `What was accomplished, in a few sentences (at most ${TASK_MEMORY_LIMITS.outcomeMaxChars} characters). Put decisions, facts, and open questions in their own fields rather than here.`,
+          ),
         decisions: z
-          .array(z.string())
-          .optional()
-          .describe('Decisions made during the task, one per entry.'),
-        rationale: z
-          .string()
-          .optional()
-          .describe('Why those decisions were made; alternatives rejected.'),
-        reusableFacts: z
-          .array(z.string())
+          .array(z.string().max(TASK_MEMORY_LIMITS.listEntryMaxChars))
+          .max(TASK_MEMORY_LIMITS.listMaxEntries)
           .optional()
           .describe(
-            'Durable facts about the codebase or systems worth remembering.',
+            `Decisions made during the task, one per entry (at most ${TASK_MEMORY_LIMITS.listMaxEntries} entries of ${TASK_MEMORY_LIMITS.listEntryMaxChars} characters).`,
+          ),
+        rationale: z
+          .string()
+          .max(TASK_MEMORY_LIMITS.rationaleMaxChars)
+          .optional()
+          .describe(
+            `Why those decisions were made; alternatives rejected (at most ${TASK_MEMORY_LIMITS.rationaleMaxChars} characters).`,
+          ),
+        reusableFacts: z
+          .array(z.string().max(TASK_MEMORY_LIMITS.listEntryMaxChars))
+          .max(TASK_MEMORY_LIMITS.listMaxEntries)
+          .optional()
+          .describe(
+            `Durable facts about the codebase or systems worth remembering, one per entry (at most ${TASK_MEMORY_LIMITS.listMaxEntries} entries of ${TASK_MEMORY_LIMITS.listEntryMaxChars} characters).`,
           ),
         unresolvedQuestions: z
-          .array(z.string())
+          .array(z.string().max(TASK_MEMORY_LIMITS.listEntryMaxChars))
+          .max(TASK_MEMORY_LIMITS.listMaxEntries)
           .optional()
-          .describe('Open questions or follow-ups left behind.'),
+          .describe(
+            `Open questions or follow-ups left behind, one per entry (at most ${TASK_MEMORY_LIMITS.listMaxEntries} entries of ${TASK_MEMORY_LIMITS.listEntryMaxChars} characters).`,
+          ),
       },
       annotations: { readOnlyHint: false },
     },
