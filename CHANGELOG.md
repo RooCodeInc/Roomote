@@ -4,19 +4,24 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 1.9.4 (2026-09-15)
 
-Roomote 1.9.4 makes integration keys easier to enter and email identity safer while improving delivery diagnostics, artifact tables, and transcript resilience.
+Roomote 1.9.4 adds self-service password recovery and clearer cross-surface Telegram replies while making integration keys easier to enter, strengthening inbound email safety, and improving delivery diagnostics, artifact tables, and transcript resilience.
 
 ### Highlights
 
+- Request a password reset directly from sign-in on deployments configured with Email (AgentMail).
+- See the originating web message quoted when a cross-surface conversation replies in Telegram.
 - Open requested integration-key forms automatically and return to them from a persistent Session card.
-- Trust inbound email senders only after AgentMail reports a passing DMARC result.
-- Trace Telegram and GitHub review delivery through searchable, privacy-safe operational events.
-- Keep artifact tables aligned and transcripts rendering when skill output is absent.
+- Strengthen inbound email protection and delivery diagnostics while keeping artifact tables and transcripts resilient.
+
+### Minor changes
+
+- Telegram replies now quote the authenticated sender and message when a follow-up was sent from the Roomote web app, keeping cross-surface context visible above text and image responses without changing ordinary Telegram replies.
+- Email/password users can now request a one-hour password reset link directly from sign-in when Email (AgentMail) is configured, while deployments without AgentMail keep the admin-assisted recovery path and public responses do not reveal whether an account exists.
 
 ### Patch changes
 
 - CSV and TSV artifact previews now align row numbers with the first line of adjacent cell content, including rows with multiline values and whether the first row is treated as headers or data.
-- Inbound email now requires a passing DMARC result before Roomote trusts the sender as a verified account, closing a sender-spoofing gap while giving domains without a published DMARC policy or aligned SPF or DKIM guidance for fixing delivery.
+- Inbound email now requires a passing DMARC result before Roomote trusts the sender as a verified account. Messages without a pass are silently dropped before account matching, replies, or refusal limits, preventing spoofed sender addresses from triggering email to victims.
 - When an agent asks for an integration key in a Session, the key dialog now opens on its own for the Session owner, and a small "Add your <service> key" card stays at the end of the conversation until the key is saved, so the dialog is always one click away even after it was dismissed. The agent's link keeps working as before.
 - Session and task transcripts now render skill results that omit output instead of falling back to the client-side exception page.
 - Webhook and pull-request review delivery outcomes now emit searchable, correlation-friendly operational events, so operators can follow Telegram and GitHub activity from receipt through persistence, dispatch, and final delivery without logging message content or credentials.
