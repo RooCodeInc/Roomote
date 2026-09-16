@@ -207,7 +207,7 @@ describe('integration key route boundary', () => {
 
     expect(mocks.reply).toHaveBeenCalledWith(auth, {
       sessionId: fastConversationId,
-      text: expect.stringContaining('Call list_integration_keys'),
+      text: expect.stringContaining('call list_integration_keys'),
     });
     const text = mocks.reply.mock.calls[0]![1].text;
     expect(text).toMatch(

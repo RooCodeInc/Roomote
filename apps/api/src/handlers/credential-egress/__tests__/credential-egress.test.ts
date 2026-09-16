@@ -52,7 +52,6 @@ import { routePolicyMiddleware } from '../../../middleware/routePolicyMiddleware
 import { tokenAuthMiddleware } from '../../../middleware/tokenAuthMiddleware';
 import { findRoutePolicyRule } from '../../../route-policies';
 import type { Variables } from '../../../types';
-import { integrationRequest } from '../../mcp/http-integrations/broker';
 import { createCredentialEgressControlPlane } from '../index';
 
 const secret = 'Real-Upstream-Key/A+b=<"&>123';
@@ -254,6 +253,7 @@ beforeEach(async () => {
     origin,
     headerName: 'authorization',
     headerPrefix: 'Bearer ',
+    visibility: 'owner',
   });
   ({ secretRef } = await createServiceCredential(context, {
     pendingRef: pending.pendingRef,
@@ -382,6 +382,97 @@ it('registers an attached run, returns substitutes once, and stores only a keyed
   );
   expect(dump).not.toContain(secret);
 });
+
+it('delivers a deployment-visible grant to another active member run', async () => {
+  const sharedPending = await prepareServiceCredential(context, {
+    label: 'Shared API',
+    origin,
+    headerName: 'authorization',
+    headerPrefix: 'Bearer ',
+    visibility: 'deployment',
+  });
+  const shared = await createServiceCredential(context, {
+    pendingRef: sharedPending.pendingRef,
+    secret,
+  });
+  await db
+    .update(users)
+    .set({ metadata: { integration_keys_enabled: true } })
+    .where(eq(users.id, otherId));
+  const otherSession = await session(otherId);
+  const otherRun = await run(otherId, otherSession.id);
+
+  const result = await register({ runId: otherRun.id });
+  expect(result.status).toBe(201);
+  const registration = result.json as CredentialEgressWorkloadRegistration;
+  expect(registration.substitutes).toEqual([
+    expect.objectContaining({
+      secretRef: shared.secretRef,
+      label: 'Shared API',
+      allowedMethods: ['GET', 'HEAD'],
+    }),
+  ]);
+  const substitute = registration.substitutes[0]!.substitute;
+  minted.push(substitute);
+  await expect(authorize(authorizeBody({ substitute }))).resolves.toMatchObject(
+    {
+      allowed: true,
+      sessionId: otherSession.id,
+      credential: expect.objectContaining({ value: secret }),
+    },
+  );
+});
+
+it.each(['deactivated', 'deleted'] as const)(
+  'stops an issued shared substitute when the grant owner is %s',
+  async (state) => {
+    const sharer = await userFactory.create();
+    userIds.push(sharer.id);
+    const sharerSession = await session(sharer.id);
+    const sharerContext = { userId: sharer.id, sessionId: sharerSession.id };
+    const sharedPending = await prepareServiceCredential(sharerContext, {
+      label: 'Shared API',
+      origin,
+      headerName: 'authorization',
+      headerPrefix: 'Bearer ',
+      visibility: 'deployment',
+    });
+    const shared = await createServiceCredential(sharerContext, {
+      pendingRef: sharedPending.pendingRef,
+      secret,
+    });
+    await db
+      .update(users)
+      .set({ metadata: { integration_keys_enabled: true } })
+      .where(eq(users.id, otherId));
+    const otherSession = await session(otherId);
+    const otherRun = await run(otherId, otherSession.id);
+    const result = await register({ runId: otherRun.id });
+    expect(result.status).toBe(201);
+    const registration = result.json as CredentialEgressWorkloadRegistration;
+    const issue = registration.substitutes.find(
+      (candidate) => candidate.secretRef === shared.secretRef,
+    )!;
+    minted.push(issue.substitute);
+
+    if (state === 'deactivated') {
+      await db
+        .update(users)
+        .set({ deletedAt: new Date() })
+        .where(eq(users.id, sharer.id));
+    } else {
+      await db.delete(users).where(eq(users.id, sharer.id));
+    }
+
+    await expect(
+      authorize(authorizeBody({ substitute: issue.substitute })),
+    ).resolves.toEqual({
+      allowed: false,
+      reason:
+        state === 'deactivated' ? 'session_unavailable' : 'unknown_substitute',
+    });
+  },
+);
 
 it('authorizes each phase live and resolves the credential only on the request phase', async () => {
   const base = await registered();
@@ -950,22 +1041,6 @@ it('allows write methods only for grants the owner explicitly acknowledged, with
     allowed: false,
     reason: 'method_not_allowed',
   });
-  // The legacy broker path is not broadened either: POST stays refused there.
-  await expect(
-    integrationRequest(
-      { integrations: [] },
-      `egress-test:${sessionId}`,
-      {
-        integrationId: `session:${write.secretRef}`,
-        method: 'POST',
-        path: '/x',
-        body: '{}',
-      },
-      ownerId,
-      undefined,
-      async () => context,
-    ),
-  ).rejects.toThrow(/^Secret request unavailable$/);
 });
 
 it('drives the controller flow through the typed SDK client', async () => {

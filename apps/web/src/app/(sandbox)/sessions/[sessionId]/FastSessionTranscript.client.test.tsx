@@ -539,10 +539,14 @@ describe('FastSessionTranscript', () => {
       '/api/sessions/canonical-session/secrets',
       expect.objectContaining({
         method: 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           pendingRef: secretRef,
           secret: 'disposable-test-credential',
           allowedMethods: ['GET', 'HEAD'],
+          visibility: 'deployment',
         }),
       }),
     );

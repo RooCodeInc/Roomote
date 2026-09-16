@@ -127,6 +127,7 @@ beforeEach(async () => {
     origin,
     headerName: 'authorization',
     headerPrefix: 'Bearer ',
+    visibility: 'owner',
   });
   ({ secretRef } = await createServiceCredential(context, {
     pendingRef: pending.pendingRef,
@@ -649,6 +650,151 @@ it('records failure, not success, when revoked during completion-audit persisten
   );
   expect(rows.map((row) => row.outcome).sort()).toEqual(['failed', 'started']);
 });
+
+it('performs an approved write method with a body and still rejects methods outside the grant', async () => {
+  const pending = await prepareServiceCredential(context, {
+    label: 'Write test credential',
+    origin,
+    headerName: 'authorization',
+    headerPrefix: 'Bearer ',
+    allowedMethods: ['GET', 'HEAD', 'POST'],
+    visibility: 'deployment',
+  });
+  const writable = await createServiceCredential(context, {
+    pendingRef: pending.pendingRef,
+    secret,
+    allowedMethods: ['GET', 'HEAD', 'POST'],
+  });
+  try {
+    await request({
+      integrationId: `session:${writable.secretRef}`,
+      method: 'POST',
+      path: '/v1/search',
+      body: '{"q":"roomote"}',
+      contentType: 'application/json',
+    });
+    const [url, options] = vi.mocked(fetch).mock.lastCall!;
+    expect(String(url)).toBe(`${origin}/v1/search`);
+    expect(options).toMatchObject({ method: 'POST', body: '{"q":"roomote"}' });
+    expect((options!.headers as Record<string, string>).authorization).toBe(
+      `Bearer ${secret}`,
+    );
+    await expect(
+      request({
+        integrationId: `session:${writable.secretRef}`,
+        method: 'DELETE',
+        path: '/v1/search',
+      }),
+    ).rejects.toThrow(/^Secret request unavailable$/);
+  } finally {
+    await db.execute(
+      sql`delete from service_credential_audit where secret_ref = ${writable.secretRef}`,
+    );
+  }
+});
+
+it('lets another active member use a deployment-visible grant with its approved POST method', async () => {
+  const otherSession = await session(otherId);
+  const otherAuth: Extract<Auth, { tokenType: 'session-broker' }> = {
+    tokenType: 'session-broker',
+    userId: otherId,
+    fastConversationId: otherSession.fastConversationId!,
+  };
+  const pending = await prepareServiceCredential(context, {
+    label: 'Shared write credential',
+    origin,
+    headerName: 'authorization',
+    headerPrefix: 'Bearer ',
+    allowedMethods: ['GET', 'HEAD', 'POST'],
+    visibility: 'deployment',
+  });
+  const shared = await createServiceCredential(context, {
+    pendingRef: pending.pendingRef,
+    secret,
+    allowedMethods: ['GET', 'HEAD', 'POST'],
+  });
+  try {
+    await integrationRequest(
+      { integrations: [] },
+      `shared:${otherSession.id}`,
+      {
+        integrationId: `session:${shared.secretRef}`,
+        method: 'POST',
+        path: '/v1/search',
+        body: '{"q":"roomote"}',
+        contentType: 'application/json',
+      },
+      otherId,
+      undefined,
+      () => resolveServiceCredentialContext(otherAuth),
+    );
+    expect(vi.mocked(fetch).mock.lastCall?.[1]).toMatchObject({
+      method: 'POST',
+      body: '{"q":"roomote"}',
+    });
+  } finally {
+    await db.execute(
+      sql`delete from service_credential_audit where secret_ref = ${shared.secretRef}`,
+    );
+  }
+});
+
+it.each(['deactivated', 'deleted'] as const)(
+  'rejects a deployment-visible grant when its owner is %s',
+  async (state) => {
+    const sharer = await userFactory.create();
+    userIds.push(sharer.id);
+    const sharerSession = await session(sharer.id);
+    const sharerContext = { userId: sharer.id, sessionId: sharerSession.id };
+    const otherSession = await session(otherId);
+    const otherAuth: Extract<Auth, { tokenType: 'session-broker' }> = {
+      tokenType: 'session-broker',
+      userId: otherId,
+      fastConversationId: otherSession.fastConversationId!,
+    };
+    const pending = await prepareServiceCredential(sharerContext, {
+      label: 'Shared credential',
+      origin,
+      headerName: 'authorization',
+      headerPrefix: 'Bearer ',
+      visibility: 'deployment',
+    });
+    const shared = await createServiceCredential(sharerContext, {
+      pendingRef: pending.pendingRef,
+      secret,
+    });
+    if (state === 'deactivated') {
+      await db
+        .update(users)
+        .set({ deletedAt: new Date() })
+        .where(eq(users.id, sharer.id));
+    } else {
+      await db.delete(users).where(eq(users.id, sharer.id));
+    }
+
+    try {
+      await expect(
+        integrationRequest(
+          { integrations: [] },
+          `inactive-owner:${otherSession.id}`,
+          {
+            integrationId: `session:${shared.secretRef}`,
+            method: 'GET',
+            path: '/v1/items',
+          },
+          otherId,
+          undefined,
+          () => resolveServiceCredentialContext(otherAuth),
+        ),
+      ).rejects.toThrow(/^Secret request unavailable$/);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      await db.execute(
+        sql`delete from service_credential_audit where secret_ref = ${shared.secretRef}`,
+      );
+    }
+  },
+);
 
 it('logs bounded reasons for denied and failed Session requests without request details', async () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

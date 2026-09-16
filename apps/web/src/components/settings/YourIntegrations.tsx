@@ -8,6 +8,7 @@ import {
   CREDENTIAL_EGRESS_METHODS,
   type CredentialEgressMethod,
   type ServiceCredentialMetadata,
+  type ServiceCredentialVisibility,
 } from '@roomote/types';
 
 import {
@@ -35,9 +36,8 @@ function describeExpiry(secret: ServiceCredentialMetadata) {
 }
 
 /**
- * API keys the user holds for HTTPS services, usable by agents in every
- * Session and coding task the user owns. Metadata only: the key is never
- * returned, so nothing here can be copied out.
+ * API keys available to the user for HTTPS services. Metadata only: the key
+ * is never returned, so nothing here can be copied out.
  */
 export function YourIntegrations() {
   const [secrets, setSecrets] = useState<ServiceCredentialMetadata[] | null>(
@@ -81,7 +81,7 @@ export function YourIntegrations() {
   return (
     <Section
       icon={KeyRound}
-      title="Your integrations"
+      title="Integration keys"
       action={
         <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
           Add integration
@@ -89,10 +89,9 @@ export function YourIntegrations() {
       }
     >
       <p className="text-sm text-muted-foreground">
-        API keys for services you use. Agents in every Session and coding task
-        you own can call these services through Roomote without ever seeing the
-        key. Add one here, or approve it when an agent asks in a Session. These
-        are yours alone; deployment integrations are configured below.
+        API keys for services you use. Choose whether each integration is only
+        for you or available to everyone in this deployment. Roomote keeps the
+        key server-side and sends it only to the approved service.
       </p>
       {error ? (
         <p role="alert" className="text-sm text-destructive">
@@ -116,33 +115,81 @@ export function YourIntegrations() {
                   {secret.origin} · {secret.allowedMethods.join(', ')} ·{' '}
                   {describeExpiry(secret)}
                 </p>
+                {secret.ownerName ? (
+                  <p className="text-xs text-muted-foreground">
+                    Owned by {secret.ownerName}
+                  </p>
+                ) : null}
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busyRef !== null}
-                onClick={async () => {
-                  setBusyRef(secret.secretRef);
-                  try {
-                    const response = await fetch(endpoint, {
-                      method: 'DELETE',
-                      cache: 'no-store',
-                      credentials: 'same-origin',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ secretRef: secret.secretRef }),
-                    });
-                    if (!response.ok) throw new Error('Unavailable');
-                    toast.success(`Revoked ${secret.label}.`);
-                    await load();
-                  } catch {
-                    toast.error('Could not revoke the integration. Try again.');
-                  } finally {
-                    setBusyRef(null);
-                  }
-                }}
-              >
-                {busyRef === secret.secretRef ? 'Revoking…' : 'Revoke'}
-              </Button>
+              {secret.canManage ? (
+                <div className="flex items-center gap-2">
+                  <select
+                    aria-label={`Visibility for ${secret.label}`}
+                    value={secret.visibility}
+                    disabled={busyRef !== null}
+                    className="h-9 rounded-md border bg-card px-3 text-sm"
+                    onChange={async (event) => {
+                      const visibility = event.target
+                        .value as ServiceCredentialVisibility;
+                      setBusyRef(secret.secretRef);
+                      try {
+                        const response = await fetch(endpoint, {
+                          method: 'PATCH',
+                          cache: 'no-store',
+                          credentials: 'same-origin',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            secretRef: secret.secretRef,
+                            visibility,
+                          }),
+                        });
+                        if (!response.ok) throw new Error('Unavailable');
+                        toast.success(`Updated ${secret.label}.`);
+                        await load();
+                      } catch {
+                        toast.error(
+                          'Could not update the integration. Try again.',
+                        );
+                      } finally {
+                        setBusyRef(null);
+                      }
+                    }}
+                  >
+                    <option value="deployment">Everyone</option>
+                    <option value="owner">Only me</option>
+                  </select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busyRef !== null}
+                    onClick={async () => {
+                      setBusyRef(secret.secretRef);
+                      try {
+                        const response = await fetch(endpoint, {
+                          method: 'DELETE',
+                          cache: 'no-store',
+                          credentials: 'same-origin',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            secretRef: secret.secretRef,
+                          }),
+                        });
+                        if (!response.ok) throw new Error('Unavailable');
+                        toast.success(`Revoked ${secret.label}.`);
+                        await load();
+                      } catch {
+                        toast.error(
+                          'Could not revoke the integration. Try again.',
+                        );
+                      } finally {
+                        setBusyRef(null);
+                      }
+                    }}
+                  >
+                    {busyRef === secret.secretRef ? 'Revoking…' : 'Revoke'}
+                  </Button>
+                </div>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -197,6 +244,7 @@ function AddIntegrationForm({ onSaved }: { onSaved: () => Promise<void> }) {
           headerPrefix:
             headerName === 'authorization' ? form.get('headerPrefix') : '',
           allowedMethods: methods,
+          visibility: form.get('visibility'),
           ...(lifetime ? { lifetimeHours: Number(lifetime) } : {}),
           secret: form.get('secret'),
         });
@@ -310,6 +358,24 @@ function AddIntegrationForm({ onSaved }: { onSaved: () => Promise<void> }) {
             max={8760}
             inputMode="numeric"
           />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="integration-visibility">
+            Who can use this integration?
+          </Label>
+          <select
+            id="integration-visibility"
+            name="visibility"
+            defaultValue="deployment"
+            className="h-9 w-full rounded-md border bg-card px-3 text-sm"
+          >
+            <option value="deployment">Everyone in this deployment</option>
+            <option value="owner">Only me</option>
+          </select>
+          <p className="text-sm text-muted-foreground">
+            Anyone in this deployment can make requests with a shared
+            integration. The API key always stays server-side.
+          </p>
         </div>
         <div className="space-y-1">
           <Label htmlFor="integration-secret">API key</Label>

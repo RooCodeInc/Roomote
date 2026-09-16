@@ -11,6 +11,9 @@ const secret = {
   headerName: 'authorization',
   headerPrefix: 'Bearer ',
   allowedMethods: ['GET', 'POST'],
+  visibility: 'deployment',
+  ownerName: null,
+  canManage: true,
   expiresAt: null,
   revokedAt: null,
   createdAt: new Date().toISOString(),
@@ -86,9 +89,52 @@ it('adds an integration with the policy and key entered by the human', async () 
     headerName: 'authorization',
     headerPrefix: 'Bearer ',
     allowedMethods: ['GET', 'HEAD', 'POST'],
+    visibility: 'deployment',
     secret: 'disposable-test-credential',
   });
   expect(await screen.findByText('Stripe')).toBeInTheDocument();
+});
+
+it('shows who shared an integration and lets an authorized viewer change visibility', async () => {
+  fetchMock
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          secrets: [
+            secret,
+            {
+              ...secret,
+              secretRef: '6a1f8f1e-0000-4000-8000-000000000012',
+              label: 'Shared search',
+              ownerName: 'Taylor',
+              canManage: false,
+            },
+          ],
+        }),
+      ),
+    )
+    .mockResolvedValueOnce(new Response(JSON.stringify({ secret })))
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ secrets: [{ ...secret, visibility: 'owner' }] }),
+      ),
+    );
+  render(<YourIntegrations />);
+  expect(await screen.findByText('Owned by Taylor')).toBeInTheDocument();
+  expect(
+    screen.queryByLabelText('Visibility for Shared search'),
+  ).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Visibility for Stripe'), {
+    target: { value: 'owner' },
+  });
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  expect(fetchMock.mock.calls[1]![1]).toMatchObject({
+    method: 'PATCH',
+    body: JSON.stringify({
+      secretRef: secret.secretRef,
+      visibility: 'owner',
+    }),
+  });
 });
 
 it('reports load failures', async () => {

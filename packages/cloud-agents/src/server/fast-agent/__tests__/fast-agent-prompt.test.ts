@@ -751,6 +751,21 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(enabledPrompt).toContain(
       'Label that link with the service, for example "Connect Figma securely"',
     );
+    expect(enabledPrompt).toContain(
+      'never delegate that lookup to a coding task',
+    );
+    const platformEventPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      serviceCredentialToolsEnabled: false,
+    });
+    expect(platformEventPrompt).toContain(
+      'If integration-key tools are absent on this turn, ask the user to reply',
+    );
+    expect(platformEventPrompt).not.toContain(
+      'Integration-key tools are turned off for this user',
+    );
+    expect(platformEventPrompt).not.toContain('Settings → Experimental');
     expect(prompt).toContain('Settings → Experimental');
     expect(prompt).toContain(
       'A human turn may begin with a Roomote-injected `<integration_saved>` block',

@@ -4,10 +4,12 @@ import {
   createIntegration,
   listIntegrations,
   revokeIntegration,
+  updateIntegrationVisibility,
 } from '@roomote/sdk/server/service-credentials';
 import {
   integrationCreateSchema,
   serviceCredentialRevokeSchema,
+  serviceCredentialVisibilityUpdateSchema,
 } from '@roomote/types';
 
 import { authorize } from '@/lib/server/auth-context';
@@ -15,9 +17,9 @@ import { readBoundedJsonBody } from '@/lib/server/bounded-json-body';
 import { Env } from '@/lib/server/env';
 
 /**
- * The signed-in user's integrations (owner-scoped Integration keys): metadata
- * only, never a credential. Listing needs only the server identity; adding
- * and revoking require a same-origin JSON body, like the Session route.
+ * Integration keys available to the signed-in member: metadata only, never a
+ * credential. Mutations require a same-origin JSON body and are limited to the
+ * owner or an admin by the shared authorization layer.
  */
 
 export const runtime = 'nodejs';
@@ -93,6 +95,21 @@ export async function DELETE(request: Request) {
     if (!args.success) return error(400);
     await revokeIntegration(auth.userId, args.data);
     return new NextResponse(null, { status: 204, headers });
+  } catch {
+    return error(500);
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const auth = await authorize();
+    if (!auth.success || !auth.userId) return error(401);
+    const body = await sameOriginJson(request);
+    if (!body.ok) return error(body.status);
+    const args = serviceCredentialVisibilityUpdateSchema.safeParse(body.value);
+    if (!args.success) return error(400);
+    const secret = await updateIntegrationVisibility(auth.userId, args.data);
+    return NextResponse.json({ secret }, { headers });
   } catch {
     return error(500);
   }

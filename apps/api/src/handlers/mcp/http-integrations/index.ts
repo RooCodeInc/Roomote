@@ -33,6 +33,14 @@ import {
   loadHttpIntegrationsConfig,
 } from './broker';
 
+/** Refusal reasons the caller may see; none carries a request value. */
+const SHAREABLE_INTEGRATION_REFUSALS = new Set([
+  'method_not_allowed',
+  'credential_echo',
+  'credential_echo_encoded',
+  'path_too_long',
+]);
+
 export function createHttpIntegrationsMcp() {
   // Only operator integrations require a startup manifest; integration keys are live.
   const config = Env.R_HTTP_INTEGRATIONS_ENABLED
@@ -109,7 +117,7 @@ export function createHttpIntegrationsMcp() {
         'list_integrations',
         {
           description: serviceCredentialToolsEnabled
-            ? "List allowed operator integrations and live owner-approved integration keys with their methods and paths. Credentials are never returned. integration keys need no operator manifest: use integration_request with a session: id for a GET or HEAD read, or, inside an attached coding run, the substitute token and base URL delivered for that grant (see ROOMOTE_CREDENTIAL_EGRESS_SERVICES) with any ordinary HTTP client and the grant's allowed methods."
+            ? "List allowed operator integrations and live integration keys available to this member with their methods and paths. Credentials are never returned. integration keys need no operator manifest: use integration_request with a session: id for any of the grant's allowed methods, or, inside an attached coding run, the substitute token and base URL delivered for that grant (see ROOMOTE_CREDENTIAL_EGRESS_SERVICES) with any ordinary HTTP client and the grant's allowed methods."
             : 'List allowed operator integrations with their methods and paths. Credentials are never returned.',
           inputSchema: {},
           annotations: {
@@ -151,10 +159,10 @@ export function createHttpIntegrationsMcp() {
                   id: `session:${grant.secretRef}`,
                   description: grant.label,
                   origin: grant.origin,
-                  rules: [
-                    { method: 'GET', pathPrefix: '/' },
-                    { method: 'HEAD', pathPrefix: '/' },
-                  ],
+                  rules: grant.allowedMethods.map((method) => ({
+                    method,
+                    pathPrefix: '/',
+                  })),
                   expiresAt: grant.expiresAt,
                 })),
             ],
@@ -194,7 +202,7 @@ export function createHttpIntegrationsMcp() {
         'list_integration_keys',
         {
           description:
-            "List this Session owner's nonsecret pending approvals and ready grants with origin, header, allowed HTTP methods, and expiry. A ready grant is usable through integration_request with its session: id for GET and HEAD, and is delivered to attached coding runs as a substitute token with a base URL for ordinary clients and the grant's allowed methods.",
+            "List this Session owner's nonsecret pending approvals and the live ready grants available to them, including deployment-visible grants, with origin, header, visibility, allowed HTTP methods, and expiry. A ready grant is usable through integration_request with its session: id for any of its allowed methods, and is delivered to attached coding runs as a substitute token with a base URL for ordinary clients and the grant's allowed methods.",
           inputSchema: {},
         },
         async () => {
@@ -224,7 +232,7 @@ export function createHttpIntegrationsMcp() {
         'integration_request',
         {
           description: serviceCredentialToolsEnabled
-            ? 'Make a credential-broker request using an ID from list_integrations: an operator integration ID, or a session: ID for an owner-approved integration key. integration keys are GET and HEAD only here; for approved write methods, scripts, or SDKs inside an attached run, use the delivered substitute token with the base URL instead. Supply only integrationId, method, relative path (optional query), optional body/contentType and Session accept preference; never supply credentials, arbitrary headers, or a Session/user ID.'
+            ? 'Make a credential-broker request using an ID from list_integrations: an operator integration ID, or a session: ID for an owner-approved integration key. integration keys accept any method the owner approved for them; for scripts or SDKs inside an attached run, use the delivered substitute token with the base URL instead. Supply only integrationId, method, relative path (optional query), optional body/contentType and Session accept preference; never supply credentials, arbitrary headers, or a Session/user ID.'
             : 'Make a credential-broker request using an operator integration ID from list_integrations. Supply only integrationId, method, relative path (optional query), optional body/contentType and accept preference; never supply credentials, arbitrary headers, or a Session/user ID.',
           inputSchema: integrationRequestSchema,
           annotations: {
@@ -246,13 +254,19 @@ export function createHttpIntegrationsMcp() {
                 serviceCredentialToolsEnabled ? resolveContext : undefined,
               ),
             );
-          } catch {
+          } catch (error) {
+            // A few refusal reasons are safe to name (they carry no request
+            // values) and let the caller fix the call instead of retrying.
+            const reason = integrationFailureReason(error);
+            const named = SHAREABLE_INTEGRATION_REFUSALS.has(reason)
+              ? ` (reason: ${reason})`
+              : '';
             return {
               isError: true,
               content: [
                 {
                   type: 'text' as const,
-                  text: 'Integration request rejected or failed. Check the allowed methods and paths; the broker never falls back to direct access.',
+                  text: `Integration request rejected or failed. Check the allowed methods and paths; the broker never falls back to direct access.${named}`,
                 },
               ],
             };

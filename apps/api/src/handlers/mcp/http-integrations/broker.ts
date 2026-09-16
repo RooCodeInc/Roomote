@@ -233,13 +233,13 @@ let active = 0;
 const scopes = new Map<string, number>();
 
 /**
- * Operator-manifest requests and `session:` grant reads share this broker.
+ * Operator-manifest requests and `session:` grant requests share this broker.
  *
- * For `session:` IDs this is the read-only floor: a GET or HEAD made by the
- * API itself, available on every compute provider and to Fast. It is never
- * widened; a grant's `allowedMethods` apply to the credential egress proxy
- * (`apps/api/src/handlers/credential-egress-proxy`), where attached runs use
- * ordinary clients with a delivered substitute token.
+ * For `session:` IDs the request is made by the API itself, available on
+ * every compute provider and to Fast, and limited to the grant's approved
+ * `allowedMethods` on any path under the origin. The same policy applies to
+ * the credential egress proxy (`apps/api/src/handlers/credential-egress-proxy`),
+ * where attached runs use ordinary clients with a delivered substitute token.
  */
 export async function integrationRequest(
   config: HttpIntegrationsConfig,
@@ -294,7 +294,7 @@ export async function integrationRequest(
     const context = await resolveContext();
     const grant = await resolveOwnedServiceCredential(context, secretRef.data);
     const args = parsed.data;
-    if (args.method !== 'GET' && args.method !== 'HEAD')
+    if (!grant.allowedMethods.includes(args.method))
       throw new IntegrationRequestError('method_not_allowed');
     if (args.path.length > 2048)
       throw new IntegrationRequestError('path_too_long');
@@ -330,10 +330,10 @@ export async function integrationRequest(
             id: args.integrationId,
             description: grant.label,
             origin: grant.origin,
-            rules: [
-              { method: 'GET', pathPrefix: '/' },
-              { method: 'HEAD', pathPrefix: '/' },
-            ],
+            rules: grant.allowedMethods.map((method) => ({
+              method,
+              pathPrefix: '/',
+            })),
             credential: {
               header: grant.headerName,
               prefix: grant.headerPrefix,

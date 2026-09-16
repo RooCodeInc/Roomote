@@ -333,6 +333,34 @@ function resolveReceiptLanguage(
       verb: byPhase('Starting', 'Started', 'Failed to Start'),
       object: 'coding task',
     };
+  if (toolName === 'prepare_integration_key') {
+    const label = typeof args?.label === 'string' ? args.label.trim() : '';
+    return {
+      verb: byPhase('Requesting', 'Requested', 'Failed to Request'),
+      object: label ? `a key for ${label}` : 'an integration key',
+    };
+  }
+  if (toolName === 'list_integration_keys')
+    return {
+      verb: byPhase('Checking', 'Checked', 'Failed to Check'),
+      object: 'your integrations',
+    };
+  if (toolName === 'request_with_integration_key') {
+    const method =
+      typeof args?.method === 'string' ? args.method.toUpperCase() : '';
+    const path = typeof args?.path === 'string' ? args.path : '';
+    const status =
+      phase !== 'running' && typeof result?.status === 'number'
+        ? ` (${result.status})`
+        : '';
+    return {
+      verb: byPhase('Calling', 'Called', 'Failed to Call'),
+      object:
+        method && path
+          ? `${method} ${path}${status}`
+          : `an integration${status}`,
+    };
+  }
   if (toolName === 'review_pull_request')
     return {
       verb: byPhase('Starting', 'Started', 'Failed to Start'),
