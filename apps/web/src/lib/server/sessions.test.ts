@@ -10,6 +10,7 @@ import {
   fastAgentParentEvents,
   inArray,
   llmUsageEvents,
+  repositories,
   repositoryFactory,
   runFactory,
   sessionFactory,
@@ -718,6 +719,10 @@ describe('unified Session queries', () => {
       fullName: 'RooCodeInc/Roomote',
       linkedByUserId: owner.id,
     });
+    await db
+      .update(repositories)
+      .set({ host: null })
+      .where(eq(repositories.id, linkedRepository.id));
     await db.insert(sessionTasks).values([
       ...tasksBySession.map((task, index) => ({
         sessionId: candidateSessions[index]!.id,
@@ -817,6 +822,16 @@ describe('unified Session queries', () => {
     ).resolves.toMatchObject({
       sessions: [
         expect.objectContaining({ id: otherProviderSession.id }),
+        expect.objectContaining({ id: unstampedSession.id }),
+      ],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: `gitlab:RooCodeInc/Roomote#123|repositoryId:${linkedRepository.id}`,
+      }),
+    ).resolves.toMatchObject({
+      sessions: [
         expect.objectContaining({ id: linkedSameHostSession.id }),
         expect.objectContaining({ id: unstampedSession.id }),
       ],

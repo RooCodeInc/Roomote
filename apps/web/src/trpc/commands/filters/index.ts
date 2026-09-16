@@ -286,7 +286,10 @@ export async function getPullRequestsForFilterCommand(
       )`,
       repositoryIds: sql<string[]>`coalesce(
         array_agg(distinct ${taskPullRequests.repositoryId}::text)
-          filter (where ${taskPullRequests.repositoryId} is not null),
+          filter (
+            where ${taskPullRequests.repositoryId} is not null
+              and ${effectiveHost} is null
+          ),
         '{}'
       )`,
       repository: taskPullRequests.repository,
@@ -317,11 +320,12 @@ export async function getPullRequestsForFilterCommand(
     )
     .flatMap((r) => {
       const scopes: Array<{ host?: string; repositoryId?: string }> =
-        r.hosts.length > 0
-          ? r.hosts.map((host) => ({ host }))
-          : r.repositoryIds.length > 0
-            ? r.repositoryIds.map((repositoryId) => ({ repositoryId }))
-            : [{}];
+        r.hosts.length > 0 || r.repositoryIds.length > 0
+          ? [
+              ...r.hosts.map((host) => ({ host })),
+              ...r.repositoryIds.map((repositoryId) => ({ repositoryId })),
+            ]
+          : [{}];
 
       return scopes.map(({ host, repositoryId }) => {
         const value = buildPullRequestFilterValue({

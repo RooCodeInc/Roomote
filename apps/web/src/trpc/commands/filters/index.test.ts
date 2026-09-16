@@ -1,5 +1,7 @@
 import {
   db,
+  eq,
+  repositories,
   repositoryFactory,
   taskFactory,
   taskPullRequests,
@@ -19,6 +21,10 @@ describe('getPullRequestsForFilterCommand', () => {
       fullName: repository,
       linkedByUserId: linkedBy.id,
     });
+    await db
+      .update(repositories)
+      .set({ host: null })
+      .where(eq(repositories.id, linkedRepository.id));
     const [
       githubTask,
       gitlabTask,
@@ -94,9 +100,12 @@ describe('getPullRequestsForFilterCommand', () => {
           value: `gitlab:${repository}#123|host:gitlab.internal`,
           subLabel: expect.stringContaining('GitLab (gitlab.internal)'),
         }),
+        expect.objectContaining({
+          value: `gitlab:${repository}#123|repositoryId:${linkedRepository.id}`,
+        }),
       ]),
     );
-    expect(options).toHaveLength(3);
+    expect(options).toHaveLength(4);
     expect(
       options.filter(
         (option) => option.value === `gitlab:${repository}#123|host:gitlab.com`,
