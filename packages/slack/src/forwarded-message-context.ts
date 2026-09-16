@@ -442,6 +442,12 @@ function extractBlockLinks(
         if (text) {
           collectSlackMarkdownLinks(text, links, seenKeys);
         }
+        for (const field of Array.isArray(block.fields) ? block.fields : []) {
+          const fieldText = getSlackTextObjectText(field);
+          if (fieldText) {
+            collectSlackMarkdownLinks(fieldText, links, seenKeys);
+          }
+        }
         break;
       }
       case 'context': {
@@ -472,30 +478,53 @@ function extractBlockLinks(
             continue;
           }
 
-          const elements = Array.isArray(section.elements)
-            ? section.elements
-            : [];
+          collectRichTextElementLinks(section.elements, links, seenKeys);
+        }
 
-          for (const element of elements) {
-            if (!isRecord(element)) {
+        break;
+      }
+      case 'table': {
+        const rows = Array.isArray(block.rows) ? block.rows : [];
+        for (const row of rows) {
+          for (const cell of Array.isArray(row) ? row : []) {
+            if (!isRecord(cell)) {
               continue;
             }
-
-            const url = getStringField(element, 'url');
-            if (getStringField(element, 'type') === 'link' && url) {
-              appendUniqueSlackBlockLink(links, seenKeys, {
-                url,
-                text: normalizeSlackLinkText(getStringField(element, 'text')),
-              });
+            collectRichTextElementLinks(cell.elements, links, seenKeys);
+            if (typeof cell.text === 'string') {
+              collectSlackMarkdownLinks(cell.text, links, seenKeys);
             }
           }
         }
-
         break;
       }
       default:
         break;
     }
+  }
+}
+
+function collectRichTextElementLinks(
+  elements: unknown,
+  links: SlackBlockLink[],
+  seenKeys: Set<string>,
+): void {
+  if (!Array.isArray(elements)) {
+    return;
+  }
+  for (const element of elements) {
+    if (!isRecord(element)) {
+      continue;
+    }
+    const url = getStringField(element, 'url');
+    if (getStringField(element, 'type') === 'link' && url) {
+      appendUniqueSlackBlockLink(links, seenKeys, {
+        url,
+        text: normalizeSlackLinkText(getStringField(element, 'text')),
+      });
+    }
+    // Nested rich-text containers (sections inside a table cell).
+    collectRichTextElementLinks(element.elements, links, seenKeys);
   }
 }
 

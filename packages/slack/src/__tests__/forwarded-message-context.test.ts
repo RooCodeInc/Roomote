@@ -453,6 +453,55 @@ describe('forwarded-message-context', () => {
     );
   });
 
+  it('keeps links from table cells and section fields', () => {
+    const context = formatSlackAttachmentContext('Report', undefined, [
+      {
+        type: 'section',
+        fields: [{ type: 'mrkdwn', text: '<https://example.com/run/9|Run 9>' }],
+      },
+      {
+        type: 'container',
+        child_blocks: [
+          {
+            type: 'table',
+            rows: [
+              [
+                { type: 'raw_text', text: 'Test' },
+                {
+                  type: 'rich_text',
+                  elements: [
+                    {
+                      type: 'rich_text_section',
+                      elements: [
+                        {
+                          type: 'link',
+                          url: 'https://example.com/tests/checkout',
+                          text: 'checkout flow',
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            ],
+          },
+        ],
+      },
+    ]);
+
+    expect(context).toBe(
+      [
+        'Slack block text:',
+        'Run 9',
+        'Test | checkout flow',
+        '',
+        'Slack block links:',
+        '- Run 9: https://example.com/run/9',
+        '- checkout flow: https://example.com/tests/checkout',
+      ].join('\n'),
+    );
+  });
+
   it('preserves newlines between rich_text block sections', () => {
     const context = formatSlackBlockTextContext([
       {
