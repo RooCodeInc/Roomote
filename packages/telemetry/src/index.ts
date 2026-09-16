@@ -199,6 +199,18 @@ export interface PingInstanceReportRequest {
   report: Record<string, unknown>;
 }
 
+export interface PingPlatformIssueSubmission {
+  reportId: string;
+  instanceId: string;
+  appVersion: string;
+  submittedAt: string;
+  report: {
+    title: string;
+    summary: string;
+    taskUrl: string;
+  };
+}
+
 export interface PingVersionCheckRequest {
   instanceId: string;
   appVersion: string;

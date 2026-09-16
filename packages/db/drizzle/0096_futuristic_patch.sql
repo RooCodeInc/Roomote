@@ -1,0 +1,3 @@
+ALTER TABLE "task_platform_issue_reports" ADD COLUMN "ping_submitted_at" timestamp;--> statement-breakpoint
+ALTER TABLE "task_platform_issue_reports" ADD COLUMN "ping_submitted_by_user_id" text;--> statement-breakpoint
+ALTER TABLE "task_platform_issue_reports" ADD CONSTRAINT "task_platform_issue_reports_ping_submitted_by_user_id_users_id_fk" FOREIGN KEY ("ping_submitted_by_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
