@@ -744,6 +744,19 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(enabledPrompt).toContain('`prepare_integration_key`');
     expect(enabledPrompt).toContain('`list_integration_keys`');
     expect(enabledPrompt).toContain(
+      'launch a coding task attached to this Session to use the integration',
+    );
+    expect(enabledPrompt).not.toContain('`request_with_integration_key`');
+    expect(enabledPrompt).not.toContain(
+      'for one or a few direct calls, call `request_with_integration_key` yourself',
+    );
+    expect(enabledPrompt).toContain(
+      'Never invent a reference or substitute another credential.',
+    );
+    expect(enabledPrompt).toContain(
+      'In web Sessions these tools need no opening `send_chat_reply`.',
+    );
+    expect(enabledPrompt).toContain(
       'do not launch a coding task to build a connector when an integration key would do',
     );
     expect(enabledPrompt).toContain(
@@ -1563,6 +1576,11 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       'Assume the user may know their domain better than you do',
+    );
+    // Deference is about the user's choices; a terse trigger is a reason to
+    // investigate, not to ask.
+    expect(prompt).toContain(
+      'find the specifics yourself first from the conversation, the repositories, recent failures, and memory, and ask a question only when that search leaves the work genuinely ambiguous',
     );
     expect(prompt).toContain(
       'do not present your work as corrected, verified, reviewed, or a verdict unless the user asked for that review',

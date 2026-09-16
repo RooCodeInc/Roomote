@@ -24,11 +24,37 @@ describe('buildFastAgentToolFilter', () => {
 });
 
 describe('getFastAgentNativeAcpKind', () => {
+  it('disables only direct key-based requests', () => {
+    const filter = buildFastAgentToolFilter([], {
+      surface: 'web',
+      serviceCredentialToolsEnabled: true,
+    });
+    expect(
+      filter[FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential],
+    ).toBe(false);
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]).toBe(
+      true,
+    );
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]).toBe(
+      true,
+    );
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]).toBe(
+      true,
+    );
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]).toBe(true);
+    expect(
+      FAST_AGENT_SUBAGENT_TOOL_FILTER[
+        FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools
+      ],
+    ).toBe(true);
+    expect(
+      FAST_AGENT_SUBAGENT_TOOL_FILTER[
+        FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool
+      ],
+    ).toBe(true);
+  });
+
   it.each([
-    [
-      FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
-      ACP_TOOL_KINDS.read,
-    ],
     [
       FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
       ACP_TOOL_KINDS.tool,
@@ -61,7 +87,7 @@ describe('getFastAgentNativeAcpKind', () => {
     );
     expect(
       filter[FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential],
-    ).toBe(true);
+    ).toBe(false);
     expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]).toBe(
       false,
     );
