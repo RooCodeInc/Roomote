@@ -314,7 +314,7 @@ function ServerFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg">
+      <DialogContent size="xl">
         <DialogHeader>
           <DialogTitle>
             {isEdit ? 'Edit custom MCP server' : 'Add custom MCP server'}
@@ -657,7 +657,7 @@ function CustomToolManagementDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg">
+      <DialogContent size="xl">
         <DialogHeader>
           <DialogTitle>
             Manage tools{server ? ` — ${server.name}` : ''}
@@ -828,6 +828,51 @@ export function useCustomMcpServers(): {
             enabled: !server.enabled,
           });
           refresh();
+        },
+        configureAction: {
+          label: 'Configure',
+          ariaLabel: `Configure ${server.name}`,
+          onAction: needsConnection
+            ? async () => {
+                const initiateUrl = await connect.mutateAsync({
+                  id: server.id,
+                  redirectTo: '/settings/integrations',
+                });
+                window.location.href = initiateUrl;
+              }
+            : () => {
+                setEditingServer(server);
+                setFormOpen(true);
+              },
+          isPending: connect.isPending,
+          icon: <Pencil />,
+        },
+        manageToolsAction:
+          server.transport === 'remote'
+            ? {
+                label: 'Manage available tools',
+                ariaLabel: `Manage ${server.name} tools`,
+                onAction: () => setToolsServer(server),
+                isPending: false,
+                icon: <Wrench />,
+              }
+            : undefined,
+        removeAction: {
+          label: 'Remove',
+          ariaLabel: `Remove ${server.name}`,
+          onAction: async () => {
+            if (
+              confirm(
+                `Delete custom MCP server '${server.name}'? Stored credentials are removed as well.`,
+              )
+            ) {
+              await deleteServer.mutateAsync({ id: server.id });
+              refresh();
+            }
+          },
+          isPending:
+            deleteServer.isPending && deleteServer.variables?.id === server.id,
+          icon: <Trash2 />,
         },
         status: needsConnection
           ? server.authStatus === 'error'

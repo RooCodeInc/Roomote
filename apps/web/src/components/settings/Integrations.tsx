@@ -3,6 +3,7 @@
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { toast } from 'sonner';
 
 import {
@@ -50,11 +51,13 @@ import {
 } from '@/hooks/mcp-connections';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import {
+  IntegrationListHeader,
+  IntegrationListRow,
   IntegrationSection,
-  splitIntegrationItems,
   type IntegrationItem,
 } from './integration-card';
 import { useCustomMcpServers } from './CustomMcpServers';
+import { useYourIntegrations } from './YourIntegrations';
 import {
   saveAsanaConnectionSchema,
   saveNotionConnectionSchema,
@@ -73,6 +76,8 @@ import {
   AlertDescription,
   AlertTitle,
   Button,
+  Card,
+  CardContent,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -91,6 +96,7 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
+  Skeleton,
   Spinner,
   Textarea,
   TriangleAlert,
@@ -569,6 +575,37 @@ function buildAdminConfiguredIntegrationItem({
       : undefined,
     isPending,
     status,
+    configureAction: canConfigure
+      ? {
+          label: 'Configure',
+          ariaLabel: `Configure ${integration.name}`,
+          onAction: openDialog,
+          isPending: isPending || (dialogOpen && connectionPending),
+          icon: <Pencil />,
+        }
+      : null,
+    manageToolsAction:
+      canManageTools &&
+      enabled &&
+      integration.serverMode !== 'native' &&
+      integration.serverMode !== 'credential_only'
+        ? {
+            label: 'Manage available tools',
+            ariaLabel: `Manage ${integration.name} tools`,
+            onAction: openToolDialog,
+            isPending: false,
+            icon: <Settings2 />,
+          }
+        : undefined,
+    removeAction:
+      canConfigure && enabled
+        ? {
+            label: 'Remove',
+            ariaLabel: `Remove ${integration.name}`,
+            onAction: disconnectIntegration,
+            isPending,
+          }
+        : undefined,
     headerAction:
       canConfigure && connection != null
         ? {
@@ -603,20 +640,6 @@ function buildAdminConfiguredIntegrationItem({
         }
       : undefined,
   };
-}
-
-function AddCustomMcpServerBar({ onAdd }: { onAdd: () => void }) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-border/70 px-4 py-3">
-      <p className="text-sm text-muted-foreground">
-        Not in the catalog? Connect your own MCP server, remote or local.
-      </p>
-      <Button type="button" variant="secondary" size="sm" onClick={onAdd}>
-        <Plus />
-        Add custom server
-      </Button>
-    </div>
-  );
 }
 
 function DeepLinkEnableDialog({
@@ -700,7 +723,7 @@ function AdminConfiguredIntegrationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg">
+      <DialogContent size="xl">
         <DialogHeader>
           <DialogTitle>{dialogTitle}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -1618,11 +1641,16 @@ function VercelConnectionFields({
 export function Integrations({
   integrationIds,
   configurationRequest,
+  addRequest,
   showCatalog = true,
 }: {
   integrationIds?: readonly string[];
   configurationRequest?: {
     integrationId: string;
+    sequence: number;
+  } | null;
+  addRequest?: {
+    type: 'catalog' | 'custom-mcp' | 'api-key';
     sequence: number;
   } | null;
   showCatalog?: boolean;
@@ -1639,6 +1667,9 @@ export function Integrations({
     useState<string | null>(null);
   const [clearedDeepLinkIntegrationId, setClearedDeepLinkIntegrationId] =
     useState<string | null>(null);
+  const [isCatalogOpen, setIsCatalogOpen] = useState(false);
+  const [configurationInfoItem, setConfigurationInfoItem] =
+    useState<IntegrationItem | null>(null);
   const highlightedIntegrationId =
     clearedDeepLinkIntegrationId === deepLinkedIntegrationId
       ? ''
@@ -2164,6 +2195,15 @@ export function Integrations({
               icon: <Settings2 />,
             }
           : undefined,
+        configureAction: isAdmin
+          ? {
+              label: 'Configure',
+              ariaLabel: 'Configure Linear',
+              onAction: () => setIsLinearOauthSetupOpen(true),
+              isPending: isLinearOauthSetupOpen && linearOauthSetup.isPending,
+              icon: <Pencil />,
+            }
+          : null,
         onAction: linearOauthUnavailable
           ? canSetUpLinearOauth
             ? () => setIsLinearOauthSetupOpen(true)
@@ -2312,6 +2352,7 @@ export function Integrations({
               const nextEnabled = !voiceEnabled;
               return {
                 ...item,
+                configureAction: null,
                 actionLabel: voiceEnabled ? 'Disable Voice' : 'Enable Voice',
                 isPending:
                   setDeploymentEnabled.isPending &&
@@ -2727,11 +2768,92 @@ export function Integrations({
     openAddDialog: openCustomMcpDialog,
     dialogs: customMcpDialogs,
   } = useCustomMcpServers();
+  const {
+    items: apiKeyItems,
+    isLoading: apiKeyItemsLoading,
+    error: apiKeyItemsError,
+    openAddDialog: openApiKeyDialog,
+    dialogs: apiKeyDialogs,
+  } = useYourIntegrations();
+  const handledAddRequestSequence = useRef<number | null>(null);
 
-  const { installed, configured, available } = splitIntegrationItems([
-    ...items,
+  useEffect(() => {
+    if (
+      addRequest == null ||
+      handledAddRequestSequence.current === addRequest.sequence
+    ) {
+      return;
+    }
+
+    handledAddRequestSequence.current = addRequest.sequence;
+    if (addRequest.type === 'catalog') {
+      setIsCatalogOpen(true);
+    } else if (addRequest.type === 'custom-mcp') {
+      if (customMcpEnabled) {
+        openCustomMcpDialog();
+      } else {
+        toast.error(
+          'Custom MCP servers are disabled by the deployment operator.',
+        );
+      }
+    } else {
+      openApiKeyDialog();
+    }
+  }, [addRequest, customMcpEnabled, openApiKeyDialog, openCustomMcpDialog]);
+
+  const availableItems = items.filter((item) => !item.enabled);
+  const activeItems = [
+    ...items
+      .filter((item) => item.enabled)
+      .map((item) => ({
+        ...item,
+        configureAction:
+          item.configureAction === undefined
+            ? {
+                label: 'Configure',
+                ariaLabel: `Configure ${item.name}`,
+                onAction: () => setConfigurationInfoItem(item),
+                isPending: false,
+              }
+            : item.configureAction,
+        manageToolsAction:
+          item.manageToolsAction ??
+          (item.secondaryAction?.label.startsWith('Manage')
+            ? {
+                ...item.secondaryAction,
+                label: 'Manage available tools',
+              }
+            : undefined),
+      })),
     ...customMcpItems,
-  ]);
+    ...apiKeyItems,
+  ]
+    .filter((item) => item.enabled)
+    .map((item) => ({
+      ...item,
+      removeAction:
+        item.removeAction ??
+        (item.onAction
+          ? {
+              label: 'Remove',
+              ariaLabel: `Remove ${item.name}`,
+              onAction: item.onAction,
+              isPending: item.isPending,
+            }
+          : undefined),
+    }));
+  const configurationInfoDefinition = configurationInfoItem
+    ? MCP_INTEGRATIONS.find(
+        (integration) =>
+          integration.id ===
+          (configurationInfoItem.id === 'sentry-mcp'
+            ? 'sentry'
+            : configurationInfoItem.id),
+      )
+    : undefined;
+  const configurationIsDeploymentScoped = configurationInfoDefinition
+    ? isDeploymentScopedMcpIntegration(configurationInfoDefinition)
+    : false;
   const highlightedItem =
     items.find((item) => item.id === highlightedIntegrationId) ?? null;
   const deepLinkDialogItem =
@@ -3401,9 +3523,9 @@ export function Integrations({
     });
   };
 
-  if (integrationsUnavailable) {
+  if (integrationsUnavailable && integrationIds !== undefined) {
     return (
-      <div className="space-y-8">
+      <div>
         <Alert>
           <AlertTitle>Integrations disabled by deployment operator</AlertTitle>
           <AlertDescription>
@@ -3411,28 +3533,12 @@ export function Integrations({
             instance.
           </AlertDescription>
         </Alert>
-        {integrationIds === undefined && customMcpEnabled ? (
-          <>
-            {customMcpDialogs}
-            <AddCustomMcpServerBar onAdd={openCustomMcpDialog} />
-            <IntegrationSection
-              id="custom-mcp-servers"
-              title="Custom MCP servers"
-              items={customMcpItems}
-              emptyState={
-                <p className="text-sm text-muted-foreground">
-                  No custom MCP servers configured yet.
-                </p>
-              }
-            />
-          </>
-        ) : null}
       </div>
     );
   }
 
   return (
-    <div className="space-y-8">
+    <div className={integrationIds === undefined ? 'contents' : 'space-y-8'}>
       <McpToolManagementDialog
         mcpId={toolDialogState?.mcpId ?? null}
         integrationName={toolDialogState?.integrationName ?? null}
@@ -3695,6 +3801,115 @@ export function Integrations({
           deepLinkDialogItem.onAction?.();
         }}
       />
+      {customMcpDialogs}
+      {apiKeyDialogs}
+      <Dialog open={isCatalogOpen} onOpenChange={setIsCatalogOpen}>
+        <DialogContent size="xl">
+          <DialogHeader>
+            <DialogTitle>Add from the catalog</DialogTitle>
+            <DialogDescription>
+              Choose a built-in integration to connect or configure.
+            </DialogDescription>
+          </DialogHeader>
+          {integrationsUnavailable ? (
+            <Alert>
+              <AlertTitle>
+                Integrations disabled by deployment operator
+              </AlertTitle>
+              <AlertDescription>
+                Built-in integrations cannot be added on this Roomote instance.
+              </AlertDescription>
+            </Alert>
+          ) : availableItems.length > 0 ? (
+            <div className="divide-y divide-background rounded-lg border bg-muted/30">
+              {availableItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-3 px-4 py-3"
+                >
+                  <div className="flex size-5 shrink-0 items-center justify-center">
+                    {item.icon}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold">{item.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {item.description}
+                    </p>
+                  </div>
+                  {item.onAction ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        setIsCatalogOpen(false);
+                        item.onAction?.();
+                      }}
+                    >
+                      <Plus />
+                      Add
+                    </Button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              All available built-in integrations are active.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={configurationInfoItem != null}
+        onOpenChange={(open) => {
+          if (!open) setConfigurationInfoItem(null);
+        }}
+      >
+        <DialogContent size="xl">
+          <DialogHeader>
+            <DialogTitle>
+              Configure {configurationInfoItem?.name ?? 'integration'}
+            </DialogTitle>
+            <DialogDescription>
+              {configurationInfoItem?.description}
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {configurationIsDeploymentScoped
+              ? 'Reconnect the workspace account to update this deployment-wide connection.'
+              : 'Connection settings for this integration are managed by each team member from Personal settings.'}{' '}
+            Deployment-wide tool availability can be managed from the sliders
+            action in this list.
+          </p>
+          <DialogFooter>
+            {configurationIsDeploymentScoped && configurationInfoDefinition ? (
+              <Button
+                type="button"
+                onClick={() => {
+                  connectMcp.mutate(
+                    {
+                      mcpId: configurationInfoDefinition.id,
+                      redirectTo: pathname,
+                    },
+                    {
+                      onSuccess: (url) => {
+                        window.location.href = url;
+                      },
+                      onError: (error) => toast.error(error.message),
+                    },
+                  );
+                }}
+              >
+                Reconnect
+              </Button>
+            ) : (
+              <Button asChild>
+                <Link href="/settings/personal">Open Personal settings</Link>
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {!showCatalog ? null : integrationIds !== undefined ? (
         <IntegrationSection
           id="selected-integrations"
@@ -3702,34 +3917,56 @@ export function Integrations({
           items={items}
         />
       ) : (
-        <>
-          {customMcpDialogs}
-          {customMcpEnabled ? (
-            <AddCustomMcpServerBar onAdd={openCustomMcpDialog} />
+        <div className="space-y-3 md:flex md:min-h-0 md:flex-1 md:flex-col md:gap-3 md:space-y-0">
+          {integrationsUnavailable ? (
+            <Alert>
+              <AlertTitle>
+                Integrations disabled by deployment operator
+              </AlertTitle>
+              <AlertDescription>
+                Built-in integrations cannot be connected or used on this
+                Roomote instance. Active custom and API-key integrations remain
+                listed below.
+              </AlertDescription>
+            </Alert>
           ) : null}
-          <IntegrationSection
-            id="installed-integrations"
-            title="Connected"
-            items={installed}
-            emptyState={
-              <p className="text-sm text-muted-foreground">
-                You haven&apos;t connected any integrations yet.
-              </p>
-            }
-          />
-          {configured.length > 0 && (
-            <IntegrationSection
-              id="configured-integrations"
-              title="Configured"
-              items={configured}
-            />
-          )}
-          <IntegrationSection
-            id="available-integrations"
-            title="Available"
-            items={available}
-          />
-        </>
+          {apiKeyItemsError ? (
+            <p role="alert" className="text-sm text-destructive">
+              {apiKeyItemsError}
+            </p>
+          ) : null}
+          <Card
+            variant="snug"
+            className="gap-0 p-0 md:min-h-0 md:flex-1 md:overflow-y-auto"
+          >
+            <CardContent className="p-0!">
+              <div role="table" aria-label="Integrations">
+                <IntegrationListHeader />
+                <div role="rowgroup" className="divide-y divide-background">
+                  {apiKeyItemsLoading ? (
+                    <div className="space-y-2 px-4 py-3">
+                      <Skeleton className="h-4 w-48" />
+                      <Skeleton className="h-3 w-full max-w-lg" />
+                    </div>
+                  ) : null}
+                  {(integrationsUnavailable
+                    ? [...customMcpItems, ...apiKeyItems].filter(
+                        (item) => item.enabled,
+                      )
+                    : activeItems
+                  ).map((item) => (
+                    <IntegrationListRow key={item.id} item={item} />
+                  ))}
+                  {!apiKeyItemsLoading && activeItems.length === 0 ? (
+                    <p className="px-4 py-6 text-sm text-muted-foreground">
+                      No active integrations yet.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   );

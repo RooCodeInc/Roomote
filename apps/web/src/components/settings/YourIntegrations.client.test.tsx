@@ -44,7 +44,7 @@ it('lists integrations without credentials and revokes with a same-origin JSON b
     'GET, POST · kept until revoked',
   );
   expect(fetchMock.mock.calls[0]![0]).toBe('/api/account/integrations');
-  fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Stripe' }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
   expect(fetchMock.mock.calls[1]![1]).toMatchObject({
     method: 'DELETE',
@@ -122,9 +122,10 @@ it('shows who shared an integration and lets an authorized viewer change visibil
   render(<YourIntegrations />);
   expect(await screen.findByText('Owned by Taylor')).toBeInTheDocument();
   expect(
-    screen.queryByLabelText('Visibility for Shared search'),
+    screen.queryByRole('button', { name: 'Configure Shared search' }),
   ).not.toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText('Visibility for Stripe'), {
+  fireEvent.click(screen.getByRole('button', { name: 'Configure Stripe' }));
+  fireEvent.change(screen.getByLabelText('Who can use this integration?'), {
     target: { value: 'owner' },
   });
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));

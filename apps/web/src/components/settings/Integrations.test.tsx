@@ -1,5 +1,6 @@
 import type {
   ButtonHTMLAttributes,
+  ComponentProps,
   HTMLAttributes,
   InputHTMLAttributes,
   LabelHTMLAttributes,
@@ -393,6 +394,16 @@ vi.mock('./CustomMcpServers', () => ({
   }),
 }));
 
+vi.mock('./YourIntegrations', () => ({
+  useYourIntegrations: () => ({
+    items: [],
+    isLoading: false,
+    error: null,
+    openAddDialog: vi.fn(),
+    dialogs: null,
+  }),
+}));
+
 vi.mock('@/components/system', () => ({
   Alert: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   AlertDescription: ({
@@ -519,6 +530,7 @@ vi.mock('@/components/system', () => ({
   Spinner: () => <span>loading</span>,
   Star: () => <svg aria-hidden="true" />,
   Trash: () => <svg aria-hidden="true" />,
+  Trash2: () => <svg aria-hidden="true" data-icon="trash-2" />,
   Switch: ({
     checked,
     disabled,
@@ -549,8 +561,24 @@ vi.mock('@/components/system', () => ({
   X: () => <svg aria-hidden="true" />,
 }));
 
-import { Integrations, sortIntegrationItems } from './Integrations';
+import {
+  Integrations as ActualIntegrations,
+  sortIntegrationItems,
+} from './Integrations';
 import { splitIntegrationItems } from './integration-card';
+
+function Integrations(props: ComponentProps<typeof ActualIntegrations> = {}) {
+  if (props.integrationIds !== undefined || props.showCatalog === false) {
+    return <ActualIntegrations {...props} />;
+  }
+
+  return (
+    <ActualIntegrations
+      {...props}
+      integrationIds={['linear', ...MCP_INTEGRATIONS.map(({ id }) => id)]}
+    />
+  );
+}
 
 describe('Integrations settings', () => {
   beforeEach(() => {
@@ -598,7 +626,7 @@ describe('Integrations settings', () => {
   });
 
   it('returns Linear OAuth to a service-specific integrations URL', () => {
-    render(<Integrations />);
+    render(<ActualIntegrations />);
 
     expect(state.linearRedirectPath).toBe(
       '/settings/integrations?service=linear',
@@ -1027,26 +1055,16 @@ describe('Integrations settings', () => {
     ]);
   });
 
-  it('shows configured integrations separately and an empty connected state', () => {
+  it('shows only active integrations in one list', () => {
     state.linearInstallation = null;
 
-    render(<Integrations />);
+    render(<ActualIntegrations />);
 
-    const connectedSection = screen
-      .getByRole('heading', { name: 'Connected' })
-      .closest('section');
-    const configuredSection = screen
-      .getByRole('heading', { name: 'Configured' })
-      .closest('section');
-
-    expect(connectedSection).toHaveTextContent(
-      "You haven't connected any integrations yet.",
-    );
     expect(
-      within(configuredSection as HTMLElement).getByRole('heading', {
-        name: 'Linear',
-      }),
-    ).toBeInTheDocument();
+      screen.getByRole('table', { name: 'Integrations' }),
+    ).toHaveTextContent('No active integrations yet.');
+    expect(screen.queryByText('Linear')).not.toBeInTheDocument();
+    expect(screen.queryByText('Available')).not.toBeInTheDocument();
   });
 
   it('highlights a selected integration above alphabetical order', () => {
@@ -1066,109 +1084,32 @@ describe('Integrations settings', () => {
     ]);
   });
 
-  it('renders connected and available sections with compact action buttons', () => {
-    render(<Integrations />);
+  it('renders active rows with icon-only actions and keeps inactive integrations in the catalog', () => {
+    const { rerender } = render(<ActualIntegrations />);
 
-    const connectedSection = screen
-      .getByRole('heading', { name: 'Connected' })
-      .closest('section');
-    const availableSection = screen
-      .getByRole('heading', { name: 'Available' })
-      .closest('section');
-    expect(connectedSection).not.toBeNull();
-    expect(availableSection).not.toBeNull();
+    const table = screen.getByRole('table', { name: 'Integrations' });
     expect(
-      screen.queryByRole('heading', { name: 'Configured' }),
+      screen.queryByRole('heading', { name: 'Connected' }),
     ).not.toBeInTheDocument();
+    expect(within(table).getByText('Linear')).toBeInTheDocument();
+    expect(within(table).queryByText('Asana')).not.toBeInTheDocument();
+    expect(
+      within(table).getByRole('button', { name: 'Configure Linear' }),
+    ).toHaveTextContent('');
+    expect(
+      within(table).getByRole('button', { name: 'Remove Linear' }),
+    ).toHaveTextContent('');
 
-    expect(
-      within(connectedSection as HTMLElement)
-        .getAllByRole('heading', { level: 3 })
-        .map((heading) => heading.textContent),
-    ).toEqual(['Linear']);
-    expect(
-      within(availableSection as HTMLElement)
-        .getAllByRole('heading', { level: 3 })
-        .map((heading) => heading.textContent),
-    ).toEqual([
-      'Asana',
-      'Better Stack',
-      'Braintrust',
-      'ElevenLabs',
-      'Grafana',
-      'Granola',
-      'Jira',
-      'monday.com',
-      'Neon',
-      'Notion',
-      'PostHog',
-      'Pylon',
-      'Railway',
-      'Resend',
-      'Rippling',
-      'Sentry',
-      'Snowflake',
-      'Supabase',
-      'Supermemory',
-      'Vercel',
-      'Voice',
-      'X',
-      'Zero',
-    ]);
-    expect(
-      screen.getAllByText('First-class integration').length,
-    ).toBeGreaterThan(0);
-    expect(screen.getAllByText('MCP-based integration').length).toBeGreaterThan(
-      0,
+    rerender(
+      <ActualIntegrations addRequest={{ type: 'catalog', sequence: 1 }} />,
     );
     expect(
-      screen.queryByText('Connected once for everyone in your workspace.'),
+      screen.getByRole('heading', { name: 'Add from the catalog' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Asana')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Disable Linear' }),
     ).not.toBeInTheDocument();
-
-    expect(
-      screen.getByRole('button', { name: 'Disable Linear' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Better Stack' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable PostHog' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Pylon' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Railway' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Resend' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'Inspect and manage shared email infrastructure through Resend from Roomote tasks.',
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Jira' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Sentry' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Asana' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Grafana' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Granola' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Snowflake' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Vercel' }),
-    ).toBeInTheDocument();
   });
 
   it('shows operator policy instead of integration controls when disabled', () => {
@@ -2522,17 +2463,9 @@ describe('Integrations settings', () => {
       options?.onSuccess?.();
     });
 
-    render(<Integrations />);
+    render(<ActualIntegrations />);
 
-    const connectedSection = (
-      await screen.findByRole('heading', { name: 'Connected' })
-    ).closest('section');
-    expect(
-      within(connectedSection as HTMLElement).getByRole('heading', {
-        level: 3,
-        name: 'Voice',
-      }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('Voice')).toBeInTheDocument();
     // The key is not the admin's to edit, and where it came from is not
     // something the card needs to say.
     expect(
@@ -2545,7 +2478,7 @@ describe('Integrations settings', () => {
       screen.queryByRole('button', { name: 'Configure Voice' }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Disable Voice' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Voice' }));
 
     expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(
       { mcpId: 'voice', enabled: false },
@@ -2569,19 +2502,19 @@ describe('Integrations settings', () => {
       enabled: false,
     };
 
-    render(<Integrations />);
+    render(
+      <ActualIntegrations addRequest={{ type: 'catalog', sequence: 1 }} />,
+    );
 
-    const availableSection = (
-      await screen.findByRole('heading', { name: 'Available' })
-    ).closest('section');
     expect(
-      within(availableSection as HTMLElement).getByRole('heading', {
-        level: 3,
-        name: 'Voice',
-      }),
+      await screen.findByRole('heading', { name: 'Add from the catalog' }),
     ).toBeInTheDocument();
+    const voiceCatalogRow = screen.getByText('Voice').parentElement
+      ?.parentElement as HTMLElement;
 
-    fireEvent.click(screen.getByRole('button', { name: 'Enable Voice' }));
+    fireEvent.click(
+      within(voiceCatalogRow).getByRole('button', { name: 'Add' }),
+    );
 
     expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(
       { mcpId: 'voice', enabled: true },

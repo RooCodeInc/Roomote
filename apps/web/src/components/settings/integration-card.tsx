@@ -12,10 +12,12 @@ import {
   CardTitle,
   Info,
   InfoTooltip,
+  Pencil,
   Plus,
   PlugIcon,
   Settings2,
   Spinner,
+  Trash2,
   X,
 } from '@/components/system';
 
@@ -61,6 +63,17 @@ export type IntegrationItem = {
     icon: ReactNode;
   };
   highlighted?: boolean;
+  configureAction?: IntegrationItemAction | null;
+  manageToolsAction?: IntegrationItemAction;
+  removeAction?: IntegrationItemAction;
+};
+
+export type IntegrationItemAction = {
+  label: string;
+  ariaLabel: string;
+  onAction: () => void;
+  isPending: boolean;
+  icon?: ReactNode;
 };
 
 function IntegrationCard({ item }: { item: IntegrationItem }) {
@@ -196,6 +209,121 @@ function IntegrationCard({ item }: { item: IntegrationItem }) {
         </CardContent>
       ) : null}
     </Card>
+  );
+}
+
+function IntegrationIconAction({
+  action,
+  fallbackIcon,
+}: {
+  action: IntegrationItemAction;
+  fallbackIcon: ReactNode;
+}) {
+  return (
+    <BasicTooltip content={action.label}>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        aria-label={action.ariaLabel}
+        onClick={action.onAction}
+        disabled={action.isPending}
+      >
+        {action.isPending ? (
+          <Spinner size="sm" />
+        ) : (
+          (action.icon ?? fallbackIcon)
+        )}
+      </Button>
+    </BasicTooltip>
+  );
+}
+
+export function IntegrationListHeader() {
+  return (
+    <div
+      role="row"
+      className="hidden grid-cols-[1rem_minmax(0,4fr)_minmax(0,6fr)_7rem] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
+    >
+      <span role="columnheader" className="sr-only">
+        Icon
+      </span>
+      <span role="columnheader" className="col-start-2">
+        Name
+      </span>
+      <span role="columnheader" className="col-start-3">
+        Description
+      </span>
+      <span role="columnheader" className="sr-only">
+        Actions
+      </span>
+    </div>
+  );
+}
+
+export function IntegrationListRow({ item }: { item: IntegrationItem }) {
+  const configureAction = item.configureAction;
+  const manageToolsAction = item.manageToolsAction;
+  const removeAction = item.removeAction;
+
+  return (
+    <div
+      id={`integration-${item.id}`}
+      role="row"
+      data-highlighted={item.highlighted ? 'true' : undefined}
+      className={`grid grid-cols-[1rem_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[1rem_minmax(0,4fr)_minmax(0,6fr)_7rem] md:items-center md:gap-4 md:px-4 md:py-3 ${item.highlighted ? 'bg-primary/5 ring-1 ring-inset ring-primary/40' : ''}`}
+    >
+      <div role="cell" className="col-start-1 row-start-1 pt-0.5 md:pt-0">
+        <div className="flex size-4 items-center justify-center">
+          {item.icon}
+        </div>
+      </div>
+      <div role="cell" className="col-start-2 row-start-1 min-w-0 space-y-1">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <p className="truncate text-sm font-semibold">{item.name}</p>
+          {item.badge}
+        </div>
+        {item.status ? (
+          <div className="flex items-start gap-1 text-xs text-muted-foreground">
+            {item.statusIcon ? (
+              <span className="mt-0.5 shrink-0 text-destructive">
+                {item.statusIcon}
+              </span>
+            ) : null}
+            <span>{item.status}</span>
+          </div>
+        ) : null}
+      </div>
+      <div
+        role="cell"
+        className="col-span-2 col-start-2 row-start-2 min-w-0 text-sm text-muted-foreground/80 md:col-span-1 md:col-start-3 md:row-start-1"
+      >
+        {item.description}
+      </div>
+      <div
+        role="cell"
+        className="col-start-3 row-start-1 flex shrink-0 items-center justify-end gap-1 md:col-start-4"
+      >
+        {configureAction ? (
+          <IntegrationIconAction
+            action={configureAction}
+            fallbackIcon={<Pencil />}
+          />
+        ) : null}
+        {manageToolsAction ? (
+          <IntegrationIconAction
+            action={manageToolsAction}
+            fallbackIcon={<Settings2 />}
+          />
+        ) : null}
+        {removeAction ? (
+          <IntegrationIconAction
+            action={removeAction}
+            fallbackIcon={<Trash2 />}
+          />
+        ) : null}
+      </div>
+    </div>
   );
 }
 
