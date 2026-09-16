@@ -84,6 +84,56 @@ export type SaveVoiceConnectionInput = z.infer<
   typeof saveVoiceConnectionSchema
 >;
 
+const APNS_PEM_PATTERN =
+  /-----BEGIN PRIVATE KEY-----[\s\S]+-----END PRIVATE KEY-----/;
+
+export const saveIosAppConnectionSchema = z.object({
+  teamId: z
+    .string()
+    .transform((value) => value.trim().toUpperCase())
+    .pipe(
+      z
+        .string()
+        .min(1, 'Team ID is required')
+        .regex(
+          /^[A-Z0-9]{10}$/,
+          'Team ID is the 10-character Apple team identifier',
+        ),
+    ),
+  keyId: z
+    .string()
+    .transform((value) => value.trim().toUpperCase())
+    .pipe(
+      z
+        .string()
+        .min(1, 'Key ID is required')
+        .regex(
+          /^[A-Z0-9]{10}$/,
+          'Key ID is the 10-character APNs key identifier',
+        ),
+    ),
+  bundleId: z
+    .string()
+    .trim()
+    .min(1, 'Bundle ID is required')
+    .regex(
+      /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/,
+      'Bundle ID looks like com.example.app',
+    ),
+  /** Blank keeps the stored key; otherwise the full .p8 PEM contents. */
+  privateKey: z
+    .string()
+    .transform((value) => value.trim())
+    .refine(
+      (value) => value.length === 0 || APNS_PEM_PATTERN.test(value),
+      'Paste the whole .p8 file, starting with -----BEGIN PRIVATE KEY-----',
+    ),
+});
+
+export type SaveIosAppConnectionInput = z.infer<
+  typeof saveIosAppConnectionSchema
+>;
+
 export const saveVercelConnectionSchema = z.object({
   accessToken: z.string().transform((value) => value.trim()),
   defaultTeamIdOrSlug: z

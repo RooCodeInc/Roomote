@@ -22,6 +22,7 @@ export enum ScheduledJobName {
   ThreadFooterRefresh = 'ThreadFooterRefresh',
   WebTaskInitiatorSettleNotification = 'WebTaskInitiatorSettleNotification',
   SessionAttentionNotification = 'SessionAttentionNotification',
+  IosPushNotification = 'IosPushNotification',
 }
 
 /**

@@ -1,5 +1,6 @@
 import {
   and,
+  count,
   db,
   deploymentMcpEnablements,
   eq,
@@ -8,6 +9,7 @@ import {
   mcpConnections,
   or,
   resolveModelProviderEnvValue,
+  userDevices,
 } from '@roomote/db/server';
 import {
   filterMcpToolDefinitions,
@@ -26,6 +28,7 @@ import {
   isMcpConnectionGranolaConfig,
   isMcpConnectionElevenLabsConfig,
   isMcpConnectionVoiceConfig,
+  isMcpConnectionIosAppConfig,
   isMcpConnectionGrafanaConfig,
   isMcpConnectionSnowflakeConfig,
   isMcpConnectionVercelConfig,
@@ -59,6 +62,7 @@ import type {
   SaveGranolaConnectionInput,
   SaveElevenLabsConnectionInput,
   SaveVoiceConnectionInput,
+  SaveIosAppConnectionInput,
   SaveGrafanaConnectionInput,
   SaveSnowflakeConnectionInput,
   SaveVercelConnectionInput,
@@ -1060,6 +1064,55 @@ export async function getVoiceConnectionCommand(
   };
 }
 
+/**
+ * The deployment's iOS app settings for the Integrations card. The APNs
+ * private key never leaves the server; `deviceCount` is how many phones are
+ * currently registered for push so an admin can see the key is in use.
+ */
+export async function getIosAppConnectionCommand(
+  auth: UserAuthSuccess,
+): Promise<{
+  authStatus: 'pending' | 'authenticated' | 'error' | null;
+  configured: boolean;
+  teamId: string;
+  keyId: string;
+  bundleId: string;
+  deviceCount: number;
+} | null> {
+  assertAdmin(auth);
+
+  const connection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'ios_app'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: {
+      authConfig: true,
+      authStatus: true,
+    },
+  });
+
+  if (!connection || !isMcpConnectionIosAppConfig(connection.authConfig)) {
+    return null;
+  }
+
+  const [devices] = await db
+    .select({ value: count() })
+    .from(userDevices)
+    .where(
+      and(eq(userDevices.platform, 'ios'), isNull(userDevices.disabledAt)),
+    );
+
+  return {
+    authStatus: connection.authStatus,
+    configured: true,
+    teamId: connection.authConfig.teamId,
+    keyId: connection.authConfig.keyId,
+    bundleId: connection.authConfig.bundleId,
+    deviceCount: devices?.value ?? 0,
+  };
+}
+
 export async function getXConnectionCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
 
@@ -1840,6 +1893,106 @@ export async function saveVoiceConnectionCommand(
     captureIntegrationLifecycleEvent(
       'integration_enabled',
       'voice',
+      auth.userId,
+    );
+  }
+
+  return {
+    authStatus: 'authenticated' as const,
+  };
+}
+
+export async function saveIosAppConnectionCommand(
+  auth: UserAuthSuccess,
+  input: SaveIosAppConnectionInput,
+) {
+  assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
+
+  const existingConnection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'ios_app'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: {
+      authConfig: true,
+    },
+  });
+
+  const existingConfig = isMcpConnectionIosAppConfig(
+    existingConnection?.authConfig,
+  )
+    ? existingConnection.authConfig
+    : null;
+  const nextEncryptedPrivateKey =
+    input.privateKey.length > 0
+      ? encrypt(input.privateKey)
+      : existingConfig?.encryptedPrivateKey;
+
+  if (!nextEncryptedPrivateKey) {
+    throw new Error(
+      'An APNs key (.p8) is required when no key is already stored.',
+    );
+  }
+
+  const authConfig = {
+    type: 'ios_app' as const,
+    teamId: input.teamId,
+    keyId: input.keyId,
+    bundleId: input.bundleId,
+    encryptedPrivateKey: nextEncryptedPrivateKey,
+  };
+
+  await db
+    .insert(mcpConnections)
+    .values({
+      userId: null,
+      mcpId: 'ios_app',
+      connectionRole: 'default',
+      authConfig,
+      enabled: true,
+      authStatus: 'authenticated',
+    })
+    .onConflictDoUpdate({
+      target: [
+        mcpConnections.userId,
+        mcpConnections.mcpId,
+        mcpConnections.connectionRole,
+      ],
+      set: {
+        connectionRole: 'default',
+        authConfig,
+        enabled: true,
+        authStatus: 'authenticated',
+        updatedAt: new Date(),
+      },
+    });
+
+  await db
+    .insert(deploymentMcpEnablements)
+    .values({
+      mcpId: 'ios_app',
+      enabled: true,
+      enabledByUserId: auth.userId,
+    })
+    .onConflictDoUpdate({
+      target: [deploymentMcpEnablements.mcpId],
+      set: {
+        enabled: true,
+        enabledByUserId: auth.userId,
+        updatedAt: new Date(),
+      },
+    });
+
+  if (!existingConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      'ios_app',
+      auth.userId,
+    );
+    captureIntegrationLifecycleEvent(
+      'integration_enabled',
+      'ios_app',
       auth.userId,
     );
   }

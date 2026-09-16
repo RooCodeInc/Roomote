@@ -45,6 +45,7 @@ export {
   enqueueSessionAttentionNotification,
   type SessionAttentionNotificationJob,
 } from './lib/enqueue-session-attention-notification';
+export * from './lib/ios-push';
 export {
   AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
   AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,

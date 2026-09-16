@@ -204,6 +204,8 @@ export {
   notionDirectoryUsers,
   telegramUserMappings,
   telegramUserMappingsRelations,
+  userDevices,
+  userDevicesRelations,
   agentmailUserMappings,
   agentmailUserMappingsRelations,
   agentmailConversations,

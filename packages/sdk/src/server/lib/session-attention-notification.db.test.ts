@@ -16,6 +16,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   enqueue: vi.fn(),
+  enqueueIosPush: vi.fn(),
   hasAny: vi.fn(),
   isPresent: vi.fn(),
   send: vi.fn(),
@@ -32,6 +33,9 @@ vi.mock('./user-direct-message', () => ({
 }));
 vi.mock('./enqueue-session-attention-notification', () => ({
   enqueueSessionAttentionNotification: mocks.enqueue,
+}));
+vi.mock('./ios-push/enqueue', () => ({
+  enqueueIosPush: mocks.enqueueIosPush,
 }));
 
 import {
@@ -109,7 +113,8 @@ async function insertFastMessage(input: {
   eventType?:
     | 'roomote_runtime.user_prompt'
     | 'roomote_runtime.assistant_message'
-    | 'roomote_runtime.request_user_input';
+    | 'roomote_runtime.request_user_input'
+    | 'roomote_runtime.capability_offer';
   payload?: Record<string, unknown>;
 }) {
   const [message] = await db
@@ -148,6 +153,7 @@ describe('session attention notifications', () => {
     mocks.isPresent.mockResolvedValue(false);
     mocks.hasAny.mockResolvedValue(true);
     mocks.enqueue.mockResolvedValue(true);
+    mocks.enqueueIosPush.mockResolvedValue(true);
     mocks.voiceActive.mockResolvedValue(false);
     messageId = crypto.randomUUID();
     mocks.send.mockResolvedValue({
@@ -903,6 +909,130 @@ describe('session attention notifications', () => {
         },
       }),
     );
+  });
+
+  it('queues an iOS push beside the chat DM with the pending request id', async () => {
+    const { conversation, session, user } = await createFastWebSession();
+    await insertFastMessage({
+      conversationId: conversation.id,
+      eventId: 'turn-1:assistant:0',
+      turnId: 'turn-1',
+      turnSeq: 1,
+      ts: 2_000,
+      role: 'assistant',
+      text: 'First response.',
+      purpose: 'closeout',
+    });
+    await notifyFastWebSessionAttention({
+      fastConversationId: conversation.id,
+      kind: 'result_ready',
+      eventId: 'turn-1',
+      message: 'First response.',
+      manual: true,
+    });
+    expect(mocks.enqueueIosPush).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        userId: user.id,
+        kind: 'reply',
+        title: session.title,
+        body: 'First response.',
+        sessionId: session.id,
+        fastConversationId: conversation.id,
+        eventKey: 'fast:result_ready:turn-1',
+      }),
+    );
+    expect(mocks.enqueueIosPush.mock.lastCall?.[0]).not.toHaveProperty(
+      'requestId',
+    );
+
+    await insertFastMessage({
+      conversationId: conversation.id,
+      eventId: 'turn-2:input_request:1',
+      turnId: 'turn-2',
+      turnSeq: 1,
+      ts: 4_000,
+      role: 'assistant',
+      text: 'Which environment?',
+      eventType: 'roomote_runtime.request_user_input',
+      payload: { requestId: 'rui:turn-2:input_request:1', questions: [] },
+    });
+    await notifyFastWebSessionAttention({
+      fastConversationId: conversation.id,
+      kind: 'input_needed',
+      eventId: 'rui:turn-2:input_request:1',
+      message: 'Which environment?',
+      manual: true,
+    });
+    expect(mocks.enqueueIosPush).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: 'user_input',
+        requestId: 'rui:turn-2:input_request:1',
+        body: 'Which environment?',
+        sessionId: session.id,
+      }),
+    );
+    // The DM still goes out; the push is additive.
+    expect(mocks.send).toHaveBeenCalledTimes(2);
+  });
+
+  it('labels a closeout that carries an unanswered capability offer', async () => {
+    const { conversation, session } = await createFastWebSession();
+    await insertFastMessage({
+      conversationId: conversation.id,
+      eventId: 'turn-1:offer',
+      turnId: 'turn-1',
+      turnSeq: 1,
+      ts: 2_000,
+      role: 'assistant',
+      text: 'Want me to connect GitHub?',
+      eventType: 'roomote_runtime.capability_offer',
+      payload: {
+        offerId: 'offer-1',
+        capability: 'source_control',
+        message: 'Want me to connect GitHub?',
+      },
+    });
+    await insertFastMessage({
+      conversationId: conversation.id,
+      eventId: 'turn-1:assistant:0',
+      turnId: 'turn-1',
+      turnSeq: 2,
+      ts: 2_100,
+      role: 'assistant',
+      text: 'I can set that up.',
+      purpose: 'closeout',
+    });
+    await notifyFastWebSessionAttention({
+      fastConversationId: conversation.id,
+      kind: 'result_ready',
+      eventId: 'turn-1',
+      message: 'I can set that up.',
+      manual: true,
+    });
+    expect(mocks.enqueueIosPush).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: 'capability_offer',
+        offerId: 'offer-1',
+        capability: 'source_control',
+        sessionId: session.id,
+      }),
+    );
+  });
+
+  it('keeps delivering the chat DM when the push queue is unavailable', async () => {
+    const { conversation } = await createFastWebSession();
+    mocks.enqueueIosPush.mockRejectedValueOnce(new Error('redis down'));
+
+    await expect(
+      notifyFastWebSessionAttention({
+        fastConversationId: conversation.id,
+        kind: 'result_ready',
+        eventId: 'turn-1',
+        message: 'Done.',
+        manual: true,
+      }),
+    ).resolves.toBe('delivered');
+    expect(mocks.send).toHaveBeenCalledOnce();
   });
 
   it('bridges a web request before a structured input notification', async () => {

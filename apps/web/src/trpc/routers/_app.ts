@@ -93,6 +93,7 @@ import {
   saveGranolaConnectionSchema,
   saveElevenLabsConnectionSchema,
   saveVoiceConnectionSchema,
+  saveIosAppConnectionSchema,
   saveGrafanaConnectionSchema,
   saveSnowflakeConnectionSchema,
   saveVercelConnectionSchema,
@@ -273,6 +274,7 @@ import {
   getGranolaConnectionCommand,
   getElevenLabsConnectionCommand,
   getVoiceConnectionCommand,
+  getIosAppConnectionCommand,
   getGrafanaConnectionCommand,
   getSnowflakeConnectionCommand,
   getVercelConnectionCommand,
@@ -284,6 +286,7 @@ import {
   saveGranolaConnectionCommand,
   saveElevenLabsConnectionCommand,
   saveVoiceConnectionCommand,
+  saveIosAppConnectionCommand,
   saveGrafanaConnectionCommand,
   saveSnowflakeConnectionCommand,
   saveVercelConnectionCommand,
@@ -2016,6 +2019,10 @@ export const appRouter = createRouter({
       getVoiceConnectionCommand(auth),
     ),
 
+    iosAppConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getIosAppConnectionCommand(auth),
+    ),
+
     grafanaConnection: protectedProcedure.query(({ ctx: { auth } }) =>
       getGrafanaConnectionCommand(auth),
     ),
@@ -2110,6 +2117,12 @@ export const appRouter = createRouter({
       .input(saveVoiceConnectionSchema)
       .mutation(({ ctx: { auth }, input }) =>
         saveVoiceConnectionCommand(auth, input),
+      ),
+
+    saveIosAppConnection: protectedProcedure
+      .input(saveIosAppConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveIosAppConnectionCommand(auth, input),
       ),
 
     saveGrafanaConnection: protectedProcedure

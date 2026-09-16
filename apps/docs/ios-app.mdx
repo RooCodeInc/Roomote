@@ -1,0 +1,110 @@
+---
+title: iOS app
+icon: mobile
+description: Get Roomote push notifications on your phone and answer from the lock screen.
+---
+
+The Roomote iOS app puts your Sessions and tasks in your pocket. It shows the
+same Sessions you see on the web, streams replies live, and sends a push
+notification when Roomote needs you: a question to answer, a capability to
+approve, a task that finished, or a reply that landed while you were away.
+Questions and approvals can be answered straight from the notification.
+
+## One app per deployment
+
+Like its Slack app, each Roomote deployment builds and distributes its own copy
+of the iOS app. There is no shared App Store listing that talks to every
+deployment; your build is tied to your Apple Developer team, your bundle
+identifier, and your deployment URL, and push notifications are signed with
+your own Apple Push Notification service (APNs) key. Roomote never sees that
+key: it is stored encrypted on your deployment's control plane and used only
+there.
+
+Setting the app up takes four steps:
+
+1. Enroll in the Apple Developer Program.
+2. Create an APNs key and an app identifier.
+3. Enter them in **Settings > Integrations > iOS app**.
+4. Build the app and distribute it through TestFlight.
+
+## 1. Apple Developer enrollment
+
+You need a paid [Apple Developer Program](https://developer.apple.com/programs/)
+membership (an organization membership if the app will be shared with a team).
+Note your **Team ID** from **Membership details**; it is a 10-character
+identifier such as `ABCDE12345`.
+
+## 2. APNs key and app identifier
+
+In **Certificates, Identifiers & Profiles**:
+
+- Under **Identifiers**, register an **App ID** with an explicit bundle
+  identifier of your choosing, for example `com.example.roomote`. Enable the
+  **Push Notifications** and **Associated Domains** capabilities.
+- Under **Keys**, create a key with **Apple Push Notifications service (APNs)**
+  enabled. Download the `AuthKey_<Key ID>.p8` file right away; Apple only lets
+  you download it once. Note the 10-character **Key ID**.
+
+One APNs key works for both the TestFlight (production APNs) and Xcode debug
+(sandbox APNs) builds of the app; the app tells your deployment which
+environment each device belongs to when it registers.
+
+## 3. Deployment settings
+
+A deployment admin opens **Settings > Integrations > iOS app** and enters:
+
+- **Team ID**
+- **Key ID**
+- **Bundle ID**, the identifier you registered above
+- **APNs key**, the full contents of the `.p8` file
+
+The key is stored encrypted. Editing the connection later lets you change the
+identifiers and leave the key field blank to keep the stored key. Disconnecting
+the integration stops all push delivery.
+
+Once saved, the deployment also serves the Apple universal-links manifest at
+`/.well-known/apple-app-site-association`, so links to `/sessions/<id>` and
+`/task/<id>` on your deployment host open in the app instead of the browser
+when the build's associated domain matches.
+
+## 4. Building and distributing
+
+The app source lives in `apps/ios` of the Roomote repository. The release
+script bakes your deployment URL and bundle identifier into the build,
+archives it, and uploads it to App Store Connect:
+
+```bash
+apps/ios/scripts/release.sh
+```
+
+Run it on a Mac with Xcode installed; the script's header documents the
+settings it needs (your team, bundle identifier, and deployment URL). When the
+upload finishes, add testers in App Store Connect under **TestFlight** and
+they receive an invitation to install the app.
+
+TestFlight builds expire **90 days** after upload. Re-run the release script
+before then to ship a fresh build; testers update in place and keep their
+sign-in and device registration.
+
+## Signing in
+
+The app signs in against your deployment. Email and password accounts sign in
+natively; single sign-on accounts (Slack, Microsoft, and any other provider)
+sign in through a short browser handoff and come back to the app. Sessions
+last 30 days and renew on use.
+
+## Notification categories
+
+Each device can turn categories on or off in the app's settings:
+
+| Category | When it fires | Actions from the notification |
+| --- | --- | --- |
+| Input needed | Roomote asks you a question in a Session | Reply inline, or open the Session |
+| Capability offer | Roomote offers to set up or use a capability | Approve or decline |
+| Task finished | A task you started from the web completed, failed, or was canceled | Open the task |
+| Reply | Roomote replied in a Session while you were away | Open the Session |
+
+Push notifications are additive to your existing chat notifications: if you
+also receive Roomote's direct messages in Slack, Teams, Telegram, or Discord,
+those continue unchanged. A notification is not sent while you have the
+Session open in a browser.

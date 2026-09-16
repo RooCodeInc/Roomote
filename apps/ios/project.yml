@@ -1,0 +1,163 @@
+# Xcode project definition. Regenerate with `xcodegen generate` (which runs
+# scripts/configure.sh first through preGenCommand). The generated
+# Roomote.xcodeproj is not committed.
+name: Roomote
+options:
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.4"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  groupSortPosition: top
+  preGenCommand: scripts/configure.sh
+
+configs:
+  Debug: debug
+  Release: release
+
+configFiles:
+  Debug: Config/Deployment.xcconfig
+  Release: Config/Deployment.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
+    GENERATE_INFOPLIST_FILE: NO
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+
+packages:
+  RoomoteKit:
+    path: RoomoteKit
+
+# Info.plist keys every target carries so RoomoteKit can read the
+# deployment from Bundle.main (app) or the extension bundle.
+sharedInfoKeys: &sharedInfoKeys
+  RoomoteDeploymentURL: $(ROOMOTE_DEPLOYMENT_URL)
+  RoomoteDisplayName: $(ROOMOTE_DISPLAY_NAME)
+  RoomoteBundleID: $(ROOMOTE_BUNDLE_ID)
+  RoomoteKeychainAccessGroup: $(ROOMOTE_KEYCHAIN_ACCESS_GROUP)
+  RoomoteAppGroup: $(ROOMOTE_APP_GROUP)
+  CFBundleDisplayName: $(ROOMOTE_DISPLAY_NAME)
+  CFBundleShortVersionString: $(MARKETING_VERSION)
+  CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+  NSAppTransportSecurity:
+    NSAllowsLocalNetworking: true
+
+targets:
+  Roomote:
+    type: application
+    platform: iOS
+    sources:
+      - path: Roomote
+    dependencies:
+      - package: RoomoteKit
+      - target: RoomoteNotificationService
+        embed: true
+      - target: RoomoteShare
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(ROOMOTE_BUNDLE_ID)
+        PRODUCT_NAME: Roomote
+        CODE_SIGN_ENTITLEMENTS: Config/Generated/Roomote.entitlements
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: NO
+        SUPPORTS_MACCATALYST: NO
+    info:
+      path: Roomote/Info.plist
+      properties:
+        <<: *sharedInfoKeys
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundlePackageType: APPL
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIBackgroundModes:
+          - remote-notification
+        CFBundleURLTypes:
+          - CFBundleURLName: $(ROOMOTE_BUNDLE_ID)
+            CFBundleURLSchemes:
+              - roomote
+        ITSAppUsesNonExemptEncryption: false
+        NSPhotoLibraryUsageDescription: Attach images to a session or task.
+        UIAppFonts:
+          - "DMSans[opsz,wght].ttf"
+          - "DMSans-Italic[opsz,wght].ttf"
+          - MonaspaceNeon-Regular.otf
+          - MonaspaceNeon-Medium.otf
+
+  RoomoteNotificationService:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: RoomoteNotificationService
+    dependencies:
+      - package: RoomoteKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(ROOMOTE_BUNDLE_ID).notification-service
+        CODE_SIGN_ENTITLEMENTS: Config/Generated/RoomoteNotificationService.entitlements
+    info:
+      path: RoomoteNotificationService/Info.plist
+      properties:
+        <<: *sharedInfoKeys
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundlePackageType: XPC!
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+
+  RoomoteShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: RoomoteShare
+    dependencies:
+      - package: RoomoteKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(ROOMOTE_BUNDLE_ID).share
+        CODE_SIGN_ENTITLEMENTS: Config/Generated/RoomoteShare.entitlements
+    info:
+      path: RoomoteShare/Info.plist
+      properties:
+        <<: *sharedInfoKeys
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundlePackageType: XPC!
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsImageWithMaxCount: 4
+
+schemes:
+  Roomote:
+    build:
+      targets:
+        Roomote: all
+        RoomoteNotificationService: [run, test, archive, profile, analyze]
+        RoomoteShare: [run, test, archive, profile, analyze]
+    run:
+      config: Debug
+    archive:
+      config: Release

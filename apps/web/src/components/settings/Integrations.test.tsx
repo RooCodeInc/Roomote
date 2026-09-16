@@ -55,6 +55,14 @@ const state = vi.hoisted(() => ({
     enabled?: boolean;
     voiceId?: string;
   },
+  iosAppConnection: null as null | {
+    authStatus?: string | null;
+    configured: boolean;
+    teamId: string;
+    keyId: string;
+    bundleId: string;
+    deviceCount: number;
+  },
   grafanaConnection: null as null | {
     authStatus?: string | null;
     baseUrl: string;
@@ -119,6 +127,7 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     saveGranolaConnection: vi.fn(),
     saveElevenLabsConnection: vi.fn(),
     saveVoiceConnection: vi.fn(),
+    saveIosAppConnection: vi.fn(),
     previewVoice: vi.fn(),
     saveGrafanaConnection: vi.fn(),
     saveSnowflakeConnection: vi.fn(),
@@ -344,6 +353,14 @@ vi.mock('@/hooks/mcp-connections', () => ({
     data: state.voiceConnection,
     isPending: false,
   }),
+  useSaveIosAppConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveIosAppConnection,
+  }),
+  useIosAppConnection: () => ({
+    data: state.iosAppConnection,
+    isPending: false,
+  }),
   useSaveGrafanaConnection: () => ({
     isPending: false,
     mutate: mutations.saveGrafanaConnection,
@@ -557,6 +574,7 @@ describe('Integrations settings', () => {
     vi.clearAllMocks();
     window.history.replaceState(null, '', '/settings/integrations');
     state.voiceConnection = null;
+    state.iosAppConnection = null;
     state.deploymentEnablements = [];
     state.integrationsEnabled = true;
     state.oauthReadiness = [{ mcpId: 'linear', status: 'ready' }];
@@ -1097,6 +1115,7 @@ describe('Integrations settings', () => {
       'ElevenLabs',
       'Grafana',
       'Granola',
+      'iOS app',
       'Jira',
       'monday.com',
       'Neon',
@@ -2459,6 +2478,92 @@ describe('Integrations settings', () => {
     expect(
       screen.getByRole('button', { name: 'Enable search_events' }),
     ).toBeInTheDocument();
+  });
+
+  it('lets an admin store Apple push credentials from the iOS app card', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [];
+    state.userConnections = [];
+
+    render(<Integrations />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Configure iOS app' }),
+    );
+    fireEvent.change(await screen.findByLabelText('Team ID'), {
+      target: { value: ' abcde12345 ' },
+    });
+    fireEvent.change(screen.getByLabelText('Key ID'), {
+      target: { value: 'KEY1234567' },
+    });
+    fireEvent.change(screen.getByLabelText('Bundle ID'), {
+      target: { value: 'com.example.roomote' },
+    });
+    const keyField = screen.getByLabelText('APNs key (.p8)');
+    fireEvent.submit(keyField.closest('form') as HTMLFormElement);
+    expect(mutations.saveIosAppConnection).not.toHaveBeenCalled();
+    expect(await screen.findByText('APNs key is required')).toBeInTheDocument();
+
+    fireEvent.change(keyField, {
+      target: {
+        value: '-----BEGIN PRIVATE KEY-----\nMIGT\n-----END PRIVATE KEY-----\n',
+      },
+    });
+    fireEvent.submit(keyField.closest('form') as HTMLFormElement);
+
+    expect(mutations.saveIosAppConnection).toHaveBeenCalledWith(
+      {
+        teamId: 'ABCDE12345',
+        keyId: 'KEY1234567',
+        bundleId: 'com.example.roomote',
+        privateKey:
+          '-----BEGIN PRIVATE KEY-----\nMIGT\n-----END PRIVATE KEY-----',
+      },
+      expect.anything(),
+    );
+  });
+
+  it('prefills the stored Apple ids and lets the key stay put when editing', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [{ mcpId: 'ios_app', enabled: true }];
+    state.userConnections = [
+      { id: 'ios-1', mcpId: 'ios_app', authStatus: 'authenticated' },
+    ];
+    state.iosAppConnection = {
+      authStatus: 'authenticated',
+      configured: true,
+      teamId: 'ABCDE12345',
+      keyId: 'KEY1234567',
+      bundleId: 'com.example.roomote',
+      deviceCount: 2,
+    };
+
+    render(<Integrations />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit iOS app connection' }),
+    );
+    expect(await screen.findByLabelText('Bundle ID')).toHaveValue(
+      'com.example.roomote',
+    );
+    expect(
+      screen.getByText(/2 devices are registered for push/),
+    ).toBeInTheDocument();
+    fireEvent.submit(
+      screen
+        .getByLabelText('APNs key (.p8)')
+        .closest('form') as HTMLFormElement,
+    );
+
+    expect(mutations.saveIosAppConnection).toHaveBeenCalledWith(
+      {
+        teamId: 'ABCDE12345',
+        keyId: 'KEY1234567',
+        bundleId: 'com.example.roomote',
+        privateKey: '',
+      },
+      expect.anything(),
+    );
   });
 
   it('lets an admin store a voice key from the Voice card', async () => {

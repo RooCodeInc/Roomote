@@ -666,6 +666,13 @@
       "when": 1789493497726,
       "tag": "0094_nasty_post",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1789530924741,
+      "tag": "0095_faulty_whistler",
+      "breakpoints": true
     }
   ]
 }

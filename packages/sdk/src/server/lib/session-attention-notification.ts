@@ -31,6 +31,7 @@ import {
   extractVisibleAcpPromptText,
   getFastAgentParentFromPayload,
   isSystemInjectedAcpPromptText,
+  type IosPushKind,
 } from '@roomote/types';
 
 import {
@@ -44,6 +45,8 @@ import {
   type SessionAttentionNotificationJob,
 } from './enqueue-session-attention-notification';
 import { buildDeterministicMessageId } from './deterministic-message-id';
+import { enqueueIosPush } from './ios-push/enqueue';
+import { findPendingSessionAttention } from './ios-push/pending-attention';
 
 const DELIVERY_LEASE_MS = 2 * 60 * 1_000;
 const RECOVERY_DELAY_MS = DELIVERY_LEASE_MS + 5_000;
@@ -63,6 +66,8 @@ type NotificationSubject = {
   sessionId: string;
   userId: string;
   eventKey: string;
+  /** The attention event id; for `input_needed` this is the requestId. */
+  eventId: string;
   kind: SessionAttentionKind;
   taskId?: string;
   runId?: number;
@@ -151,6 +156,62 @@ async function markOutcome(
     );
 }
 
+/**
+ * Queue the matching iOS push. Additive to the chat DM: it runs beside the
+ * provider waterfall, never replaces it, and never fails the delivery.
+ */
+async function enqueueAttentionIosPush(
+  subject: NotificationSubject,
+  notificationText: string,
+  executor: Pick<DbTransaction, 'select'>,
+): Promise<void> {
+  try {
+    const [session] = await executor
+      .select({
+        title: sessions.title,
+        fastConversationId: sessions.fastConversationId,
+      })
+      .from(sessions)
+      .where(eq(sessions.id, subject.sessionId))
+      .limit(1);
+    const fastConversationId =
+      subject.fastConversationId ?? session?.fastConversationId ?? undefined;
+    const pending = fastConversationId
+      ? await findPendingSessionAttention(fastConversationId, executor)
+      : { request: null, offer: null };
+    const kind: IosPushKind =
+      subject.kind === 'input_needed'
+        ? 'user_input'
+        : pending.offer
+          ? 'capability_offer'
+          : 'reply';
+    await enqueueIosPush({
+      userId: subject.userId,
+      kind,
+      title: session?.title?.trim() || 'Roomote',
+      body: notificationText,
+      sessionId: subject.sessionId,
+      ...(fastConversationId ? { fastConversationId } : {}),
+      ...(subject.taskId ? { taskId: subject.taskId } : {}),
+      ...(kind === 'user_input'
+        ? { requestId: pending.request?.requestId ?? subject.eventId }
+        : {}),
+      ...(kind === 'capability_offer' && pending.offer
+        ? {
+            offerId: pending.offer.offerId,
+            capability: pending.offer.capability,
+          }
+        : {}),
+      eventKey: subject.eventKey,
+      collapseId: `${kind}:${subject.sessionId}`,
+    });
+  } catch (error) {
+    console.warn(
+      `[sessionAttentionNotification] iOS push enqueue failed for ${subject.eventKey}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 async function deliverNotification(
   subject: NotificationSubject,
 ): Promise<SessionAttentionNotificationResult> {
@@ -202,6 +263,7 @@ async function deliverNotification(
       (subject.kind === 'input_needed'
         ? 'Your input is needed.'
         : 'A new response is ready.');
+    await enqueueAttentionIosPush(subject, notificationText, tx);
     const previousDelivery = await findLatestSessionAttentionDelivery(
       {
         sessionId: subject.sessionId,
@@ -344,6 +406,7 @@ export async function notifyDirectWebTaskAttention(
     sessionId: session.id,
     userId: run.task.initiatorUserId,
     eventKey: `task:${run.id}:${input.kind}:${input.eventId}`,
+    eventId: input.eventId,
     kind: input.kind,
     taskId: run.taskId,
     runId: run.id,
@@ -406,6 +469,7 @@ export async function notifyFastWebSessionAttention(
     sessionId: session.id,
     userId: session.ownerUserId,
     eventKey: `fast:${input.kind}:${input.eventId}`,
+    eventId: input.eventId,
     kind: input.kind,
     message: input.message,
     fastConversationId: input.fastConversationId,

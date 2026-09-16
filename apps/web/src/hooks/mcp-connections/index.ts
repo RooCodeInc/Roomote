@@ -22,6 +22,8 @@ export { useSaveElevenLabsConnection } from './useSaveElevenLabsConnection';
 export { useVoiceConnection } from './useVoiceConnection';
 export { useSaveVoiceConnection } from './useSaveVoiceConnection';
 export { usePreviewVoice } from './usePreviewVoice';
+export { useIosAppConnection } from './useIosAppConnection';
+export { useSaveIosAppConnection } from './useSaveIosAppConnection';
 export { useSaveGrafanaConnection } from './useSaveGrafanaConnection';
 export { useSaveSnowflakeConnection } from './useSaveSnowflakeConnection';
 export { useSnowflakeConnection } from './useSnowflakeConnection';

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   findTaskMessage: vi.fn(),
   resolvePresentation: vi.fn(),
   getChatPreference: vi.fn(),
+  enqueueIosPush: vi.fn(),
 }));
 
 function updateChain() {
@@ -55,6 +56,9 @@ vi.mock('../session-attention-notification', () => ({
   hasTaskRunAttentionNotification: mocks.hasAttention,
   resolveSessionAttentionPresentation: mocks.resolvePresentation,
 }));
+vi.mock('../ios-push/enqueue', () => ({
+  enqueueIosPush: mocks.enqueueIosPush,
+}));
 vi.mock('./fast-agent-delivery-claim', () => ({
   buildDeliveryClaimMarker: () => 'delivering:1',
   buildDeliveryClaimPredicate: () => true,
@@ -93,6 +97,53 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
       receipts: [],
     });
     mocks.recordEvent.mockResolvedValue(undefined);
+    mocks.enqueueIosPush.mockResolvedValue(true);
+  });
+
+  it('queues a task_settled iOS push with the task title and outcome', async () => {
+    await notifyWebTaskInitiatorOnSettle(run, RunStatus.Completed);
+
+    expect(mocks.enqueueIosPush).toHaveBeenCalledWith({
+      userId: 'user-1',
+      kind: 'task_settled',
+      title: 'Ship notification fallback',
+      body: 'Completed',
+      taskId: 'task-1',
+      sessionId: 'session-1',
+      eventKey: 'run:42:completed',
+      collapseId: 'task_settled:task-1',
+    });
+  });
+
+  it('includes the failure reason and still pushes when the user is present', async () => {
+    mocks.isPresent.mockResolvedValue(true);
+    mocks.findTask.mockResolvedValue({
+      ...eligibleTask,
+      state: RunStatus.Failed,
+      runs: [
+        { ...eligibleTask.runs[0], status: RunStatus.Failed, error: 'boom' },
+      ],
+    });
+    mocks.selectTaskStateRun.mockReturnValue({
+      ...eligibleTask.runs[0],
+      status: RunStatus.Failed,
+    });
+
+    await expect(
+      notifyWebTaskInitiatorOnSettle(run, RunStatus.Failed),
+    ).resolves.toBe('skipped');
+    expect(mocks.enqueueIosPush).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'task_settled', body: 'Failed: boom' }),
+    );
+    expect(mocks.sendPersonalNotification).not.toHaveBeenCalled();
+  });
+
+  it('does not let a push queue failure break the settlement notification', async () => {
+    mocks.enqueueIosPush.mockRejectedValueOnce(new Error('redis down'));
+
+    await expect(
+      notifyWebTaskInitiatorOnSettle(run, RunStatus.Completed),
+    ).resolves.toBe('delivered');
   });
 
   it('uses the user task-starting chat preference for a new notification route', async () => {
