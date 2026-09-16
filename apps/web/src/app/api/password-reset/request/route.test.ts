@@ -1,10 +1,16 @@
 const {
+  afterCallbacks,
   isSelfServicePasswordResetAllowedMock,
   isSelfServicePasswordResetAvailableMock,
+  loggerInfoMock,
+  loggerWarnMock,
   requestSelfServicePasswordResetMock,
 } = vi.hoisted(() => ({
+  afterCallbacks: [] as Array<() => unknown>,
   isSelfServicePasswordResetAllowedMock: vi.fn(),
   isSelfServicePasswordResetAvailableMock: vi.fn(),
+  loggerInfoMock: vi.fn(),
+  loggerWarnMock: vi.fn(),
   requestSelfServicePasswordResetMock: vi.fn(),
 }));
 
@@ -15,9 +21,12 @@ vi.mock('@/lib/server/self-service-password-reset', () => ({
 vi.mock('@/lib/server/user-management', () => ({
   requestSelfServicePasswordReset: requestSelfServicePasswordResetMock,
 }));
+vi.mock('@/lib/server/logger', () => ({
+  logger: { info: loggerInfoMock, warn: loggerWarnMock },
+}));
 vi.mock('next/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('next/server')>()),
-  after: (callback: () => unknown) => callback(),
+  after: (callback: () => unknown) => afterCallbacks.push(callback),
 }));
 
 import { POST } from './route';
@@ -36,9 +45,10 @@ function createRequest(body: unknown) {
 describe('password reset request route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    afterCallbacks.length = 0;
     isSelfServicePasswordResetAvailableMock.mockResolvedValue(true);
     isSelfServicePasswordResetAllowedMock.mockResolvedValue(true);
-    requestSelfServicePasswordResetMock.mockResolvedValue(undefined);
+    requestSelfServicePasswordResetMock.mockResolvedValue('sent');
   });
 
   it('requests a reset while returning only a generic response', async () => {
@@ -47,6 +57,7 @@ describe('password reset request route', () => {
     );
 
     expect(response.status).toBe(202);
+    expect(response.headers.get('x-request-id')).toMatch(/^[0-9a-f-]{36}$/u);
     await expect(response.json()).resolves.toEqual({
       message:
         'If an active email/password account exists for that address, a reset link will arrive shortly.',
@@ -55,24 +66,60 @@ describe('password reset request route', () => {
       email: 'ada@example.com',
       clientAddress: '203.0.113.10',
     });
+    expect(requestSelfServicePasswordResetMock).not.toHaveBeenCalled();
+
+    await afterCallbacks[0]?.();
+
     expect(requestSelfServicePasswordResetMock).toHaveBeenCalledWith(
       'ada@example.com',
+    );
+    expect(loggerInfoMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'password_reset_request',
+        outcome: 'sent',
+        requestId: expect.any(String),
+      }),
+      'Password reset request completed',
     );
   });
 
   it.each([
-    ['disabled or unconfigured delivery', false, true],
-    ['a rate-limited request', true, false],
-  ])('keeps the same response for %s', async (_, available, allowed) => {
-    isSelfServicePasswordResetAvailableMock.mockResolvedValue(available);
-    isSelfServicePasswordResetAllowedMock.mockResolvedValue(allowed);
+    ['disabled or unconfigured delivery', false, true, 'unavailable'],
+    ['a rate-limited request', true, false, 'rate_limited'],
+  ])(
+    'keeps the same response for %s',
+    async (_, available, allowed, outcome) => {
+      isSelfServicePasswordResetAvailableMock.mockResolvedValue(available);
+      isSelfServicePasswordResetAllowedMock.mockResolvedValue(allowed);
+
+      const response = await POST(
+        createRequest({ email: 'ada@example.com' }) as never,
+      );
+
+      expect(response.status).toBe(202);
+      expect(requestSelfServicePasswordResetMock).not.toHaveBeenCalled();
+      expect(loggerInfoMock).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome }),
+        'Password reset request completed',
+      );
+    },
+  );
+
+  it('records a provider failure only after the generic response is created', async () => {
+    requestSelfServicePasswordResetMock.mockResolvedValue('send_failed');
 
     const response = await POST(
       createRequest({ email: 'ada@example.com' }) as never,
     );
-
     expect(response.status).toBe(202);
-    expect(requestSelfServicePasswordResetMock).not.toHaveBeenCalled();
+    expect(loggerInfoMock).not.toHaveBeenCalled();
+
+    await afterCallbacks[0]?.();
+
+    expect(loggerInfoMock).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'send_failed' }),
+      'Password reset request completed',
+    );
   });
 
   it('keeps the same response for unknown account outcomes and malformed input', async () => {

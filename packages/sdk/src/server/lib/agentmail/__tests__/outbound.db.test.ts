@@ -529,6 +529,7 @@ describe('sendAgentMailSystemEmail (real database, stubbed AgentMail API)', () =
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
   function stubSend() {
@@ -585,6 +586,7 @@ describe('sendAgentMailSystemEmail (real database, stubbed AgentMail API)', () =
   it('never sends to a bounced or complained address', async () => {
     const requests = stubSend();
     const to = uniqueEmail('bounced');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     await suppressAgentMailAddress({ emailAddress: to, reason: 'bounce' });
 
     const result = await sendAgentMailSystemEmail({
@@ -596,5 +598,24 @@ describe('sendAgentMailSystemEmail (real database, stubbed AgentMail API)', () =
 
     expect(result).toEqual({ sent: false, reason: 'suppressed' });
     expect(requests).toHaveLength(0);
+    expect(String(warn.mock.calls[0]?.[0])).not.toContain(to.toLowerCase());
+  });
+
+  it('reports provider failures without logging the recipient', async () => {
+    const to = uniqueEmail('failed');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    globalThis.fetch = vi.fn(async () =>
+      Response.json({ message: `Could not deliver to ${to}` }, { status: 500 }),
+    ) as typeof fetch;
+
+    const result = await sendAgentMailSystemEmail({
+      to,
+      subject: 'Reset your Roomote password',
+      text: 'reset',
+      logContext: 'outbound-test',
+    });
+
+    expect(result).toEqual({ sent: false, reason: 'send_failed' });
+    expect(String(warn.mock.calls[0]?.[0])).not.toContain(to.toLowerCase());
   });
 });
