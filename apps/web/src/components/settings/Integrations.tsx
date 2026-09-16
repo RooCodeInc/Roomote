@@ -80,6 +80,7 @@ import {
   Alert,
   AlertDescription,
   AlertTitle,
+  BasicTooltip,
   Button,
   Card,
   CardContent,
@@ -4193,6 +4194,32 @@ export function Integrations({
                       {item.name}
                     </p>
                   </div>
+                  {[item.headerAction, item.utilityAction]
+                    .filter((action) => action != null)
+                    .map((action) => (
+                      <BasicTooltip
+                        key={action.ariaLabel}
+                        content={action.label}
+                      >
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          aria-label={action.ariaLabel}
+                          disabled={action.isPending}
+                          onClick={() => {
+                            setIsCatalogOpen(false);
+                            action.onAction();
+                          }}
+                        >
+                          {action.isPending ? (
+                            <Spinner size="sm" />
+                          ) : (
+                            action.icon
+                          )}
+                        </Button>
+                      </BasicTooltip>
+                    ))}
                   {item.onAction ? (
                     <Button
                       type="button"
