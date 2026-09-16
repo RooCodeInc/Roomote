@@ -91,6 +91,7 @@ import {
   saveNotionConnectionSchema,
   saveRipplingConnectionSchema,
   saveGranolaConnectionSchema,
+  saveExaConnectionSchema,
   saveElevenLabsConnectionSchema,
   saveVoiceConnectionSchema,
   saveGrafanaConnectionSchema,
@@ -271,6 +272,7 @@ import {
   getNotionConnectionCommand,
   getRipplingConnectionCommand,
   getGranolaConnectionCommand,
+  getExaConnectionCommand,
   getElevenLabsConnectionCommand,
   getVoiceConnectionCommand,
   getGrafanaConnectionCommand,
@@ -282,6 +284,8 @@ import {
   saveNotionConnectionCommand,
   saveRipplingConnectionCommand,
   saveGranolaConnectionCommand,
+  saveExaConnectionCommand,
+  removeExaApiKeyCommand,
   saveElevenLabsConnectionCommand,
   saveVoiceConnectionCommand,
   saveGrafanaConnectionCommand,
@@ -2008,6 +2012,10 @@ export const appRouter = createRouter({
       getGranolaConnectionCommand(auth),
     ),
 
+    exaConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getExaConnectionCommand(auth),
+    ),
+
     elevenLabsConnection: protectedProcedure.query(({ ctx: { auth } }) =>
       getElevenLabsConnectionCommand(auth),
     ),
@@ -2099,6 +2107,16 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         saveGranolaConnectionCommand(auth, input),
       ),
+
+    saveExaConnection: protectedProcedure
+      .input(saveExaConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveExaConnectionCommand(auth, input),
+      ),
+
+    removeExaApiKey: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      removeExaApiKeyCommand(auth),
+    ),
 
     saveElevenLabsConnection: protectedProcedure
       .input(saveElevenLabsConnectionSchema)

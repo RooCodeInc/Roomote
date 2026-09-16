@@ -29,6 +29,7 @@ import {
   useDisconnectMcp,
   useGrafanaConnection,
   useGranolaConnection,
+  useExaConnection,
   useElevenLabsConnection,
   useVoiceConnection,
   useEffectiveMcpIntegrations,
@@ -39,6 +40,8 @@ import {
   useSaveRipplingConnection,
   useSaveGrafanaConnection,
   useSaveGranolaConnection,
+  useSaveExaConnection,
+  useRemoveExaApiKey,
   useSaveElevenLabsConnection,
   useSaveVoiceConnection,
   usePreviewVoice,
@@ -65,6 +68,7 @@ import {
   saveRipplingConnectionSchema,
   saveGrafanaConnectionSchema,
   saveGranolaConnectionSchema,
+  saveExaConnectionSchema,
   saveElevenLabsConnectionSchema,
   saveVoiceConnectionSchema,
   saveSnowflakeConnectionSchema,
@@ -100,6 +104,7 @@ import {
   Skeleton,
   Spinner,
   Textarea,
+  Trash2,
   TriangleAlert,
   Wrench,
 } from '@/components/system';
@@ -118,6 +123,7 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect dashboards, alert rules, live alert state, annotations, and data sources.',
   granola:
     'Roomote will use one deployment-wide Granola connection to browse meeting notes, transcripts, decisions, and action items.',
+  exa: 'Roomote will enable Exa with free keyless web search and page fetching. You can add a deployment API key separately for authenticated access and Exa Agent.',
   elevenlabs:
     'Roomote will use one deployment-wide ElevenLabs connection to narrate feature-demo videos. The key stays on the control plane; agents get no ElevenLabs tools.',
   voice:
@@ -218,6 +224,10 @@ type GranolaFormState = {
   apiKey: string;
 };
 
+type ExaFormState = {
+  apiKey: string;
+};
+
 type ElevenLabsFormState = {
   apiKey: string;
   voiceId: string;
@@ -287,6 +297,12 @@ function buildEmptyRipplingForm(): RipplingFormState {
 }
 
 function buildEmptyGranolaForm(): GranolaFormState {
+  return {
+    apiKey: '',
+  };
+}
+
+function buildEmptyExaForm(): ExaFormState {
   return {
     apiKey: '',
   };
@@ -438,6 +454,18 @@ function getGranolaFieldErrors(
 
   return {
     apiKey: fieldErrors.apiKey,
+  };
+}
+
+function getExaFieldErrors(
+  result: ReturnType<typeof saveExaConnectionSchema.safeParse>,
+): Partial<Record<keyof ExaFormState, string[]>> {
+  if (result.success) {
+    return {};
+  }
+
+  return {
+    apiKey: result.error.flatten().fieldErrors.apiKey,
   };
 }
 
@@ -701,6 +729,7 @@ function AdminConfiguredIntegrationDialog({
   isLoading,
   description,
   loadingMessage,
+  title,
   submitLabel,
   onSubmit,
   children,
@@ -713,11 +742,13 @@ function AdminConfiguredIntegrationDialog({
   isLoading: boolean;
   description: ReactNode;
   loadingMessage?: string;
+  title?: string;
   submitLabel?: string;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   children: ReactNode;
 }) {
-  const dialogTitle = `${isEditing ? 'Edit' : 'Connect'} ${integrationName}`;
+  const dialogTitle =
+    title ?? `${isEditing ? 'Edit' : 'Connect'} ${integrationName}`;
   const resolvedLoadingMessage =
     loadingMessage ?? 'Loading connection settings...';
   const resolvedSubmitLabel =
@@ -1188,18 +1219,26 @@ function XConnectionFields({
   );
 }
 
-function GranolaConnectionFields({
+function ApiKeyConnectionFields({
+  fieldId,
+  label,
+  placeholder,
   form,
   fieldErrors,
   formError,
   allowBlankApiKey,
+  help,
   onFieldChange,
 }: {
-  form: GranolaFormState;
-  fieldErrors: Partial<Record<keyof GranolaFormState, string[]>>;
+  fieldId: string;
+  label: string;
+  placeholder: string;
+  form: { apiKey: string };
+  fieldErrors: { apiKey?: string[] };
   formError: string | null;
   allowBlankApiKey: boolean;
-  onFieldChange: (field: keyof GranolaFormState, value: string) => void;
+  help: ReactNode;
+  onFieldChange: (field: 'apiKey', value: string) => void;
 }) {
   const fieldClassName =
     'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
@@ -1207,41 +1246,95 @@ function GranolaConnectionFields({
   return (
     <>
       <div className="space-y-2">
-        <Label htmlFor="granola-api-key">Granola API Key</Label>
+        <Label htmlFor={fieldId}>{label}</Label>
         <Input
-          id="granola-api-key"
+          id={fieldId}
           type="password"
-          placeholder="Enter your Granola API key"
+          placeholder={placeholder}
           value={form.apiKey}
           onChange={(event) => onFieldChange('apiKey', event.target.value)}
-          {...getFieldErrorAttributes('granola-api-key', fieldErrors.apiKey)}
+          {...getFieldErrorAttributes(fieldId, fieldErrors.apiKey)}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
           data-1p-ignore
         />
-        <p className="text-sm text-muted-foreground">
-          We strongly recommend a Granola workspace API key. Workspace keys can
-          read public notes and spaces where &quot;Allow Granola API
-          access&quot; is enabled. New spaces enable API access by default, so
-          admins should review space settings before connecting.
-        </p>
-        <p className="text-sm text-muted-foreground">
-          You can also use a personal API key with Public notes selected and
-          Personal notes left unchecked.
-        </p>
+        {help}
         {allowBlankApiKey ? (
           <p className="text-sm text-muted-foreground">
             Leave blank to keep the existing API key.
           </p>
         ) : null}
-        <FieldError fieldId="granola-api-key" errors={fieldErrors.apiKey} />
+        <FieldError fieldId={fieldId} errors={fieldErrors.apiKey} />
       </div>
       {formError ? (
         <p className="text-sm text-destructive">{formError}</p>
       ) : null}
     </>
+  );
+}
+
+function GranolaConnectionFields(
+  props: Omit<
+    Parameters<typeof ApiKeyConnectionFields>[0],
+    'fieldId' | 'label' | 'placeholder' | 'help'
+  >,
+) {
+  return (
+    <ApiKeyConnectionFields
+      {...props}
+      fieldId="granola-api-key"
+      label="Granola API Key"
+      placeholder="Enter your Granola API key"
+      help={
+        <>
+          <p className="text-sm text-muted-foreground">
+            We strongly recommend a Granola workspace API key. Workspace keys
+            can read public notes and spaces where &quot;Allow Granola API
+            access&quot; is enabled. New spaces enable API access by default, so
+            admins should review space settings before connecting.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            You can also use a personal API key with Public notes selected and
+            Personal notes left unchecked.
+          </p>
+        </>
+      }
+    />
+  );
+}
+
+function ExaConnectionFields(
+  props: Omit<
+    Parameters<typeof ApiKeyConnectionFields>[0],
+    'fieldId' | 'label' | 'placeholder' | 'help'
+  >,
+) {
+  return (
+    <ApiKeyConnectionFields
+      {...props}
+      fieldId="exa-api-key"
+      label="Exa API Key"
+      placeholder="Enter your Exa API key"
+      help={
+        <p className="text-sm text-muted-foreground">
+          Create a key in the{' '}
+          <a
+            href="https://dashboard.exa.ai/api-keys"
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary underline hover:no-underline"
+          >
+            Exa dashboard
+          </a>
+          . Roomote validates it against Exa before storing it. Exa Agent runs
+          are usage-based. Without a key, enabled deployments use Exa&apos;s
+          free keyless access, where Exa rate limits apply and Exa Agent is
+          unavailable.
+        </p>
+      }
+    />
   );
 }
 
@@ -1728,6 +1821,14 @@ export function Integrations({
     Partial<Record<keyof GranolaFormState, string[]>>
   >({});
   const [granolaFormError, setGranolaFormError] = useState<string | null>(null);
+  const [isExaDialogOpen, setIsExaDialogOpen] = useState(false);
+  const [exaForm, setExaForm] = useState<ExaFormState>(buildEmptyExaForm());
+  const [exaFieldErrors, setExaFieldErrors] = useState<
+    Partial<Record<keyof ExaFormState, string[]>>
+  >({});
+  const [exaFormError, setExaFormError] = useState<string | null>(null);
+  const [isRemoveExaApiKeyDialogOpen, setIsRemoveExaApiKeyDialogOpen] =
+    useState(false);
   const [isGrafanaDialogOpen, setIsGrafanaDialogOpen] = useState(false);
   const [grafanaForm, setGrafanaForm] = useState<GrafanaFormState>(
     buildEmptyGrafanaForm(),
@@ -1789,6 +1890,8 @@ export function Integrations({
   const saveRipplingConnection = useSaveRipplingConnection();
   const saveGrafanaConnection = useSaveGrafanaConnection();
   const saveGranolaConnection = useSaveGranolaConnection();
+  const saveExaConnection = useSaveExaConnection();
+  const removeExaApiKey = useRemoveExaApiKey();
   const saveElevenLabsConnection = useSaveElevenLabsConnection();
   const saveVoiceConnection = useSaveVoiceConnection();
   const saveSnowflakeConnection = useSaveSnowflakeConnection();
@@ -1845,6 +1948,15 @@ export function Integrations({
     granolaConnectionSummary?.authStatus === 'authenticated';
   const granolaConnection = useGranolaConnection(
     isAdmin && (isGranolaConnected || isGranolaDialogOpen),
+  );
+  const exaConnectionSummary = useMemo(
+    () =>
+      (effectiveIntegrations.data ?? []).find((entry) => entry.id === 'exa'),
+    [effectiveIntegrations.data],
+  );
+  const isExaConnected = exaConnectionSummary?.authStatus === 'authenticated';
+  const exaConnection = useExaConnection(
+    isAdmin && (isExaConnected || isExaDialogOpen),
   );
   const voiceConnectionSummary = useMemo(
     () =>
@@ -1967,6 +2079,20 @@ export function Integrations({
     setGranolaFormError(null);
     setGranolaForm(buildEmptyGranolaForm());
   }, [granolaConnection.isPending, isGranolaConnected, isGranolaDialogOpen]);
+
+  useEffect(() => {
+    if (!isExaDialogOpen) {
+      return;
+    }
+
+    if (exaConnection.isPending && isExaConnected) {
+      return;
+    }
+
+    setExaFieldErrors({});
+    setExaFormError(null);
+    setExaForm(buildEmptyExaForm());
+  }, [exaConnection.isPending, isExaConnected, isExaDialogOpen]);
 
   useEffect(() => {
     if (!isVoiceDialogOpen) {
@@ -2319,6 +2445,106 @@ export function Integrations({
             });
           }
 
+          if (integration.id === 'exa') {
+            const enabled = orgEnablementMap.get(integration.id) ?? false;
+            const isPending =
+              (setDeploymentEnabled.isPending &&
+                setDeploymentEnabled.variables?.mcpId === integration.id) ||
+              saveExaConnection.isPending ||
+              removeExaApiKey.isPending;
+            const configureAction = isAdmin
+              ? {
+                  label: isExaConnected ? 'Edit API key' : 'Add API key',
+                  ariaLabel: `${isExaConnected ? 'Edit' : 'Add'} Exa API key`,
+                  onAction: () => setIsExaDialogOpen(true),
+                  isPending:
+                    isPending || (isExaDialogOpen && exaConnection.isPending),
+                  icon: <Pencil className="size-4" />,
+                }
+              : undefined;
+            const manageToolsAction =
+              isAdmin && enabled
+                ? {
+                    label: 'Manage tools',
+                    ariaLabel: 'Manage Exa tools',
+                    onAction: () => openMcpToolDialog(integration),
+                    isPending: false,
+                    icon: <Wrench className="size-4" />,
+                  }
+                : undefined;
+
+            return {
+              id: integration.id,
+              name: integration.name,
+              description: integration.description,
+              icon: <McpIcon icon={integration.icon} name={integration.name} />,
+              enabled,
+              connected: isExaConnected,
+              highlighted: highlightedIntegrationId === integration.id,
+              isMcpBased: true,
+              actionLabel: `${enabled ? 'Disable' : 'Enable'} Exa`,
+              isPending,
+              status: enabled
+                ? isExaConnected
+                  ? 'Enabled with a deployment API key. Exa Agent is available and usage-based.'
+                  : 'Enabled with free keyless access. Exa rate limits apply, and Exa Agent is unavailable.'
+                : isExaConnected
+                  ? 'Disabled. The deployment API key is still stored.'
+                  : 'Disabled. Enable Exa for free keyless search, or add a deployment API key.',
+              configureAction,
+              manageToolsAction,
+              removeAction:
+                isAdmin && isExaConnected
+                  ? {
+                      label: 'Remove API key',
+                      ariaLabel: 'Remove Exa API key',
+                      onAction: () =>
+                        removeExaApiKey.mutate(undefined, {
+                          onSuccess: () =>
+                            toast.success(
+                              enabled
+                                ? 'Exa API key removed. Keyless access remains enabled.'
+                                : 'Exa API key removed.',
+                            ),
+                          onError: (error) => toast.error(error.message),
+                        }),
+                      isPending: removeExaApiKey.isPending,
+                      confirmationDescription:
+                        'Remove the stored Exa API key. If Exa is enabled, it will continue with free keyless access.',
+                    }
+                  : undefined,
+              utilityAction:
+                isAdmin && isExaConnected
+                  ? {
+                      label: 'Remove API key',
+                      ariaLabel: 'Remove Exa API key',
+                      onAction: () => setIsRemoveExaApiKeyDialogOpen(true),
+                      isPending: removeExaApiKey.isPending,
+                      icon: <Trash2 className="size-4" />,
+                    }
+                  : undefined,
+              headerAction: configureAction,
+              secondaryAction: manageToolsAction,
+              onAction: isAdmin
+                ? () => {
+                    const nextEnabled = !enabled;
+                    setDeploymentEnabled.mutate(
+                      { mcpId: integration.id, enabled: nextEnabled },
+                      {
+                        onSuccess: () =>
+                          toast.success(
+                            nextEnabled
+                              ? 'Exa enabled for this deployment.'
+                              : 'Exa disabled for this deployment.',
+                          ),
+                        onError: (error) => toast.error(error.message),
+                      },
+                    );
+                  }
+                : undefined,
+            } satisfies IntegrationItem;
+          }
+
           if (integration.id === 'voice') {
             if (voiceConfiguredByEnvironment) {
               // The key comes from the environment (an operator's or a
@@ -2645,6 +2871,7 @@ export function Integrations({
     disconnectMcp,
     grafanaConnection.isPending,
     granolaConnection.isPending,
+    exaConnection.isPending,
     elevenLabsConnection.isPending,
     voiceConnection.isPending,
     voiceConfiguredByEnvironment,
@@ -2658,6 +2885,8 @@ export function Integrations({
     isAdmin,
     isGrafanaDialogOpen,
     isGranolaDialogOpen,
+    isExaDialogOpen,
+    isExaConnected,
     isElevenLabsDialogOpen,
     isVoiceDialogOpen,
     isLinearOauthSetupOpen,
@@ -2666,6 +2895,8 @@ export function Integrations({
     saveRipplingConnection.isPending,
     saveGrafanaConnection.isPending,
     saveGranolaConnection.isPending,
+    saveExaConnection.isPending,
+    removeExaApiKey,
     saveElevenLabsConnection.isPending,
     saveVoiceConnection.isPending,
     saveVercelConnection.isPending,
@@ -2974,6 +3205,14 @@ export function Integrations({
     setGranolaFormError(null);
   };
 
+  const handleExaFieldChange = (field: keyof ExaFormState, value: string) => {
+    setExaForm((current) => ({ ...current, [field]: value }));
+    setExaFieldErrors((current) =>
+      current[field] ? { ...current, [field]: undefined } : current,
+    );
+    setExaFormError(null);
+  };
+
   const handleVoiceFieldChange = (
     field: keyof VoiceFormState,
     value: string,
@@ -3135,6 +3374,16 @@ export function Integrations({
     }
 
     setGranolaForm(buildEmptyGranolaForm());
+  };
+
+  const handleExaDialogOpenChange = (open: boolean) => {
+    setIsExaDialogOpen(open);
+    setExaFieldErrors({});
+    setExaFormError(null);
+
+    if (open) {
+      setExaForm(buildEmptyExaForm());
+    }
   };
 
   const handleVoiceDialogOpenChange = (open: boolean) => {
@@ -3338,6 +3587,35 @@ export function Integrations({
       onError: (error) => {
         setGranolaFormError(error.message);
       },
+    });
+  };
+
+  const handleExaSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const parsed = saveExaConnectionSchema.safeParse(exaForm);
+    if (!parsed.success) {
+      setExaFieldErrors(getExaFieldErrors(parsed));
+      return;
+    }
+
+    if (!isExaConnected && parsed.data.apiKey.length === 0) {
+      setExaFieldErrors({ apiKey: ['API key is required'] });
+      return;
+    }
+
+    setExaFieldErrors({});
+    setExaFormError(null);
+    saveExaConnection.mutate(parsed.data, {
+      onSuccess: () => {
+        toast.success(
+          isExaConnected
+            ? 'Exa API key updated for this deployment.'
+            : 'Exa API key saved for this deployment.',
+        );
+        handleExaDialogOpenChange(false);
+      },
+      onError: (error) => setExaFormError(error.message),
     });
   };
 
@@ -3653,6 +3931,79 @@ export function Integrations({
           onFieldChange={handleGranolaFieldChange}
         />
       </AdminConfiguredIntegrationDialog>
+      <AdminConfiguredIntegrationDialog
+        integrationName="Exa"
+        title={isExaConnected ? 'Edit Exa API key' : 'Add Exa API key'}
+        open={isExaDialogOpen}
+        onOpenChange={handleExaDialogOpenChange}
+        isEditing={isExaConnected}
+        isPending={saveExaConnection.isPending}
+        isLoading={isExaConnected && exaConnection.isPending}
+        submitLabel={isExaConnected ? 'Save changes' : 'Add API key'}
+        description={
+          <>
+            Optionally store an Exa API key for authenticated access and Exa
+            Agent. The key stays encrypted server-side and is sent only from
+            Roomote&apos;s proxy to Exa. Saving it does not change whether Exa
+            is enabled.
+          </>
+        }
+        onSubmit={handleExaSubmit}
+      >
+        <ExaConnectionFields
+          form={exaForm}
+          fieldErrors={exaFieldErrors}
+          formError={exaFormError}
+          allowBlankApiKey={isExaConnected}
+          onFieldChange={handleExaFieldChange}
+        />
+      </AdminConfiguredIntegrationDialog>
+      <Dialog
+        open={isRemoveExaApiKeyDialogOpen}
+        onOpenChange={setIsRemoveExaApiKeyDialogOpen}
+      >
+        <DialogContent size="md">
+          <DialogHeader>
+            <DialogTitle>Remove Exa API key?</DialogTitle>
+            <DialogDescription>
+              Remove the stored Exa API key. If Exa is enabled, it will continue
+              with free keyless access.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsRemoveExaApiKeyDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={removeExaApiKey.isPending}
+              onClick={() =>
+                removeExaApiKey.mutate(undefined, {
+                  onSuccess: () => {
+                    setIsRemoveExaApiKeyDialogOpen(false);
+                    toast.success(
+                      effectiveIntegrations.data?.find(
+                        (entry) => entry.id === 'exa',
+                      )?.enabled
+                        ? 'Exa API key removed. Keyless access remains enabled.'
+                        : 'Exa API key removed.',
+                    );
+                  },
+                  onError: (error) => toast.error(error.message),
+                })
+              }
+            >
+              {removeExaApiKey.isPending ? <Spinner size="sm" /> : <Trash2 />}
+              Remove key
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <AdminConfiguredIntegrationDialog
         integrationName="Voice"
         open={isVoiceDialogOpen}
