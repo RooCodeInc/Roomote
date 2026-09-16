@@ -2,6 +2,10 @@ import { Queue } from 'bullmq';
 import { z } from 'zod';
 
 import { getRedis } from '@roomote/redis';
+import {
+  formatOperationalEvent,
+  getOperationalLogRuntimeFields,
+} from '@roomote/types';
 
 export const PULL_REQUEST_MERGEABILITY_CHECK_QUEUE_NAME =
   'pull-request-mergeability-check-jobs';
@@ -76,16 +80,56 @@ export async function enqueuePullRequestMergeabilityCheck(
       : PULL_REQUEST_MERGEABILITY_RETRY_DELAY_MS;
   const deduplicationId = `pr-mergeability:${data.deduplicationKey}:attempt-${data.retryAttempt}`;
 
-  await getPullRequestMergeabilityQueue().add('check-pr-mergeability', data, {
-    delay,
-    deduplication: {
-      id: deduplicationId,
-      // The key must not outlive the job's promotion: BullMQ only replaces
-      // DELAYED jobs, so a longer TTL would silently drop pushes that arrive
-      // while the job runs or shortly after it completes.
-      ttl: delay,
-      extend: true,
-      replace: true,
-    },
-  });
+  const operationalFields = {
+    ...getOperationalLogRuntimeFields(
+      process.env.RAILWAY_SERVICE_NAME?.trim() || 'sdk-server',
+      process.env,
+    ),
+    provider: 'github' as const,
+    surface: 'github' as const,
+    repository: data.repository,
+    prNumber: data.prNumber,
+    attempt: data.retryAttempt + 1,
+  };
+
+  try {
+    const job = await getPullRequestMergeabilityQueue().add(
+      'check-pr-mergeability',
+      data,
+      {
+        delay,
+        deduplication: {
+          id: deduplicationId,
+          // The key must not outlive the job's promotion: BullMQ only replaces
+          // DELAYED jobs, so a longer TTL would silently drop pushes that arrive
+          // while the job runs or shortly after it completes.
+          ttl: delay,
+          extend: true,
+          replace: true,
+        },
+      },
+    );
+    console.log(
+      formatOperationalEvent('source_control_pr_mergeability_enqueue', {
+        ...operationalFields,
+        jobId: job.id,
+        outcome: 'enqueued',
+        reason:
+          data.retryAttempt === 0
+            ? 'provider_event_check'
+            : 'mergeability_unknown_retry',
+        retryable: false,
+      }),
+    );
+  } catch (error) {
+    console.error(
+      formatOperationalEvent('source_control_pr_mergeability_enqueue', {
+        ...operationalFields,
+        outcome: 'failed',
+        reason: error instanceof Error ? error.name : 'unknown_error',
+        retryable: true,
+      }),
+    );
+    throw error;
+  }
 }

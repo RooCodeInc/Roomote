@@ -23,9 +23,13 @@ const request = {
 };
 
 describe('enqueuePullRequestMergeabilityCheck', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockQueueAdd.mockResolvedValue({ id: 'mergeability-job-1' });
+  });
 
   it('delays and trailing-edge deduplicates the first branch check', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     await enqueuePullRequestMergeabilityCheck(request);
 
     expect(mockQueueAdd).toHaveBeenCalledWith(
@@ -43,6 +47,23 @@ describe('enqueuePullRequestMergeabilityCheck', () => {
         },
       },
     );
+    expect(
+      log.mock.calls
+        .map(([message]) => JSON.parse(String(message)))
+        .find(
+          (entry) => entry.event === 'source_control_pr_mergeability_enqueue',
+        ),
+    ).toEqual(
+      expect.objectContaining({
+        provider: 'github',
+        repository: 'owner/repo',
+        jobId: 'mergeability-job-1',
+        outcome: 'enqueued',
+        reason: 'provider_event_check',
+      }),
+    );
+    expect(log.mock.calls.join('\n')).not.toContain(request.deduplicationKey);
+    log.mockRestore();
   });
 
   it('rejects a request without any scope', async () => {
@@ -71,5 +92,32 @@ describe('enqueuePullRequestMergeabilityCheck', () => {
         delay: PULL_REQUEST_MERGEABILITY_RETRY_DELAY_MS,
       }),
     );
+  });
+
+  it('logs queue failures safely and rethrows them', async () => {
+    const error = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    mockQueueAdd.mockRejectedValue(new Error('redis://secret-host'));
+
+    await expect(enqueuePullRequestMergeabilityCheck(request)).rejects.toThrow(
+      'redis://secret-host',
+    );
+
+    const event = error.mock.calls
+      .map(([message]) => JSON.parse(String(message)))
+      .find(
+        (entry) => entry.event === 'source_control_pr_mergeability_enqueue',
+      );
+    expect(event).toEqual(
+      expect.objectContaining({
+        repository: 'owner/repo',
+        outcome: 'failed',
+        reason: 'Error',
+        retryable: true,
+      }),
+    );
+    expect(error.mock.calls.join('\n')).not.toContain('secret-host');
+    error.mockRestore();
   });
 });
