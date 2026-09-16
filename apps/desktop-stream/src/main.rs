@@ -520,6 +520,10 @@ impl Broadcaster {
     /// Returns the number of viewers left.
     fn deliver_fragment(&self, fragment: Bytes, keyframe: bool, bytes_served: &AtomicU64) -> usize {
         let mut inner = self.inner.lock().unwrap();
+        // Viewers that left before receiving anything (no init segment yet,
+        // or still waiting for a keyframe) never hit a send error, so prune
+        // by connection state or they would keep the encoder alive forever.
+        inner.viewers.retain(|viewer| !viewer.sender.is_closed());
         let mut dropped = Vec::new();
         for viewer in &mut inner.viewers {
             if !viewer.has_init {
@@ -550,7 +554,11 @@ impl Broadcaster {
     /// Whether the encoder has been without viewers for longer than the
     /// grace period.
     fn idle_expired(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
+        inner.viewers.retain(|viewer| !viewer.sender.is_closed());
+        if inner.viewers.is_empty() && inner.idle_since.is_none() {
+            inner.idle_since = Some(Instant::now());
+        }
         inner.viewers.is_empty()
             && inner
                 .idle_since
@@ -2182,6 +2190,21 @@ mod tests {
         let second = broadcaster.subscribe(1).expect("slot reclaimed");
         assert!(!second.1, "the encoder slot is still claimed");
         assert_eq!(broadcaster.viewer_count(), 1);
+    }
+
+    #[test]
+    fn viewers_that_leave_before_any_data_do_not_keep_the_encoder_alive() {
+        let broadcaster = Broadcaster::new();
+        let (receiver, _) = broadcaster.subscribe(0).expect("admitted");
+        // Leave before the init segment or a keyframe ever arrives.
+        drop(receiver);
+        let served = AtomicU64::new(0);
+        assert_eq!(
+            broadcaster.deliver_fragment(Bytes::from_static(b"frag"), false, &served),
+            0
+        );
+        assert_eq!(broadcaster.viewer_count(), 0);
+        assert!(broadcaster.inner.lock().unwrap().idle_since.is_some());
     }
 
     #[test]
