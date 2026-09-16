@@ -22,8 +22,8 @@ import {
   type OAuthServerMetadata,
 } from '@roomote/types';
 
-import { createGuardedFetch } from '../safe-fetch';
 import { createMcpOauthReplay, getValidAccessToken } from './data';
+import { createBoundedCustomMcpFetch } from './custom-fetch';
 import { discoverOAuthEndpoints } from './oauth';
 
 const MCP_PROTOCOL_VERSION = '2025-06-18';
@@ -49,7 +49,7 @@ export type AddRemoteCustomMcpResult =
     }
   | {
       status: 'needs_static_headers';
-      id: string;
+      id?: string;
       name: string;
       settingsUrl: string;
       reused: boolean;
@@ -58,7 +58,7 @@ export type AddRemoteCustomMcpResult =
       status: 'client_registration_required';
       id: string;
       name: string;
-      authorizeUrl: string;
+      authorizeUrl?: string;
       settingsUrl: string;
       reused: boolean;
     }
@@ -95,7 +95,7 @@ function normalizeFastRemoteMcpName(value: string): string {
   const collapsed = value
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/[^a-z0-9_]+/g, '-')
     .replace(/-+/g, '-');
   const withoutLeadingDash = collapsed.startsWith('-')
     ? collapsed.slice(1)
@@ -117,15 +117,6 @@ function findMatchingRemoteMcpServer(
   if (nameMatch && urlMatch && nameMatch.id !== urlMatch.id) {
     throw new Error(
       'The requested name and URL match different custom MCP servers. Review them in Settings.',
-    );
-  }
-  if (
-    nameMatch &&
-    (!nameMatch.url ||
-      canonicalizeRemoteMcpUrl(nameMatch.url) !== normalizedUrl)
-  ) {
-    throw new Error(
-      'A custom MCP server already uses that name or URL with different configuration. Review it in Settings.',
     );
   }
   return nameMatch ?? urlMatch;
@@ -166,10 +157,7 @@ async function callRemoteMcp(input: {
   sessionId?: string | null;
   protocolVersion?: string;
 }) {
-  const guardedFetch = createGuardedFetch(
-    Env.R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS,
-  );
-  const response = await guardedFetch(input.url, {
+  const response = await createBoundedCustomMcpFetch()(input.url, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -187,7 +175,7 @@ async function callRemoteMcp(input: {
       params: input.params,
     }),
   });
-  const body = await response.text();
+  const body = new TextDecoder().decode(await response.arrayBuffer());
   return {
     response,
     payload: response.ok
@@ -200,7 +188,46 @@ async function callRemoteMcp(input: {
 async function listRemoteMcpTools(
   url: string,
   headers: Record<string, string> = {},
+  session?: { sessionId: string | null; protocolVersion: string },
 ): Promise<RemoteMcpTool[]> {
+  if (session) {
+    try {
+      await createBoundedCustomMcpFetch()(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          ...(session.sessionId ? { 'mcp-session-id': session.sessionId } : {}),
+          'mcp-protocol-version': session.protocolVersion,
+          ...headers,
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'notifications/initialized',
+        }),
+      });
+    } catch {
+      // Strict servers enforce this on the following tools/list request.
+    }
+    const listed = await callRemoteMcp({
+      url,
+      headers,
+      method: 'tools/list',
+      params: {},
+      requestId: 2,
+      sessionId: session.sessionId,
+      protocolVersion: session.protocolVersion,
+    });
+    if (!listed.response.ok) {
+      throw new Error(
+        `Custom MCP tools/list failed (${listed.response.status}).`,
+      );
+    }
+    const tools = parseTools(listed.payload);
+    if (!tools) throw new Error('Custom MCP server did not return tools.');
+    return tools;
+  }
+
   const direct = await callRemoteMcp({
     url,
     headers,
@@ -241,47 +268,10 @@ async function listRemoteMcpTools(
       ? initializedResult.protocolVersion
       : MCP_PROTOCOL_VERSION;
 
-  try {
-    const guardedFetch = createGuardedFetch(
-      Env.R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS,
-    );
-    await guardedFetch(url, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream',
-        ...(initialized.sessionId
-          ? { 'mcp-session-id': initialized.sessionId }
-          : {}),
-        'mcp-protocol-version': protocolVersion,
-        ...headers,
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'notifications/initialized',
-      }),
-    });
-  } catch {
-    // Strict servers enforce this on the following tools/list request.
-  }
-
-  const listed = await callRemoteMcp({
-    url,
-    headers,
-    method: 'tools/list',
-    params: {},
-    requestId: 2,
+  return listRemoteMcpTools(url, headers, {
     sessionId: initialized.sessionId,
     protocolVersion,
   });
-  if (!listed.response.ok) {
-    throw new Error(
-      `Custom MCP tools/list failed (${listed.response.status}).`,
-    );
-  }
-  const tools = parseTools(listed.payload);
-  if (!tools) throw new Error('Custom MCP server did not return tools.');
-  return tools;
 }
 
 async function probeRemoteMcp(url: string): Promise<RemoteMcpProbe> {
@@ -296,14 +286,46 @@ async function probeRemoteMcp(url: string): Promise<RemoteMcpProbe> {
     requestId: 1,
   });
 
-  if (initialized.response.status === 401) {
+  if (
+    initialized.response.status === 401 ||
+    initialized.response.status === 403
+  ) {
+    const boundedFetch = createBoundedCustomMcpFetch();
+    let indeterminateFailure = false;
+    let successfulMetadataResponse = false;
+    const fetchImpl = async (
+      requestUrl: string,
+      init?: Parameters<typeof boundedFetch>[1],
+    ) => {
+      try {
+        const response = await boundedFetch(requestUrl, init);
+        const isResourceRequest =
+          canonicalizeRemoteMcpUrl(requestUrl) ===
+          canonicalizeRemoteMcpUrl(url);
+        if (!isResourceRequest && response.ok) {
+          successfulMetadataResponse = true;
+        }
+        if (
+          !response.ok &&
+          !(isResourceRequest && [401, 403].includes(response.status)) &&
+          ![404, 410].includes(response.status)
+        ) {
+          indeterminateFailure = true;
+        }
+        return response;
+      } catch (error) {
+        indeterminateFailure = true;
+        throw error;
+      }
+    };
     try {
       const metadata = await discoverOAuthEndpoints(url, {
-        fetchImpl: createGuardedFetch(Env.R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS),
+        fetchImpl,
         resource: url,
       });
       return { status: 'oauth', metadata };
-    } catch {
+    } catch (error) {
+      if (indeterminateFailure || successfulMetadataResponse) throw error;
       return { status: 'needs_static_headers' };
     }
   }
@@ -314,7 +336,28 @@ async function probeRemoteMcp(url: string): Promise<RemoteMcpProbe> {
     );
   }
 
-  return { status: 'connected', tools: await listRemoteMcpTools(url) };
+  const initializedResult =
+    initialized.payload &&
+    typeof initialized.payload === 'object' &&
+    'result' in initialized.payload
+      ? (initialized.payload as { result?: { protocolVersion?: unknown } })
+          .result
+      : undefined;
+  const protocolVersion =
+    typeof initializedResult?.protocolVersion === 'string'
+      ? initializedResult.protocolVersion
+      : MCP_PROTOCOL_VERSION;
+  return {
+    status: 'connected',
+    tools: await listRemoteMcpTools(
+      url,
+      {},
+      {
+        sessionId: initialized.sessionId,
+        protocolVersion,
+      },
+    ),
+  };
 }
 
 async function prepareOAuthReplay(input: {
@@ -443,7 +486,7 @@ async function resultForServer(input: {
   let oauthServerMetadata = server.oauthServerMetadata;
   if (!oauthServerMetadata) {
     oauthServerMetadata = await discoverOAuthEndpoints(server.url, {
-      fetchImpl: createGuardedFetch(Env.R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS),
+      fetchImpl: createBoundedCustomMcpFetch(),
       resource: server.url,
     });
     await db
@@ -462,6 +505,15 @@ async function resultForServer(input: {
       isNull(mcpConnections.userId),
     ),
   });
+  if (existingConnection?.authStatus === 'error' && !server.manualClientId) {
+    return {
+      status: 'client_registration_required',
+      id: server.id,
+      name: server.name,
+      settingsUrl: publicUrl(SETTINGS_PATH),
+      reused: input.reused,
+    };
+  }
   if (existingConnection?.authStatus === 'authenticated') {
     const accessToken = await getValidAccessToken(
       existingConnection.id,
@@ -550,6 +602,14 @@ export async function addRemoteCustomMcpForFast(input: {
   }
 
   const probe = await probeRemoteMcp(normalizedUrl);
+  if (probe.status === 'needs_static_headers') {
+    return {
+      status: 'needs_static_headers',
+      name: parsed.name,
+      settingsUrl: publicUrl(SETTINGS_PATH),
+      reused: false,
+    };
+  }
   const selected = await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtextextended(${normalizedUrl}, 0))`,
@@ -572,11 +632,7 @@ export async function addRemoteCustomMcpForFast(input: {
       );
     }
     const authType =
-      probe.status === 'oauth'
-        ? ('oauth' as const)
-        : probe.status === 'needs_static_headers'
-          ? ('static_headers' as const)
-          : ('none' as const);
+      probe.status === 'oauth' ? ('oauth' as const) : ('none' as const);
     const [created] = await tx
       .insert(customMcpServers)
       .values({

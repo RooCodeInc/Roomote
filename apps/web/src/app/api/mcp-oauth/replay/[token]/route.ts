@@ -49,10 +49,17 @@ export async function GET(
   }
 
   if (isCustomMcpConnectionId(replay.mcpId)) {
+    if (replay.userId !== authResult.userId) {
+      return NextResponse.redirect(
+        new URL(
+          '/error?message=This authorization link belongs to another administrator',
+          webUrl,
+        ),
+      );
+    }
     if (
       webEnv.R_CUSTOM_MCP_DISABLED === true ||
       !authResult.isAdmin ||
-      replay.userId !== authResult.userId ||
       !replay.connectionId
     ) {
       return NextResponse.redirect(

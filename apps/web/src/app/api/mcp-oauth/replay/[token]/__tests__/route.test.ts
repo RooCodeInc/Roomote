@@ -179,4 +179,27 @@ describe('GET /api/mcp-oauth/replay/[token]', () => {
     );
     expect(mcpConnectionsFindFirstMock).not.toHaveBeenCalled();
   });
+
+  it('explains when a custom authorization link belongs to another admin', async () => {
+    authorizeMock.mockResolvedValue({
+      success: true,
+      userId: 'user-2',
+      isAdmin: true,
+    });
+    getMcpOauthReplayMock.mockResolvedValue({
+      mcpId: 'custom:server-1',
+      connectionId: 'connection-custom-1',
+      connectionRole: 'default',
+      userId: 'user-1',
+    });
+
+    const response = await GET(buildRequest(), {
+      params: Promise.resolve({ token: TOKEN }),
+    });
+
+    expect(response.headers.get('location')).toBe(
+      'https://roomote.example/error?message=This%20authorization%20link%20belongs%20to%20another%20administrator',
+    );
+    expect(resolveCustomMcpAuthTargetMock).not.toHaveBeenCalled();
+  });
 });

@@ -483,13 +483,19 @@ function guardedAgentFor(config: GuardedAgentConfig): Agent {
 export function createGuardedFetch(allowedPrivateCidrs?: string) {
   return (
     url: string,
-    init?: { method?: string; headers?: Record<string, string>; body?: string },
+    init?: {
+      method?: string;
+      headers?: Record<string, string>;
+      body?: string;
+      signal?: AbortSignal;
+    },
   ): Promise<Response> =>
     safeFetch(url, {
       allowedPrivateCidrs,
       method: init?.method,
       headers: init?.headers,
       body: init?.body,
+      signal: init?.signal,
     });
 }
 

@@ -2,11 +2,13 @@ import {
   customMcpServers,
   db,
   eq,
+  inArray,
   mcpConnections,
   mcpOauthReplays,
   userFactory,
   users,
 } from '@roomote/db/server';
+import { customMcpConnectionId } from '@roomote/types';
 
 const { guardedFetchMock } = vi.hoisted(() => ({
   guardedFetchMock: vi.fn(),
@@ -44,10 +46,45 @@ function toolsResponse(name = 'search') {
   });
 }
 
+function successfulMcpFetch() {
+  return vi.fn(async (_url: string, init?: { body?: string }) => {
+    const body = JSON.parse(String(init?.body)) as { method?: string };
+    if (body.method === 'initialize') return initializedResponse();
+    if (body.method === 'tools/list') return toolsResponse();
+    return new Response(null, { status: 202 });
+  });
+}
+
+function noOAuthFetch(status: 401 | 403) {
+  return vi.fn(async (url: string) =>
+    url === 'https://mcp.example.com/mcp'
+      ? new Response(null, { status })
+      : new Response(null, { status: 404 }),
+  );
+}
+
 async function cleanup() {
-  await db.delete(mcpOauthReplays);
-  await db.delete(mcpConnections);
-  await db.delete(customMcpServers);
+  const userIds = [adminId, memberId];
+  const servers = await db.query.customMcpServers.findMany({
+    where: inArray(customMcpServers.createdByUserId, userIds),
+    columns: { id: true },
+  });
+  const serverIds = servers.map((server) => server.id);
+  const mcpIds = serverIds.map(customMcpConnectionId);
+  await db
+    .delete(mcpOauthReplays)
+    .where(inArray(mcpOauthReplays.userId, userIds));
+  if (mcpIds.length > 0) {
+    await db
+      .delete(mcpOauthReplays)
+      .where(inArray(mcpOauthReplays.mcpId, mcpIds));
+    await db
+      .delete(mcpConnections)
+      .where(inArray(mcpConnections.mcpId, mcpIds));
+    await db
+      .delete(customMcpServers)
+      .where(inArray(customMcpServers.id, serverIds));
+  }
   await db.delete(users).where(eq(users.id, adminId));
   await db.delete(users).where(eq(users.id, memberId));
 }
@@ -62,9 +99,9 @@ describe('addRemoteCustomMcpForFast', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     guardedFetchMock.mockReset();
-    await db.delete(mcpOauthReplays);
-    await db.delete(mcpConnections);
-    await db.delete(customMcpServers);
+    await cleanup();
+    await userFactory.create({ id: adminId, role: 'admin' });
+    await userFactory.create({ id: memberId, role: 'member' });
   });
 
   afterAll(cleanup);
@@ -104,9 +141,7 @@ describe('addRemoteCustomMcpForFast', () => {
       authType: 'none',
       createdByUserId: adminId,
     });
-    guardedFetchMock
-      .mockResolvedValueOnce(initializedResponse())
-      .mockResolvedValueOnce(toolsResponse());
+    guardedFetchMock.mockImplementation(successfulMcpFetch());
 
     const result = await addRemoteCustomMcpForFast({
       userId: adminId,
@@ -120,9 +155,7 @@ describe('addRemoteCustomMcpForFast', () => {
   });
 
   it('normalizes a display name and returns the stored slug', async () => {
-    guardedFetchMock
-      .mockResolvedValueOnce(initializedResponse())
-      .mockResolvedValueOnce(toolsResponse());
+    guardedFetchMock.mockImplementation(successfulMcpFetch());
 
     const result = await addRemoteCustomMcpForFast({
       userId: adminId,
@@ -138,6 +171,30 @@ describe('addRemoteCustomMcpForFast', () => {
     expect(await db.query.customMcpServers.findFirst()).toMatchObject({
       name: 'acme-billing-mcp',
     });
+  });
+
+  it('preserves underscores and reuses an existing name with a different URL', async () => {
+    await db.insert(customMcpServers).values({
+      name: 'acme_mcp',
+      url: 'https://existing.example.com/mcp',
+      authType: 'none',
+      createdByUserId: adminId,
+    });
+    guardedFetchMock.mockResolvedValueOnce(toolsResponse());
+
+    const result = await addRemoteCustomMcpForFast({
+      userId: adminId,
+      sessionId: crypto.randomUUID(),
+      name: 'Acme_MCP',
+      url: 'https://different.example.com/mcp',
+    });
+
+    expect(result).toMatchObject({
+      status: 'connected',
+      name: 'acme_mcp',
+      reused: true,
+    });
+    expect(await db.query.customMcpServers.findMany()).toHaveLength(1);
   });
 
   it('deduplicates after normalizing the supplied name', async () => {
@@ -222,9 +279,7 @@ describe('addRemoteCustomMcpForFast', () => {
   });
 
   it('truncates normalized names to a valid 64-character boundary', async () => {
-    guardedFetchMock
-      .mockResolvedValueOnce(initializedResponse())
-      .mockResolvedValueOnce(toolsResponse());
+    guardedFetchMock.mockImplementation(successfulMcpFetch());
     const expectedName = 'a'.repeat(63);
 
     const result = await addRemoteCustomMcpForFast({
@@ -241,9 +296,7 @@ describe('addRemoteCustomMcpForFast', () => {
   });
 
   it('verifies an unauthenticated server before creating it', async () => {
-    guardedFetchMock
-      .mockResolvedValueOnce(initializedResponse())
-      .mockResolvedValueOnce(toolsResponse());
+    guardedFetchMock.mockImplementation(successfulMcpFetch());
 
     const result = await addRemoteCustomMcpForFast({
       userId: adminId,
@@ -262,6 +315,45 @@ describe('addRemoteCustomMcpForFast', () => {
       name: 'records',
       url: 'https://mcp.example.com/mcp',
       authType: 'none',
+    });
+  });
+
+  it('reuses the probe initialization session for tool listing', async () => {
+    const methods: string[] = [];
+    guardedFetchMock.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { method?: string };
+      methods.push(body.method ?? '');
+      if (body.method === 'initialize') {
+        return jsonResponse(
+          {
+            jsonrpc: '2.0',
+            id: 1,
+            result: { protocolVersion: '2025-06-18' },
+          },
+          200,
+          { 'mcp-session-id': 'probe-session' },
+        );
+      }
+      return body.method === 'tools/list'
+        ? toolsResponse()
+        : new Response(null, { status: 202 });
+    });
+
+    await addRemoteCustomMcpForFast({
+      userId: adminId,
+      sessionId: crypto.randomUUID(),
+      name: 'records',
+      url: 'https://mcp.example.com/mcp',
+    });
+
+    expect(methods).toEqual([
+      'initialize',
+      'notifications/initialized',
+      'tools/list',
+    ]);
+    expect(guardedFetchMock.mock.calls[2]?.[1]?.headers).toMatchObject({
+      'mcp-session-id': 'probe-session',
+      'mcp-protocol-version': '2025-06-18',
     });
   });
 
@@ -419,9 +511,7 @@ describe('addRemoteCustomMcpForFast', () => {
   });
 
   it('uses Settings for a 401 response without OAuth metadata', async () => {
-    guardedFetchMock.mockImplementation(
-      async () => new Response(null, { status: 401 }),
-    );
+    guardedFetchMock.mockImplementation(noOAuthFetch(401));
 
     const result = await addRemoteCustomMcpForFast({
       userId: adminId,
@@ -438,10 +528,171 @@ describe('addRemoteCustomMcpForFast', () => {
     expect((result as { settingsUrl: string }).settingsUrl).toContain(
       '/settings/integrations',
     );
-    expect(await db.query.customMcpServers.findFirst()).toMatchObject({
-      authType: 'static_headers',
-      headers: null,
+    expect(result).not.toHaveProperty('id');
+    expect(await db.query.customMcpServers.findMany()).toEqual([]);
+  });
+
+  it('uses Settings without persistence for a 403 response without OAuth metadata', async () => {
+    guardedFetchMock.mockImplementation(noOAuthFetch(403));
+
+    const result = await addRemoteCustomMcpForFast({
+      userId: adminId,
+      sessionId: crypto.randomUUID(),
+      name: 'gateway-records',
+      url: 'https://mcp.example.com/mcp',
     });
+
+    expect(result).toMatchObject({
+      status: 'needs_static_headers',
+      name: 'gateway-records',
+      reused: false,
+    });
+    expect(result).not.toHaveProperty('id');
+    expect(await db.query.customMcpServers.findMany()).toEqual([]);
+  });
+
+  it.each([
+    ['network failure', () => Promise.reject(new Error('network unavailable'))],
+    [
+      'guard refusal',
+      () => Promise.reject(new Error('Private address denied')),
+    ],
+    [
+      'metadata 5xx',
+      () => Promise.resolve(new Response(null, { status: 503 })),
+    ],
+  ])(
+    'surfaces %s during OAuth discovery without persistence',
+    async (_label, failure) => {
+      guardedFetchMock
+        .mockResolvedValueOnce(new Response(null, { status: 401 }))
+        .mockImplementation(failure);
+
+      await expect(
+        addRemoteCustomMcpForFast({
+          userId: adminId,
+          sessionId: crypto.randomUUID(),
+          name: 'records',
+          url: 'https://mcp.example.com/mcp',
+        }),
+      ).rejects.toThrow();
+
+      expect(await db.query.customMcpServers.findMany()).toEqual([]);
+    },
+  );
+
+  it('aborts an unresponsive probe after ten seconds', async () => {
+    const controller = new AbortController();
+    const timeout = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(controller.signal);
+    try {
+      guardedFetchMock.mockImplementation(
+        async (_url, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              'abort',
+              () => reject(init.signal?.reason),
+              { once: true },
+            );
+          }),
+      );
+      const request = addRemoteCustomMcpForFast({
+        userId: adminId,
+        sessionId: crypto.randomUUID(),
+        name: 'records',
+        url: 'https://mcp.example.com/mcp',
+      });
+      await vi.waitFor(() => expect(guardedFetchMock).toHaveBeenCalledOnce());
+      controller.abort(new DOMException('Timed out', 'TimeoutError'));
+      await expect(request).rejects.toThrow();
+      expect(timeout).toHaveBeenCalledWith(10_000);
+    } finally {
+      timeout.mockRestore();
+    }
+    expect(await db.query.customMcpServers.findMany()).toEqual([]);
+  });
+
+  it('rejects a declared response larger than one MiB', async () => {
+    guardedFetchMock.mockResolvedValueOnce(
+      new Response('oversized', {
+        headers: { 'content-length': String(1024 * 1024 + 1) },
+      }),
+    );
+
+    await expect(
+      addRemoteCustomMcpForFast({
+        userId: adminId,
+        sessionId: crypto.randomUUID(),
+        name: 'records',
+        url: 'https://mcp.example.com/mcp',
+      }),
+    ).rejects.toThrow('exceeds 1048576 bytes');
+    expect(await db.query.customMcpServers.findMany()).toEqual([]);
+  });
+
+  it('rejects a streamed response larger than one MiB without content-length', async () => {
+    const chunk = new Uint8Array(600 * 1024);
+    guardedFetchMock.mockResolvedValueOnce(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(chunk);
+            controller.enqueue(chunk);
+            controller.close();
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      addRemoteCustomMcpForFast({
+        userId: adminId,
+        sessionId: crypto.randomUUID(),
+        name: 'records',
+        url: 'https://mcp.example.com/mcp',
+      }),
+    ).rejects.toThrow('exceeds 1048576 bytes');
+    expect(await db.query.customMcpServers.findMany()).toEqual([]);
+  });
+
+  it('returns Settings without an authorization link after DCR failure', async () => {
+    const [server] = await db
+      .insert(customMcpServers)
+      .values({
+        name: 'accounting',
+        url: 'https://mcp.example.com/mcp',
+        authType: 'oauth',
+        oauthServerMetadata: {
+          issuer: 'https://auth.example.com',
+          authorization_endpoint: 'https://auth.example.com/authorize',
+          token_endpoint: 'https://auth.example.com/token',
+          registration_endpoint: 'https://auth.example.com/register',
+          response_types_supported: ['code'],
+        },
+        createdByUserId: adminId,
+      })
+      .returning({ id: customMcpServers.id });
+    await db.insert(mcpConnections).values({
+      userId: null,
+      mcpId: customMcpConnectionId(server!.id),
+      connectionRole: 'default',
+      authStatus: 'error',
+      enabled: false,
+    });
+
+    const result = await addRemoteCustomMcpForFast({
+      userId: adminId,
+      sessionId: crypto.randomUUID(),
+      name: 'accounting',
+      url: 'https://mcp.example.com/mcp',
+    });
+
+    expect(result).toMatchObject({
+      status: 'client_registration_required',
+      settingsUrl: expect.stringContaining('/settings/integrations'),
+    });
+    expect(result).not.toHaveProperty('authorizeUrl');
   });
 
   it('returns the reusable replay and Settings links for manual client registration', async () => {

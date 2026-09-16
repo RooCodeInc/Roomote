@@ -12,6 +12,7 @@ import {
   storeOAuthStateWithId,
   storeClientInformation,
   getClientInformation,
+  updateAuthStatus,
   resolveCustomMcpAuthTarget,
   ensureCustomMcpServerMetadata,
 } from '@roomote/sdk/server';
@@ -314,16 +315,25 @@ export async function GET(
 
       // Catalog registrations keep their historical call shape; custom
       // targets add the guarded fetch options.
-      const registeredClient = customTarget
-        ? await registerOAuthClient(
-            serverMetadata.registration_endpoint,
-            clientMetadata,
-            customTarget.oauthOptions,
-          )
-        : await registerOAuthClient(
-            serverMetadata.registration_endpoint,
-            clientMetadata,
-          );
+      let registeredClient: OAuthClientInformation;
+      try {
+        registeredClient = customTarget
+          ? await registerOAuthClient(
+              serverMetadata.registration_endpoint,
+              clientMetadata,
+              customTarget.oauthOptions,
+            )
+          : await registerOAuthClient(
+              serverMetadata.registration_endpoint,
+              clientMetadata,
+            );
+      } catch (error) {
+        if (!customTarget) throw error;
+        await updateAuthStatus(connectionId, 'error', false);
+        return NextResponse.redirect(
+          withMcpQuery(webUrl, redirectPath, 'error', 'registration_failed'),
+        );
+      }
 
       const storedClientInfo: OAuthClientInformation = {
         ...registeredClient,
