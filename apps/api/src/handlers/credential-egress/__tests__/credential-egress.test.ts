@@ -254,6 +254,7 @@ beforeEach(async () => {
     origin,
     headerName: 'authorization',
     headerPrefix: 'Bearer ',
+    visibility: 'owner',
   });
   ({ secretRef } = await createServiceCredential(context, {
     pendingRef: pending.pendingRef,
@@ -384,6 +385,17 @@ it('registers an attached run, returns substitutes once, and stores only a keyed
 });
 
 it('delivers a deployment-visible grant to another active member run', async () => {
+  const sharedPending = await prepareServiceCredential(context, {
+    label: 'Shared API',
+    origin,
+    headerName: 'authorization',
+    headerPrefix: 'Bearer ',
+    visibility: 'deployment',
+  });
+  const shared = await createServiceCredential(context, {
+    pendingRef: sharedPending.pendingRef,
+    secret,
+  });
   await db
     .update(users)
     .set({ metadata: { integration_keys_enabled: true } })
@@ -396,8 +408,8 @@ it('delivers a deployment-visible grant to another active member run', async () 
   const registration = result.json as CredentialEgressWorkloadRegistration;
   expect(registration.substitutes).toEqual([
     expect.objectContaining({
-      secretRef,
-      label: 'Example API',
+      secretRef: shared.secretRef,
+      label: 'Shared API',
       allowedMethods: ['GET', 'HEAD'],
     }),
   ]);
@@ -411,6 +423,57 @@ it('delivers a deployment-visible grant to another active member run', async () 
     },
   );
 });
+
+it.each(['deactivated', 'deleted'] as const)(
+  'stops an issued shared substitute when the grant owner is %s',
+  async (state) => {
+    const sharer = await userFactory.create();
+    userIds.push(sharer.id);
+    const sharerSession = await session(sharer.id);
+    const sharerContext = { userId: sharer.id, sessionId: sharerSession.id };
+    const sharedPending = await prepareServiceCredential(sharerContext, {
+      label: 'Shared API',
+      origin,
+      headerName: 'authorization',
+      headerPrefix: 'Bearer ',
+      visibility: 'deployment',
+    });
+    const shared = await createServiceCredential(sharerContext, {
+      pendingRef: sharedPending.pendingRef,
+      secret,
+    });
+    await db
+      .update(users)
+      .set({ metadata: { integration_keys_enabled: true } })
+      .where(eq(users.id, otherId));
+    const otherSession = await session(otherId);
+    const otherRun = await run(otherId, otherSession.id);
+    const result = await register({ runId: otherRun.id });
+    expect(result.status).toBe(201);
+    const registration = result.json as CredentialEgressWorkloadRegistration;
+    const issue = registration.substitutes.find(
+      (candidate) => candidate.secretRef === shared.secretRef,
+    )!;
+    minted.push(issue.substitute);
+
+    if (state === 'deactivated') {
+      await db
+        .update(users)
+        .set({ deletedAt: new Date() })
+        .where(eq(users.id, sharer.id));
+    } else {
+      await db.delete(users).where(eq(users.id, sharer.id));
+    }
+
+    await expect(
+      authorize(authorizeBody({ substitute: issue.substitute })),
+    ).resolves.toEqual({
+      allowed: false,
+      reason:
+        state === 'deactivated' ? 'session_unavailable' : 'unknown_substitute',
+    });
+  },
+);
 
 it('authorizes each phase live and resolves the credential only on the request phase', async () => {
   const base = await registered();

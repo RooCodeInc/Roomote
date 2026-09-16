@@ -12,7 +12,7 @@ const secret = {
   headerPrefix: 'Bearer ',
   allowedMethods: ['GET', 'POST'],
   visibility: 'deployment',
-  sharedBy: null,
+  ownerName: null,
   canManage: true,
   expiresAt: null,
   revokedAt: null,
@@ -106,7 +106,7 @@ it('shows who shared an integration and lets an authorized viewer change visibil
               ...secret,
               secretRef: '6a1f8f1e-0000-4000-8000-000000000012',
               label: 'Shared search',
-              sharedBy: 'Taylor',
+              ownerName: 'Taylor',
               canManage: false,
             },
           ],
@@ -120,7 +120,7 @@ it('shows who shared an integration and lets an authorized viewer change visibil
       ),
     );
   render(<YourIntegrations />);
-  expect(await screen.findByText('Shared by Taylor')).toBeInTheDocument();
+  expect(await screen.findByText('Owned by Taylor')).toBeInTheDocument();
   expect(
     screen.queryByLabelText('Visibility for Shared search'),
   ).not.toBeInTheDocument();

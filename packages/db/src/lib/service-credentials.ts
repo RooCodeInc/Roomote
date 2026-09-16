@@ -155,7 +155,7 @@ function metadata(
     headerPrefix: row.headerPrefix,
     allowedMethods: [...row.allowedMethods],
     visibility: row.visibility,
-    sharedBy:
+    ownerName:
       viewer && ownerUserId !== viewer.userId
         ? ('ownerName' in row ? row.ownerName?.trim() : null) ||
           'Another member'
@@ -222,13 +222,18 @@ function lifetimeExpiry(lifetimeHours: number | null | undefined) {
 }
 
 /** A live grant: not revoked and either permanent or not yet expired. */
-function liveGrantWhere() {
+export function liveServiceCredentialWhere() {
   return and(
     isNull(serviceCredentials.revokedAt),
     or(
       isNull(serviceCredentials.expiresAt),
       gt(serviceCredentials.expiresAt, sql`clock_timestamp()`),
     ),
+    sql`exists (
+      select 1 from ${users} as grant_owner
+      where grant_owner.id = ${serviceCredentials.ownerUserId}
+        and grant_owner.deleted_at is null
+    )`,
   );
 }
 
@@ -369,7 +374,10 @@ export async function listOwnedServiceCredentials(
   return listUserIntegrations(owner.id);
 }
 
-export async function listUserIntegrations(userId: string) {
+export async function listUserIntegrations(
+  userId: string,
+  options: { includeAllForAdmin?: boolean } = {},
+) {
   const viewer = await db.query.users.findFirst({
     where: and(eq(users.id, userId), isNull(users.deletedAt)),
     columns: { id: true, role: true },
@@ -381,14 +389,16 @@ export async function listUserIntegrations(userId: string) {
     .innerJoin(users, eq(users.id, serviceCredentials.ownerUserId))
     .where(
       and(
-        or(
-          eq(serviceCredentials.ownerUserId, userId),
-          eq(serviceCredentials.visibility, 'deployment'),
-        ),
+        viewer.role === 'admin' && options.includeAllForAdmin
+          ? undefined
+          : or(
+              eq(serviceCredentials.ownerUserId, userId),
+              eq(serviceCredentials.visibility, 'deployment'),
+            ),
         isNull(users.deletedAt),
         // Revoked and expired integrations are gone for every reader: the
         // agent's listing, the Settings page, and attached runs.
-        liveGrantWhere(),
+        liveServiceCredentialWhere(),
       ),
     )
     .orderBy(asc(serviceCredentials.createdAt));
@@ -514,7 +524,7 @@ export async function resolveOwnedServiceCredential(
           eq(serviceCredentials.ownerUserId, owner.id),
           eq(serviceCredentials.visibility, 'deployment'),
         ),
-        liveGrantWhere(),
+        liveServiceCredentialWhere(),
       ),
     );
   if (!row?.secret.value)
@@ -543,7 +553,7 @@ export async function updateUserIntegrationVisibility(
           actor.role === 'admin'
             ? undefined
             : eq(serviceCredentials.ownerUserId, actor.id),
-          liveGrantWhere(),
+          liveServiceCredentialWhere(),
         ),
       )
       .returning(metadataColumns);

@@ -30,6 +30,7 @@ import {
   users,
 } from '../schema';
 import { decrypt } from './encryption';
+import { liveServiceCredentialWhere } from './service-credentials';
 
 /**
  * Credential egress control plane persistence.
@@ -129,11 +130,7 @@ export async function findCredentialEgressCandidateForRun(
           eq(serviceCredentials.ownerUserId, eligible.ownerUserId),
           eq(serviceCredentials.visibility, 'deployment'),
         ),
-        isNull(serviceCredentials.revokedAt),
-        or(
-          isNull(serviceCredentials.expiresAt),
-          gt(serviceCredentials.expiresAt, sql`clock_timestamp()`),
-        ),
+        liveServiceCredentialWhere(),
       ),
     );
   return {
@@ -258,11 +255,7 @@ async function mintMissingSubstitutes(
           eq(serviceCredentials.ownerUserId, workload.ownerUserId),
           eq(serviceCredentials.visibility, 'deployment'),
         ),
-        isNull(serviceCredentials.revokedAt),
-        or(
-          isNull(serviceCredentials.expiresAt),
-          gt(serviceCredentials.expiresAt, sql`clock_timestamp()`),
-        ),
+        liveServiceCredentialWhere(),
         sql`not exists (
           select 1 from ${credentialEgressSubstitutes}
           where ${credentialEgressSubstitutes.workloadId} = ${workload.id}
@@ -586,6 +579,11 @@ async function authorizeSubstitute(
       )`,
         workloadExpired: sql<boolean>`${credentialEgressWorkloads.expiresAt} <= clock_timestamp()`,
         grantExpired: sql<boolean>`coalesce(${serviceCredentials.expiresAt} <= clock_timestamp(), false)`,
+        grantOwnerActive: sql<boolean>`exists (
+          select 1 from ${users} as grant_owner
+          where grant_owner.id = ${serviceCredentials.ownerUserId}
+            and grant_owner.deleted_at is null
+        )`,
       })
       .from(credentialEgressSubstitutes)
       .innerJoin(
@@ -629,6 +627,7 @@ async function authorizeSubstitute(
       session.archivedAt ||
       row.ownerDeletedAt ||
       !isServiceCredentialToolsExperimentEnabled(row.ownerMetadata) ||
+      !row.grantOwnerActive ||
       run.actingUserId !== workload.ownerUserId ||
       !ELIGIBLE_RUN_STATUSES.includes(run.status) ||
       !row.attached

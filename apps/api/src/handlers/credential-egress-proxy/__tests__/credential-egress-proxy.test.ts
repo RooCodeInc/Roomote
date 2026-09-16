@@ -125,6 +125,7 @@ async function grant(
     origin: input.origin ?? origin,
     headerName: input.headerName ?? 'authorization',
     headerPrefix: input.headerPrefix ?? 'Bearer ',
+    visibility: 'owner',
     ...(input.allowedMethods ? { allowedMethods: input.allowedMethods } : {}),
   });
   return createServiceCredential(context, {

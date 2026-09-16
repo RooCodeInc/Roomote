@@ -621,6 +621,7 @@ const sessionPolicy = {
   origin: 'https://api.example.com',
   headerName: 'x-api-key' as const,
   headerPrefix: '' as const,
+  visibility: 'owner' as const,
 };
 
 async function sessionGrant(

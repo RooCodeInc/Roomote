@@ -177,8 +177,8 @@ export interface ServiceCredentialMetadata {
   headerPrefix: ServiceCredentialPrepare['headerPrefix'];
   allowedMethods: CredentialEgressMethod[];
   visibility: ServiceCredentialVisibility;
-  /** The person who shared this integration, only when it belongs to someone else. */
-  sharedBy: string | null;
+  /** The owner, only when this integration belongs to someone else. */
+  ownerName: string | null;
   /** Whether the current viewer may revoke it or change its visibility. */
   canManage: boolean;
   /** Null: kept until revoked. */
@@ -189,7 +189,7 @@ export interface ServiceCredentialMetadata {
 
 export interface ServiceCredentialPendingMetadata extends Omit<
   ServiceCredentialMetadata,
-  'secretRef' | 'revokedAt' | 'expiresAt' | 'sharedBy' | 'canManage'
+  'secretRef' | 'revokedAt' | 'expiresAt' | 'ownerName' | 'canManage'
 > {
   pendingRef: string;
   /** How long the integration will live once the key is entered; null keeps it until revoked. */

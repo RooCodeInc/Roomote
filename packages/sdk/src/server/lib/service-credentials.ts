@@ -220,10 +220,10 @@ export async function revokeServiceCredential(
   }
 }
 
-/** Settings: the owner's integrations, metadata only. */
+/** Settings: integrations visible to the member, with an all-grants admin view. */
 export async function listIntegrations(userId: string) {
   try {
-    return await listUserIntegrations(userId);
+    return await listUserIntegrations(userId, { includeAllForAdmin: true });
   } catch {
     throw new Error(ERROR);
   }

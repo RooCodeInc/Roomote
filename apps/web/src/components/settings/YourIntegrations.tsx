@@ -81,7 +81,7 @@ export function YourIntegrations() {
   return (
     <Section
       icon={KeyRound}
-      title="Your integrations"
+      title="Integration keys"
       action={
         <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
           Add integration
@@ -115,9 +115,9 @@ export function YourIntegrations() {
                   {secret.origin} · {secret.allowedMethods.join(', ')} ·{' '}
                   {describeExpiry(secret)}
                 </p>
-                {secret.sharedBy ? (
+                {secret.ownerName ? (
                   <p className="text-xs text-muted-foreground">
-                    Shared by {secret.sharedBy}
+                    Owned by {secret.ownerName}
                   </p>
                 ) : null}
               </div>

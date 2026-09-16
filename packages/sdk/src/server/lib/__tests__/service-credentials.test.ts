@@ -230,9 +230,9 @@ it('encrypts SQL storage, lists metadata only and wipes ciphertext on revoke', a
     'headerPrefix',
     'label',
     'origin',
+    'ownerName',
     'revokedAt',
     'secretRef',
-    'sharedBy',
     'visibility',
   ]);
   expect(JSON.stringify(listed)).not.toContain(secret);
@@ -363,6 +363,58 @@ it('shares new grants with active deployment members by default while owner gran
   await expect(
     revokeIntegration(stranger.id, { secretRef: shared.secretRef }),
   ).rejects.toThrow('Secret request unavailable');
+});
+
+it.each(['deactivated', 'deleted'] as const)(
+  'removes a deployment-visible grant when its owner is %s',
+  async (state) => {
+    const sharedPending = await prepareServiceCredential(context, policy);
+    const shared = await createServiceCredential(context, {
+      pendingRef: sharedPending.pendingRef,
+      secret,
+    });
+    const member = await userFactory.create();
+    userIds.push(member.id);
+    const memberContext = {
+      userId: member.id,
+      sessionId: await session(member.id),
+    };
+    expect(
+      (await listServiceCredentials(memberContext)).map(
+        (item) => item.secretRef,
+      ),
+    ).toContain(shared.secretRef);
+
+    if (state === 'deactivated') {
+      await db
+        .update(users)
+        .set({ deletedAt: new Date() })
+        .where(eq(users.id, context.userId!));
+    } else {
+      await db.delete(users).where(eq(users.id, context.userId!));
+    }
+
+    expect(await listServiceCredentials(memberContext)).toEqual([]);
+    await expect(
+      resolveOwnedServiceCredential(memberContext, shared.secretRef),
+    ).rejects.toThrow('Secret unavailable');
+  },
+);
+
+it('lists every active grant for Settings admins but not ordinary members', async () => {
+  const admin = await userFactory.create({ role: 'admin' });
+  const member = await userFactory.create({ role: 'member' });
+  userIds.push(admin.id, member.id);
+
+  expect(await listIntegrations(member.id)).toEqual([]);
+  expect(await listIntegrations(admin.id)).toEqual([
+    expect.objectContaining({
+      secretRef,
+      visibility: 'owner',
+      ownerName: expect.any(String),
+      canManage: true,
+    }),
+  ]);
 });
 
 it('omits revoked and expired deployment grants from another member listing', async () => {
