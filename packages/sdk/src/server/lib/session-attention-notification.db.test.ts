@@ -19,8 +19,12 @@ const mocks = vi.hoisted(() => ({
   hasAny: vi.fn(),
   isPresent: vi.fn(),
   send: vi.fn(),
+  voiceActive: vi.fn(),
 }));
 
+vi.mock('@roomote/cloud-agents/server', () => ({
+  isFastAgentVoiceCallActive: mocks.voiceActive,
+}));
 vi.mock('@roomote/redis', () => ({
   isSessionUserPresent: mocks.isPresent,
 }));
@@ -146,6 +150,7 @@ describe('session attention notifications', () => {
     mocks.isPresent.mockResolvedValue(false);
     mocks.hasAny.mockResolvedValue(true);
     mocks.enqueue.mockResolvedValue(true);
+    mocks.voiceActive.mockResolvedValue(false);
     messageId = crypto.randomUUID();
     mocks.send.mockResolvedValue({
       deliveredProviders: ['slack'],
@@ -158,6 +163,39 @@ describe('session attention notifications', () => {
         },
       ],
     });
+  });
+
+  it('suppresses the personal fallback while voice is connected and restores it after disconnect', async () => {
+    const { conversation } = await createFastWebSession();
+    mocks.voiceActive.mockResolvedValueOnce(true);
+
+    await expect(
+      notifyFastWebSessionAttention({
+        fastConversationId: conversation.id,
+        kind: 'result_ready',
+        eventId: 'voice-turn',
+        message: 'The answer was spoken on the call.',
+        manual: true,
+      }),
+    ).resolves.toBe('skipped');
+
+    expect(mocks.voiceActive).toHaveBeenCalledWith(conversation.id);
+    expect(mocks.hasAny).not.toHaveBeenCalled();
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+
+    await expect(
+      notifyFastWebSessionAttention({
+        fastConversationId: conversation.id,
+        kind: 'result_ready',
+        eventId: 'voice-turn',
+        message: 'The answer now needs a notification.',
+        manual: true,
+      }),
+    ).resolves.toBe('delivered');
+
+    expect(mocks.enqueue).toHaveBeenCalledOnce();
+    expect(mocks.send).toHaveBeenCalledOnce();
   });
 
   it('notifies nonterminal direct-task completions once per completion id', async () => {

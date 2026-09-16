@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { isFastAgentVoiceCallActive } from '@roomote/cloud-agents/server';
 import {
   and,
   asc,
@@ -378,6 +379,15 @@ export async function notifyFastWebSessionAttention(
   ) {
     return 'not_applicable';
   }
+  const voiceCallActive = await isFastAgentVoiceCallActive(
+    input.fastConversationId,
+  ).catch((error) => {
+    console.warn(
+      `[sessionAttentionNotification] Voice state lookup failed for ${input.eventId}; notifying defensively: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  });
+  if (voiceCallActive) return 'skipped';
   if (!(await hasAnyUserDirectMessageIdentity(session.ownerUserId))) {
     return 'not_applicable';
   }
