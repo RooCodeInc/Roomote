@@ -41,26 +41,55 @@ describe('useSessionVoiceCallLease', () => {
 
     act(() => window.dispatchEvent(new Event('blur')));
     act(() => vi.advanceTimersByTime(20_000));
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
 
     rerender({ active: false });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
     expect(fetchMock).toHaveBeenLastCalledWith(
       `/api/sessions/${SESSION_ID}/presence`,
       expect.objectContaining({ method: 'DELETE', keepalive: true }),
     );
   });
 
-  it('releases on page hide and unmount', () => {
+  it('releases on page hide and unmount', async () => {
     const { unmount } = renderHook(() =>
       useSessionVoiceCallLease(SESSION_ID, true),
     );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
     act(() => window.dispatchEvent(new Event('pagehide')));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     unmount();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect(fetchMock).toHaveBeenLastCalledWith(
       `/api/sessions/${SESSION_ID}/presence`,
       expect.objectContaining({ method: 'DELETE' }),
     );
+  });
+
+  it('serializes disconnect after in-flight heartbeats', async () => {
+    let finishFirstRefresh!: () => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finishFirstRefresh = () => resolve(new Response());
+        }),
+    );
+    const { rerender } = renderHook(
+      ({ active }) => useSessionVoiceCallLease(SESSION_ID, active),
+      { initialProps: { active: true } },
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+
+    act(() => vi.advanceTimersByTime(10_000));
+    rerender({ active: false });
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    finishFirstRefresh();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock.mock.calls.map(([, options]) => options?.method)).toEqual([
+      'POST',
+      'POST',
+      'DELETE',
+    ]);
   });
 });
