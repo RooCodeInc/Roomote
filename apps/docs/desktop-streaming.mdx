@@ -43,12 +43,17 @@ use: at the limit, a new viewer replaces viewers whose tab stopped reading the
 stream and is otherwise told the desktop is full, so a stale tab can never
 lock the desktop and live viewers are never interrupted.
 
+The header's pop-out button opens the desktop in its own window and hands
+input control to it; the panel can take control back at any time.
+
 ## Verify performance
 
-Open **Shared Desktop** and select **Start remote desktop**. The player
-reports browser-rendered FPS and time from starting the stream to the first
-decoded frame. The service's `/metrics` endpoint additionally reports encoder
-FPS and bitrate for diagnostics.
+Open **Shared Desktop** and select **Start remote desktop**. The statistics
+toggle in the header overlays browser-rendered FPS, bitrate, dropped frames,
+distance from the live edge, the remote screen size, time to the first
+decoded frame, and the number of input events sent. The service's `/metrics`
+endpoint additionally reports encoder FPS, bitrate, and pointer positions for
+diagnostics.
 
 For a deterministic transport test without a desktop, start the service with
 a synthetic input:

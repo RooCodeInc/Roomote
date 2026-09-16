@@ -162,6 +162,7 @@ describe('DesktopStreamClient', () => {
       <DesktopStreamClient
         previewUrl="https://desktop.preview.test"
         runId={123}
+        onClose={() => {}}
       />,
     );
     const start = await screen.findByRole('button', {
@@ -173,7 +174,7 @@ describe('DesktopStreamClient', () => {
     const socket = FakeWebSocket.instances[0];
     expect(socket?.url).toContain('/control');
     act(() => socket?.open());
-    await screen.findByText(/Control connected/);
+    await screen.findByRole('button', { name: 'Release control' });
 
     const video = screen.getByLabelText('Remote desktop');
     Object.defineProperties(video, {
@@ -222,6 +223,7 @@ describe('DesktopStreamClient', () => {
       <DesktopStreamClient
         previewUrl="https://desktop.preview.test"
         runId={123}
+        onClose={() => {}}
       />,
     );
     const start = await screen.findByRole('button', {
@@ -254,6 +256,7 @@ describe('DesktopStreamClient', () => {
         <DesktopStreamClient
           previewUrl="https://desktop.preview.test"
           runId={123}
+          onClose={() => {}}
         />,
       );
       const start = await screen.findByRole('button', {
@@ -320,20 +323,37 @@ describe('DesktopStreamClient', () => {
     ).toBeNull();
   });
 
-  it('offers a fullscreen toggle for the desktop frame', async () => {
-    const requestFullscreen = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(HTMLElement.prototype, 'requestFullscreen', {
-      configurable: true,
-      value: requestFullscreen,
-    });
+  it('pops the desktop out into its own window and hands over control', async () => {
+    const open = vi.fn();
+    vi.stubGlobal('open', open);
     render(
       <DesktopStreamClient
         previewUrl="https://desktop.preview.test"
         runId={123}
+        onClose={() => {}}
+        popoutHref="/task/abc/shared-desktop/popout"
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Fullscreen' }));
-    await waitFor(() => expect(requestFullscreen).toHaveBeenCalledTimes(1));
+    const start = await screen.findByRole('button', {
+      name: 'Start remote desktop',
+    });
+    await waitFor(() => expect(start).toBeEnabled());
+    fireEvent.click(start);
+    const socket = FakeWebSocket.instances[0]!;
+    act(() => socket.open());
+    await screen.findByRole('button', { name: 'Release control' });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Pop out Shared Desktop' }),
+    );
+    expect(open).toHaveBeenCalledWith(
+      '/task/abc/shared-desktop/popout',
+      'roomote-shared-desktop-123',
+      expect.stringContaining('popup=yes'),
+    );
+    // The panel gives up control so the new window can take it cleanly.
+    expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+    await screen.findByRole('button', { name: 'Take control' });
   });
 
   it('sizes the remote screen to the panel within the pixel budget', () => {
@@ -353,6 +373,7 @@ describe('DesktopStreamClient', () => {
       <DesktopStreamClient
         previewUrl="https://desktop.preview.test"
         runId={123}
+        onClose={() => {}}
       />,
     );
     const start = await screen.findByRole('button', {
@@ -398,6 +419,7 @@ describe('DesktopStreamClient', () => {
       <DesktopStreamClient
         previewUrl="https://desktop.preview.test"
         runId={123}
+        onClose={() => {}}
       />,
     );
     const start = await screen.findByRole('button', {
@@ -417,6 +439,7 @@ describe('DesktopStreamClient', () => {
       <DesktopStreamClient
         previewUrl="https://desktop.preview.test"
         runId={123}
+        onClose={() => {}}
       />,
     );
     const start = await screen.findByRole('button', {
@@ -426,7 +449,7 @@ describe('DesktopStreamClient', () => {
     fireEvent.click(start);
     const first = FakeWebSocket.instances[0]!;
     act(() => first.open());
-    await screen.findByText(/Control connected/);
+    await screen.findByRole('button', { name: 'Release control' });
 
     const video = screen.getByLabelText('Remote desktop');
     Object.defineProperties(video, {
@@ -457,7 +480,7 @@ describe('DesktopStreamClient', () => {
     });
     expect(FakeWebSocket.instances).toHaveLength(2);
     act(() => FakeWebSocket.instances[1]!.open());
-    await screen.findByText(/Control connected/);
+    await screen.findByRole('button', { name: 'Release control' });
   });
 
   it('offers release and take control in the header', async () => {
@@ -475,18 +498,18 @@ describe('DesktopStreamClient', () => {
     fireEvent.click(start);
     const first = FakeWebSocket.instances[0]!;
     act(() => first.open());
-    await screen.findByText(/Control connected/);
+    await screen.findByRole('button', { name: 'Release control' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Release control' }));
     expect(first.readyState).toBe(FakeWebSocket.CLOSED);
-    await screen.findByText('Control released');
+    await screen.findByRole('button', { name: 'Take control' });
     // A released viewer does not reconnect on its own.
     expect(FakeWebSocket.instances).toHaveLength(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Take control' }));
     expect(FakeWebSocket.instances).toHaveLength(2);
     act(() => FakeWebSocket.instances[1]!.open());
-    await screen.findByText(/Control connected/);
+    await screen.findByRole('button', { name: 'Release control' });
   });
 
   it('reconnects control and reloads the stream after an unexpected drop', async () => {
@@ -496,6 +519,7 @@ describe('DesktopStreamClient', () => {
         <DesktopStreamClient
           previewUrl="https://desktop.preview.test"
           runId={123}
+          onClose={() => {}}
         />,
       );
       const start = await screen.findByRole('button', {
@@ -505,13 +529,13 @@ describe('DesktopStreamClient', () => {
       fireEvent.click(start);
       const first = FakeWebSocket.instances[0]!;
       act(() => first.open());
-      await screen.findByText(/Control connected/);
+      await screen.findByRole('button', { name: 'Release control' });
       const video = screen.getByLabelText('Remote desktop');
       fireEvent.loadedData(video);
 
       // Service restart: control closes without a supersession message.
       act(() => first.close());
-      await screen.findByText('Control disconnected');
+      await screen.findByRole('button', { name: 'Take control' });
       act(() => {
         vi.advanceTimersByTime(2_000);
       });
@@ -558,5 +582,23 @@ describe('DesktopStreamClient', () => {
       screen.getByRole('button', { name: 'Hide stream statistics' }),
     );
     expect(screen.queryByTestId('stream-stats')).toBeNull();
+  });
+
+  it('shows its own toolbar in the standalone pop-out window', async () => {
+    render(
+      <DesktopStreamClient
+        previewUrl="https://desktop.preview.test"
+        runId={123}
+        standalone
+      />,
+    );
+    await screen.findByRole('button', { name: 'Start remote desktop' });
+    expect(screen.getByRole('button', { name: 'Take control' })).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Show stream statistics' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Pop out Shared Desktop' }),
+    ).toBeNull();
   });
 });

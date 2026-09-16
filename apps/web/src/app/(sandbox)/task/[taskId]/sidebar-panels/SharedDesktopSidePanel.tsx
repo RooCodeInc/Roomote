@@ -26,6 +26,7 @@ export function SharedDesktopSidePanel({
             previewUrl={desktopUrl}
             runId={taskRun.id}
             onClose={onClose}
+            popoutHref={`/task/${taskRun.taskId}/shared-desktop/popout`}
           />
         </div>
       ) : (

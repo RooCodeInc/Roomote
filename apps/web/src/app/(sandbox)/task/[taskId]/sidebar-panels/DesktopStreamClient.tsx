@@ -11,8 +11,8 @@ import {
 import {
   Activity,
   Button,
+  ExternalLink,
   Loader2,
-  Maximize2,
   SquareDashedMousePointer,
   Play,
 } from '@/components/system';
@@ -207,12 +207,17 @@ export function DesktopStreamClient({
   previewUrl,
   runId,
   onClose,
+  popoutHref,
+  standalone = false,
 }: {
   previewUrl: string;
   runId: number;
   onClose?: () => void;
+  /** Standalone page for this desktop; shown as a pop-out in the header. */
+  popoutHref?: string;
+  /** Render a minimal toolbar of its own (used by the pop-out window). */
+  standalone?: boolean;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const pendingPointerRef = useRef<RemotePoint | null>(null);
@@ -265,7 +270,6 @@ export function DesktopStreamClient({
   const pendingInitialPlayRef = useRef(false);
   const sessionRef = useRef<DesktopStreamSession | null>(null);
   sessionRef.current = session;
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const sendControl = (event: ControlEvent) => {
     const socket = socketRef.current;
@@ -294,27 +298,6 @@ export function DesktopStreamClient({
     }, LIVE_EDGE_CHECK_INTERVAL_MS);
     return () => window.clearInterval(interval);
   }, [isPlaying]);
-
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      const active = document.fullscreenElement === containerRef.current;
-      setIsFullscreen(active);
-      if (active) {
-        videoRef.current?.focus();
-      }
-    };
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () =>
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
-
-  const toggleFullscreen = () => {
-    if (document.fullscreenElement) {
-      void document.exitFullscreen();
-    } else {
-      void containerRef.current?.requestFullscreen?.();
-    }
-  };
 
   const clearStartTimeout = () => {
     if (startTimeoutRef.current !== null) {
@@ -863,51 +846,81 @@ export function DesktopStreamClient({
       videoRef.current?.requestVideoFrameCallback(frameCallback) ?? null;
   };
 
+  const headerActions = (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={!session || controlState === 'connecting'}
+        onClick={controlState === 'on' ? releaseControl : takeControl}
+      >
+        {controlState === 'on' ? 'Release control' : 'Take control'}
+      </Button>
+      {popoutHref ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Pop out Shared Desktop"
+          title="Pop out"
+          onClick={() => {
+            const container = videoRef.current?.parentElement;
+            const width = Math.max(
+              640,
+              Math.round(container?.clientWidth ?? 1280),
+            );
+            const height = Math.max(
+              400,
+              Math.round(container?.clientHeight ?? 800),
+            );
+            // Hand control to the new window rather than fighting it.
+            if (controlOnRef.current) {
+              releaseControl();
+            }
+            window.open(
+              popoutHref,
+              `roomote-shared-desktop-${runId}`,
+              `popup=yes,width=${width},height=${height}`,
+            );
+          }}
+        >
+          <ExternalLink />
+        </Button>
+      ) : null}
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={
+          showStats ? 'Hide stream statistics' : 'Show stream statistics'
+        }
+        aria-pressed={showStats}
+        title={showStats ? 'Hide stream statistics' : 'Show stream statistics'}
+        className={showStats ? 'text-primary' : undefined}
+        onClick={() => {
+          const next = !showStats;
+          setShowStats(next);
+          writeStatsPreference(next);
+        }}
+      >
+        <Activity />
+      </Button>
+    </>
+  );
+
   return (
-    <div
-      ref={containerRef}
-      className="relative flex size-full flex-col overflow-hidden bg-zinc-950"
-    >
+    <div className="relative flex size-full flex-col overflow-hidden bg-zinc-950">
       {onClose ? (
         <SidePanelHeader
           title="Shared Desktop"
           onClose={onClose}
-          actions={
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!session || controlState === 'connecting'}
-                onClick={controlState === 'on' ? releaseControl : takeControl}
-              >
-                {controlState === 'on' ? 'Release control' : 'Take control'}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={
-                  showStats
-                    ? 'Hide stream statistics'
-                    : 'Show stream statistics'
-                }
-                aria-pressed={showStats}
-                title={
-                  showStats
-                    ? 'Hide stream statistics'
-                    : 'Show stream statistics'
-                }
-                className={showStats ? 'text-primary' : undefined}
-                onClick={() => {
-                  const next = !showStats;
-                  setShowStats(next);
-                  writeStatsPreference(next);
-                }}
-              >
-                <Activity />
-              </Button>
-            </>
-          }
+          actions={headerActions}
         />
+      ) : standalone ? (
+        <div className="flex items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-900 px-3 py-1.5">
+          <span className="text-sm font-medium text-zinc-100">
+            Shared Desktop
+          </span>
+          <div className="flex items-center gap-1">{headerActions}</div>
+        </div>
       ) : null}
       <div className="relative min-h-0 flex-1">
         <video
@@ -987,6 +1000,48 @@ export function DesktopStreamClient({
           }}
         />
 
+        {isPlaying && controlState !== 'on' && controlState !== 'off' ? (
+          <div className="pointer-events-none absolute top-2 left-2 rounded bg-zinc-950/80 px-2 py-1 text-xs text-zinc-200">
+            {controlState === 'connecting'
+              ? 'Connecting control'
+              : controlState === 'released'
+                ? 'Control released'
+                : 'Another viewer has control'}
+          </div>
+        ) : null}
+        {isPlaying && sessionError ? (
+          <div
+            role="alert"
+            className="pointer-events-none absolute top-2 right-2 left-2 mx-auto w-fit max-w-[90%] truncate rounded bg-zinc-950/80 px-2 py-1 text-xs text-destructive"
+          >
+            {sessionError}
+          </div>
+        ) : null}
+        {showStats ? (
+          <div
+            data-testid="stream-stats"
+            className="pointer-events-none absolute right-2 bottom-2 rounded bg-zinc-950/80 px-2 py-1 font-mono text-xs text-zinc-300 tabular-nums"
+          >
+            {renderedFps === null ? '-' : `${renderedFps.toFixed(1)} fps`}
+            {' · '}
+            {decodedBitrateKbps === null
+              ? '- kbps'
+              : `${decodedBitrateKbps.toFixed(0)} kbps`}
+            {' · '}
+            {droppedFrames} dropped
+            {' · '}
+            {liveLagMs === null
+              ? '-'
+              : `${liveLagMs.toFixed(0)} ms behind live`}
+            {remoteSize ? ` · ${remoteSize.width}×${remoteSize.height}` : ''}
+            {' · '}
+            {startupMs === null
+              ? '-'
+              : `${startupMs.toFixed(0)} ms first frame`}
+            {' · '}
+            {sentEvents} events
+          </div>
+        ) : null}
         {!isPlaying ? (
           <div className="absolute inset-0 grid place-items-center bg-zinc-950/85 p-6 text-center">
             <div className="max-w-sm space-y-4">
@@ -1013,59 +1068,6 @@ export function DesktopStreamClient({
             </div>
           </div>
         ) : null}
-      </div>
-
-      <div className="flex min-h-10 items-center justify-between gap-3 border-t border-zinc-800 bg-zinc-900 px-3 text-xs text-zinc-400">
-        <span className="min-w-0 truncate">
-          {controlState === 'on'
-            ? showStats
-              ? `Control connected · ${sentEvents} events sent`
-              : 'Control connected'
-            : controlState === 'connecting'
-              ? 'Connecting control'
-              : controlState === 'released'
-                ? 'Control released'
-                : controlState === 'taken'
-                  ? 'Another viewer has control'
-                  : 'Control disconnected'}
-          {isPlaying && sessionError ? (
-            <span role="alert" className="text-destructive">
-              {' · '}
-              {sessionError}
-            </span>
-          ) : null}
-        </span>
-        <span className="flex shrink-0 items-center gap-3">
-          {showStats ? (
-            <span className="font-mono tabular-nums" data-testid="stream-stats">
-              {renderedFps === null ? '-' : `${renderedFps.toFixed(1)} fps`}
-              {' · '}
-              {decodedBitrateKbps === null
-                ? '- kbps'
-                : `${decodedBitrateKbps.toFixed(0)} kbps`}
-              {' · '}
-              {droppedFrames} dropped
-              {' · '}
-              {liveLagMs === null
-                ? '-'
-                : `${liveLagMs.toFixed(0)} ms behind live`}
-              {remoteSize ? ` · ${remoteSize.width}×${remoteSize.height}` : ''}
-              {' · '}
-              {startupMs === null
-                ? '-'
-                : `${startupMs.toFixed(0)} ms first frame`}
-            </span>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleFullscreen}
-            aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-          >
-            <Maximize2 />
-          </Button>
-        </span>
       </div>
     </div>
   );
