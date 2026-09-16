@@ -90,6 +90,14 @@ import {
 
 const REMOVED_EVAL_COMMAND_PATTERN = /^!eval(?:\s|$)/iu;
 
+/**
+ * How long after an automated root message the same app's own thread
+ * replies are delivered to the Session as follow-ups. Workflows post their
+ * detail within seconds of the mention; a bot that returns to the thread
+ * much later is a new conversation and needs a fresh mention.
+ */
+export const AUTOMATED_THREAD_REPLY_WINDOW_SECONDS = 15 * 60;
+
 async function getBoundSlackFastAgentSessionOwner(params: {
   teamId: string;
   channelId: string;
@@ -1003,6 +1011,148 @@ async function processAutomatedAppMentionTask(params: {
   return Boolean(followUpOutcome.value);
 }
 
+function isAutomatedThreadReplyCandidate(
+  event: SlackEvent,
+  slackInstallation: SlackInstallation,
+): event is SlackEvent & { thread_ts: string } {
+  if (
+    event.type !== 'message' ||
+    event.channel_type === 'im' ||
+    !event.thread_ts ||
+    event.thread_ts === event.ts ||
+    (event.subtype && event.subtype !== 'bot_message') ||
+    !(event.bot_id || event.app_id) ||
+    isRoomoteAuthoredSlackEvent(event, slackInstallation)
+  ) {
+    return false;
+  }
+
+  // A bot reply that mentions Roomote is an automated mention in its own
+  // right; one that mentions somebody else is addressed to them.
+  if (
+    mentionsSlackBot(event, slackInstallation.botUserId) ||
+    mentionsSlackUserOtherThanBot(event, slackInstallation.botUserId)
+  ) {
+    return false;
+  }
+
+  const secondsSinceRoot = Number(event.ts) - Number(event.thread_ts);
+  if (
+    !Number.isFinite(secondsSinceRoot) ||
+    secondsSinceRoot < 0 ||
+    secondsSinceRoot > AUTOMATED_THREAD_REPLY_WINDOW_SECONDS
+  ) {
+    return false;
+  }
+
+  return Boolean(
+    event.text?.trim() ||
+    (Array.isArray(event.attachments) && event.attachments.length > 0) ||
+    (Array.isArray(event.blocks) && event.blocks.length > 0),
+  );
+}
+
+function isSameAutomatedAuthor(
+  root: { bot_id?: string; app_id?: string },
+  event: { bot_id?: string; app_id?: string },
+): boolean {
+  return Boolean(
+    (root.bot_id && root.bot_id === event.bot_id) ||
+    (root.app_id && root.app_id === event.app_id),
+  );
+}
+
+/**
+ * A workflow or app that summoned Roomote usually posts its detail as
+ * thread replies right after the mention. Those replies are bot-authored
+ * and carry no linked human, so the ordinary follow-up path drops them
+ * and the Session only ever sees the headline. When the thread is bound to
+ * a Session and the reply comes from the app that authored the root, hand
+ * it to Fast under the automation identity like the mention itself: an
+ * active turn is steered, an idle Session gets a new turn.
+ */
+async function maybeRouteAutomatedThreadReply(params: {
+  event: SlackEvent;
+  context: SlackWebhookContext;
+}): Promise<boolean> {
+  const { event, context } = params;
+  const { slackInstallation, slack, teamId } = context;
+
+  if (!isAutomatedThreadReplyCandidate(event, slackInstallation)) {
+    return false;
+  }
+
+  const threadId = event.thread_ts;
+  const sessionOwner = await getBoundSlackFastAgentSessionOwner({
+    teamId,
+    channelId: event.channel,
+    threadId,
+  });
+  if (!sessionOwner) {
+    return false;
+  }
+
+  const threadMessages = await slack
+    .fetchThreadMessages({ channel: event.channel, threadTs: threadId })
+    .catch(() => []);
+  const root = threadMessages.find((message) => message.ts === threadId);
+  if (
+    !root ||
+    !isSameAutomatedAuthor(root as { bot_id?: string; app_id?: string }, event)
+  ) {
+    return false;
+  }
+
+  const launchIdentity = await getSlackAutomationLaunchIdentity({
+    slackInstallation,
+    teamId,
+  });
+  const threadEvent = { ...event, user: launchIdentity.slackUserId };
+  const { activeMapping: launchUserMapping } =
+    launchIdentity.slackUserId === slackInstallation.botUserId
+      ? { activeMapping: null }
+      : await lookupSlackUserMapping({
+          slackUserId: launchIdentity.slackUserId,
+          teamId,
+        });
+  const fastStart = await startFastAgentResponse({
+    event: threadEvent,
+    slackInstallation,
+    ...(launchUserMapping ? { userMapping: launchUserMapping } : {}),
+    slack,
+    userId: launchIdentity.launchUserId,
+    teamId,
+    directedAtRoomote: true,
+    delegatedTaskInitiator: {
+      kind: 'automation',
+      key: 'slack_channel_auto_start',
+      ...(typeof event.user === 'string'
+        ? { actor: { externalId: event.user } }
+        : {}),
+    },
+    resolveActiveTasks: () =>
+      resolveFastAgentReplyTasks({
+        slack,
+        slackTeamId: teamId,
+        channelId: event.channel,
+        threadTs: threadId,
+      }),
+    errorLogPrefix: `❌ Background fast-agent response failed for automated thread reply ${threadId}:`,
+  });
+
+  if (fastStart.accepted) {
+    apiLogger.info(
+      `[SlackWebhook] Automated thread reply routed to Fast thread_id=${threadId} channel=${event.channel} app_id=${event.app_id} bot_id=${event.bot_id}`,
+    );
+  } else {
+    apiLogger.warn(
+      `[SlackWebhook] Automated thread reply Fast entry not accepted (${fastStart.reason}) for thread ${threadId}`,
+    );
+  }
+
+  return true;
+}
+
 async function startAutomatedAppMentionTaskWithLock(params: {
   event: AutomatedSlackAppMentionEvent;
   slackInstallation: SlackInstallation;
@@ -1293,6 +1443,13 @@ export async function handleMessageOrAppMentionEvent(params: {
   if (
     !automatedAppMentionEvent &&
     (await maybeHandleChannelAutoStart({ event, context, redis }))
+  ) {
+    return;
+  }
+
+  if (
+    !automatedAppMentionEvent &&
+    (await maybeRouteAutomatedThreadReply({ event, context }))
   ) {
     return;
   }
