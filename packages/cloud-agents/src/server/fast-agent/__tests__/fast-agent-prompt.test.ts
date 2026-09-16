@@ -742,11 +742,15 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(enabledPrompt).toContain(
       'launch a coding task attached to this Session to use the integration',
     );
-    expect(enabledPrompt).toContain(
-      'Fast cannot call `request_with_integration_key` directly',
-    );
+    expect(enabledPrompt).not.toContain('`request_with_integration_key`');
     expect(enabledPrompt).not.toContain(
       'for one or a few direct calls, call `request_with_integration_key` yourself',
+    );
+    expect(enabledPrompt).toContain(
+      'Never invent a reference or substitute another credential.',
+    );
+    expect(enabledPrompt).toContain(
+      'In web Sessions these tools need no opening `send_chat_reply`.',
     );
     expect(enabledPrompt).toContain(
       'do not launch a coding task to build a connector when an integration key would do',
