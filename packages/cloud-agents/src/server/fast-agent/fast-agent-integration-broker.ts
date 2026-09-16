@@ -682,6 +682,30 @@ export async function callFastAgentIntegration(
 
   // Fail closed: an integration tool never executes unless its durable audit
   // record exists first.
+  const publicFetchAudit =
+    integration.id === ROOMOTE_MCP_ID && request.toolName === 'fetch_url'
+      ? (() => {
+          let destination: string | undefined;
+          try {
+            destination = new URL(String(request.args.url)).origin;
+          } catch {
+            // The tool validates malformed URLs; the audit retains no raw URL.
+          }
+          const headers = request.args.headers;
+          return {
+            ...(destination ? { destination } : {}),
+            ...(typeof request.args.format === 'string'
+              ? { format: request.args.format }
+              : {}),
+            ...(typeof request.args.timeout === 'number'
+              ? { timeout: request.args.timeout }
+              : {}),
+            ...(headers && typeof headers === 'object'
+              ? { headerNames: Object.keys(headers).sort() }
+              : {}),
+          };
+        })()
+      : null;
   const audit = await beginSlackFastIntegrationCall({
     fastAgentConversationId: context.sessionId,
     userId: context.userId,
@@ -699,7 +723,9 @@ export async function callFastAgentIntegration(
     arguments:
       integration.id === HTTP_INTEGRATIONS_MCP_ID
         ? { toolName: request.toolName }
-        : request.args,
+        : publicFetchAudit
+          ? publicFetchAudit
+          : request.args,
   });
 
   try {
@@ -757,7 +783,7 @@ export async function callFastAgentIntegration(
         id: audit.id,
         status: 'succeeded',
         resultPreview:
-          integration.id === HTTP_INTEGRATIONS_MCP_ID
+          integration.id === HTTP_INTEGRATIONS_MCP_ID || publicFetchAudit
             ? '[Broker result omitted]'
             : serializeAuditPreview(result, 30_000),
         startedAt: audit.startedAt,
