@@ -1,0 +1,67 @@
+---
+title: Cloudflare Workers AI
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/cloudflare.svg'
+description: Use Cloudflare-hosted Workers AI models for Roomote tasks.
+---
+
+Cloudflare Workers AI hosts open and specialized models on Cloudflare's
+network. Roomote's direct provider exposes a curated `@cf/` subset suited to
+coding and agent work.
+
+This is a separate connection from [Cloudflare AI Gateway](/providers/inference/cloudflare-ai-gateway).
+Connecting Workers AI does not require a gateway ID and does not connect AI
+Gateway.
+
+## Get credentials
+
+Create a [Cloudflare API token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)
+with Workers AI access. Copy the account ID from the Cloudflare dashboard. A
+gateway ID is not used for this provider.
+
+Make sure the account has Workers AI enabled for the models you select. See
+the [Workers AI model catalog](https://developers.cloudflare.com/workers-ai/models/).
+
+## Configuration
+
+Add **Cloudflare Workers AI** in **Settings > Models**, then enter the API
+token and account ID. Environment-variable configuration uses:
+
+```sh
+CLOUDFLARE_WORKERS_AI_API_TOKEN=...
+CLOUDFLARE_WORKERS_AI_ACCOUNT_ID=your-account-id
+```
+
+Roomote adds supported models with the `cloudflare-workers-ai/` prefix, using
+Cloudflare-hosted `@cf/` catalog IDs. Enable the models you want and assign the
+default coding and specialized roles. Provider model names are case-sensitive,
+so use the IDs shown in Roomote rather than typing a similar slug from another
+gateway.
+
+In gateway mode, the API token stays on the Roomote control plane. Requests are
+proxied to Cloudflare's OpenAI-compatible
+`/accounts/<account>/ai/v1` surface. No gateway header is sent.
+
+## Cost behavior
+
+Cloudflare charges the connected account according to the selected Workers AI
+model. Roomote records usage and estimates cost when model metadata includes
+pricing; Cloudflare billing and the [Workers AI pricing page](https://developers.cloudflare.com/workers-ai/platform/pricing/)
+are authoritative.
+
+## Verify setup
+
+1. save the API token and account ID
+2. confirm Workers AI models appear in **Settings > Models**
+3. enable one `@cf/` model and assign it as the coding model
+4. run a small task and confirm the request appears in Workers AI usage
+
+## Common issues
+
+- **Authentication fails.** Confirm the token has Workers AI permission and
+  belongs to the configured account.
+- **A model ID is rejected.** Use the exact `cloudflare-workers-ai/@cf/...` ID
+  shown in Roomote. IDs from AI Gateway or another provider are not
+  interchangeable.
+- **Requests mention a missing gateway.** You are calling the AI Gateway
+  provider, not Workers AI. Connect **Cloudflare Workers AI** when you want
+  hosted `@cf/` models without a gateway ID.
