@@ -6,7 +6,11 @@ import {
   waitFor,
 } from '@testing-library/react';
 
-import { DesktopStreamClient, mapPointerToRemote } from './DesktopStreamClient';
+import {
+  DesktopStreamClient,
+  STREAM_START_TIMEOUT_MS,
+  mapPointerToRemote,
+} from './DesktopStreamClient';
 
 class FakeWebSocket {
   static readonly CONNECTING = 0;
@@ -183,5 +187,65 @@ describe('DesktopStreamClient', () => {
     view.unmount();
     expect(socket?.readyState).toBe(FakeWebSocket.CLOSED);
     expect(video).not.toHaveAttribute('src');
+  });
+
+  it('recovers from a media error so the stream can be restarted', async () => {
+    render(
+      <DesktopStreamClient
+        previewUrl="https://desktop.preview.test"
+        runId={123}
+      />,
+    );
+    const start = await screen.findByRole('button', {
+      name: 'Start remote desktop',
+    });
+    await waitFor(() => expect(start).toBeEnabled());
+    fireEvent.click(start);
+    expect(screen.getByRole('button', { name: 'Starting...' })).toBeDisabled();
+
+    const video = screen.getByLabelText('Remote desktop');
+    Object.defineProperty(video, 'error', {
+      configurable: true,
+      value: { code: 4 },
+    });
+    fireEvent.error(video);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Remote desktop stream is unavailable',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Start remote desktop' }),
+    ).toBeEnabled();
+    expect(FakeWebSocket.instances[0]?.readyState).toBe(FakeWebSocket.CLOSED);
+  });
+
+  it('gives up when no frame arrives before the start timeout', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(
+        <DesktopStreamClient
+          previewUrl="https://desktop.preview.test"
+          runId={123}
+        />,
+      );
+      const start = await screen.findByRole('button', {
+        name: 'Start remote desktop',
+      });
+      await waitFor(() => expect(start).toBeEnabled());
+      fireEvent.click(start);
+
+      act(() => {
+        vi.advanceTimersByTime(STREAM_START_TIMEOUT_MS + 1);
+      });
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'did not start in time',
+      );
+      expect(
+        screen.getByRole('button', { name: 'Start remote desktop' }),
+      ).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

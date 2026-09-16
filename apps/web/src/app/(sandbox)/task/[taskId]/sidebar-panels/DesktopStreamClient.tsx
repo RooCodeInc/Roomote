@@ -20,6 +20,30 @@ interface DesktopStreamSession {
   streamUrl: string;
 }
 
+/** How long to wait for the first decoded frame before giving up. */
+export const STREAM_START_TIMEOUT_MS = 30_000;
+
+// MediaError code constants, inlined because the global is not defined in
+// every runtime (jsdom, server rendering).
+const MEDIA_ERR_NETWORK = 2;
+const MEDIA_ERR_DECODE = 3;
+const MEDIA_ERR_SRC_NOT_SUPPORTED = 4;
+
+function describeMediaError(
+  error: Pick<MediaError, 'code'> | null | undefined,
+): string {
+  switch (error?.code) {
+    case MEDIA_ERR_NETWORK:
+      return 'Remote desktop stream could not be reached';
+    case MEDIA_ERR_DECODE:
+      return 'Remote desktop stream could not be decoded';
+    case MEDIA_ERR_SRC_NOT_SUPPORTED:
+      return 'Remote desktop stream is unavailable';
+    default:
+      return 'Remote desktop playback failed';
+  }
+}
+
 type ControlEvent =
   | { type: 'pointer_move'; x: number; y: number }
   | { type: 'pointer_button'; button: number; down: boolean }
@@ -81,6 +105,7 @@ export function DesktopStreamClient({
   const pendingPointerRef = useRef<RemotePoint | null>(null);
   const pointerFrameRef = useRef<number | null>(null);
   const videoFrameRef = useRef<number | null>(null);
+  const startTimeoutRef = useRef<number | null>(null);
   const startedAtRef = useRef(0);
   const renderedFramesRef = useRef(0);
   const sampleFramesRef = useRef(0);
@@ -108,6 +133,33 @@ export function DesktopStreamClient({
   const releaseAll = () => {
     pendingPointerRef.current = null;
     sendControl({ type: 'release_all' });
+  };
+
+  const clearStartTimeout = () => {
+    if (startTimeoutRef.current !== null) {
+      window.clearTimeout(startTimeoutRef.current);
+      startTimeoutRef.current = null;
+    }
+  };
+
+  /** Tear down a stream that failed before or after playback began. */
+  const failStream = (message: string) => {
+    clearStartTimeout();
+    releaseAll();
+    socketRef.current?.close();
+    const video = videoRef.current;
+    if (video) {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+    }
+    if (videoFrameRef.current !== null) {
+      videoRef.current?.cancelVideoFrameCallback(videoFrameRef.current);
+      videoFrameRef.current = null;
+    }
+    setSessionError(message);
+    setIsStarting(false);
+    setIsPlaying(false);
   };
 
   useEffect(() => {
@@ -211,6 +263,9 @@ export function DesktopStreamClient({
         );
       }
       socketRef.current?.close(1000, 'remote desktop closed');
+      if (startTimeoutRef.current !== null) {
+        window.clearTimeout(startTimeoutRef.current);
+      }
       video?.pause();
       video?.removeAttribute('src');
       video?.load();
@@ -269,17 +324,21 @@ export function DesktopStreamClient({
     decodedBytesRef.current = 0;
     video.src = session.streamUrl;
     connectControl(session.controlUrl);
+    clearStartTimeout();
+    startTimeoutRef.current = window.setTimeout(() => {
+      startTimeoutRef.current = null;
+      failStream(
+        'Remote desktop did not start in time. The sandbox desktop service may not be running.',
+      );
+    }, STREAM_START_TIMEOUT_MS);
     try {
       await video.play();
     } catch (error) {
-      releaseAll();
-      socketRef.current?.close();
-      setSessionError(
+      failStream(
         error instanceof Error
           ? error.message
           : 'Remote desktop playback failed',
       );
-      setIsStarting(false);
     }
   };
 
@@ -361,7 +420,11 @@ export function DesktopStreamClient({
             event.preventDefault();
             sendControl({ type: 'key', code: event.code, down: false });
           }}
+          onError={() => {
+            failStream(describeMediaError(videoRef.current?.error));
+          }}
           onLoadedData={() => {
+            clearStartTimeout();
             setStartupMs(performance.now() - startedAtRef.current);
             setIsStarting(false);
             setIsPlaying(true);
@@ -422,8 +485,14 @@ export function DesktopStreamClient({
       </div>
 
       <div className="flex min-h-10 items-center justify-between gap-3 border-t border-zinc-800 bg-zinc-900 px-3 text-xs text-zinc-400">
-        <span>
+        <span className="min-w-0 truncate">
           {controlReady ? 'Control connected' : 'Control disconnected'}
+          {isPlaying && sessionError ? (
+            <span role="alert" className="text-destructive">
+              {' · '}
+              {sessionError}
+            </span>
+          ) : null}
         </span>
         <span className="font-mono tabular-nums">
           {renderedFps === null ? '-' : `${renderedFps.toFixed(1)} fps`}

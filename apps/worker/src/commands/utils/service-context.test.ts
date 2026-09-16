@@ -86,4 +86,40 @@ describe('buildServiceContextForPreviewProxy', () => {
       }),
     );
   });
+
+  it('registers the reserved Shared Desktop port only when the run reserved it', () => {
+    const workspace = {
+      type: 'environment',
+      environmentConfig: {
+        name: 'App',
+        repositories: [{ repository: 'Roomote/example-app' }],
+        ports: [{ name: 'web', port: 3000, primary: true }],
+      },
+    };
+    const workerEnv = {
+      previewAuthPublicKey: 'preview-public-key',
+      previewAuthCookieName: 'preview_auth',
+      roomoteAppUrl: 'https://app.roomote.dev/some/path',
+      trpcUrl: 'https://api.roomote.dev',
+    };
+
+    const reserved = buildServiceContextForPreviewProxy(
+      {
+        id: 1,
+        taskId: 'task_1',
+        proxyPorts: { SHARED_DESKTOP: 50001, WEB: 50001 },
+      } as never,
+      workspace as never,
+      workerEnv as never,
+    );
+    expect(reserved?.appPorts).toEqual({ WEB: 3000, SHARED_DESKTOP: 6080 });
+    expect(reserved?.appOrigin).toBe('https://app.roomote.dev');
+
+    const notReserved = buildServiceContextForPreviewProxy(
+      { id: 2, taskId: 'task_2', proxyPorts: { WEB: 50001 } } as never,
+      workspace as never,
+      workerEnv as never,
+    );
+    expect(notReserved?.appPorts).toEqual({ WEB: 3000 });
+  });
 });

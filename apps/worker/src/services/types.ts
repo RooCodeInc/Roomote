@@ -30,6 +30,13 @@ export interface ServiceContext {
    */
   appPorts?: Record<string, number>;
   /**
+   * Origin of the Roomote web app (scheme + host). Sandbox services that
+   * validate browser Origins on proxied WebSockets, such as Shared Desktop,
+   * accept this origin because the preview proxy has already validated the
+   * task-scoped preview token.
+   */
+  appOrigin?: string;
+  /**
    * Set of port names that should skip authentication.
    */
   unauthenticatedPorts?: Set<string>;

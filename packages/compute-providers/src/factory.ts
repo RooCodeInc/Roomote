@@ -124,6 +124,9 @@ export function createComputeProviderClient(
               DOCKER_WORKER_IMAGE: envValue('DOCKER_WORKER_IMAGE'),
               RELEASE_VERSION: envValue('RELEASE_VERSION'),
               ROOMOTE_WORKER_IMAGE_REPO: envValue('ROOMOTE_WORKER_IMAGE_REPO'),
+              ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF: envValue(
+                'ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF',
+              ),
               APP_ENV: envValue('APP_ENV'),
               NODE_ENV: envValue('NODE_ENV'),
             }) ??
@@ -192,6 +195,9 @@ export function createComputeProviderClient(
           DOCKER_WORKER_IMAGE: envValue('DOCKER_WORKER_IMAGE'),
           RELEASE_VERSION: envValue('RELEASE_VERSION'),
           ROOMOTE_WORKER_IMAGE_REPO: envValue('ROOMOTE_WORKER_IMAGE_REPO'),
+          ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF: envValue(
+            'ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF',
+          ),
           APP_ENV: envValue('APP_ENV'),
           NODE_ENV: envValue('NODE_ENV'),
         }) ??

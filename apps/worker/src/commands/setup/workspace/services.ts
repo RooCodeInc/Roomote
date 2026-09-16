@@ -148,9 +148,23 @@ async function startEnvironmentServices({
     environmentConfig &&
     serviceContext?.appPorts?.[SHARED_DESKTOP_NAMED_PORT.name]
   ) {
-    await timedStep(logger, 'start shared desktop', () =>
-      startSharedDesktop({ cwd: workspaceRoot, env: envVars }),
-    );
+    // Shared Desktop is optional: a failure here must not prevent the port
+    // proxies below from starting, or Live Preview breaks alongside it.
+    try {
+      await timedStep(logger, 'start shared desktop', () =>
+        startSharedDesktop({
+          cwd: workspaceRoot,
+          env: envVars,
+          allowedControlOrigin: serviceContext.appOrigin,
+        }),
+      );
+    } catch (error) {
+      logger.userLog.warn(
+        `Shared Desktop is unavailable for this task: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   // Start port proxies if proxyPorts are configured.

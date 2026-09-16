@@ -64,10 +64,13 @@ Set these variables as needed:
   `roomote_stream.monitor`
 - `ROOMOTE_DESKTOP_STREAM_MAX_CLIENTS` to permit additional per-viewer encoders
 
-The control WebSocket accepts the authenticated Roomote preview-proxy marker or
-a same-origin request. `ROOMOTE_DESKTOP_STREAM_ALLOWED_CONTROL_ORIGIN` exists
-only for an explicit trusted reverse proxy or local test origin; do not use it
-as a wildcard or as a substitute for task-scoped preview authentication.
+The control WebSocket accepts the authenticated Roomote preview-proxy marker,
+a same-origin request, or the single origin named by
+`ROOMOTE_DESKTOP_STREAM_ALLOWED_CONTROL_ORIGIN`. The worker sets that variable
+to the Roomote app origin because the sandbox auth proxy validates the
+task-scoped preview token and then strips its marker on WebSocket upgrades,
+leaving only the browser `Origin`. It is a single exact origin, never a
+wildcard, and it does not replace task-scoped preview authentication.
 
 The sandbox application must render into the selected X11 display. For audio,
 route application output into the selected PulseAudio sink and capture its

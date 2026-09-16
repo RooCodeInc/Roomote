@@ -7,7 +7,9 @@ import {
 } from '@roomote/db/server';
 
 import { getSignedInAuthContext } from '@/lib/server';
+import { canAccessTask } from './custom-automation-task-access';
 import { Env } from './env';
+import { isTaskSharedDesktopHost } from './shared-desktop-host';
 
 interface PreviewSession {
   enableHiDpi: boolean;
@@ -106,7 +108,7 @@ function buildPreviewResourceUrl(
 async function authorizePreviewSession(params: {
   runId: string;
   previewUrl: string;
-}): Promise<{ previewUrl: URL; token: string }> {
+}): Promise<{ previewUrl: URL; token: string; taskId: string }> {
   const previewUrl = parsePreviewUrl(params.previewUrl);
   const runId = validateRunId(params.runId);
 
@@ -122,7 +124,13 @@ async function authorizePreviewSession(params: {
     where: eq(taskRuns.id, runId),
   });
 
-  if (!taskRun) {
+  if (
+    !taskRun ||
+    !(await canAccessTask(
+      { userId: authResult.userId, isAdmin: authResult.isAdmin },
+      taskRun.taskId,
+    ))
+  ) {
     throw new PreviewSessionError(404, 'Task run not found or access denied');
   }
 
@@ -131,7 +139,7 @@ async function authorizePreviewSession(params: {
     timeoutSeconds: Env.PREVIEW_TOKEN_TTL_SECONDS,
   });
 
-  return { previewUrl, token };
+  return { previewUrl, token, taskId: taskRun.taskId };
 }
 
 export async function createPreviewSession(params: {
@@ -157,7 +165,15 @@ export async function createDesktopStreamSession(params: {
   runId: string;
   previewUrl: string;
 }): Promise<DesktopStreamSession> {
-  const { previewUrl, token } = await authorizePreviewSession(params);
+  const { previewUrl, token, taskId } = await authorizePreviewSession(params);
+
+  if (!isTaskSharedDesktopHost(previewUrl, taskId)) {
+    throw new PreviewSessionError(
+      400,
+      "Preview URL is not this task run's Shared Desktop",
+    );
+  }
+
   return {
     configUrl: buildPreviewResourceUrl(previewUrl, '/config', token),
     controlUrl: buildPreviewResourceUrl(previewUrl, '/control', token, true),

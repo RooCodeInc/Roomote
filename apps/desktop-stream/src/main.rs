@@ -932,7 +932,9 @@ fn has_allowed_origin(headers: &HeaderMap, explicitly_allowed: Option<&str>) -> 
     // The authenticated preview proxy adds this marker only after validating
     // the task-scoped preview token. The browser Origin is the Roomote app,
     // not the separate preview host, so strict host equality cannot apply on
-    // this path.
+    // this path. The sandbox auth proxy strips the marker on WebSocket
+    // upgrades, so the worker also passes the Roomote app origin as the
+    // explicitly allowed control origin below.
     if headers.contains_key("x-roomote-forwarded-host") {
         return true;
     }
