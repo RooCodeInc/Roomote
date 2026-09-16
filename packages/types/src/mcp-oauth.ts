@@ -247,6 +247,17 @@ export interface McpConnectionXConfig {
 }
 
 /**
+ * Deployment-scoped Exa connection config stored in mcpConnections.authConfig.
+ *
+ * The API key is expected to be encrypted before persistence and is forwarded
+ * to Exa's hosted MCP server through the control-plane proxy only.
+ */
+export interface McpConnectionExaConfig {
+  type: 'exa';
+  encryptedApiKey: string;
+}
+
+/**
  * Organization-scoped Vercel connection config stored in mcpConnections.authConfig.
  *
  * The bearer token is expected to be encrypted before persistence.
@@ -318,6 +329,7 @@ export type McpConnectionAuthConfig =
   | McpConnectionGrafanaConfig
   | McpConnectionGbrainConfig
   | McpConnectionXConfig
+  | McpConnectionExaConfig
   | Record<string, never>;
 
 export type McpConnectionRole =
@@ -484,6 +496,10 @@ export type McpIntegration = {
   oauthScopeMode?: McpIntegrationOauthScopeMode;
   connectionMode?: McpIntegrationConnectionMode;
   serverMode?: McpIntegrationServerMode;
+  /** The integration remains usable through its upstream MCP without credentials. */
+  supportsKeylessAccess?: boolean;
+  /** Alternate upstream used when an optional admin credential is present. */
+  authenticatedUrl?: string;
   defaultDisabledTools?: string[];
 };
 
@@ -727,6 +743,21 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     serverMode: 'native',
     instructions:
       'Use Granola to browse and read meeting notes, transcripts, folders, decisions, and action items through the deployment API key. The built-in tools are read-only.',
+  },
+  {
+    id: 'exa',
+    name: 'Exa',
+    url: 'https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa',
+    authenticatedUrl:
+      'https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa,agent_run',
+    description: `Enable Exa so your agents can search and fetch the web, with an optional API key for multi-step research from ${PRODUCT_NAME} tasks`,
+    icon: 'exa',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'upstream_proxy',
+    supportsKeylessAccess: true,
+    instructions:
+      "Use Exa for web search, page fetching, and advanced filtered search. Keyless access uses Exa's free rate limits and does not include agent_run. When a deployment operator adds an API key, the key stays on the Roomote control plane and agent_run becomes available for usage-based multi-step research.",
   },
   {
     id: 'elevenlabs',
@@ -1118,6 +1149,19 @@ export function isMcpConnectionGranolaConfig(
     typeof authConfig === 'object' &&
     'type' in authConfig &&
     authConfig.type === 'granola' &&
+    'encryptedApiKey' in authConfig &&
+    typeof authConfig.encryptedApiKey === 'string',
+  );
+}
+
+export function isMcpConnectionExaConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionExaConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'exa' &&
     'encryptedApiKey' in authConfig &&
     typeof authConfig.encryptedApiKey === 'string',
   );

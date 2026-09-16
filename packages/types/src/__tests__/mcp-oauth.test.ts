@@ -11,6 +11,7 @@ import {
   isMcpConnectionRipplingConfig,
   isMcpConnectionElevenLabsConfig,
   isMcpConnectionVoiceConfig,
+  isMcpConnectionExaConfig,
   OPENAI_REALTIME_VOICE_OPTIONS,
   isMcpConnectionGbrainConfig,
   LINEAR_APP_OAUTH_SCOPES,
@@ -150,6 +151,25 @@ describe('Granola API key connection', () => {
     expect(getMcpIntegrationConnectionScope('granola')).toBe('deployment');
     expect(getMcpIntegrationOauthScopeMode('granola')).toBeUndefined();
     expect(getMcpIntegrationDefaultDisabledTools('granola')).toEqual([]);
+  });
+});
+
+describe('Exa optional API key connection', () => {
+  it('separates keyless and authenticated hosted MCP tools', () => {
+    expect(getMcpIntegration('exa')).toMatchObject({
+      name: 'Exa',
+      connectionScope: 'deployment',
+      connectionMode: 'admin_configured',
+      serverMode: 'upstream_proxy',
+      supportsKeylessAccess: true,
+      url: 'https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa',
+      authenticatedUrl:
+        'https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa,agent_run',
+    });
+    expect(
+      isMcpConnectionExaConfig({ type: 'exa', encryptedApiKey: 'enc' }),
+    ).toBe(true);
+    expect(isMcpConnectionExaConfig({ type: 'exa' } as never)).toBe(false);
   });
 });
 
