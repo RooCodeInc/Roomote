@@ -52,8 +52,10 @@ import {
   mergeAmazonBedrockProviderConfig,
   mergeBedrockMantleOpenAiProviderConfig,
   mergeBedrockMantleProviderConfig,
+  mergeCloudflareOpenCodeProviderConfig,
   mergeKimiForCodingProviderConfig,
   mergeOpenAiCompatibleProviderConfig,
+  rewriteCloudflareOpenCodeModelId,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
   mergeOpenRouterVariantAliasModels,
@@ -1004,6 +1006,12 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function toOpenCodeRuntimeModelId(modelId: string): string {
+  return rewriteCloudflareOpenCodeModelId(
+    toBedrockMantleRuntimeModelId(modelId),
+  );
+}
+
 /**
  * When the dequeue env carries an inference gateway URL, rebase each
  * gateway-covered provider that a selected model uses onto the gateway. The
@@ -1197,6 +1205,9 @@ function rebaseProviderOntoGateway(
     ...providerConfig,
     [openCodeProviderId]: {
       ...existingProvider,
+      ...(gatewayProvider.openCodeNpm
+        ? { npm: gatewayProvider.openCodeNpm }
+        : {}),
       options: {
         ...existingOptions,
         baseURL: buildInferenceGatewayOpenCodeBaseUrl(
@@ -1631,43 +1642,43 @@ function resolveModelBackedOpenCodeConfig(
   const normalizedModelOverride = modelOverride
     ? collectOpenRouterVariantModelAlias(
         variantAliases,
-        toBedrockMantleRuntimeModelId(
+        toOpenCodeRuntimeModelId(
           applyImplicitLiteLlmModelPrefix(modelOverride, isLiteLlmConfigured),
         ),
       )
     : undefined;
   const model = collectOpenRouterVariantModelAlias(
     variantAliases,
-    toBedrockMantleRuntimeModelId(rawModel),
+    toOpenCodeRuntimeModelId(rawModel),
   );
   const smallModel = rawSmallModel
     ? collectOpenRouterVariantModelAlias(
         variantAliases,
-        toBedrockMantleRuntimeModelId(rawSmallModel),
+        toOpenCodeRuntimeModelId(rawSmallModel),
       )
     : undefined;
   const visionModel = rawVisionModel
     ? collectOpenRouterVariantModelAlias(
         variantAliases,
-        toBedrockMantleRuntimeModelId(rawVisionModel),
+        toOpenCodeRuntimeModelId(rawVisionModel),
       )
     : undefined;
   const codeReviewModel = rawCodeReviewModel
     ? collectOpenRouterVariantModelAlias(
         variantAliases,
-        toBedrockMantleRuntimeModelId(rawCodeReviewModel),
+        toOpenCodeRuntimeModelId(rawCodeReviewModel),
       )
     : undefined;
   const exploreModel = rawExploreModel
     ? collectOpenRouterVariantModelAlias(
         variantAliases,
-        toBedrockMantleRuntimeModelId(rawExploreModel),
+        toOpenCodeRuntimeModelId(rawExploreModel),
       )
     : undefined;
   const planningModel = rawPlanningModel
     ? collectOpenRouterVariantModelAlias(
         variantAliases,
-        toBedrockMantleRuntimeModelId(rawPlanningModel),
+        toOpenCodeRuntimeModelId(rawPlanningModel),
       )
     : undefined;
   const effectiveCodingModel = normalizedModelOverride ?? model;
@@ -1851,27 +1862,31 @@ function resolveModelBackedOpenCodeConfig(
       )
     : providerReasoningConfig;
   const providerConfig = mergeInferenceGatewayProviderConfig(
-    mergeOpenCodeGoProviderConfig(
-      mergeAzureCognitiveServicesProviderConfig(
-        mergeAmazonBedrockProviderConfig(
-          mergeBedrockMantleProviderConfig(
-            mergeBedrockMantleOpenAiProviderConfig(
-              mergeOpenAiCompatibleProviderConfig(
-                // Registered in full so it does not depend on OpenCode's
-                // runtime catalog; the gateway rebase below still replaces
-                // the base URL and credential in gateway mode.
-                mergeKimiForCodingProviderConfig(
-                  mergeOpenRouterVariantAliasModels(
-                    providerModelConfig,
-                    variantAliases,
+    mergeCloudflareOpenCodeProviderConfig(
+      mergeOpenCodeGoProviderConfig(
+        mergeAzureCognitiveServicesProviderConfig(
+          mergeAmazonBedrockProviderConfig(
+            mergeBedrockMantleProviderConfig(
+              mergeBedrockMantleOpenAiProviderConfig(
+                mergeOpenAiCompatibleProviderConfig(
+                  // Registered in full so it does not depend on OpenCode's
+                  // runtime catalog; the gateway rebase below still replaces
+                  // the base URL and credential in gateway mode.
+                  mergeKimiForCodingProviderConfig(
+                    mergeOpenRouterVariantAliasModels(
+                      providerModelConfig,
+                      variantAliases,
+                    ),
+                    configuredModelIds,
                   ),
-                  configuredModelIds,
+                  runtimeEnv,
+                  openAiCompatibleModelIds,
+                  visionModel ?? effectiveCodingModel,
+                  modelContextWindows,
+                  modelCosts,
                 ),
                 runtimeEnv,
-                openAiCompatibleModelIds,
-                visionModel ?? effectiveCodingModel,
-                modelContextWindows,
-                modelCosts,
+                configuredModelIds,
               ),
               runtimeEnv,
               configuredModelIds,
@@ -1879,11 +1894,11 @@ function resolveModelBackedOpenCodeConfig(
             runtimeEnv,
             configuredModelIds,
           ),
-          runtimeEnv,
           configuredModelIds,
         ),
         configuredModelIds,
       ),
+      runtimeEnv,
       configuredModelIds,
     ),
     runtimeEnv,
@@ -2045,7 +2060,7 @@ export function generateOpenCodeConfig({
   removeDisabledProviderConfiguration(runtimeEnv, homeDir);
   const configuredModel = resolveConfiguredPromptModel(model);
   const resolvedModel = configuredModel
-    ? toBedrockMantleRuntimeModelId(configuredModel)
+    ? toOpenCodeRuntimeModelId(configuredModel)
     : undefined;
   // A variant task model (`openrouter/...:nitro`) surfaces as its catalog base
   // model here (inline config + per-prompt model selection); the operator
