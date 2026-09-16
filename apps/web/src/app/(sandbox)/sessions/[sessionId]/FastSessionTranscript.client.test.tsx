@@ -2253,9 +2253,25 @@ describe('FastSessionTranscript', () => {
         choice: 'yes',
       }),
     );
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('pr-review-action-offer'),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not render a persisted resolved offer', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="22222222-2222-4222-8222-222222222222"
+        initialMessages={[reviewOfferMessage('resolved')]}
+      />,
+    );
+
     expect(
-      await screen.findByText('Resolving the current review issues.'),
-    ).toBeInTheDocument();
+      screen.queryByTestId('pr-review-action-offer'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Review feedback remains.')).toBeVisible();
   });
 
   it('hides dismissed offers and renders late-click states without controls', async () => {
