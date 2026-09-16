@@ -839,6 +839,94 @@ describe('SessionWorkspace', () => {
     expect(screen.queryByLabelText('Full task task-5')).toBeNull();
   });
 
+  it('automatically opens running tasks first while preserving relative status order', async () => {
+    const task = (
+      taskId: string,
+      status: RunStatus,
+      taskPhase: string | null,
+    ): SessionInfo['tasks'][number] => ({
+      ...singleTask,
+      taskId,
+      title: taskId,
+      latestRun: {
+        id: 1,
+        status,
+        taskPhase,
+        error: null,
+        result: null,
+      },
+    });
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1920,
+      sessionOverride: {
+        tasks: [
+          task('inactive-1', RunStatus.Completed, null),
+          task('running-1', RunStatus.Running, 'running'),
+          task('inactive-2', RunStatus.Completed, null),
+          task('running-2', RunStatus.Pending, null),
+          task('inactive-3', RunStatus.Completed, null),
+        ],
+      },
+    });
+
+    const firstRunning = await screen.findByLabelText('Full task running-1');
+    const secondRunning = screen.getByLabelText('Full task running-2');
+    const firstInactive = screen.getByLabelText('Full task inactive-1');
+
+    expect(firstRunning.compareDocumentPosition(secondRunning)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(secondRunning.compareDocumentPosition(firstInactive)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.queryByLabelText('Full task inactive-2')).toBeNull();
+    expect(screen.queryByLabelText('Full task inactive-3')).toBeNull();
+  });
+
+  it('prioritizes running tasks within an automatically opened arrival batch', async () => {
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1920,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+    });
+    const inactiveTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Completed task',
+      latestRun: {
+        id: 3,
+        status: RunStatus.Completed,
+        taskPhase: null,
+        error: null,
+        result: null,
+      },
+    };
+    const runningTask = {
+      ...singleTask,
+      taskId: 'task-4',
+      title: 'Running task',
+      latestRun: {
+        id: 4,
+        status: RunStatus.Running,
+        taskPhase: 'running',
+        error: null,
+        result: null,
+      },
+    };
+
+    expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [singleTask, secondTask, inactiveTask, runningTask],
+      });
+    });
+
+    expect(await screen.findByLabelText('Full task task-4')).toBeVisible();
+    expect(screen.queryByLabelText('Full task task-3')).toBeNull();
+  });
+
   it('keeps closed task panels dismissed after navigating away and back', async () => {
     const { navigateAwayAndBack } = renderWorkspace({
       isMobile: false,

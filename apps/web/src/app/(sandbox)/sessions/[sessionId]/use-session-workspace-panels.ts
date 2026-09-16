@@ -355,6 +355,7 @@ export function getVisibleSessionTaskPanelIds(
 type SessionWorkspacePanelControllerOptions = {
   sessionId: string;
   taskIds: string[];
+  automaticTaskPanelIds: string[];
   singleRunningTaskId: string | null;
   taskPanelCapacity: number;
   isMdOrLarger: boolean;
@@ -364,6 +365,7 @@ type SessionWorkspacePanelControllerOptions = {
 export function useSessionWorkspacePanels({
   sessionId,
   taskIds,
+  automaticTaskPanelIds,
   singleRunningTaskId,
   taskPanelCapacity,
   isMdOrLarger,
@@ -440,8 +442,10 @@ export function useSessionWorkspacePanels({
       dispatch({
         type: 'seed-wide-panels',
         taskIds: dismissedTaskPanelIds
-          ? taskIds.filter((taskId) => !dismissedTaskPanelIds.has(taskId))
-          : taskIds,
+          ? automaticTaskPanelIds.filter(
+              (taskId) => !dismissedTaskPanelIds.has(taskId),
+            )
+          : automaticTaskPanelIds,
         selectedTaskId: selectedPanelTaskId,
       });
       return;
@@ -449,7 +453,7 @@ export function useSessionWorkspacePanels({
     if (!previousTaskIds) return;
 
     const previousTaskIdSet = new Set(previousTaskIds);
-    const newTaskIds = taskIds.filter(
+    const newTaskIds = automaticTaskPanelIds.filter(
       (taskId) =>
         !previousTaskIdSet.has(taskId) && !dismissedTaskPanelIds?.has(taskId),
     );
@@ -462,6 +466,7 @@ export function useSessionWorkspacePanels({
     });
   }, [
     isMdOrLarger,
+    automaticTaskPanelIds,
     navigationState,
     selectedPanelTaskId,
     sessionId,
