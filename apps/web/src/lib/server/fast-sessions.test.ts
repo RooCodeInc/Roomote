@@ -47,17 +47,27 @@ async function createFastSession({
   userId,
   conversationId,
   updatedAt,
+  privacy = 'shared',
+  privateOwnerUserId = null,
+  surface = 'slack',
+  workspaceId,
 }: {
   userId: string;
   conversationId: string;
   updatedAt: Date;
+  privacy?: 'shared' | 'private';
+  privateOwnerUserId?: string | null;
+  surface?: 'web' | 'slack';
+  workspaceId?: string;
 }) {
   const [session] = await db
     .insert(fastAgentConversations)
     .values({
       userId,
-      surface: 'slack',
-      workspaceId: `workspace-${conversationId}`,
+      privacy,
+      privateOwnerUserId,
+      surface,
+      workspaceId: workspaceId ?? `workspace-${conversationId}`,
       conversationId,
       compatibilityMessages: [{ role: 'user', content: 'Hello' }],
       updatedAt,
@@ -310,6 +320,66 @@ describe('Fast session queries', () => {
       ).resolves.not.toBeNull();
     },
   );
+
+  it('keeps private Fast transcripts owner-only, including for admins', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const conversation = await createFastSession({
+      userId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      surface: 'web',
+      workspaceId: owner.id,
+      conversationId: crypto.randomUUID(),
+      updatedAt: new Date(),
+    });
+    const unified = await ensureSessionForFastConversation(db, conversation.id);
+    await createFastMessage({
+      conversationId: conversation.id,
+      eventId: 'owner-only-result',
+      turnSeq: 1,
+    });
+    const ownerAuth = { userId: owner.id, isAdmin: false };
+
+    for (const id of [conversation.id, unified.id]) {
+      await expect(
+        findReadableFastSession(ownerAuth, id),
+      ).resolves.toMatchObject({ id: conversation.id });
+      expect(
+        (await getFastSessionMessagesCommand(ownerAuth as UserAuthSuccess, id))
+          .messages,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ eventId: 'owner-only-result' }),
+        ]),
+      );
+      for (const auth of [
+        { userId: other.id, isAdmin: false },
+        { userId: other.id, isAdmin: true },
+      ]) {
+        await expect(findReadableFastSession(auth, id)).resolves.toBeNull();
+        await expect(getFastSessionTasks(auth, id)).resolves.toBeNull();
+        await expect(
+          getFastSessionMessagesCommand(auth as UserAuthSuccess, id),
+        ).rejects.toThrow('Fast session not found');
+      }
+    }
+    expect(
+      (await getFastSessionById(ownerAuth, conversation.id))?.messages,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventId: 'owner-only-result' }),
+      ]),
+    );
+    for (const auth of [
+      { userId: other.id, isAdmin: false },
+      { userId: other.id, isAdmin: true },
+    ]) {
+      await expect(
+        getFastSessionById(auth, conversation.id),
+      ).resolves.toBeNull();
+    }
+  });
 
   it('keeps ordinary conversations collaborative even when human text mentions an automation', async () => {
     const owner = await userFactory.create();

@@ -5,7 +5,9 @@ import {
   fastAgentConversationRepository,
 } from '@roomote/cloud-agents/server';
 import {
+  activeRunStatuses,
   ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
+  type RunStatus,
   SESSION_STATUSES,
 } from '@roomote/types';
 import {
@@ -23,6 +25,7 @@ import {
   sessions,
   sessionTasks,
   taskArtifacts,
+  taskRuns,
   tasks,
 } from '@roomote/db/server';
 import { captureEvent } from '@roomote/telemetry/server';
@@ -54,133 +57,286 @@ export async function deletePrivateSessionCommand(
   auth: UserAuthSuccess,
   sessionId: string,
 ) {
-  return db.transaction(async (tx) => {
-    const [session] = await tx
-      .select({
-        id: sessions.id,
-        fastConversationId: sessions.fastConversationId,
-      })
-      .from(sessions)
-      .where(
-        and(
-          eq(sessions.id, sessionId),
-          eq(sessions.privacy, 'private'),
-          eq(sessions.privateOwnerUserId, auth.userId),
-        ),
-      )
-      .for('update');
-    if (!session) return { deleted: false };
+  const readableSession = await findAccessibleSession(auth, sessionId);
+  if (
+    !readableSession ||
+    readableSession.privacy !== 'private' ||
+    readableSession.privateOwnerUserId !== auth.userId
+  ) {
+    return { deleted: false };
+  }
 
-    const linkedTasks = await tx
-      .select({ taskId: sessionTasks.taskId })
-      .from(sessionTasks)
-      .where(eq(sessionTasks.sessionId, session.id));
-    const linkedTaskIds = linkedTasks.map(({ taskId }) => taskId);
-    const lockedTasks =
-      linkedTaskIds.length > 0
-        ? await tx
-            .select({ id: tasks.id })
-            .from(tasks)
-            .where(
-              and(
-                inArray(tasks.id, linkedTaskIds),
-                eq(tasks.privacy, 'private'),
-                eq(tasks.privateOwnerUserId, auth.userId),
-              ),
-            )
-            .orderBy(asc(tasks.id))
-            .for('update')
-        : [];
-    const taskIds = lockedTasks.map(({ id }) => id);
-    const artifacts = await tx
-      .select({
-        id: taskArtifacts.id,
-        taskId: taskArtifacts.taskId,
-        sessionId: taskArtifacts.sessionId,
-        path: taskArtifacts.path,
-        version: taskArtifacts.version,
-        uploadUrlExpiresAt: taskArtifacts.uploadUrlExpiresAt,
-      })
-      .from(taskArtifacts)
-      .where(
-        or(
-          eq(taskArtifacts.sessionId, session.id),
-          taskIds.length > 0
-            ? inArray(taskArtifacts.taskId, taskIds)
-            : undefined,
-        ),
-      );
-    const now = new Date();
-    const legacyExpiry = new Date(
-      now.getTime() + ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS * 1_000,
-    );
-    const legacyArtifactIds = artifacts
-      .filter(
-        (artifact) =>
-          artifact.taskId !== null && artifact.uploadUrlExpiresAt === null,
-      )
-      .map((artifact) => artifact.id);
-    if (legacyArtifactIds.length > 0) {
-      await tx
-        .update(taskArtifacts)
-        .set({ uploadUrlExpiresAt: legacyExpiry, updatedAt: now })
-        .where(inArray(taskArtifacts.id, legacyArtifactIds));
-    }
-    const latestExpiry = artifacts.reduce((latest, artifact) => {
-      const expiry =
-        artifact.uploadUrlExpiresAt ??
-        (artifact.taskId === null ? now : legacyExpiry);
-      return expiry > latest ? expiry : latest;
-    }, now);
-    if (latestExpiry > now) {
-      return {
-        deleted: false,
-        retryAfter: latestExpiry.toISOString(),
-        reason: 'artifact_uploads_pending' as const,
-      };
-    }
-    if (artifacts.length > 0) {
-      const result = await deleteArtifactsBatch(
-        artifacts.map((artifact) => ({
-          ...(artifact.taskId
-            ? { taskId: artifact.taskId }
-            : { sessionId: artifact.sessionId! }),
-          artifactId: artifact.id,
-          path: artifact.path,
-          version: artifact.version,
-        })),
-      );
-      if (result.errors > 0) {
-        throw new Error(
-          `Failed to delete ${result.errors} private Session artifact object(s).`,
-        );
+  let releaseTurnLock;
+  if (readableSession.fastConversationId) {
+    const record = await fastAgentConversationRepository.findById({
+      id: readableSession.fastConversationId,
+    });
+    if (record) {
+      releaseTurnLock = await acquireFastAgentTurnLock({
+        conversation: record.conversation,
+        maxWaitMs: 2_000,
+      });
+      if (!releaseTurnLock) {
+        return { deleted: false, reason: 'session_busy' as const };
       }
     }
-    if (taskIds.length > 0) {
-      await tx
-        .delete(tasks)
+  }
+
+  try {
+    const prepared = await db.transaction(async (tx) => {
+      const [session] = await tx
+        .select({
+          id: sessions.id,
+          fastConversationId: sessions.fastConversationId,
+        })
+        .from(sessions)
         .where(
           and(
-            inArray(tasks.id, taskIds),
-            eq(tasks.privacy, 'private'),
-            eq(tasks.privateOwnerUserId, auth.userId),
+            eq(sessions.id, sessionId),
+            eq(sessions.privacy, 'private'),
+            eq(sessions.privateOwnerUserId, auth.userId),
+          ),
+        )
+        .for('update');
+      if (!session) return { deleted: false };
+
+      const linkedTasks = await tx
+        .select({ taskId: sessionTasks.taskId })
+        .from(sessionTasks)
+        .where(eq(sessionTasks.sessionId, session.id));
+      const linkedTaskIds = linkedTasks.map(({ taskId }) => taskId);
+      const lockedTasks =
+        linkedTaskIds.length > 0
+          ? await tx
+              .select({ id: tasks.id })
+              .from(tasks)
+              .where(
+                and(
+                  inArray(tasks.id, linkedTaskIds),
+                  eq(tasks.privacy, 'private'),
+                  eq(tasks.privateOwnerUserId, auth.userId),
+                ),
+              )
+              .orderBy(asc(tasks.id))
+              .for('update')
+          : [];
+      const taskIds = lockedTasks.map(({ id }) => id);
+      const activeRuns =
+        taskIds.length === 0
+          ? []
+          : await tx
+              .select({ id: taskRuns.id })
+              .from(taskRuns)
+              .where(
+                and(
+                  inArray(taskRuns.taskId, taskIds),
+                  inArray(
+                    taskRuns.status,
+                    activeRunStatuses as readonly RunStatus[],
+                  ),
+                ),
+              )
+              .limit(1);
+      if (activeRuns.length > 0) {
+        return { deleted: false, reason: 'active_runs' as const };
+      }
+      const artifacts = await tx
+        .select({
+          id: taskArtifacts.id,
+          taskId: taskArtifacts.taskId,
+          sessionId: taskArtifacts.sessionId,
+          path: taskArtifacts.path,
+          version: taskArtifacts.version,
+          uploadUrlExpiresAt: taskArtifacts.uploadUrlExpiresAt,
+        })
+        .from(taskArtifacts)
+        .where(
+          or(
+            eq(taskArtifacts.sessionId, session.id),
+            taskIds.length > 0
+              ? inArray(taskArtifacts.taskId, taskIds)
+              : undefined,
           ),
         );
+      const now = new Date();
+      const legacyExpiry = new Date(
+        now.getTime() + ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS * 1_000,
+      );
+      const legacyArtifactIds = artifacts
+        .filter(
+          (artifact) =>
+            artifact.taskId !== null && artifact.uploadUrlExpiresAt === null,
+        )
+        .map((artifact) => artifact.id);
+      if (legacyArtifactIds.length > 0) {
+        await tx
+          .update(taskArtifacts)
+          .set({ uploadUrlExpiresAt: legacyExpiry, updatedAt: now })
+          .where(inArray(taskArtifacts.id, legacyArtifactIds));
+      }
+      const latestExpiry = artifacts.reduce((latest, artifact) => {
+        const expiry =
+          artifact.uploadUrlExpiresAt ??
+          (artifact.taskId === null ? now : legacyExpiry);
+        return expiry > latest ? expiry : latest;
+      }, now);
+      if (latestExpiry > now) {
+        return {
+          deleted: false,
+          retryAfter: latestExpiry.toISOString(),
+          reason: 'artifact_uploads_pending' as const,
+        };
+      }
+      return { ready: true as const, session, taskIds, artifacts };
+    });
+
+    if (prepared.ready !== true) return prepared;
+
+    const result = await deleteArtifactsBatch(
+      prepared.artifacts.map((artifact) => ({
+        ...(artifact.taskId
+          ? { taskId: artifact.taskId }
+          : { sessionId: artifact.sessionId! }),
+        artifactId: artifact.id,
+        path: artifact.path,
+        version: artifact.version,
+      })),
+    );
+    if (result.errors > 0) {
+      throw new Error(
+        `Failed to delete ${result.errors} private Session artifact object(s).`,
+      );
     }
-    await tx.delete(sessions).where(eq(sessions.id, session.id));
-    if (session.fastConversationId) {
-      await tx
-        .delete(fastAgentConversations)
+
+    return await db.transaction(async (tx) => {
+      const [session] = await tx
+        .select({
+          id: sessions.id,
+          fastConversationId: sessions.fastConversationId,
+        })
+        .from(sessions)
         .where(
           and(
-            eq(fastAgentConversations.id, session.fastConversationId),
-            eq(fastAgentConversations.privacy, 'private'),
-            eq(fastAgentConversations.privateOwnerUserId, auth.userId),
+            eq(sessions.id, sessionId),
+            eq(sessions.privacy, 'private'),
+            eq(sessions.privateOwnerUserId, auth.userId),
+          ),
+        )
+        .for('update');
+      if (!session) return { deleted: false };
+
+      const linkedTasks = await tx
+        .select({ taskId: sessionTasks.taskId })
+        .from(sessionTasks)
+        .where(eq(sessionTasks.sessionId, session.id));
+      const linkedTaskIds = linkedTasks.map(({ taskId }) => taskId).sort();
+      const lockedTasks =
+        linkedTaskIds.length === 0
+          ? []
+          : await tx
+              .select({ id: tasks.id })
+              .from(tasks)
+              .where(
+                and(
+                  inArray(tasks.id, linkedTaskIds),
+                  eq(tasks.privacy, 'private'),
+                  eq(tasks.privateOwnerUserId, auth.userId),
+                ),
+              )
+              .orderBy(asc(tasks.id))
+              .for('update');
+      const taskIds = lockedTasks.map(({ id }) => id);
+      if (taskIds.join('\0') !== prepared.taskIds.join('\0')) {
+        return { deleted: false, reason: 'session_changed' as const };
+      }
+
+      const activeRuns =
+        taskIds.length === 0
+          ? []
+          : await tx
+              .select({ id: taskRuns.id })
+              .from(taskRuns)
+              .where(
+                and(
+                  inArray(taskRuns.taskId, taskIds),
+                  inArray(
+                    taskRuns.status,
+                    activeRunStatuses as readonly RunStatus[],
+                  ),
+                ),
+              )
+              .limit(1);
+      if (activeRuns.length > 0) {
+        return { deleted: false, reason: 'active_runs' as const };
+      }
+
+      const artifacts = await tx
+        .select({
+          id: taskArtifacts.id,
+          taskId: taskArtifacts.taskId,
+          sessionId: taskArtifacts.sessionId,
+          path: taskArtifacts.path,
+          version: taskArtifacts.version,
+          uploadUrlExpiresAt: taskArtifacts.uploadUrlExpiresAt,
+        })
+        .from(taskArtifacts)
+        .where(
+          or(
+            eq(taskArtifacts.sessionId, session.id),
+            taskIds.length > 0
+              ? inArray(taskArtifacts.taskId, taskIds)
+              : undefined,
           ),
         );
-    }
-    return { deleted: true };
-  });
+      const artifactIds = artifacts.map(({ id }) => id).sort();
+      const preparedArtifactIds = prepared.artifacts.map(({ id }) => id).sort();
+      if (artifactIds.join('\0') !== preparedArtifactIds.join('\0')) {
+        return { deleted: false, reason: 'artifacts_changed' as const };
+      }
+      const now = new Date();
+      const latestExpiry = artifacts.reduce(
+        (latest, artifact) =>
+          artifact.uploadUrlExpiresAt && artifact.uploadUrlExpiresAt > latest
+            ? artifact.uploadUrlExpiresAt
+            : latest,
+        now,
+      );
+      if (latestExpiry > now) {
+        return {
+          deleted: false,
+          retryAfter: latestExpiry.toISOString(),
+          reason: 'artifact_uploads_pending' as const,
+        };
+      }
+
+      if (taskIds.length > 0) {
+        await tx
+          .delete(tasks)
+          .where(
+            and(
+              inArray(tasks.id, taskIds),
+              eq(tasks.privacy, 'private'),
+              eq(tasks.privateOwnerUserId, auth.userId),
+            ),
+          );
+      }
+      await tx.delete(sessions).where(eq(sessions.id, session.id));
+      if (session.fastConversationId) {
+        await tx
+          .delete(fastAgentConversations)
+          .where(
+            and(
+              eq(fastAgentConversations.id, session.fastConversationId),
+              eq(fastAgentConversations.privacy, 'private'),
+              eq(fastAgentConversations.privateOwnerUserId, auth.userId),
+            ),
+          );
+      }
+      return { deleted: true };
+    });
+  } finally {
+    await releaseTurnLock?.();
+  }
 }
 const sessionTimelineCursorSchema = z.object({
   at: z.number().nonnegative(),

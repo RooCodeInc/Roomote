@@ -2,14 +2,18 @@ import {
   db,
   eq,
   fastAgentConversations,
+  runFactory,
   sessionFactory,
   sessions,
   sessionTasks,
   taskArtifacts,
   taskFactory,
+  taskRuns,
   tasks,
   userFactory,
 } from '@roomote/db/server';
+import { RunStatus } from '@roomote/types';
+import * as cloudAgents from '@roomote/cloud-agents/server';
 import type { UserAuthSuccess } from '@/types';
 
 const mockDeleteArtifactsBatch = vi.hoisted(() => vi.fn());
@@ -25,6 +29,8 @@ describe('deletePrivateSessionCommand', () => {
     mockDeleteArtifactsBatch.mockReset();
     mockDeleteArtifactsBatch.mockResolvedValue({ deleted: 1, errors: 0 });
   });
+
+  afterEach(() => vi.restoreAllMocks());
 
   it('deletes an owned private Session and descendants but denies other users', async () => {
     const owner = await userFactory.create();
@@ -172,7 +178,7 @@ describe('deletePrivateSessionCommand', () => {
     ).resolves.toBeDefined();
   });
 
-  it('blocks concurrent artifact creation before taking the deletion snapshot', async () => {
+  it('releases row locks for S3 cleanup and retries when artifacts change', async () => {
     const owner = await userFactory.create();
     const session = await sessionFactory.create({
       ownerKind: 'user',
@@ -199,30 +205,21 @@ describe('deletePrivateSessionCommand', () => {
       uploaded: true,
       uploadUrlExpiresAt: new Date(0),
     });
-    let concurrentInsert: Promise<unknown> | null = null;
+    let concurrentArtifactId: string | undefined;
     mockDeleteArtifactsBatch.mockImplementation(async () => {
-      concurrentInsert = Promise.resolve(
-        db.insert(taskArtifacts).values({
+      const [concurrentArtifact] = await db
+        .insert(taskArtifacts)
+        .values({
           taskId: task.id,
           contentType: 'text/plain',
           path: 'too-late.txt',
           version: 0,
           size: 8,
           uploaded: true,
-        }),
-      );
-      const settled = concurrentInsert.then(
-        () => true,
-        () => true,
-      );
-      await expect(
-        Promise.race([
-          settled,
-          new Promise<false>((resolve) =>
-            setTimeout(() => resolve(false), 100),
-          ),
-        ]),
-      ).resolves.toBe(false);
+          uploadUrlExpiresAt: new Date(0),
+        })
+        .returning({ id: taskArtifacts.id });
+      concurrentArtifactId = concurrentArtifact!.id;
       return { deleted: 0, errors: 0 };
     });
 
@@ -231,8 +228,14 @@ describe('deletePrivateSessionCommand', () => {
         { userId: owner.id, isAdmin: false } as UserAuthSuccess,
         session.id,
       ),
-    ).resolves.toEqual({ deleted: true });
-    await expect(concurrentInsert).rejects.toThrow();
+    ).resolves.toEqual({ deleted: false, reason: 'artifacts_changed' });
+    expect(concurrentArtifactId).toBeDefined();
+    await expect(
+      db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
+    ).resolves.toBeDefined();
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, task.id) }),
+    ).resolves.toBeDefined();
   });
 
   it('waits for authorized uploads to expire before deleting objects or rows', async () => {
@@ -339,5 +342,82 @@ describe('deletePrivateSessionCommand', () => {
         version: 1,
       },
     ]);
+  });
+
+  it('does not delete private Session rows while a linked run is active', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    await db.insert(sessionTasks).values({
+      sessionId: session.id,
+      taskId: task.id,
+      origin: 'fast_delegation',
+    });
+    const run = await runFactory.create({
+      taskId: task.id,
+      status: RunStatus.Running,
+    });
+
+    const auth = { userId: owner.id, isAdmin: false } as UserAuthSuccess;
+    await expect(
+      deletePrivateSessionCommand(auth, session.id),
+    ).resolves.toEqual({ deleted: false, reason: 'active_runs' });
+    expect(mockDeleteArtifactsBatch).not.toHaveBeenCalled();
+    await expect(
+      db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
+    ).resolves.toBeDefined();
+
+    await db
+      .update(taskRuns)
+      .set({ status: RunStatus.Completed })
+      .where(eq(taskRuns.id, run.id));
+    await expect(
+      deletePrivateSessionCommand(auth, session.id),
+    ).resolves.toEqual({ deleted: true });
+  });
+
+  it('does not delete a private Session while its Fast turn is active', async () => {
+    const owner = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        privacy: 'private',
+        privateOwnerUserId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      fastConversationId: conversation!.id,
+    });
+    vi.spyOn(cloudAgents, 'acquireFastAgentTurnLock').mockResolvedValueOnce(
+      null,
+    );
+
+    await expect(
+      deletePrivateSessionCommand(
+        { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+        session.id,
+      ),
+    ).resolves.toEqual({ deleted: false, reason: 'session_busy' });
+    await expect(
+      db.query.sessions.findFirst({ where: eq(sessions.id, session.id) }),
+    ).resolves.toBeDefined();
+    expect(mockDeleteArtifactsBatch).not.toHaveBeenCalled();
   });
 });

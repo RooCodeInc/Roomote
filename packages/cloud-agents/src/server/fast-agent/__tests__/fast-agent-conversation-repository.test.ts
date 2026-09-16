@@ -6,6 +6,7 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   fastAgentParentEvents,
+  getSessionForFastConversation,
   getUserChatInitiationProvider,
   inArray,
   sessions,
@@ -75,6 +76,40 @@ describe('Fast conversation repository', () => {
       privacy: 'private',
     });
     expect(created).toMatchObject({ privacy: 'private', created: true });
+    await fastAgentConversationRepository.appendVisibleMessages({
+      conversationId: created.id,
+      messages: [
+        { role: 'user', content: 'Private question' },
+        { role: 'assistant', content: 'Private answer' },
+      ],
+    });
+    await expect(
+      getSessionForFastConversation(db, created.id),
+    ).resolves.toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    await expect(
+      fastAgentConversationRepository.findById({ id: created.id }),
+    ).resolves.toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      compatibilityMessages: [
+        { role: 'user', content: 'Private question' },
+        { role: 'assistant', content: 'Private answer' },
+      ],
+    });
+    await expect(
+      getOrCreateFastAgentSession({
+        owner: { kind: 'user', userId: owner.id },
+        conversation,
+        privacy: 'private',
+      }),
+    ).resolves.toMatchObject({
+      id: created.id,
+      privacy: 'private',
+      created: false,
+    });
     await expect(
       getOrCreateFastAgentSession({
         owner: { kind: 'user', userId: owner.id },

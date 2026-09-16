@@ -22,6 +22,7 @@ import {
   inArray,
   isNull,
   or,
+  privateFastSessionAccess,
   sessions,
   sql,
   taskArtifacts,
@@ -347,13 +348,13 @@ export async function findAccessibleFastSession(
   return findFastSession(sessionId, fastSessionScope(auth));
 }
 
-/** Direct-link reads for authenticated deployment members, not action authorization. */
+/** Shared direct links stay collaborative; private reads require the owner. */
 export async function findReadableFastSession(
   auth: FastSessionAuth,
   sessionId: string,
 ) {
   if (!auth.userId) return null;
-  return findFastSession(sessionId);
+  return findFastSession(sessionId, privateFastSessionAccess(auth));
 }
 
 async function findFastSession(
@@ -810,7 +811,12 @@ export async function getFastSessionById(
     .select(fastSessionSelection)
     .from(fastAgentConversations)
     .leftJoin(users, eq(fastAgentConversations.userId, users.id))
-    .where(eq(fastAgentConversations.id, sessionId))
+    .where(
+      and(
+        eq(fastAgentConversations.id, sessionId),
+        privateFastSessionAccess(auth),
+      ),
+    )
     .limit(1);
 
   if (!session) {

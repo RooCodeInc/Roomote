@@ -11,6 +11,8 @@ import {
   eq,
   inArray,
   isNull,
+  or,
+  privateTaskAccess,
   sql,
 } from '@roomote/db/server';
 
@@ -100,7 +102,7 @@ export function aggregateCostAnalyticsRowsByTask(
 }
 
 export async function getCostAnalyticsRows(
-  _auth: UserAuthSuccess,
+  auth: UserAuthSuccess,
   timePeriod: TimePeriodFilter | undefined,
   now: Date,
 ): Promise<AnalyticsRow[]> {
@@ -149,7 +151,9 @@ export async function getCostAnalyticsRows(
     )
     .leftJoin(taskRuns, eq(taskRuns.id, llmUsageEvents.runId))
     .leftJoin(environments, eq(environments.id, llmUsageEvents.environmentId))
-    .where(usageCutoffCondition);
+    .where(
+      and(usageCutoffCondition, or(isNull(tasks.id), privateTaskAccess(auth))),
+    );
 
   const fallbackEnvironmentIds = [
     ...new Set(
@@ -188,8 +192,14 @@ export async function getCostAnalyticsRows(
       : await db
           .select({
             nativeSessionId: fastAgentMessages.nativeSessionId,
+            privacy: fastAgentConversations.privacy,
+            privateOwnerUserId: fastAgentConversations.privateOwnerUserId,
           })
           .from(fastAgentMessages)
+          .innerJoin(
+            fastAgentConversations,
+            eq(fastAgentConversations.id, fastAgentMessages.conversationId),
+          )
           .where(inArray(fastAgentMessages.nativeSessionId, nativeSessionIds));
   const currentNativeSessionRows =
     nativeSessionIds.length === 0
@@ -197,15 +207,38 @@ export async function getCostAnalyticsRows(
       : await db
           .select({
             nativeSessionId: fastAgentConversations.openCodeSessionId,
+            privacy: fastAgentConversations.privacy,
+            privateOwnerUserId: fastAgentConversations.privateOwnerUserId,
           })
           .from(fastAgentConversations)
           .where(
             inArray(fastAgentConversations.openCodeSessionId, nativeSessionIds),
           );
-  const fastNativeSessionIds = new Set(
-    [...nativeMessageSessionRows, ...currentNativeSessionRows]
+  const fastNativeRows = [
+    ...nativeMessageSessionRows,
+    ...currentNativeSessionRows,
+  ];
+  const inaccessiblePrivateNativeSessionIds = new Set(
+    fastNativeRows
+      .filter(
+        (row) =>
+          row.privacy === 'private' && row.privateOwnerUserId !== auth.userId,
+      )
       .map((row) => row.nativeSessionId)
       .filter((id): id is string => Boolean(id)),
+  );
+  const fastNativeSessionIds = new Set(
+    fastNativeRows
+      .map((row) => row.nativeSessionId)
+      .filter(
+        (id): id is string =>
+          Boolean(id) && !inaccessiblePrivateNativeSessionIds.has(id!),
+      ),
+  );
+  const visibleUsageRows = usageRows.filter(
+    (row) =>
+      !row.harnessSessionId ||
+      !inaccessiblePrivateNativeSessionIds.has(row.harnessSessionId),
   );
   const pullRequestRows = await db
     .select({
@@ -220,6 +253,7 @@ export async function getCostAnalyticsRows(
     .where(
       and(
         isNull(tasks.deletedAt),
+        privateTaskAccess(auth),
         sql`exists (
           select 1
           from ${llmUsageEvents}
@@ -248,7 +282,7 @@ export async function getCostAnalyticsRows(
     prKeysByTaskId.set(pullRequest.taskId, keys);
   }
 
-  return usageRows.map((row) => {
+  return visibleUsageRows.map((row) => {
     const isTask = Boolean(row.taskId);
     const isDeletedTask = isTask && Boolean(row.taskDeletedAt);
     const isMemory = !isTask && row.source === 'brain_synthesis';
