@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import {
   BasicTooltip,
@@ -10,6 +10,12 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   Info,
   InfoTooltip,
   Pencil,
@@ -75,6 +81,7 @@ export type IntegrationItemAction = {
   onAction: () => void;
   isPending: boolean;
   icon?: ReactNode;
+  confirmationDescription?: ReactNode;
 };
 
 function IntegrationCard({ item }: { item: IntegrationItem }) {
@@ -266,65 +273,104 @@ export function IntegrationListRow({ item }: { item: IntegrationItem }) {
   const configureAction = item.configureAction;
   const manageToolsAction = item.manageToolsAction;
   const removeAction = item.removeAction;
+  const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
 
   return (
-    <div
-      id={`integration-${item.id}`}
-      role="row"
-      data-highlighted={item.highlighted ? 'true' : undefined}
-      className={`grid grid-cols-[1rem_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[1rem_minmax(0,4fr)_minmax(0,6fr)_7rem] md:items-center md:gap-4 md:px-4 md:py-3 ${item.highlighted ? 'bg-primary/5 ring-1 ring-inset ring-primary/40' : ''}`}
-    >
-      <div role="cell" className="col-start-1 row-start-1 pt-0.5 md:pt-0">
-        <div className="flex size-4 items-center justify-center">
-          {item.icon}
-        </div>
-      </div>
-      <div role="cell" className="col-start-2 row-start-1 min-w-0 space-y-1">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <p className="truncate text-sm font-semibold">{item.name}</p>
-          {item.badge}
-        </div>
-        {item.status ? (
-          <div className="flex items-start gap-1 text-xs text-muted-foreground">
-            {item.statusIcon ? (
-              <span className="mt-0.5 shrink-0 text-destructive">
-                {item.statusIcon}
-              </span>
-            ) : null}
-            <span>{item.status}</span>
+    <>
+      <div
+        id={`integration-${item.id}`}
+        role="row"
+        data-highlighted={item.highlighted ? 'true' : undefined}
+        className={`grid grid-cols-[1rem_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[1rem_minmax(0,4fr)_minmax(0,6fr)_7rem] md:items-center md:gap-4 md:px-4 md:py-3 ${item.highlighted ? 'bg-primary/5 ring-1 ring-inset ring-primary/40' : ''}`}
+      >
+        <div role="cell" className="col-start-1 row-start-1 pt-0.5 md:pt-0">
+          <div className="flex size-4 items-center justify-center">
+            {item.icon}
           </div>
-        ) : null}
+        </div>
+        <div role="cell" className="col-start-2 row-start-1 min-w-0 space-y-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <p className="truncate text-sm font-semibold">{item.name}</p>
+            {item.badge}
+          </div>
+          {item.status ? (
+            <div className="flex items-start gap-1 text-xs text-muted-foreground">
+              {item.statusIcon ? (
+                <span className="mt-0.5 shrink-0 text-destructive">
+                  {item.statusIcon}
+                </span>
+              ) : null}
+              <span>{item.status}</span>
+            </div>
+          ) : null}
+        </div>
+        <div
+          role="cell"
+          className="col-span-2 col-start-2 row-start-2 min-w-0 text-sm text-muted-foreground/80 md:col-span-1 md:col-start-3 md:row-start-1"
+        >
+          {item.description}
+        </div>
+        <div
+          role="cell"
+          className="col-start-3 row-start-1 flex shrink-0 items-center justify-end gap-1 md:col-start-4"
+        >
+          {configureAction ? (
+            <IntegrationIconAction
+              action={configureAction}
+              fallbackIcon={<Pencil />}
+            />
+          ) : null}
+          {manageToolsAction ? (
+            <IntegrationIconAction
+              action={manageToolsAction}
+              fallbackIcon={<Wrench />}
+            />
+          ) : null}
+          {removeAction ? (
+            <IntegrationIconAction
+              action={{
+                ...removeAction,
+                onAction: () => setRemoveDialogOpen(true),
+              }}
+              fallbackIcon={<Trash2 />}
+            />
+          ) : null}
+        </div>
       </div>
-      <div
-        role="cell"
-        className="col-span-2 col-start-2 row-start-2 min-w-0 text-sm text-muted-foreground/80 md:col-span-1 md:col-start-3 md:row-start-1"
-      >
-        {item.description}
-      </div>
-      <div
-        role="cell"
-        className="col-start-3 row-start-1 flex shrink-0 items-center justify-end gap-1 md:col-start-4"
-      >
-        {configureAction ? (
-          <IntegrationIconAction
-            action={configureAction}
-            fallbackIcon={<Pencil />}
-          />
-        ) : null}
-        {manageToolsAction ? (
-          <IntegrationIconAction
-            action={manageToolsAction}
-            fallbackIcon={<Wrench />}
-          />
-        ) : null}
-        {removeAction ? (
-          <IntegrationIconAction
-            action={removeAction}
-            fallbackIcon={<Trash2 />}
-          />
-        ) : null}
-      </div>
-    </div>
+      <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
+        <DialogContent size="md">
+          <DialogHeader>
+            <DialogTitle>Remove {item.name}?</DialogTitle>
+            <DialogDescription>
+              {removeAction?.confirmationDescription ??
+                'This integration will be removed from Roomote. You can add or configure it again later.'}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={removeAction?.isPending}
+              onClick={() => setRemoveDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={!removeAction || removeAction.isPending}
+              onClick={() => {
+                removeAction?.onAction();
+                setRemoveDialogOpen(false);
+              }}
+            >
+              <Trash2 />
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

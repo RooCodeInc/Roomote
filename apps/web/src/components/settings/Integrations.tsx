@@ -2,6 +2,7 @@
 
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import { usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
@@ -2135,15 +2136,13 @@ export function Integrations({
         { mcpId: integration.id },
         {
           onSuccess: () => {
-            toast.success(
-              `${integration.name} disconnected for this deployment.`,
-            );
+            toast.success(`${integration.name} removed.`);
           },
           onError: (error) =>
             toast.error(
               error instanceof Error
                 ? error.message
-                : `Failed to disconnect ${integration.name}.`,
+                : `Failed to remove ${integration.name}.`,
             ),
         },
       );
@@ -2212,13 +2211,12 @@ export function Integrations({
           : () => {
               if (linearInstallation.data) {
                 disconnectLinear.mutate(undefined, {
-                  onSuccess: () =>
-                    toast.success('Linear disabled for this deployment.'),
+                  onSuccess: () => toast.success('Linear removed.'),
                   onError: (error) =>
                     toast.error(
                       error instanceof Error
                         ? error.message
-                        : 'Failed to disable Linear. Please try again.',
+                        : 'Failed to remove Linear. Please try again.',
                     ),
                 });
                 return;
@@ -2354,7 +2352,7 @@ export function Integrations({
               return {
                 ...item,
                 configureAction: null,
-                actionLabel: voiceEnabled ? 'Disable Voice' : 'Enable Voice',
+                actionLabel: voiceEnabled ? 'Remove Voice' : 'Enable Voice',
                 isPending:
                   setDeploymentEnabled.isPending &&
                   setDeploymentEnabled.variables?.mcpId === integration.id,
@@ -2364,13 +2362,13 @@ export function Integrations({
                     {
                       onSuccess: () =>
                         toast.success(
-                          `Voice ${nextEnabled ? 'enabled' : 'disabled'} for this deployment.`,
+                          nextEnabled ? 'Voice enabled.' : 'Voice removed.',
                         ),
                       onError: (error) =>
                         toast.error(
                           error instanceof Error
                             ? error.message
-                            : `Failed to ${nextEnabled ? 'enable' : 'disable'} Voice.`,
+                            : `Failed to ${nextEnabled ? 'enable' : 'remove'} Voice.`,
                         ),
                     },
                   ),
@@ -2615,14 +2613,16 @@ export function Integrations({
                     }
 
                     toast.success(
-                      `${displayName} ${nextEnabled ? 'enabled' : 'disabled'} for this deployment.`,
+                      nextEnabled
+                        ? `${displayName} enabled for this deployment.`
+                        : `${displayName} removed.`,
                     );
                   },
                   onError: (error) =>
                     toast.error(
                       error instanceof Error
                         ? error.message
-                        : `Failed to ${nextEnabled ? 'enable' : 'disable'} ${displayName}.`,
+                        : `Failed to ${nextEnabled ? 'enable' : 'remove'} ${displayName}.`,
                     ),
                 },
               );
@@ -3942,10 +3942,17 @@ export function Integrations({
             variant="snug"
             className="gap-0 p-0 md:min-h-0 md:flex-1 md:overflow-y-auto"
           >
-            <CardContent className="p-0!">
-              <div role="table" aria-label="Integrations">
+            <CardContent className="h-full p-0!">
+              <div
+                role="table"
+                aria-label="Integrations"
+                className="flex h-full flex-col"
+              >
                 <IntegrationListHeader />
-                <div role="rowgroup" className="divide-y divide-background">
+                <div
+                  role="rowgroup"
+                  className="flex min-h-0 flex-1 flex-col divide-y divide-background"
+                >
                   {apiKeyItemsLoading ? (
                     <div className="space-y-2 px-4 py-3">
                       <Skeleton className="h-4 w-48" />
@@ -3961,9 +3968,18 @@ export function Integrations({
                     <IntegrationListRow key={item.id} item={item} />
                   ))}
                   {!apiKeyItemsLoading && activeItems.length === 0 ? (
-                    <p className="px-4 py-6 text-sm text-muted-foreground">
-                      No active integrations yet.
-                    </p>
+                    <div className="flex min-h-64 flex-1 flex-col items-center justify-center gap-3 px-4 py-6">
+                      <Image
+                        src="/elements/integrations.png"
+                        width={778}
+                        height={685}
+                        alt=""
+                        className="max-h-32 w-auto object-contain"
+                      />
+                      <p className="text-sm text-muted-foreground">
+                        No active integrations yet.
+                      </p>
+                    </div>
                   ) : null}
                 </div>
               </div>

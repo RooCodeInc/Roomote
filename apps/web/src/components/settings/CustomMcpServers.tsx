@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
+import { toast } from 'sonner';
 
 import {
   Button,
@@ -837,8 +838,6 @@ export function useCustomMcpServers(): {
   const [formOpen, setFormOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<ListedServer | null>(null);
   const [toolsServer, setToolsServer] = useState<ListedServer | null>(null);
-  const [serverPendingRemoval, setServerPendingRemoval] =
-    useState<ListedServer | null>(null);
 
   const refresh = () =>
     queryClient.invalidateQueries({
@@ -865,6 +864,18 @@ export function useCustomMcpServers(): {
         server.transport === 'remote'
           ? (server.url ?? '')
           : [server.stdioCommand, ...server.stdioArgs].join(' ');
+      const removeServer = () => {
+        deleteServer.mutate(
+          { id: server.id },
+          {
+            onSuccess: () => {
+              toast.success(`${server.name} removed.`);
+              void refresh();
+            },
+            onError: () => toast.error(`Failed to remove ${server.name}.`),
+          },
+        );
+      };
 
       return {
         id: `custom-${server.id}`,
@@ -920,10 +931,12 @@ export function useCustomMcpServers(): {
         removeAction: {
           label: 'Remove',
           ariaLabel: `Remove ${server.name}`,
-          onAction: () => setServerPendingRemoval(server),
+          onAction: removeServer,
           isPending:
             deleteServer.isPending && deleteServer.variables?.id === server.id,
           icon: <Trash2 />,
+          confirmationDescription:
+            'This custom MCP integration and its stored credentials will be permanently removed. This cannot be undone.',
         },
         status: needsConnection
           ? server.authStatus === 'error'
@@ -967,7 +980,7 @@ export function useCustomMcpServers(): {
         headerAction: {
           label: 'Remove',
           ariaLabel: `Remove ${server.name}`,
-          onAction: () => setServerPendingRemoval(server),
+          onAction: removeServer,
           isPending:
             deleteServer.isPending && deleteServer.variables?.id === server.id,
           icon: <Trash2 className="size-4" />,
@@ -1010,59 +1023,6 @@ export function useCustomMcpServers(): {
         }}
         onSaved={refresh}
       />
-      <Dialog
-        open={serverPendingRemoval != null}
-        onOpenChange={(open) => {
-          if (!open && !deleteServer.isPending) {
-            setServerPendingRemoval(null);
-          }
-        }}
-      >
-        <DialogContent size="md">
-          <DialogHeader>
-            <DialogTitle>
-              Remove {serverPendingRemoval?.name ?? 'custom integration'}?
-            </DialogTitle>
-            <DialogDescription>
-              This custom MCP server and its stored credentials will be
-              permanently removed. This cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={deleteServer.isPending}
-              onClick={() => setServerPendingRemoval(null)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={deleteServer.isPending}
-              onClick={() => {
-                if (!serverPendingRemoval) {
-                  return;
-                }
-
-                deleteServer.mutate(
-                  { id: serverPendingRemoval.id },
-                  {
-                    onSuccess: () => {
-                      setServerPendingRemoval(null);
-                      void refresh();
-                    },
-                  },
-                );
-              }}
-            >
-              <Trash2 />
-              {deleteServer.isPending ? 'Removing...' : 'Remove'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 

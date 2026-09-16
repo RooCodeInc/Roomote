@@ -125,10 +125,10 @@ export function useYourIntegrations(): {
         body: JSON.stringify({ secretRef: secret.secretRef }),
       });
       if (!response.ok) throw new Error('Unavailable');
-      toast.success(`Revoked ${secret.label}.`);
+      toast.success(`${secret.label} removed.`);
       await load();
     } catch {
-      toast.error('Could not revoke the integration. Try again.');
+      toast.error('Could not remove the integration. Try again.');
     } finally {
       setBusyRef(null);
     }
@@ -161,6 +161,8 @@ export function useYourIntegrations(): {
               onAction: () => void remove(secret),
               isPending: busyRef === secret.secretRef,
               icon: <Trash2 />,
+              confirmationDescription:
+                'This API-key integration and its stored key will be permanently removed. This cannot be undone.',
             }
           : undefined,
       })),

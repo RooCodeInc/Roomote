@@ -1233,7 +1233,7 @@ describe('Integrations settings', () => {
     );
   });
 
-  it('keeps the disable toast unchanged for Jira after it is workspace-scoped', () => {
+  it('describes removing Jira after it is workspace-scoped', () => {
     state.deploymentEnablements = [{ mcpId: 'jira', enabled: true }];
     mutations.setDeploymentEnabled.mockImplementation((_variables, options) => {
       options?.onSuccess?.();
@@ -1250,9 +1250,7 @@ describe('Integrations settings', () => {
         onError: expect.any(Function),
       }),
     );
-    expect(toast.success).toHaveBeenCalledWith(
-      'Jira disabled for this deployment.',
-    );
+    expect(toast.success).toHaveBeenCalledWith('Jira removed.');
   });
 
   it('surfaces the highlighted integration from the URL', () => {
@@ -2481,6 +2479,13 @@ describe('Integrations settings', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove Voice' }));
 
+    expect(
+      screen.getByRole('heading', { name: 'Remove Voice?' }),
+    ).toBeInTheDocument();
+    expect(mutations.setDeploymentEnabled).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
     expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(
       { mcpId: 'voice', enabled: false },
       expect.objectContaining({
@@ -2488,9 +2493,7 @@ describe('Integrations settings', () => {
         onError: expect.any(Function),
       }),
     );
-    expect(toast.success).toHaveBeenCalledWith(
-      'Voice disabled for this deployment.',
-    );
+    expect(toast.success).toHaveBeenCalledWith('Voice removed.');
   });
 
   it('lets an admin turn environment-keyed Voice back on after disabling it', async () => {

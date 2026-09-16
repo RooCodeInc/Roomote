@@ -24,7 +24,14 @@ type ListedServer = {
   enabled: boolean;
 };
 
-const { state, createMock, deleteMock, setEnabledMock } = vi.hoisted(() => ({
+const {
+  state,
+  createMock,
+  deleteMock,
+  setEnabledMock,
+  toastSuccessMock,
+  toastErrorMock,
+} = vi.hoisted(() => ({
   state: {
     availability: { enabled: true },
     servers: [] as ListedServer[],
@@ -37,6 +44,12 @@ const { state, createMock, deleteMock, setEnabledMock } = vi.hoisted(() => ({
   createMock: vi.fn(async () => ({ id: 'new-server' })),
   deleteMock: vi.fn(async () => ({ deleted: true })),
   setEnabledMock: vi.fn(async () => ({ enabled: false })),
+  toastSuccessMock: vi.fn(),
+  toastErrorMock: vi.fn(),
+}));
+
+vi.mock('sonner', () => ({
+  toast: { success: toastSuccessMock, error: toastErrorMock },
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -113,7 +126,7 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
-import type { IntegrationItem } from './integration-card';
+import { IntegrationListRow, type IntegrationItem } from './integration-card';
 import { useCustomMcpServers } from './CustomMcpServers';
 
 function buildServer(overrides: Partial<ListedServer> = {}): ListedServer {
@@ -161,24 +174,7 @@ function Harness() {
             <span data-testid="configured">{String(item.configured)}</span>
             <span data-testid="item-enabled">{String(item.enabled)}</span>
             <span data-testid="item-connected">{String(item.connected)}</span>
-            {item.manageToolsAction ? (
-              <button
-                type="button"
-                onClick={item.manageToolsAction.onAction}
-                aria-label={item.manageToolsAction.ariaLabel}
-              >
-                Manage tools
-              </button>
-            ) : null}
-            {item.removeAction ? (
-              <button
-                type="button"
-                onClick={item.removeAction.onAction}
-                aria-label={item.removeAction.ariaLabel}
-              >
-                Remove
-              </button>
-            ) : null}
+            <IntegrationListRow item={item} />
           </li>
         ))}
       </ul>
@@ -273,6 +269,7 @@ describe('useCustomMcpServers', () => {
         expect.anything(),
       ),
     );
+    expect(toastSuccessMock).toHaveBeenCalledWith('internal-tools removed.');
   });
 
   it('names the tools dialog for the selected integration', async () => {
