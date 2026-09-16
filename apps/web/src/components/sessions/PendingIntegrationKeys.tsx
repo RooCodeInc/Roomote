@@ -24,7 +24,7 @@ export function PendingIntegrationKeys({
   /** Event id of the newest key request in the transcript; a change refetches. */
   latestRequestId: string | null;
 }) {
-  const { data, error, isFetching, refetch } =
+  const { data, error, errorUpdatedAt, isFetching, refetch } =
     useSessionIntegrationApprovals(sessionId);
   useEffect(() => {
     if (latestRequestId) void refetch();
@@ -58,7 +58,8 @@ export function PendingIntegrationKeys({
     return () => window.clearTimeout(timer);
   }, [nextExpiry, refetch]);
 
-  if (error && !data) {
+  // React Query clears error during an initial retry, but keeps its timestamp.
+  if (!data && (error || (isFetching && errorUpdatedAt > 0))) {
     return (
       <RetryableLoadError
         className="mt-4 border"
