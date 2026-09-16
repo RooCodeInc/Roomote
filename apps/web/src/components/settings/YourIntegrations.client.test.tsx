@@ -2,7 +2,14 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { YourIntegrations } from './YourIntegrations';
 
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+const { toastSuccessMock, toastErrorMock } = vi.hoisted(() => ({
+  toastSuccessMock: vi.fn(),
+  toastErrorMock: vi.fn(),
+}));
+
+vi.mock('sonner', () => ({
+  toast: { success: toastSuccessMock, error: toastErrorMock },
+}));
 
 const secret = {
   secretRef: '6a1f8f1e-0000-4000-8000-000000000011',
@@ -20,6 +27,7 @@ const secret = {
 };
 const fetchMock = vi.fn();
 beforeEach(() => {
+  vi.clearAllMocks();
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockReset();
 });
@@ -27,7 +35,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('lists integrations without credentials and revokes with a same-origin JSON body', async () => {
+it('lists integrations without credentials and removes with a same-origin JSON body', async () => {
   fetchMock
     .mockResolvedValueOnce(new Response(JSON.stringify({ secrets: [secret] })))
     .mockResolvedValueOnce(new Response(null, { status: 204 }))
@@ -44,7 +52,12 @@ it('lists integrations without credentials and revokes with a same-origin JSON b
     'GET, POST · kept until revoked',
   );
   expect(fetchMock.mock.calls[0]![0]).toBe('/api/account/integrations');
-  fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Stripe' }));
+  expect(
+    screen.getByRole('heading', { name: 'Remove Stripe?' }),
+  ).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
   expect(fetchMock.mock.calls[1]![1]).toMatchObject({
     method: 'DELETE',
@@ -54,6 +67,7 @@ it('lists integrations without credentials and revokes with a same-origin JSON b
   await waitFor(() =>
     expect(screen.getByText('No integrations yet.')).toBeInTheDocument(),
   );
+  expect(toastSuccessMock).toHaveBeenCalledWith('Stripe removed.');
 });
 
 it('adds an integration with the policy and key entered by the human', async () => {
@@ -122,9 +136,10 @@ it('shows who shared an integration and lets an authorized viewer change visibil
   render(<YourIntegrations />);
   expect(await screen.findByText('Owned by Taylor')).toBeInTheDocument();
   expect(
-    screen.queryByLabelText('Visibility for Shared search'),
+    screen.queryByRole('button', { name: 'Configure Shared search' }),
   ).not.toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText('Visibility for Stripe'), {
+  fireEvent.click(screen.getByRole('button', { name: 'Configure Stripe' }));
+  fireEvent.change(screen.getByLabelText('Who can use this integration?'), {
     target: { value: 'owner' },
   });
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));

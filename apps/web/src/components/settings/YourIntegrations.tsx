@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import {
@@ -21,10 +22,13 @@ import {
   Input,
   KeyRound,
   Label,
+  Pencil,
   Skeleton,
+  Trash2,
 } from '@/components/system';
 
-import { Section } from './Section';
+import type { IntegrationItem } from './integration-card';
+import { IntegrationListRow } from './integration-card';
 
 const endpoint = '/api/account/integrations';
 const readOnly: CredentialEgressMethod[] = ['GET', 'HEAD'];
@@ -39,13 +43,21 @@ function describeExpiry(secret: ServiceCredentialMetadata) {
  * API keys available to the user for HTTPS services. Metadata only: the key
  * is never returned, so nothing here can be copied out.
  */
-export function YourIntegrations() {
+export function useYourIntegrations(): {
+  items: IntegrationItem[];
+  isLoading: boolean;
+  error: string | null;
+  openAddDialog: () => void;
+  dialogs: ReactNode;
+} {
   const [secrets, setSecrets] = useState<ServiceCredentialMetadata[] | null>(
     null,
   );
   const [error, setError] = useState<string | null>(null);
   const [busyRef, setBusyRef] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [configuring, setConfiguring] =
+    useState<ServiceCredentialMetadata | null>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -78,125 +90,92 @@ export function YourIntegrations() {
       (!secret.expiresAt || new Date(secret.expiresAt).getTime() > Date.now()),
   );
 
-  return (
-    <Section
-      icon={KeyRound}
-      title="Integration keys"
-      action={
-        <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
-          Add integration
-        </Button>
-      }
-    >
-      <p className="text-sm text-muted-foreground">
-        API keys for services you use. Choose whether each integration is only
-        for you or available to everyone in this deployment. Roomote keeps the
-        key server-side and sends it only to the approved service.
-      </p>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      {secrets === null && !error ? <Skeleton className="h-16 w-full" /> : null}
-      {secrets !== null && active.length === 0 && !error ? (
-        <p className="text-sm text-muted-foreground">No integrations yet.</p>
-      ) : null}
-      {active.length > 0 ? (
-        <ul className="divide-y rounded-md border">
-          {active.map((secret) => (
-            <li
-              key={secret.secretRef}
-              className="flex flex-wrap items-center justify-between gap-3 p-3"
-            >
-              <div className="min-w-0 space-y-0.5">
-                <p className="truncate text-sm font-medium">{secret.label}</p>
-                <p className="break-all text-xs text-muted-foreground">
-                  {secret.origin} · {secret.allowedMethods.join(', ')} ·{' '}
-                  {describeExpiry(secret)}
-                </p>
-                {secret.ownerName ? (
-                  <p className="text-xs text-muted-foreground">
-                    Owned by {secret.ownerName}
-                  </p>
-                ) : null}
-              </div>
-              {secret.canManage ? (
-                <div className="flex items-center gap-2">
-                  <select
-                    aria-label={`Visibility for ${secret.label}`}
-                    value={secret.visibility}
-                    disabled={busyRef !== null}
-                    className="h-9 rounded-md border bg-card px-3 text-sm"
-                    onChange={async (event) => {
-                      const visibility = event.target
-                        .value as ServiceCredentialVisibility;
-                      setBusyRef(secret.secretRef);
-                      try {
-                        const response = await fetch(endpoint, {
-                          method: 'PATCH',
-                          cache: 'no-store',
-                          credentials: 'same-origin',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            secretRef: secret.secretRef,
-                            visibility,
-                          }),
-                        });
-                        if (!response.ok) throw new Error('Unavailable');
-                        toast.success(`Updated ${secret.label}.`);
-                        await load();
-                      } catch {
-                        toast.error(
-                          'Could not update the integration. Try again.',
-                        );
-                      } finally {
-                        setBusyRef(null);
-                      }
-                    }}
-                  >
-                    <option value="deployment">Everyone</option>
-                    <option value="owner">Only me</option>
-                  </select>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busyRef !== null}
-                    onClick={async () => {
-                      setBusyRef(secret.secretRef);
-                      try {
-                        const response = await fetch(endpoint, {
-                          method: 'DELETE',
-                          cache: 'no-store',
-                          credentials: 'same-origin',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            secretRef: secret.secretRef,
-                          }),
-                        });
-                        if (!response.ok) throw new Error('Unavailable');
-                        toast.success(`Revoked ${secret.label}.`);
-                        await load();
-                      } catch {
-                        toast.error(
-                          'Could not revoke the integration. Try again.',
-                        );
-                      } finally {
-                        setBusyRef(null);
-                      }
-                    }}
-                  >
-                    {busyRef === secret.secretRef ? 'Revoking…' : 'Revoke'}
-                  </Button>
-                </div>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      ) : null}
+  const updateVisibility = async (
+    secret: ServiceCredentialMetadata,
+    visibility: ServiceCredentialVisibility,
+  ) => {
+    setBusyRef(secret.secretRef);
+    try {
+      const response = await fetch(endpoint, {
+        method: 'PATCH',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ secretRef: secret.secretRef, visibility }),
+      });
+      if (!response.ok) throw new Error('Unavailable');
+      toast.success(`Updated ${secret.label}.`);
+      setConfiguring(null);
+      await load();
+    } catch {
+      toast.error('Could not update the integration. Try again.');
+    } finally {
+      setBusyRef(null);
+    }
+  };
+
+  const remove = async (secret: ServiceCredentialMetadata) => {
+    setBusyRef(secret.secretRef);
+    try {
+      const response = await fetch(endpoint, {
+        method: 'DELETE',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ secretRef: secret.secretRef }),
+      });
+      if (!response.ok) throw new Error('Unavailable');
+      toast.success(`${secret.label} removed.`);
+      await load();
+    } catch {
+      toast.error('Could not remove the integration. Try again.');
+    } finally {
+      setBusyRef(null);
+    }
+  };
+
+  const items = useMemo<IntegrationItem[]>(
+    () =>
+      active.map((secret) => ({
+        id: `api-key-${secret.secretRef}`,
+        name: secret.label,
+        description: `${secret.origin} · ${secret.allowedMethods.join(', ')} · ${describeExpiry(secret)}`,
+        icon: <KeyRound className="size-4" />,
+        enabled: true,
+        isMcpBased: false,
+        isPending: busyRef === secret.secretRef,
+        status: secret.ownerName ? `Owned by ${secret.ownerName}` : undefined,
+        configureAction: secret.canManage
+          ? {
+              label: 'Configure',
+              ariaLabel: `Configure ${secret.label}`,
+              onAction: () => setConfiguring(secret),
+              isPending: busyRef === secret.secretRef,
+              icon: <Pencil />,
+            }
+          : undefined,
+        removeAction: secret.canManage
+          ? {
+              label: 'Remove',
+              ariaLabel: `Remove ${secret.label}`,
+              onAction: () => void remove(secret),
+              isPending: busyRef === secret.secretRef,
+              icon: <Trash2 />,
+              confirmationDescription:
+                'This API-key integration and its stored key will be permanently removed. This cannot be undone.',
+            }
+          : undefined,
+      })),
+    // `active` is derived from the latest fetch and intentionally rebuilt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [secrets, busyRef],
+  );
+
+  const dialogs = (
+    <>
       <Dialog open={adding} onOpenChange={setAdding}>
         <DialogContent
-          size="lg"
+          size="xl"
           className="ph-no-capture ph-mask ph-no-recording sentry-block"
         >
           <DialogHeader>
@@ -216,7 +195,85 @@ export function YourIntegrations() {
           ) : null}
         </DialogContent>
       </Dialog>
-    </Section>
+      <Dialog
+        open={configuring != null}
+        onOpenChange={(open) => {
+          if (!open) setConfiguring(null);
+        }}
+      >
+        <DialogContent size="xl">
+          <DialogHeader>
+            <DialogTitle>
+              Configure {configuring?.label ?? 'integration'}
+            </DialogTitle>
+            <DialogDescription>
+              Control who can use this API-key integration. The stored key is
+              never returned to the browser.
+            </DialogDescription>
+          </DialogHeader>
+          {configuring ? (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="integration-config-visibility">
+                  Who can use this integration?
+                </Label>
+                <select
+                  id="integration-config-visibility"
+                  defaultValue={configuring.visibility}
+                  disabled={busyRef != null}
+                  className="h-9 w-full rounded-md border bg-card px-3 text-sm"
+                  onChange={(event) =>
+                    void updateVisibility(
+                      configuring,
+                      event.target.value as ServiceCredentialVisibility,
+                    )
+                  }
+                >
+                  <option value="deployment">
+                    Everyone in this deployment
+                  </option>
+                  <option value="owner">Only me</option>
+                </select>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+
+  return {
+    items,
+    isLoading: secrets === null && !error,
+    error,
+    openAddDialog: () => setAdding(true),
+    dialogs,
+  };
+}
+
+export function YourIntegrations() {
+  const { items, isLoading, error, openAddDialog, dialogs } =
+    useYourIntegrations();
+
+  return (
+    <div>
+      <Button variant="outline" size="sm" onClick={openAddDialog}>
+        Add integration
+      </Button>
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      {isLoading ? <Skeleton className="h-16 w-full" /> : null}
+      {!isLoading && items.length === 0 && !error ? (
+        <p className="text-sm text-muted-foreground">No integrations yet.</p>
+      ) : null}
+      {items.map((item) => (
+        <IntegrationListRow key={item.id} item={item} />
+      ))}
+      {dialogs}
+    </div>
   );
 }
 

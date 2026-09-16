@@ -4,23 +4,24 @@ import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
+import { toast } from 'sonner';
 
 import {
-  Badge,
   Button,
   Checkbox,
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   Input,
   Label,
   Pencil,
+  Plug,
   Plus,
   RadioGroup,
   RadioGroupItem,
-  ServerCog,
   Skeleton,
   Switch,
   Trash2,
@@ -247,11 +248,19 @@ function ServerFormDialog({
   open,
   onOpenChange,
   editingServer,
+  disabledServers,
+  enablingServerId,
+  onEnableServer,
+  onEditServer,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editingServer: ListedServer | null;
+  disabledServers: ListedServer[];
+  enablingServerId: string | null;
+  onEnableServer: (server: ListedServer) => void;
+  onEditServer: (server: ListedServer) => void;
   onSaved: () => void;
 }) {
   const trpc = useTRPC();
@@ -314,7 +323,7 @@ function ServerFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg">
+      <DialogContent size="xl">
         <DialogHeader>
           <DialogTitle>
             {isEdit ? 'Edit custom MCP server' : 'Add custom MCP server'}
@@ -326,6 +335,61 @@ function ServerFormDialog({
             same privileges as the agent.
           </DialogDescription>
         </DialogHeader>
+
+        {!isEdit && disabledServers.length > 0 ? (
+          <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold">
+                Disabled custom MCP servers
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Re-enable a saved server without re-entering its credentials, or
+                edit its configuration first.
+              </p>
+            </div>
+            <div className="divide-y divide-background">
+              {disabledServers.map((server) => (
+                <div
+                  key={server.id}
+                  className="flex items-center justify-between gap-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {server.name}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {server.transport === 'remote'
+                        ? server.url
+                        : [server.stdioCommand, ...server.stdioArgs].join(' ')}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onEditServer(server)}
+                    >
+                      <Pencil />
+                      Edit
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={enablingServerId != null}
+                      onClick={() => onEnableServer(server)}
+                    >
+                      {enablingServerId === server.id
+                        ? 'Enabling...'
+                        : 'Enable'}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         <form onSubmit={onSubmit} className="space-y-4">
           {!isEdit && (
@@ -657,10 +721,10 @@ function CustomToolManagementDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg">
+      <DialogContent size="xl">
         <DialogHeader>
           <DialogTitle>
-            Manage tools{server ? ` — ${server.name}` : ''}
+            Manage tools for {server?.name ?? 'integration'}
           </DialogTitle>
           <DialogDescription>
             Disabled tools are blocked at the Roomote proxy and hidden from
@@ -717,10 +781,10 @@ function CustomToolManagementDialog({
           </div>
         )}
 
-        <div className="flex justify-end gap-2">
+        <DialogFooter>
           <Button
             type="button"
-            variant="secondary"
+            variant="outline"
             onClick={() => onOpenChange(false)}
           >
             Cancel
@@ -732,7 +796,7 @@ function CustomToolManagementDialog({
           >
             {setDisabledTools.isPending ? <Loading /> : 'Save'}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -741,9 +805,9 @@ function CustomToolManagementDialog({
 /**
  * Custom MCP servers rendered as regular integration cards.
  *
- * They live in the same Connected/Configured grids as the built-in catalog
- * (a "Custom" badge is the only visual difference), so this exposes items
- * plus the dialogs they drive rather than owning a section of its own.
+ * They live in the same Connected/Configured grids as the built-in catalog,
+ * so this exposes items plus the dialogs they drive rather than owning a
+ * section of its own.
  */
 export function useCustomMcpServers(): {
   isEnabled: boolean;
@@ -800,17 +864,24 @@ export function useCustomMcpServers(): {
         server.transport === 'remote'
           ? (server.url ?? '')
           : [server.stdioCommand, ...server.stdioArgs].join(' ');
+      const removeServer = () => {
+        deleteServer.mutate(
+          { id: server.id },
+          {
+            onSuccess: () => {
+              toast.success(`${server.name} removed.`);
+              void refresh();
+            },
+            onError: () => toast.error(`Failed to remove ${server.name}.`),
+          },
+        );
+      };
 
       return {
         id: `custom-${server.id}`,
         name: server.name,
         description,
-        icon: <ServerCog className="size-5" />,
-        badge: (
-          <Badge variant="outline" className="shrink-0">
-            Custom
-          </Badge>
-        ),
+        icon: <Plug className="size-5" />,
         enabled: server.enabled,
         connected: server.enabled && !needsConnection,
         // Custom servers are always deployment-defined, so a disabled one
@@ -828,6 +899,44 @@ export function useCustomMcpServers(): {
             enabled: !server.enabled,
           });
           refresh();
+        },
+        configureAction: {
+          label: 'Configure',
+          ariaLabel: `Configure ${server.name}`,
+          onAction: needsConnection
+            ? async () => {
+                const initiateUrl = await connect.mutateAsync({
+                  id: server.id,
+                  redirectTo: '/settings/integrations',
+                });
+                window.location.href = initiateUrl;
+              }
+            : () => {
+                setEditingServer(server);
+                setFormOpen(true);
+              },
+          isPending: connect.isPending,
+          icon: <Pencil />,
+        },
+        manageToolsAction:
+          server.transport === 'remote'
+            ? {
+                label: 'Manage available tools',
+                ariaLabel: `Manage ${server.name} tools`,
+                onAction: () => setToolsServer(server),
+                isPending: false,
+                icon: <Wrench />,
+              }
+            : undefined,
+        removeAction: {
+          label: 'Remove',
+          ariaLabel: `Remove ${server.name}`,
+          onAction: removeServer,
+          isPending:
+            deleteServer.isPending && deleteServer.variables?.id === server.id,
+          icon: <Trash2 />,
+          confirmationDescription:
+            'This custom MCP integration and its stored credentials will be permanently removed. This cannot be undone.',
         },
         status: needsConnection
           ? server.authStatus === 'error'
@@ -871,16 +980,7 @@ export function useCustomMcpServers(): {
         headerAction: {
           label: 'Remove',
           ariaLabel: `Remove ${server.name}`,
-          onAction: async () => {
-            if (
-              confirm(
-                `Delete custom MCP server '${server.name}'? Stored credentials are removed as well.`,
-              )
-            ) {
-              await deleteServer.mutateAsync({ id: server.id });
-              refresh();
-            }
-          },
+          onAction: removeServer,
           isPending:
             deleteServer.isPending && deleteServer.variables?.id === server.id,
           icon: <Trash2 className="size-4" />,
@@ -896,6 +996,18 @@ export function useCustomMcpServers(): {
         open={formOpen}
         onOpenChange={setFormOpen}
         editingServer={editingServer}
+        disabledServers={servers.filter((server) => !server.enabled)}
+        enablingServerId={
+          setEnabled.isPending && setEnabled.variables?.enabled
+            ? setEnabled.variables.id
+            : null
+        }
+        onEnableServer={(server) => {
+          void setEnabled
+            .mutateAsync({ id: server.id, enabled: true })
+            .then(refresh);
+        }}
+        onEditServer={(server) => setEditingServer(server)}
         onSaved={() => {
           setFormOpen(false);
           refresh();
