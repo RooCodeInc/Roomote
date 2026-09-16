@@ -90,6 +90,17 @@ function normalizeFastRemoteMcpUrl(value: string): string {
   return url.toString();
 }
 
+function normalizeFastRemoteMcpName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+    .replace(/-+$/g, '');
+}
+
 function parseTools(payload: unknown): RemoteMcpTool[] | null {
   const result =
     payload && typeof payload === 'object' && 'result' in payload
@@ -489,7 +500,7 @@ export async function addRemoteCustomMcpForFast(input: {
 
   const parsed = customMcpRemoteServerInputSchema.parse({
     transport: 'remote',
-    name: input.name,
+    name: normalizeFastRemoteMcpName(input.name),
     url: input.url,
     authType: 'none',
   });

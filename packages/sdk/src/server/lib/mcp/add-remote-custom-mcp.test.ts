@@ -119,6 +119,84 @@ describe('addRemoteCustomMcpForFast', () => {
     expect(await db.query.customMcpServers.findMany()).toHaveLength(2);
   });
 
+  it('normalizes a display name and returns the stored slug', async () => {
+    guardedFetchMock
+      .mockResolvedValueOnce(initializedResponse())
+      .mockResolvedValueOnce(toolsResponse());
+
+    const result = await addRemoteCustomMcpForFast({
+      userId: adminId,
+      sessionId: crypto.randomUUID(),
+      name: '  Acme & Billing MCP!  ',
+      url: 'https://mcp.example.com/mcp',
+    });
+
+    expect(result).toMatchObject({
+      status: 'connected',
+      name: 'acme-billing-mcp',
+    });
+    expect(await db.query.customMcpServers.findFirst()).toMatchObject({
+      name: 'acme-billing-mcp',
+    });
+  });
+
+  it('deduplicates after normalizing the supplied name', async () => {
+    await db.insert(customMcpServers).values({
+      name: 'acme-mcp',
+      url: 'https://mcp.example.com/mcp',
+      authType: 'none',
+      createdByUserId: adminId,
+    });
+    guardedFetchMock.mockResolvedValueOnce(toolsResponse());
+
+    const result = await addRemoteCustomMcpForFast({
+      userId: adminId,
+      sessionId: crypto.randomUUID(),
+      name: 'Acme MCP',
+      url: 'https://mcp.example.com/mcp',
+    });
+
+    expect(result).toMatchObject({
+      status: 'connected',
+      name: 'acme-mcp',
+      reused: true,
+    });
+    expect(await db.query.customMcpServers.findMany()).toHaveLength(1);
+  });
+
+  it('rejects a name that normalizes to empty before probing or writing', async () => {
+    await expect(
+      addRemoteCustomMcpForFast({
+        userId: adminId,
+        sessionId: crypto.randomUUID(),
+        name: ' !!! ',
+        url: 'https://mcp.example.com/mcp',
+      }),
+    ).rejects.toThrow('Server name must be a lowercase slug');
+
+    expect(guardedFetchMock).not.toHaveBeenCalled();
+    expect(await db.query.customMcpServers.findMany()).toEqual([]);
+  });
+
+  it('truncates normalized names to a valid 64-character boundary', async () => {
+    guardedFetchMock
+      .mockResolvedValueOnce(initializedResponse())
+      .mockResolvedValueOnce(toolsResponse());
+    const expectedName = 'a'.repeat(63);
+
+    const result = await addRemoteCustomMcpForFast({
+      userId: adminId,
+      sessionId: crypto.randomUUID(),
+      name: `${expectedName} & trailing`,
+      url: 'https://mcp.example.com/mcp',
+    });
+
+    expect(result).toMatchObject({ status: 'connected', name: expectedName });
+    expect(await db.query.customMcpServers.findFirst()).toMatchObject({
+      name: expectedName,
+    });
+  });
+
   it('verifies an unauthenticated server before creating it', async () => {
     guardedFetchMock
       .mockResolvedValueOnce(initializedResponse())

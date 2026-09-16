@@ -5780,6 +5780,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ id: 'roomote' }),
       ]),
       {
+        addRemoteMcpEnabled: true,
         surface: 'slack',
         serviceCredentialToolsEnabled: true,
         serviceCredentialPrepareEnabled: true,
@@ -5832,6 +5833,23 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ([sessionID]) => sessionID === 'opencode-subagent-1',
       )?.[3],
     ).toMatchObject({ allowSkillAccess: false, allowSpillRecovery: false });
+  });
+
+  it('does not enable remote MCP setup for a non-admin', async () => {
+    mocks.getUserIdentity.mockResolvedValue({
+      displayName: 'Member',
+      githubLogin: null,
+      isAdmin: false,
+      serviceCredentialToolsEnabled: true,
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
+      'conversation-1',
+      expect.any(Array),
+      expect.objectContaining({ addRemoteMcpEnabled: false }),
+    );
   });
 
   it('rebuilds an invalidated OpenCode session from canonical compatibility history', async () => {
