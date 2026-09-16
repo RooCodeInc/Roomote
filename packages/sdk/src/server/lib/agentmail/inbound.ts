@@ -314,7 +314,6 @@ function strangerRefusalDailyKey(now = new Date()): string {
  */
 const STRANGER_REFUSAL_TEXT = {
   unverified: `This address isn't the verified email on a Roomote account, so I can't act on this email. Send it again from your account's verified email address, or verify this address under Settings > Personal > Linked Accounts first.`,
-  unauthenticated: `I couldn't verify that this email really came from its sender address (it did not pass DMARC), so I can't act on it. If this is your address, ask whoever runs its email domain to publish SPF, DKIM, and a DMARC policy, then send it again.`,
 } as const;
 
 async function maybeSendStrangerRefusal(input: {
@@ -534,20 +533,12 @@ export async function processAgentMailWebhookEvent(
     }
 
     // The From header is about to become the sender's identity. Only a
-    // DMARC pass proves the message came from that domain; anything else
-    // is refused before the address is even looked up, so a spoofed From
-    // never reaches an account.
+    // DMARC pass proves the message came from that domain; anything else is
+    // dropped before the address is looked up or used as a reply target.
     if (!isAgentMailSenderAuthenticated(message)) {
       console.warn(
-        `${LOG_PREFIX} Refusing inbound email without a DMARC pass: inbox=${inboxId} message=${message.message_id} dmarc=${message.authentication_results?.dmarc ?? 'absent'}`,
+        `${LOG_PREFIX} Dropping inbound email without a DMARC pass: inbox=${inboxId} message=${message.message_id} dmarc=${message.authentication_results?.dmarc ?? 'absent'}`,
       );
-      await maybeSendStrangerRefusal({
-        client,
-        inboxId,
-        message,
-        senderAddress,
-        reason: 'unauthenticated',
-      });
       await markEventProcessed(row.id);
       return;
     }
