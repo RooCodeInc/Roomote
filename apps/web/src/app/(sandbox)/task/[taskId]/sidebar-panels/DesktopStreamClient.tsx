@@ -215,7 +215,11 @@ export function DesktopStreamClient({
   onClose?: () => void;
   /** Standalone page for this desktop; shown as a pop-out in the header. */
   popoutHref?: string;
-  /** Render a minimal toolbar of its own (used by the pop-out window). */
+  /**
+   * Render a minimal toolbar of its own and start the desktop as soon as
+   * the session is ready (used by the pop-out window, which must take over
+   * control from the panel that opened it without another click).
+   */
   standalone?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -774,6 +778,17 @@ export function DesktopStreamClient({
     connectControl(session.controlUrl);
   };
 
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (!standalone || !session || autoStartedRef.current) {
+      return;
+    }
+    autoStartedRef.current = true;
+    start();
+    // `start` is recreated every render; the ref guards against re-running.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [standalone, session]);
+
   const pointForEvent = (
     event:
       | ReactPointerEvent<HTMLVideoElement>
@@ -926,6 +941,9 @@ export function DesktopStreamClient({
         <video
           ref={videoRef}
           aria-label="Remote desktop"
+          // No audio track is streamed; muted also keeps autoplay allowed in
+          // the pop-out window.
+          muted
           // The sandbox cursor is not painted into the video; the local cursor
           // is the pointer, so it never trails behind the stream.
           className="size-full cursor-default object-contain outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"

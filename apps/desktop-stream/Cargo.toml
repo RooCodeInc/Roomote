@@ -7,6 +7,7 @@ description = "Low-latency desktop video and audio streaming for Roomote sandbox
 
 [dependencies]
 async-stream = "0.3.6"
+bytes = "1.10.1"
 axum = { version = "0.8.7", features = ["http1", "json", "ws"] }
 futures-util = "0.3.31"
 serde = { version = "1.0.228", features = ["derive"] }

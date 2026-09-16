@@ -1,9 +1,9 @@
 # Roomote desktop stream
 
 `roomote-desktop-stream` is a small Rust service for streaming an existing X11
-desktop from a Roomote sandbox. It starts one FFmpeg encoder per viewer and
-serves low-latency fragmented MP4 with H.264 video and optional synchronized AAC
-audio. The browser uses its native media pipeline, so decoding can use client
+desktop from a Roomote sandbox. It runs one FFmpeg encoder shared by all
+viewers and serves low-latency fragmented MP4 with H.264 video (audio capture
+is available but disabled by default). The browser uses its native media pipeline, so decoding can use client
 hardware acceleration without a custom JavaScript codec.
 
 The service is intended to run behind an authenticated Roomote Live Preview
@@ -66,12 +66,14 @@ Set these variables as needed:
 - `ROOMOTE_DESKTOP_STREAM_AUDIO_MODE=pulse` to capture a PulseAudio source
 - `ROOMOTE_DESKTOP_STREAM_PULSE_SOURCE`, usually a sink monitor such as
   `roomote_stream.monitor`
-- `ROOMOTE_DESKTOP_STREAM_MAX_CLIENTS` (default 2) to bound per-viewer
-  encoders; at the limit a new viewer evicts viewers that stopped reading
-  their stream and is otherwise refused with 429, so an abandoned tab never
-  pins the desktop while live viewers are never kicked. A new control
-  connection always supersedes the previous one, and only the current
-  controller can resize the screen
+- `ROOMOTE_DESKTOP_STREAM_MAX_CLIENTS` to cap viewers (default 0, unlimited).
+  Viewers share one encoder: the service splits FFmpeg's fragmented MP4 into
+  the init segment and keyframe-aligned fragments and fans them out, so each
+  viewer costs bandwidth, not another encode. A viewer that stops reading is
+  dropped rather than allowed to stall the encoder; the encoder itself stops
+  a few seconds after the last viewer leaves. A new control connection always
+  supersedes the previous one, and only the current controller can resize the
+  screen
 
 The control WebSocket accepts the authenticated Roomote preview-proxy marker,
 a same-origin request, or the single origin named by

@@ -9,7 +9,7 @@ use std::{
         Arc, Mutex, RwLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use async_stream::stream as async_stream;
@@ -24,13 +24,14 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
+use bytes::{Bytes, BytesMut};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::TcpListener,
     process::Command,
-    sync::watch,
+    sync::{mpsc, watch},
 };
 use tokio_util::io::ReaderStream;
 use x11rb::{
@@ -165,7 +166,9 @@ impl Config {
         let fps = parse_env("ROOMOTE_DESKTOP_STREAM_FPS", 60_u16)?;
         let video_bitrate_kbps = parse_env("ROOMOTE_DESKTOP_STREAM_VIDEO_BITRATE_KBPS", 6_000_u32)?;
         let audio_bitrate_kbps = parse_env("ROOMOTE_DESKTOP_STREAM_AUDIO_BITRATE_KBPS", 128_u16)?;
-        let max_clients = parse_env("ROOMOTE_DESKTOP_STREAM_MAX_CLIENTS", 2_usize)?;
+        // 0 means unlimited: viewers share one encoder, so each extra viewer
+        // costs bandwidth, not CPU.
+        let max_clients = parse_env("ROOMOTE_DESKTOP_STREAM_MAX_CLIENTS", 0_usize)?;
 
         if width == 0
             || height == 0
@@ -174,10 +177,9 @@ impl Config {
             || fps == 0
             || fps > 120
             || video_bitrate_kbps == 0
-            || max_clients == 0
         {
             return Err(
-                "width/height must be 1-8192, fps must be 1-120, and video bitrate/max clients must be positive".into(),
+                "width/height must be 1-8192, fps must be 1-120, and video bitrate must be positive".into(),
             );
         }
 
@@ -390,21 +392,193 @@ impl InputLatency {
     }
 }
 
-/// A running per-viewer encoder. Tracked out of band so it can be killed
-/// even when its viewer has stopped reading the response, which otherwise
-/// blocks the encoder on a full pipe and pins the viewer slot forever.
-#[derive(Clone, Debug)]
-struct EncoderHandle {
-    id: u64,
-    pid: u32,
-    /// Milliseconds since service start when the viewer last consumed data.
-    /// A viewer that stops reading leaves ffmpeg blocked on a full pipe; such
-    /// encoders are the first to be evicted for a new viewer.
-    last_progress_ms: Arc<AtomicU64>,
+/// Encoder-to-viewer fan-out. One FFmpeg process encodes the screen; every
+/// viewer receives the same fragmented-MP4 bytes: the init segment first,
+/// then fragments starting at the next keyframe. Extra viewers therefore
+/// cost bandwidth rather than another encoder.
+struct Broadcaster {
+    inner: Mutex<BroadcastState>,
+    next_viewer_id: AtomicU64,
 }
 
-/// A viewer that has not consumed any stream data for this long is stalled.
-const STALLED_VIEWER_MS: u64 = 3_000;
+#[derive(Default)]
+struct BroadcastState {
+    encoder: Option<RunningEncoder>,
+    /// `ftyp` + `moov`, required before any fragment can be decoded.
+    init_segment: Option<Bytes>,
+    viewers: Vec<Viewer>,
+    /// When the last viewer left; the encoder stops after a grace period.
+    idle_since: Option<Instant>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RunningEncoder {
+    generation: u64,
+    pid: Option<u32>,
+}
+
+struct Viewer {
+    id: u64,
+    sender: mpsc::Sender<Bytes>,
+    /// Set once the init segment was handed over.
+    has_init: bool,
+    /// Set once a keyframe fragment was handed over; fragments before that
+    /// would not decode.
+    streaming: bool,
+}
+
+/// Chunks a viewer may fall behind by before it is dropped. A viewer that
+/// stops reading (a hidden tab, a dead connection) must never stall the
+/// shared encoder, so a full queue ends that viewer's stream instead.
+const VIEWER_QUEUE_CAPACITY: usize = 512;
+/// How long the encoder keeps running with no viewers, so a reload during a
+/// resize or a brief disconnect does not pay the startup cost again.
+const ENCODER_IDLE_GRACE: Duration = Duration::from_secs(3);
+
+impl Broadcaster {
+    fn new() -> Self {
+        Self {
+            inner: Mutex::new(BroadcastState::default()),
+            next_viewer_id: AtomicU64::new(1),
+        }
+    }
+
+    fn viewer_count(&self) -> usize {
+        self.inner.lock().unwrap().viewers.len()
+    }
+
+    /// Adds a viewer. Returns its receiver and whether an encoder must be
+    /// started for it.
+    fn subscribe(&self) -> (mpsc::Receiver<Bytes>, bool) {
+        let (sender, receiver) = mpsc::channel(VIEWER_QUEUE_CAPACITY);
+        let mut inner = self.inner.lock().unwrap();
+        let mut viewer = Viewer {
+            id: self.next_viewer_id.fetch_add(1, Ordering::Relaxed),
+            sender,
+            has_init: false,
+            streaming: false,
+        };
+        if let Some(init) = &inner.init_segment
+            && viewer.sender.try_send(init.clone()).is_ok()
+        {
+            viewer.has_init = true;
+        }
+        inner.viewers.push(viewer);
+        inner.idle_since = None;
+        let needs_encoder = inner.encoder.is_none();
+        if needs_encoder {
+            inner.encoder = Some(RunningEncoder {
+                generation: 0,
+                pid: None,
+            });
+        }
+        (receiver, needs_encoder)
+    }
+
+    /// Claims the encoder slot for a starting encoder task.
+    fn begin_encoder(&self, generation: u64) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.encoder = Some(RunningEncoder {
+            generation,
+            pid: None,
+        });
+        inner.init_segment = None;
+    }
+
+    fn set_encoder_pid(&self, generation: u64, pid: u32) {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(encoder) = &mut inner.encoder
+            && encoder.generation == generation
+        {
+            encoder.pid = Some(pid);
+        }
+    }
+
+    fn deliver_init(&self, init: Bytes) {
+        let mut inner = self.inner.lock().unwrap();
+        for viewer in &mut inner.viewers {
+            if !viewer.has_init && viewer.sender.try_send(init.clone()).is_ok() {
+                viewer.has_init = true;
+            }
+        }
+        inner.init_segment = Some(init);
+    }
+
+    /// Fans a fragment out. Viewers still waiting for a keyframe skip
+    /// non-keyframe fragments; viewers that cannot keep up are dropped.
+    /// Returns the number of viewers left.
+    fn deliver_fragment(&self, fragment: Bytes, keyframe: bool, bytes_served: &AtomicU64) -> usize {
+        let mut inner = self.inner.lock().unwrap();
+        let mut dropped = Vec::new();
+        for viewer in &mut inner.viewers {
+            if !viewer.has_init {
+                continue;
+            }
+            if !viewer.streaming {
+                if !keyframe {
+                    continue;
+                }
+                viewer.streaming = true;
+            }
+            match viewer.sender.try_send(fragment.clone()) {
+                Ok(()) => {
+                    bytes_served.fetch_add(fragment.len() as u64, Ordering::Relaxed);
+                }
+                Err(_) => dropped.push(viewer.id),
+            }
+        }
+        if !dropped.is_empty() {
+            inner.viewers.retain(|viewer| !dropped.contains(&viewer.id));
+        }
+        if inner.viewers.is_empty() && inner.idle_since.is_none() {
+            inner.idle_since = Some(Instant::now());
+        }
+        inner.viewers.len()
+    }
+
+    /// Whether the encoder has been without viewers for longer than the
+    /// grace period.
+    fn idle_expired(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.viewers.is_empty()
+            && inner
+                .idle_since
+                .is_some_and(|since| since.elapsed() > ENCODER_IDLE_GRACE)
+    }
+
+    /// Marks the encoder gone and ends every viewer's stream. Viewers
+    /// reconnect on their own and start a fresh encoder.
+    fn end_encoder(&self, generation: u64) {
+        let mut inner = self.inner.lock().unwrap();
+        if inner
+            .encoder
+            .is_some_and(|encoder| encoder.generation != generation)
+        {
+            return;
+        }
+        inner.encoder = None;
+        inner.init_segment = None;
+        inner.viewers.clear();
+        inner.idle_since = None;
+    }
+
+    /// Kills the running encoder, for example after a screen resize. The
+    /// encoder task notices the exit and ends the viewers' streams.
+    fn stop_encoder(&self) {
+        let pid = {
+            let inner = self.inner.lock().unwrap();
+            inner.encoder.and_then(|encoder| encoder.pid)
+        };
+        if let Some(pid) = pid {
+            tokio::spawn(async move {
+                let _ = Command::new("kill")
+                    .args(["-KILL", &pid.to_string()])
+                    .status()
+                    .await;
+            });
+        }
+    }
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -414,12 +588,8 @@ struct AppState {
     started_at: Instant,
     /// Current screen size, updated by viewer resize requests.
     screen: Arc<RwLock<ScreenSize>>,
-    /// Bumped whenever the screen is resized so running encoders, which
-    /// captured at the old size, stop and let the viewer reconnect.
-    stream_generation: Arc<watch::Sender<u64>>,
-    /// Encoders currently serving viewers, oldest first.
-    encoders: Arc<Mutex<Vec<EncoderHandle>>>,
-    next_encoder_id: Arc<AtomicU64>,
+    broadcaster: Arc<Broadcaster>,
+    next_encoder_generation: Arc<AtomicU64>,
     /// Bumped when a new control client connects so the previous one is
     /// released: the newest viewer always wins control.
     control_generation: Arc<watch::Sender<u64>>,
@@ -430,78 +600,9 @@ impl AppState {
         *self.screen.read().unwrap()
     }
 
-    fn now_ms(&self) -> u64 {
-        self.started_at.elapsed().as_millis() as u64
-    }
-
-    /// Registers an encoder. When the viewer limit is reached, stalled
-    /// viewers (ones no longer reading their stream) are evicted first so an
-    /// abandoned tab can never pin the desktop. Healthy viewers are never
-    /// evicted: two live viewers reloading into each other would otherwise
-    /// fight forever, so the newcomer is refused instead.
-    fn register_encoder(&self, pid: u32) -> Result<EncoderHandle, ()> {
-        let now = self.now_ms();
-        let handle = EncoderHandle {
-            id: self.next_encoder_id.fetch_add(1, Ordering::Relaxed),
-            pid,
-            last_progress_ms: Arc::new(AtomicU64::new(now)),
-        };
-        let evicted = {
-            let mut encoders = self.encoders.lock().unwrap();
-            let limit = self.config.max_clients.max(1);
-            let mut evicted = Vec::new();
-            if encoders.len() >= limit {
-                let (stalled, healthy): (Vec<_>, Vec<_>) =
-                    encoders.drain(..).partition(|encoder| {
-                        now.saturating_sub(encoder.last_progress_ms.load(Ordering::Relaxed))
-                            > STALLED_VIEWER_MS
-                    });
-                *encoders = healthy;
-                evicted = stalled;
-            }
-            if encoders.len() >= limit {
-                return Err(());
-            }
-            encoders.push(handle.clone());
-            evicted
-        };
-        for encoder in evicted {
-            kill_encoder(encoder);
-        }
-        Ok(handle)
-    }
-
-    fn unregister_encoder(&self, id: u64) {
-        self.encoders
-            .lock()
-            .unwrap()
-            .retain(|encoder| encoder.id != id);
-    }
-
-    /// Kills every running encoder, for example after a screen resize, so
-    /// viewers reconnect at the new size even if one had stopped reading.
-    fn stop_encoders(&self) {
-        let encoders = std::mem::take(&mut *self.encoders.lock().unwrap());
-        for encoder in encoders {
-            kill_encoder(encoder);
-        }
-    }
-
     fn active_clients(&self) -> usize {
-        self.encoders.lock().unwrap().len()
+        self.broadcaster.viewer_count()
     }
-}
-
-/// Sends SIGKILL to an encoder by pid. The response stream that owns the
-/// child reaps it once it is polled again; a viewer that never reads again
-/// simply ends when its connection closes.
-fn kill_encoder(encoder: EncoderHandle) {
-    tokio::spawn(async move {
-        let _ = Command::new("kill")
-            .args(["-KILL", &encoder.pid.to_string()])
-            .status()
-            .await;
-    });
 }
 
 #[derive(Debug, Deserialize)]
@@ -1099,17 +1200,6 @@ struct MetricsResponse {
     x_pointer: Option<(i16, i16)>,
 }
 
-struct ClientGuard {
-    state: AppState,
-    handle: EncoderHandle,
-}
-
-impl Drop for ClientGuard {
-    fn drop(&mut self) {
-        self.state.unregister_encoder(self.handle.id);
-    }
-}
-
 /// Clears the control flag when the session that currently owns control
 /// ends; a superseded session must not clear its successor's flag.
 struct ControlConnectionGuard {
@@ -1158,9 +1248,8 @@ async fn main() {
         control_connected: Arc::new(AtomicBool::new(false)),
         started_at: Instant::now(),
         screen: Arc::new(RwLock::new(screen)),
-        stream_generation: Arc::new(watch::Sender::new(0)),
-        encoders: Arc::new(Mutex::new(Vec::new())),
-        next_encoder_id: Arc::new(AtomicU64::new(1)),
+        broadcaster: Arc::new(Broadcaster::new()),
+        next_encoder_generation: Arc::new(AtomicU64::new(1)),
         control_generation: Arc::new(watch::Sender::new(0)),
     };
     let app = Router::new()
@@ -1406,10 +1495,8 @@ fn resize_screen(
     }
     controller.set_screen_size(size)?;
     *state.screen.write().unwrap() = size;
-    state
-        .stream_generation
-        .send_modify(|generation| *generation += 1);
-    state.stop_encoders();
+    // The encoder captures at the old size: stop it so viewers reconnect.
+    state.broadcaster.stop_encoder();
     Ok(size)
 }
 
@@ -1490,86 +1577,32 @@ fn has_allowed_origin(headers: &HeaderMap, explicitly_allowed: Option<&str>) -> 
 }
 
 async fn stream(State(state): State<AppState>) -> Response {
-    state.metrics.total_clients.fetch_add(1, Ordering::Relaxed);
-
-    let mut generation = state.stream_generation.subscribe();
-    generation.mark_unchanged();
-    let mut command = Command::new(&state.config.ffmpeg);
-    command
-        .args(state.config.ffmpeg_args(state.screen()))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                format!("failed to start ffmpeg: {error}"),
-            )
-                .into_response();
-        }
-    };
-    let Some(pid) = child.id() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "ffmpeg exited before streaming started",
-        )
-            .into_response();
-    };
-    // Registering evicts stalled viewers; healthy ones keep their slot.
-    let Ok(handle) = state.register_encoder(pid) else {
-        let _ = child.start_kill();
+    let limit = state.config.max_clients;
+    if limit > 0 && state.broadcaster.viewer_count() >= limit {
         return (
             StatusCode::TOO_MANY_REQUESTS,
             "desktop stream is already being watched by the maximum number of viewers",
         )
             .into_response();
-    };
-    let progress = handle.last_progress_ms.clone();
-    let progress_state = state.clone();
-    let guard = ClientGuard {
-        state: state.clone(),
-        handle,
-    };
+    }
+    state.metrics.total_clients.fetch_add(1, Ordering::Relaxed);
 
-    let stdout = child.stdout.take().expect("ffmpeg stdout is piped");
-    let stderr = child.stderr.take().expect("ffmpeg stderr is piped");
-    let progress_metrics = state.metrics.clone();
-    tokio::spawn(async move {
-        parse_progress(BufReader::new(stderr), progress_metrics).await;
-    });
+    let (mut receiver, needs_encoder) = state.broadcaster.subscribe();
+    if needs_encoder {
+        let generation = state
+            .next_encoder_generation
+            .fetch_add(1, Ordering::Relaxed);
+        state.broadcaster.begin_encoder(generation);
+        let encoder_state = state.clone();
+        tokio::spawn(async move {
+            run_encoder(encoder_state, generation).await;
+        });
+    }
 
-    let stream_metrics = state.metrics.clone();
     let body_stream = async_stream! {
-        let _guard = guard;
-        let mut chunks = ReaderStream::new(stdout);
-        loop {
-            tokio::select! {
-                chunk = chunks.next() => {
-                    match chunk {
-                        Some(Ok(chunk)) => {
-                            stream_metrics.bytes_served.fetch_add(chunk.len() as u64, Ordering::Relaxed);
-                            progress.store(progress_state.now_ms(), Ordering::Relaxed);
-                            yield Ok::<_, std::io::Error>(chunk);
-                        }
-                        Some(Err(error)) => {
-                            yield Err(error);
-                            break;
-                        }
-                        None => break,
-                    }
-                }
-                // The screen was resized: this encoder captures at the old
-                // size, so stop it and let the viewer reconnect.
-                _ = generation.changed() => {
-                    let _ = child.start_kill();
-                    break;
-                }
-            }
+        while let Some(chunk) = receiver.recv().await {
+            yield Ok::<_, std::io::Error>(chunk);
         }
-        let _ = child.wait().await;
     };
 
     let mut response = Response::new(Body::from_stream(body_stream));
@@ -1585,6 +1618,245 @@ async fn stream(State(state): State<AppState>) -> Response {
         HeaderValue::from_static("nosniff"),
     );
     response
+}
+
+/// Runs one shared encoder until it exits, is stopped, or has had no
+/// viewers for the grace period, splitting its output into an init segment
+/// and keyframe-aligned fragments for the broadcaster.
+async fn run_encoder(state: AppState, generation: u64) {
+    let mut command = Command::new(&state.config.ffmpeg);
+    command
+        .args(state.config.ffmpeg_args(state.screen()))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            eprintln!("failed to start ffmpeg: {error}");
+            state.broadcaster.end_encoder(generation);
+            return;
+        }
+    };
+    if let Some(pid) = child.id() {
+        state.broadcaster.set_encoder_pid(generation, pid);
+    }
+
+    let stdout = child.stdout.take().expect("ffmpeg stdout is piped");
+    let stderr = child.stderr.take().expect("ffmpeg stderr is piped");
+    let progress_metrics = state.metrics.clone();
+    tokio::spawn(async move {
+        parse_progress(BufReader::new(stderr), progress_metrics).await;
+    });
+
+    let mut chunks = ReaderStream::new(stdout);
+    let mut parser = FragmentParser::default();
+    while let Some(Ok(chunk)) = chunks.next().await {
+        for event in parser.push(&chunk) {
+            match event {
+                FragmentEvent::Init(init) => state.broadcaster.deliver_init(init),
+                FragmentEvent::Fragment { data, keyframe } => {
+                    state
+                        .broadcaster
+                        .deliver_fragment(data, keyframe, &state.metrics.bytes_served);
+                }
+            }
+        }
+        if state.broadcaster.idle_expired() {
+            break;
+        }
+    }
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+    state.broadcaster.end_encoder(generation);
+}
+
+enum FragmentEvent {
+    Init(Bytes),
+    Fragment { data: Bytes, keyframe: bool },
+}
+
+/// Splits a fragmented-MP4 byte stream into the init segment (everything up
+/// to and including `moov`) and `moof`+`mdat` fragments.
+#[derive(Default)]
+struct FragmentParser {
+    buffer: BytesMut,
+    init: Vec<u8>,
+    init_done: bool,
+    pending_moof: Option<Bytes>,
+}
+
+impl FragmentParser {
+    fn push(&mut self, chunk: &[u8]) -> Vec<FragmentEvent> {
+        self.buffer.extend_from_slice(chunk);
+        let mut events = Vec::new();
+        loop {
+            let Some((box_type, size)) = peek_box(&self.buffer) else {
+                break;
+            };
+            if self.buffer.len() < size {
+                break;
+            }
+            let data = self.buffer.split_to(size).freeze();
+            match &box_type {
+                b"moof" => self.pending_moof = Some(data),
+                b"mdat" => {
+                    if let Some(moof) = self.pending_moof.take() {
+                        let keyframe = moof_starts_with_keyframe(&moof);
+                        let mut fragment = BytesMut::with_capacity(moof.len() + data.len());
+                        fragment.extend_from_slice(&moof);
+                        fragment.extend_from_slice(&data);
+                        events.push(FragmentEvent::Fragment {
+                            data: fragment.freeze(),
+                            keyframe,
+                        });
+                    }
+                }
+                _ if !self.init_done => {
+                    self.init.extend_from_slice(&data);
+                    if &box_type == b"moov" {
+                        self.init_done = true;
+                        events.push(FragmentEvent::Init(Bytes::from(std::mem::take(
+                            &mut self.init,
+                        ))));
+                    }
+                }
+                _ => {}
+            }
+        }
+        events
+    }
+}
+
+/// Reads an MP4 box header: (type, total size). Handles 64-bit sizes.
+fn peek_box(buffer: &[u8]) -> Option<([u8; 4], usize)> {
+    if buffer.len() < 8 {
+        return None;
+    }
+    let size32 = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
+    let box_type = [buffer[4], buffer[5], buffer[6], buffer[7]];
+    let size = match size32 {
+        1 => {
+            if buffer.len() < 16 {
+                return None;
+            }
+            u64::from_be_bytes([
+                buffer[8], buffer[9], buffer[10], buffer[11], buffer[12], buffer[13], buffer[14],
+                buffer[15],
+            ]) as usize
+        }
+        // Size 0 means "to end of file", which a live stream never produces.
+        0 => return None,
+        size => size as usize,
+    };
+    if size < 8 {
+        return None;
+    }
+    Some((box_type, size))
+}
+
+/// Iterates the child boxes of a container box body.
+fn child_boxes(body: &[u8]) -> impl Iterator<Item = ([u8; 4], &[u8])> {
+    let mut offset = 0;
+    std::iter::from_fn(move || {
+        let (box_type, size) = peek_box(&body[offset..])?;
+        if offset + size > body.len() {
+            return None;
+        }
+        let header = if body[offset..offset + 4] == [0, 0, 0, 1] {
+            16
+        } else {
+            8
+        };
+        let child = &body[offset + header..offset + size];
+        offset += size;
+        Some((box_type, child))
+    })
+}
+
+const SAMPLE_IS_NON_SYNC: u32 = 0x0001_0000;
+
+/// Whether the first sample of a `moof` is a sync sample, from the `trun`
+/// first-sample or per-sample flags, else the `tfhd` default flags.
+fn moof_starts_with_keyframe(moof: &[u8]) -> bool {
+    // `moof` is a container: its body follows the 8-byte header.
+    let Some(body) = moof.get(8..) else {
+        return false;
+    };
+    for (box_type, traf) in child_boxes(body) {
+        if &box_type != b"traf" {
+            continue;
+        }
+        let mut default_flags = None;
+        let mut first_flags = None;
+        for (child_type, child) in child_boxes(traf) {
+            match &child_type {
+                b"tfhd" if child.len() >= 8 => {
+                    let flags = u32::from_be_bytes([0, child[1], child[2], child[3]]);
+                    let mut offset = 8;
+                    if flags & 0x1 != 0 {
+                        offset += 8;
+                    }
+                    if flags & 0x2 != 0 {
+                        offset += 4;
+                    }
+                    if flags & 0x8 != 0 {
+                        offset += 4;
+                    }
+                    if flags & 0x10 != 0 {
+                        offset += 4;
+                    }
+                    if flags & 0x20 != 0 && child.len() >= offset + 4 {
+                        default_flags = Some(u32::from_be_bytes([
+                            child[offset],
+                            child[offset + 1],
+                            child[offset + 2],
+                            child[offset + 3],
+                        ]));
+                    }
+                }
+                b"trun" if child.len() >= 8 => {
+                    let flags = u32::from_be_bytes([0, child[1], child[2], child[3]]);
+                    let sample_count = u32::from_be_bytes([child[4], child[5], child[6], child[7]]);
+                    let mut offset = 8;
+                    if flags & 0x1 != 0 {
+                        offset += 4;
+                    }
+                    if flags & 0x4 != 0 && child.len() >= offset + 4 {
+                        first_flags = Some(u32::from_be_bytes([
+                            child[offset],
+                            child[offset + 1],
+                            child[offset + 2],
+                            child[offset + 3],
+                        ]));
+                        offset += 4;
+                    }
+                    if first_flags.is_none() && flags & 0x400 != 0 && sample_count > 0 {
+                        // Per-sample fields: duration, size, flags, cts.
+                        if flags & 0x100 != 0 {
+                            offset += 4;
+                        }
+                        if flags & 0x200 != 0 {
+                            offset += 4;
+                        }
+                        if child.len() >= offset + 4 {
+                            first_flags = Some(u32::from_be_bytes([
+                                child[offset],
+                                child[offset + 1],
+                                child[offset + 2],
+                                child[offset + 3],
+                            ]));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let flags = first_flags.or(default_flags);
+        return flags.is_some_and(|flags| flags & SAMPLE_IS_NON_SYNC == 0);
+    }
+    false
 }
 
 async fn parse_progress<R>(reader: BufReader<R>, metrics: Arc<Metrics>)
@@ -1822,6 +2094,85 @@ mod tests {
         );
         headers.insert(header::ORIGIN, "https://app.roomote.test".parse().unwrap());
         assert!(has_allowed_origin(&headers, None));
+    }
+
+    fn mp4_box(box_type: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut out = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+        out.extend_from_slice(box_type);
+        out.extend_from_slice(body);
+        out
+    }
+
+    /// A `moof` whose `trun` carries first-sample flags.
+    fn moof_with_first_sample_flags(flags: u32) -> Vec<u8> {
+        let mut trun = vec![0, 0, 0, 0x05]; // version 0, data-offset + first-sample-flags
+        trun.extend_from_slice(&1_u32.to_be_bytes()); // sample_count
+        trun.extend_from_slice(&0_u32.to_be_bytes()); // data_offset
+        trun.extend_from_slice(&flags.to_be_bytes());
+        let tfhd = [0, 0, 0, 0, 0, 0, 0, 1]; // version 0, no optional fields, track 1
+        let traf = [mp4_box(b"tfhd", &tfhd), mp4_box(b"trun", &trun)].concat();
+        let mfhd = [0, 0, 0, 0, 0, 0, 0, 1];
+        mp4_box(
+            b"moof",
+            &[mp4_box(b"mfhd", &mfhd), mp4_box(b"traf", &traf)].concat(),
+        )
+    }
+
+    #[test]
+    fn fragment_parser_splits_init_segment_and_keyframe_aligned_fragments() {
+        let ftyp = mp4_box(b"ftyp", b"isom");
+        let moov = mp4_box(b"moov", b"xx");
+        let key_moof = moof_with_first_sample_flags(0x0200_0000);
+        let delta_moof = moof_with_first_sample_flags(0x0101_0000);
+        let mdat = mp4_box(b"mdat", b"payload");
+        let stream = [
+            ftyp.clone(),
+            moov.clone(),
+            key_moof.clone(),
+            mdat.clone(),
+            delta_moof.clone(),
+            mdat.clone(),
+        ]
+        .concat();
+
+        // Feed in awkward chunk sizes to exercise buffering across boundaries.
+        let mut parser = FragmentParser::default();
+        let mut events = Vec::new();
+        for chunk in stream.chunks(7) {
+            events.extend(parser.push(chunk));
+        }
+
+        assert_eq!(events.len(), 3);
+        match &events[0] {
+            FragmentEvent::Init(init) => assert_eq!(&init[..], [ftyp, moov].concat()),
+            FragmentEvent::Fragment { .. } => panic!("init expected first"),
+        }
+        match &events[1] {
+            FragmentEvent::Fragment { data, keyframe } => {
+                assert!(keyframe);
+                assert_eq!(&data[..], [key_moof, mdat.clone()].concat());
+            }
+            FragmentEvent::Init(_) => panic!("fragment expected"),
+        }
+        match &events[2] {
+            FragmentEvent::Fragment { keyframe, .. } => assert!(!keyframe),
+            FragmentEvent::Init(_) => panic!("fragment expected"),
+        }
+    }
+
+    #[test]
+    fn keyframe_detection_falls_back_to_tfhd_default_flags() {
+        let tfhd = [
+            [0, 0, 0, 0x20].as_slice(), // default-sample-flags present
+            &1_u32.to_be_bytes(),
+            &0x0101_0000_u32.to_be_bytes(), // non-sync
+        ]
+        .concat();
+        let mut trun = vec![0, 0, 0, 0]; // no optional fields
+        trun.extend_from_slice(&1_u32.to_be_bytes());
+        let traf = [mp4_box(b"tfhd", &tfhd), mp4_box(b"trun", &trun)].concat();
+        let moof = mp4_box(b"moof", &mp4_box(b"traf", &traf));
+        assert!(!moof_starts_with_keyframe(&moof));
     }
 
     #[test]

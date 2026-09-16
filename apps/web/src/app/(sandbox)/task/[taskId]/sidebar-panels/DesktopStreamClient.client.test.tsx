@@ -592,13 +592,16 @@ describe('DesktopStreamClient', () => {
         standalone
       />,
     );
-    await screen.findByRole('button', { name: 'Start remote desktop' });
-    expect(screen.getByRole('button', { name: 'Take control' })).toBeVisible();
     expect(
       screen.getByRole('button', { name: 'Show stream statistics' }),
     ).toBeVisible();
     expect(
       screen.queryByRole('button', { name: 'Pop out Shared Desktop' }),
     ).toBeNull();
+    // The pop-out starts on its own so it can take over control from the
+    // panel that opened it without another click.
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    act(() => FakeWebSocket.instances[0]!.open());
+    await screen.findByRole('button', { name: 'Release control' });
   });
 });

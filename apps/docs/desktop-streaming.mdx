@@ -38,10 +38,11 @@ panel reconnects on its own. `ROOMOTE_DESKTOP_STREAM_WIDTH` and
 `ROOMOTE_DESKTOP_STREAM_HEIGHT` set the initial size before a viewer connects.
 The default target is 60 fps and 6 Mbps; tune `ROOMOTE_DESKTOP_STREAM_FPS` and
 `ROOMOTE_DESKTOP_STREAM_VIDEO_BITRATE_KBPS` for the workload and available CPU.
-Each viewer gets a dedicated encoder. The default two-viewer limit bounds CPU
-use: at the limit, a new viewer replaces viewers whose tab stopped reading the
-stream and is otherwise told the desktop is full, so a stale tab can never
-lock the desktop and live viewers are never interrupted.
+All viewers share one encoder: the service encodes the screen once and fans
+the same stream out to every viewer, so extra viewers cost bandwidth rather
+than sandbox CPU. There is no viewer limit by default
+(`ROOMOTE_DESKTOP_STREAM_MAX_CLIENTS` can set one). A viewer whose tab stops
+reading the stream is dropped rather than allowed to stall the encoder.
 
 The header's pop-out button opens the desktop in its own window and hands
 input control to it; the panel can take control back at any time.
