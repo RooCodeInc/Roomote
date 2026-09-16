@@ -173,6 +173,20 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
     throw new Error('Refusing to seed demo data in production.');
   }
 
+  const reservedFastSession = await db.query.sessions.findFirst({
+    where: eq(sessions.id, demoSeedFastSession.sessionId),
+  });
+
+  if (
+    reservedFastSession &&
+    reservedFastSession.fastConversationId !==
+      demoSeedFastSession.conversationId
+  ) {
+    throw new Error(
+      `Cannot seed demo data: reserved Fast Session ID ${demoSeedFastSession.sessionId} is already used by an unrelated Session.`,
+    );
+  }
+
   const summary: DemoSeedSummary = { created: [], skipped: [] };
 
   const record = (label: string, created: boolean) => {
