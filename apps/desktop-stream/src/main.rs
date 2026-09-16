@@ -165,7 +165,7 @@ impl Config {
         let fps = parse_env("ROOMOTE_DESKTOP_STREAM_FPS", 60_u16)?;
         let video_bitrate_kbps = parse_env("ROOMOTE_DESKTOP_STREAM_VIDEO_BITRATE_KBPS", 6_000_u32)?;
         let audio_bitrate_kbps = parse_env("ROOMOTE_DESKTOP_STREAM_AUDIO_BITRATE_KBPS", 128_u16)?;
-        let max_clients = parse_env("ROOMOTE_DESKTOP_STREAM_MAX_CLIENTS", 1_usize)?;
+        let max_clients = parse_env("ROOMOTE_DESKTOP_STREAM_MAX_CLIENTS", 2_usize)?;
 
         if width == 0
             || height == 0
@@ -393,11 +393,18 @@ impl InputLatency {
 /// A running per-viewer encoder. Tracked out of band so it can be killed
 /// even when its viewer has stopped reading the response, which otherwise
 /// blocks the encoder on a full pipe and pins the viewer slot forever.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct EncoderHandle {
     id: u64,
     pid: u32,
+    /// Milliseconds since service start when the viewer last consumed data.
+    /// A viewer that stops reading leaves ffmpeg blocked on a full pipe; such
+    /// encoders are the first to be evicted for a new viewer.
+    last_progress_ms: Arc<AtomicU64>,
 }
+
+/// A viewer that has not consumed any stream data for this long is stalled.
+const STALLED_VIEWER_MS: u64 = 3_000;
 
 #[derive(Clone)]
 struct AppState {
@@ -423,33 +430,52 @@ impl AppState {
         *self.screen.read().unwrap()
     }
 
-    /// Registers an encoder, evicting the oldest ones when the viewer limit
-    /// is reached so a new viewer always replaces a stale one.
-    fn register_encoder(&self, pid: u32) -> EncoderHandle {
+    fn now_ms(&self) -> u64 {
+        self.started_at.elapsed().as_millis() as u64
+    }
+
+    /// Registers an encoder. When the viewer limit is reached, stalled
+    /// viewers (ones no longer reading their stream) are evicted first so an
+    /// abandoned tab can never pin the desktop. Healthy viewers are never
+    /// evicted: two live viewers reloading into each other would otherwise
+    /// fight forever, so the newcomer is refused instead.
+    fn register_encoder(&self, pid: u32) -> Result<EncoderHandle, ()> {
+        let now = self.now_ms();
         let handle = EncoderHandle {
             id: self.next_encoder_id.fetch_add(1, Ordering::Relaxed),
             pid,
+            last_progress_ms: Arc::new(AtomicU64::new(now)),
         };
         let evicted = {
             let mut encoders = self.encoders.lock().unwrap();
+            let limit = self.config.max_clients.max(1);
             let mut evicted = Vec::new();
-            while encoders.len() >= self.config.max_clients.max(1) {
-                evicted.push(encoders.remove(0));
+            if encoders.len() >= limit {
+                let (stalled, healthy): (Vec<_>, Vec<_>) =
+                    encoders.drain(..).partition(|encoder| {
+                        now.saturating_sub(encoder.last_progress_ms.load(Ordering::Relaxed))
+                            > STALLED_VIEWER_MS
+                    });
+                *encoders = healthy;
+                evicted = stalled;
             }
-            encoders.push(handle);
+            if encoders.len() >= limit {
+                return Err(());
+            }
+            encoders.push(handle.clone());
             evicted
         };
         for encoder in evicted {
             kill_encoder(encoder);
         }
-        handle
+        Ok(handle)
     }
 
-    fn unregister_encoder(&self, handle: EncoderHandle) {
+    fn unregister_encoder(&self, id: u64) {
         self.encoders
             .lock()
             .unwrap()
-            .retain(|encoder| encoder.id != handle.id);
+            .retain(|encoder| encoder.id != id);
     }
 
     /// Kills every running encoder, for example after a screen resize, so
@@ -1080,7 +1106,7 @@ struct ClientGuard {
 
 impl Drop for ClientGuard {
     fn drop(&mut self) {
-        self.state.unregister_encoder(self.handle);
+        self.state.unregister_encoder(self.handle.id);
     }
 }
 
@@ -1326,9 +1352,13 @@ async fn control_socket(
                         event: ControlEvent::Resize { width, height },
                         ..
                     }) => {
-                        let payload = match resize_screen(&state, &mut controller, width, height) {
-                            Ok(size) => serde_json::json!({ "resized": size }).to_string(),
-                            Err(error) => serde_json::json!({ "error": error }).to_string(),
+                        let payload = if *superseded.borrow() != generation {
+                            serde_json::json!({ "error": "another viewer took control of the desktop" }).to_string()
+                        } else {
+                            match resize_screen(&state, &mut controller, width, height) {
+                                Ok(size) => serde_json::json!({ "resized": size }).to_string(),
+                                Err(error) => serde_json::json!({ "error": error }).to_string(),
+                            }
                         };
                         let _ = socket.send(Message::Text(payload.into())).await;
                     }
@@ -1488,11 +1518,20 @@ async fn stream(State(state): State<AppState>) -> Response {
         )
             .into_response();
     };
-    // Registering may evict an older viewer's encoder: the newest viewer
-    // always wins the slot instead of being refused.
+    // Registering evicts stalled viewers; healthy ones keep their slot.
+    let Ok(handle) = state.register_encoder(pid) else {
+        let _ = child.start_kill();
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            "desktop stream is already being watched by the maximum number of viewers",
+        )
+            .into_response();
+    };
+    let progress = handle.last_progress_ms.clone();
+    let progress_state = state.clone();
     let guard = ClientGuard {
         state: state.clone(),
-        handle: state.register_encoder(pid),
+        handle,
     };
 
     let stdout = child.stdout.take().expect("ffmpeg stdout is piped");
@@ -1512,6 +1551,7 @@ async fn stream(State(state): State<AppState>) -> Response {
                     match chunk {
                         Some(Ok(chunk)) => {
                             stream_metrics.bytes_served.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+                            progress.store(progress_state.now_ms(), Ordering::Relaxed);
                             yield Ok::<_, std::io::Error>(chunk);
                         }
                         Some(Err(error)) => {

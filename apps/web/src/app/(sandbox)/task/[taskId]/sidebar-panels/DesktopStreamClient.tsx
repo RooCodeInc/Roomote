@@ -82,7 +82,7 @@ function describeMediaError(
     case MEDIA_ERR_DECODE:
       return 'Remote desktop stream could not be decoded';
     case MEDIA_ERR_SRC_NOT_SUPPORTED:
-      return 'Remote desktop stream is unavailable';
+      return 'Remote desktop stream is unavailable or already being watched by the maximum number of viewers';
     default:
       return 'Remote desktop playback failed';
   }
@@ -213,9 +213,15 @@ export function DesktopStreamClient({
   const [controlState, setControlState] = useState<ControlState>('off');
   /** True after the viewer explicitly released control: no auto-reconnect. */
   const releasedRef = useRef(false);
-  const reconnectTimerRef = useRef<number | null>(null);
+  const controlReconnectTimerRef = useRef<number | null>(null);
+  const streamRetryTimerRef = useRef<number | null>(null);
   const recoveryAttemptsRef = useRef(0);
+  const streamRetriesRef = useRef(0);
   const unmountedRef = useRef(false);
+  /** Mirrors controlState === 'on' for handlers that run outside render. */
+  const controlOnRef = useRef(false);
+  /** Pending visibility-change retry, removed on unmount. */
+  const visibilityRetryRef = useRef<(() => void) | null>(null);
   const [renderedFps, setRenderedFps] = useState<number | null>(null);
   const [startupMs, setStartupMs] = useState<number | null>(null);
   const [decodedBitrateKbps, setDecodedBitrateKbps] = useState<number | null>(
@@ -295,16 +301,34 @@ export function DesktopStreamClient({
   };
 
   /** Tear down a stream that failed before or after playback began. */
-  const clearReconnectTimer = () => {
-    if (reconnectTimerRef.current !== null) {
-      window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
+  const clearControlReconnectTimer = () => {
+    if (controlReconnectTimerRef.current !== null) {
+      window.clearTimeout(controlReconnectTimerRef.current);
+      controlReconnectTimerRef.current = null;
+    }
+  };
+
+  const clearStreamRetryTimer = () => {
+    if (streamRetryTimerRef.current !== null) {
+      window.clearTimeout(streamRetryTimerRef.current);
+      streamRetryTimerRef.current = null;
+    }
+  };
+
+  const clearVisibilityRetry = () => {
+    if (visibilityRetryRef.current) {
+      document.removeEventListener(
+        'visibilitychange',
+        visibilityRetryRef.current,
+      );
+      visibilityRetryRef.current = null;
     }
   };
 
   const failStream = (message: string) => {
     clearStartTimeout();
-    clearReconnectTimer();
+    clearStreamRetryTimer();
+    clearVisibilityRetry();
     pendingInitialPlayRef.current = false;
     restartPendingRef.current = false;
     releaseAll();
@@ -419,8 +443,17 @@ export function DesktopStreamClient({
     const video = videoRef.current;
     return () => {
       unmountedRef.current = true;
-      if (reconnectTimerRef.current !== null) {
-        window.clearTimeout(reconnectTimerRef.current);
+      if (controlReconnectTimerRef.current !== null) {
+        window.clearTimeout(controlReconnectTimerRef.current);
+      }
+      if (streamRetryTimerRef.current !== null) {
+        window.clearTimeout(streamRetryTimerRef.current);
+      }
+      if (visibilityRetryRef.current) {
+        document.removeEventListener(
+          'visibilitychange',
+          visibilityRetryRef.current,
+        );
       }
       pendingPointerRef.current = null;
       const socket = socketRef.current;
@@ -454,7 +487,11 @@ export function DesktopStreamClient({
   const sendPanelSize = (): boolean => {
     const container = videoRef.current?.parentElement;
     const socket = socketRef.current;
-    if (!container || socket?.readyState !== WebSocket.OPEN) {
+    if (
+      !container ||
+      !controlOnRef.current ||
+      socket?.readyState !== WebSocket.OPEN
+    ) {
       return false;
     }
     const rect = container.getBoundingClientRect();
@@ -501,9 +538,10 @@ export function DesktopStreamClient({
           // Do not let the startup timeout fail a deliberately deferred
           // stream; re-arm it once playback is attempted again.
           clearStartTimeout();
+          clearVisibilityRetry();
           const retry = () => {
             if (document.visibilityState === 'visible') {
-              document.removeEventListener('visibilitychange', retry);
+              clearVisibilityRetry();
               startTimeoutRef.current = window.setTimeout(() => {
                 startTimeoutRef.current = null;
                 failStream(
@@ -513,6 +551,7 @@ export function DesktopStreamClient({
               void play();
             }
           };
+          visibilityRetryRef.current = retry;
           document.addEventListener('visibilitychange', retry);
           return;
         }
@@ -568,6 +607,7 @@ export function DesktopStreamClient({
         if (message.ready) {
           setControlReady(true);
           setControlState('on');
+          controlOnRef.current = true;
           recoveryAttemptsRef.current = 0;
           videoRef.current?.focus();
           // Match the panel before the first stream starts so the encoder
@@ -615,6 +655,7 @@ export function DesktopStreamClient({
     });
     socket.addEventListener('close', () => {
       setControlReady(false);
+      controlOnRef.current = false;
       const wasCurrent = socketRef.current === socket;
       if (wasCurrent) {
         socketRef.current = null;
@@ -636,9 +677,9 @@ export function DesktopStreamClient({
         setControlState('off');
         if (recoveryAttemptsRef.current < MAX_AUTO_RECOVERIES) {
           recoveryAttemptsRef.current += 1;
-          clearReconnectTimer();
-          reconnectTimerRef.current = window.setTimeout(() => {
-            reconnectTimerRef.current = null;
+          clearControlReconnectTimer();
+          controlReconnectTimerRef.current = window.setTimeout(() => {
+            controlReconnectTimerRef.current = null;
             const url = sessionRef.current?.controlUrl;
             if (url && !releasedRef.current && !unmountedRef.current) {
               connectControl(url);
@@ -655,7 +696,7 @@ export function DesktopStreamClient({
   /** Give up input control on purpose; the stream keeps playing. */
   const releaseControl = () => {
     releasedRef.current = true;
-    clearReconnectTimer();
+    clearControlReconnectTimer();
     releaseAll();
     setControlState('released');
     socketRef.current?.close(1000, 'control released');
@@ -677,20 +718,23 @@ export function DesktopStreamClient({
    * evicted, proxy hiccup). Reload it a few times before giving up, so a
    * hiccup never strands the viewer on a Start button.
    */
-  const recoverStream = (message: string) => {
+  const recoverStream = (message: string, refused = false) => {
+    // A refused stream (the desktop is already at its viewer limit) is not
+    // a hiccup worth hammering; give it one more try, then stop.
+    const limit = refused ? 1 : MAX_AUTO_RECOVERIES;
     if (
       !isPlaying ||
       unmountedRef.current ||
-      recoveryAttemptsRef.current >= MAX_AUTO_RECOVERIES
+      streamRetriesRef.current >= limit
     ) {
       failStream(message);
       return;
     }
-    recoveryAttemptsRef.current += 1;
+    streamRetriesRef.current += 1;
     setSessionError(`${message}; reconnecting`);
-    clearReconnectTimer();
-    reconnectTimerRef.current = window.setTimeout(() => {
-      reconnectTimerRef.current = null;
+    clearStreamRetryTimer();
+    streamRetryTimerRef.current = window.setTimeout(() => {
+      streamRetryTimerRef.current = null;
       if (unmountedRef.current) {
         return;
       }
@@ -844,7 +888,11 @@ export function DesktopStreamClient({
               // stream is already loading.
               return;
             }
-            recoverStream(describeMediaError(videoRef.current?.error));
+            const mediaError = videoRef.current?.error;
+            recoverStream(
+              describeMediaError(mediaError),
+              mediaError?.code === MEDIA_ERR_SRC_NOT_SUPPORTED,
+            );
           }}
           onEnded={() => {
             recoverStream('Remote desktop stream ended');
@@ -860,6 +908,7 @@ export function DesktopStreamClient({
           }}
           onLoadedData={() => {
             restartPendingRef.current = false;
+            streamRetriesRef.current = 0;
             clearStartTimeout();
             setStartupMs(performance.now() - startedAtRef.current);
             setIsStarting(false);

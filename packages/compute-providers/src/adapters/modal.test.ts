@@ -1238,7 +1238,10 @@ describe('ModalClient', () => {
     expect(dockerfile).toContain('apps/desktop-stream');
     expect(dockerfile).toContain('/usr/local/bin/roomote-desktop-stream');
     expect(dockerfile).toContain('    ffmpeg \\');
-    expect(dockerfile).toContain('    pulseaudio \\');
+    // Xvnc supports RandR screen resizes, which Xvfb does not.
+    expect(dockerfile).toContain('    tigervnc-standalone-server \\');
+    // Audio is not streamed: a silent track would stall the browser clock.
+    expect(dockerfile).not.toContain('pulseaudio');
   });
 
   it('bakes shared runtime tooling and the OpenCode entrypoint into the worker image', () => {

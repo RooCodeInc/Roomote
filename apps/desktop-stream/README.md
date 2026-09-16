@@ -66,10 +66,12 @@ Set these variables as needed:
 - `ROOMOTE_DESKTOP_STREAM_AUDIO_MODE=pulse` to capture a PulseAudio source
 - `ROOMOTE_DESKTOP_STREAM_PULSE_SOURCE`, usually a sink monitor such as
   `roomote_stream.monitor`
-- `ROOMOTE_DESKTOP_STREAM_MAX_CLIENTS` to permit additional per-viewer encoders;
-  once the limit is reached a new viewer evicts the oldest encoder, and a new
-  control connection supersedes the previous one, so a stalled or abandoned
-  viewer never pins the desktop
+- `ROOMOTE_DESKTOP_STREAM_MAX_CLIENTS` (default 2) to bound per-viewer
+  encoders; at the limit a new viewer evicts viewers that stopped reading
+  their stream and is otherwise refused with 429, so an abandoned tab never
+  pins the desktop while live viewers are never kicked. A new control
+  connection always supersedes the previous one, and only the current
+  controller can resize the screen
 
 The control WebSocket accepts the authenticated Roomote preview-proxy marker,
 a same-origin request, or the single origin named by
