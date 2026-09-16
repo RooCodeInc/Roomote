@@ -7,8 +7,6 @@ import {
   type TaskRun,
   createComputeProviderMutationEventRecorder,
   db,
-  taskRuns,
-  eq,
 } from '@roomote/db/server';
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
@@ -27,7 +25,10 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
-import type { CredentialEgressLifecycle } from '../credential-egress';
+import {
+  prepareHostedWorkerLaunch,
+  type CredentialEgressLifecycle,
+} from '../credential-egress';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 import {
   COMPUTE_BOOTSTRAP_TIMEOUT_MS,
@@ -254,7 +255,8 @@ export async function spawnDaytonaWorker(
     );
   });
 
-  const credentialEgressPlan = await credentialEgress?.planApiProxy({
+  const launchHostedWorker = await prepareHostedWorkerLaunch({
+    credentialEgress,
     taskRun,
     provider: 'daytona',
   });
@@ -337,11 +339,8 @@ export async function spawnDaytonaWorker(
       }),
     });
 
-    const result = await computeClient.runCommand({
-      instanceId: machine.machineId,
-      cmd: 'worker',
-      args,
-      env: buildDaytonaWorkerEnv({
+    const result = await launchHostedWorker(
+      buildDaytonaWorkerEnv({
         authToken,
         sandboxExpiresAtMs: Date.now() + daytonaTimeoutMs,
         deploymentSlug,
@@ -349,44 +348,41 @@ export async function spawnDaytonaWorker(
         snapshotName: daytonaSnapshotName,
         extraEnv: {
           SANDBOX_TIMEOUT_MS: String(daytonaTimeoutMs),
-          ...credentialEgressPlan?.bootstrapEnv,
         },
       }),
-      detached: true,
-      signal: AbortSignal.timeout(60_000),
-    });
+      async (env) => {
+        const launchResult = await computeClient.runCommand({
+          instanceId: machine.machineId,
+          cmd: 'worker',
+          args,
+          env,
+          detached: true,
+          signal: AbortSignal.timeout(60_000),
+        });
 
-    if (result.exitCode !== null && result.exitCode !== 0) {
-      throw buildDetachedWorkerExitError(workerCommand, result);
-    }
+        if (launchResult.exitCode !== null && launchResult.exitCode !== 0) {
+          throw buildDetachedWorkerExitError(workerCommand, launchResult);
+        }
 
-    await recordMutation({
-      provider: 'daytona',
-      operation: 'run_command',
-      eventType: 'completed',
-      instanceId: machine.machineId,
-      message: `runCommand launched detached worker ${workerCommand} for Daytona instance ${machine.machineId}.`,
-      details: buildComputeProviderMutationDetails(mutationContext, {
-        command: 'worker',
-        args,
-        detached: true,
-        phase: 'launch_worker',
-        commandId: result.commandId ?? null,
-        exitCode: result.exitCode,
-      }),
-    });
+        await recordMutation({
+          provider: 'daytona',
+          operation: 'run_command',
+          eventType: 'completed',
+          instanceId: machine.machineId,
+          message: `runCommand launched detached worker ${workerCommand} for Daytona instance ${machine.machineId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            command: 'worker',
+            args,
+            detached: true,
+            phase: 'launch_worker',
+            commandId: launchResult.commandId ?? null,
+            exitCode: launchResult.exitCode,
+          }),
+        });
 
-    if (result.commandId) {
-      await db
-        .update(taskRuns)
-        .set({ sandboxCmdId: result.commandId })
-        .where(eq(taskRuns.id, taskRun.id));
-    }
-
-    // The worker is waiting on the bootstrap nonce after its ordinary
-    // bootstrap; an admission failure fails the spawn, as it does for Docker,
-    // rather than leaving a worker that expected substitutes without them.
-    await credentialEgressPlan?.admit();
+        return launchResult;
+      },
+    );
 
     return {
       machineId: machine.machineId,
