@@ -406,7 +406,9 @@ function listConditions(
   const cursor = decodeCursor(input.before);
   const scope = input.scope ?? 'all';
   const period = input.period ?? 'all';
-  const pullRequestNumber = Number(input.pullRequest);
+  const [pullRequestRepository, pullRequestNumberPart] =
+    input.pullRequest?.split('#') ?? [];
+  const pullRequestNumber = Number.parseInt(pullRequestNumberPart ?? '', 10);
 
   return and(
     sessionListScope(auth),
@@ -461,11 +463,14 @@ function listConditions(
       ? taskExistsCondition(eq(tasks.repositoryName, input.repository))
       : undefined,
     input.model ? taskExistsCondition(eq(tasks.model, input.model)) : undefined,
-    input.pullRequest && Number.isFinite(pullRequestNumber)
+    pullRequestRepository &&
+      Number.isFinite(pullRequestNumber) &&
+      pullRequestNumber > 0
       ? exists(
           db
             .select({ one: sql`1` })
             .from(sessionTasks)
+            .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
             .innerJoin(
               taskPullRequests,
               eq(taskPullRequests.taskId, sessionTasks.taskId),
@@ -473,6 +478,8 @@ function listConditions(
             .where(
               and(
                 eq(sessionTasks.sessionId, sessions.id),
+                isNull(tasks.deletedAt),
+                eq(taskPullRequests.repository, pullRequestRepository),
                 eq(taskPullRequests.prNumber, pullRequestNumber),
               ),
             ),

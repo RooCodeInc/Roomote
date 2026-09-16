@@ -652,6 +652,108 @@ describe('unified Session queries', () => {
     ]);
   });
 
+  it('filters Sessions by pull requests from their linked tasks', async () => {
+    const owner = await userFactory.create();
+    const matchingSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 400,
+    });
+    const otherRepositorySession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 300,
+    });
+    const deletedTaskSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 200,
+    });
+    const candidateSessions = [
+      matchingSession,
+      otherRepositorySession,
+      deletedTaskSession,
+    ];
+    const tasksBySession = await Promise.all(
+      candidateSessions.map((session) =>
+        taskFactory.create({
+          initiatorUserId: owner.id,
+          repositoryName: 'RooCodeInc/Roomote',
+          deletedAt:
+            session.id === deletedTaskSession.id ? new Date() : undefined,
+        }),
+      ),
+    );
+    const matchingPrTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      repositoryName: 'RooCodeInc/Other',
+    });
+    await db.insert(sessionTasks).values([
+      ...tasksBySession.map((task, index) => ({
+        sessionId: candidateSessions[index]!.id,
+        taskId: task.id,
+        origin: 'direct_launch' as const,
+      })),
+      {
+        sessionId: matchingSession.id,
+        taskId: matchingPrTask.id,
+        origin: 'fast_delegation',
+      },
+    ]);
+    await db.insert(taskPullRequests).values([
+      {
+        taskId: matchingPrTask.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl: 'https://github.com/RooCodeInc/Roomote/pull/123',
+        sourceControlProvider: 'github',
+      },
+      {
+        taskId: tasksBySession[1]!.id,
+        repository: 'RooCodeInc/Other',
+        prNumber: 123,
+        prUrl: 'https://github.com/RooCodeInc/Other/pull/123',
+        sourceControlProvider: 'github',
+      },
+      {
+        taskId: tasksBySession[2]!.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl: 'https://github.com/RooCodeInc/Roomote/pull/123',
+        sourceControlProvider: 'github',
+      },
+    ]);
+    const auth = { userId: owner.id, isAdmin: false };
+    const ids = candidateSessions.map((session) => session.id);
+
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: 'RooCodeInc/Roomote#123',
+      }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: matchingSession.id })],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: 'RooCodeInc/Other#123',
+      }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: otherRepositorySession.id })],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        repository: 'RooCodeInc/Roomote',
+        pullRequest: 'RooCodeInc/Roomote#123',
+      }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: matchingSession.id })],
+    });
+    expect((await getSessions(auth, { ids })).sessions).toHaveLength(3);
+  });
+
   it('lists only distinct visible sources within the list scope', async () => {
     const owner = await userFactory.create();
     const stranger = await userFactory.create();
