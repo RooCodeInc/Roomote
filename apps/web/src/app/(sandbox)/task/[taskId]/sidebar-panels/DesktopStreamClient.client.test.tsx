@@ -148,7 +148,7 @@ describe('DesktopStreamClient', () => {
     const socket = FakeWebSocket.instances[0];
     expect(socket?.url).toContain('/control');
     act(() => socket?.open());
-    await screen.findByText('Control connected');
+    await screen.findByText(/Control connected/);
 
     const video = screen.getByLabelText('Remote desktop');
     Object.defineProperties(video, {
@@ -401,7 +401,7 @@ describe('DesktopStreamClient', () => {
     fireEvent.click(start);
     const first = FakeWebSocket.instances[0]!;
     act(() => first.open());
-    await screen.findByText('Control connected');
+    await screen.findByText(/Control connected/);
 
     const video = screen.getByLabelText('Remote desktop');
     Object.defineProperties(video, {
@@ -432,6 +432,6 @@ describe('DesktopStreamClient', () => {
     });
     expect(FakeWebSocket.instances).toHaveLength(2);
     act(() => FakeWebSocket.instances[1]!.open());
-    await screen.findByText('Control connected');
+    await screen.findByText(/Control connected/);
   });
 });

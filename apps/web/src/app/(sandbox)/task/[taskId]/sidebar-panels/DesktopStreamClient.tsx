@@ -208,6 +208,7 @@ export function DesktopStreamClient({
   const [droppedFrames, setDroppedFrames] = useState(0);
   const [liveLagMs, setLiveLagMs] = useState<number | null>(null);
   const [remoteSize, setRemoteSize] = useState<RemoteSize | null>(null);
+  const [sentEvents, setSentEvents] = useState(0);
   const sentRemoteSizeRef = useRef<RemoteSize | null>(null);
   const resizeTimerRef = useRef<number | null>(null);
   /** Set while the server restarts the encoder after a resize. */
@@ -222,6 +223,7 @@ export function DesktopStreamClient({
     const socket = socketRef.current;
     if (socket?.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ ...event, sent_at_ms: Date.now() }));
+      setSentEvents((count) => count + 1);
     }
   };
 
@@ -761,7 +763,9 @@ export function DesktopStreamClient({
 
       <div className="flex min-h-10 items-center justify-between gap-3 border-t border-zinc-800 bg-zinc-900 px-3 text-xs text-zinc-400">
         <span className="min-w-0 truncate">
-          {controlReady ? 'Control connected' : 'Control disconnected'}
+          {controlReady
+            ? `Control connected · ${sentEvents} events sent`
+            : 'Control disconnected'}
           {isPlaying && sessionError ? (
             <span role="alert" className="text-destructive">
               {' · '}
