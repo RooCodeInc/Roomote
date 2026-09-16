@@ -4306,7 +4306,7 @@ export const serviceCredentials = pgTable(
       .$type<CredentialEgressMethod[]>(),
     visibility: text('visibility')
       .notNull()
-      .default('deployment')
+      .default('owner')
       .$type<import('@roomote/types').ServiceCredentialVisibility>(),
     value: encryptedText('value'),
     /** Null: kept until revoked. */
@@ -4347,7 +4347,7 @@ export const serviceCredentialApprovals = pgTable(
       .$type<CredentialEgressMethod[]>(),
     visibility: text('visibility')
       .notNull()
-      .default('deployment')
+      .default('owner')
       .$type<import('@roomote/types').ServiceCredentialVisibility>(),
     /** How long the resulting integration lives once the key is entered; null keeps it until revoked. */
     lifetimeHours: integer('lifetime_hours'),

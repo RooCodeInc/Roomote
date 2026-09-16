@@ -10451,7 +10451,7 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'deployment'"
+          "default": "'owner'"
         },
         "lifetime_hours": {
           "name": "lifetime_hours",
@@ -10644,7 +10644,7 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'deployment'"
+          "default": "'owner'"
         },
         "value": {
           "name": "value",

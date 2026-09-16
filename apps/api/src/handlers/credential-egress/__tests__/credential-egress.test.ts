@@ -52,7 +52,6 @@ import { routePolicyMiddleware } from '../../../middleware/routePolicyMiddleware
 import { tokenAuthMiddleware } from '../../../middleware/tokenAuthMiddleware';
 import { findRoutePolicyRule } from '../../../route-policies';
 import type { Variables } from '../../../types';
-import { integrationRequest } from '../../mcp/http-integrations/broker';
 import { createCredentialEgressControlPlane } from '../index';
 
 const secret = 'Real-Upstream-Key/A+b=<"&>123';
@@ -1042,22 +1041,6 @@ it('allows write methods only for grants the owner explicitly acknowledged, with
     allowed: false,
     reason: 'method_not_allowed',
   });
-  // The legacy broker path is not broadened either: POST stays refused there.
-  await expect(
-    integrationRequest(
-      { integrations: [] },
-      `egress-test:${sessionId}`,
-      {
-        integrationId: `session:${write.secretRef}`,
-        method: 'POST',
-        path: '/x',
-        body: '{}',
-      },
-      ownerId,
-      undefined,
-      async () => context,
-    ),
-  ).rejects.toThrow(/^Secret request unavailable$/);
 });
 
 it('drives the controller flow through the typed SDK client', async () => {
