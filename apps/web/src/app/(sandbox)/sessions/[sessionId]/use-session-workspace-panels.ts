@@ -25,6 +25,7 @@ export type TaskArtifactSelection = { path: string; version?: number };
 export type SessionWorkspacePanelState = {
   utilityPanel: UtilityWorkspacePanel | null;
   taskPanelIds: string[];
+  explicitTaskPanelIds: string[];
   taskArtifacts: Record<string, TaskArtifactSelection>;
   promptFocusTaskId: string | null;
 };
@@ -121,6 +122,7 @@ export function createSessionWorkspacePanelState({
       ? { kind: 'artifacts', artifact: null }
       : null,
     taskPanelIds: [],
+    explicitTaskPanelIds: [],
     taskArtifacts: {},
     promptFocusTaskId: selectedTaskId,
   };
@@ -170,32 +172,47 @@ export function sessionWorkspacePanelReducer(
       };
     }
     case 'promote-running-tasks': {
-      const visibleTaskPanelIds = getOrderedSessionTaskPanelIds(
-        state,
-        action.selectedTaskId,
-      ).slice(0, action.capacity);
-      const shouldPromote = action.transitionedTaskIds.some(
-        (taskId) =>
-          taskId !== action.selectedTaskId &&
-          state.taskPanelIds.includes(taskId) &&
-          !visibleTaskPanelIds.includes(taskId),
-      );
-      if (!shouldPromote) return state;
-
       const runningTaskIdSet = new Set(action.runningTaskIds);
-      return {
-        ...state,
-        taskPanelIds: [
-          ...action.runningTaskIds.filter(
-            (taskId) =>
-              taskId !== action.selectedTaskId &&
-              state.taskPanelIds.includes(taskId),
-          ),
-          ...state.taskPanelIds.filter(
-            (taskId) => !runningTaskIdSet.has(taskId),
-          ),
-        ],
-      };
+      const explicitTaskPanelIdSet = new Set(state.explicitTaskPanelIds);
+      const visibleSlotCount = Math.max(
+        0,
+        action.capacity - (action.selectedTaskId ? 1 : 0),
+      );
+      const taskPanelIds = [...state.taskPanelIds];
+      let changed = false;
+
+      for (const taskId of action.transitionedTaskIds) {
+        const taskIndex = taskPanelIds.indexOf(taskId);
+        if (
+          taskId === action.selectedTaskId ||
+          taskIndex < visibleSlotCount ||
+          explicitTaskPanelIdSet.has(taskId)
+        ) {
+          continue;
+        }
+
+        let replacementIndex = -1;
+        for (let index = visibleSlotCount - 1; index >= 0; index -= 1) {
+          const visibleTaskId = taskPanelIds[index];
+          if (
+            visibleTaskId &&
+            !runningTaskIdSet.has(visibleTaskId) &&
+            !explicitTaskPanelIdSet.has(visibleTaskId)
+          ) {
+            replacementIndex = index;
+            break;
+          }
+        }
+        if (replacementIndex < 0) continue;
+
+        taskPanelIds.splice(taskIndex, 1);
+        const replacedTaskId = taskPanelIds[replacementIndex]!;
+        taskPanelIds[replacementIndex] = taskId;
+        taskPanelIds.splice(visibleSlotCount, 0, replacedTaskId);
+        changed = true;
+      }
+
+      return changed ? { ...state, taskPanelIds } : state;
     }
     case 'open-task': {
       const taskArtifacts = withoutTaskArtifact(
@@ -209,6 +226,9 @@ export function sessionWorkspacePanelReducer(
         return {
           ...state,
           utilityPanel: null,
+          explicitTaskPanelIds: [
+            ...new Set([...state.explicitTaskPanelIds, action.taskId]),
+          ],
           taskArtifacts,
           promptFocusTaskId: action.taskId,
         };
@@ -231,6 +251,9 @@ export function sessionWorkspacePanelReducer(
         ...state,
         utilityPanel: null,
         taskPanelIds,
+        explicitTaskPanelIds: [
+          ...new Set([...state.explicitTaskPanelIds, action.taskId]),
+        ],
         taskArtifacts,
         promptFocusTaskId: action.taskId,
       };
@@ -244,12 +267,14 @@ export function sessionWorkspacePanelReducer(
         taskPanelIds: action.taskIds.filter(
           (taskId) => taskId !== action.selectedTaskId,
         ),
+        explicitTaskPanelIds: [...action.taskIds],
         taskArtifacts: {},
       };
     case 'show-main':
       return {
         utilityPanel: null,
         taskPanelIds: [],
+        explicitTaskPanelIds: [],
         taskArtifacts: {},
         promptFocusTaskId: null,
       };
@@ -298,6 +323,9 @@ export function sessionWorkspacePanelReducer(
           action.taskId === action.selectedTaskId
             ? state.taskPanelIds
             : state.taskPanelIds.filter((taskId) => taskId !== action.taskId),
+        explicitTaskPanelIds: state.explicitTaskPanelIds.filter(
+          (taskId) => taskId !== action.taskId,
+        ),
         taskArtifacts: withoutTaskArtifact(state.taskArtifacts, action.taskId),
       };
     case 'select-panel-task': {
@@ -307,6 +335,13 @@ export function sessionWorkspacePanelReducer(
         action.currentTaskId,
         action.nextTaskId,
       ]);
+      const explicitTaskPanelIds = [
+        ...new Set([
+          ...state.explicitTaskPanelIds,
+          action.currentTaskId,
+          action.nextTaskId,
+        ]),
+      ];
       if (action.currentTaskId === action.selectedTaskId) {
         const nextIndex = state.taskPanelIds.indexOf(action.nextTaskId);
         if (nextIndex < 0) return { ...state, taskArtifacts };
@@ -315,6 +350,7 @@ export function sessionWorkspacePanelReducer(
           taskPanelIds: state.taskPanelIds.map((taskId, index) =>
             index === nextIndex ? action.currentTaskId : taskId,
           ),
+          explicitTaskPanelIds,
           taskArtifacts,
         };
       }
@@ -324,6 +360,7 @@ export function sessionWorkspacePanelReducer(
           taskPanelIds: state.taskPanelIds.map((taskId) =>
             taskId === action.currentTaskId ? action.selectedTaskId! : taskId,
           ),
+          explicitTaskPanelIds,
           taskArtifacts,
         };
       }
@@ -334,7 +371,12 @@ export function sessionWorkspacePanelReducer(
       const taskPanelIds = [...state.taskPanelIds];
       taskPanelIds[currentIndex] = action.nextTaskId;
       if (nextIndex >= 0) taskPanelIds[nextIndex] = action.currentTaskId;
-      return { ...state, taskPanelIds, taskArtifacts };
+      return {
+        ...state,
+        taskPanelIds,
+        explicitTaskPanelIds,
+        taskArtifacts,
+      };
     }
     case 'focus-complete':
       return state.promptFocusTaskId === action.taskId

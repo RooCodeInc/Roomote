@@ -983,6 +983,86 @@ describe('SessionWorkspace', () => {
     expect(screen.queryByLabelText('Full task task-1')).toBeNull();
   });
 
+  it('preserves manual panel selections when a hidden task begins running', async () => {
+    const existingRunningTask = {
+      ...secondTask,
+      latestRun: {
+        id: 2,
+        status: RunStatus.Running,
+        taskPhase: 'running',
+        error: null,
+        result: null,
+      },
+    };
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Third task',
+    };
+    const manuallySelectedTask = {
+      ...singleTask,
+      taskId: 'task-4',
+      title: 'Manually selected task',
+    };
+    const hiddenTask = {
+      ...singleTask,
+      taskId: 'task-5',
+      title: 'Hidden task',
+    };
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1920,
+      sessionOverride: {
+        tasks: [
+          singleTask,
+          existingRunningTask,
+          thirdTask,
+          manuallySelectedTask,
+          hiddenTask,
+        ],
+      },
+    });
+
+    expect(await screen.findByLabelText('Full task task-3')).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Select task-4 from task-3' }),
+    );
+    expect(screen.getByLabelText('Full task task-4')).toBeVisible();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [
+          singleTask,
+          existingRunningTask,
+          thirdTask,
+          manuallySelectedTask,
+          {
+            ...hiddenTask,
+            latestRun: {
+              id: 5,
+              status: RunStatus.Running,
+              taskPhase: 'running',
+              error: null,
+              result: null,
+            },
+          },
+        ],
+      });
+    });
+
+    const existingRunningPanel = screen.getByLabelText('Full task task-2');
+    const promotedRunningPanel =
+      await screen.findByLabelText('Full task task-5');
+    const manualPanel = screen.getByLabelText('Full task task-4');
+    expect(
+      existingRunningPanel.compareDocumentPosition(promotedRunningPanel),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(promotedRunningPanel.compareDocumentPosition(manualPanel)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
+  });
+
   it('keeps closed task panels dismissed after navigating away and back', async () => {
     const { navigateAwayAndBack } = renderWorkspace({
       isMobile: false,
