@@ -22,6 +22,7 @@ const paramsSchema = z.object({ sessionId: z.string().uuid() });
 const bodySchema = z.object({
   clientId: z.string().uuid(),
   channel: z.enum(['view', 'voice']).default('view'),
+  generation: z.number().int().nonnegative().optional(),
 });
 
 async function authorizePresenceRequest(
@@ -90,16 +91,22 @@ export async function POST(
   if (!body.success) {
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   }
+  if (body.data.channel === 'voice' && body.data.generation === undefined) {
+    return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+  }
 
-  const refresh =
-    body.data.channel === 'voice'
-      ? refreshSessionVoiceCall
-      : refreshSessionPresence;
-  const lease = await refresh({
+  const identity = {
     sessionId: context.sessionId,
     userId: context.auth.userId,
     clientId: body.data.clientId,
-  });
+  };
+  const lease =
+    body.data.channel === 'voice'
+      ? await refreshSessionVoiceCall({
+          ...identity,
+          generation: body.data.generation!,
+        })
+      : await refreshSessionPresence(identity);
   return NextResponse.json(lease);
 }
 
@@ -113,15 +120,22 @@ export async function DELETE(
   if (!body.success) {
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   }
+  if (body.data.channel === 'voice' && body.data.generation === undefined) {
+    return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+  }
 
-  const disconnect =
-    body.data.channel === 'voice'
-      ? disconnectSessionVoiceCall
-      : disconnectSessionPresence;
-  await disconnect({
+  const identity = {
     sessionId: context.sessionId,
     userId: context.auth.userId,
     clientId: body.data.clientId,
-  });
+  };
+  if (body.data.channel === 'voice') {
+    await disconnectSessionVoiceCall({
+      ...identity,
+      generation: body.data.generation!,
+    });
+  } else {
+    await disconnectSessionPresence(identity);
+  }
   return new NextResponse(null, { status: 204 });
 }

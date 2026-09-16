@@ -34,7 +34,11 @@ describe('useSessionVoiceCallLease', () => {
       `/api/sessions/${SESSION_ID}/presence`,
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ clientId: CLIENT_ID, channel: 'voice' }),
+        body: JSON.stringify({
+          clientId: CLIENT_ID,
+          channel: 'voice',
+          generation: 1,
+        }),
         keepalive: true,
       }),
     );
@@ -66,30 +70,32 @@ describe('useSessionVoiceCallLease', () => {
     );
   });
 
-  it('serializes disconnect after in-flight heartbeats', async () => {
-    let finishFirstRefresh!: () => void;
-    fetchMock.mockImplementationOnce(
+  it('starts pagehide release while a heartbeat is in flight', async () => {
+    let finishHeartbeat!: () => void;
+    fetchMock.mockResolvedValueOnce(new Response()).mockImplementationOnce(
       () =>
         new Promise<Response>((resolve) => {
-          finishFirstRefresh = () => resolve(new Response());
+          finishHeartbeat = () => resolve(new Response());
         }),
     );
-    const { rerender } = renderHook(
-      ({ active }) => useSessionVoiceCallLease(SESSION_ID, active),
-      { initialProps: { active: true } },
-    );
+    renderHook(() => useSessionVoiceCallLease(SESSION_ID, true));
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
 
     act(() => vi.advanceTimersByTime(10_000));
-    rerender({ active: false });
-    expect(fetchMock).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    act(() => window.dispatchEvent(new Event('pagehide')));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
 
-    finishFirstRefresh();
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(fetchMock.mock.calls.map(([, options]) => options?.method)).toEqual([
-      'POST',
-      'POST',
-      'DELETE',
+    expect(
+      fetchMock.mock.calls.map(([, options]) => ({
+        method: options?.method,
+        generation: JSON.parse(String(options?.body)).generation,
+      })),
+    ).toEqual([
+      { method: 'POST', generation: 1 },
+      { method: 'POST', generation: 2 },
+      { method: 'DELETE', generation: 3 },
     ]);
+    finishHeartbeat();
   });
 });

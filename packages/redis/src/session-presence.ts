@@ -13,6 +13,10 @@ type SessionPresenceLease = SessionPresenceIdentity & {
   clientId: string;
 };
 
+type SessionVoiceCallLease = SessionPresenceLease & {
+  generation: number;
+};
+
 type SessionPresenceOptions = {
   now?: number;
   redis?: Redis;
@@ -24,6 +28,13 @@ function sessionPresenceKey({ sessionId, userId }: SessionPresenceIdentity) {
 
 function sessionVoiceCallKey({ sessionId, userId }: SessionPresenceIdentity) {
   return `session:voice:${sessionId}:${userId}`;
+}
+
+function sessionVoiceCallStateKey({
+  sessionId,
+  userId,
+}: SessionPresenceIdentity) {
+  return `session:voice-state:${sessionId}:${userId}`;
 }
 
 function sessionViewersKey(sessionId: string) {
@@ -134,23 +145,37 @@ export async function isSessionUserPresent(
 
 /** Refreshes one browser tab's short-lived active voice-call lease. */
 export async function refreshSessionVoiceCall(
-  lease: SessionPresenceLease,
+  lease: SessionVoiceCallLease,
   options: SessionPresenceOptions = {},
 ): Promise<{ expiresAt: number }> {
   const now = options.now ?? Date.now();
   const expiresAt = now + SESSION_PRESENCE_LEASE_MS;
   const redis = options.redis ?? getRedis();
-  await refreshLease(lease, sessionVoiceCallKey(lease), expiresAt, now, redis);
+  const key = sessionVoiceCallKey(lease);
+  const stateKey = sessionVoiceCallStateKey(lease);
+  await redis
+    .multi()
+    .zadd(stateKey, 'GT', lease.generation, lease.clientId)
+    .pexpire(stateKey, SESSION_PRESENCE_LEASE_MS * 2)
+    .zadd(key, expiresAt, `${lease.clientId}:${lease.generation}`)
+    .zremrangebyscore(key, '-inf', now)
+    .pexpire(key, SESSION_PRESENCE_LEASE_MS * 2)
+    .exec();
   return { expiresAt };
 }
 
 /** Best-effort immediate release; lease expiry covers abrupt disconnects. */
 export async function disconnectSessionVoiceCall(
-  lease: SessionPresenceLease,
+  lease: SessionVoiceCallLease,
   options: Pick<SessionPresenceOptions, 'redis'> = {},
 ): Promise<void> {
   const redis = options.redis ?? getRedis();
-  await disconnectLease(lease, sessionVoiceCallKey(lease), redis);
+  const stateKey = sessionVoiceCallStateKey(lease);
+  await redis
+    .multi()
+    .zadd(stateKey, 'GT', lease.generation, lease.clientId)
+    .pexpire(stateKey, SESSION_PRESENCE_LEASE_MS * 2)
+    .exec();
 }
 
 /** Returns whether the user has an unexpired voice-call lease for a Session. */
@@ -158,5 +183,25 @@ export async function isSessionVoiceCallActive(
   identity: SessionPresenceIdentity,
   options: SessionPresenceOptions = {},
 ): Promise<boolean> {
-  return isLeaseActive(identity, sessionVoiceCallKey(identity), options);
+  const now = options.now ?? Date.now();
+  const redis = options.redis ?? getRedis();
+  const key = sessionVoiceCallKey(identity);
+  await redis.zremrangebyscore(key, '-inf', now);
+  const leases = await redis.zrangebyscore(key, `(${now}`, '+inf');
+  const stateKey = sessionVoiceCallStateKey(identity);
+  for (const lease of leases) {
+    const separator = lease.lastIndexOf(':');
+    if (separator < 0) continue;
+    const clientId = lease.slice(0, separator);
+    const generation = Number(lease.slice(separator + 1));
+    if (!Number.isSafeInteger(generation)) continue;
+    const currentGeneration = await redis.zscore(stateKey, clientId);
+    if (
+      currentGeneration !== null &&
+      Number(currentGeneration) === generation
+    ) {
+      return true;
+    }
+  }
+  return false;
 }

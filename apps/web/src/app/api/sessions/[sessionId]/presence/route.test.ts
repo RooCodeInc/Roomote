@@ -44,13 +44,18 @@ function request(
   method: 'POST' | 'DELETE',
   clientId = CLIENT_ID,
   channel?: 'view' | 'voice',
+  generation: number | null = channel === 'voice' ? 1 : null,
 ) {
   return new NextRequest(
     `http://localhost/api/sessions/${SESSION_ID}/presence`,
     {
       method,
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ clientId, ...(channel ? { channel } : {}) }),
+      body: JSON.stringify({
+        clientId,
+        ...(channel ? { channel } : {}),
+        ...(generation !== null ? { generation } : {}),
+      }),
     },
   );
 }
@@ -165,6 +170,7 @@ describe('/api/sessions/[sessionId]/presence', () => {
       sessionId: SESSION_ID,
       userId: USER_ID,
       clientId: CLIENT_ID,
+      generation: 1,
     });
     expect(refreshSessionPresenceMock).not.toHaveBeenCalled();
 
@@ -175,8 +181,19 @@ describe('/api/sessions/[sessionId]/presence', () => {
       sessionId: SESSION_ID,
       userId: USER_ID,
       clientId: CLIENT_ID,
+      generation: 1,
     });
     expect(disconnectSessionPresenceMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects voice lease requests without a generation', async () => {
+    const response = await POST(
+      request('POST', CLIENT_ID, 'voice', null),
+      props,
+    );
+
+    expect(response.status).toBe(400);
+    expect(refreshSessionVoiceCallMock).not.toHaveBeenCalled();
   });
 
   it('rejects unauthenticated requests', async () => {

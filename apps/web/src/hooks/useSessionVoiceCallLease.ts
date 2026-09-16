@@ -7,26 +7,26 @@ const HEARTBEAT_INTERVAL_MS = 10_000;
 export function useSessionVoiceCallLease(sessionId: string, active: boolean) {
   const readyRef = useRef<Promise<void>>(Promise.resolve());
   const clientIdRef = useRef<string>(crypto.randomUUID());
-  const requestChainRef = useRef<Promise<void>>(Promise.resolve());
+  const generationRef = useRef(0);
 
   useEffect(() => {
     if (!active) return;
     const url = `/api/sessions/${sessionId}/presence`;
-    const body = JSON.stringify({
-      clientId: clientIdRef.current,
-      channel: 'voice',
-    });
     const send = (method: 'POST' | 'DELETE') => {
-      const request = requestChainRef.current.then(() =>
-        fetch(url, {
-          method,
-          headers: { 'content-type': 'application/json' },
-          body,
-          keepalive: true,
-        }).then(() => undefined),
+      const generation = ++generationRef.current;
+      return fetch(url, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          clientId: clientIdRef.current,
+          channel: 'voice',
+          generation,
+        }),
+        keepalive: true,
+      }).then(
+        () => undefined,
+        () => undefined,
       );
-      requestChainRef.current = request.catch(() => undefined);
-      return requestChainRef.current;
     };
 
     readyRef.current = send('POST');
