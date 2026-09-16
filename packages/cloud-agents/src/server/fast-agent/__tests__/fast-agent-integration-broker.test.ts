@@ -1574,6 +1574,82 @@ describe('fast-agent integration broker', () => {
     });
   });
 
+  it('does not retain public-fetch header values in Fast audit records', async () => {
+    mocks.configuredServers = {
+      roomote: { url: 'https://app.example.test/mcp', headers: {} },
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'fetch_url', inputSchema: { type: 'object' } },
+    ]);
+    const available = await listFastAgentIntegrations(auditContext);
+    const result = {
+      kind: 'text',
+      url: 'https://public.example/docs?token=not-audited',
+      status: 200,
+      contentType: 'text/plain',
+      format: 'text',
+    };
+    mocks.callMcpTool.mockResolvedValue(result);
+
+    await expect(
+      callFastAgentIntegration(auditContext, available, {
+        integrationId: 'roomote',
+        toolName: 'fetch_url',
+        args: {
+          url: 'https://public.example/docs?token=secret-query',
+          format: 'text',
+          timeout: 45,
+          headers: {
+            Authorization: 'Bearer secret',
+            'X-Trace': 'trace-value',
+          },
+        },
+      }),
+    ).resolves.toEqual(result);
+
+    expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        integrationId: 'roomote',
+        toolName: 'fetch_url',
+        arguments: {
+          destination: 'https://public.example',
+          format: 'text',
+          timeout: 45,
+          headerNames: ['Authorization', 'X-Trace'],
+        },
+      }),
+    );
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'succeeded',
+        resultPreview: '[Broker result omitted]',
+      }),
+    );
+  });
+
+  it('honors the public-fetch timeout beyond the generic Fast integration deadline', async () => {
+    vi.useFakeTimers();
+    mocks.configuredServers = {
+      roomote: { url: 'https://app.example.test/mcp', headers: {} },
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'fetch_url', inputSchema: { type: 'object' } },
+    ]);
+    const available = await listFastAgentIntegrations(auditContext);
+    mocks.callMcpTool.mockImplementation(() => new Promise(() => undefined));
+
+    const call = callFastAgentIntegration(auditContext, available, {
+      integrationId: 'roomote',
+      toolName: 'fetch_url',
+      args: { url: 'https://public.example/', timeout: 120 },
+    });
+    const timedOut = expect(call).rejects.toThrow(
+      'Fast roomote/fetch_url integration call timed out after 125000ms.',
+    );
+    await vi.advanceTimersByTimeAsync(125_000);
+    await timedOut;
+  });
+
   it('omits manage_tasks when its schema cannot safely remove task launch', async () => {
     mocks.configuredServers = {
       roomote: {

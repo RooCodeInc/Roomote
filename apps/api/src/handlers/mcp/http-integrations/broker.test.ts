@@ -609,12 +609,9 @@ it('blocks reflection split across body chunks', async () => {
   ).rejects.toThrow('Integration request failed');
 });
 
-it('wires the DNS guard into the Agent and pins only vetted public answers', async () => {
+it('pins public DNS answers and rejects mixed or private answers', async () => {
   const lookup = vi.fn((_hostname, _options, callback) =>
-    callback(null, [
-      { address: '127.0.0.1', family: 4 },
-      { address: '93.184.216.34', family: 4 },
-    ]),
+    callback(null, [{ address: '93.184.216.34', family: 4 }]),
   );
   const actual = await vi.importActual<
     typeof import('@roomote/sdk/server/safe-fetch')
@@ -641,6 +638,15 @@ it('wires the DNS guard into the Agent and pins only vetted public answers', asy
   callback.mockClear();
   wired.lookup('api.example.com', {}, callback);
   expect(callback).toHaveBeenCalledWith(null, '93.184.216.34', 4);
+  lookup.mockImplementationOnce((_hostname, _options, cb) =>
+    cb(null, [
+      { address: '127.0.0.1', family: 4 },
+      { address: '93.184.216.34', family: 4 },
+    ]),
+  );
+  callback.mockClear();
+  wired.lookup('api.example.com', { all: true }, callback);
+  expect(callback).toHaveBeenCalledWith(expect.any(Error), '', 4);
   lookup.mockImplementationOnce((_hostname, _options, cb) =>
     cb(null, [{ address: '10.0.0.1', family: 4 }]),
   );

@@ -32,6 +32,8 @@ import {
   MCP_INTEGRATION_PROXY_PATH_PREFIX,
   MCP_ROUTING_PROXY_PATH_PREFIX,
   ROOMOTE_MCP_ID,
+  PUBLIC_URL_FETCH_DEFAULT_TIMEOUT_SECONDS,
+  PUBLIC_URL_FETCH_MAX_TIMEOUT_SECONDS,
   getMcpIntegration,
   getMemoryMcpDisplayName,
   formatErrorForLog,
@@ -87,6 +89,30 @@ const FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS = 30_000;
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_MAX_ENTRIES = 1_000;
 const FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS = 10_000;
 const FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS = 60_000;
+const FAST_AGENT_PUBLIC_FETCH_TIMEOUT_GRACE_MS = 5_000;
+
+function resolveFastIntegrationCallTimeoutMs(request: {
+  integrationId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+}): number {
+  if (
+    request.integrationId !== ROOMOTE_MCP_ID ||
+    request.toolName !== 'fetch_url'
+  ) {
+    return FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS;
+  }
+
+  const requested =
+    typeof request.args.timeout === 'number' &&
+    Number.isFinite(request.args.timeout) &&
+    request.args.timeout > 0
+      ? Math.min(request.args.timeout, PUBLIC_URL_FETCH_MAX_TIMEOUT_SECONDS)
+      : PUBLIC_URL_FETCH_DEFAULT_TIMEOUT_SECONDS;
+  return (
+    Math.ceil(requested * 1_000) + FAST_AGENT_PUBLIC_FETCH_TIMEOUT_GRACE_MS
+  );
+}
 
 type IntegrationToolCacheEntry = {
   expiresAt: number;
@@ -656,6 +682,30 @@ export async function callFastAgentIntegration(
 
   // Fail closed: an integration tool never executes unless its durable audit
   // record exists first.
+  const publicFetchAudit =
+    integration.id === ROOMOTE_MCP_ID && request.toolName === 'fetch_url'
+      ? (() => {
+          let destination: string | undefined;
+          try {
+            destination = new URL(String(request.args.url)).origin;
+          } catch {
+            // The tool validates malformed URLs; the audit retains no raw URL.
+          }
+          const headers = request.args.headers;
+          return {
+            ...(destination ? { destination } : {}),
+            ...(typeof request.args.format === 'string'
+              ? { format: request.args.format }
+              : {}),
+            ...(typeof request.args.timeout === 'number'
+              ? { timeout: request.args.timeout }
+              : {}),
+            ...(headers && typeof headers === 'object'
+              ? { headerNames: Object.keys(headers).sort() }
+              : {}),
+          };
+        })()
+      : null;
   const audit = await beginSlackFastIntegrationCall({
     fastAgentConversationId: context.sessionId,
     userId: context.userId,
@@ -673,7 +723,9 @@ export async function callFastAgentIntegration(
     arguments:
       integration.id === HTTP_INTEGRATIONS_MCP_ID
         ? { toolName: request.toolName }
-        : request.args,
+        : publicFetchAudit
+          ? publicFetchAudit
+          : request.args,
   });
 
   try {
@@ -722,7 +774,7 @@ export async function callFastAgentIntegration(
           toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,
           signal,
         }),
-      FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS,
+      resolveFastIntegrationCallTimeoutMs(request),
       `Fast ${integration.id}/${request.toolName} integration call`,
     );
 
@@ -731,7 +783,7 @@ export async function callFastAgentIntegration(
         id: audit.id,
         status: 'succeeded',
         resultPreview:
-          integration.id === HTTP_INTEGRATIONS_MCP_ID
+          integration.id === HTTP_INTEGRATIONS_MCP_ID || publicFetchAudit
             ? '[Broker result omitted]'
             : serializeAuditPreview(result, 30_000),
         startedAt: audit.startedAt,
