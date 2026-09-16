@@ -22,7 +22,7 @@ import { runMemoryOutboxLifecycleContract } from './memory-outbox-lifecycle.cont
 
 const createdUserIds: string[] = [];
 
-async function makeConversation() {
+async function makeConversation(privacy: 'shared' | 'private' = 'shared') {
   const user = await userFactory.create();
   createdUserIds.push(user.id);
 
@@ -33,6 +33,8 @@ async function makeConversation() {
       surface: 'web',
       workspaceId: user.id,
       conversationId: `conversation-${crypto.randomUUID()}`,
+      privacy,
+      privateOwnerUserId: privacy === 'private' ? user.id : null,
     })
     .returning();
 
@@ -50,6 +52,19 @@ afterEach(async () => {
 });
 
 describe('appendFastAgentMemory', () => {
+  it('refuses private Sessions before persisting memory text', async () => {
+    const conversation = await makeConversation('private');
+
+    await expect(
+      appendFastAgentMemory(db, conversation.id, 'private canary fact'),
+    ).resolves.toEqual({ saved: false, reason: 'private_conversation' });
+    await expect(
+      db.query.fastAgentMemoryEvents.findFirst({
+        where: eq(fastAgentMemoryEvents.conversationId, conversation.id),
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('creates the conversation row on first save and accumulates later facts', async () => {
     const conversation = await makeConversation();
 

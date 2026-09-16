@@ -10,6 +10,7 @@ import {
   githubUserMappings,
   eq,
   inArray,
+  privateTaskAccess,
 } from '@roomote/db/server';
 
 import {
@@ -127,7 +128,7 @@ function isRoomotePullRequestAuthor(login: string | null) {
   return isAnalyticsRoomoteGitHubLogin(login);
 }
 
-async function getRoomotePullRequestMetadataByKey(_auth: UserAuthSuccess) {
+async function getRoomotePullRequestMetadataByKey(auth: UserAuthSuccess) {
   // isRoomotePullRequestAuthor classifies logins synchronously from the
   // cached configured app slug.
   await GitHub.resolveConfiguredGitHubAppSlug();
@@ -154,7 +155,8 @@ async function getRoomotePullRequestMetadataByKey(_auth: UserAuthSuccess) {
     .leftJoin(
       taskInitiatorUsers,
       eq(taskInitiatorUsers.id, tasks.initiatorUserId),
-    );
+    )
+    .where(privateTaskAccess(auth));
 
   const deduped = new Map<
     string,

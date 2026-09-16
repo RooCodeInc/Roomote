@@ -43,6 +43,8 @@ export type SourceControlGitCredential = {
 
 export type SourceControlProxyCredential = SourceControlGitCredential & {
   provider: SourceControlProvider;
+  /** Reject Git receive-pack while preserving clone/fetch. */
+  readOnly?: boolean;
 };
 
 export type SourceControlTokenMetadata = {

@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   appendMemory: vi.fn(),
   appendLearnedPreference: vi.fn(),
   isBrainEnabled: vi.fn(),
+  privateSessionsEnabled: vi.fn(),
   generateText: vi.fn(),
   generateHelperText: vi.fn(),
   generateTrackedObject: vi.fn(),
@@ -209,6 +210,7 @@ vi.mock('@roomote/db/server', () => ({
   appendLearnedUserPreference: mocks.appendLearnedPreference,
   getUserPersonalizationRuntimeContext: mocks.getPersonalization,
   isBrainEnabled: mocks.isBrainEnabled,
+  isPrivateSessionsExperimentEnabled: mocks.privateSessionsEnabled,
   db: {
     execute: mocks.executeDb,
     query: {
@@ -478,6 +480,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.getUnifiedSession.mockResolvedValue(null);
     mocks.touchSessionActivity.mockResolvedValue(undefined);
     mocks.getSessionForTask.mockResolvedValue(null);
+    mocks.privateSessionsEnabled.mockResolvedValue(true);
     mocks.getPendingHumanFollowUp.mockResolvedValue([]);
     mocks.ensureOwnTaskFollowThroughWakeup.mockResolvedValue(undefined);
     mocks.ensureSessionGoalContinuationWakeup.mockResolvedValue(undefined);
@@ -5265,7 +5268,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('creates a durable Session artifact with inferred content type', async () => {
+  it('creates a durable private Session artifact with inferred content type', async () => {
+    mocks.getUnifiedSession.mockResolvedValue({
+      id: 'session-1',
+      privacy: 'private',
+      privateOwnerUserId: 'user-1',
+    });
     const createArtifact = vi.fn().mockResolvedValue({
       id: 'artifact-1',
       path: 'notes/decision.md',

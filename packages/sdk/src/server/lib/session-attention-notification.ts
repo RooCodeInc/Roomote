@@ -312,6 +312,7 @@ export async function notifyDirectWebTaskAttention(
           initiatorKind: true,
           trigger: true,
           surface: true,
+          privacy: true,
           prompt: true,
         },
       },
@@ -319,6 +320,7 @@ export async function notifyDirectWebTaskAttention(
   });
   if (
     !run?.task ||
+    run.task.privacy === 'private' ||
     run.task.surface !== 'web' ||
     run.task.trigger !== 'manual' ||
     run.task.initiatorKind !== 'user' ||
@@ -384,11 +386,13 @@ export async function notifyFastWebSessionAttention(
       id: true,
       ownerUserId: true,
       sourceSurface: true,
+      privacy: true,
     },
   });
   if (
     !session?.ownerUserId ||
     session.sourceSurface !== 'web' ||
+    session.privacy === 'private' ||
     input.manual !== true
   ) {
     return 'not_applicable';

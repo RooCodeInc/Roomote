@@ -67,6 +67,7 @@ import {
   getSessions,
   getSessionTimeline,
   archiveSessionCommand,
+  deletePrivateSessionCommand,
   listSessionPins,
   markSessionReadCommand,
   sessionIdInputSchema,
@@ -499,8 +500,10 @@ import {
 } from '../commands/analytics';
 import {
   getMiscSettingsCommand,
+  getPrivateSessionsExperimentCommand,
   setDeploymentTimeZoneCommand,
   setAnonymousAnalyticsCommand,
+  setPrivateSessionsExperimentCommand,
 } from '../commands/misc-settings';
 import {
   backfillBrainTaskMemoriesCommand,
@@ -3251,6 +3254,11 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         archiveSessionCommand(auth, input.sessionId),
       ),
+    deletePrivate: protectedProcedure
+      .input(sessionIdInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        deletePrivateSessionCommand(auth, input.sessionId),
+      ),
     unarchive: protectedProcedure
       .input(sessionIdInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
@@ -3459,6 +3467,9 @@ export const appRouter = createRouter({
   }),
 
   miscSettings: createRouter({
+    privateSessionsExperiment: protectedProcedure.query(() =>
+      getPrivateSessionsExperimentCommand(),
+    ),
     get: protectedProcedure.query(({ ctx: { auth } }) =>
       getMiscSettingsCommand(auth),
     ),
@@ -3471,6 +3482,11 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setAnonymousAnalyticsCommand(auth, input),
+      ),
+    setPrivateSessionsExperiment: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setPrivateSessionsExperimentCommand(auth, input),
       ),
     setTimeZone: protectedProcedure
       .input(z.object({ timeZone: z.string().trim().min(1).max(100) }))

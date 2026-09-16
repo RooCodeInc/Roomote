@@ -27,6 +27,12 @@ const mocks = vi.hoisted(() => ({
   findMember: vi.fn(),
   findBitbucketRepository: vi.fn(),
   findNativeMergeRepository: vi.fn(),
+  getMcpIntegrationDataPolicy: vi.fn(),
+}));
+
+vi.mock('@roomote/types', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/types')>()),
+  getMcpIntegrationDataPolicy: mocks.getMcpIntegrationDataPolicy,
 }));
 
 vi.mock('@roomote/env', async (importOriginal) => ({
@@ -160,6 +166,7 @@ describe('fast-agent integration broker', () => {
       externalRepoId: 'repo-uuid',
     });
     mocks.findNativeMergeRepository.mockResolvedValue(undefined);
+    mocks.getMcpIntegrationDataPolicy.mockReturnValue('shared');
     mocks.listMcpTools.mockResolvedValue([
       { name: 'search', inputSchema: { type: 'object' } },
     ]);
@@ -191,6 +198,7 @@ describe('fast-agent integration broker', () => {
       'integration_request',
     ]);
     expect(Object.keys(available[0]!).sort()).toEqual([
+      'dataPolicy',
       'description',
       'endpoint',
       'id',
@@ -1926,6 +1934,147 @@ describe('fast-agent integration broker', () => {
       args: { query: 'roadmap' },
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it('allows bounded private Brain reads and blocks shared-memory writes', async () => {
+    mocks.callMcpTool.mockResolvedValue({ results: ['Shared fact'] });
+    const privateContext = { ...auditContext, privacy: 'private' as const };
+    const brain = {
+      id: 'gbrain',
+      name: 'Brain',
+      description: 'Shared Brain',
+      tools: [{ name: 'query' }, { name: 'synthesize' }],
+    };
+
+    await expect(
+      callFastAgentIntegration(privateContext, [brain], {
+        integrationId: 'gbrain',
+        toolName: 'query',
+        args: { query: 'private canary query' },
+      }),
+    ).resolves.toEqual({ results: ['Shared fact'] });
+    await expect(
+      callFastAgentIntegration(privateContext, [brain], {
+        integrationId: 'gbrain',
+        toolName: 'synthesize',
+        args: { question: 'private canary query' },
+      }),
+    ).rejects.toThrow('Brain synthesis is unavailable');
+    await expect(
+      callFastAgentIntegration(
+        privateContext,
+        [
+          {
+            id: 'supermemory',
+            name: 'Supermemory',
+            description: 'Shared memory',
+            tools: [{ name: 'add_memory' }],
+          },
+        ],
+        {
+          integrationId: 'supermemory',
+          toolName: 'add_memory',
+          args: { content: 'private canary fact' },
+        },
+      ),
+    ).rejects.toThrow('cannot write to shared memory');
+    expect(mocks.callMcpTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires a matching private Session owner for private integrations', async () => {
+    mocks.callMcpTool.mockResolvedValue({ value: 'private canary result' });
+    const integration = {
+      id: 'private-example',
+      name: 'Private example',
+      description: 'Private data',
+      dataPolicy: 'private' as const,
+      tools: [{ name: 'read_private' }],
+    };
+    const request = {
+      integrationId: integration.id,
+      toolName: 'read_private',
+      args: { query: 'private canary argument' },
+    };
+
+    for (const context of [
+      auditContext,
+      {
+        ...auditContext,
+        privacy: 'private' as const,
+        privateOwnerUserId: 'different-user',
+      },
+    ]) {
+      await expect(
+        callFastAgentIntegration(context, [integration], request),
+      ).rejects.toThrow('owned by the current user');
+    }
+
+    await expect(
+      callFastAgentIntegration(
+        {
+          ...auditContext,
+          privacy: 'private',
+          privateOwnerUserId: auditContext.userId,
+          privateSessionsExperimentEnabled: true,
+        },
+        [integration],
+        request,
+      ),
+    ).resolves.toEqual({ value: 'private canary result' });
+    expect(mocks.callMcpTool).toHaveBeenCalledTimes(1);
+
+    await expect(
+      callFastAgentIntegration(
+        {
+          ...auditContext,
+          privacy: 'private',
+          privateOwnerUserId: auditContext.userId,
+          privateSessionsExperimentEnabled: false,
+        },
+        [integration],
+        request,
+      ),
+    ).rejects.toThrow('require a private Session');
+  });
+
+  it('preserves private policy through discovery and shared rejection', async () => {
+    mocks.getMcpIntegrationDataPolicy.mockReturnValue('private');
+    mocks.configuredServers = {
+      'private-example': {
+        url: 'https://api.example.com/api/mcp/private-example',
+        headers: {},
+      },
+    };
+    mocks.listMcpTools.mockResolvedValue([{ name: 'read_private' }]);
+    mocks.callMcpTool.mockResolvedValue({ value: 'private canary result' });
+    const integrations = await listFastAgentIntegrations(auditContext);
+
+    expect(integrations).toEqual([
+      expect.objectContaining({
+        id: 'private-example',
+        dataPolicy: 'private',
+      }),
+    ]);
+    const request = {
+      integrationId: 'private-example',
+      toolName: 'read_private',
+      args: { query: 'private canary argument' },
+    };
+    await expect(
+      callFastAgentIntegration(auditContext, integrations, request),
+    ).rejects.toThrow('require a private Session');
+    await expect(
+      callFastAgentIntegration(
+        {
+          ...auditContext,
+          privacy: 'private',
+          privateOwnerUserId: auditContext.userId,
+          privateSessionsExperimentEnabled: true,
+        },
+        integrations,
+        request,
+      ),
+    ).resolves.toEqual({ value: 'private canary result' });
   });
 
   it('preserves a failed tool call error', async () => {

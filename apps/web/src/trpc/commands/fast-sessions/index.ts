@@ -39,6 +39,7 @@ import {
   getSessionForFastConversation,
   retireCanonicalPrReviewActionsForDestinationKey,
   sessions,
+  isPrivateSessionsExperimentEnabled,
   sql,
 } from '@roomote/db/server';
 import {
@@ -428,6 +429,7 @@ export async function startFastSessionCommand(
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
     conversationId?: string;
+    privacy?: 'shared' | 'private';
     pinnedLaunch?: PinnedFastSessionLaunchInput;
     voiceCall?: boolean;
   },
@@ -436,7 +438,21 @@ export async function startFastSessionCommand(
   fastConversationId?: string;
   taskId?: string;
 }> {
+  if (
+    input.privacy === 'private' &&
+    !(await isPrivateSessionsExperimentEnabled())
+  ) {
+    throw new Error('Private Sessions are not enabled for this deployment.');
+  }
+  if (input.privacy === 'private' && input.voiceCall) {
+    throw new Error('Private Sessions cannot start as voice calls.');
+  }
   if (input.pinnedLaunch) {
+    if (input.privacy === 'private') {
+      throw new Error(
+        'Private Sessions cannot start as pinned environment tasks.',
+      );
+    }
     return startPinnedFastSessionLaunch(auth, {
       text: input.text,
       images: input.images,
@@ -456,6 +472,7 @@ export async function startFastSessionCommand(
   const session = await getOrCreateFastAgentSession({
     userId: auth.userId,
     conversation,
+    ...(input.privacy ? { privacy: input.privacy } : {}),
   });
   const settings = await resolveSessionModelSettings(session.id, input, {
     model: null,

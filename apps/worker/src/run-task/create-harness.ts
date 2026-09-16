@@ -44,6 +44,7 @@ interface CreateHarnessOptions {
    * substitution in custom MCP config, regardless of variable name.
    */
   operatorEnvVars?: Record<string, string>;
+  taskPrivacy?: 'shared' | 'private';
   taskRun: DequeuedTaskRun['taskRun'];
   userAttentionNotificationsEnabled?: boolean;
   developerInstructionsContent?: string;
@@ -84,6 +85,7 @@ export async function createHarness({
   environmentMcpServers,
   deploymentMcpServers,
   operatorEnvVars,
+  taskPrivacy,
   taskRun,
   userAttentionNotificationsEnabled,
   developerInstructionsContent,
@@ -117,6 +119,7 @@ export async function createHarness({
       environmentMcpServers,
       operatorEnvVars,
       deploymentMcpServers,
+      taskPrivacy,
     );
     const modelOverride = taskRun.payload?.harnessModelOverrides
       ? getHarnessModelOverride(

@@ -2,7 +2,7 @@ import { eq, sql } from 'drizzle-orm';
 import { FAST_AGENT_MEMORY_MAX_CHARS } from '@roomote/types';
 
 import { type DatabaseOrTransaction } from '../db';
-import { fastAgentMemoryEvents } from '../schema';
+import { fastAgentConversations, fastAgentMemoryEvents } from '../schema';
 import { runInTransactionIfAvailable } from './transaction-utils';
 import { createMemoryOutboxLifecycle } from './memory-outbox-lifecycle';
 
@@ -15,7 +15,19 @@ const PROCESSING_RECLAIM_INTERVAL = '15 minutes';
 
 export type AppendFastAgentMemoryResult =
   | { saved: true }
-  | { saved: false; reason: 'memory_full' };
+  | { saved: false; reason: 'memory_full' | 'private_conversation' };
+
+export async function isFastConversationSharedBrainEligible(
+  database: DatabaseOrTransaction,
+  conversationId: string,
+): Promise<boolean> {
+  const [conversation] = await database
+    .select({ privacy: fastAgentConversations.privacy })
+    .from(fastAgentConversations)
+    .where(eq(fastAgentConversations.id, conversationId))
+    .limit(1);
+  return conversation?.privacy === 'shared';
+}
 
 /**
  * Append one remembered fact to a conversation's memory outbox row. The agent
@@ -39,6 +51,9 @@ export async function appendFastAgentMemory(
   const line = `- ${fact.trim()}`;
 
   return runInTransactionIfAvailable(database, async (tx) => {
+    if (!(await isFastConversationSharedBrainEligible(tx, conversationId))) {
+      return { saved: false, reason: 'private_conversation' };
+    }
     const [existing] = await tx
       .select({ memory: fastAgentMemoryEvents.memory })
       .from(fastAgentMemoryEvents)

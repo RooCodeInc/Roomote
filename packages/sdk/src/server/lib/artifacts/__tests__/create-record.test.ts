@@ -1,8 +1,47 @@
-import { taskFactory } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  taskArtifacts,
+  taskFactory,
+  userFactory,
+} from '@roomote/db/server';
 
-import { createTaskArtifactRecord } from '../create-record';
+import {
+  authorizeTaskArtifactUpload,
+  createTaskArtifactRecord,
+} from '../create-record';
 
 describe('createTaskArtifactRecord', () => {
+  it('creates upload records for private tasks under their inherited owner', async () => {
+    const owner = await userFactory.create();
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+
+    const artifact = await createTaskArtifactRecord({
+      taskId: task.id,
+      artifactType: 'general',
+      contentType: 'text/plain',
+      path: 'private.txt',
+      size: 10,
+    });
+    expect(artifact).toMatchObject({ taskId: task.id, uploaded: false });
+
+    const expiresAt = new Date(Date.now() + 60_000);
+    await authorizeTaskArtifactUpload({
+      taskId: task.id,
+      artifactId: artifact!.id,
+      expiresAt,
+    });
+    await expect(
+      db.query.taskArtifacts.findFirst({
+        where: eq(taskArtifacts.id, artifact!.id),
+      }),
+    ).resolves.toMatchObject({ uploadUrlExpiresAt: expiresAt });
+  });
+
   it('allocates versions independently for each task owner', async () => {
     const firstTask = await taskFactory.create();
     const secondTask = await taskFactory.create();
@@ -29,5 +68,29 @@ describe('createTaskArtifactRecord', () => {
       sessionId: null,
       uploaded: false,
     });
+  });
+
+  it('records the bearer upload expiry on an existing shared artifact', async () => {
+    const task = await taskFactory.create();
+    const artifact = await createTaskArtifactRecord({
+      taskId: task.id,
+      artifactType: 'general',
+      contentType: 'text/plain',
+      path: 'authorized.txt',
+      size: 10,
+    });
+    const expiresAt = new Date(Date.now() + 60_000);
+
+    await authorizeTaskArtifactUpload({
+      taskId: task.id,
+      artifactId: artifact!.id,
+      expiresAt,
+    });
+
+    await expect(
+      db.query.taskArtifacts.findFirst({
+        where: eq(taskArtifacts.id, artifact!.id),
+      }),
+    ).resolves.toMatchObject({ uploadUrlExpiresAt: expiresAt });
   });
 });

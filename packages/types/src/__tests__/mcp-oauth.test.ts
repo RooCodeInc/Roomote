@@ -3,6 +3,7 @@ import {
   getMcpIntegration,
   getMcpIntegrationAuthorizationParameters,
   getMcpIntegrationConnectionScope,
+  getMcpIntegrationDataPolicy,
   getMcpIntegrationDefaultDisabledTools,
   getMcpIntegrationOauthResource,
   getMcpIntegrationOauthScopeMode,
@@ -18,6 +19,22 @@ import {
   MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
   RESEND_DEFAULT_DISABLED_TOOL_NAMES,
 } from '../mcp-oauth';
+
+describe('integration data policy', () => {
+  it('keeps existing and unknown integrations shared by default', () => {
+    expect(getMcpIntegrationDataPolicy('monday')).toBe('shared');
+    expect(getMcpIntegrationDataPolicy('unknown')).toBe('shared');
+    expect(
+      getMcpIntegrationDataPolicy({
+        id: 'private-example',
+        name: 'Private example',
+        description: 'Private data',
+        icon: 'lock',
+        dataPolicy: 'private',
+      }),
+    ).toBe('private');
+  });
+});
 
 describe('Linear OAuth scopes', () => {
   it('keeps issue comments separate from issue field updates', () => {

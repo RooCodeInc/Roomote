@@ -53,6 +53,7 @@
           "live-previews",
           "goal-mode",
           "fast-sessions",
+          "private-sessions",
           "integration-keys",
           "memory",
           "file-attachments",

@@ -228,6 +228,33 @@ afterAll(async () => {
 });
 
 describe('enqueueTask initiator stamping', () => {
+  it('stamps private web tasks and rejects non-web private launches', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+      privacy: 'private',
+    });
+
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, run.taskId) }),
+    ).resolves.toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: userId,
+    });
+    await expect(
+      launchFresh({
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'slack',
+        trigger: 'message',
+        privacy: 'private',
+      }),
+    ).rejects.toThrow('linked user on the web surface');
+  });
+
   it.each(['slack', 'teams', 'telegram', 'discord'] as const)(
     'records %s as the authenticated user task-starting chat provider',
     async (surface) => {

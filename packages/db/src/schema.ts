@@ -88,6 +88,7 @@ import type {
   FastAgentSurface,
   ReasoningEffort,
   SessionStatus,
+  SessionPrivacy,
   SessionWakeupReportPolicy,
   SessionWakeupSchedule,
   SessionWakeupStatus,
@@ -718,6 +719,14 @@ export const tasks = pgTable(
       .notNull()
       .default('visible')
       .$type<TaskVisibility>(),
+    privacy: text('privacy')
+      .notNull()
+      .default('shared')
+      .$type<SessionPrivacy>(),
+    privateOwnerUserId: text('private_owner_user_id').references(
+      () => users.id,
+      { onDelete: 'cascade' },
+    ),
     // Terminal task state. Only written by the finishRun terminal path;
     // live runtime phase stays on runs.
     state: text('state').notNull().default('active').$type<TaskState>(),
@@ -848,6 +857,14 @@ export const tasks = pgTable(
       sql`${table.visibility} in ('visible', 'hidden')`,
     ),
     check(
+      'tasks_privacy_check',
+      sql`${table.privacy} in ('shared', 'private')`,
+    ),
+    check(
+      'tasks_private_owner_check',
+      sql`(${table.privacy} = 'shared' AND ${table.privateOwnerUserId} IS NULL) OR (${table.privacy} = 'private' AND ${table.privateOwnerUserId} IS NOT NULL)`,
+    ),
+    check(
       'tasks_state_check',
       sql`${table.state} in ('active', 'completed', 'failed', 'canceled')`,
     ),
@@ -966,6 +983,7 @@ export const taskArtifacts = pgTable(
     version: integer('version').notNull().default(0),
     size: bigint('size', { mode: 'number' }).notNull(),
     uploaded: boolean('uploaded').notNull().default(false),
+    uploadUrlExpiresAt: timestamp('upload_url_expires_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -3434,6 +3452,14 @@ export const fastAgentConversations = pgTable(
       onDelete: 'cascade',
     }),
     ownerAutomation: text('owner_automation').$type<BackgroundAutomationKey>(),
+    privacy: text('privacy')
+      .notNull()
+      .default('shared')
+      .$type<SessionPrivacy>(),
+    privateOwnerUserId: text('private_owner_user_id').references(
+      () => users.id,
+      { onDelete: 'cascade' },
+    ),
     surface: text('surface').notNull().$type<FastAgentSurface>(),
     workspaceId: text('workspace_id').notNull(),
     conversationId: text('conversation_id').notNull(),
@@ -3477,6 +3503,14 @@ export const fastAgentConversations = pgTable(
         or
         (${table.userId} is null and ${table.ownerAutomation} is not null)
       )`,
+    ),
+    check(
+      'fast_agent_conversations_privacy_check',
+      sql`${table.privacy} in ('shared', 'private')`,
+    ),
+    check(
+      'fast_agent_conversations_private_owner_check',
+      sql`(${table.privacy} = 'shared' AND ${table.privateOwnerUserId} IS NULL) OR (${table.privacy} = 'private' AND ${table.privateOwnerUserId} IS NOT NULL AND ${table.privateOwnerUserId} = ${table.userId})`,
     ),
     index('fast_agent_conversations_legacy_ids_idx').using(
       'gin',
@@ -4161,7 +4195,7 @@ export const automationsRelations = relations(automations, ({ many }) => ({
 
 export type SessionOwnerKind = 'user' | 'automation' | 'system';
 export type SessionSourceSurface = TaskSurface | FastAgentSurface;
-export type { SessionStatus };
+export type { SessionPrivacy, SessionStatus };
 export type SessionTaskOrigin =
   | 'direct_launch'
   | 'fast_delegation'
@@ -4195,6 +4229,14 @@ export const sessions = pgTable(
     ownerAutomation: text('owner_automation')
       .$type<BackgroundAutomationKey>()
       .references(() => automations.key, { onDelete: 'set null' }),
+    privacy: text('privacy')
+      .notNull()
+      .default('shared')
+      .$type<SessionPrivacy>(),
+    privateOwnerUserId: text('private_owner_user_id').references(
+      () => users.id,
+      { onDelete: 'cascade' },
+    ),
     sourceSurface: text('source_surface')
       .notNull()
       .$type<SessionSourceSurface>(),
@@ -4237,6 +4279,14 @@ export const sessions = pgTable(
     check(
       'sessions_owner_kind_check',
       sql`${table.ownerKind} in ('user', 'automation', 'system')`,
+    ),
+    check(
+      'sessions_privacy_check',
+      sql`${table.privacy} in ('shared', 'private')`,
+    ),
+    check(
+      'sessions_private_owner_check',
+      sql`(${table.privacy} = 'shared' AND ${table.privateOwnerUserId} IS NULL) OR (${table.privacy} = 'private' AND ${table.privateOwnerUserId} IS NOT NULL AND ${table.privateOwnerUserId} = ${table.ownerUserId})`,
     ),
     check(
       'sessions_source_surface_check',

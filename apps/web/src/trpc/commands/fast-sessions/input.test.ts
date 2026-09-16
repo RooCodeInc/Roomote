@@ -46,6 +46,35 @@ describe('Fast session input schemas', () => {
     });
   });
 
+  it('accepts private mode only on Session creation', () => {
+    expect(
+      startFastSessionInputSchema.parse({
+        text: 'Review private context',
+        privacy: 'private',
+      }),
+    ).toEqual({ text: 'Review private context', privacy: 'private' });
+    expect(
+      replyToFastSessionInputSchema.parse({
+        sessionId: '00000000-0000-4000-8000-000000000000',
+        text: 'Make this private',
+        privacy: 'private',
+      }),
+    ).toEqual({
+      sessionId: '00000000-0000-4000-8000-000000000000',
+      text: 'Make this private',
+    });
+  });
+
+  it('rejects private voice-call creation', () => {
+    expect(() =>
+      startFastSessionInputSchema.parse({
+        text: '',
+        privacy: 'private',
+        voiceCall: true,
+      }),
+    ).toThrow('Private Sessions cannot start as voice calls');
+  });
+
   it('rejects too many extracted attachments', () => {
     expect(() =>
       startFastSessionInputSchema.parse({

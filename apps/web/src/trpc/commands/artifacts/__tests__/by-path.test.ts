@@ -5,6 +5,7 @@ const {
   mockGetArtifactBySessionPath,
   mockGenerateDownloadUrl,
   mockGenerateOwnedDownloadUrl,
+  mockGetOwnedArtifactObject,
   mockSignArtifactId,
   mockCurrentEpochSeconds,
   mockFindReadableSession,
@@ -13,6 +14,7 @@ const {
   mockGetArtifactBySessionPath: vi.fn(),
   mockGenerateDownloadUrl: vi.fn(),
   mockGenerateOwnedDownloadUrl: vi.fn(),
+  mockGetOwnedArtifactObject: vi.fn(),
   mockSignArtifactId: vi.fn(),
   mockCurrentEpochSeconds: vi.fn(),
   mockFindReadableSession: vi.fn(),
@@ -23,6 +25,7 @@ vi.mock('@/lib/server', () => ({
   getArtifactBySessionPath: mockGetArtifactBySessionPath,
   generateDownloadUrl: mockGenerateDownloadUrl,
   generateOwnedDownloadUrl: mockGenerateOwnedDownloadUrl,
+  getOwnedArtifactObject: mockGetOwnedArtifactObject,
   signArtifactId: mockSignArtifactId,
   currentEpochSeconds: mockCurrentEpochSeconds,
 }));
@@ -252,6 +255,42 @@ describe('getArtifactByPathCommand', () => {
       taskId: null,
       sessionId: '11111111-1111-4111-8111-111111111111',
       content: 'session text',
+    });
+  });
+
+  it('keeps private Session previews and downloads on owner-authenticated paths', async () => {
+    const sessionId = '11111111-1111-4111-8111-111111111111';
+    mockFindReadableSession.mockResolvedValue({
+      id: sessionId,
+      privacy: 'private',
+    });
+    mockGetArtifactBySessionPath.mockResolvedValue(
+      createArtifact({ taskId: null, sessionId }),
+    );
+    mockGetOwnedArtifactObject.mockResolvedValue({
+      Body: {
+        transformToWebStream: () => new Response('private session text').body,
+      },
+      ContentLength: 20,
+    });
+
+    const result = await getArtifactByPathCommand(auth, {
+      sessionId,
+      path: 'logs/output.txt',
+    });
+
+    expect(mockGenerateOwnedDownloadUrl).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockGetOwnedArtifactObject).toHaveBeenCalledWith(
+      { sessionId },
+      'artifact-1',
+      'logs/output.txt',
+      1,
+    );
+    expect(result).toMatchObject({
+      content: 'private session text',
+      downloadUrl:
+        '/api/artifacts/artifact-1/raw?sig=sig&ts=1700000000&download=1',
     });
   });
 

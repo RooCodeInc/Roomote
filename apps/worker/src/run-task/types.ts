@@ -68,6 +68,8 @@ type TaskChannelBindings = Pick<
 > & {
   surface?: DequeuedTaskRun['task']['surface'];
   initiatorUserId?: DequeuedTaskRun['task']['initiatorUserId'];
+  privacy?: DequeuedTaskRun['task']['privacy'];
+  privateOwnerUserId?: DequeuedTaskRun['task']['privateOwnerUserId'];
 };
 
 type Todo = {
