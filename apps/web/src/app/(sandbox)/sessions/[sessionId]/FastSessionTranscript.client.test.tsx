@@ -58,6 +58,7 @@ const {
   voiceStatusQuery,
   recordVoiceTurnMutate,
   recordVoiceCallEventMutate,
+  waitForVoiceCallLease,
   liveVoiceState,
   authenticatedUserState,
 } = vi.hoisted(() => ({
@@ -75,6 +76,7 @@ const {
   voiceStatusQuery: vi.fn(),
   recordVoiceTurnMutate: vi.fn(),
   recordVoiceCallEventMutate: vi.fn(),
+  waitForVoiceCallLease: vi.fn(),
   authenticatedUserState: {
     user: null as null | {
       userId: string;
@@ -157,6 +159,10 @@ vi.mock('@/hooks/useLiveVoice', () => ({
       deliveringUtterances: liveVoiceState.deliveringUtterances,
     };
   },
+}));
+
+vi.mock('@/hooks/useSessionVoiceCallLease', () => ({
+  useSessionVoiceCallLease: () => waitForVoiceCallLease,
 }));
 
 vi.mock('@/hooks/useNarrationMode', () => ({
@@ -349,6 +355,8 @@ beforeEach(() => {
   recordVoiceTurnMutate.mockResolvedValue({ eventId: 'voice:1' });
   recordVoiceCallEventMutate.mockReset();
   recordVoiceCallEventMutate.mockResolvedValue({ eventId: 'voice-call:1' });
+  waitForVoiceCallLease.mockReset();
+  waitForVoiceCallLease.mockResolvedValue(undefined);
   liveVoiceState.startedAt = null;
   liveVoiceState.inputLevel = 0;
   liveVoiceState.micMuted = false;
@@ -3436,6 +3444,36 @@ describe('FastSessionTranscript', () => {
       expect(screen.getByPlaceholderText('Message agent')).toHaveValue(
         'Keep this draft',
       );
+    });
+
+    it('waits for the voice-call lease before sending the first spoken request', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      let releaseLease!: () => void;
+      waitForVoiceCallLease.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          releaseLease = resolve;
+        }),
+      );
+      replyMutate.mockResolvedValue({ success: true });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        liveVoiceState.onUtterance?.('Check the build', 'item_1');
+      });
+      expect(waitForVoiceCallLease).toHaveBeenCalledOnce();
+      expect(replyMutate).not.toHaveBeenCalled();
+
+      releaseLease();
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledOnce());
     });
 
     it('reads the answer to a spoken request to Live as it streams, and leaves typed replies on screen', async () => {
