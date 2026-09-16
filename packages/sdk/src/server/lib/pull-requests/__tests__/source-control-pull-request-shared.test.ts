@@ -136,13 +136,16 @@ describe('environment GitHub repository scope', () => {
         ),
       ).toBeUndefined();
     } else {
+      // Invalid environment mappings can fail either while resolving a GitHub
+      // installation or at the final scope gate. Both paths must deny access;
+      // the exact diagnostic depends on the surrounding installation state.
       await expect(assertion).rejects.toThrow(
         [
           'inactive anchor',
           'non-GitHub mapped anchor',
           'unmapped anchor',
         ].includes(scenario)
-          ? 'GitHub installations'
+          ? /GitHub installations|outside this task/
           : 'outside this task',
       );
     }
