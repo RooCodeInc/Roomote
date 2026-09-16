@@ -36,7 +36,7 @@ use tokio_util::io::ReaderStream;
 use x11rb::{
     connection::Connection,
     protocol::{
-        randr::ConnectionExt as RandrConnectionExt,
+        randr::{self, ConnectionExt as RandrConnectionExt},
         xproto::{
             BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ConnectionExt as XprotoConnectionExt,
             KEY_PRESS_EVENT, KEY_RELEASE_EVENT, MOTION_NOTIFY_EVENT, Window,
@@ -515,12 +515,126 @@ impl X11Controller {
         if size.width == self.width && size.height == self.height {
             return Ok(());
         }
+        let x11 =
+            |error: x11rb::errors::ConnectionError| format!("X11 RandR request failed: {error}");
+        let reply = |error: x11rb::errors::ReplyError| format!("X11 RandR reply failed: {error}");
+        let resources = self
+            .connection
+            .randr_get_screen_resources_current(self.root)
+            .map_err(x11)?
+            .reply()
+            .map_err(reply)?;
+
+        // Drive the first output that has a CRTC (Xvnc exposes one, VNC-0).
+        let mut target = None;
+        for &output in &resources.outputs {
+            let info = self
+                .connection
+                .randr_get_output_info(output, resources.config_timestamp)
+                .map_err(x11)?
+                .reply()
+                .map_err(reply)?;
+            let crtc = if info.crtc != 0 {
+                Some(info.crtc)
+            } else {
+                info.crtcs.first().copied()
+            };
+            if let Some(crtc) = crtc {
+                target = Some((output, crtc));
+                break;
+            }
+        }
+        let Some((output, crtc)) = target else {
+            return Err("X11 server exposes no RandR output to resize".into());
+        };
+
+        // Reuse a mode of the requested size or register a new one. Xvnc
+        // ignores the timings; they only need to be self-consistent.
+        let existing = resources
+            .modes
+            .iter()
+            .find(|mode| mode.width == size.width && mode.height == size.height)
+            .map(|mode| mode.id);
+        let mode = match existing {
+            Some(mode) => mode,
+            None => {
+                let name = format!("{}x{}_roomote", size.width, size.height);
+                let htotal = size.width + 32;
+                let vtotal = size.height + 20;
+                let mode_info = randr::ModeInfo {
+                    id: 0,
+                    width: size.width,
+                    height: size.height,
+                    dot_clock: u32::from(htotal) * u32::from(vtotal) * 60,
+                    hsync_start: size.width + 8,
+                    hsync_end: size.width + 16,
+                    htotal,
+                    hskew: 0,
+                    vsync_start: size.height + 3,
+                    vsync_end: size.height + 6,
+                    vtotal,
+                    name_len: name.len() as u16,
+                    mode_flags: randr::ModeFlag::HSYNC_POSITIVE | randr::ModeFlag::VSYNC_POSITIVE,
+                };
+                let mode = self
+                    .connection
+                    .randr_create_mode(self.root, mode_info, name.as_bytes())
+                    .map_err(x11)?
+                    .reply()
+                    .map_err(reply)?
+                    .mode;
+                self.connection
+                    .randr_add_output_mode(output, mode)
+                    .map_err(x11)?
+                    .check()
+                    .map_err(|error| format!("X11 server rejected the new screen mode: {error}"))?;
+                mode
+            }
+        };
+
+        // Same order as xrandr: park the CRTC so the framebuffer can shrink,
+        // resize the framebuffer, then bring the CRTC back at the new mode.
         let (mm_width, mm_height) = size.millimeters();
         self.connection
+            .randr_set_crtc_config(
+                crtc,
+                x11rb::CURRENT_TIME,
+                resources.config_timestamp,
+                0,
+                0,
+                0,
+                randr::Rotation::ROTATE0,
+                &[],
+            )
+            .map_err(x11)?
+            .reply()
+            .map_err(reply)?;
+        self.connection
             .randr_set_screen_size(self.root, size.width, size.height, mm_width, mm_height)
-            .map_err(|error| format!("failed to request X11 screen resize: {error}"))?
+            .map_err(x11)?
             .check()
             .map_err(|error| format!("X11 server rejected screen resize: {error}"))?;
+        let status = self
+            .connection
+            .randr_set_crtc_config(
+                crtc,
+                x11rb::CURRENT_TIME,
+                resources.config_timestamp,
+                0,
+                0,
+                mode,
+                randr::Rotation::ROTATE0,
+                &[output],
+            )
+            .map_err(x11)?
+            .reply()
+            .map_err(reply)?;
+        if status.status != randr::SetConfig::SUCCESS {
+            return Err(format!(
+                "X11 server rejected the resized output configuration: {:?}",
+                status.status
+            ));
+        }
         self.width = size.width;
         self.height = size.height;
         Ok(())
