@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => ({
   getUnifiedSession: vi.fn(),
   prepareServiceCredential: vi.fn(),
   listServiceCredentialApprovals: vi.fn(),
+  addRemoteMcp: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
   getPendingHumanFollowUp: vi.fn(),
@@ -94,6 +95,7 @@ const nativeToolNames = vi.hoisted(
   () =>
     ({
       callIntegrationTool: 'call_integration_tool',
+      addRemoteMcp: 'add_remote_mcp',
       cancelTask: 'cancel_task',
       createArtifact: 'create_artifact',
       findIntegrationTools: 'find_integration_tools',
@@ -131,6 +133,10 @@ const fastAgentSessionToolFilter = vi.hoisted(() => ({ task: true }));
 vi.mock('@roomote/sdk/server/service-credentials', () => ({
   prepareServiceCredential: mocks.prepareServiceCredential,
   listServiceCredentialApprovals: mocks.listServiceCredentialApprovals,
+}));
+
+vi.mock('@roomote/sdk/server/add-remote-custom-mcp', () => ({
+  addRemoteCustomMcpForFast: mocks.addRemoteMcp,
 }));
 
 vi.mock('@roomote/telemetry/server', () => ({
@@ -5460,6 +5466,61 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('records add_remote_mcp as the canonical native tool name', async () => {
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
+    mocks.addRemoteMcp.mockResolvedValue({
+      success: true,
+      status: 'connected',
+      integrationId: 'deepwiki',
+      name: 'deepwiki',
+      tools: [],
+      reused: false,
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll connect it.',
+        });
+        await invokeTool(nativeToolNames.addRemoteMcp, {
+          name: 'DeepWiki',
+          url: 'https://mcp.deepwiki.com/mcp',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'DeepWiki is connected.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const events = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .filter(
+        (message) => message.payload?.toolName === nativeToolNames.addRemoteMcp,
+      );
+    expect(events).toHaveLength(2);
+    expect(events).toEqual([
+      expect.objectContaining({
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+        payload: expect.objectContaining({
+          title: 'add_remote_mcp',
+          toolName: 'add_remote_mcp',
+        }),
+      }),
+      expect.objectContaining({
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        payload: expect.objectContaining({
+          title: 'add_remote_mcp',
+          toolName: 'add_remote_mcp',
+        }),
+      }),
+    ]);
+  });
+
   it('saves a conversation memory through the outbox', async () => {
     mocks.isBrainEnabled.mockResolvedValue(true);
     mocks.appendMemory.mockResolvedValue({ saved: true });
@@ -5780,6 +5841,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ id: 'roomote' }),
       ]),
       {
+        addRemoteMcpEnabled: true,
         surface: 'slack',
         serviceCredentialToolsEnabled: true,
         serviceCredentialPrepareEnabled: true,
@@ -5832,6 +5894,23 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         ([sessionID]) => sessionID === 'opencode-subagent-1',
       )?.[3],
     ).toMatchObject({ allowSkillAccess: false, allowSpillRecovery: false });
+  });
+
+  it('does not enable remote MCP setup for a non-admin', async () => {
+    mocks.getUserIdentity.mockResolvedValue({
+      displayName: 'Member',
+      githubLogin: null,
+      isAdmin: false,
+      serviceCredentialToolsEnabled: true,
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
+      'conversation-1',
+      expect.any(Array),
+      expect.objectContaining({ addRemoteMcpEnabled: false }),
+    );
   });
 
   it('rebuilds an invalidated OpenCode session from canonical compatibility history', async () => {

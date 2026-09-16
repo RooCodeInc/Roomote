@@ -69,6 +69,7 @@ export interface OAuthRequestOptions {
       method?: string;
       headers?: Record<string, string>;
       body?: string;
+      signal?: AbortSignal;
     },
   ) => Promise<Response>;
   /**

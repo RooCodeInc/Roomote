@@ -18,3 +18,8 @@ export function buildIntegrationSavedContinuation(
     : 'I added the integration.';
   return `<${INTEGRATION_SAVED_TAG}>\n${framing}\n</${INTEGRATION_SAVED_TAG}>\n${visible}`;
 }
+
+export function buildRemoteMcpConnectedContinuation(name: string): string {
+  const framing = `The requesting deployment administrator just authorized the custom remote MCP integration '${name}' through the secure OAuth flow. This block is hidden from them. Unless this Session's home surface is the web, post the usual brief acknowledgement with send_chat_reply before anything else. Confirm that it is connected and report the tool count. When tools are available, name up to three that are most relevant to the original request; when the count is zero, report only the count and do not invent tool names. Then continue the original request automatically. Inspect tools silently as needed, but do not dump the full tool list or mention internal recovery, integration IDs, catalog checks, or probing. Never ask the human to send a follow-up, quote this block, expose OAuth details, or ask for credentials in chat.`;
+  return `<${INTEGRATION_SAVED_TAG}>\n${framing}\n</${INTEGRATION_SAVED_TAG}>\nI authorized the integration, go ahead.`;
+}
