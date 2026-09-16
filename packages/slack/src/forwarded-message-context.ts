@@ -1105,11 +1105,22 @@ export function formatSlackAttachmentTitleContexts(
 
 export function formatSlackBlockLinkContext(
   blocks?: unknown[],
+  attachments?: unknown[],
 ): string | undefined {
   const links: SlackBlockLink[] = [];
   const seenKeys = new Set<string>();
 
   extractBlockLinks(blocks, links, seenKeys);
+  // App unfurls keep their links inside attachment blocks; the text pass
+  // flattens `<url|label>` to the label, so collect the URLs here too.
+  for (const attachment of attachments ?? []) {
+    if (
+      isRecord(attachment) &&
+      !isForwardedSlackMessageAttachment(attachment)
+    ) {
+      extractBlockLinks(attachment.blocks, links, seenKeys);
+    }
+  }
 
   if (links.length === 0) {
     return undefined;
@@ -1262,7 +1273,7 @@ export function formatSlackAttachmentContext(
     blocks,
     textWithForwardedContext,
   );
-  const blockLinkContext = formatSlackBlockLinkContext(blocks);
+  const blockLinkContext = formatSlackBlockLinkContext(blocks, attachments);
   const additionalContexts = [
     formatSlackForwardedMessageContext(attachments),
     attachmentTitleContext,

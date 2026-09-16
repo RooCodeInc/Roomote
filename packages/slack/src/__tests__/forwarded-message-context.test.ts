@@ -355,7 +355,10 @@ describe('forwarded-message-context', () => {
         blocks: [
           {
             type: 'section',
-            text: { type: 'mrkdwn', text: '*Pull request #42*: fix the tests' },
+            text: {
+              type: 'mrkdwn',
+              text: '<https://example.com/pull/42|*Pull request #42*>: fix the tests',
+            },
           },
           {
             type: 'context',
@@ -377,6 +380,9 @@ describe('forwarded-message-context', () => {
         'Text:',
         '*Pull request #42*: fix the tests',
         'Open · 3 files changed',
+        '',
+        'Slack block links:',
+        '- Pull request #42: https://example.com/pull/42',
       ].join('\n'),
     );
   });
