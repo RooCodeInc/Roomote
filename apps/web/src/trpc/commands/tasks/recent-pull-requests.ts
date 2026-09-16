@@ -40,8 +40,15 @@ export async function getRecentPullRequestsCommand(
   // Legacy associations may predate host backfills, but their PR URL still
   // identifies the source-control instance.
   const normalizedPullRequestHost = sql<string>`coalesce(
-    nullif(lower(${taskPullRequests.host}), ''),
-    nullif(lower(split_part(split_part(${taskPullRequests.prUrl}, '://', 2), '/', 1)), '')
+    nullif(regexp_replace(lower(${taskPullRequests.host}), ':443$', ''), ''),
+    nullif(
+      case
+        when lower(${taskPullRequests.prUrl}) like 'http://%'
+          then regexp_replace(lower(split_part(split_part(${taskPullRequests.prUrl}, '://', 2), '/', 1)), ':80$', '')
+        else regexp_replace(lower(split_part(split_part(${taskPullRequests.prUrl}, '://', 2), '/', 1)), ':443$', '')
+      end,
+      ''
+    )
   )`;
 
   const latestPullRequestStatuses = db
