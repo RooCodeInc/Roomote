@@ -1370,8 +1370,8 @@ describe('SessionWorkspace', () => {
         'ready',
       );
     });
-    expect(card).not.toHaveTextContent('Ada');
-    expect(card).not.toHaveTextContent('98');
+    expect(card).toHaveTextContent('Ada');
+    expect(card).toHaveTextContent('98');
   });
 
   it('opens a deep-linked Session artifact without a click and clears the link on back', async () => {
