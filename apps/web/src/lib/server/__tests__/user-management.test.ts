@@ -126,6 +126,7 @@ vi.mock('@roomote/db/server', () => {
 import {
   createPasswordResetLinkForUser,
   removeUser,
+  requestSelfServicePasswordReset,
   updateUserRole,
   userHasCredentialAccount,
 } from '../user-management';
@@ -292,6 +293,44 @@ describe('createPasswordResetLinkForUser', () => {
     });
 
     expect(result).toEqual({ created: false, reason: 'not_generated' });
+  });
+});
+
+describe('requestSelfServicePasswordReset', () => {
+  it('does nothing for an unknown or removed account', async () => {
+    await requestSelfServicePasswordReset('missing@example.com');
+
+    expect(state.requestedPasswordReset).toBeUndefined();
+  });
+
+  it('does nothing for an OAuth-only account', async () => {
+    state.target = {
+      id: 'user-1',
+      email: 'ada@example.com',
+      role: 'member',
+      deletedAt: null,
+    };
+
+    await requestSelfServicePasswordReset('ADA@example.com');
+
+    expect(state.requestedPasswordReset).toBeUndefined();
+  });
+
+  it('requests delivery for an active credential account', async () => {
+    state.target = {
+      id: 'user-1',
+      email: 'ada@example.com',
+      role: 'member',
+      deletedAt: null,
+    };
+    state.credentialAccountExists = true;
+
+    await requestSelfServicePasswordReset(' ADA@example.com ');
+
+    expect(state.requestedPasswordReset).toEqual({
+      email: 'ada@example.com',
+      redirectTo: 'https://roomote.example.com/reset-password',
+    });
   });
 });
 
