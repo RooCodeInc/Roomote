@@ -72,7 +72,7 @@ it('lists integrations without credentials and removes with a same-origin JSON b
   expect(toastSuccessMock).toHaveBeenCalledWith('Stripe removed.');
 });
 
-it('adds an integration with the policy and key entered by the human', async () => {
+it('adds a shared integration without offering personal scope', async () => {
   fetchMock
     .mockResolvedValueOnce(new Response(JSON.stringify({ secrets: [] })))
     .mockResolvedValueOnce(
@@ -82,6 +82,12 @@ it('adds an integration with the policy and key entered by the human', async () 
   render(<YourIntegrations />);
   expect(await screen.findByText('No integrations yet.')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Add integration' }));
+  expect(
+    screen.queryByLabelText('Who can use this integration?'),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('option', { name: 'Only me' }),
+  ).not.toBeInTheDocument();
   fireEvent.change(await screen.findByLabelText('Name'), {
     target: { value: 'Stripe' },
   });

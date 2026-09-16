@@ -203,7 +203,7 @@ export function useYourIntegrations(view: IntegrationView = 'shared'): {
           </DialogHeader>
           {adding ? (
             <AddIntegrationForm
-              visibility={view === 'personal' ? 'owner' : undefined}
+              visibility={view === 'personal' ? 'owner' : 'deployment'}
               onSaved={async () => {
                 setAdding(false);
                 await load();
