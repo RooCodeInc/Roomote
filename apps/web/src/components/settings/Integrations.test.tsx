@@ -1129,6 +1129,18 @@ describe('Integrations settings', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('shows the empty state when curated integrations are disabled and only retained built-ins are active', () => {
+    state.integrationsEnabled = false;
+
+    render(<ActualIntegrations />);
+
+    const table = screen.getByRole('table', { name: 'Integrations' });
+    expect(
+      within(table).getByText('No active integrations yet.'),
+    ).toBeInTheDocument();
+    expect(within(table).queryByText('Linear')).not.toBeInTheDocument();
+  });
+
   it('connects and enables an org-scoped MCP from the integrations page', () => {
     render(<Integrations />);
 

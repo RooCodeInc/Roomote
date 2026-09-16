@@ -2855,6 +2855,9 @@ export function Integrations({
   const configurationIsDeploymentScoped = configurationInfoDefinition
     ? isDeploymentScopedMcpIntegration(configurationInfoDefinition)
     : false;
+  const displayedActiveItems = integrationsUnavailable
+    ? [...customMcpItems, ...apiKeyItems].filter((item) => item.enabled)
+    : activeItems;
   const highlightedItem =
     items.find((item) => item.id === highlightedIntegrationId) ?? null;
   const deepLinkDialogItem =
@@ -3959,15 +3962,10 @@ export function Integrations({
                       <Skeleton className="h-3 w-full max-w-lg" />
                     </div>
                   ) : null}
-                  {(integrationsUnavailable
-                    ? [...customMcpItems, ...apiKeyItems].filter(
-                        (item) => item.enabled,
-                      )
-                    : activeItems
-                  ).map((item) => (
+                  {displayedActiveItems.map((item) => (
                     <IntegrationListRow key={item.id} item={item} />
                   ))}
-                  {!apiKeyItemsLoading && activeItems.length === 0 ? (
+                  {!apiKeyItemsLoading && displayedActiveItems.length === 0 ? (
                     <div className="flex min-h-64 flex-1 flex-col items-center justify-center gap-3 px-4 py-6">
                       <Image
                         src="/elements/integrations.png"
