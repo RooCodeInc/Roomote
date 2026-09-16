@@ -31,44 +31,45 @@ const OAUTH_REPLAY_TTL_MS = 24 * 60 * 60 * 1000;
 const SETTINGS_PATH = '/settings/integrations';
 
 type RemoteMcpTool = { name: string; description: string | null };
+type ServerResultIdentity = {
+  integrationId: string;
+  name: string;
+  usage: string;
+};
 
 export type AddRemoteCustomMcpResult =
-  | {
+  | (ServerResultIdentity & {
       status: 'connected';
-      id: string;
-      name: string;
       tools: RemoteMcpTool[];
       reused: boolean;
-    }
-  | {
+    })
+  | (ServerResultIdentity & {
       status: 'authorization_required';
-      id: string;
-      name: string;
       authorizeUrl: string;
       reused: boolean;
-    }
+    })
   | {
       status: 'needs_static_headers';
-      id?: string;
       name: string;
       settingsUrl: string;
-      reused: boolean;
+      reused: false;
     }
-  | {
+  | (ServerResultIdentity & {
+      status: 'needs_static_headers';
+      settingsUrl: string;
+      reused: true;
+    })
+  | (ServerResultIdentity & {
       status: 'client_registration_required';
-      id: string;
-      name: string;
       authorizeUrl?: string;
       settingsUrl: string;
       reused: boolean;
-    }
-  | {
+    })
+  | (ServerResultIdentity & {
       status: 'disabled';
-      id: string;
-      name: string;
       settingsUrl: string;
       reused: true;
-    };
+    });
 
 type RemoteMcpProbe =
   | { status: 'connected'; tools: RemoteMcpTool[] }
@@ -77,6 +78,16 @@ type RemoteMcpProbe =
 
 function publicUrl(path: string): string {
   return new URL(path, Env.R_PUBLIC_URL ?? Env.R_APP_URL).toString();
+}
+
+function serverResultIdentity(
+  server: typeof customMcpServers.$inferSelect,
+): ServerResultIdentity {
+  return {
+    integrationId: server.name,
+    name: server.name,
+    usage: `Use integrationId '${server.name}' with find_integration_tools and call_integration_tool. Do not use a server UUID as the integration ID.`,
+  };
 }
 
 function canonicalizeRemoteMcpUrl(value: string): string {
@@ -440,8 +451,7 @@ async function resultForServer(input: {
   if (!server.enabled) {
     return {
       status: 'disabled',
-      id: server.id,
-      name: server.name,
+      ...serverResultIdentity(server),
       settingsUrl: publicUrl(SETTINGS_PATH),
       reused: true,
     };
@@ -450,8 +460,7 @@ async function resultForServer(input: {
   if (server.authType === 'none') {
     return {
       status: 'connected',
-      id: server.id,
-      name: server.name,
+      ...serverResultIdentity(server),
       tools: await listRemoteMcpTools(server.url),
       reused: input.reused,
     };
@@ -460,8 +469,7 @@ async function resultForServer(input: {
     if (server.headers && Object.keys(server.headers).length > 0) {
       return {
         status: 'connected',
-        id: server.id,
-        name: server.name,
+        ...serverResultIdentity(server),
         tools: await listRemoteMcpTools(
           server.url,
           Object.fromEntries(
@@ -476,8 +484,7 @@ async function resultForServer(input: {
     }
     return {
       status: 'needs_static_headers',
-      id: server.id,
-      name: server.name,
+      ...serverResultIdentity(server),
       settingsUrl: publicUrl(SETTINGS_PATH),
       reused: input.reused,
     };
@@ -508,8 +515,7 @@ async function resultForServer(input: {
   if (existingConnection?.authStatus === 'error' && !server.manualClientId) {
     return {
       status: 'client_registration_required',
-      id: server.id,
-      name: server.name,
+      ...serverResultIdentity(server),
       settingsUrl: publicUrl(SETTINGS_PATH),
       reused: input.reused,
     };
@@ -522,8 +528,7 @@ async function resultForServer(input: {
     if (accessToken) {
       return {
         status: 'connected',
-        id: server.id,
-        name: server.name,
+        ...serverResultIdentity(server),
         tools: await listRemoteMcpTools(server.url, {
           authorization: `Bearer ${accessToken}`,
         }),
@@ -543,8 +548,7 @@ async function resultForServer(input: {
   if (!server.manualClientId && !oauthServerMetadata.registration_endpoint) {
     return {
       status: 'client_registration_required',
-      id: server.id,
-      name: server.name,
+      ...serverResultIdentity(server),
       authorizeUrl,
       settingsUrl: publicUrl(SETTINGS_PATH),
       reused: input.reused,
@@ -552,8 +556,7 @@ async function resultForServer(input: {
   }
   return {
     status: 'authorization_required',
-    id: server.id,
-    name: server.name,
+    ...serverResultIdentity(server),
     authorizeUrl,
     reused: input.reused,
   };
@@ -669,8 +672,7 @@ export async function addRemoteCustomMcpForFast(input: {
   if (probe.status === 'connected') {
     return {
       status: 'connected',
-      id: selected.server.id,
-      name: selected.server.name,
+      ...serverResultIdentity(selected.server),
       tools: probe.tools,
       reused: false,
     };

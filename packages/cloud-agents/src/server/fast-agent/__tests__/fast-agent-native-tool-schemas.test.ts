@@ -405,6 +405,10 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     )!;
     const schema = toOpenCodeJsonSchema(zod, tool.args!);
 
+    expect(tool.description).toContain(
+      'use that exact integrationId with find_integration_tools and call_integration_tool',
+    );
+
     expect(Object.keys(tool.args!).sort()).toEqual(['name', 'url']);
     expect(schema).toMatchObject({
       type: 'object',

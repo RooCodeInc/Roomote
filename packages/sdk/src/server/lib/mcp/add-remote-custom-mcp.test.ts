@@ -167,7 +167,10 @@ describe('addRemoteCustomMcpForFast', () => {
     expect(result).toMatchObject({
       status: 'connected',
       name: 'acme-billing-mcp',
+      integrationId: 'acme-billing-mcp',
+      usage: expect.stringContaining("Use integrationId 'acme-billing-mcp'"),
     });
+    expect(result).not.toHaveProperty('id');
     expect(await db.query.customMcpServers.findFirst()).toMatchObject({
       name: 'acme-billing-mcp',
     });
@@ -244,7 +247,12 @@ describe('addRemoteCustomMcpForFast', () => {
       }),
     ]);
 
-    expect(new Set([first.id, second.id]).size).toBe(1);
+    expect(first.status).toBe('connected');
+    expect(second.status).toBe('connected');
+    if (first.status !== 'connected' || second.status !== 'connected') {
+      throw new Error('Expected connected results.');
+    }
+    expect(new Set([first.integrationId, second.integrationId]).size).toBe(1);
     expect(new Set([first.name, second.name]).size).toBe(1);
     expect([first.reused, second.reused].sort()).toEqual([false, true]);
     expect(await db.query.customMcpServers.findMany()).toHaveLength(1);
