@@ -3804,7 +3804,10 @@ export function Integrations({
       {customMcpDialogs}
       {apiKeyDialogs}
       <Dialog open={isCatalogOpen} onOpenChange={setIsCatalogOpen}>
-        <DialogContent size="xl">
+        <DialogContent
+          size="xl"
+          className="md:grid-rows-[auto_minmax(0,1fr)] md:overflow-y-hidden"
+        >
           <DialogHeader>
             <DialogTitle>Add from the catalog</DialogTitle>
             <DialogDescription>
@@ -3821,7 +3824,7 @@ export function Integrations({
               </AlertDescription>
             </Alert>
           ) : availableItems.length > 0 ? (
-            <div className="divide-y divide-background rounded-lg border bg-muted/30">
+            <div className="divide-y divide-background rounded-lg border bg-card md:min-h-0 md:overflow-y-auto">
               {availableItems.map((item) => (
                 <div
                   key={item.id}
@@ -3831,9 +3834,8 @@ export function Integrations({
                     {item.icon}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold">{item.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {item.description}
+                    <p className="truncate text-sm font-semibold">
+                      {item.name}
                     </p>
                   </div>
                   {item.onAction ? (
