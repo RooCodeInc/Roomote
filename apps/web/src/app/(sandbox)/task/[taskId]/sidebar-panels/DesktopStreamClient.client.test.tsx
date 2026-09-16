@@ -534,4 +534,29 @@ describe('DesktopStreamClient', () => {
       vi.useRealTimers();
     }
   });
+
+  it('hides the stream statistics behind a header toggle', async () => {
+    render(
+      <DesktopStreamClient
+        previewUrl="https://desktop.preview.test"
+        runId={123}
+        onClose={() => {}}
+      />,
+    );
+    await screen.findByRole('button', { name: 'Start remote desktop' });
+    expect(screen.queryByTestId('stream-stats')).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Show stream statistics' }),
+    );
+    expect(screen.getByTestId('stream-stats')).toHaveTextContent('kbps');
+    expect(window.localStorage.getItem('roomote.shared-desktop.stats')).toBe(
+      '1',
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Hide stream statistics' }),
+    );
+    expect(screen.queryByTestId('stream-stats')).toBeNull();
+  });
 });

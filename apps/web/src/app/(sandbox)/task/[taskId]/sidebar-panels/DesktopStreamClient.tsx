@@ -9,6 +9,7 @@ import {
 } from 'react';
 
 import {
+  Activity,
   Button,
   Loader2,
   Maximize2,
@@ -183,6 +184,24 @@ type ControlState = 'off' | 'connecting' | 'on' | 'released' | 'taken';
 
 const RECONNECT_DELAY_MS = 1_500;
 const MAX_AUTO_RECOVERIES = 20;
+/** Per-browser preference for the diagnostics readout in the footer. */
+const STATS_STORAGE_KEY = 'roomote.shared-desktop.stats';
+
+function readStatsPreference(): boolean {
+  try {
+    return window.localStorage.getItem(STATS_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeStatsPreference(enabled: boolean): void {
+  try {
+    window.localStorage.setItem(STATS_STORAGE_KEY, enabled ? '1' : '0');
+  } catch {
+    // Preference storage is a convenience only.
+  }
+}
 
 export function DesktopStreamClient({
   previewUrl,
@@ -211,6 +230,10 @@ export function DesktopStreamClient({
   const [isPlaying, setIsPlaying] = useState(false);
   const [controlReady, setControlReady] = useState(false);
   const [controlState, setControlState] = useState<ControlState>('off');
+  const [showStats, setShowStats] = useState(false);
+  useEffect(() => {
+    setShowStats(readStatsPreference());
+  }, []);
   /** True after the viewer explicitly released control: no auto-reconnect. */
   const releasedRef = useRef(false);
   const controlReconnectTimerRef = useRef<number | null>(null);
@@ -850,14 +873,39 @@ export function DesktopStreamClient({
           title="Shared Desktop"
           onClose={onClose}
           actions={
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!session || controlState === 'connecting'}
-              onClick={controlState === 'on' ? releaseControl : takeControl}
-            >
-              {controlState === 'on' ? 'Release control' : 'Take control'}
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!session || controlState === 'connecting'}
+                onClick={controlState === 'on' ? releaseControl : takeControl}
+              >
+                {controlState === 'on' ? 'Release control' : 'Take control'}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={
+                  showStats
+                    ? 'Hide stream statistics'
+                    : 'Show stream statistics'
+                }
+                aria-pressed={showStats}
+                title={
+                  showStats
+                    ? 'Hide stream statistics'
+                    : 'Show stream statistics'
+                }
+                className={showStats ? 'text-primary' : undefined}
+                onClick={() => {
+                  const next = !showStats;
+                  setShowStats(next);
+                  writeStatsPreference(next);
+                }}
+              >
+                <Activity />
+              </Button>
+            </>
           }
         />
       ) : null}
@@ -970,7 +1018,9 @@ export function DesktopStreamClient({
       <div className="flex min-h-10 items-center justify-between gap-3 border-t border-zinc-800 bg-zinc-900 px-3 text-xs text-zinc-400">
         <span className="min-w-0 truncate">
           {controlState === 'on'
-            ? `Control connected · ${sentEvents} events sent`
+            ? showStats
+              ? `Control connected · ${sentEvents} events sent`
+              : 'Control connected'
             : controlState === 'connecting'
               ? 'Connecting control'
               : controlState === 'released'
@@ -986,24 +1036,26 @@ export function DesktopStreamClient({
           ) : null}
         </span>
         <span className="flex shrink-0 items-center gap-3">
-          <span className="font-mono tabular-nums">
-            {renderedFps === null ? '-' : `${renderedFps.toFixed(1)} fps`}
-            {' · '}
-            {decodedBitrateKbps === null
-              ? '- kbps'
-              : `${decodedBitrateKbps.toFixed(0)} kbps`}
-            {' · '}
-            {droppedFrames} dropped
-            {' · '}
-            {liveLagMs === null
-              ? '-'
-              : `${liveLagMs.toFixed(0)} ms behind live`}
-            {remoteSize ? ` · ${remoteSize.width}×${remoteSize.height}` : ''}
-            {' · '}
-            {startupMs === null
-              ? '-'
-              : `${startupMs.toFixed(0)} ms first frame`}
-          </span>
+          {showStats ? (
+            <span className="font-mono tabular-nums" data-testid="stream-stats">
+              {renderedFps === null ? '-' : `${renderedFps.toFixed(1)} fps`}
+              {' · '}
+              {decodedBitrateKbps === null
+                ? '- kbps'
+                : `${decodedBitrateKbps.toFixed(0)} kbps`}
+              {' · '}
+              {droppedFrames} dropped
+              {' · '}
+              {liveLagMs === null
+                ? '-'
+                : `${liveLagMs.toFixed(0)} ms behind live`}
+              {remoteSize ? ` · ${remoteSize.width}×${remoteSize.height}` : ''}
+              {' · '}
+              {startupMs === null
+                ? '-'
+                : `${startupMs.toFixed(0)} ms first frame`}
+            </span>
+          ) : null}
           <Button
             variant="ghost"
             size="icon"
