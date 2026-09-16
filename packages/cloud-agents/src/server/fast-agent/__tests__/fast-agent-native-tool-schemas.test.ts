@@ -413,7 +413,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
   // Opt in where the pinned OpenCode binary is installed. No real provider
   // credentials/config are inherited; both providers terminate at this mock.
   it.skipIf(process.env.ROOMOTE_TEST_OPENCODE_SCHEMAS !== '1')(
-    'captures the Integration-key schema emitted to OpenAI and Anthropic HTTP endpoints',
+    'captures enabled Integration-key setup schemas emitted to OpenAI and Anthropic',
     async () => {
       const requests: Record<string, unknown>[] = [];
       const provider = createServer(async (request, response) => {
