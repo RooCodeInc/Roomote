@@ -6164,7 +6164,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }
       }, 0);
     }) as typeof setTimeout);
-    mocks.generateText.mockRejectedValue(new Error('TypeError: fetch failed'));
+    mocks.generateText.mockRejectedValue(
+      new TypeError('fetch failed', {
+        cause: Object.assign(new Error('read ECONNRESET'), {
+          code: 'ECONNRESET',
+        }),
+      }),
+    );
 
     try {
       await expect(
@@ -11355,6 +11361,57 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('retries a wrapped connection reset after completed read tools without replaying them', async () => {
+    vi.useFakeTimers();
+    try {
+      const reset = Object.assign(new Error('read ECONNRESET'), {
+        code: 'ECONNRESET',
+      });
+      mocks.generateText
+        .mockImplementationOnce(async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.listSkills, {});
+          await invokeTool(nativeToolNames.findIntegrationTools, {
+            integrationId: 'github',
+          });
+          throw new TypeError('fetch failed', { cause: reset });
+        })
+        .mockImplementationOnce(async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Recovered without repeating the reads.',
+          });
+          return '';
+        });
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toBe(
+        'Recovered without repeating the reads.',
+      );
+      expect(mocks.generateText).toHaveBeenCalledTimes(2);
+      expect(mocks.generateText.mock.calls[1]?.[1]).toEqual({
+        id: 'opencode-session-1',
+      });
+      expect(mocks.generateText.mock.calls[1]?.[0]).toMatchObject({
+        prompt: expect.stringContaining(
+          'Do not repeat completed tool calls or messages already sent',
+        ),
+        timeoutMs: 300_000,
+      });
+      expect(adapter.postReply).toHaveBeenCalledOnce();
+      expect(adapter.postReply).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: 'Recovered without repeating the reads.',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not retry or append an error after the turn already closed', async () => {
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
@@ -11363,7 +11420,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           purpose: 'closeout',
           message: 'The requested work is complete.',
         });
-        throw new Error('TypeError: fetch failed');
+        throw new TypeError('fetch failed', {
+          cause: Object.assign(new Error('read ECONNRESET'), {
+            code: 'ECONNRESET',
+          }),
+        });
       },
     );
     const adapter = callbacks();
@@ -11514,7 +11575,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     vi.useFakeTimers();
     try {
       mocks.generateText
-        .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
+        .mockRejectedValueOnce(
+          new TypeError('fetch failed', {
+            cause: Object.assign(new Error('read ECONNRESET'), {
+              code: 'ECONNRESET',
+            }),
+          }),
+        )
         .mockImplementationOnce(async (_params, _session, options) => {
           await options.onSessionReady('opencode-session-1');
           await invokeTool(nativeToolNames.sendChatReply, {
