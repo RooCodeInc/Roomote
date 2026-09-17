@@ -894,6 +894,7 @@ async function deliverTurn(
   const session = await getOrCreateFastAgentSession({
     userId: conversation.ownerUserId,
     conversation: fastConversation,
+    userInitiated: { surface: 'agentmail', trigger: 'message' },
   });
 
   const result = await continueFastAgentSurfaceReplyWithLock(

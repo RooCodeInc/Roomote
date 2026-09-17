@@ -941,6 +941,7 @@ telegram.post('/', async (c) => {
       (await getOrCreateFastAgentSession({
         userId: senderUserId,
         conversation: fastConversation,
+        userInitiated: { surface: 'telegram', trigger: 'message' },
       }));
     if (
       metadata.communicationThreadId &&
@@ -1297,6 +1298,7 @@ telegram.post('/', async (c) => {
     session = await getOrCreateFastAgentSession({
       userId: senderUserId,
       conversation: fastConversation,
+      userInitiated: { surface: 'telegram', trigger: 'message' },
     });
     c.set('operationalFields', {
       ...c.get('operationalFields'),

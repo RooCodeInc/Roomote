@@ -1,3 +1,9 @@
+const { captureEvent } = vi.hoisted(() => ({
+  captureEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@roomote/telemetry/server', () => ({ captureEvent }));
+
 import {
   and,
   db,
@@ -14,6 +20,7 @@ import {
   userFactory,
   users,
 } from '@roomote/db/server';
+import type { FastAgentConversation, FastAgentSurface } from '@roomote/types';
 
 import {
   fastAgentConversationRepository,
@@ -56,12 +63,95 @@ const slackConversation = {
 };
 
 afterEach(async () => {
+  captureEvent.mockClear();
   for (const userId of createdUserIds.splice(0)) {
     await db.delete(users).where(eq(users.id, userId));
   }
 });
 
 describe('Fast conversation repository', () => {
+  it.each([
+    'web',
+    'slack',
+    'teams',
+    'telegram',
+    'discord',
+    'agentmail',
+    'linear',
+    'github',
+    'gitlab',
+    'bitbucket',
+    'ado',
+    'gitea',
+  ] as const)(
+    'captures one user-started Session creation for the %s origin',
+    async (surface: Exclude<FastAgentSurface, 'automation'>) => {
+      const user = await createUser();
+      const userId = user.id;
+      const identity = {
+        surface,
+        workspaceId: `${surface}-telemetry-workspace`,
+        conversationId: crypto.randomUUID(),
+      };
+      const conversation = (
+        surface === 'web'
+          ? identity
+          : {
+              ...identity,
+              replyTarget: { channelId: `${surface}-telemetry-channel` },
+            }
+      ) as FastAgentConversation;
+
+      const created = await getOrCreateFastAgentSession({
+        userId,
+        conversation,
+        userInitiated: { surface, trigger: 'message' },
+      });
+      expect(created.created).toBe(true);
+      expect(captureEvent).toHaveBeenCalledTimes(1);
+      expect(captureEvent).toHaveBeenCalledWith('session_created', {
+        userId,
+        properties: {
+          surface,
+          trigger: 'message',
+          outcome: 'created',
+        },
+      });
+
+      const reused = await getOrCreateFastAgentSession({
+        userId,
+        conversation,
+        userInitiated: { surface, trigger: 'message' },
+      });
+      expect(reused.created).toBe(false);
+      expect(captureEvent).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('does not capture platform-created or automation-owned Sessions', async () => {
+    const user = await createUser();
+    const userId = user.id;
+    await getOrCreateFastAgentSession({
+      userId,
+      conversation: {
+        surface: 'web',
+        workspaceId: userId,
+        conversationId: crypto.randomUUID(),
+      },
+    });
+    await getOrCreateFastAgentSession({
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      conversation: {
+        surface: 'automation',
+        workspaceId: 'automation-telemetry-workspace',
+        conversationId: crypto.randomUUID(),
+      },
+      userInitiated: { surface: 'system', trigger: 'schedule' },
+    });
+
+    expect(captureEvent).not.toHaveBeenCalled();
+  });
+
   it('creates private web conversations with an immutable matching owner', async () => {
     const owner = await createUser();
     const conversation = {

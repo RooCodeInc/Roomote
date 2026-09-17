@@ -3177,6 +3177,14 @@ export async function answerFastAgentQuestion({
         userId,
         conversation: canonicalConversation ?? conversation,
         ...(turnSource === 'human' ? { chatInitiationOrder } : {}),
+        ...(turnSource === 'human' && conversation.surface !== 'automation'
+          ? {
+              userInitiated: {
+                surface: conversation.surface,
+                trigger: 'message' as const,
+              },
+            }
+          : {}),
       }),
       listFastAgentIntegrations(
         { userId, apiBaseUrl },

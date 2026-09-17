@@ -41,6 +41,7 @@ import {
   isManagedDeploymentReadOnly,
   isRoomoteDeploymentDisabled,
 } from '@roomote/types';
+import { captureUserStartedSessionCreated } from './session-telemetry';
 import { Env, isRoomoteCloudEnabled } from '@roomote/env';
 import {
   type TaskRun,
@@ -1955,10 +1956,28 @@ async function enqueueFreshLaunch(
   }
 
   const delegated = Boolean(reusedTask || fastAgentSessionId);
-  void captureEvent(delegated ? 'session_task_delegated' : 'session_created', {
-    ...(linkedUserId ? { userId: linkedUserId } : {}),
-    properties: { surface, outcome: 'created' },
-  });
+  const userStartedSession =
+    !delegated &&
+    initiator.kind === 'user' &&
+    linkedUserId !== null &&
+    resolvedTaskPolicy.launchClass !== 'automation' &&
+    taskRun.payloadKind !== TaskPayloadKind.SnapshotEnvironment &&
+    visibility === 'visible' &&
+    taskWithHarnessOverrides.sourceRunId == null &&
+    taskWithHarnessOverrides.payload.environmentDefinitionId == null &&
+    taskWithHarnessOverrides.payload.verifiesEnvironmentId == null;
+  if (userStartedSession) {
+    captureUserStartedSessionCreated({
+      userId: linkedUserId,
+      surface,
+      trigger,
+    });
+  } else if (delegated) {
+    void captureEvent('session_task_delegated', {
+      ...(linkedUserId ? { userId: linkedUserId } : {}),
+      properties: { surface, outcome: 'created' },
+    });
+  }
 
   if (shouldCaptureTaskCreatedEvent(taskRun.payloadKind)) {
     // Anonymous analytics (no-op unless enabled): task creation with

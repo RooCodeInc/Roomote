@@ -157,6 +157,7 @@ describe('function-executed', () => {
     );
     expect(getOrCreateFastAgentSessionMock).toHaveBeenCalledWith({
       userId: 'user_author',
+      userInitiated: { surface: 'slack', trigger: 'message' },
       conversation: {
         surface: 'slack',
         workspaceId: 'T123',

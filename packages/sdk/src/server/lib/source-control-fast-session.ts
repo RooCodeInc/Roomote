@@ -177,6 +177,10 @@ export async function startSourceControlFastSessionTurn(input: {
   const fastSession = await getOrCreateFastAgentSession({
     userId: input.userId,
     conversation,
+    userInitiated: {
+      surface: input.discussion.provider,
+      trigger: 'message',
+    },
   });
   const queued = await queueFastAgentSurfaceReply({
     sessionId: fastSession.id,
