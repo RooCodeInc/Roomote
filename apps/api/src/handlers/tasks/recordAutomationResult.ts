@@ -7,6 +7,7 @@ import {
   recordAutomationResultForTask,
   taskRuns,
 } from '@roomote/db/server';
+import { resolveTaskAutomationResultVisibility } from '@roomote/sdk/server/automation-result-visibility';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -41,10 +42,14 @@ export async function recordAutomationResult(
     return c.json({ error: 'Invalid automation result payload' }, 400);
   }
 
+  const visibility = await resolveTaskAutomationResultVisibility(taskId).catch(
+    () => 'private' as const,
+  );
   const result = await recordAutomationResultForTask({
     taskId,
     content: body.data.content,
     dedupeKey: body.data.dedupeKey,
+    visibility,
   });
 
   return c.json({ recorded: Boolean(result) });

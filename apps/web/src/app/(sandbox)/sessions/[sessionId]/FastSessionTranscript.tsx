@@ -13,6 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useStickToBottomContext } from 'use-stick-to-bottom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   SETUP_RECEIPT_INPUT_KIND,
@@ -34,7 +35,7 @@ import {
 } from '@roomote/types';
 
 import type { FastSessionMessage } from '@/lib/server/fast-sessions';
-import { useTRPCClient } from '@/trpc/client';
+import { useTRPC, useTRPCClient } from '@/trpc/client';
 import {
   Conversation,
   ConversationContent,
@@ -470,7 +471,25 @@ export function FastSessionTranscript({
    */
   autoStartVoice?: boolean;
 }) {
+  const trpc = useTRPC();
   const trpcClient = useTRPCClient();
+  const queryClient = useQueryClient();
+  const taskReportRefreshRef = useRef({
+    queryClient,
+    fastTasksQueryKey: trpc.fastSessions.tasks.queryKey({ sessionId }),
+    taskSessionQueryKey: (taskId: string) =>
+      trpc.sandboxSession.byTaskId.queryKey({ taskId }),
+    taskArtifactsQueryKey: (taskId: string) =>
+      trpc.artifacts.forTask.queryKey({ taskId }),
+  });
+  taskReportRefreshRef.current = {
+    queryClient,
+    fastTasksQueryKey: trpc.fastSessions.tasks.queryKey({ sessionId }),
+    taskSessionQueryKey: (taskId: string) =>
+      trpc.sandboxSession.byTaskId.queryKey({ taskId }),
+    taskArtifactsQueryKey: (taskId: string) =>
+      trpc.artifacts.forTask.queryKey({ taskId }),
+  };
   const { user: authenticatedUser } = useUser();
   const currentUser = useMemo<TranscriptOwner | undefined>(
     () =>
@@ -508,6 +527,9 @@ export function FastSessionTranscript({
   );
   const serverMessagesRef = useRef(serverMessages);
   const hasReceivedInitialSessionStateRef = useRef(false);
+  const pendingTaskReportTimingsRef = useRef(
+    new Map<string, { admittedAtMs: number; serverReceivedAtMs: number }>(),
+  );
   const [initialOptimisticMessage] = useState(() =>
     getInitialOptimisticMessage(sessionId, initialMessages, currentUser),
   );
@@ -618,6 +640,40 @@ export function FastSessionTranscript({
         }
         serverMessagesRef.current = next;
         setServerMessages(next);
+        for (const message of canonicalMessages) {
+          const timing = pendingTaskReportTimingsRef.current.get(
+            message.eventId,
+          );
+          if (!timing) continue;
+          pendingTaskReportTimingsRef.current.delete(message.eventId);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              const displayAt = performance.timeOrigin + performance.now();
+              if (displayAt < timing.admittedAtMs) return;
+              try {
+                performance.measure(
+                  'roomote.task-report-admission-to-display',
+                  {
+                    start: Math.max(
+                      0,
+                      timing.admittedAtMs - performance.timeOrigin,
+                    ),
+                    end: performance.now(),
+                    detail: {
+                      admissionToServerMs: Math.max(
+                        0,
+                        timing.serverReceivedAtMs - timing.admittedAtMs,
+                      ),
+                      admissionToDisplayMs: displayAt - timing.admittedAtMs,
+                    },
+                  },
+                );
+              } catch {
+                // Older browsers may not support options-based measurements.
+              }
+            });
+          });
+        }
         // A persisted reply row supersedes the live text streamed for it.
         const persistedStreamIds = new Set(
           messages
@@ -722,15 +778,55 @@ export function FastSessionTranscript({
         // Ignore malformed frames; the persisted row still arrives.
       }
     };
+    const onTaskReport = (event: MessageEvent) => {
+      try {
+        const refresh = JSON.parse(event.data) as {
+          type: 'task_report_admitted';
+          eventId: string;
+          taskId: string;
+          admittedAtMs: number;
+          serverReceivedAtMs: number;
+        };
+        if (
+          refresh.type !== 'task_report_admitted' ||
+          !refresh.eventId ||
+          !refresh.taskId ||
+          !Number.isFinite(refresh.admittedAtMs) ||
+          !Number.isFinite(refresh.serverReceivedAtMs)
+        ) {
+          return;
+        }
+        pendingTaskReportTimingsRef.current.set(refresh.eventId, {
+          admittedAtMs: refresh.admittedAtMs,
+          serverReceivedAtMs: refresh.serverReceivedAtMs,
+        });
+        const refreshQueries = taskReportRefreshRef.current;
+        void Promise.all([
+          refreshQueries.queryClient.invalidateQueries({
+            queryKey: refreshQueries.fastTasksQueryKey,
+          }),
+          refreshQueries.queryClient.invalidateQueries({
+            queryKey: refreshQueries.taskSessionQueryKey(refresh.taskId),
+          }),
+          refreshQueries.queryClient.invalidateQueries({
+            queryKey: refreshQueries.taskArtifactsQueryKey(refresh.taskId),
+          }),
+        ]);
+      } catch {
+        // Ignore malformed hints; transcript and task polling remain active.
+      }
+    };
     source.addEventListener('open', onOpen);
     source.addEventListener('messages', onMessages);
     source.addEventListener('session', onSession);
     source.addEventListener('chunk', onChunk);
+    source.addEventListener('task-report', onTaskReport);
     return () => {
       source.removeEventListener('open', onOpen);
       source.removeEventListener('messages', onMessages);
       source.removeEventListener('session', onSession);
       source.removeEventListener('chunk', onChunk);
+      source.removeEventListener('task-report', onTaskReport);
       source.close();
     };
   }, [

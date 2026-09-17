@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { addRemoteCustomMcpForFast } from '@roomote/sdk/server/add-remote-custom-mcp';
+import { createFastSessionPlatformIssueReport } from '@roomote/sdk/server/platform-issue-reporting';
 import {
   listServiceCredentialApprovals,
   prepareServiceCredential,
@@ -34,7 +35,6 @@ import {
   formatErrorForLog,
   formatSingleLineLog,
   manageWakeupsInputSchema,
-  serviceCredentialRequestSchema,
   serviceCredentialPrepareSchema,
   serviceCredentialPrepareToolSchema,
   resolveInferenceProviderRetryDelayMs,
@@ -48,6 +48,7 @@ import {
   parseDiscordMessagePermalink,
   parseSlackChannelPermalink,
   parseSlackMessagePermalink,
+  platformIssueReportSchema,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
@@ -192,7 +193,6 @@ import {
 import {
   getFastAgentNativeAcpKind,
   isFastAgentNativeIntegration,
-  isFastAgentNativeToolEnabled,
 } from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
@@ -1740,20 +1740,6 @@ function isSuccessfulChatReactionResult(
   );
 }
 
-/**
- * What the model is told when the API names why an integration-key request
- * was refused. Only reasons that carry no request values are ever named.
- */
-const INTEGRATION_REFUSAL_GUIDANCE: Readonly<Record<string, string>> = {
-  method_not_allowed:
-    'That method is not approved for this integration. Use one of its allowed methods, or prepare a new approval that includes it.',
-  credential_echo:
-    "The service's response contained the key itself, so it was withheld. Use an endpoint that does not echo request headers.",
-  credential_echo_encoded:
-    "The service's response contained the key itself, so it was withheld. Use an endpoint that does not echo request headers.",
-  path_too_long: 'The request path is too long; shorten it.',
-};
-
 const addRemoteMcpArgsSchema = z
   .object({
     name: z.string().trim().min(1).max(80),
@@ -1785,6 +1771,7 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  platformEventTimestampMs,
   automationReport = false,
   serviceCredentialPlatformActorUserId,
   serviceCredentialPlatformDenialReason,
@@ -1828,6 +1815,8 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** Original durable admission time for a projected platform receipt. */
+  platformEventTimestampMs?: number;
   /** The settling delegated task ran for a custom automation; its closeout is
    * the run's report and may carry launchable suggestions. */
   automationReport?: boolean;
@@ -2303,6 +2292,7 @@ export async function answerFastAgentQuestion({
   });
   let surfaceDisposed = false;
   let surfaceActivityStarted = false;
+  let surfaceActiveTaskIds = new Set(activeTasks.map((task) => task.taskId));
   const startSurfaceActivity = () => {
     if (surfaceDisposed || surfaceActivityStarted || !adapter.activity) return;
     surfaceActivityStarted = true;
@@ -3122,8 +3112,10 @@ export async function answerFastAgentQuestion({
     surfaceSettlement ??= (async () => {
       await surfaceReplyStream.close();
       if (surfaceDisposed) return;
-      if (surfaceActivityStarted) {
-        await adapter.activity?.settle({ keepProcessing: durableTurnDeferred });
+      const keepProcessing =
+        durableTurnDeferred || surfaceActiveTaskIds.size > 0;
+      if (surfaceActivityStarted || keepProcessing) {
+        await adapter.activity?.settle({ keepProcessing });
       } else {
         await adapter.activity?.dispose();
       }
@@ -3500,7 +3492,8 @@ export async function answerFastAgentQuestion({
       {
         ...userEvent,
         turnId,
-        ts: previousAttempt?.prompt?.ts ?? Date.now(),
+        ts:
+          previousAttempt?.prompt?.ts ?? platformEventTimestampMs ?? Date.now(),
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         role: 'user',
         contentBlocks: buildFastAgentUserContentBlocks(
@@ -3560,6 +3553,7 @@ export async function answerFastAgentQuestion({
     const currentTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
     );
+    surfaceActiveTaskIds = new Set(currentTasks.keys());
     taskMessageGuard.restore(previousAttempt?.events ?? [], [
       ...currentTasks.keys(),
     ]);
@@ -3955,7 +3949,6 @@ export async function answerFastAgentQuestion({
       ...(conversation.surface === 'web'
         ? [
             FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp,
-            FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
             FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
             FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
           ]
@@ -3973,8 +3966,17 @@ export async function answerFastAgentQuestion({
               'Post an acknowledgement with send_chat_reply before this action.',
           };
 
+    const isWebIntegrationKeyRequest = (
+      call: z.infer<typeof callIntegrationToolArgsSchema>,
+    ) =>
+      conversation.surface === 'web' &&
+      call.integrationId === HTTP_INTEGRATIONS_MCP_ID &&
+      call.toolName === 'integration_request' &&
+      typeof call.args?.integrationId === 'string' &&
+      call.args.integrationId.startsWith('session:');
     const executeMcpTool = async (
       call: FastAgentMcpToolCall,
+      { acknowledgementExempt = false } = {},
     ): Promise<unknown> => {
       activeToolExecutions += 1;
       let canonicalToolEvent:
@@ -3989,9 +3991,9 @@ export async function answerFastAgentQuestion({
         turnProgressMarker += 1;
         // The acknowledgement gate runs before replay revocation: a refused
         // pre-ack call must leave the durable row recoverable.
-        const startDenial = authorizeToolStart(
-          `${call.integrationId}_${call.toolName}`,
-        );
+        const startDenial = acknowledgementExempt
+          ? null
+          : authorizeToolStart(`${call.integrationId}_${call.toolName}`);
         if (startDenial) return startDenial;
 
         if (platformEventHandling === 'present_only') {
@@ -4238,13 +4240,6 @@ export async function answerFastAgentQuestion({
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
       try {
-        if (!isFastAgentNativeToolEnabled(call.name)) {
-          return {
-            success: false,
-            error:
-              'request_with_integration_key is unavailable in Fast mode. Launch a coding task from this Session to use the approved integration.',
-          };
-        }
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools) {
           return await describeIntegrationTools(
             findIntegrationToolsArgsSchema.parse(call.args),
@@ -4271,25 +4266,28 @@ export async function answerFastAgentQuestion({
     };
     const executeNativeToolInner = async (
       call: FastAgentNativeToolCall,
+      fastEventId?: string,
     ): Promise<unknown> => {
       const recordToolFinished = diagnostics.recordNativeToolStarted(call.name);
       const instructionVersion = getInstructionVersion(call.messageId);
 
       try {
-        if (!isFastAgentNativeToolEnabled(call.name)) {
-          return {
-            success: false,
-            error:
-              'request_with_integration_key is unavailable in Fast mode. Launch a coding task from this Session to use the approved integration.',
-          };
-        }
         const closedError = requireOpen(call.messageId);
         if (closedError) return closedError;
         const ownershipError = requireLockOwnership();
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
         turnProgressMarker += 1;
-        const startDenial = authorizeToolStart(call.name);
+        const integrationCall =
+          call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool
+            ? callIntegrationToolArgsSchema.safeParse(call.args)
+            : undefined;
+        const acknowledgementExempt =
+          integrationCall?.success === true &&
+          isWebIntegrationKeyRequest(integrationCall.data);
+        const startDenial = acknowledgementExempt
+          ? null
+          : authorizeToolStart(call.name);
         if (startDenial) return startDenial;
         // No replay withdrawal here: every call is recorded before it runs and
         // its result after, and a resumed run is handed that record, so an
@@ -4546,6 +4544,23 @@ export async function answerFastAgentQuestion({
             }
           }
 
+          case FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue: {
+            if (!fastEventId) {
+              return {
+                success: false,
+                error:
+                  'This platform issue report has no Session event context.',
+              };
+            }
+            const report = platformIssueReportSchema.parse(call.args);
+            return await createFastSessionPlatformIssueReport({
+              fastConversationId: session.id,
+              fastEventId,
+              report,
+              userId,
+            });
+          }
+
           case FAST_AGENT_NATIVE_TOOL_NAMES.showWidget: {
             const args = showWidgetArgsSchema.parse(call.args);
             const result = await prepareShowWidget(args);
@@ -4718,6 +4733,7 @@ export async function answerFastAgentQuestion({
             }
             if (result.success) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
+              surfaceActiveTaskIds.add(result.taskId);
               if (substantiveHumanInput) {
                 try {
                   await ensureOwnTaskFollowThroughWakeup({
@@ -4809,6 +4825,7 @@ export async function answerFastAgentQuestion({
             }
             if (result.taskId) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
+              surfaceActiveTaskIds.add(result.taskId);
             }
             const kickoffMessage = [
               args.kickoffMessage,
@@ -4854,8 +4871,8 @@ export async function answerFastAgentQuestion({
                   attachmentTexts,
                 })
               : args.message;
-            return await taskMessageGuard.send(taskId, args, () =>
-              sendFastAgentTaskMessage(
+            return await taskMessageGuard.send(taskId, args, async () => {
+              const result = await sendFastAgentTaskMessage(
                 { userId, apiBaseUrl },
                 {
                   taskId,
@@ -4864,8 +4881,10 @@ export async function answerFastAgentQuestion({
                     ? { images }
                     : {}),
                 },
-              ),
-            );
+              );
+              if (result.success) surfaceActiveTaskIds.add(taskId);
+              return result;
+            });
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask: {
@@ -4899,16 +4918,16 @@ export async function answerFastAgentQuestion({
             );
             if (result.success) {
               currentTasks.delete(target.taskId);
+              surfaceActiveTaskIds.delete(target.taskId);
             }
             return result;
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential:
-          case FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials:
-          case FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential: {
+          case FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials: {
             // The model only ever sees the generic message; the bounded reason
-            // goes to server logs so operators can tell a disabled experiment
-            // from a missing Session binding or a broker denial.
+            // goes to server logs so operators can distinguish a disabled
+            // experiment from a missing Session binding.
             const unavailable = (reason: string, nameReason = false) => {
               console.warn(
                 `[Fast Agent] ${call.name} unavailable (reason=${reason})`,
@@ -4954,15 +4973,10 @@ export async function answerFastAgentQuestion({
                 call.name ===
                 FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential
                   ? serviceCredentialPrepareToolSchema
-                  : call.name ===
-                      FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials
-                    ? z.object({}).strict()
-                    : serviceCredentialRequestSchema;
+                  : z.object({}).strict();
               const args = schema.safeParse(call.args);
               if (!args.success) {
-                // Argument paths are the model's own field names, never values;
-                // the JSON tool schema cannot express cross-field rules such as
-                // "GET/HEAD carry no body", so the runtime says which field failed.
+                // Argument paths are the model's own field names, never values.
                 const fields = [
                   ...new Set(
                     args.error.issues.map((issue) =>
@@ -4975,7 +4989,7 @@ export async function answerFastAgentQuestion({
                 );
                 return {
                   success: false,
-                  error: `Invalid arguments: ${fields.join(', ')}. GET and HEAD carry no body; headerPrefix is Bearer, Basic, or Token; methods must be approved for the integration.`,
+                  error: `Invalid arguments: ${fields.join(', ')}. Check the integration label, HTTPS origin, credential header, and approved methods.`,
                 };
               }
               if (!userId) return unavailable('actor_missing');
@@ -5004,68 +5018,13 @@ export async function answerFastAgentQuestion({
                 );
                 return { pending, sessionUrl: sessionUrl.toString() };
               }
-              if (
-                call.name ===
-                FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials
-              ) {
-                return {
-                  ...(await listServiceCredentialApprovals(context)),
-                  sessionUrl: sessionUrl.toString(),
-                };
-              }
-              const request = serviceCredentialRequestSchema.parse(args.data);
-              const result = await callFastAgentIntegration(
-                {
-                  userId,
-                  apiBaseUrl,
-                  sessionId: session.id,
-                  humanTurn: true,
-                },
-                availableIntegrations,
-                {
-                  integrationId: HTTP_INTEGRATIONS_MCP_ID,
-                  toolName: 'integration_request',
-                  args: {
-                    integrationId: `session:${request.secretRef}`,
-                    method: request.method,
-                    path: request.path,
-                    body: request.body,
-                    contentType: request.contentType,
-                    accept: request.accept,
-                  },
-                },
-              );
-              return { success: true, ...(result as Record<string, unknown>) };
+              return {
+                ...(await listServiceCredentialApprovals(context)),
+                sessionUrl: sessionUrl.toString(),
+              };
             } catch (error) {
-              // The broker's isError text is our own constant copy, so it is
-              // safe to classify (never to log); anything else is logged by
-              // class name only because SDK/database messages can echo bound
-              // values.
-              const named =
-                error instanceof McpToolCallError
-                  ? /\(reason: ([a-z_]+)\)$/u.exec(
-                      error.upstreamText ?? '',
-                    )?.[1]
-                  : undefined;
-              const guidance = named
-                ? INTEGRATION_REFUSAL_GUIDANCE[named]
-                : undefined;
-              if (guidance) {
-                console.warn(
-                  `[Fast Agent] ${call.name} unavailable (reason=${named})`,
-                );
-                return { success: false, error: guidance };
-              }
               return unavailable(
-                error instanceof McpToolCallError
-                  ? error.upstreamText?.startsWith(
-                      'Integration request rejected',
-                    )
-                    ? 'broker_rejected'
-                    : 'broker_unavailable'
-                  : error instanceof Error
-                    ? error.name || 'Error'
-                    : 'unknown',
+                error instanceof Error ? error.name || 'Error' : 'unknown',
               );
             }
           }
@@ -5099,6 +5058,7 @@ export async function answerFastAgentQuestion({
               { userId, apiBaseUrl },
               { taskId: target.taskId, userInitiated: args.userInitiated },
             );
+            if (result.success) surfaceActiveTaskIds.delete(target.taskId);
             return result;
           }
 
@@ -5453,11 +5413,14 @@ export async function answerFastAgentQuestion({
             if (isFastAgentNativeIntegration(args.integrationId)) {
               return nativeIntegrationError(args.integrationId);
             }
-            return executeMcpTool({
-              integrationId: args.integrationId,
-              toolName: args.toolName,
-              args: args.args ?? {},
-            });
+            return executeMcpTool(
+              {
+                integrationId: args.integrationId,
+                toolName: args.toolName,
+                args: args.args ?? {},
+              },
+              { acknowledgementExempt },
+            );
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent: {
             ignoreEventArgsSchema.parse(call.args);
@@ -5503,7 +5466,10 @@ export async function answerFastAgentQuestion({
           kind: getFastAgentNativeAcpKind(call.name),
         });
         try {
-          const result = await executeNativeToolInner(call);
+          const result = await executeNativeToolInner(
+            call,
+            canonicalToolEvent.canonicalEvent.eventId,
+          );
           await finishCanonicalToolEvent(
             canonicalToolEvent,
             result,

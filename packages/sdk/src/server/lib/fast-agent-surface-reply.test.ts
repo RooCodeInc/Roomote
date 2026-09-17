@@ -1271,7 +1271,7 @@ describe('continueFastAgentSurfaceReplyWithLock outcomes', () => {
     expect(lock.durableResume).toBeUndefined();
   });
 
-  it('reports delivery for a completed turn', async () => {
+  it('binds a caller-owned drain lock once across ordered completed turns', async () => {
     const user = await userFactory.create();
     const conversation = await createConversation({
       userId: user.id,
@@ -1283,6 +1283,7 @@ describe('continueFastAgentSurfaceReplyWithLock outcomes', () => {
     });
     mocks.answerQuestion.mockResolvedValue('');
 
+    const lock = callerLock();
     await expect(
       continueFastAgentSurfaceReplyWithLock(
         {
@@ -1292,8 +1293,22 @@ describe('continueFastAgentSurfaceReplyWithLock outcomes', () => {
           question: 'Follow up',
           currentMessageId: 'web-message-1',
         },
-        callerLock(),
+        lock,
       ),
     ).resolves.toEqual({ outcome: 'delivered' });
+    const afterRelease = lock.afterRelease;
+    expect(afterRelease).toEqual(expect.any(Function));
+
+    await continueFastAgentSurfaceReplyWithLock(
+      {
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Matt',
+        question: 'Another ordered email',
+        currentMessageId: 'web-message-2',
+      },
+      lock,
+    );
+    expect(lock.afterRelease).toBe(afterRelease);
   });
 });

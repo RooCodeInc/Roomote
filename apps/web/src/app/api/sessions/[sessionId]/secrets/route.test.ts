@@ -206,6 +206,8 @@ describe('integration key route boundary', () => {
       text: expect.stringContaining('call list_integration_keys'),
     });
     const text = mocks.reply.mock.calls[0]![1].text;
+    expect(text).toContain('_roomote_http_integrations integration_request');
+    expect(text).toContain('a session: prefix');
     expect(text).toMatch(
       /^<integration_saved>\n[^<]+\n<\/integration_saved>\nI added the integration, go ahead\.$/u,
     );

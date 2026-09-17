@@ -54,6 +54,7 @@ vi.mock('@roomote/sdk/server', () => ({
   resolveUserMcpServerConfigs: vi.fn(),
   wakeFastAgentParentEventAt: vi.fn(),
   wakeFastAgentParentEventNow: vi.fn(),
+  wakeFastAgentParentEventsOnTurnRelease: vi.fn(),
   startFastSessionGoal: mocks.startSessionGoal,
 }));
 

@@ -18,7 +18,6 @@ import { z } from 'zod';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 
 import { getFastAgentNativeToolRuntime } from '../fast-agent-native-tool-bridge';
-import { isFastAgentNativeToolEnabled } from '../fast-agent-tool-policy';
 import { writeOpenCodePluginSeedFixture } from '../../__tests__/helpers/opencode-plugin-seed-fixture';
 
 /**
@@ -276,15 +275,6 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       await rm(dirname(join(workDir, 'x')), { recursive: true, force: true });
   });
 
-  it('omits direct Integration-key requests from generated Fast tools', () => {
-    expect(
-      tools.find(
-        ({ name }) =>
-          name === FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
-      ),
-    ).toBeUndefined();
-  });
-
   it('generates concrete nonsecret preparation and empty status schemas', async () => {
     const prepare = tools.find(
       ({ name }) =>
@@ -412,7 +402,10 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       "a service's official hosted remote MCP endpoint",
     );
     expect(tool.description).toContain(
-      'mean the MCP exists and setup is pending',
+      "means this human cannot connect it now: relay the result's reason (the provider's own words) when present, share settingsUrl as the alternative",
+    );
+    expect(tool.description).toContain(
+      'registers this deployment with the provider before returning an authorization link',
     );
 
     expect(Object.keys(tool.args!).sort()).toEqual(['name', 'url']);
@@ -449,9 +442,9 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
 
   it('covers every enabled native tool', () => {
     const generated = tools.map((tool) => tool.name).sort();
-    for (const name of Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)) {
-      expect(generated.includes(name)).toBe(isFastAgentNativeToolEnabled(name));
-    }
+    expect(generated).toEqual(
+      Object.values(FAST_AGENT_NATIVE_TOOL_NAMES).sort(),
+    );
     for (const tool of tools) {
       expect(typeof tool.description, tool.name).toBe('string');
       expect(typeof tool.execute, tool.name).toBe('function');
@@ -525,7 +518,6 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
                 build: {
                   tools: {
                     '*': false,
-                    request_with_integration_key: true,
                     prepare_integration_key: true,
                     list_integration_keys: true,
                   },
@@ -635,21 +627,6 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
             ).toEqual(Object.keys(properties).sort());
             expect(validateJsonSchema(schema, providerID!)).toEqual([]);
           }
-          const emitted = requests
-            .flatMap(
-              (request) =>
-                (request.tools ?? []) as Array<{
-                  name?: string;
-                  parameters?: object;
-                  input_schema?: object;
-                }>,
-            )
-            .find(
-              (tool) =>
-                tool.name ===
-                FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
-            );
-          expect(emitted, `${providerID}: ${output}`).toBeUndefined();
           expect(JSON.stringify(requests)).not.toContain('mock-provider-key');
         }
       } catch (error) {

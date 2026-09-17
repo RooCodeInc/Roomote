@@ -588,7 +588,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).not.toContain('`send_chat_reaction` with purpose `ack`');
     expect(prompt).toContain(
-      'A direct closeout or clarification that fully handles the turn is already the first communication',
+      'A direct closeout or clarification that fully handles the turn without bypassing required Brain recall or other investigation is already the first communication',
     );
     expect(prompt).toContain(
       'The acknowledgement streams independently of coding-task startup',
@@ -745,11 +745,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Tool arguments, results, and reasoning are retained natively',
     );
     expect(prompt).toContain('native JSON schema');
-    for (const name of [
-      'prepare_integration_key',
-      'list_integration_keys',
-      'request_with_integration_key',
-    ]) {
+    for (const name of ['prepare_integration_key', 'list_integration_keys']) {
       expect(prompt).not.toContain(name);
     }
     expect(prompt).toContain(
@@ -766,12 +762,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(enabledPrompt).toContain('`prepare_integration_key`');
     expect(enabledPrompt).toContain('`list_integration_keys`');
     expect(enabledPrompt).toContain(
-      'launch a coding task attached to this Session to use the integration',
+      'use the `_roomote_http_integrations` server for one or a few direct calls',
     );
-    expect(enabledPrompt).not.toContain('`request_with_integration_key`');
-    expect(enabledPrompt).not.toContain(
-      'for one or a few direct calls, call `request_with_integration_key` yourself',
-    );
+    expect(enabledPrompt).toContain('`integration_request` tool');
+    expect(enabledPrompt).toContain('a `session:` prefix');
     expect(enabledPrompt).toContain(
       'Never invent a reference or substitute another credential.',
     );
@@ -793,13 +787,28 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(enabledPrompt).toContain('the page where the human creates a key');
     expect(enabledPrompt).toContain(
+      'what connecting to it requires (whether clients must be approved or allowlisted by the provider',
+    );
+    expect(enabledPrompt).toContain(
+      'Suggest the MCP route only when connecting is something this human can complete now',
+    );
+    expect(enabledPrompt).toContain(
+      'A result that needs manual client registration or static headers means the MCP is not connectable by this human now',
+    );
+    expect(enabledPrompt).toContain(
+      "when the result carries the provider's `reason`, give it to the human in plain words",
+    );
+    expect(enabledPrompt).toContain(
+      "never characterize a provider's status (beta, unsupported, a future capability) from memory",
+    );
+    expect(enabledPrompt).toContain(
       'say in one sentence where they create that key',
     );
     expect(enabledPrompt).toContain(
       'stdio project or a repository is not a hosted MCP',
     );
     expect(enabledPrompt).toContain(
-      'A pending MCP state (an authorization link or manual client registration) means the MCP exists',
+      'An authorization link is a pending MCP state',
     );
     expect(enabledPrompt).toContain(
       'a denied authorization is never bypassed with a key',
@@ -818,6 +827,15 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(enabledPrompt).toContain(
       'never delegate that lookup to a coding task',
+    );
+    expect(enabledPrompt).toContain(
+      'For custom integration connection, setup, and result replies, lead with the plain-language outcome',
+    );
+    expect(enabledPrompt).toContain(
+      'Omit endpoint paths, request methods, status codes, authentication jargon, and implementation or process details',
+    );
+    expect(enabledPrompt).toContain(
+      'Do not claim broader access than the completed check established; state meaningful permission limits in plain language',
     );
     const platformEventPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -887,6 +905,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('Each structured output');
     expect(prompt).not.toContain('toolArguments');
     expect(prompt).toContain('no local filesystem, shell');
+    expect(prompt).toContain(
+      'Use `report_platform_issue` only for an admin-fixable Roomote platform',
+    );
     expect(prompt).not.toContain(
       'current-channel chat context tools are the only direct external capabilities',
     );
@@ -1195,6 +1216,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('remain visible in the session');
     expect(prompt).toContain('Treat Brain recall as a sequential preflight');
     expect(prompt).toContain(
+      'An unfamiliar person, project, company, name, or term is a reason to retrieve relevant memory, not to immediately ask the user what it means',
+    );
+    expect(prompt).toContain(
       'durable preference, decision, correction, or fact',
     );
     expect(prompt).toContain('save_memory');
@@ -1220,7 +1244,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Use deployment MCP servers as relevant sources of truth',
     );
     expect(prompt).toContain(
-      'Ask for clarification only when ambiguity blocks meaningful investigation',
+      'Ask for clarification only after required recall and available-source inspection',
     );
     expect(prompt).toContain(
       'regardless of whether the message is phrased as a question, request, or declarative feedback',
@@ -2013,15 +2037,19 @@ describe('buildFastAgentSystemPrompt', () => {
       'Treat a verification tool error, network failure, or otherwise indeterminate result as unresolved',
     );
     expect(adminPrompt).toContain('do not switch to the key route');
+    expect(adminPrompt).toContain(
+      'Roomote registers this deployment with the provider before returning an authorization link',
+    );
+    expect(adminPrompt).toContain("relay the provider's `reason` when present");
     expect(adminPrompt).not.toContain(
       'a failed verification only means there is no MCP and the key route applies',
     );
     expect(nonAdminPrompt).not.toContain('Remote MCP: call `add_remote_mcp`');
     expect(nonAdminPrompt).toContain(
-      'Remote MCP setup is unavailable from this Session',
+      'Remote MCP setup is not available from this Session',
     );
     expect(nonAdminPrompt).toContain(
-      'stop with that outcome and do not offer an integration-key fallback unless the human explicitly asked for API access',
+      'use the key route and mention the MCP in one sentence',
     );
     for (const prompt of [adminPrompt, nonAdminPrompt]) {
       expect(prompt).not.toContain('Only deployment administrators');

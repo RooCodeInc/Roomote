@@ -19,6 +19,7 @@ import {
   getFastSessionDisplayTitle,
 } from '@/lib/server/fast-sessions';
 import { subscribeFastSessionReplyStream } from '@/lib/server/fast-session-reply-stream';
+import { createFastSessionPollWake } from '@/lib/server/fast-session-poll-wake';
 
 export const runtime = 'nodejs';
 
@@ -69,6 +70,7 @@ export async function GET(
 
   return createResponse(request, async (sseSession) => {
     const startTime = Date.now();
+    const pollWake = createFastSessionPollWake(POLL_INTERVAL_MS);
     // A reply streams in as assistant text chunks while the model writes
     // it; the persisted row later arrives through the poll under the same
     // eventId and replaces the live text.
@@ -77,7 +79,15 @@ export async function GET(
       (event) => {
         if (!sseSession.isConnected) return;
         try {
-          void sseSession.push({ event }, 'chunk');
+          if ('type' in event && event.type === 'task_report_admitted') {
+            pollWake.request();
+            void sseSession.push(
+              { ...event, serverReceivedAtMs: Date.now() },
+              'task-report',
+            );
+          } else {
+            void sseSession.push({ event }, 'chunk');
+          }
         } catch {
           // The poll loop notices the disconnect.
         }
@@ -162,9 +172,10 @@ export async function GET(
           break;
         }
 
-        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+        await pollWake.wait();
       }
     } finally {
+      pollWake.dispose();
       await replyStream.close();
     }
 

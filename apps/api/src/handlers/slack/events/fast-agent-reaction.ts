@@ -23,6 +23,7 @@ import {
   resolveUserMcpServerConfigs,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
+  wakeFastAgentParentEventsOnTurnRelease,
 } from '@roomote/sdk/server';
 import {
   buildSlackThreadReplyFooterBlock,
@@ -68,6 +69,7 @@ async function processFastAgentReaction(params: {
     params.onRejected();
     return;
   }
+  wakeFastAgentParentEventsOnTurnRelease(releaseTurnLock, session.id);
   params.onAccepted(() =>
     releaseTurnLock.abort(new Error('Slack reaction turn was canceled.')),
   );

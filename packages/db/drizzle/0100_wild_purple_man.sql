@@ -1,0 +1,11 @@
+ALTER TABLE "task_platform_issue_reports" ALTER COLUMN "task_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "task_platform_issue_reports" ALTER COLUMN "run_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "task_platform_issue_reports" ADD COLUMN "session_id" uuid;--> statement-breakpoint
+ALTER TABLE "task_platform_issue_reports" ADD COLUMN "fast_conversation_id" uuid;--> statement-breakpoint
+ALTER TABLE "task_platform_issue_reports" ADD COLUMN "fast_event_id" text;--> statement-breakpoint
+ALTER TABLE "task_platform_issue_reports" ADD COLUMN "reported_by_user_id" text;--> statement-breakpoint
+ALTER TABLE "task_platform_issue_reports" ADD CONSTRAINT "task_platform_issue_reports_session_id_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."sessions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "task_platform_issue_reports" ADD CONSTRAINT "task_platform_issue_reports_fast_conversation_id_fast_agent_conversations_id_fk" FOREIGN KEY ("fast_conversation_id") REFERENCES "public"."fast_agent_conversations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "task_platform_issue_reports" ADD CONSTRAINT "task_platform_issue_reports_reported_by_user_id_users_id_fk" FOREIGN KEY ("reported_by_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "task_platform_issue_reports_fast_event_unique" ON "task_platform_issue_reports" USING btree ("fast_conversation_id","fast_event_id");--> statement-breakpoint
+ALTER TABLE "task_platform_issue_reports" ADD CONSTRAINT "task_platform_issue_reports_source_check" CHECK (("task_platform_issue_reports"."task_id" IS NOT NULL AND "task_platform_issue_reports"."run_id" IS NOT NULL AND "task_platform_issue_reports"."session_id" IS NULL AND "task_platform_issue_reports"."fast_conversation_id" IS NULL AND "task_platform_issue_reports"."fast_event_id" IS NULL) OR ("task_platform_issue_reports"."task_id" IS NULL AND "task_platform_issue_reports"."run_id" IS NULL AND "task_platform_issue_reports"."session_id" IS NOT NULL AND "task_platform_issue_reports"."fast_conversation_id" IS NOT NULL AND "task_platform_issue_reports"."fast_event_id" IS NOT NULL));

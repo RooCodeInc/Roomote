@@ -42,7 +42,6 @@ import { z } from 'zod';
 
 import {
   FAST_AGENT_NATIVE_TOOL_NAMES,
-  isFastAgentNativeToolEnabled,
   isFastAgentSpillTool,
   type FastAgentNativeToolName,
 } from './fast-agent-tool-policy';
@@ -434,6 +433,20 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Report an admin-fixable Roomote platform, configuration, or access defect from this Session. Use this only for defects that require an admin or platform fix, not for ordinary code bugs or repository-level failures. When productive fallback work remains, describe the defect as degraded capability rather than a blocker, continue that fallback work, and do not treat this report as Session completion. Report once when the defect is clear.",
+  args: {
+    title: z.string().trim().min(1).max(200).describe("Short title for the platform defect"),
+    summary: z.string().trim().min(1).max(4000).describe("Concise summary of the defect and what is failing"),
+  },
+  execute: (args, context) => invoke("report_platform_issue", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
@@ -648,7 +661,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Add or reconnect one deployment-shared remote MCP integration from its HTTPS streamable-HTTP endpoint. Use it for a service's official hosted remote MCP endpoint or a URL the human supplied; never invent a URL, and a local stdio project is not a hosted MCP. The server verifies the endpoint before saving it, reuses an existing matching integration, and returns either connected tools, a secure OAuth authorization link, or the existing Settings link for static headers/manual OAuth client setup. Authorization-required and client-registration-required results mean the MCP exists and setup is pending: share the link and do not open an integration-key approval instead. Server-backed results include integrationId, the actual Fast catalog ID: use that exact integrationId with find_integration_tools and call_integration_tool, never a server UUID, but do not narrate IDs or catalog checks to the human. Share authorizeUrl and settingsUrl exactly unchanged, labeled 'Authorize <name>' and 'Integration settings' respectively; never rewrite either target to /settings. The conversation resumes automatically after the human authorizes, so never ask them to send a follow-up. In user-visible progress say at most that you are checking. Never ask for or accept secrets in chat or tool arguments.",
+  description: "Add or reconnect one deployment-shared remote MCP integration from its HTTPS streamable-HTTP endpoint. Use it for a service's official hosted remote MCP endpoint or a URL the human supplied; never invent a URL, and a local stdio project is not a hosted MCP. The server verifies the endpoint before saving it, reuses an existing matching integration, and returns either connected tools, a secure OAuth authorization link, or the existing Settings link for static headers/manual OAuth client setup. An authorization-required result is pending setup: share the link and do not open an integration-key approval. Roomote registers this deployment with the provider before returning an authorization link, so a returned link can succeed. A client-registration-required or needs-static-headers result means this human cannot connect it now: relay the result's reason (the provider's own words) when present, share settingsUrl as the alternative, and continue with the integration-key route. Server-backed results include integrationId, the actual Fast catalog ID: use that exact integrationId with find_integration_tools and call_integration_tool, never a server UUID, but do not narrate IDs or catalog checks to the human. Share authorizeUrl and settingsUrl exactly unchanged, labeled 'Authorize <name>' and 'Integration settings' respectively; never rewrite either target to /settings. The conversation resumes automatically after the human authorizes, so never ask them to send a follow-up. In user-visible progress say at most that you are checking. Never ask for or accept secrets in chat or tool arguments.",
   args: {
     name: z.string().trim().min(1).max(80).describe("Short deployment-visible integration name; Roomote normalizes it to a lowercase slug"),
     url: z.string().url().startsWith("https://").max(2048).describe("HTTPS streamable-HTTP MCP endpoint"),
@@ -764,24 +777,6 @@ export default {
   description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, official remote MCP, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List integrations available to this human (their own and deployment-visible grants, with origin, header, allowed methods, visibility, and expiry) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready integrations are delivered automatically to coding tasks launched from this Session.",
   args: {},
   execute: (args, context) => invoke("list_integration_keys", args, context),
-}
-`,
-
-    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential]: String.raw`
-import { z } from "zod"
-import { invoke } from "../roomote-fast-tool-bridge.js"
-
-export default {
-  description: "Make one bounded request using a ready integration key reference without exposing the credential; the server sends it to the approved origin with the real key, using any method the human approved for that integration (reads, and POST/PUT/PATCH/DELETE when listed in its allowedMethods). Discover references with list_integration_keys; never invent one or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers; give a body and contentType for writes. For scripts, SDKs, CLIs, or many calls, launch a coding task attached to this Session instead: it receives the approved services as substitute tokens with a base URL. Call directly without an opening acknowledgement or another confirmation, and report the actual result.",
-  args: {
-    secretRef: z.string().uuid(),
-    method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]),
-    path: z.string().min(1).max(2048),
-    accept: z.enum(["application/json", "text/plain"]).optional(),
-    body: z.string().max(65536).nullish().describe("Request body for an approved write method. GET/HEAD have no body: omit, use null, or use an empty string."),
-    contentType: z.enum(["application/json", "text/plain", "application/x-www-form-urlencoded"]).optional().describe("Content type of the body; ignored for GET/HEAD."),
-  },
-  execute: (args, context) => invoke("request_with_integration_key", args, context),
 }
 `,
 
@@ -1515,10 +1510,6 @@ function createSharedToolsDirectory(): string {
         layout: 3,
         bridge: FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE,
         tools: FAST_AGENT_NATIVE_TOOL_SOURCES,
-        enabledTools: Object.keys(FAST_AGENT_NATIVE_TOOL_SOURCES).filter(
-          (name) =>
-            isFastAgentNativeToolEnabled(name as FastAgentNativeToolName),
-        ),
       }),
     )
     .digest('hex');
@@ -1550,8 +1541,6 @@ function createSharedToolsDirectory(): string {
     'utf8',
   );
   for (const [name, source] of Object.entries(FAST_AGENT_NATIVE_TOOL_SOURCES)) {
-    if (!isFastAgentNativeToolEnabled(name as FastAgentNativeToolName))
-      continue;
     writeFileSync(join(toolsDirectory, `${name}.js`), source, 'utf8');
   }
   return directory;
