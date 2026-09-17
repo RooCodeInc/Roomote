@@ -882,6 +882,8 @@ export function ModelSettingsSection({
   const saveInFlightRef = useRef(false);
   const saveQueuedRef = useRef(false);
   const suppressNextSaveSuccessToastRef = useRef(false);
+  const suppressSuccessToastForDraftRef =
+    useRef<ModelSettingsSectionDraft | null>(null);
   const lastSyncedDraftRef = useRef<ModelSettingsSectionDraft | null>(null);
   const draftStateRef = useRef<ModelSettingsSectionDraft>({
     models: [],
@@ -1490,7 +1492,6 @@ export function ModelSettingsSection({
     index: number,
     rule: CodingModelRoutingRule,
   ) => {
-    suppressNextSaveSuccessToast();
     applyDraftUpdates(
       {
         codingModelRoutingRules: codingModelRoutingRules.map(
@@ -1500,6 +1501,7 @@ export function ModelSettingsSection({
       },
       400,
     );
+    suppressSuccessToastForDraftRef.current = cloneDraft(draftStateRef.current);
   };
 
   const addCodingModelRoutingRule = () => {
@@ -1539,8 +1541,12 @@ export function ModelSettingsSection({
     }
 
     const draft = cloneDraft(draftStateRef.current);
-    const suppressSuccessToast = suppressNextSaveSuccessToastRef.current;
+    const suppressSuccessToast =
+      suppressNextSaveSuccessToastRef.current ||
+      (suppressSuccessToastForDraftRef.current !== null &&
+        draftsEqual(draft, suppressSuccessToastForDraftRef.current));
     suppressNextSaveSuccessToastRef.current = false;
+    suppressSuccessToastForDraftRef.current = null;
 
     if (draftsEqual(draft, lastSyncedDraftRef.current)) {
       return;

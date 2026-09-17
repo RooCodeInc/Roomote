@@ -688,7 +688,7 @@ describe('ModelSettingsSection', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Add another model routing rule',
+        name: 'Add a model routing rule',
       }),
     );
     const condition = screen.getByLabelText('Routing rule 1 condition');
@@ -702,6 +702,26 @@ describe('ModelSettingsSection', () => {
 
     expect(toast.success).not.toHaveBeenCalledWith('Updated model settings.');
     expect(updateMutateAsyncMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps success feedback when another setting joins a routing-rule save', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    fireEvent.change(screen.getByLabelText('Routing rule 1 condition'), {
+      target: { value: 'a' },
+    });
+    fireEvent.click(screen.getByRole('switch', { name: 'Toggle GLM 5.2' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(toast.success).toHaveBeenCalledWith('Updated model settings.');
   });
 
   it('hides the reasoning selector for models that do not support reasoning', () => {
