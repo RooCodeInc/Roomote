@@ -803,6 +803,15 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(enabledPrompt).toContain(
       'never delegate that lookup to a coding task',
     );
+    expect(enabledPrompt).toContain(
+      'For custom integration connection, setup, and result replies, lead with the plain-language outcome',
+    );
+    expect(enabledPrompt).toContain(
+      'Omit endpoint paths, request methods, status codes, authentication jargon, and implementation or process details',
+    );
+    expect(enabledPrompt).toContain(
+      'Do not claim broader access than the completed check established; state meaningful permission limits in plain language',
+    );
     const platformEventPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       turnSource: 'platform_event',
