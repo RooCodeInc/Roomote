@@ -72,6 +72,7 @@ import { getPrSha } from '../workflows/utils';
 
 const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
+const createdRepositoryIds: string[] = [];
 
 const explicitWorkKind = {
   kind: 'implement',
@@ -215,12 +216,45 @@ afterAll(async () => {
     await db.delete(tasks).where(inArray(tasks.id, createdTaskIds));
   }
 
+  if (createdRepositoryIds.length > 0) {
+    await db
+      .delete(repositories)
+      .where(inArray(repositories.id, createdRepositoryIds));
+  }
+
   if (createdUserIds.length > 0) {
     await db.delete(users).where(inArray(users.id, createdUserIds));
   }
 });
 
 describe('enqueueTask initiator stamping', () => {
+  it('stamps private web tasks and rejects non-web private launches', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+      privacy: 'private',
+    });
+
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, run.taskId) }),
+    ).resolves.toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: userId,
+    });
+    await expect(
+      launchFresh({
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'slack',
+        trigger: 'message',
+        privacy: 'private',
+      }),
+    ).rejects.toThrow('linked user on the web surface');
+  });
+
   it.each(['slack', 'teams', 'telegram', 'discord'] as const)(
     'records %s as the authenticated user task-starting chat provider',
     async (surface) => {
@@ -1425,17 +1459,34 @@ describe('enqueueTask snapshot resume', () => {
 
   it('inherits source-control stamps from the source run payload', async () => {
     const userId = await createUser();
+    const suffix = crypto.randomUUID();
+    const adoRepositoryFullName = `roomote/Test ADO/Test ADO-${suffix}`;
+    const gitLabRepositoryFullName = `group/web-${suffix}`;
+    const adoRepository = await repositoryFactory.create({
+      linkedByUserId: userId,
+      fullName: adoRepositoryFullName,
+      sourceControlProvider: 'ado',
+      host: 'dev.azure.com',
+      isActive: true,
+    });
+    const gitLabRepository = await repositoryFactory.create({
+      linkedByUserId: userId,
+      fullName: gitLabRepositoryFullName,
+      sourceControlProvider: 'gitlab',
+      isActive: true,
+    });
+    createdRepositoryIds.push(adoRepository.id, gitLabRepository.id);
 
     const freshRun = await launchFresh({
       task: standardTaskInput({
         payload: {
-          repo: 'roomote/Test ADO/Test ADO',
+          repo: adoRepositoryFullName,
           description: 'Do the thing',
           sourceControlProvider: 'ado',
           sourceControlHost: 'dev.azure.com',
           repositoryProviders: {
-            'roomote/Test ADO/Test ADO': 'ado',
-            'group/web': 'gitlab',
+            [adoRepositoryFullName]: 'ado',
+            [gitLabRepositoryFullName]: 'gitlab',
           },
         },
       }),
@@ -1451,7 +1502,7 @@ describe('enqueueTask snapshot resume', () => {
     const resumeTask: SnapshotResumeTask = {
       type: TaskPayloadKind.SnapshotResume,
       payload: {
-        repo: 'roomote/Test ADO/Test ADO',
+        repo: adoRepositoryFullName,
         sourceSnapshotId: 'snap-ado-1',
         sourceRunId: freshRun.id,
       },
@@ -1470,10 +1521,13 @@ describe('enqueueTask snapshot resume', () => {
 
     expect(resumePayload.sourceControlProvider).toBe('ado');
     expect(resumePayload.sourceControlHost).toBe('dev.azure.com');
-    expect(resumePayload.repositoryProviders).toEqual({
-      'roomote/Test ADO/Test ADO': 'ado',
-      'group/web': 'gitlab',
+    expect(freshRun.payload.repositoryProviders).toMatchObject({
+      [adoRepositoryFullName]: 'ado',
+      [gitLabRepositoryFullName]: 'gitlab',
     });
+    expect(resumePayload.repositoryProviders).toEqual(
+      freshRun.payload.repositoryProviders,
+    );
   });
 
   it('preserves Fast parent routing and communication isolation across resume', async () => {
@@ -2522,7 +2576,14 @@ describe('enqueueTask source-control provider stamping', () => {
       fullName: 'group/project',
       isActive: true,
     });
-    createdRepositoryIds.push(repository.id);
+    const additionalRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
+      linkedByUserId: userId,
+      fullName: 'group/additional-project',
+      isActive: true,
+    });
+    createdRepositoryIds.push(repository.id, additionalRepository.id);
 
     const environment = await environmentFactory.create({
       createdByUserId: userId,
@@ -2567,8 +2628,9 @@ describe('enqueueTask source-control provider stamping', () => {
       provider: 'gitea',
       host: 'gitea.example.com',
     });
-    expect(persistedRun!.payload.repositoryProviders).toEqual({
+    expect(persistedRun!.payload.repositoryProviders).toMatchObject({
       'group/project': 'gitea',
+      'group/additional-project': 'gitea',
     });
   });
 

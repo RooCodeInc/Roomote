@@ -305,6 +305,9 @@ export function getWorkspaceInstructions(
      * the `clone_repository` tool instead of cloning every one at setup.
      */
     repositoriesOnDemand?: boolean;
+    /** Scoped workspaces prepare selected repositories first but can check out
+     * other authorized repositories without provisioning another environment. */
+    additionalRepositoriesOnDemand?: boolean;
     /**
      * Blank slate workspaces start with nothing checked out. When the
      * deployment has source control connected they carry the same
@@ -353,6 +356,14 @@ When working with multiple repositories:
 - Consider the impact of changes across repositories
 - Create multiple PRs in different repositories as necessary to complete your task
 `;
+
+  if (options.additionalRepositoriesOnDemand) {
+    instructions += `
+- \`REPOSITORIES.md\` at the workspace root lists the active repositories authorized for this task and their current checkout state
+- Before reading, searching, or changing a repository that is not checked out, call the \`clone_repository\` tool with its full name (owner/repo); never run \`git clone\` for those repositories yourself
+- Workspace selection controls the initial checkout and tooling. Checking out another repository does not run another environment's setup commands or provision its services
+`;
+  }
 
   if (repoFullNames && repoFullNames.length > 0) {
     instructions += options.repositoriesOnDemand

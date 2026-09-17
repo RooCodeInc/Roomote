@@ -143,7 +143,10 @@ export {
   signArtifactIdWithKey,
   verifyArtifactSignatureWithKeys,
 } from './lib/artifacts/raw-url';
-export { createTaskArtifactRecord } from './lib/artifacts/create-record';
+export {
+  authorizeTaskArtifactUpload,
+  createTaskArtifactRecord,
+} from './lib/artifacts/create-record';
 export {
   createFastAgentConversationArtifact,
   createFastAgentSessionArtifact,
@@ -570,6 +573,12 @@ export {
   isDefinitiveOAuthRejection,
   type CustomMcpAuthTarget,
 } from './lib/mcp/custom-auth-target';
+
+export {
+  addRemoteCustomMcpForFast,
+  prepareDeploymentCustomMcpOAuthConnection,
+  type AddRemoteCustomMcpResult,
+} from './lib/mcp/add-remote-custom-mcp';
 
 export {
   LINEAR_ORG_CONNECTION_ROLE,

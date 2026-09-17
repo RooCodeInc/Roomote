@@ -277,6 +277,14 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     userSettingsPath: '/settings/personal',
   },
   {
+    id: 'exa',
+    name: 'Exa',
+    availabilityKind: 'admin_configured',
+    hostSuffixes: ['dashboard.exa.ai'],
+    deploymentSettingsPath: '/settings/integrations',
+    userSettingsPath: '/settings/personal',
+  },
+  {
     id: 'supermemory',
     name: 'Supermemory',
     availabilityKind: 'curated_oauth',

@@ -41,6 +41,22 @@ You may see rows for:
 If an integration is not listed, it usually means an admin has not enabled it
 for the deployment yet, or the integration does not require personal linking.
 
+## Manage personal integrations
+
+Use **Personal integrations** to add, edit, or revoke API-key integrations that
+only your Sessions and coding tasks can use. Roomote keeps the key server-side;
+agents receive an opaque reference or a task-scoped substitute rather than the
+key itself.
+
+An integration-key approval created from a Session also appears here when you
+choose **Only me**. Deployment-wide integration keys instead appear under the
+administrator's **Settings → Integrations** page. If an administrator changes a
+shared integration to owner-only access, Roomote moves it to that owner's
+Personal integrations card.
+
+See [Integration keys](/integration-keys) for approval methods, security
+boundaries, task behavior, and self-hosting options.
+
 ## Why personal linking matters
 
 Personal linked accounts help Roomote act with the right context. Depending on
@@ -66,16 +82,13 @@ Personal Settings also include app preferences such as:
 - **Narration Mode** for a more streamlined task conversation view
 - **How to work with me** for private personal instructions and conversational
   learning
-- **Home suggestions** under **Settings > Experimental** to offer task ideas
-  based on your recent work
-- **Slack peer conversations** under **Settings > Experimental** to let an
-  established Fast Slack thread continue after another participant is mentioned
 
 Most teammates only need profile, linked accounts, and theme settings.
 
 ### Try personalized Home suggestions
 
-**Home suggestions** is an opt-in experiment. When enabled, Roomote uses up to
+**Home suggestions** is a deployment-wide experiment. When an admin enables it
+under **Settings > Experimental**, Roomote uses up to
 five of your recent successfully completed and ingested task memories to prepare
 short ideas for what to do next in the Home composer. Suggestions are prepared
 in the background when possible and rotate until you focus the composer; press
@@ -85,12 +98,13 @@ Only your visible, manually initiated work is eligible. Roomote excludes other
 members' work, automations, system tasks, hidden or deleted tasks, incomplete
 runs, and memories that have not finished ingesting. If Memory or helper-model
 generation is unavailable, Home keeps the standard non-personalized suggestions.
-Turn the experiment off at any time to stop personalized suggestion requests.
+An admin can turn the experiment off to stop personalized suggestion requests
+for every member.
 
 ### Continue Slack peer conversations
 
-**Slack peer conversations** is an opt-in experiment owned by the person whose
-Fast Session is bound to the Slack thread. When enabled, eligible human replies
+**Slack peer conversations** is a deployment-wide experiment controlled by
+admins under **Settings > Experimental**. When enabled, eligible human replies
 can continue reaching Fast after someone mentions another participant. Fast is
 instructed to stay quiet around peer discussion unless it has a useful reason to
 participate. Direct Roomote mentions work normally with the experiment on or off.

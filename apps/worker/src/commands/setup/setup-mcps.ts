@@ -340,7 +340,13 @@ export function resolveBuiltInMcpServers(
   environmentMcpServers?: EnvironmentMcpServers,
   operatorEnvVars?: Record<string, string>,
   deploymentMcpServers?: EnvironmentMcpServers,
+  taskPrivacy: 'shared' | 'private' = 'shared',
 ): Record<string, McpServerConfig> {
+  if (taskPrivacy === 'private') {
+    integrations = undefined;
+    environmentMcpServers = undefined;
+    deploymentMcpServers = undefined;
+  }
   // The extension's StdioClientTransport only inherits a minimal set of
   // env vars (HOME, PATH, SHELL, TERM, USER) via getDefaultEnvironment().
   // Mise shims (npx, node) need MISE_DATA_DIR to locate runtimes, so we

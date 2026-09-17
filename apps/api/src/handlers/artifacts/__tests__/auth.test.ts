@@ -11,6 +11,7 @@ const {
   andMock,
   eqMock,
   isVisibleTaskMock,
+  privateTaskAccessMock,
   mockTaskRunFindFirst,
   mockFindTaskRunByRunTokenClaims,
   mockTaskFindFirst,
@@ -18,6 +19,7 @@ const {
   andMock: vi.fn((...args) => ({ type: 'and', args })),
   eqMock: vi.fn((...args) => ({ type: 'eq', args })),
   isVisibleTaskMock: vi.fn((column) => ({ type: 'isVisibleTask', column })),
+  privateTaskAccessMock: vi.fn((auth) => ({ type: 'privateTaskAccess', auth })),
   mockTaskRunFindFirst: vi.fn(),
   mockFindTaskRunByRunTokenClaims: vi.fn(),
   mockTaskFindFirst: vi.fn(),
@@ -38,6 +40,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   eq: eqMock,
   isVisibleTask: isVisibleTaskMock,
+  privateTaskAccess: privateTaskAccessMock,
   tasks: { id: 'tasks.id' },
 }));
 

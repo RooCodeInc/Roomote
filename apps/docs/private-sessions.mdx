@@ -1,0 +1,41 @@
+---
+title: "Private Sessions"
+description: "How Roomote isolates private integration data from other members and shared memory"
+---
+
+Private Sessions are Roomote's application-level boundary for work that uses a personal or otherwise private integration. A private integration can run only in a private Session owned by the person whose account is connected.
+
+Private Sessions are experimental and disabled by default. A deployment admin can enable **Private Sessions** in **Settings → Experimental** to show the Private option in members' new Session composers. A deployment exposes private integrations only after it also adds and enables an integration that explicitly declares private data. Existing integrations and Sessions remain shared unless their implementation opts into this contract. Turning the experiment off prevents new private Sessions and private integration calls, but owners can still access and delete private Sessions that already exist.
+
+## What Roomote enforces
+
+For a private Session, Roomote:
+
+- limits Session, task, transcript, log, artifact, search, and status access to the owner through normal product APIs
+- carries the same owner and privacy state into delegated tasks, retries, and snapshot resumes
+- excludes the Session and its descendants from automatic task memory, explicit memory saves, ingestion retries, historical backfills, and other writes to the deployment-shared Brain
+- allows read-only shared Brain searches while omitting private query text and results from Roomote's durable tool history
+- prevents private integration arguments and results from appearing in ordinary tool audits and transcripts
+- lets the owner create, preview, and download artifacts while keeping artifact metadata and content owner-only
+- blocks shared publishing, including communication-provider posts, external notifications, source-control writes, wakeups, shared memory integrations, and deployment-wide customizations
+- disables a private integration connection before deleting its local credentials when you disconnect it
+
+Roomote does not convert an existing shared Session into a private one. Start private work in a new private Session so content from the earlier conversation cannot cross the boundary.
+
+## Deleting private work
+
+The Session owner can delete a private Session and its Roomote-managed descendants. Deletion removes the Session, linked tasks and runs, transcript records, Session-owned and task-owned artifact objects, audits, and Roomote's native-session reference. If an artifact upload or object-write capability is still valid, Roomote keeps the records and asks the owner to retry after it expires; this prevents a delayed upload from recreating private content after deletion. Disconnecting an integration does not automatically delete existing private Sessions.
+
+Roomote does not add a separate private memory store. Private Session content is excluded from shared memory rather than saved elsewhere.
+
+## Limits of the boundary
+
+Owner-only access describes authorization through Roomote's normal UI and APIs. It does not mean that private content is inaccessible to:
+
+- deployment operators with direct database, filesystem, or infrastructure access
+- backup and disaster-recovery systems while retained copies exist
+- the upstream integration provider that supplied the data
+- the configured inference provider that processes model context
+- native agent-session infrastructure while provider-side history is retained
+
+Roomote removes its local native-session reference during deletion, but provider-side deletion is best effort and depends on provider capabilities and retention terms. Operators should choose integration, inference, sandbox, logging, and backup providers whose policies match their requirements.

@@ -27,6 +27,7 @@ import {
   getMcpIntegrationUpstreamUrl,
   MCP_INTEGRATIONS,
   isMcpConnectionAsanaConfig,
+  isMcpConnectionExaConfig,
   isMcpConnectionNotionConfig,
   isMcpConnectionGranolaConfig,
   isMcpConnectionGbrainConfig,
@@ -498,6 +499,29 @@ async function buildCuratedMcpServerConfigs(ctx: {
   );
   const requestOrigin = ctx.requestOrigin;
 
+  for (const entry of enabledConnections) {
+    if (entry.connection) {
+      continue;
+    }
+
+    const integration = getMcpIntegration(entry.enabledMcpId);
+    if (!integration?.supportsKeylessAccess) {
+      continue;
+    }
+
+    servers[integration.id] = {
+      url: buildProxyUrl(integration.id, requestOrigin),
+      headers: { 'X-MCP-Client': PRODUCT_NAME },
+      ...(entry.disabledTools?.length
+        ? { disabledTools: entry.disabledTools }
+        : {}),
+    };
+    logInfo('[getMcpServerConfigs] Included keyless integration:', {
+      mcpId: integration.id,
+      via: 'keyless_proxy',
+    });
+  }
+
   for (const connection of connections) {
     logInfo('[getMcpServerConfigs] Processing connection:', {
       connectionId: connection.id,
@@ -627,6 +651,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
         isMcpConnectionVercelConfig(authConfig) ||
         isMcpConnectionGrafanaConfig(authConfig) ||
         isMcpConnectionGbrainConfig(authConfig) ||
+        isMcpConnectionExaConfig(authConfig) ||
         isMcpConnectionXConfig(authConfig)
       ) {
         servers[connection.mcpId] = {

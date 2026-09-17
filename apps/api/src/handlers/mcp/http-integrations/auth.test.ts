@@ -42,17 +42,22 @@ import {
 } from './broker';
 import { createHttpIntegrationsMcp } from './index';
 
-const { enabled, secretToolsEnabled, destroy } = vi.hoisted(() => ({
+const {
+  enabled,
+  secretToolsEnabled,
+  isDeploymentExperimentEnabledMock,
+  destroy,
+} = vi.hoisted(() => ({
   enabled: { value: true },
   secretToolsEnabled: { value: true },
+  isDeploymentExperimentEnabledMock: vi.fn(),
   destroy: vi.fn(async () => {}),
 }));
-// Retain coverage of the dormant implementation while testing the rollout pause below.
-vi.mock('@roomote/types', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@roomote/types')>();
+vi.mock('@roomote/db/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/db/server')>();
   return {
     ...actual,
-    isServiceCredentialToolsExperimentEnabled: () => secretToolsEnabled.value,
+    isDeploymentExperimentEnabled: isDeploymentExperimentEnabledMock,
   };
 });
 vi.mock('@roomote/env', async (importOriginal) => {
@@ -135,6 +140,9 @@ beforeEach(() => {
   observedAuth.mockClear();
   enabled.value = true;
   secretToolsEnabled.value = true;
+  isDeploymentExperimentEnabledMock
+    .mockReset()
+    .mockImplementation(() => Promise.resolve(secretToolsEnabled.value));
   vi.mocked(integrationRequest).mockClear();
   vi.mocked(loadHttpIntegrationsConfig)
     .mockReset()
@@ -767,6 +775,18 @@ it.each(['broker', 'run'] as const)(
   },
 );
 
+it('rechecks the deployment experiment before using an established integration-key tool', async () => {
+  const fixture = await sessionGrant();
+  isDeploymentExperimentEnabledMock
+    .mockReset()
+    .mockResolvedValueOnce(true)
+    .mockResolvedValue(false);
+
+  const response = await tool(fixture.brokerToken, 'list_integration_keys');
+
+  expect(response.isError).toBe(true);
+});
+
 it('keeps broker authority separate from ordinary auth and restricts it to the exact API resource', async () => {
   const fixture = await sessionGrant();
   const scopedResponse = await post(fixture.brokerToken);
@@ -1224,11 +1244,6 @@ it('denies a still-valid signed run token after its live bound actor drifts', as
 it.each(['broker', 'run'] as const)(
   'hides paused Integration-key tools and grants for %s clients',
   async (kind) => {
-    const actual =
-      await vi.importActual<typeof import('@roomote/types')>('@roomote/types');
-    expect(actual.isServiceCredentialToolsExperimentEnabled(undefined)).toBe(
-      false,
-    );
     secretToolsEnabled.value = false;
     const fixture = await sessionGrant();
     const token = kind === 'broker' ? fixture.brokerToken : fixture.runToken;

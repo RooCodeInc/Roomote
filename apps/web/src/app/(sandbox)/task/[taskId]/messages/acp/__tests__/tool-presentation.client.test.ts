@@ -415,6 +415,54 @@ describe('tool presentation resolver', () => {
     ).toMatchObject({ verb: 'Called', object: 'POST /api/v1/search (200)' });
   });
 
+  it.each([
+    ['in_progress', {}, 'Adding', 'remote MCP DeepWiki'],
+    [
+      'completed',
+      { status: 'connected', name: 'deepwiki', tools: [{}, {}, {}] },
+      'Added',
+      'remote MCP deepwiki (3 tools)',
+    ],
+    [
+      'completed',
+      { status: 'authorization_required', name: 'linear-remote' },
+      'Prepared',
+      'remote MCP linear-remote for authorization',
+    ],
+    [
+      'completed',
+      { status: 'connected', name: 'deepwiki', reused: true },
+      'Found',
+      'remote MCP deepwiki',
+    ],
+    [
+      'completed',
+      { status: 'disabled', name: 'deepwiki', reused: true },
+      'Found',
+      'remote MCP deepwiki (disabled)',
+    ],
+    ['failed', {}, 'Failed to Add', 'remote MCP DeepWiki'],
+  ] as const)(
+    'presents add_remote_mcp while %s',
+    (status, output, verb, object) => {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            toolName: 'add_remote_mcp',
+            status,
+            rawInput: { arguments: { name: 'DeepWiki' } },
+            output: JSON.stringify(output),
+          } as never),
+        ),
+      ).toMatchObject({
+        verb,
+        object,
+        category: 'generic',
+        iconKey: 'tool',
+      });
+    },
+  );
+
   it('never uses native fallback titles for headers or identity', () => {
     expect(
       resolveToolPresentation(

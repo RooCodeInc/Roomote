@@ -49,13 +49,9 @@ const inFlightPreparations = new Map<
  * minted from the same stamp, so a repository outside it (or under a
  * different provider) would fail authentication rather than clone.
  *
- * Only all-repositories and Blank slate workspaces check repositories out on
- * demand. The MCP tool is hidden elsewhere, but any holder of the run token
- * can call this mutation directly, so the persisted workspace scope is the
- * gate: a single-repository, repository-set, or environment run must not be
- * able to widen its workspace to other deployment repositories. A Blank
- * slate launched without a repository stamp (no source control connected)
- * has no credentials to clone with, so it is refused as well.
+ * The MCP tool is hidden when no checkout scope was stamped, but any holder of
+ * the run token can call this mutation directly. The persisted provider map
+ * remains the authorization gate for every workspace type.
  */
 async function loadRepositoryScope(runId: number): Promise<RepositoryScope> {
   const taskRun = await sdk.taskRuns.findFirstById(runId);
@@ -77,14 +73,11 @@ async function loadRepositoryScope(runId: number): Promise<RepositoryScope> {
     });
   }
 
-  if (
-    workspaceType !== 'all_repositories' &&
-    workspaceType !== 'no_repositories'
-  ) {
+  if (!repositoryProviders && workspaceType !== 'all_repositories') {
     throw new TRPCError({
       code: 'FORBIDDEN',
       message:
-        'Repository checkout on demand is only available in all-repositories and Blank slate workspaces; this run is scoped to its prepared repositories.',
+        'Repository checkout on demand is unavailable because this run has no authorized repository scope.',
     });
   }
 
@@ -216,10 +209,8 @@ async function prepareOnDemandRepository({
 }
 
 /**
- * Check out one of the deployment's repositories into the shared workspace
- * root. All-repositories and Blank slate workspaces do not clone repositories
- * during setup; the agent calls this (through the `clone_repository` MCP
- * tool) for the repositories the task actually needs.
+ * Check out an authorized active deployment repository into the shared
+ * workspace root without running environment setup or touching existing work.
  */
 export const prepareRepository = publicProcedure
   .input(prepareRepositoryInputSchema)

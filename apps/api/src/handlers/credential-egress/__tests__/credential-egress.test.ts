@@ -28,6 +28,7 @@ import {
   sessionFactory,
   taskFactory,
   runFactory,
+  setDeploymentExperimentEnabled,
   hashCredentialEgressSubstitute,
   type ServiceCredentialContext,
 } from '@roomote/db/server';
@@ -238,10 +239,7 @@ beforeEach(async () => {
   minted.length = 0;
   for (let i = 0; i < 2; i++) userIds.push((await userFactory.create()).id);
   [ownerId, otherId] = userIds as [string, string];
-  await db
-    .update(users)
-    .set({ metadata: { integration_keys_enabled: true } })
-    .where(eq(users.id, ownerId));
+  await setDeploymentExperimentEnabled('serviceCredentialTools', true);
   const row = await session(ownerId);
   sessionId = row.id;
   context = { userId: ownerId, sessionId };
@@ -395,10 +393,6 @@ it('delivers a deployment-visible grant to another active member run', async () 
     pendingRef: sharedPending.pendingRef,
     secret,
   });
-  await db
-    .update(users)
-    .set({ metadata: { integration_keys_enabled: true } })
-    .where(eq(users.id, otherId));
   const otherSession = await session(otherId);
   const otherRun = await run(otherId, otherSession.id);
 
@@ -441,10 +435,6 @@ it.each(['deactivated', 'deleted'] as const)(
       pendingRef: sharedPending.pendingRef,
       secret,
     });
-    await db
-      .update(users)
-      .set({ metadata: { integration_keys_enabled: true } })
-      .where(eq(users.id, otherId));
     const otherSession = await session(otherId);
     const otherRun = await run(otherId, otherSession.id);
     const result = await register({ runId: otherRun.id });
@@ -1087,9 +1077,9 @@ it('drives the controller flow through the typed SDK client', async () => {
   ).rejects.toThrow(/404 workload_not_found/);
 });
 
-it('treats an owner who turned integration keys off as ineligible everywhere', async () => {
+it('treats a deployment that turned integration keys off as ineligible everywhere', async () => {
   const base = await registered();
-  await db.update(users).set({ metadata: {} }).where(eq(users.id, ownerId));
+  await setDeploymentExperimentEnabled('serviceCredentialTools', false);
   // Registration and rotation refuse inside the minting transaction.
   expect(await register()).toMatchObject({
     status: 409,
@@ -1109,9 +1099,6 @@ it('treats an owner who turned integration keys off as ineligible everywhere', a
     ).status,
   ).toBe(404);
   // Turning it back on restores the same workload without a new registration.
-  await db
-    .update(users)
-    .set({ metadata: { integration_keys_enabled: true } })
-    .where(eq(users.id, ownerId));
+  await setDeploymentExperimentEnabled('serviceCredentialTools', true);
   expect((await authorize(authorizeBody(base))).allowed).toBe(true);
 });

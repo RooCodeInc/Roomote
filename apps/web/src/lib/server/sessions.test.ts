@@ -399,6 +399,35 @@ describe('unified Session queries', () => {
     }
   });
 
+  it('keeps private Session reads owner-only, including for admins', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      title: 'Owner-only Session',
+    });
+
+    await expect(
+      findReadableSession({ userId: owner.id, isAdmin: false }, session.id),
+    ).resolves.toMatchObject({ id: session.id, privacy: 'private' });
+
+    for (const auth of [
+      { userId: other.id, isAdmin: false },
+      { userId: other.id, isAdmin: true },
+    ]) {
+      await expect(findReadableSession(auth, session.id)).resolves.toBeNull();
+      await expect(findAccessibleSession(auth, session.id)).resolves.toBeNull();
+      await expect(getSessionById(auth, session.id)).resolves.toBeNull();
+      await expect(getSessionTimeline(auth, session.id)).resolves.toBeNull();
+      expect((await getSessions(auth, { ids: [session.id] })).sessions).toEqual(
+        [],
+      );
+    }
+  });
+
   beforeEach(() => {
     syncFastSlackTitle.mockReset();
     syncFastSlackTitle.mockResolvedValue(undefined);

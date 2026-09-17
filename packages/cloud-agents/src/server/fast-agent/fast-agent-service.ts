@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
+import { addRemoteCustomMcpForFast } from '@roomote/sdk/server/add-remote-custom-mcp';
 import {
   listServiceCredentialApprovals,
   prepareServiceCredential,
@@ -10,6 +11,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
+  BRAIN_MCP_ID,
   CHAT_CHANNEL_POST_TOOL_NAME,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_CHANNELS_TOOL,
@@ -67,6 +69,7 @@ import {
   getSessionForTask,
   inArray,
   isBrainEnabled,
+  isPrivateSessionsExperimentEnabled,
   isNull,
   markSessionGoalForConversation,
   releaseSessionGoalContinuation,
@@ -1734,6 +1737,13 @@ const INTEGRATION_REFUSAL_GUIDANCE: Readonly<Record<string, string>> = {
   path_too_long: 'The request path is too long; shorten it.',
 };
 
+const addRemoteMcpArgsSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    url: z.string().url().startsWith('https://').max(2_048),
+  })
+  .strict();
+
 export async function answerFastAgentQuestion({
   question,
   images = [],
@@ -1874,6 +1884,10 @@ export async function answerFastAgentQuestion({
   const turnVisibleMessages: ModelMessage[] = [];
   let mirroredMessageCount = 0;
   let canonicalConversationId: string | null = null;
+  let currentSessionPrivacy: 'shared' | 'private' = 'shared';
+  let currentPrivateOwnerUserId: string | null = null;
+  let privateSessionsExperimentEnabled = false;
+  let availableIntegrations: FastAgentIntegration[] = [];
   let durableOpenCodeSessionId: string | null = null;
   let lastVisibleMessage = '';
   /** Last model OpenCode resolved for this turn, for the failure closeout. */
@@ -2740,6 +2754,13 @@ export async function answerFastAgentQuestion({
       title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction;
     const privatePersonalization =
       title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
+    const privateBrainRead =
+      currentSessionPrivacy === 'private' && mcpServerName === BRAIN_MCP_ID;
+    const privateIntegrationCall = availableIntegrations.some(
+      (integration) =>
+        integration.id === mcpServerName &&
+        integration.dataPolicy === 'private',
+    );
     const canonicalEvent = allocateCanonicalEvent(`tool:${ordinal}`);
     await persistCanonicalMessage(
       {
@@ -2764,7 +2785,14 @@ export async function answerFastAgentQuestion({
           serverName: mcpServerName,
           toolName: mcpToolName ?? title,
           command: null,
-          rawInput: { arguments: privatePersonalization ? {} : args },
+          rawInput: {
+            arguments:
+              privatePersonalization ||
+              privateBrainRead ||
+              privateIntegrationCall
+                ? {}
+                : args,
+          },
         },
         source: conversation.surface,
         nativeSessionId: nativeSessionId ?? activeOpenCodeSessionId,
@@ -2796,14 +2824,31 @@ export async function answerFastAgentQuestion({
       result.success === false;
     const privatePersonalization =
       event.title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
-    const { output, truncated } = privatePersonalization
-      ? {
-          output: failed
-            ? 'Personalization was not updated'
-            : 'Personalization updated',
-          truncated: false,
-        }
-      : serializeFastAgentToolOutput(result);
+    const privateBrainRead =
+      currentSessionPrivacy === 'private' &&
+      event.mcpServerName === BRAIN_MCP_ID;
+    const privateIntegrationCall = availableIntegrations.some(
+      (integration) =>
+        integration.id === event.mcpServerName &&
+        integration.dataPolicy === 'private',
+    );
+    const { output, truncated } =
+      privatePersonalization || privateBrainRead || privateIntegrationCall
+        ? {
+            output: failed
+              ? privateBrainRead
+                ? 'Brain read failed'
+                : privateIntegrationCall
+                  ? 'Private integration call failed'
+                  : 'Personalization was not updated'
+              : privateBrainRead
+                ? 'Brain read completed'
+                : privateIntegrationCall
+                  ? 'Private integration call completed'
+                  : 'Personalization updated',
+            truncated: false,
+          }
+        : serializeFastAgentToolOutput(result);
     await persistCanonicalMessage(
       {
         ...event.canonicalEvent,
@@ -2829,7 +2874,14 @@ export async function answerFastAgentQuestion({
           command: null,
           exitCode: null,
           output,
-          rawInput: { arguments: privatePersonalization ? {} : event.args },
+          rawInput: {
+            arguments:
+              privatePersonalization ||
+              privateBrainRead ||
+              privateIntegrationCall
+                ? {}
+                : event.args,
+          },
         },
         source: conversation.surface,
         nativeSessionId: nativeSessionId ?? activeOpenCodeSessionId,
@@ -3213,11 +3265,43 @@ export async function answerFastAgentQuestion({
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
-    const availableIntegrations = selectFastRoomoteChannelTools({
+    currentSessionPrivacy = session.privacy ?? 'shared';
+    currentPrivateOwnerUserId = session.privateOwnerUserId ?? null;
+    privateSessionsExperimentEnabled =
+      currentSessionPrivacy === 'private'
+        ? await isPrivateSessionsExperimentEnabled()
+        : false;
+    availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
       conversation,
       currentMessageReactable,
     });
+    availableIntegrations = availableIntegrations.filter((integration) =>
+      currentSessionPrivacy !== 'private'
+        ? integration.dataPolicy !== 'private'
+        : integration.id === BRAIN_MCP_ID ||
+          (integration.dataPolicy === 'private' &&
+            privateSessionsExperimentEnabled &&
+            currentPrivateOwnerUserId === userId),
+    );
+    if (currentSessionPrivacy === 'private') {
+      availableIntegrations = availableIntegrations
+        .filter(
+          (integration) =>
+            !isMemoryMcpServer(integration.id) ||
+            integration.id === BRAIN_MCP_ID,
+        )
+        .map((integration) =>
+          integration.id === BRAIN_MCP_ID
+            ? {
+                ...integration,
+                tools: integration.tools.filter(
+                  (tool) => tool.name !== 'synthesize',
+                ),
+              }
+            : integration,
+        );
+    }
     canonicalConversationId = session.id;
     // A resumed run continues the same turn. Load what the earlier attempt
     // already did before anything is written: the model is told about it,
@@ -3462,6 +3546,7 @@ export async function answerFastAgentQuestion({
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
       serviceCredentialToolsEnabled: currentUser.serviceCredentialToolsEnabled,
+      addRemoteMcpEnabled: currentUser.isAdmin && !platformEvent,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
@@ -3785,6 +3870,7 @@ export async function answerFastAgentQuestion({
       // no extra reply. This does not bypass the live actor/grant checks.
       ...(conversation.surface === 'web'
         ? [
+            FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp,
             FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
             FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
             FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
@@ -3942,9 +4028,10 @@ export async function answerFastAgentQuestion({
             userId,
             apiBaseUrl,
             sessionId: session.id,
+            privacy: currentSessionPrivacy,
+            privateOwnerUserId: currentPrivateOwnerUserId,
+            privateSessionsExperimentEnabled,
             humanTurn: !platformEvent,
-            conversation,
-            messageId: currentMessageId ?? conversation.conversationId,
           },
           availableIntegrations,
           {
@@ -4059,7 +4146,7 @@ export async function answerFastAgentQuestion({
     };
     // Subagents may look up and call on-demand deployment MCP tools; every
     // other Fast tool stays with the parent. Calls run through the parent's
-    // MCP executor, so gating, duplicate detection, and auditing are shared.
+    // MCP executor, so gating and duplicate detection are shared.
     const executeSubagentNativeTool = async (
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
@@ -4132,6 +4219,58 @@ export async function answerFastAgentQuestion({
           };
         }
         switch (call.name) {
+          case FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp: {
+            if (platformEvent) {
+              return {
+                success: false,
+                error:
+                  'A deployment administrator must request this connection in a human-authored turn.',
+              };
+            }
+            if (!currentUser.isAdmin) {
+              return {
+                success: false,
+                error:
+                  'Only a deployment administrator can add a custom remote MCP integration.',
+              };
+            }
+            const args = addRemoteMcpArgsSchema.parse(call.args);
+            const canonicalSession = await getSessionForFastConversation(
+              db,
+              session.id,
+            );
+            if (!canonicalSession) {
+              return {
+                success: false,
+                error: 'This Fast conversation is not attached to a Session.',
+              };
+            }
+            const result = await addRemoteCustomMcpForFast({
+              userId,
+              sessionId: canonicalSession.id,
+              ...args,
+            });
+            if (result.status === 'connected') {
+              const refreshedIntegrations = await listFastAgentIntegrations(
+                { userId, apiBaseUrl },
+                adapter.resolveMcpServerConfigs,
+              );
+              availableIntegrations.splice(
+                0,
+                availableIntegrations.length,
+                ...refreshedIntegrations,
+              );
+              onDemandIntegrations.splice(
+                0,
+                onDemandIntegrations.length,
+                ...refreshedIntegrations.filter(
+                  (integration) =>
+                    !isFastAgentNativeIntegration(integration.id),
+                ),
+              );
+            }
+            return { success: true, ...result };
+          }
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
             const args = chatReplyArgsSchema.parse(call.args);
             if (args.message === undefined) await waitForSettledReplyText();
@@ -4492,7 +4631,10 @@ export async function answerFastAgentQuestion({
             }
             if (result.success) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
-              if (substantiveHumanInput) {
+              if (
+                substantiveHumanInput &&
+                currentSessionPrivacy !== 'private'
+              ) {
                 try {
                   await ensureOwnTaskFollowThroughWakeup({
                     conversationId: session.id,
@@ -4515,6 +4657,13 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest: {
+            if (currentSessionPrivacy === 'private') {
+              return {
+                success: false,
+                error:
+                  'Pull request review is unavailable in private Sessions.',
+              };
+            }
             const args = reviewPullRequestArgsSchema.parse(call.args);
             const conversationTarget =
               getConversationPullRequestTarget(conversation);
@@ -4794,8 +4943,6 @@ export async function answerFastAgentQuestion({
                   apiBaseUrl,
                   sessionId: session.id,
                   humanTurn: true,
-                  conversation,
-                  messageId: currentMessageId ?? conversation.conversationId,
                 },
                 availableIntegrations,
                 {
@@ -4879,6 +5026,12 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups: {
+            if (currentSessionPrivacy === 'private') {
+              return {
+                success: false,
+                error: 'Wakeups are unavailable in private Sessions.',
+              };
+            }
             const args = manageWakeupsInputSchema.parse(
               normalizeManageWakeupsArgs(call.args),
             );
@@ -4964,7 +5117,9 @@ export async function answerFastAgentQuestion({
               return {
                 success: false,
                 error:
-                  "This conversation's memory is full. Start a new conversation to save further memories.",
+                  result.reason === 'private_conversation'
+                    ? 'Private Sessions cannot write to shared memory.'
+                    : "This conversation's memory is full. Start a new conversation to save further memories.",
               };
             }
             return {
@@ -5402,6 +5557,7 @@ export async function answerFastAgentQuestion({
               currentUser.serviceCredentialToolsEnabled,
             serviceCredentialPrepareEnabled:
               currentUser.serviceCredentialToolsEnabled && !platformEvent,
+            addRemoteMcpEnabled: currentUser.isAdmin && !platformEvent,
           },
         );
         const unbindExecutors = new Set<() => void>();

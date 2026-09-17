@@ -3,9 +3,9 @@ import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { and, asc, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 
 import { getEncryptionKey } from '@roomote/env';
+import { DEPLOYMENT_EXPERIMENT_METADATA_KEYS } from '@roomote/feature-flags';
 import {
   activeRunStatuses,
-  isServiceCredentialToolsExperimentEnabled,
   CREDENTIAL_EGRESS_SUBSTITUTE_PREFIX,
   type RunStatus,
   type CredentialEgressAuthorization,
@@ -23,6 +23,7 @@ import {
   credentialEgressRevocations,
   credentialEgressSubstitutes,
   credentialEgressWorkloads,
+  deploymentSettings,
   serviceCredentials,
   sessionTasks,
   sessions,
@@ -30,6 +31,10 @@ import {
   users,
 } from '../schema';
 import { decrypt } from './encryption';
+import {
+  isDeploymentExperimentEnabled,
+  isDeploymentExperimentEnabledWithShareLock,
+} from './deployment-experiments';
 import { liveServiceCredentialWhere } from './service-credentials';
 
 /**
@@ -84,7 +89,6 @@ async function eligibleRunSession(tx: DatabaseOrTransaction, runId: number) {
     .select({
       sessionId: sessions.id,
       ownerUserId: users.id,
-      ownerMetadata: users.metadata,
     })
     .from(taskRuns)
     .innerJoin(sessionTasks, eq(sessionTasks.taskId, taskRuns.taskId))
@@ -109,7 +113,7 @@ async function eligibleRunSession(tx: DatabaseOrTransaction, runId: number) {
  * grants would it get? Runs with no such Session are ordinary runs and never
  * contact the control plane; runs with a Session but zero grants are
  * reported, not registered (grants approved mid-run take effect at the next
- * start or resume). The owner's experiment setting gates delivery the same
+ * start or resume). The deployment experiment setting gates delivery the same
  * way it gates the Fast and coding-run tools.
  */
 export async function findCredentialEgressCandidateForRun(
@@ -136,29 +140,24 @@ export async function findCredentialEgressCandidateForRun(
   return {
     sessionId: eligible.sessionId,
     grantCount: row?.count ?? 0,
-    experimentEnabled: isServiceCredentialToolsExperimentEnabled(
-      eligible.ownerMetadata,
+    experimentEnabled: await isDeploymentExperimentEnabled(
+      'serviceCredentialTools',
     ),
   };
 }
 
 /**
- * The owner's Integration-key-tools setting, read under a share lock so a
+ * The deployment Integration-key-tools setting, read under a share lock so a
  * concurrent toggle blocks until this transaction commits. Every path that
  * mints or extends substitutes calls this inside its transaction; the
  * controller's preflight read is planning only.
  */
-async function ownerExperimentLocked(
+async function deploymentExperimentLocked(
   tx: DatabaseOrTransaction,
-  ownerUserId: string,
 ): Promise<boolean> {
-  const [owner] = await tx
-    .select({ metadata: users.metadata })
-    .from(users)
-    .where(and(eq(users.id, ownerUserId), isNull(users.deletedAt)))
-    .for('share');
-  return (
-    Boolean(owner) && isServiceCredentialToolsExperimentEnabled(owner!.metadata)
+  return isDeploymentExperimentEnabledWithShareLock(
+    'serviceCredentialTools',
+    tx,
   );
 }
 
@@ -191,12 +190,10 @@ async function liveWorkload(tx: DatabaseOrTransaction, workloadId: string) {
       ),
     )
     .for('update', { of: credentialEgressWorkloads });
-  // The owner's experiment gates the tools per request; a workload is only
+  // The deployment experiment gates the tools per request; a workload is only
   // live while it stays on, so renewals and new substitutes stop with it.
   if (!row) return null;
-  return (await ownerExperimentLocked(tx, row.workload.ownerUserId))
-    ? row.workload
-    : null;
+  return (await deploymentExperimentLocked(tx)) ? row.workload : null;
 }
 
 /** Authorization for controller-to-worker delivery of substitute-only client config. */
@@ -267,13 +264,10 @@ async function mintMissingSubstitutes(
     )
     .orderBy(asc(serviceCredentials.createdAt));
   const issued: CredentialEgressSubstituteIssue[] = [];
-  // Minting is the write boundary: the owner row is already share-locked by
+  // Minting is the write boundary: the deployment row is already share-locked by
   // the caller's transaction, so this re-read cannot observe a newer toggle
-  // and simply refuses to write for an owner whose tools are off.
-  if (
-    grants.length > 0 &&
-    !(await ownerExperimentLocked(tx, workload.ownerUserId))
-  )
+  // and simply refuses to write while the deployment tools are off.
+  if (grants.length > 0 && !(await deploymentExperimentLocked(tx)))
     return issued;
   for (const grant of grants) {
     // Withheld plaintext is unrecoverable, so denied grants must remain mintable.
@@ -330,11 +324,11 @@ export async function registerCredentialEgressWorkload(
       .where(eq(taskRuns.id, input.runId))
       .for('update');
     const eligible = await eligibleRunSession(tx, input.runId);
-    // The controller's preflight is planning only. The owner row is locked
+    // The controller's preflight is planning only. The deployment row is locked
     // here for the rest of the transaction, so a toggle that lands between
     // this read and the mint waits for the commit and then governs the next
-    // live check; nothing is minted for an owner who already turned it off.
-    if (!eligible || !(await ownerExperimentLocked(tx, eligible.ownerUserId)))
+    // live check; nothing is minted after an admin has turned it off.
+    if (!eligible || !(await deploymentExperimentLocked(tx)))
       throw new CredentialEgressRegistrationError('run_not_eligible');
 
     const [existing] = await tx
@@ -570,7 +564,11 @@ async function authorizeSubstitute(
           archivedAt: sessions.archivedAt,
         },
         ownerDeletedAt: users.deletedAt,
-        ownerMetadata: users.metadata,
+        experimentEnabled: sql<boolean>`coalesce((
+          select ${deploymentSettings.metadata}->>${DEPLOYMENT_EXPERIMENT_METADATA_KEYS.serviceCredentialTools} = 'true'
+          from ${deploymentSettings}
+          where ${deploymentSettings.id} = 'default'
+        ), false)`,
         run: { actingUserId: taskRuns.actingUserId, status: taskRuns.status },
         attached: sql<boolean>`exists (
         select 1 from ${sessionTasks}
@@ -626,7 +624,7 @@ async function authorizeSubstitute(
         secret.visibility !== 'deployment') ||
       session.archivedAt ||
       row.ownerDeletedAt ||
-      !isServiceCredentialToolsExperimentEnabled(row.ownerMetadata) ||
+      !row.experimentEnabled ||
       !row.grantOwnerActive ||
       run.actingUserId !== workload.ownerUserId ||
       !ELIGIBLE_RUN_STATUSES.includes(run.status) ||

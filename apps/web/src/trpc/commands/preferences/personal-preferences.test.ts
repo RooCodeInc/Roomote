@@ -14,7 +14,7 @@ function buildAuth(userId: string) {
 }
 
 describe('personal preferences', () => {
-  it('defaults opt-in preferences to disabled', async () => {
+  it('returns personal preferences without dormant experiment metadata', async () => {
     const user = await userFactory.create();
 
     await expect(
@@ -22,89 +22,44 @@ describe('personal preferences', () => {
     ).resolves.toEqual(
       expect.objectContaining({
         mindReaderMode: false,
-        slackPeerConversationsExperimentEnabled: false,
-        homeComposerSuggestionsEnabled: false,
-        serviceCredentialToolsEnabled: false,
       }),
     );
   });
 
-  it('persists the Slack peer-conversations experiment without replacing other metadata', async () => {
+  it('leaves dormant per-user experiment values untouched on updates', async () => {
     const user = await userFactory.create({
-      metadata: { existing_value: 'preserved' },
-    });
-
-    await expect(
-      updatePersonalPreferencesCommand(buildAuth(user.id), {
-        slackPeerConversationsExperimentEnabled: true,
-      }),
-    ).resolves.toEqual(
-      expect.objectContaining({
-        slackPeerConversationsExperimentEnabled: true,
-      }),
-    );
-
-    const storedUser = await db.query.users.findFirst({
-      where: eq(users.id, user.id),
-      columns: { metadata: true },
-    });
-
-    expect(storedUser?.metadata).toEqual(
-      expect.objectContaining({
-        existing_value: 'preserved',
+      metadata: {
+        results_page_enabled: true,
         slack_peer_conversations_experiment_enabled: true,
-      }),
-    );
-  });
-
-  it('persists the integration keys experiment per user', async () => {
-    const user = await userFactory.create({
-      metadata: { existing_value: 'preserved' },
-    });
-
-    await expect(
-      updatePersonalPreferencesCommand(buildAuth(user.id), {
-        serviceCredentialToolsEnabled: true,
-      }),
-    ).resolves.toEqual(
-      expect.objectContaining({ serviceCredentialToolsEnabled: true }),
-    );
-
-    const storedUser = await db.query.users.findFirst({
-      where: eq(users.id, user.id),
-      columns: { metadata: true },
-    });
-    expect(storedUser?.metadata).toEqual(
-      expect.objectContaining({
-        existing_value: 'preserved',
-        integration_keys_enabled: true,
-      }),
-    );
-  });
-
-  it('persists the Home suggestions experimental flag per user', async () => {
-    const user = await userFactory.create({
-      metadata: { existing_value: 'preserved' },
-    });
-
-    await expect(
-      updatePersonalPreferencesCommand(buildAuth(user.id), {
-        homeComposerSuggestionsEnabled: true,
-      }),
-    ).resolves.toEqual(
-      expect.objectContaining({ homeComposerSuggestionsEnabled: true }),
-    );
-
-    const storedUser = await db.query.users.findFirst({
-      where: eq(users.id, user.id),
-      columns: { metadata: true },
-    });
-    expect(storedUser?.metadata).toEqual(
-      expect.objectContaining({
-        existing_value: 'preserved',
         home_composer_suggestions_enabled: true,
-      }),
+        integration_keys_enabled: true,
+      },
+    });
+
+    const preferences = await getPersonalPreferencesCommand(buildAuth(user.id));
+    expect(preferences).not.toHaveProperty('resultsPageEnabled');
+    expect(preferences).not.toHaveProperty(
+      'slackPeerConversationsExperimentEnabled',
     );
+    expect(preferences).not.toHaveProperty('homeComposerSuggestionsEnabled');
+    expect(preferences).not.toHaveProperty('serviceCredentialToolsEnabled');
+
+    await updatePersonalPreferencesCommand(buildAuth(user.id), {
+      narrationMode: true,
+    });
+
+    const storedUser = await db.query.users.findFirst({
+      where: eq(users.id, user.id),
+      columns: { metadata: true },
+    });
+
+    expect(storedUser?.metadata).toEqual({
+      results_page_enabled: true,
+      slack_peer_conversations_experiment_enabled: true,
+      home_composer_suggestions_enabled: true,
+      integration_keys_enabled: true,
+      narration_mode: true,
+    });
   });
 
   it.each([undefined, false])(

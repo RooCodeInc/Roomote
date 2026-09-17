@@ -1,20 +1,21 @@
 ---
 title: "Integration keys"
-description: "Give agents an API key for one service, in every Session you own, without the key ever leaving Roomote."
+description: "Give agents an API key for one HTTPS service without the key ever leaving Roomote."
 ---
 
 Integration keys let a Roomote agent use an API key you hold, for one HTTPS
 service, without the key ever entering chat, a prompt, a task environment, or
-a transcript. You enter the key once, either when an agent asks for it in a
-Session or under **Settings → Integrations → Your integrations**; from then on it is an
-integration of yours that every Session and coding task you own can use. The
+a transcript. You enter the key once when an agent asks for it in a Session,
+under **Personal Settings → Personal integrations**, or, for administrators,
+under **Settings → Integrations**. Personal integrations are available only to
+their owner; deployment-wide integrations are available to active members. The
 agent works with an opaque reference or a substitute token, and Roomote's API
-adds the real key on the way out. These are personal API keys for HTTPS
-services, not a replacement for [connected integrations](/integrations).
+adds the real key on the way out. Integration keys are for HTTPS services, not
+a replacement for [connected integrations](/integrations).
 
 <Note>
-  Integration keys are gated per user. Turn on **integration keys** under
-  **Settings → Experimental** to enable them for the Sessions you own.
+  Integration keys are gated deployment-wide. An admin can turn on
+  **Integration keys** under **Settings → Experimental** for all members.
 </Note>
 
 ## How an approval works
@@ -33,14 +34,17 @@ services, not a replacement for [connected integrations](/integrations).
    the end of the conversation, and the agent's secure link opens the same
    form. Enter the key there; the form bypasses chat and is excluded from
    capture and replay. If the agent asked for write methods, the form shows
-   them and you confirm them.
-4. The Session resumes on its own. The key is now an integration of yours:
-   every Session you own, and every coding task launched from one, can use it
-   within its policy until you revoke it.
+   them and you confirm them. Choose **Only me** for a personal integration or
+   **Everyone in this deployment** for a shared integration.
+4. The Session resumes on its own. Personal integrations are available to your
+   Sessions and coding tasks. Deployment-wide integrations are available to
+   active members while the integration owner remains active.
 
-You can also add an integration directly under **Settings → Integrations →
-Your integrations**, naming the origin, header, methods, and key yourself. Either
-way the result is the same kind of integration, listed and revocable there.
+You can also add a personal integration directly under **Personal Settings →
+Personal integrations**, naming the origin, header, methods, and key yourself.
+Administrators add deployment-wide integrations under **Settings →
+Integrations**. Owners and administrators can change a shared integration to
+personal access; Roomote then moves it to the owner's Personal Settings.
 
 An integration covers one origin. Nothing the agent sends can change the
 origin or widen the methods. Integrations are kept until you revoke them; you
@@ -49,9 +53,11 @@ temporary.
 
 ## What agents can do with it
 
-**In the Session itself**, the agent can make single GET or HEAD requests to
-the approved origin. Roomote's API sends the request with the real key and
-returns the response. This works everywhere and needs no setup.
+**In a human Session turn**, Fast can discover existing integration keys,
+prepare secure approval requests, and make one or a few direct calls to an
+approved origin using any HTTP method approved for that integration. Roomote's
+API sends the request with the real key and returns the response. For scripts,
+SDKs, CLIs, or many calls, Fast launches an attached coding task instead.
 
 **In coding tasks launched from the Session**, the task receives each approved
 service as a substitute token in its environment, plus one base URL. The agent
@@ -100,8 +106,10 @@ files, or ordinary Session messages.
 
 - One origin per integration; paths under it are not restricted beyond the
   approved methods.
-- Integrations are personal. Collaborators on a shared task never receive
-  them, and a task only receives its acting user's integrations.
+- Personal integrations are available only to their owner. Deployment-wide
+  integrations are available to active members, stop working when their owner
+  becomes inactive or is deleted, and remain manageable by administrators.
+- A task receives only the integrations available to its acting user.
 - Services that sign requests with the secret (for example AWS Signature V4)
   cannot be used, since the key must be present where the signature is made.
 - Streaming responses, WebSockets, and redirects are not relayed through the

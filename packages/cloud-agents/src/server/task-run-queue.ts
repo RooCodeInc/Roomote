@@ -1013,6 +1013,7 @@ export type FreshTaskLaunch = {
   surface: TaskSurface;
   trigger: TaskTrigger;
   visibility?: TaskVisibility;
+  privacy?: 'shared' | 'private';
   channels?: TaskChannelBindings;
   /** Required when workflow is 'pr_review' or 'pr_conflict_resolve'. */
   prLinkage?: TaskPrLinkage;
@@ -1416,8 +1417,12 @@ async function enqueueFreshLaunch(
 ): Promise<TaskRun> {
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
+  const privacy = input.privacy ?? 'shared';
   const linkedUserId = getTaskInitiatorLinkedUserId(initiator);
   await assertUserIsNotDeleted(linkedUserId);
+  if (privacy === 'private' && (!linkedUserId || surface !== 'web')) {
+    throw new Error('Private tasks require a linked user on the web surface.');
+  }
 
   const requestedExistingTask = input.existingTaskId
     ? await db.query.tasks.findFirst({
@@ -1760,6 +1765,8 @@ async function enqueueFreshLaunch(
             surface,
             trigger,
             visibility,
+            privacy,
+            privateOwnerUserId: privacy === 'private' ? linkedUserId : null,
             state: 'active',
             ...initiatorColumns,
             ...commitAuthor,
@@ -2193,19 +2200,19 @@ async function stampWorkspaceSourceControlProviders(
   payload: FreshTask['payload'],
   workspace: ReturnType<typeof resolveTaskWorkspace>,
 ): Promise<void> {
-  // A Blank slate prepares no repositories, but when the deployment has
-  // source control connected the agent can still check any active
-  // repository out on demand, so it carries the same complete provider map
-  // (and mints the same credentials) as an all-repositories run. With no
-  // active repositories it stays credential-free.
-  const scopeWorkspace =
+  // Workspace selection controls initial checkout and tooling. The provider
+  // map instead records every active deployment repository the run may check
+  // out later through its normally authorized source-control credentials.
+  const initialScopeWorkspace =
     workspace.type === 'no_repositories'
       ? ({ type: 'all_repositories' } as const)
       : workspace;
-  const [repositoryProviders, workspaceHost] = await Promise.all([
-    resolveWorkspaceRepositoryProviders(db, scopeWorkspace),
-    resolveWorkspaceSourceControlHost(db, scopeWorkspace),
-  ]);
+  const [initialRepositoryProviders, workspaceHost, repositoryProviders] =
+    await Promise.all([
+      resolveWorkspaceRepositoryProviders(db, initialScopeWorkspace),
+      resolveWorkspaceSourceControlHost(db, initialScopeWorkspace),
+      resolveWorkspaceRepositoryProviders(db, { type: 'all_repositories' }),
+    ]);
 
   if (
     workspace.type === 'no_repositories' &&
@@ -2218,31 +2225,36 @@ async function stampWorkspaceSourceControlProviders(
   }
 
   const isAggregateWorkspace =
-    scopeWorkspace.type === 'repository_set' ||
-    scopeWorkspace.type === 'all_repositories';
+    initialScopeWorkspace.type === 'repository_set' ||
+    initialScopeWorkspace.type === 'all_repositories';
   const requiresCompleteCoverage =
-    isAggregateWorkspace || scopeWorkspace.type === 'environment';
+    isAggregateWorkspace || initialScopeWorkspace.type === 'environment';
   const expectedRepositoryCount =
-    scopeWorkspace.type === 'repository_set'
-      ? new Set(scopeWorkspace.repositories).size
+    initialScopeWorkspace.type === 'repository_set'
+      ? new Set(initialScopeWorkspace.repositories).size
       : undefined;
 
+  // Preserve the existing fail-closed validation for the repositories that
+  // setup must prepare before widening the map to optional checkouts.
   if (requiresCompleteCoverage) {
-    payload.repositoryProviders = repositoryProviders;
+    payload.repositoryProviders = initialRepositoryProviders;
   }
 
   if (
     requiresCompleteCoverage &&
-    (Object.keys(repositoryProviders).length === 0 ||
+    (Object.keys(initialRepositoryProviders).length === 0 ||
       (expectedRepositoryCount !== undefined &&
-        Object.keys(repositoryProviders).length !== expectedRepositoryCount))
+        Object.keys(initialRepositoryProviders).length !==
+          expectedRepositoryCount))
   ) {
     payload.sourceControlProvider = undefined;
     payload.sourceControlHost = undefined;
     return;
   }
 
-  const providers = Object.values(repositoryProviders);
+  payload.repositoryProviders = repositoryProviders;
+
+  const providers = Object.values(initialRepositoryProviders);
   const spansProviders = new Set(providers).size > 1;
 
   if (requiresCompleteCoverage && !spansProviders) {
@@ -2250,7 +2262,7 @@ async function stampWorkspaceSourceControlProviders(
   }
 
   if (spansProviders && !requiresCompleteCoverage) {
-    payload.repositoryProviders = repositoryProviders;
+    payload.sourceControlHost = undefined;
   }
 
   const primaryProvider = providers[0];

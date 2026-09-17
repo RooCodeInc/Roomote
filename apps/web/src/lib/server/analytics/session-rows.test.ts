@@ -7,6 +7,7 @@ import {
   sessionTasks,
   taskFactory,
   tasks,
+  userFactory,
 } from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
@@ -17,6 +18,10 @@ import { formatAnalyticsDateTime } from './time-buckets';
 describe('getSessionAnalyticsRows', () => {
   const sessionIds: string[] = [];
   const taskIds: string[] = [];
+  const analyticsAuth = {
+    userId: 'analytics-test-user',
+    isAdmin: true,
+  } as UserAuthSuccess;
 
   // createdAt is database-generated, so backdate it after insert.
   async function createSessionAt(createdAt: Date) {
@@ -57,7 +62,7 @@ describe('getSessionAnalyticsRows', () => {
     );
     sessionIds.push(recentSession.id, boundarySession.id, oldSession.id);
 
-    const rows = await getSessionAnalyticsRows({} as UserAuthSuccess, 7, now);
+    const rows = await getSessionAnalyticsRows(analyticsAuth, 7, now);
     const rowIds = new Set(rows.map((row) => row.id));
 
     expect(rowIds.has(recentSession.id)).toBe(true);
@@ -76,7 +81,7 @@ describe('getSessionAnalyticsRows', () => {
     sessionIds.push(slackSession.id, systemSession.id);
 
     const rows = await getSessionAnalyticsRows(
-      {} as UserAuthSuccess,
+      analyticsAuth,
       'all',
       new Date('2026-07-16T16:00:00.000Z'),
     );
@@ -120,7 +125,7 @@ describe('getSessionAnalyticsRows', () => {
     ]);
 
     const rows = await getSessionAnalyticsRows(
-      {} as UserAuthSuccess,
+      analyticsAuth,
       'all',
       new Date('2026-07-16T16:00:00.000Z'),
     );
@@ -142,5 +147,32 @@ describe('getSessionAnalyticsRows', () => {
     expect(rows.filter((row) => row.id === sessionWithTasks.id)).toHaveLength(
       1,
     );
+  });
+
+  it('excludes private Sessions from non-owner admin analytics', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const privateSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      title: 'Owner analytics only',
+    });
+    sessionIds.push(privateSession.id);
+
+    const ownerRows = await getSessionAnalyticsRows(
+      { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+      'all',
+      new Date(),
+    );
+    const adminRows = await getSessionAnalyticsRows(
+      { userId: other.id, isAdmin: true } as UserAuthSuccess,
+      'all',
+      new Date(),
+    );
+
+    expect(ownerRows.map(({ id }) => id)).toContain(privateSession.id);
+    expect(adminRows.map(({ id }) => id)).not.toContain(privateSession.id);
   });
 });

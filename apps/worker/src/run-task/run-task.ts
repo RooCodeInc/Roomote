@@ -1409,6 +1409,7 @@ export const runTask = async ({
           (entry): entry is [string, string] => entry[1] !== undefined,
         ),
       ),
+      taskPrivacy: task?.privacy,
       taskRun,
       userAttentionNotificationsEnabled,
       developerInstructionsContent: harnessDeveloperInstructions,

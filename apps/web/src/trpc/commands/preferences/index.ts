@@ -4,8 +4,6 @@ import {
   eq,
   getUserPersonalization,
   isNull,
-  isSlackPeerConversationsExperimentEnabledInMetadata,
-  SLACK_PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY,
   sql,
   updateUserPersonalization,
   UserPersonalizationConflictError,
@@ -13,7 +11,6 @@ import {
 } from '@roomote/db/server';
 import { TRPCError } from '@trpc/server';
 import { headers } from 'next/headers';
-import { SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 import { getAuth } from '@/lib/server/auth';
@@ -52,20 +49,6 @@ function normalizePersonalPreferences(
       typeof metadata.narration_mode === 'boolean'
         ? metadata.narration_mode
         : DEFAULT_PERSONAL_PREFERENCES.narrationMode,
-    resultsPageEnabled:
-      typeof metadata.results_page_enabled === 'boolean'
-        ? metadata.results_page_enabled
-        : DEFAULT_PERSONAL_PREFERENCES.resultsPageEnabled,
-    slackPeerConversationsExperimentEnabled:
-      isSlackPeerConversationsExperimentEnabledInMetadata(metadata),
-    homeComposerSuggestionsEnabled:
-      typeof metadata.home_composer_suggestions_enabled === 'boolean'
-        ? metadata.home_composer_suggestions_enabled
-        : DEFAULT_PERSONAL_PREFERENCES.homeComposerSuggestionsEnabled,
-    serviceCredentialToolsEnabled:
-      typeof metadata[SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY] === 'boolean'
-        ? metadata[SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY]
-        : DEFAULT_PERSONAL_PREFERENCES.serviceCredentialToolsEnabled,
   };
 }
 
@@ -192,22 +175,6 @@ export async function updatePersonalPreferencesCommand(
 
   if (input.narrationMode !== undefined) {
     nextMetadataRecord.narration_mode = input.narrationMode;
-  }
-
-  if (input.resultsPageEnabled !== undefined) {
-    nextMetadataRecord.results_page_enabled = input.resultsPageEnabled;
-  }
-  if (input.slackPeerConversationsExperimentEnabled !== undefined) {
-    nextMetadataRecord[SLACK_PEER_CONVERSATIONS_EXPERIMENT_METADATA_KEY] =
-      input.slackPeerConversationsExperimentEnabled;
-  }
-  if (input.homeComposerSuggestionsEnabled !== undefined) {
-    nextMetadataRecord.home_composer_suggestions_enabled =
-      input.homeComposerSuggestionsEnabled;
-  }
-  if (input.serviceCredentialToolsEnabled !== undefined) {
-    nextMetadataRecord[SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY] =
-      input.serviceCredentialToolsEnabled;
   }
 
   if (Object.keys(nextMetadataRecord).length === 0) {

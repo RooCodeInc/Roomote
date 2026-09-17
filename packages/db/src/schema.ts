@@ -88,6 +88,7 @@ import type {
   FastAgentSurface,
   ReasoningEffort,
   SessionStatus,
+  SessionPrivacy,
   SessionWakeupReportPolicy,
   SessionWakeupSchedule,
   SessionWakeupStatus,
@@ -200,7 +201,6 @@ export const userRelations = relations(users, ({ many }) => ({
   taskPins: many(taskPins),
   ownedSessions: many(sessions, { relationName: 'sessionOwnerUser' }),
   sessionParticipants: many(sessionParticipants),
-  slackFastIntegrationCalls: many(slackFastIntegrationCalls),
   workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
 }));
@@ -719,6 +719,14 @@ export const tasks = pgTable(
       .notNull()
       .default('visible')
       .$type<TaskVisibility>(),
+    privacy: text('privacy')
+      .notNull()
+      .default('shared')
+      .$type<SessionPrivacy>(),
+    privateOwnerUserId: text('private_owner_user_id').references(
+      () => users.id,
+      { onDelete: 'cascade' },
+    ),
     // Terminal task state. Only written by the finishRun terminal path;
     // live runtime phase stays on runs.
     state: text('state').notNull().default('active').$type<TaskState>(),
@@ -849,6 +857,14 @@ export const tasks = pgTable(
       sql`${table.visibility} in ('visible', 'hidden')`,
     ),
     check(
+      'tasks_privacy_check',
+      sql`${table.privacy} in ('shared', 'private')`,
+    ),
+    check(
+      'tasks_private_owner_check',
+      sql`(${table.privacy} = 'shared' AND ${table.privateOwnerUserId} IS NULL) OR (${table.privacy} = 'private' AND ${table.privateOwnerUserId} IS NOT NULL)`,
+    ),
+    check(
       'tasks_state_check',
       sql`${table.state} in ('active', 'completed', 'failed', 'canceled')`,
     ),
@@ -967,6 +983,7 @@ export const taskArtifacts = pgTable(
     version: integer('version').notNull().default(0),
     size: bigint('size', { mode: 'number' }).notNull(),
     uploaded: boolean('uploaded').notNull().default(false),
+    uploadUrlExpiresAt: timestamp('upload_url_expires_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -3440,6 +3457,14 @@ export const fastAgentConversations = pgTable(
       onDelete: 'cascade',
     }),
     ownerAutomation: text('owner_automation').$type<BackgroundAutomationKey>(),
+    privacy: text('privacy')
+      .notNull()
+      .default('shared')
+      .$type<SessionPrivacy>(),
+    privateOwnerUserId: text('private_owner_user_id').references(
+      () => users.id,
+      { onDelete: 'cascade' },
+    ),
     surface: text('surface').notNull().$type<FastAgentSurface>(),
     workspaceId: text('workspace_id').notNull(),
     conversationId: text('conversation_id').notNull(),
@@ -3483,6 +3508,14 @@ export const fastAgentConversations = pgTable(
         or
         (${table.userId} is null and ${table.ownerAutomation} is not null)
       )`,
+    ),
+    check(
+      'fast_agent_conversations_privacy_check',
+      sql`${table.privacy} in ('shared', 'private')`,
+    ),
+    check(
+      'fast_agent_conversations_private_owner_check',
+      sql`(${table.privacy} = 'shared' AND ${table.privateOwnerUserId} IS NULL) OR (${table.privacy} = 'private' AND ${table.privateOwnerUserId} IS NOT NULL AND ${table.privateOwnerUserId} = ${table.userId})`,
     ),
     index('fast_agent_conversations_legacy_ids_idx').using(
       'gin',
@@ -4019,17 +4052,13 @@ export const slackConversationMessagesRelations = relations(
   }),
 );
 
-export type SlackFastIntegrationCallStatus =
-  | 'executing'
-  | 'succeeded'
-  | 'failed';
-
 /**
  * slack_fast_integration_calls
  *
- * Durable audit trail for deployment MCP tools executed directly by runless
- * Fast conversations. An `executing` row is inserted before the external call
- * so a missing terminal update remains visibly ambiguous.
+ * N-1 rollback: no longer written after removal of the dedicated Fast
+ * integration-call audit. The previous release still inserts and updates this
+ * table; drop it only after that release is no longer the supported rollback
+ * target. Existing rows are retained until that follow-up migration.
  */
 export const slackFastIntegrationCalls = pgTable(
   'slack_fast_integration_calls',
@@ -4048,7 +4077,9 @@ export const slackFastIntegrationCalls = pgTable(
     integrationId: text('integration_id').notNull(),
     toolName: text('tool_name').notNull(),
     arguments: jsonb('arguments').notNull().$type<Record<string, unknown>>(),
-    status: text('status').notNull().$type<SlackFastIntegrationCallStatus>(),
+    status: text('status')
+      .notNull()
+      .$type<'executing' | 'succeeded' | 'failed'>(),
     resultPreview: text('result_preview'),
     error: text('error'),
     startedAt: timestamp('started_at').notNull().defaultNow(),
@@ -4071,20 +4102,6 @@ export const slackFastIntegrationCalls = pgTable(
       table.createdAt,
     ),
   ],
-);
-
-export const slackFastIntegrationCallsRelations = relations(
-  slackFastIntegrationCalls,
-  ({ one }) => ({
-    fastAgentConversation: one(fastAgentConversations, {
-      fields: [slackFastIntegrationCalls.fastAgentConversationId],
-      references: [fastAgentConversations.id],
-    }),
-    user: one(users, {
-      fields: [slackFastIntegrationCalls.userId],
-      references: [users.id],
-    }),
-  }),
 );
 
 /**
@@ -4183,7 +4200,7 @@ export const automationsRelations = relations(automations, ({ many }) => ({
 
 export type SessionOwnerKind = 'user' | 'automation' | 'system';
 export type SessionSourceSurface = TaskSurface | FastAgentSurface;
-export type { SessionStatus };
+export type { SessionPrivacy, SessionStatus };
 export type SessionTaskOrigin =
   | 'direct_launch'
   | 'fast_delegation'
@@ -4217,6 +4234,14 @@ export const sessions = pgTable(
     ownerAutomation: text('owner_automation')
       .$type<BackgroundAutomationKey>()
       .references(() => automations.key, { onDelete: 'set null' }),
+    privacy: text('privacy')
+      .notNull()
+      .default('shared')
+      .$type<SessionPrivacy>(),
+    privateOwnerUserId: text('private_owner_user_id').references(
+      () => users.id,
+      { onDelete: 'cascade' },
+    ),
     sourceSurface: text('source_surface')
       .notNull()
       .$type<SessionSourceSurface>(),
@@ -4259,6 +4284,14 @@ export const sessions = pgTable(
     check(
       'sessions_owner_kind_check',
       sql`${table.ownerKind} in ('user', 'automation', 'system')`,
+    ),
+    check(
+      'sessions_privacy_check',
+      sql`${table.privacy} in ('shared', 'private')`,
+    ),
+    check(
+      'sessions_private_owner_check',
+      sql`(${table.privacy} = 'shared' AND ${table.privateOwnerUserId} IS NULL) OR (${table.privacy} = 'private' AND ${table.privateOwnerUserId} IS NOT NULL AND ${table.privateOwnerUserId} = ${table.ownerUserId})`,
     ),
     check(
       'sessions_source_surface_check',

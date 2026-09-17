@@ -26,6 +26,7 @@ import {
   FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+  isPublicUrlFetchImageResult,
   NO_REPOSITORIES,
   REASONING_EFFORT_VALUES,
   MANAGE_WAKEUPS_TOOL_DESCRIPTION,
@@ -642,6 +643,20 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Add or reconnect one deployment-shared remote MCP integration from its HTTPS endpoint. Use this when an administrator asks to connect a service or provides a remote MCP URL that is not already available. The server verifies the endpoint before saving it, reuses an existing matching integration, and returns either connected tools, a secure OAuth authorization link, or the existing Settings link for static headers/manual OAuth client setup. Server-backed results include integrationId, the actual Fast catalog ID: use that exact integrationId with find_integration_tools and call_integration_tool, never a server UUID, but do not narrate IDs or catalog checks to the human. Share authorizeUrl and settingsUrl exactly unchanged, labeled 'Authorize <name>' and 'Integration settings' respectively; never rewrite either target to /settings. The conversation resumes automatically after the requesting administrator authorizes, so never ask them to send a follow-up. In user-visible progress say at most that you are checking. Never ask for or accept secrets in chat or tool arguments.",
+  args: {
+    name: z.string().trim().min(1).max(80).describe("Short deployment-visible integration name; Roomote normalizes it to a lowercase slug"),
+    url: z.string().url().startsWith("https://").max(2048).describe("HTTPS streamable-HTTP MCP endpoint"),
+  },
+  execute: (args, context) => invoke("add_remote_mcp", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
@@ -1132,6 +1147,18 @@ async function handleMcpRequest(
       args: params.arguments ?? {},
     });
     assertFastTurnActive(isActive);
+    if (isPublicUrlFetchImageResult(result)) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Image fetched successfully' },
+          {
+            type: 'image' as const,
+            data: result.data,
+            mimeType: result.mimeType,
+          },
+        ],
+      };
+    }
     return {
       content: [
         {
@@ -1567,6 +1594,7 @@ export async function getFastAgentNativeToolRuntime(
     surface?: FastAgentSurface;
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
+    addRemoteMcpEnabled?: boolean;
   } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
@@ -1627,6 +1655,7 @@ export async function getFastAgentNativeToolRuntime(
                 options.serviceCredentialToolsEnabled === true,
               serviceCredentialPrepareEnabled:
                 options.serviceCredentialPrepareEnabled,
+              addRemoteMcpEnabled: options.addRemoteMcpEnabled,
             },
           ),
         },

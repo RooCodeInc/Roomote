@@ -4,6 +4,7 @@ import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
   filterRepositoryNamesForSourceControlProvider,
+  resolveRepositoryNamesForSourceControlProviderFromPayload,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
@@ -497,6 +498,15 @@ function filterRepositorySelectionForGitea(
 async function resolveGiteaRepositoryNamesForTaskRun(
   taskRun: TaskRun,
 ): Promise<string[] | null> {
+  const stampedRepositories =
+    resolveRepositoryNamesForSourceControlProviderFromPayload(
+      taskRun.payload,
+      GITEA_PROVIDER,
+    );
+  if (stampedRepositories) {
+    return stampedRepositories;
+  }
+
   if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
       where: eq(environments.id, taskRun.payload.environmentId),

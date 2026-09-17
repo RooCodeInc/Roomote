@@ -120,6 +120,15 @@ Granola uses an admin-managed API key:
 
 Prefer a workspace API key, which cannot read ordinary private notes. Workspace keys can read public notes and notes in spaces where Allow Granola API access is enabled. If using a personal API key instead, create it with only Public notes selected. Once connected, I can browse and read accessible meeting notes, folders, transcripts, decisions, and action items. The built-in connection is read-only.
 
+# Exa
+
+Exa supports free keyless access with an optional admin-managed API key:
+1. A deployment operator enables Exa from Settings > Integrations.
+2. Exa then provides web search, page fetching, and advanced search through its free keyless access. Exa rate limits apply, and Exa Agent is unavailable.
+3. The operator can optionally add a deployment Exa API key for authenticated limits and usage-based Exa Agent research.
+
+When configured, the API key stays on the Roomote control plane and is sent only to Exa's hosted MCP server. Removing the key returns an enabled integration to keyless access; disabling Exa turns off both modes without deleting a stored key.
+
 # Asana
 
 Asana uses an admin-managed access token:

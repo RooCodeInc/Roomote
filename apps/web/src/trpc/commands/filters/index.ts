@@ -72,18 +72,17 @@ export async function getUsersOnlyForFilterCommand(
 
   if (!auth.isAdmin) {
     // Custom automation creator ownership is enforced by the history conditions.
-    whereConditions.push(
-      or(
-        and(
-          eq(tasks.initiatorKind, 'user'),
-          eq(tasks.initiatorUserId, auth.userId),
-        ),
-        and(
-          eq(tasks.initiatorKind, 'automation'),
-          eq(tasks.initiatorAutomation, 'custom_automation'),
-        ),
+    const ownerCondition = or(
+      and(
+        eq(tasks.initiatorKind, 'user'),
+        eq(tasks.initiatorUserId, auth.userId),
+      ),
+      and(
+        eq(tasks.initiatorKind, 'automation'),
+        eq(tasks.initiatorAutomation, 'custom_automation'),
       ),
     );
+    if (ownerCondition) whereConditions.push(ownerCondition);
   }
 
   if (input.repositoryName) {

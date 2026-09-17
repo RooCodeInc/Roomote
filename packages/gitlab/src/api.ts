@@ -4,7 +4,7 @@ import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
   filterRepositoryNamesForSourceControlProvider,
-  resolveRepositoryProvidersFromPayload,
+  resolveRepositoryNamesForSourceControlProviderFromPayload,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
@@ -1010,6 +1010,21 @@ function filterRepositorySelectionForGitLab(
 async function resolveGitLabRepositoryNamesForTaskRun(
   taskRun: TaskRun,
 ): Promise<string[]> {
+  const stampedRepositories =
+    resolveRepositoryNamesForSourceControlProviderFromPayload(
+      taskRun.payload,
+      GITLAB_PROVIDER,
+    );
+  if (stampedRepositories) {
+    if (stampedRepositories.length > 0) {
+      return stampedRepositories;
+    }
+
+    throw new Error(
+      `GitLab source control jobs require an explicit repository scope for task run ${taskRun.id}.`,
+    );
+  }
+
   if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
       where: eq(environments.id, taskRun.payload.environmentId),
@@ -1043,19 +1058,6 @@ async function resolveGitLabRepositoryNamesForTaskRun(
 
   if (taskRun.payload.repo && taskRun.payload.repo !== ALL_REPOSITORIES) {
     return [taskRun.payload.repo];
-  }
-
-  const repositoryProviders = resolveRepositoryProvidersFromPayload(
-    taskRun.payload,
-  );
-  if (repositoryProviders) {
-    const mappedRepositories = Object.entries(repositoryProviders)
-      .filter(([, provider]) => provider === GITLAB_PROVIDER)
-      .map(([repositoryName]) => repositoryName);
-
-    if (mappedRepositories.length > 0) {
-      return mappedRepositories;
-    }
   }
 
   throw new Error(

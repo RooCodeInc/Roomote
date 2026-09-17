@@ -90,7 +90,6 @@ export * from './lib/teams-runtime-credentials';
 export * from './lib/telegram-runtime-credentials';
 export * from './lib/agentmail-runtime-credentials';
 export * from './lib/discord-runtime-credentials';
-export * from './lib/slack-fast-integration-calls';
 export * from './lib/pr-action-settings';
 export * from './lib/github-mention-settings';
 export * from './lib/pr-ready-after-clean-review-settings';
@@ -112,6 +111,8 @@ export * from './lib/fast-agent-memory';
 export * from './lib/managed-access';
 export * from './lib/user-personalization';
 export * from './lib/personal-preferences';
+export * from './lib/deployment-experiments';
+export * from './lib/private-sessions-experiment';
 export * from './fixtures/development-fixtures';
 
 export {
@@ -242,8 +243,6 @@ export {
   fastAgentPrFeedbackDeliveriesRelations,
   slackConversationMessages,
   slackConversationMessagesRelations,
-  slackFastIntegrationCalls,
-  slackFastIntegrationCallsRelations,
   linearPendingSelections,
   linearPendingSelectionsRelations,
   automations,

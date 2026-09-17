@@ -87,6 +87,10 @@ Grant these repository permissions:
 - **Pull requests**: Read and write
 - **Workflows**: Read and write
 
+Grant this account permission:
+
+- **Gists**: Read and write
+
 Subscribe to these events:
 
 - **Check run**
@@ -188,6 +192,10 @@ If you add Organization projects permission to an existing app, an organization
 owner must approve the updated permission before Roomote can manage project
 items.
 
+If you add the Gists account permission to an existing app, each member must
+reauthorize the GitHub App or reconnect GitHub under **Settings -> Linked
+Accounts** before Roomote can create gists for that account.
+
 ## Public GitHub reads
 
 An eligible deployment GitHub App installation with an active connected
@@ -200,8 +208,9 @@ driver. No clone or personal access token is needed.
 
 Use the existing GitHub tools for files and directories, code search, issues,
 and pull requests. Tool discovery supplies their native descriptions and
-argument schemas. Searches require exactly one positive `repo:owner/name`
-qualifier, for example `Hello repo:octocat/Hello-World`. GitHub's tool
+argument schemas. Searches use GitHub's own query syntax; adding a
+`repo:owner/name` or `org:` qualifier, for example
+`Hello repo:octocat/Hello-World`, keeps results focused. GitHub's tool
 availability, permissions, rate limits, pagination, and search-index limits
 apply; partial or empty search results are not proof of absence.
 
@@ -210,8 +219,9 @@ bytes and a 15-second upstream deadline, including JSON or SSE body reads.
 Oversized, timed-out, or failed reads are not retried through another path.
 These additional limits do not apply to connected repository calls.
 
-Unconnected reads use a token scoped to one active connected repository.
-GitHub denies private repositories outside that token's scope.
+Unconnected reads use the token of the deployment's first installation, which
+covers the repositories connected on that installation. GitHub denies private
+repositories outside that token's scope.
 Private reads and all writes still require an eligible connection to the
 target repository. Connected access keeps its existing authorization; Roomote
 does not retry lookup or authorization failures through another credential.
@@ -223,38 +233,35 @@ are unchanged.
 
 GitHub tool discovery supports multiple installations of the configured GitHub
 App. Connected repository reads and supported writes use the installation
-connected to the requested active repository, with a token scoped to that repository. Suspended
+connected to the requested active repository, with one token covering every
+repository connected on that installation. Suspended
 installations, inactive or disconnected repositories, and installations of a
 different app are not eligible. Personal GitHub account linkage is not required
 for these deployment-connected tools; coding-run tokens remain read-only on this
 MCP path.
 
-Identify the repository with `owner` and `repo` for repository tools. For code,
-pull request, and repository searches, include exactly one `repo:owner/name`
-qualifier, for example `repo:example/service is:open`. Searches without a
-repository scope, across multiple repositories, or with ambiguous boolean,
-negation, grouping, quoted, or regex syntax are rejected with guidance to split
-the request. Optional `owner` and `repo` search arguments must match the query.
-This applies with one installation too: Roomote does not return partial
-cross-repository search coverage. Run separate, bounded searches for each
-connected or public repository when investigating several.
+Identify the repository with `owner` and `repo` for repository tools. Code,
+pull request, and repository searches accept GitHub's query syntax as written,
+including searches that span several repositories. Each call runs under one
+installation's credential, covering every repository connected on that
+installation plus public repositories: the installation that owns the
+repository named by `owner`/`repo` or a `repo:owner/name` qualifier, otherwise
+the deployment's first installation. With more than one installation, scope a
+search to the organization or repository you mean so it runs under the right
+one.
 
 ## Daily GitHub management
 
-Fast can use the native `update_pull_request`, `merge_pull_request`,
-`add_issue_comment`, and `add_reply_to_pull_request_comment` tools without
-starting a coding task.
-Their discovered descriptions and schemas define the supported arguments,
-including title and body changes, closing or reopening an existing pull request,
-reviewer requests, draft status, base retargeting, maintainer edit permission,
-merges, comments, replies, and reactions. These actions use the deployment
-GitHub App, require an active Roomote member and an active connected repository,
-and remain subject to the installation's issue or pull request write permission.
-No personal GitHub OAuth connection is required. Ask for the specific change and
-identify the repository and target issue, pull request, or comment. Authorization
-is repository-scoped, not restricted to pull requests. A reaction-only call on an
-existing review comment can use `commentId` without `pullNumber` when allowed by
-the discovered native schema.
+Fast can use GitHub's native tools directly, without starting a coding task:
+pull request and issue edits, comments, replies and reactions, reviews, labels,
+branches, and small file changes. Their discovered descriptions and schemas
+define the supported arguments. These actions use the deployment GitHub App,
+require an active Roomote member, and run under a token that reaches only the
+repositories connected on that installation, the same boundary a coding task
+has. What the token may do there is set by the App's permissions on GitHub. No
+personal GitHub OAuth connection is required. Ask for the specific change and
+identify the repository and target issue, pull request, or comment. Every call
+appears in the Session transcript with its inputs and result.
 
 For example, ask Roomote to:
 
@@ -268,10 +275,10 @@ or change files. A merge requires an explicit request from the current human
 message. Fast reads the pull request immediately before the merge, binds the
 request to the current head SHA when the native schema supports it, leaves
 branch protections and merge permissions to GitHub, and reads the pull request
-again before reporting success or retrying an ambiguous result. Creating or
-deleting pull requests, writing branches or files, editing or deleting comments,
-and repository administration are not available through this bounded Fast path;
-those requests still require a coding task.
+again before reporting success or retrying an ambiguous result. Work that needs a
+checkout, a build, or tests to get right still belongs in a coding task, which
+also remains read-only on this GitHub tool path and writes through its own
+checkout instead.
 [GitLab](/providers/source-control/gitlab#native-gitlab-api-tools-for-fast)
 and [Bitbucket Cloud](/providers/source-control/bitbucket#api-first-work-in-fast)
 have their own supported Fast operations and limits.
@@ -279,6 +286,25 @@ have their own supported Fast operations and limits.
 Native updates that combine several actions are not guaranteed to be atomic.
 After an error, Roomote inspects the resulting state before retrying so an action
 that already succeeded is not blindly repeated.
+
+### Create gists
+
+Fast Sessions and coding tasks can create a gist owned by the acting member's
+linked GitHub account. Tool discovery requires the deployment's normal eligible
+GitHub App installation and active connected repository, but gist creation uses
+the member's user access token rather than a repository installation token. Link
+GitHub under **Settings -> Linked Accounts** first: the gist tool is offered only
+to members with a linked account. The deployment's GitHub App
+must have the **Gists: Read and write** account permission; after an operator
+adds that permission, members must reauthorize or reconnect their linked GitHub
+accounts before creating gists.
+
+Gist visibility is always explicit. Roomote uses `public: false` unless the user
+explicitly requests public publishing. GitHub calls this a secret gist: anyone
+with the URL can access it, so it is link-accessible rather than private. Public
+gists are discoverable and should be created only after an explicit request.
+The result belongs to the acting member rather than the Roomote GitHub App or an
+installation owner. Coding runs without a human actor cannot create gists.
 
 Roomote tasks can manage routine repository work through the GitHub App
 installation. Requests default to the repository mapped to the task:

@@ -6,6 +6,7 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   fastAgentParentEvents,
+  getSessionForFastConversation,
   getUserChatInitiationProvider,
   inArray,
   sessions,
@@ -61,6 +62,72 @@ afterEach(async () => {
 });
 
 describe('Fast conversation repository', () => {
+  it('creates private web conversations with an immutable matching owner', async () => {
+    const owner = await createUser();
+    const conversation = {
+      surface: 'web' as const,
+      workspaceId: owner.id,
+      conversationId: crypto.randomUUID(),
+    };
+
+    const created = await getOrCreateFastAgentSession({
+      owner: { kind: 'user', userId: owner.id },
+      conversation,
+      privacy: 'private',
+    });
+    expect(created).toMatchObject({ privacy: 'private', created: true });
+    await fastAgentConversationRepository.appendVisibleMessages({
+      conversationId: created.id,
+      messages: [
+        { role: 'user', content: 'Private question' },
+        { role: 'assistant', content: 'Private answer' },
+      ],
+    });
+    await expect(
+      getSessionForFastConversation(db, created.id),
+    ).resolves.toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    await expect(
+      fastAgentConversationRepository.findById({ id: created.id }),
+    ).resolves.toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      compatibilityMessages: [
+        { role: 'user', content: 'Private question' },
+        { role: 'assistant', content: 'Private answer' },
+      ],
+    });
+    await expect(
+      getOrCreateFastAgentSession({
+        owner: { kind: 'user', userId: owner.id },
+        conversation,
+        privacy: 'private',
+      }),
+    ).resolves.toMatchObject({
+      id: created.id,
+      privacy: 'private',
+      created: false,
+    });
+    await expect(
+      getOrCreateFastAgentSession({
+        owner: { kind: 'user', userId: owner.id },
+        conversation,
+      }),
+    ).rejects.toThrow('privacy does not match');
+    await expect(
+      getOrCreateFastAgentSession({
+        owner: { kind: 'user', userId: owner.id },
+        conversation: {
+          ...slackConversation,
+          conversationId: crypto.randomUUID(),
+        },
+        privacy: 'private',
+      }),
+    ).rejects.toThrow('user-owned web conversation');
+  });
+
   it.each(['slack', 'teams', 'telegram', 'discord'] as const)(
     'records %s when a human chat turn creates a Session',
     async (surface) => {

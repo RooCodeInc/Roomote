@@ -318,6 +318,51 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     });
   });
 
+  it('makes enabled keyless Exa available to Fast without a connection', async () => {
+    mockOrderBy.mockResolvedValue([buildEnabledOnlyRow('exa')]);
+
+    const result = await resolveUserMcpServerConfigs({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.preview.roomote.run',
+    });
+
+    expect(result.exa).toEqual({
+      url: 'https://api.preview.roomote.run/api/mcp/exa',
+      headers: { 'X-MCP-Client': 'Roomote' },
+      cacheRevision: expect.any(String),
+    });
+    expect(JSON.stringify(result)).not.toContain('exa-secret');
+  });
+
+  it('makes enabled keyless Exa available to coding tasks', async () => {
+    mockOrderBy.mockResolvedValue([buildEnabledOnlyRow('exa')]);
+
+    const result = await createCaller(
+      'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
+    ).getMcpServerConfigs();
+
+    expect(result.servers.exa).toEqual({
+      url: 'https://api.preview.roomote.run/api/mcp/exa',
+      headers: { 'X-MCP-Client': 'Roomote' },
+    });
+    expect(mockGetValidAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('does not expose Exa without an enabled row', async () => {
+    mockOrderBy.mockResolvedValue([]);
+
+    const fast = await resolveUserMcpServerConfigs({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.preview.roomote.run',
+    });
+    const codingTask = await createCaller(
+      'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
+    ).getMcpServerConfigs();
+
+    expect(fast).not.toHaveProperty('exa');
+    expect(codingTask.servers).not.toHaveProperty('exa');
+  });
+
   it('routes the seeded development fixture to the local inert adapter', async () => {
     mockFindCustomServers.mockResolvedValue([
       {
@@ -672,6 +717,38 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain('enc:secret');
+  });
+
+  it('returns Exa proxy config without exposing the API key', async () => {
+    mockOrderBy.mockResolvedValue([
+      buildJoinedConnectionRow({
+        id: 'conn-exa',
+        userId: null,
+        mcpId: 'exa',
+        authConfig: {
+          type: 'exa',
+          encryptedApiKey: 'enc:exa-secret',
+        },
+      }),
+    ]);
+
+    const result = await createCaller(
+      'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
+    ).getMcpServerConfigs();
+
+    expect(getValidAccessToken).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      servers: {
+        exa: {
+          url: 'https://api.preview.roomote.run/api/mcp/exa',
+          headers: {
+            'X-MCP-Client': 'Roomote',
+          },
+        },
+        ...httpBrokerServers(),
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('exa-secret');
   });
 
   it('never delivers a credential-only ElevenLabs connection to agents', async () => {

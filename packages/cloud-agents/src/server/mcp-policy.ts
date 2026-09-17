@@ -83,6 +83,7 @@ const ROUTER_GITHUB_ALLOWED_TOOLS = [
   'merge_pull_request',
   'add_issue_comment',
   'add_reply_to_pull_request_comment',
+  'create_gist',
 ] as const;
 
 const ROUTER_MCP_SERVER_POLICIES: Record<
@@ -110,10 +111,12 @@ const ROUTER_MCP_SERVER_POLICIES: Record<
     allowedTools: ROUTER_GITHUB_ALLOWED_TOOLS,
     requiredToolGroups: ['github-pr-context', 'github-issue-context'],
     upstreamConstraints: {
-      // Discovery includes bounded writes; the GitHub proxy validates each
-      // invocation and keeps read calls and run tokens upstream-readonly.
+      // This allowlist and these toolsets bound coding-task run tokens, which
+      // read here and write through their own checkout. A signed-in member
+      // in Fast is not held to either: the GitHub proxy gives them every
+      // GitHub tool under a token scoped to the connected repositories.
       readonly: false,
-      toolsets: ['repos', 'pull_requests', 'issues', 'actions'],
+      toolsets: ['repos', 'pull_requests', 'issues', 'actions', 'gists'],
     },
   },
 };

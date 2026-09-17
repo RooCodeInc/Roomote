@@ -360,7 +360,7 @@ async function resolveHomeComposerRecommendations(input: {
   });
 
   const preferenceStartedAt = performance.now();
-  const enabled = await isHomeComposerSuggestionsEnabled(db, input.userId);
+  const enabled = await isHomeComposerSuggestionsEnabled(db);
   timing.preferenceGuardMs = performance.now() - preferenceStartedAt;
 
   if (!enabled) {
@@ -456,7 +456,7 @@ async function resolveHomeComposerRecommendations(input: {
   let latestState: [boolean, RecentBrainTaskMemoryRef[]] | null = null;
   try {
     latestState = await Promise.all([
-      isHomeComposerSuggestionsEnabled(db, input.userId),
+      isHomeComposerSuggestionsEnabled(db),
       listRecentBrainTaskMemoryRefs({
         userId: input.userId,
         limit: RECENT_MEMORY_LIMIT,

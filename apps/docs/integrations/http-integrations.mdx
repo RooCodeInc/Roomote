@@ -168,10 +168,11 @@ changes to every API replica.
 To disable operator-managed integrations, set `R_HTTP_INTEGRATIONS_ENABLED=false`
 on the same control-plane services and restart them. The broker remains available
 for owner-approved integration keys, but no operator manifest entries are loaded.
-This does not cancel an already-running operator request. Revoke integration keys
-separately under **Settings → Integrations → Your integrations**; those changes
-are checked live before dispatch and before returning upstream responses, without
-reloading the manifest or restarting.
+This does not cancel an already-running operator request. Revoke personal
+integration keys under **Personal Settings → Personal integrations**;
+administrators revoke deployment-wide keys under **Settings → Integrations**.
+Those changes are checked live before dispatch and before returning upstream
+responses, without reloading the manifest or restarting.
 
 ## Verify and troubleshoot
 

@@ -11,6 +11,7 @@ import {
 export const SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY =
   'integration_keys_enabled' as const;
 
+/** @deprecated Retained for N-1 rollback compatibility with dormant user metadata. */
 export function isServiceCredentialToolsExperimentEnabled(
   metadata: unknown,
 ): boolean {

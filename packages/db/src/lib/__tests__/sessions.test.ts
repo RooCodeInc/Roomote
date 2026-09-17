@@ -333,6 +333,55 @@ describe('session helpers', () => {
     },
   );
 
+  it('copies private task ownership into its canonical Session', async () => {
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    createdTaskIds.push(task.id);
+
+    const session = await ensureSessionForTask(db, { taskId: task.id });
+    createdSessionIds.push(session.id);
+
+    expect(session).toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      ownerUserId: owner.id,
+    });
+  });
+
+  it('copies private Fast conversation ownership into its canonical Session', async () => {
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        privacy: 'private',
+        privateOwnerUserId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    createdConversationIds.push(conversation!.id);
+
+    const session = await ensureSessionForFastConversation(
+      db,
+      conversation!.id,
+    );
+    createdSessionIds.push(session.id);
+
+    expect(session).toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      ownerUserId: owner.id,
+    });
+  });
+
   it('creates a hidden Session preserving the automation task owner', async () => {
     await ensureAutomationRows(db);
     const initiatorAutomation = 'slack_channel_auto_start';
