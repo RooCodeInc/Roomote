@@ -33,7 +33,7 @@ const sessionRefreshEventSchema = z
   })
   .strict();
 
-export type FastSessionLiveEvent = AcpMessage | FastAgentSessionRefresh;
+type FastSessionLiveEvent = AcpMessage | FastAgentSessionRefresh;
 type ChunkListener = (event: FastSessionLiveEvent) => void;
 
 /**
