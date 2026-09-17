@@ -1610,19 +1610,37 @@ export function FastSessionTranscript({
   const stopLiveVoiceRef = useRef(liveVoice.stop);
   stopLiveVoiceRef.current = liveVoice.stop;
 
-  // Key requests that arrive while the owner is watching open the key dialog
-  // on their own; requests already in the history only show the pending card.
-  const latestIntegrationKeyRequestId = useMemo(() => {
+  // The key request the conversation is still waiting on: the newest one with
+  // no human message after it. Once the owner replies without saving a key
+  // (or after saving one, since that posts a reply), the ask is over and the
+  // card goes away, even though the approval stays open in the dialog. A
+  // request that arrives while the owner is watching also opens the dialog.
+  const openIntegrationKeyRequestId = useMemo(() => {
     let latest: TranscriptMessage | null = null;
+    let latestHumanMessage: TranscriptMessage | null = null;
     for (const message of messages) {
       if (
         isIntegrationKeyRequest(message) &&
         (latest === null || compareTranscriptOrder(message, latest) > 0)
       ) {
         latest = message;
+      } else if (
+        message.role === 'user' &&
+        message.metadata?.inputKind !== SETUP_RECEIPT_INPUT_KIND &&
+        (latestHumanMessage === null ||
+          compareTranscriptOrder(message, latestHumanMessage) > 0)
+      ) {
+        latestHumanMessage = message;
       }
     }
-    return latest?.eventId ?? null;
+    if (
+      latest === null ||
+      (latestHumanMessage !== null &&
+        compareTranscriptOrder(latestHumanMessage, latest) > 0)
+    ) {
+      return null;
+    }
+    return latest.eventId;
   }, [messages]);
   const seenIntegrationKeyRequestId = useRef<string | null | undefined>(
     undefined,
@@ -1630,17 +1648,17 @@ export function FastSessionTranscript({
   useEffect(() => {
     if (!secretSessionId) return;
     if (seenIntegrationKeyRequestId.current === undefined) {
-      seenIntegrationKeyRequestId.current = latestIntegrationKeyRequestId;
+      seenIntegrationKeyRequestId.current = openIntegrationKeyRequestId;
       return;
     }
     if (
-      latestIntegrationKeyRequestId &&
-      latestIntegrationKeyRequestId !== seenIntegrationKeyRequestId.current
+      openIntegrationKeyRequestId &&
+      openIntegrationKeyRequestId !== seenIntegrationKeyRequestId.current
     ) {
-      seenIntegrationKeyRequestId.current = latestIntegrationKeyRequestId;
+      seenIntegrationKeyRequestId.current = openIntegrationKeyRequestId;
       openIntegrationKeyDialog();
     }
-  }, [latestIntegrationKeyRequestId, secretSessionId]);
+  }, [openIntegrationKeyRequestId, secretSessionId]);
 
   useEffect(() => {
     if (pendingInputRequest && (liveVoiceActive || liveVoiceConnecting)) {
@@ -1785,7 +1803,7 @@ export function FastSessionTranscript({
             {secretSessionId ? (
               <PendingIntegrationKeys
                 sessionId={secretSessionId}
-                latestRequestId={latestIntegrationKeyRequestId}
+                openRequestId={openIntegrationKeyRequestId}
               />
             ) : null}
           </ConversationContent>

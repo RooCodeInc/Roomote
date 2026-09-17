@@ -12,23 +12,27 @@ import {
 
 /**
  * One card per approval still waiting for a key, shown to the Session owner
- * at the end of the conversation. It stays until the key is saved or the
- * approval expires, so the dialog is always one click away even after it was
- * dismissed or the agent's link scrolled out of view.
+ * at the end of the conversation while the agent's request is the open ask.
+ * It goes away once the key is saved, the approval expires, or the owner
+ * replies and the conversation moves on; the approvals themselves stay open
+ * in the key dialog either way.
  */
 export function PendingIntegrationKeys({
   sessionId,
-  latestRequestId,
+  openRequestId,
 }: {
   sessionId: string;
-  /** Event id of the newest key request in the transcript; a change refetches. */
-  latestRequestId: string | null;
+  /**
+   * Event id of the key request the conversation is still waiting on, or null
+   * when there is none. A new id refetches; null hides the card.
+   */
+  openRequestId: string | null;
 }) {
   const { data, error, errorUpdatedAt, isFetching, refetch } =
     useSessionIntegrationApprovals(sessionId);
   useEffect(() => {
-    if (latestRequestId) void refetch();
-  }, [latestRequestId, refetch]);
+    if (openRequestId) void refetch();
+  }, [openRequestId, refetch]);
   useEffect(() => {
     const handleChange = () => void refetch();
     window.addEventListener(INTEGRATION_KEYS_CHANGED_EVENT, handleChange);
@@ -58,6 +62,7 @@ export function PendingIntegrationKeys({
     return () => window.clearTimeout(timer);
   }, [nextExpiry, refetch]);
 
+  if (!openRequestId) return null;
   // React Query clears error during an initial retry, but keeps its timestamp.
   if (!data && (error || (isFetching && errorUpdatedAt > 0))) {
     return (

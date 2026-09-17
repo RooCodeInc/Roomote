@@ -382,6 +382,37 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
+  /** A completed `prepare_integration_key` call at `ts`: the agent asked for a key. */
+  const keyRequestMessage = (ts: number) => ({
+    id: `key-request-${ts}`,
+    eventId: `key-request-${ts}:event`,
+    turnId: `key-request-${ts}:turn`,
+    turnSeq: 1,
+    ts,
+    eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+    role: 'tool' as const,
+    contentBlocks: [{ type: 'text' as const, text: '{"pending":{}}' }],
+    metadata: { visibleInTranscript: true },
+    payload: {
+      toolCallId: `key-request-${ts}:tool`,
+      title: 'prepare_integration_key',
+      kind: 'tool',
+      status: 'completed',
+      isExecute: false,
+      isRead: false,
+      isMcp: false,
+      mcpServerName: null,
+      mcpToolName: null,
+      toolName: 'prepare_integration_key',
+      command: null,
+      output: '{"pending":{}}',
+    },
+    source: 'web',
+    nativeSessionId: 'opencode-1',
+    nativeMessageId: null,
+    createdAt: new Date(ts),
+  });
+
   it('shows a pending-key card for the owner and opens the key dialog from it', async () => {
     integrationApprovalsState.pending = [
       {
@@ -416,7 +447,16 @@ describe('FastSessionTranscript', () => {
       <FastSessionTranscript
         sessionId="fast-conversation"
         secretSessionId="canonical-session"
-        initialMessages={[]}
+        initialMessages={[
+          textMessage({ id: 'ask', role: 'user', text: 'Read Figma', ts: 1 }),
+          keyRequestMessage(2),
+          textMessage({
+            id: 'link',
+            role: 'assistant',
+            text: 'Add your key in the secure form.',
+            ts: 3,
+          }),
+        ]}
         canReply
       />,
     );
@@ -427,6 +467,46 @@ describe('FastSessionTranscript', () => {
     // jsdom does not dispatch hashchange for a programmatic fragment change.
     fireEvent(window, new HashChangeEvent('hashchange'));
     await screen.findByLabelText('API key');
+    integrationApprovalsState.pending = [];
+  });
+
+  it('hides the pending-key card once the owner replies after the request', () => {
+    integrationApprovalsState.pending = [
+      {
+        pendingRef: '6a1f8f1e-0000-4000-8000-000000000011',
+        label: 'Intercom',
+        origin: 'https://api.intercom.io',
+        headerName: 'Authorization',
+        headerPrefix: 'Bearer ',
+        allowedMethods: ['GET', 'HEAD'],
+        lifetimeHours: null,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[
+          keyRequestMessage(1),
+          textMessage({
+            id: 'moved-on',
+            role: 'user',
+            text: 'Intercom can only use oauth',
+            ts: 2,
+          }),
+          textMessage({
+            id: 'answer',
+            role: 'assistant',
+            text: 'The token form does not fit your setup.',
+            ts: 3,
+          }),
+        ]}
+        canReply
+      />,
+    );
+    expect(screen.queryByText('Add your Intercom key')).toBeNull();
     integrationApprovalsState.pending = [];
   });
 

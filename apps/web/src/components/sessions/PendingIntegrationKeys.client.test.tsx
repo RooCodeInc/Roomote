@@ -30,7 +30,7 @@ function response(pending: unknown[] = []) {
   return new Response(JSON.stringify({ pending, secrets: [] }));
 }
 
-function setup(latestRequestId: string | null = null) {
+function setup(openRequestId: string | null = 'req-1') {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });
@@ -39,10 +39,7 @@ function setup(latestRequestId: string | null = null) {
     client,
     ...render(
       <QueryClientProvider client={client}>
-        <PendingIntegrationKeys
-          sessionId="s1"
-          latestRequestId={latestRequestId}
-        />
+        <PendingIntegrationKeys sessionId="s1" openRequestId={openRequestId} />
       </QueryClientProvider>,
     ),
   };
@@ -115,6 +112,13 @@ describe('PendingIntegrationKeys', () => {
         screen.queryByRole('button', { name: 'Retry' }),
       ).not.toBeInTheDocument(),
     );
+  });
+
+  it('renders nothing once the conversation has moved past the request', async () => {
+    fetchMock.mockResolvedValue(response([demo]));
+    const { container } = setup(null);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('shows pending approvals and opens the dialog fragment', async () => {
