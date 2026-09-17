@@ -27,6 +27,7 @@ import {
   consumeEnvironmentProposalApproval,
   ENVIRONMENT_APPROVAL_REQUIRED_ERROR,
   getEnvironmentRepositoryConfigError,
+  getEnvironmentProposalHash,
   isEnvironmentNameUniqueViolation,
   resolveCallingVerificationTaskId,
   resolveEnvironmentWriteUserId,
@@ -182,6 +183,8 @@ export async function updateEnvironment(
       if (
         auth.authContext.tokenType === 'run' &&
         (typeof requestBody.approvedProposalHash !== 'string' ||
+          requestBody.approvedProposalHash !==
+            getEnvironmentProposalHash(config, id) ||
           !(await consumeEnvironmentProposalApproval(
             tx,
             auth,

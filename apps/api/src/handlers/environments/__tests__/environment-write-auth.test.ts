@@ -4,7 +4,10 @@ import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
-import { createEnvironment } from '../createEnvironment';
+import {
+  createEnvironment,
+  getEnvironmentProposalHash,
+} from '../createEnvironment';
 import { updateEnvironment } from '../updateEnvironment';
 
 const {
@@ -107,6 +110,12 @@ function deploymentRunToken(): RunTokenContext {
     version: 1,
   };
 }
+
+const attributionConfig = {
+  name: 'Attribution Test',
+  repositories: [{ repository: 'acme/app' }],
+};
+const attributionProposalHash = getEnvironmentProposalHash(attributionConfig);
 
 /**
  * Requests with an invalid JSON body: reaching the 400 body validation
@@ -295,7 +304,9 @@ describe('createEnvironment attribution', () => {
         payload: {
           resolution: 'submitted',
           answers: {
-            'environment-approval:approved-hash': { answers: ['approve'] },
+            [`environment-approval:${attributionProposalHash}`]: {
+              answers: ['approve'],
+            },
           },
         },
       },
@@ -332,11 +343,8 @@ describe('createEnvironment attribution', () => {
       new Request('http://localhost/environments', {
         method: 'POST',
         body: JSON.stringify({
-          approvedProposalHash: 'approved-hash',
-          config: {
-            name: 'Attribution Test',
-            repositories: [{ repository: 'acme/app' }],
-          },
+          approvedProposalHash: attributionProposalHash,
+          config: attributionConfig,
         }),
         headers: { 'content-type': 'application/json' },
       }),
@@ -364,7 +372,10 @@ describe('createEnvironment attribution', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        approvedProposalHash: 'unapproved-hash',
+        approvedProposalHash: getEnvironmentProposalHash({
+          name: 'Unapproved',
+          repositories: [],
+        }),
         config: { name: 'Unapproved', repositories: [] },
       }),
     });
