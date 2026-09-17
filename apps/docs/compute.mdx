@@ -35,7 +35,9 @@ You configure sandbox providers during setup and can change them later from
 
 ## Supported providers
 
-Roomote supports local and hosted sandbox backends:
+Roomote supports local and hosted sandbox backends. Roomote Cloud deployments
+use a deployment-managed backend that requires no sandbox-provider setup and is
+not shown in **Settings > Sandboxes**.
 
 | Provider                                                                            | Best for                                               | Notes                                                                   |
 | ----------------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------- |
@@ -47,10 +49,11 @@ Roomote supports local and hosted sandbox backends:
 | <IntegrationName href="/providers/compute/box" icon="box" name="Box" />             | Hosted task sandboxes                                  | API-key setup, Docker projects, private previews, and same-sandbox task resume. |
 | <IntegrationName href="/providers/compute/azure" icon="azure" name="Azure" />      | Hosted task sandboxes on Azure Container Apps (preview) | Supports memory+disk snapshots and sub-second standby resume.           |
 
-Docker is the default because it works well for local development and simple
-self-hosted deployments. Hosted providers are useful when you want task work to
-run away from the Roomote server, scale beyond one host, or use provider-managed
-sandbox infrastructure.
+Docker is the fallback default when no hosted provider is configured because it
+works well for local development and simple self-hosted deployments. Managed or
+preconfigured deployments may select another provider. Hosted providers are
+useful when you want task work to run away from the Roomote server, scale beyond
+one host, or use provider-managed sandbox infrastructure.
 
 For resumable Docker tasks, Roomote retains the stopped container and writable
 workspace so a follow-up can restart in place on the same host.

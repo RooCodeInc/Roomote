@@ -66,9 +66,10 @@ Source Control.
 
 #### Required API permissions
 
-Azure DevOps does not use Microsoft Entra application permissions for service
-principals. Add the service principal to the Azure DevOps organization, assign
-at least **Basic** access, and grant the required project and repository
+In the app registration, add the Azure DevOps API permissions **Code, Graph,
+and User Delegation / Impersonation**, save them, and grant admin consent for
+the tenant. Then add the service principal to the Azure DevOps organization,
+assign at least **Basic** access, and grant the required project and repository
 permissions in Azure DevOps.
 
 ### Connect with your Microsoft account
