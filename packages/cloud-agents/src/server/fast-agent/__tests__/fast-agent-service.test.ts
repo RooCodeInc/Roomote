@@ -1077,7 +1077,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const firstTurn = mocks.generateText.mock.calls[0]?.[0];
     const followUp = mocks.generateText.mock.calls[1]?.[0];
     expect(firstTurn?.prompt).toContain(
-      '<routing_hint>\nRouting hint: Infra [id: env-2] looks like the best fit (judgment model confidence 0.82).',
+      '<routing_hint>\nRouting hint: Infra [id: env-2] looks like the best environment (judgment model confidence 0.82). Verify against the configured routing rules before delegating; explicit user model and effort choices take precedence, and ask when the request is still ambiguous.',
     );
     expect(followUp?.prompt).not.toContain('<routing_hint>');
     expect(followUp?.system).toBe(firstTurn?.system);
