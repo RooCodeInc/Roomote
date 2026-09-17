@@ -1669,6 +1669,9 @@ describe('buildFastAgentSystemPrompt', () => {
       'Messages to another person or to the whole group default to ambient, even when actionable',
     );
     expect(ambientPrompt).toContain(
+      "A message that explicitly addresses another person remains ambient when it asks about Roomote's work",
+    );
+    expect(ambientPrompt).toContain(
       'Answer a whole-group message only when Roomote has a specific, materially useful contribution beyond what participants have already said',
     );
     expect(ambientPrompt).toContain(
@@ -1682,6 +1685,14 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(ambientPrompt).toContain(
       'An eligible ambient message or optional human reaction may use `ignore_event` under its narrow rule below',
+    );
+    expect(
+      ambientPrompt.indexOf(
+        '## Multi-Human Conversation Directedness (Highest Priority)',
+      ),
+    ).toBeLessThan(ambientPrompt.indexOf('## Turn Startup (Highest Priority)'));
+    expect(directedPrompt).not.toContain(
+      '## Multi-Human Conversation Directedness (Highest Priority)',
     );
     expect(directedPrompt).toContain(
       '`ignore_event` and `retry_task_start` are invalid for this human-authored turn',

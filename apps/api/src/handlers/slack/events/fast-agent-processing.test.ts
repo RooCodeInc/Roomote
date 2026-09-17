@@ -360,9 +360,17 @@ describe('processFastAgentMessage', () => {
   );
 
   it.each([
-    ['peer mention', '<@U222> what do you think?', true],
+    [
+      'peer-directed question about Roomote work',
+      '<@U222> oh, in both the session and the task?',
+      true,
+    ],
     ['bot and peer mention', '<@UBOT> ask <@U222>', false],
-    ['bot only', '<@UBOT> help', false],
+    [
+      'explicit bot-addressed question',
+      '<@UBOT> oh, in both the session and the task?',
+      false,
+    ],
     ['self mention', '<@U123> note to self', false],
     ['quoted peer mention', '> <@U222> quoted message', false],
     ['ordinary message', 'Please continue', false],
@@ -402,6 +410,7 @@ describe('processFastAgentMessage', () => {
         'unless you are addressed directly',
       );
     } else {
+      expect(call.allowSilentAmbientReply).toBe(false);
       expect(call.currentMessageAgentContext).toBe(
         'Existing attachment context',
       );
