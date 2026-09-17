@@ -15,8 +15,9 @@ import { MCP_INTEGRATIONS } from '@roomote/types';
 
 import {
   getNativeIntegrationSetupStrategy,
-  setupNativeIntegrationForFast,
-} from './setup-native-integration';
+  connectIntegrationForFast,
+  listNativeIntegrationsForFast,
+} from './connect-integration';
 
 const adminId = 'native-integration-admin';
 const memberId = 'native-integration-member';
@@ -61,7 +62,7 @@ beforeEach(async () => {
 
 afterAll(cleanup);
 
-describe('setupNativeIntegrationForFast', () => {
+describe('connectIntegrationForFast', () => {
   it('assigns every built-in integration a Session setup strategy', () => {
     const strategies = Object.fromEntries(
       MCP_INTEGRATIONS.map((integration) => [
@@ -88,23 +89,12 @@ describe('setupNativeIntegrationForFast', () => {
     });
   });
 
-  it('distinguishes unsupported services from unconfigured native integrations', async () => {
+  it('uses canonical catalog ids for unconfigured native integrations', async () => {
     await expect(
-      setupNativeIntegrationForFast({
+      connectIntegrationForFast({
         userId: adminId,
         sessionId: adminSessionId,
-        integration: 'unknown-service',
-      }),
-    ).resolves.toEqual({
-      status: 'unsupported',
-      name: 'unknown-service',
-    });
-
-    await expect(
-      setupNativeIntegrationForFast({
-        userId: adminId,
-        sessionId: adminSessionId,
-        integration: 'Granola',
+        integrationId: 'granola',
       }),
     ).resolves.toMatchObject({
       status: 'configuration_required',
@@ -116,30 +106,47 @@ describe('setupNativeIntegrationForFast', () => {
     });
   });
 
+  it('rejects display names and unknown ids instead of guessing providers', async () => {
+    await expect(
+      connectIntegrationForFast({
+        userId: adminId,
+        sessionId: adminSessionId,
+        integrationId: 'Notion',
+      }),
+    ).rejects.toThrow('Unknown built-in integration: Notion');
+    await expect(
+      connectIntegrationForFast({
+        userId: adminId,
+        sessionId: adminSessionId,
+        integrationId: 'unknown-service',
+      }),
+    ).rejects.toThrow('Unknown built-in integration: unknown-service');
+  });
+
   it('preserves deployment-admin and Session ownership checks', async () => {
     await expect(
-      setupNativeIntegrationForFast({
+      connectIntegrationForFast({
         userId: memberId,
         sessionId: memberSessionId,
-        integration: 'notion',
+        integrationId: 'notion',
       }),
     ).resolves.toMatchObject({ status: 'permission_denied', id: 'notion' });
 
     await expect(
-      setupNativeIntegrationForFast({
+      connectIntegrationForFast({
         userId: adminId,
         sessionId: memberSessionId,
-        integration: 'granola',
+        integrationId: 'granola',
       }),
     ).resolves.toMatchObject({ status: 'permission_denied', id: 'granola' });
   });
 
   it('uses the native Notion setup path instead of a generic fallback', async () => {
     await expect(
-      setupNativeIntegrationForFast({
+      connectIntegrationForFast({
         userId: adminId,
         sessionId: adminSessionId,
-        integration: 'Notion',
+        integrationId: 'notion',
       }),
     ).resolves.toMatchObject({
       status: 'operator_configuration_required',
@@ -169,10 +176,10 @@ describe('setupNativeIntegrationForFast', () => {
 
     for (let attempt = 0; attempt < 2; attempt++) {
       await expect(
-        setupNativeIntegrationForFast({
+        connectIntegrationForFast({
           userId: adminId,
           sessionId: adminSessionId,
-          integration: 'granola',
+          integrationId: 'granola',
         }),
       ).resolves.toEqual({
         status: 'connected',
@@ -186,5 +193,30 @@ describe('setupNativeIntegrationForFast', () => {
         where: eq(deploymentMcpEnablements.mcpId, 'granola'),
       }),
     ).resolves.toMatchObject({ enabled: true, enabledByUserId: adminId });
+  });
+
+  it('lists every built-in integration and actor-scoped status without changing state', async () => {
+    const beforeEnablements =
+      await db.query.deploymentMcpEnablements.findMany();
+    const catalog = await listNativeIntegrationsForFast({ userId: memberId });
+
+    expect(catalog.map(({ id }) => id)).toEqual(
+      MCP_INTEGRATIONS.map(({ id }) => id),
+    );
+    expect(catalog.find(({ id }) => id === 'notion')).toMatchObject({
+      id: 'notion',
+      status: 'not_enabled',
+      setupStrategy: 'oauth',
+      canConnect: false,
+    });
+    expect(catalog.find(({ id }) => id === 'monday')).toMatchObject({
+      id: 'monday',
+      status: 'not_enabled',
+      setupStrategy: 'oauth',
+      canConnect: true,
+    });
+    expect(await db.query.deploymentMcpEnablements.findMany()).toEqual(
+      beforeEnablements,
+    );
   });
 });

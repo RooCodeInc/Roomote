@@ -737,7 +737,7 @@ describe('buildFastAgentSystemPrompt', () => {
       expect(prompt).not.toContain(name);
     }
     expect(prompt).toContain(
-      'Integration-key tools are turned off for this user',
+      'Integration-key setup is unavailable on this turn',
     );
     expect(prompt).toContain(
       'The runtime rejects those actions until a visible text reply has been delivered',
@@ -749,59 +749,31 @@ describe('buildFastAgentSystemPrompt', () => {
     });
     expect(enabledPrompt).toContain('`prepare_integration_key`');
     expect(enabledPrompt).toContain('`list_integration_keys`');
-    expect(enabledPrompt).toContain(
-      'launch a coding task attached to this Session to use the integration',
-    );
     expect(enabledPrompt).not.toContain('`request_with_integration_key`');
-    expect(enabledPrompt).not.toContain(
-      'for one or a few direct calls, call `request_with_integration_key` yourself',
+    expect(enabledPrompt).toContain(
+      'call `prepare_integration_key` only when none exists',
     );
     expect(enabledPrompt).toContain(
-      'Never invent a reference or substitute another credential.',
+      'Keep discovery and setup separate. `find_integration_tools` is read-only',
+    );
+    expect(enabledPrompt).toContain("Respect the human's explicit route");
+    expect(enabledPrompt).toContain(
+      'call `connect_integration` with the exact returned id',
     );
     expect(enabledPrompt).toContain(
-      'In web Sessions these tools need no opening `send_chat_reply`.',
+      "only when no supported MCP applies should you use the provider's HTTPS API key route",
     );
     expect(enabledPrompt).toContain(
-      'pick one route in this order and act on it in the same turn',
+      'Pending or denied OAuth is also never bypassed with another route',
     );
     expect(enabledPrompt).toContain(
-      'A connector for a different service does not count',
-    );
-    expect(enabledPrompt).not.toContain('If none is connected');
-    expect(enabledPrompt).toContain(
-      "research it before choosing: up to three `roomote_fetch_url` reads of the provider's own documentation",
+      'call `list_integration_keys` first, reuse pending or ready entries',
     );
     expect(enabledPrompt).toContain(
-      'only means nothing is installed for this one',
-    );
-    expect(enabledPrompt).toContain('the page where the human creates a key');
-    expect(enabledPrompt).toContain(
-      'say in one sentence where they create that key',
-    );
-    expect(enabledPrompt).toContain(
-      'stdio project or a repository is not a hosted MCP',
-    );
-    expect(enabledPrompt).toContain(
-      'A pending MCP state (an authorization link or manual client registration) means the MCP exists',
-    );
-    expect(enabledPrompt).toContain(
-      'a denied authorization is never bypassed with a key',
-    );
-    expect(enabledPrompt).toContain(
-      'Do not ask for exports, screenshots, or pasted content, do not probe whether the service is reachable',
+      'Share the returned secure Session link; never ask for the key in chat',
     );
     expect(enabledPrompt).toContain(
       'If available documentation cannot verify the API origin and credential header, say those details could not be verified and do not guess',
-    );
-    expect(enabledPrompt).toContain(
-      'Never tell the human to enable the Integration keys setting while these tools are available to you',
-    );
-    expect(enabledPrompt).toContain(
-      'Label that link with the service, for example "Connect Figma securely"',
-    );
-    expect(enabledPrompt).toContain(
-      'never delegate that lookup to a coding task',
     );
     const platformEventPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -809,18 +781,14 @@ describe('buildFastAgentSystemPrompt', () => {
       serviceCredentialToolsEnabled: false,
     });
     expect(platformEventPrompt).toContain(
-      'If integration-key tools are absent on this turn, ask the user to reply',
+      'Integration-key setup is unavailable on this turn',
     );
-    expect(platformEventPrompt).not.toContain(
-      'Integration-key tools are turned off for this user',
-    );
-    expect(platformEventPrompt).not.toContain('Settings → Experimental');
-    expect(prompt).toContain('Settings → Experimental');
+    expect(platformEventPrompt).not.toContain('`prepare_integration_key`');
     expect(prompt).toContain(
       'A human turn may begin with a Roomote-injected `<integration_saved>` block',
     );
     expect(enabledPrompt).not.toContain(
-      'Integration-key tools are turned off for this user',
+      'Integration-key setup is unavailable on this turn',
     );
     expect(prompt).toContain(
       'On a human-authored turn, acknowledge first, then send the instruction immediately',
@@ -1966,18 +1934,16 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).toContain(
-      'Share `authorizeUrl` and `settingsUrl` exactly unchanged',
-    );
-    expect(prompt).toContain('`Authorize <name>` and `Integration settings`');
-    expect(prompt).toContain(
-      'The conversation resumes automatically after authorization',
-    );
-    expect(prompt).toContain('never ask the human to send a follow-up');
-    expect(prompt).toContain(
-      'do not mention integration IDs, catalog checks, probing, or internal recovery',
+      'Preserve returned authorization and Settings links exactly',
     );
     expect(prompt).toContain(
-      'Remote MCP: call `add_remote_mcp` with only its name and URL',
+      'The conversation resumes automatically after OAuth',
+    );
+    expect(prompt).toContain(
+      'use the returned integrationId for later tool discovery/calls',
+    );
+    expect(prompt).toContain(
+      'For an official remote MCP, call `add_remote_mcp` with the documented name and HTTPS endpoint',
     );
   });
 
@@ -1986,16 +1952,48 @@ describe('buildFastAgentSystemPrompt', () => {
       availableEnvironments: [],
       addRemoteMcpEnabled: true,
       serviceCredentialToolsEnabled: true,
+      nativeIntegrationCatalog: [
+        {
+          id: 'notion',
+          name: 'Notion',
+          description: 'Shared docs',
+          connectionScope: 'deployment',
+          setupStrategy: 'oauth',
+          status: 'needs_connection',
+          enabled: true,
+          authStatus: null,
+          canConnect: true,
+        },
+        {
+          id: 'granola',
+          name: 'Granola',
+          description: 'Meeting notes',
+          connectionScope: 'deployment',
+          setupStrategy: 'settings',
+          status: 'not_enabled',
+          enabled: false,
+          authStatus: null,
+          canConnect: false,
+        },
+      ],
     });
 
     expect(prompt).toContain(
-      'Before researching or configuring an unconnected third-party service, call `setup_native_integration`',
+      'Notion [id: notion] status=needs_connection; setup=oauth',
     );
     expect(prompt).toContain(
-      'includes supported integrations even when they are disabled or unconfigured',
+      'Granola [id: granola] status=not_enabled; setup=settings',
     );
     expect(prompt).toContain(
-      'Continue to the remote MCP and key routes below only when the native result is unsupported',
+      'Keep discovery and setup separate. `find_integration_tools` is read-only',
+    );
+    expect(prompt).toContain(
+      'call `connect_integration` with the exact returned id',
+    );
+    expect(prompt).toContain('never bypassed with another route');
+    expect(prompt).not.toContain('pick one route in this order');
+    expect(prompt).not.toContain(
+      'Integration keys: first call `list_integration_keys`',
     );
   });
 
@@ -2012,18 +2010,17 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(adminPrompt).toContain(
-      'Treat a verification tool error, network failure, or otherwise indeterminate result as unresolved',
+      'Treat remote MCP verification errors, network failures, and indeterminate results as unresolved',
     );
-    expect(adminPrompt).toContain('do not switch to the key route');
+    expect(adminPrompt).toContain('do not switch to an API key');
     expect(adminPrompt).not.toContain(
       'a failed verification only means there is no MCP and the key route applies',
     );
-    expect(nonAdminPrompt).not.toContain('Remote MCP: call `add_remote_mcp`');
-    expect(nonAdminPrompt).toContain(
-      'Remote MCP setup is unavailable from this Session',
+    expect(nonAdminPrompt).not.toContain(
+      'For an official remote MCP, call `add_remote_mcp`',
     );
     expect(nonAdminPrompt).toContain(
-      'stop with that outcome and do not offer an integration-key fallback unless the human explicitly asked for API access',
+      'Remote MCP setup is unavailable on this turn',
     );
     for (const prompt of [adminPrompt, nonAdminPrompt]) {
       expect(prompt).not.toContain('Only deployment administrators');

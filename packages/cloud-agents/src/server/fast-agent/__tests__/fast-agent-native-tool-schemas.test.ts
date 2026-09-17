@@ -433,24 +433,26 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     );
   });
 
-  it('exposes native catalog discovery and setup as an explicit Session tool', () => {
+  it('exposes canonical catalog connection as an explicit Session tool', () => {
     const tool = tools.find(
-      ({ name }) =>
-        name === FAST_AGENT_NATIVE_TOOL_NAMES.setupNativeIntegration,
+      ({ name }) => name === FAST_AGENT_NATIVE_TOOL_NAMES.connectIntegration,
     )!;
     const schema = toOpenCodeJsonSchema(zod, tool.args!);
 
     expect(tool.description).toContain(
-      'including integrations that are currently disabled or unconfigured',
+      'selected from the read-only catalog returned by find_integration_tools',
     );
     expect(tool.description).toContain(
-      'use its exact authorizeUrl or settingsUrl',
+      'Pass only the exact canonical provider id',
     );
-    expect(Object.keys(tool.args!)).toEqual(['integration']);
+    expect(Object.keys(tool.args!)).toEqual(['integrationId']);
     expect(schema).toMatchObject({
       type: 'object',
       properties: {
-        integration: { type: 'string', minLength: 1, maxLength: 80 },
+        integrationId: {
+          type: 'string',
+          enum: expect.arrayContaining(['notion', 'granola', 'sentry']),
+        },
       },
     });
     expect(JSON.stringify(schema)).not.toMatch(

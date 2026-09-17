@@ -580,11 +580,12 @@ export {
   type AddRemoteCustomMcpResult,
 } from './lib/mcp/add-remote-custom-mcp';
 export {
-  setupNativeIntegrationForFast,
+  connectIntegrationForFast,
+  listNativeIntegrationsForFast,
   getNativeIntegrationSetupStrategy,
   type NativeIntegrationSetupStrategy,
-  type SetupNativeIntegrationResult,
-} from './lib/mcp/setup-native-integration';
+  type ConnectIntegrationResult,
+} from './lib/mcp/connect-integration';
 
 export {
   LINEAR_ORG_CONNECTION_ROLE,

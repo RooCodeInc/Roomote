@@ -59,7 +59,8 @@ const mocks = vi.hoisted(() => ({
   prepareServiceCredential: vi.fn(),
   listServiceCredentialApprovals: vi.fn(),
   addRemoteMcp: vi.fn(),
-  setupNativeIntegration: vi.fn(),
+  connectIntegration: vi.fn(),
+  listNativeIntegrations: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
   getPendingHumanFollowUp: vi.fn(),
@@ -100,7 +101,7 @@ const nativeToolNames = vi.hoisted(
     ({
       callIntegrationTool: 'call_integration_tool',
       addRemoteMcp: 'add_remote_mcp',
-      setupNativeIntegration: 'setup_native_integration',
+      connectIntegration: 'connect_integration',
       cancelTask: 'cancel_task',
       createArtifact: 'create_artifact',
       findIntegrationTools: 'find_integration_tools',
@@ -135,7 +136,7 @@ const fastAgentSessionPermissions = vi.hoisted(() => [
 ]);
 const fastAgentSessionToolFilter = vi.hoisted(() => ({
   task: true,
-  setup_native_integration: true,
+  connect_integration: true,
 }));
 
 vi.mock('@roomote/sdk/server/service-credentials', () => ({
@@ -147,8 +148,9 @@ vi.mock('@roomote/sdk/server/add-remote-custom-mcp', () => ({
   addRemoteCustomMcpForFast: mocks.addRemoteMcp,
 }));
 
-vi.mock('@roomote/sdk/server/setup-native-integration', () => ({
-  setupNativeIntegrationForFast: mocks.setupNativeIntegration,
+vi.mock('@roomote/sdk/server/connect-integration', () => ({
+  connectIntegrationForFast: mocks.connectIntegration,
+  listNativeIntegrationsForFast: mocks.listNativeIntegrations,
 }));
 
 vi.mock('@roomote/telemetry/server', () => ({
@@ -298,7 +300,7 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
   FAST_AGENT_NATIVE_TOOL_FILTER: {
     '*': false,
     send_chat_reply: true,
-    setup_native_integration: true,
+    connect_integration: true,
     task: true,
   },
   getFastAgentNativeToolRuntime: mocks.getNativeRuntime,
@@ -486,6 +488,7 @@ async function invokeMcpTool(
 describe('answerFastAgentQuestion native OpenCode tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.listNativeIntegrations.mockResolvedValue([]);
     mocks.refreshTitle.mockResolvedValue(null);
     mocks.resolveImageDelivery.mockResolvedValue({
       delivery: 'direct',
@@ -5752,7 +5755,31 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
   it('starts native integration setup against the canonical Session', async () => {
     mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
-    mocks.setupNativeIntegration.mockResolvedValue({
+    mocks.listNativeIntegrations.mockResolvedValue([
+      {
+        id: 'notion',
+        name: 'Notion',
+        description: 'Shared docs',
+        connectionScope: 'deployment',
+        setupStrategy: 'oauth',
+        status: 'needs_connection',
+        enabled: true,
+        authStatus: null,
+        canConnect: true,
+      },
+      {
+        id: 'granola',
+        name: 'Granola',
+        description: 'Meeting notes',
+        connectionScope: 'deployment',
+        setupStrategy: 'settings',
+        status: 'not_enabled',
+        enabled: false,
+        authStatus: null,
+        canConnect: true,
+      },
+    ]);
+    mocks.connectIntegration.mockResolvedValue({
       status: 'authorization_required',
       id: 'notion',
       name: 'Notion',
@@ -5761,14 +5788,29 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.findIntegrationTools, {}),
+        ).resolves.toMatchObject({
+          success: true,
+          integrations: [
+            expect.objectContaining({
+              id: 'notion',
+              status: 'needs_connection',
+            }),
+            expect.objectContaining({
+              id: 'granola',
+              status: 'not_enabled',
+            }),
+          ],
+        });
+        expect(mocks.connectIntegration).not.toHaveBeenCalled();
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'ack',
           message: 'I’ll check the built-in integration.',
         });
-        const result = await invokeTool(
-          nativeToolNames.setupNativeIntegration,
-          { integration: 'Notion' },
-        );
+        const result = await invokeTool(nativeToolNames.connectIntegration, {
+          integrationId: 'notion',
+        });
         expect(result).toEqual({
           success: true,
           status: 'authorization_required',
@@ -5786,10 +5828,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
-    expect(mocks.setupNativeIntegration).toHaveBeenCalledWith({
+    expect(mocks.connectIntegration).toHaveBeenCalledWith({
       userId: 'user-1',
       sessionId: 'canonical-session-1',
-      integration: 'Notion',
+      integrationId: 'notion',
     });
   });
 

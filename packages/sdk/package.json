@@ -72,9 +72,9 @@
       "import": "./src/server/lib/mcp/add-remote-custom-mcp.ts",
       "require": "./src/server/lib/mcp/add-remote-custom-mcp.ts"
     },
-    "./server/setup-native-integration": {
-      "import": "./src/server/lib/mcp/setup-native-integration.ts",
-      "require": "./src/server/lib/mcp/setup-native-integration.ts"
+    "./server/connect-integration": {
+      "import": "./src/server/lib/mcp/connect-integration.ts",
+      "require": "./src/server/lib/mcp/connect-integration.ts"
     },
     "./server/credential-egress": {
       "import": "./src/server/lib/credential-egress.ts",

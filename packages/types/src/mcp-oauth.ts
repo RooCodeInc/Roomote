@@ -449,6 +449,18 @@ export type EffectiveMcpIntegration = {
   };
 };
 
+export type NativeIntegrationCatalogEntry = {
+  id: string;
+  name: string;
+  description: string;
+  connectionScope: 'user' | 'deployment';
+  setupStrategy: 'oauth' | 'settings' | 'keyless';
+  status: EffectiveMcpIntegrationStatus;
+  enabled: boolean;
+  authStatus: 'pending' | 'authenticated' | 'error' | null;
+  canConnect: boolean;
+};
+
 export type McpIntegrationCategory = 'memory';
 
 export type McpIntegrationOAuthClientEnv = {

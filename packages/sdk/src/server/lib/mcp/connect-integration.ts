@@ -8,6 +8,7 @@ import {
   isNull,
   mcpConnections,
   mcpOauthReplays,
+  or,
   resolveDeploymentEnvVar,
   sessions,
   users,
@@ -18,7 +19,9 @@ import {
   getMcpIntegrationConnectionMode,
   getMcpIntegrationConnectionScope,
   isMcpConnectionOAuthConfig,
+  getMcpIntegration,
   MCP_INTEGRATIONS,
+  type NativeIntegrationCatalogEntry,
 } from '@roomote/types';
 
 import { createMcpOauthReplay, hasValidOAuthTokens } from './data';
@@ -41,8 +44,7 @@ export function getNativeIntegrationSetupStrategy(
   return 'settings';
 }
 
-export type SetupNativeIntegrationResult =
-  | { status: 'unsupported'; name: string }
+export type ConnectIntegrationResult =
   | { status: 'unavailable'; id: string; name: string }
   | { status: 'permission_denied'; id: string; name: string }
   | { status: 'connected'; id: string; name: string }
@@ -68,15 +70,6 @@ export type SetupNativeIntegrationResult =
 
 function publicUrl(path: string): string {
   return new URL(path, Env.R_PUBLIC_URL ?? Env.R_APP_URL).toString();
-}
-
-function findIntegration(value: string) {
-  const normalized = value.trim().toLowerCase();
-  return MCP_INTEGRATIONS.find(
-    (integration) =>
-      integration.id.toLowerCase() === normalized ||
-      integration.name.toLowerCase() === normalized,
-  );
 }
 
 async function hasConfiguredOauthClient(
@@ -131,14 +124,91 @@ async function prepareReplay(input: {
   return publicUrl(`/api/mcp-oauth/replay/${encodeURIComponent(token)}`);
 }
 
-export async function setupNativeIntegrationForFast(input: {
+export async function listNativeIntegrationsForFast(input: {
+  userId: string;
+}): Promise<NativeIntegrationCatalogEntry[]> {
+  const [user, enablements, connections] = await Promise.all([
+    db.query.users.findFirst({
+      where: eq(users.id, input.userId),
+      columns: { role: true, deletedAt: true },
+    }),
+    db.query.deploymentMcpEnablements.findMany({
+      columns: { mcpId: true, enabled: true },
+    }),
+    db.query.mcpConnections.findMany({
+      where: or(
+        isNull(mcpConnections.userId),
+        eq(mcpConnections.userId, input.userId),
+      ),
+      orderBy: (table, { desc }) => [desc(table.createdAt)],
+      columns: {
+        userId: true,
+        mcpId: true,
+        connectionRole: true,
+        enabled: true,
+        authStatus: true,
+      },
+    }),
+  ]);
+  const available = !areCuratedIntegrationsDisabled(
+    Env.R_CURATED_INTEGRATIONS_DISABLED,
+  );
+  const enabledById = new Map(
+    enablements.map((entry) => [entry.mcpId, entry.enabled]),
+  );
+
+  return MCP_INTEGRATIONS.map((integration) => {
+    const connectionRole = getDefaultMcpConnectionRole(integration);
+    const connectionScope = getMcpIntegrationConnectionScope(
+      integration,
+      connectionRole,
+    );
+    const targetUserId = connectionScope === 'deployment' ? null : input.userId;
+    const connection = connections.find(
+      (candidate) =>
+        candidate.mcpId === integration.id &&
+        candidate.connectionRole === connectionRole &&
+        candidate.userId === targetUserId,
+    );
+    const enabled = enabledById.get(integration.id) ?? false;
+    const authStatus = connection?.enabled
+      ? (connection.authStatus ?? null)
+      : null;
+    const connected =
+      integration.supportsKeylessAccess || authStatus === 'authenticated';
+    const status = !available
+      ? ('unavailable' as const)
+      : !enabled
+        ? ('not_enabled' as const)
+        : connected
+          ? ('connected' as const)
+          : ('needs_connection' as const);
+
+    return {
+      id: integration.id,
+      name: integration.name,
+      description: integration.description,
+      connectionScope,
+      setupStrategy: getNativeIntegrationSetupStrategy(integration),
+      status,
+      enabled,
+      authStatus,
+      canConnect:
+        available &&
+        Boolean(user && !user.deletedAt) &&
+        (connectionScope === 'user' || user?.role === 'admin'),
+    };
+  });
+}
+
+export async function connectIntegrationForFast(input: {
   userId: string;
   sessionId: string;
-  integration: string;
-}): Promise<SetupNativeIntegrationResult> {
-  const integration = findIntegration(input.integration);
+  integrationId: string;
+}): Promise<ConnectIntegrationResult> {
+  const integration = getMcpIntegration(input.integrationId);
   if (!integration) {
-    return { status: 'unsupported', name: input.integration.trim() };
+    throw new Error(`Unknown built-in integration: ${input.integrationId}`);
   }
   if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
     return {

@@ -26,6 +26,7 @@ import {
   FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+  MCP_INTEGRATIONS,
   isPublicUrlFetchImageResult,
   NO_REPOSITORIES,
   REASONING_EFFORT_VALUES,
@@ -602,7 +603,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: ${JSON.stringify(FIND_INTEGRATION_TOOLS_TOOL.description)},
+  description: ${JSON.stringify(`${FIND_INTEGRATION_TOOLS_TOOL.description} In Fast Sessions, omit every argument to list the complete built-in integration catalog with current connection status, including disabled and unconfigured providers. This operation is always read-only and never starts setup or OAuth.`)},
   args: {
     integrationId: z.string().min(1).optional().describe(${JSON.stringify(FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS.integrationId)}),
     toolName: z.string().min(1).optional().describe(${JSON.stringify(FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS.toolName)}),
@@ -657,16 +658,16 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.setupNativeIntegration]: String.raw`
+    [FAST_AGENT_NATIVE_TOOL_NAMES.connectIntegration]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Check Roomote's complete built-in integration catalog and start setup for one service, including integrations that are currently disabled or unconfigured. Call this before researching or adding a remote MCP or integration key whenever the user names a third-party service. A supported result is authoritative: use its exact authorizeUrl or settingsUrl and do not create a custom MCP or generic key fallback. Authorization and configuration remain pending until the human completes the secure flow; never accept credentials in chat. Unsupported means the service is not in the native catalog and fallback discovery may continue.",
+  description: "Connect or reconnect one built-in Roomote integration selected from the read-only catalog returned by find_integration_tools. Pass only the exact canonical provider id from that catalog; never guess an id or use a display name. The backend safely chooses already-connected reuse, keyless enablement, OAuth, or the existing secure Settings form. Unavailable, permission-denied, pending, operator-configuration, and denied-authorization outcomes are authoritative and must never be bypassed with a remote MCP or API key. Never accept credentials in chat or tool arguments.",
   args: {
-    integration: z.string().trim().min(1).max(80).describe("Service name or native integration ID named by the human"),
+    integrationId: z.enum(${JSON.stringify(MCP_INTEGRATIONS.map(({ id }) => id))}).describe("Exact canonical built-in provider id returned by find_integration_tools"),
   },
-  execute: (args, context) => invoke("setup_native_integration", args, context),
+  execute: (args, context) => invoke("connect_integration", args, context),
 }
 `,
 
