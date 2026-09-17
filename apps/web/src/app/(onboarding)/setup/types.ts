@@ -28,14 +28,6 @@ export const SETUP_STEPS: readonly SetupStep[] = SETUP_STEP_DEFINITIONS.map(
   (definition) => definition.id,
 );
 
-export function getSetupSteps(
-  _hasCommunicationAuthProvider: boolean,
-): readonly SetupStep[] {
-  // Communication-provider configuration is excluded from the activation
-  // path; the parameter remains for call-site stability.
-  return SETUP_STEPS;
-}
-
 const SETUP_STEP_DEFINITION_MAP = Object.fromEntries(
   SETUP_STEP_DEFINITIONS.map((definition) => [definition.id, definition]),
 ) as {
