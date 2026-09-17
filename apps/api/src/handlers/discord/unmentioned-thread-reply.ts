@@ -8,7 +8,7 @@ import {
 
 import {
   compareBigIntMessageIds,
-  evaluateUnmentionedThreadReplyRouting,
+  resolveUnmentionedThreadReplyRouting,
   type UnmentionedThreadHistoryMessage,
 } from '../shared/unmentioned-thread-reply.js';
 import type { DiscordThreadHistoryMessage } from './thread-context.js';
@@ -80,6 +80,7 @@ function toSharedHistoryMessages(
         botUserId,
         message.user,
       ),
+      text: message.text,
     };
   });
 }
@@ -164,8 +165,9 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
     isHumanAuthoredHistoryMessage(rootMessage!, botUserId) &&
     rootMessage!.user === senderDiscordUserId;
 
-  const decision = evaluateUnmentionedThreadReplyRouting({
+  const decision = await resolveUnmentionedThreadReplyRouting({
     eventMessageId: message.id,
+    eventText: getDiscordMessageContent(message),
     senderUserId: senderDiscordUserId,
     isThreadTaskOwner:
       Boolean(params.ownedThreadUserId) &&

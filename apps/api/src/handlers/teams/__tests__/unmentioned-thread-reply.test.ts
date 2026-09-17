@@ -10,9 +10,15 @@ import type {
 const {
   findLatestTeamsThreadTaskRunMock,
   findTaskBackedTeamsAutomationReportRunMock,
+  evaluateTypeSafeJudgmentsMock,
 } = vi.hoisted(() => ({
   findLatestTeamsThreadTaskRunMock: vi.fn(),
   findTaskBackedTeamsAutomationReportRunMock: vi.fn(),
+  evaluateTypeSafeJudgmentsMock: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
+  evaluateTypeSafeJudgments: evaluateTypeSafeJudgmentsMock,
 }));
 
 vi.mock('../find-active-teams-run.js', () => ({
@@ -118,6 +124,7 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
     });
     findTaskBackedTeamsAutomationReportRunMock.mockResolvedValue(undefined);
     fetchThreadMessagesMock.mockResolvedValue(null);
+    evaluateTypeSafeJudgmentsMock.mockResolvedValue(null);
   });
 
   it('routes an unmentioned reply directly after the bot last spoke', async () => {
@@ -209,6 +216,46 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
     ]);
 
     await expect(routeDecision(threadReplyActivity())).resolves.toBe(false);
+  });
+
+  it('routes an interjected reply the judgment model confidently gives to Roomote', async () => {
+    evaluateTypeSafeJudgmentsMock.mockResolvedValue({
+      addressee: {
+        type: 'choice',
+        choice: 'roomote',
+        confidence: 0.95,
+        probabilities: { roomote: 0.95, participant: 0.03, unclear: 0.02 },
+      },
+    });
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanGraphMessage({
+        id: THREAD_ROOT_ID,
+        userId: 'aad-user-1',
+        mentions: [botMention()],
+      }),
+      botGraphMessage('1700000000100'),
+      humanGraphMessage({
+        id: '1700000000200',
+        userId: 'aad-user-2',
+        text: 'interesting thread',
+      }),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyActivity({ text: 'can you also add a unit test?' }),
+      ),
+    ).resolves.toBe(true);
+    expect(evaluateTypeSafeJudgmentsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          reply: {
+            author: 'reply author',
+            text: 'can you also add a unit test?',
+          },
+        }),
+      }),
+    );
   });
 
   it('requires a mention when somebody else was mentioned since the bot last spoke', async () => {
