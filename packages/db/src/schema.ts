@@ -2353,6 +2353,8 @@ export const githubUserMappings = pgTable(
     accessToken: encryptedText('access_token'),
     refreshToken: encryptedText('refresh_token'),
     tokenExpiresAt: timestamp('token_expires_at'),
+    tokenRefreshClaim: text('token_refresh_claim'),
+    tokenRefreshClaimedAt: timestamp('token_refresh_claimed_at'),
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),

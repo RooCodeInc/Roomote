@@ -451,6 +451,8 @@ async function upsertGitHubUserMapping({
         accessToken: githubOAuthToken.access_token,
         refreshToken: githubOAuthToken.refresh_token ?? null,
         tokenExpiresAt,
+        tokenRefreshClaim: null,
+        tokenRefreshClaimedAt: null,
         updatedAt: new Date(),
       },
       setWhere: eq(githubUserMappings.userId, userId),
