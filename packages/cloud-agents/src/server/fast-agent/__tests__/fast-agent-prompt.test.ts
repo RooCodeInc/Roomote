@@ -572,7 +572,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).not.toContain('`send_chat_reaction` with purpose `ack`');
     expect(prompt).toContain(
-      'A direct closeout or clarification that fully handles the turn is already the first communication',
+      'A direct closeout or clarification that fully handles the turn without bypassing required Brain recall or other investigation is already the first communication',
     );
     expect(prompt).toContain(
       'The acknowledgement streams independently of coding-task startup',
@@ -1179,6 +1179,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('remain visible in the session');
     expect(prompt).toContain('Treat Brain recall as a sequential preflight');
     expect(prompt).toContain(
+      'An unfamiliar person, project, company, name, or term is a reason to retrieve relevant memory, not to immediately ask the user what it means',
+    );
+    expect(prompt).toContain(
       'durable preference, decision, correction, or fact',
     );
     expect(prompt).toContain('save_memory');
@@ -1204,7 +1207,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Use deployment MCP servers as relevant sources of truth',
     );
     expect(prompt).toContain(
-      'Ask for clarification only when ambiguity blocks meaningful investigation',
+      'Ask for clarification only after required recall and available-source inspection',
     );
     expect(prompt).toContain(
       'regardless of whether the message is phrased as a question, request, or declarative feedback',
