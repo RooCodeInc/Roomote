@@ -4092,7 +4092,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it('preserves ongoing task activity for an ignored ambient human turn', async () => {
-    mocks.getActiveTasks.mockResolvedValueOnce([{ taskId: 'task-1' }]);
+    mocks.getActiveTasks.mockResolvedValueOnce([
+      { taskId: 'task-1', status: 'running' },
+    ]);
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -4117,6 +4119,69 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(activity.start).not.toHaveBeenCalled();
     expect(activity.settle).toHaveBeenCalledOnce();
     expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: true });
+    expect(activity.dispose).not.toHaveBeenCalled();
+  });
+
+  it('does not preserve completed resumable task activity for an ignored ambient human turn', async () => {
+    mocks.getActiveTasks.mockResolvedValueOnce([
+      { taskId: 'task-1', status: 'completed' },
+    ]);
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.ignoreEvent, {
+          reason: 'The participants are talking to each other.',
+        });
+        return '';
+      },
+    );
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      allowSilentAmbientReply: true,
+      adapter: callbacks({ activity }),
+    });
+
+    expect(activity.start).not.toHaveBeenCalled();
+    expect(activity.settle).not.toHaveBeenCalled();
+    expect(activity.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('clears surface activity after reporting a completed resumable task', async () => {
+    mocks.getActiveTasks.mockResolvedValueOnce([
+      { taskId: 'task-1', status: 'completed' },
+    ]);
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The task is complete.',
+        });
+        return '';
+      },
+    );
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      adapter: callbacks({ activity }),
+    });
+
+    expect(activity.start).toHaveBeenCalledOnce();
+    expect(activity.settle).toHaveBeenCalledOnce();
+    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
     expect(activity.dispose).not.toHaveBeenCalled();
   });
 

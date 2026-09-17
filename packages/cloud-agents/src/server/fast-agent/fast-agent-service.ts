@@ -2305,7 +2305,17 @@ export async function answerFastAgentQuestion({
   });
   let surfaceDisposed = false;
   let surfaceActivityStarted = false;
-  let surfaceActiveTaskIds = new Set(activeTasks.map((task) => task.taskId));
+  const getSurfaceActiveTaskIds = (tasks: FastAgentActiveTask[]) =>
+    new Set(
+      tasks
+        .filter(
+          (task) =>
+            task.status === undefined ||
+            (activeRunStatuses as readonly RunStatus[]).includes(task.status),
+        )
+        .map((task) => task.taskId),
+    );
+  let surfaceActiveTaskIds = getSurfaceActiveTaskIds(activeTasks);
   const startSurfaceActivity = () => {
     if (surfaceDisposed || surfaceActivityStarted || !adapter.activity) return;
     surfaceActivityStarted = true;
@@ -3573,7 +3583,7 @@ export async function answerFastAgentQuestion({
     const currentTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
     );
-    surfaceActiveTaskIds = new Set(currentTasks.keys());
+    surfaceActiveTaskIds = getSurfaceActiveTaskIds(resolvedActiveTasks);
     taskMessageGuard.restore(previousAttempt?.events ?? [], [
       ...currentTasks.keys(),
     ]);
