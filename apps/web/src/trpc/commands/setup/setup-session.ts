@@ -1,10 +1,9 @@
 import { createHash } from 'node:crypto';
-import { after } from 'next/server';
 
 import {
+  buildFastAgentSetupEventTurnId,
   buildFastAgentArtifactCreator,
   enqueueFastAgentParentEvent,
-  waitForFastAgentParentEventSettlement,
 } from '@roomote/sdk/server';
 import { buildFastAgentSetupAdapter } from '@roomote/cloud-agents/server';
 import {
@@ -209,21 +208,6 @@ async function persistSetupSessionReceipt(
   // renders this receipt, while model/OpenCode compatibility history remains
   // authoritative structured setup events only.
   return inserted.length > 0;
-}
-
-function buildSetupEventTurnId(input: {
-  sessionId: string;
-  workflowVersion: number;
-  kind: SetupPlatformEventKind;
-  fingerprint: string;
-}): string {
-  const digest = createHash('sha256')
-    .update(
-      `${input.sessionId}:v${input.workflowVersion}:${input.kind}:${input.fingerprint}`,
-    )
-    .digest('hex')
-    .slice(0, 24);
-  return `setup:${input.kind}:${digest}`;
 }
 
 function buildSetupSnapshot(input: {
@@ -531,6 +515,7 @@ function buildSetupTurnContext(
   return {
     sessionId: conversation.sessionId,
     fastConversationId: conversation.fastConversationId,
+    workflowVersion: conversation.workflowVersion,
     setupSnapshot,
     starterTaskOptions: SETUP_STARTER_TASKS.map((task) => ({
       id: task.id,
@@ -764,7 +749,7 @@ async function enqueueDurableWebPlatformEventTurn(
   if (!turn.durableSessionId || !turn.setupContext || !turn.currentMessageId) {
     throw new Error('A setup platform event requires durable turn context.');
   }
-  const { eventKey } = await enqueueFastAgentParentEvent({
+  await enqueueFastAgentParentEvent({
     parent: {
       sessionId: turn.durableSessionId,
       conversation: turn.delivery.conversation,
@@ -784,24 +769,6 @@ async function enqueueDurableWebPlatformEventTurn(
       setupContext: turn.setupContext,
     },
   });
-  const onTurnSettled = turn.adapterExtensions?.onTurnSettled;
-  if (onTurnSettled) {
-    // Durable admission remains an immediate handoff. The previous direct
-    // web-turn path ran this reconciliation from its finally block; observe
-    // the durable row in the request's after() lifetime so the same web-owned
-    // setup logic runs once presentation reaches a terminal state, without
-    // serializing callbacks or making enqueue success depend on inference.
-    after(async () => {
-      try {
-        await waitForFastAgentParentEventSettlement(eventKey);
-        await onTurnSettled();
-      } catch (error) {
-        console.error(
-          `[Setup] Post-turn reconciliation failed for ${turn.delivery.conversation.conversationId}: ${formatErrorForLog(error)}`,
-        );
-      }
-    });
-  }
 }
 
 async function buildSetupPlatformEventTurn(
@@ -827,7 +794,7 @@ async function buildSetupPlatformEventTurn(
   const launchTask = (
     await import('@roomote/cloud-agents/server')
   ).createFastAgentWebTaskLauncher({ userId: auth.userId });
-  const currentMessageId = buildSetupEventTurnId({
+  const currentMessageId = buildFastAgentSetupEventTurnId({
     sessionId: conversation.sessionId,
     workflowVersion: conversation.workflowVersion,
     kind: input.kind,
@@ -901,7 +868,7 @@ async function reconcileMissedInitialCapabilityOffer(
   if (!capability || !snapshot.capabilities[capability]?.canOffer) return;
 
   const fingerprint = `v${conversation.workflowVersion}:${capability}`;
-  const correctionTurnId = buildSetupEventTurnId({
+  const correctionTurnId = buildFastAgentSetupEventTurnId({
     sessionId: conversation.sessionId,
     workflowVersion: conversation.workflowVersion,
     kind: 'capability_milestone_correction',

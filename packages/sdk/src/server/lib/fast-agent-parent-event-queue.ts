@@ -35,6 +35,7 @@ import {
   RunStatus,
   buildFastAgentInputSemantics,
   exitedRunStatuses,
+  parseFastAgentCapabilitySnapshot,
   type FastAgentParent,
   type FastAgentHumanFollowUpEvent,
   type FastAgentEventSemantics,
@@ -54,6 +55,22 @@ export type FastAgentParentEventQueueRequest = {
   conversationId: string;
   eventKey: string;
 };
+
+export function buildFastAgentSetupEventTurnId(input: {
+  sessionId: string;
+  workflowVersion?: number;
+  kind: string;
+  fingerprint: string;
+}): string {
+  const version = input.workflowVersion
+    ? `v${input.workflowVersion}`
+    : 'legacy';
+  const digest = createHash('sha256')
+    .update(`${input.sessionId}:${version}:${input.kind}:${input.fingerprint}`)
+    .digest('hex')
+    .slice(0, 24);
+  return `setup:${input.kind}:${digest}`;
+}
 
 function buildSetupDiscoveryCompletedEvent(
   event: FastAgentHumanFollowUpEvent,
@@ -93,6 +110,69 @@ function buildSetupDiscoveryCompletedEvent(
       setupSnapshot: JSON.stringify(nextSnapshot),
     },
   };
+}
+
+async function buildSetupCapabilityCorrectionEvent(
+  event: FastAgentHumanFollowUpEvent,
+): Promise<FastAgentHumanFollowUpEvent | null> {
+  const context = event.setupContext;
+  if (!context) return null;
+  const snapshot = parseFastAgentCapabilitySnapshot(context.setupSnapshot);
+  const capability = snapshot?.recommendedNextCapability;
+  if (!capability || !snapshot.capabilities[capability]?.canOffer) return null;
+
+  const correctionTurnId = buildFastAgentSetupEventTurnId({
+    sessionId: context.sessionId,
+    ...(context.workflowVersion
+      ? { workflowVersion: context.workflowVersion }
+      : {}),
+    kind: 'capability_milestone_correction',
+    fingerprint: context.workflowVersion
+      ? `v${context.workflowVersion}:${capability}`
+      : capability,
+  });
+  const rows = await db.query.fastAgentMessages.findMany({
+    where: eq(fastAgentMessages.conversationId, context.fastConversationId),
+    columns: { eventType: true, payload: true, turnId: true },
+  });
+  const alreadyHandled = rows.some(
+    (row) =>
+      (row.eventType === ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer &&
+        row.payload?.capability === capability) ||
+      row.turnId === correctionTurnId,
+  );
+  if (alreadyHandled) return null;
+
+  return {
+    type: 'human_follow_up',
+    eventId: correctionTurnId,
+    currentMessageId: correctionTurnId,
+    userId: event.userId,
+    question: `<platform_event>${JSON.stringify({
+      type: 'capability_milestone_correction',
+      capability,
+      reason:
+        'The applicable initial capability was not presented or resolved in the previous turn.',
+    })}</platform_event>`,
+    turnSource: 'platform_event',
+    platformEventKind: 'setup',
+    platformEventVisibility: 'required',
+    setupSession: true,
+    setupContext: context,
+  };
+}
+
+async function enqueueSetupCapabilityCorrectionIfMissed(params: {
+  parent: FastAgentParent;
+  event: FastAgentHumanFollowUpEvent | null;
+}): Promise<void> {
+  if (!params.event) return;
+  const correction = await buildSetupCapabilityCorrectionEvent(params.event);
+  if (!correction) return;
+  await enqueueFastAgentParentEvent({
+    parent: params.parent,
+    event: correction,
+  });
 }
 type FastAgentPullRequestOpenedEvent = Extract<
   FastAgentParentEvent,
@@ -528,33 +608,6 @@ async function isStillPending(id: string): Promise<boolean> {
   return Boolean(row) && !row!.deliveredAt && !row!.discardedAt;
 }
 
-/**
- * Observe an already-admitted event until its durable delivery attempt has
- * settled. This does not change admission into a synchronous delivery
- * contract: callers must admit first, then use this only for best-effort
- * post-turn work that used to run after an in-process turn.
- */
-export async function waitForFastAgentParentEventSettlement(
-  eventKey: string,
-  options: { pollIntervalMs?: number } = {},
-): Promise<'delivered' | 'discarded'> {
-  const pollIntervalMs = options.pollIntervalMs ?? 100;
-  for (;;) {
-    const row = await db.query.fastAgentParentEvents.findFirst({
-      where: eq(fastAgentParentEvents.eventKey, eventKey),
-      columns: { deliveredAt: true, discardedAt: true },
-    });
-    if (!row) {
-      throw new Error(
-        `Queued Fast parent event ${eventKey} disappeared before settlement.`,
-      );
-    }
-    if (row.deliveredAt) return 'delivered';
-    if (row.discardedAt) return 'discarded';
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-  }
-}
-
 async function markDelivered(id: string) {
   await db
     .update(fastAgentParentEvents)
@@ -665,6 +718,10 @@ export async function drainFastAgentParentEvents(
         })
         .where(eq(fastAgentParentEvents.id, row.id));
 
+      const durableSetupEvent =
+        row.event.type === 'human_follow_up' && row.event.setupContext
+          ? row.event
+          : null;
       try {
         const retryTaskStart = await buildRetryTaskStart(
           row.retryTaskStartRunId,
@@ -674,10 +731,6 @@ export async function drainFastAgentParentEvents(
           conversationId: request.conversationId,
           eventKey: row.eventKey,
         };
-        const durableSetupEvent =
-          row.event.type === 'human_follow_up' && row.event.setupContext
-            ? row.event
-            : null;
         if (row.admission === 'inline') {
           // Bind the row to the lock the way the inline surfaces do, so a
           // process shutdown that aborts this turn before it reaches its own
@@ -733,6 +786,10 @@ export async function drainFastAgentParentEvents(
           },
           turnLock,
         );
+        await enqueueSetupCapabilityCorrectionIfMissed({
+          parent: row.parent,
+          event: durableSetupEvent,
+        });
         if (row.admission === 'inline') {
           // The resumed run settles its own row (delivered, or withdrawn
           // from replay before a terminal action), so nothing is written
@@ -764,6 +821,10 @@ export async function drainFastAgentParentEvents(
         const deliveryError =
           error instanceof FastAgentParentEventDeliveryError ? error : null;
         if (deliveryError?.replyPosted) {
+          await enqueueSetupCapabilityCorrectionIfMissed({
+            parent: row.parent,
+            event: durableSetupEvent,
+          });
           await finalizeAutomationLaunch(row.event, 'succeeded');
           await finalizeScheduledWakeup(row.event, 'succeeded');
           await markDelivered(row.id);

@@ -1,4 +1,4 @@
-import { RunStatus } from '@roomote/types';
+import { FAST_AGENT_CAPABILITY_IDS, RunStatus } from '@roomote/types';
 
 const mocks = vi.hoisted(() => {
   class DeliveryError extends Error {
@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => {
     findPending: vi.fn(),
     findRun: vi.fn(),
     findCanonical: vi.fn(),
+    findMessages: vi.fn(),
     allocateSequence: vi.fn(),
     selectRows: vi.fn(),
     acquireLock: vi.fn(),
@@ -80,7 +81,10 @@ vi.mock('@roomote/db/server', () => ({
     })),
     query: {
       fastAgentParentEvents: { findFirst: mocks.findPending },
-      fastAgentMessages: { findFirst: mocks.findCanonical },
+      fastAgentMessages: {
+        findFirst: mocks.findCanonical,
+        findMany: mocks.findMessages,
+      },
       taskRuns: { findFirst: mocks.findRun },
     },
   },
@@ -133,12 +137,12 @@ vi.mock('./task-runs/fast-agent-startup-retry', () => ({
 
 import {
   buildFastAgentParentEventKey,
+  buildFastAgentSetupEventTurnId,
   drainFastAgentParentEvents,
   enqueueFastAgentParentEvent,
   enqueueFastAgentParentEventForRun,
   FastAgentParentBusyError,
   recoverPendingFastAgentParentEvents,
-  waitForFastAgentParentEventSettlement,
 } from './fast-agent-parent-event-queue';
 import type { FastAgentParentEvent } from './fast-agent-parent-event';
 
@@ -197,6 +201,7 @@ describe('Fast parent event durable queue', () => {
     mocks.insertOnConflict.mockResolvedValue(undefined);
     mocks.selectForUpdate.mockResolvedValue([{ status: RunStatus.Running }]);
     mocks.findCanonical.mockResolvedValue(undefined);
+    mocks.findMessages.mockResolvedValue([]);
     mocks.allocateSequence.mockResolvedValue(1);
     mocks.transaction.mockImplementation(
       async (callback: (tx: unknown) => unknown) =>
@@ -238,30 +243,6 @@ describe('Fast parent event durable queue', () => {
     );
     await vi.waitFor(() => expect(errorSpy).toHaveBeenCalledOnce());
     errorSpy.mockRestore();
-  });
-
-  it.each([
-    [{ deliveredAt: new Date(), discardedAt: null }, 'delivered'],
-    [{ deliveredAt: null, discardedAt: new Date() }, 'discarded'],
-  ] as const)(
-    'observes an admitted event through its %s terminal state',
-    async (row, expected) => {
-      mocks.findPending.mockResolvedValueOnce(row);
-
-      await expect(
-        waitForFastAgentParentEventSettlement('event-key'),
-      ).resolves.toBe(expected);
-    },
-  );
-
-  it('rejects when an admitted event disappears before settlement', async () => {
-    mocks.findPending.mockResolvedValueOnce(undefined);
-
-    await expect(
-      waitForFastAgentParentEventSettlement('missing-event'),
-    ).rejects.toThrow(
-      'Queued Fast parent event missing-event disappeared before settlement.',
-    );
   });
 
   describe('canonical event semantics', () => {
@@ -964,6 +945,71 @@ describe('Fast parent event durable queue', () => {
         jobId: expect.any(String),
       }),
     );
+  });
+
+  it('durably reconciles a missed setup capability after recovery delivery', async () => {
+    const setupEvent = {
+      type: 'human_follow_up' as const,
+      eventId: 'setup-state-recovered',
+      currentMessageId: 'setup-state-recovered',
+      userId: 'user-1',
+      question:
+        '<platform_event>{"type":"setup_state_changed"}</platform_event>',
+      turnSource: 'platform_event' as const,
+      platformEventKind: 'setup' as const,
+      platformEventVisibility: 'required' as const,
+      setupSession: true,
+      setupContext: {
+        sessionId: parent.sessionId,
+        fastConversationId: parent.sessionId,
+        workflowVersion: 3,
+        setupSnapshot: JSON.stringify({
+          setupCompleted: false,
+          recommendedNextCapability: 'integrations',
+          capabilities: Object.fromEntries(
+            FAST_AGENT_CAPABILITY_IDS.map((capability) => [
+              capability,
+              {
+                canOffer: capability === 'integrations',
+                ready: false,
+              },
+            ]),
+          ),
+        }),
+        starterTaskOptions: [],
+      },
+    };
+    const row = pendingRow('setup-recovered', setupEvent);
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(undefined);
+    mocks.findMessages.mockResolvedValueOnce([]);
+
+    await drainFastAgentParentEvents({
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    });
+
+    expect(mocks.findMessages).toHaveBeenCalled();
+    const correctionTurnId = buildFastAgentSetupEventTurnId({
+      sessionId: parent.sessionId,
+      workflowVersion: 3,
+      kind: 'capability_milestone_correction',
+      fingerprint: 'v3:integrations',
+    });
+    expect(mocks.insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent,
+        event: expect.objectContaining({
+          eventId: correctionTurnId,
+          currentMessageId: correctionTurnId,
+          question: expect.stringContaining('capability_milestone_correction'),
+          setupContext: expect.objectContaining({ workflowVersion: 3 }),
+        }),
+      }),
+    );
+    expect(mocks.updateWhere).toHaveBeenCalled();
   });
 
   it('leaves scheduled retries alone until their time', async () => {

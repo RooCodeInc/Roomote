@@ -254,13 +254,13 @@ export { requireFastSuggestionOriginSessionId } from './lib/fast-automation-sugg
 
 export {
   buildFastAgentParentEventKey,
+  buildFastAgentSetupEventTurnId,
   drainFastAgentParentEvents,
   countOverdueQueuedFastAgentParentEvents,
   enqueueFastAgentParentEvent,
   FastAgentParentBusyError,
   FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
   recoverPendingFastAgentParentEvents,
-  waitForFastAgentParentEventSettlement,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
   type FastAgentParentEventQueueRequest,

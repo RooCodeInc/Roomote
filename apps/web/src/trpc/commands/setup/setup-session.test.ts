@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
   launchTask: vi.fn(),
   schedule: vi.fn(),
   enqueue: vi.fn(),
-  waitForSettlement: vi.fn(),
   submit: vi.fn(),
   complete: vi.fn(),
 }));
@@ -23,8 +22,10 @@ vi.mock('@/lib/server/setup-funnel-telemetry', () => ({
 }));
 vi.mock('@roomote/sdk/server', () => ({
   buildFastAgentArtifactCreator: vi.fn(),
+  buildFastAgentSetupEventTurnId: vi.fn(
+    ({ kind, fingerprint }) => `setup:${kind}:${fingerprint}`,
+  ),
   enqueueFastAgentParentEvent: mocks.enqueue,
-  waitForFastAgentParentEventSettlement: mocks.waitForSettlement,
   LINEAR_ORG_CONNECTION_ROLE: 'organization',
   persistFastAgentInlineHumanTurn: vi.fn().mockResolvedValue(null),
   resolveUserMcpServerConfigs: vi.fn().mockResolvedValue([]),
@@ -236,7 +237,6 @@ describe('optional setup integration discovery', () => {
       },
     }));
     mocks.complete.mockResolvedValue(true);
-    mocks.waitForSettlement.mockResolvedValue('delivered');
     mocks.enqueue.mockImplementation(async ({ event }) => {
       mocks.schedule(event);
       return { eventKey: `queued:${event.eventId}`, queued: true };
@@ -1060,34 +1060,13 @@ describe('optional setup integration discovery', () => {
     );
   });
 
-  it('schedules one corrective milestone turn after an applicable offer is missed', async () => {
-    let settleDelivery!: () => void;
-    mocks.waitForSettlement.mockReturnValueOnce(
-      new Promise<'delivered'>((resolve) => {
-        settleDelivery = () => resolve('delivered');
-      }),
-    );
+  it('persists setup workflow identity for durable post-turn reconciliation', async () => {
     await reconcileSetupPlatformEvents(auth);
     const initialEvent = mocks.enqueue.mock.calls[0]![0].event;
     expect(initialEvent.question).toContain('setup_state_changed');
-    expect(mocks.after).toHaveBeenCalledOnce();
-
-    const postTurnReconciliation = mocks.after.mock.calls[0]![0]();
-    await vi.waitFor(() =>
-      expect(mocks.waitForSettlement).toHaveBeenCalledWith(
-        `queued:${initialEvent.eventId}`,
-      ),
+    expect(initialEvent.setupContext).toEqual(
+      expect.objectContaining({ workflowVersion: expect.any(Number) }),
     );
-    // The correction must not race the setup turn it evaluates.
-    expect(mocks.schedule).toHaveBeenCalledTimes(1);
-    settleDelivery();
-    await postTurnReconciliation;
-
-    expect(mocks.schedule).toHaveBeenCalledTimes(2);
-    expect(mocks.schedule.mock.calls[1]![0].question).toContain(
-      'capability_milestone_correction',
-    );
-    expect(mocks.schedule.mock.calls[1]![0].question).toContain('integrations');
   });
 
   it('counts every selected launch call as attempted even when launches fail', async () => {

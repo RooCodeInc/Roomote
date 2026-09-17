@@ -248,6 +248,9 @@ export const fastAgentPlatformEventVisibilitySchema = z.enum([
 export const fastAgentSetupTurnContextSchema = z.object({
   sessionId: z.string().min(1),
   fastConversationId: z.string().min(1),
+  // Optional while N-1 rows admitted before durable setup reconciliation can
+  // still be recovered by a newer queue worker.
+  workflowVersion: z.number().int().positive().optional(),
   setupSnapshot: z.string().min(1),
   starterTaskOptions: z.array(
     z.object({
