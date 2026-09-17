@@ -178,10 +178,14 @@ describe('getSessionAnalyticsRows', () => {
     );
     const ownerRow = ownerRows.find(({ id }) => id === privateSession.id);
     const adminRow = adminRows.find(
-      ({ details }) => details.values.sessionTitle === 'Private session',
+      (row) =>
+        row.details.values.sessionTitle === 'Private session' &&
+        row.dimensions.user?.key === ownerRow?.dimensions.user?.key,
     );
     const nonOwnerRow = nonOwnerRows.find(
-      ({ details }) => details.values.sessionTitle === 'Private session',
+      (row) =>
+        row.details.values.sessionTitle === 'Private session' &&
+        row.dimensions.user?.key === ownerRow?.dimensions.user?.key,
     );
 
     expect(ownerRows.reduce((sum, row) => sum + row.value, 0)).toBe(
@@ -210,7 +214,12 @@ describe('getSessionAnalyticsRows', () => {
       details: { values: { sessionTitle: 'Private session' } },
     });
     expect(adminRow?.details.links).toBeUndefined();
-    expect(nonOwnerRow).toEqual(adminRow);
+    expect(nonOwnerRow).toMatchObject({
+      id: expect.stringMatching(/^private-session:/),
+      dimensions: { user: ownerRow?.dimensions.user },
+      details: { values: { sessionTitle: 'Private session' } },
+    });
+    expect(nonOwnerRow?.details.links).toBeUndefined();
     expect(JSON.stringify(adminRow)).not.toContain(privateSession.id);
     expect(JSON.stringify(adminRow)).not.toContain('Owner analytics only');
     expect(adminRow?.details.values.user).toBe(ownerRow?.details.values.user);

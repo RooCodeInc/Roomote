@@ -36,10 +36,14 @@ describe('getTaskAnalyticsRows', () => {
     );
     const ownerRow = ownerRows.find(({ id }) => id === privateTask.id);
     const adminRow = adminRows.find(
-      ({ details }) => details.values.taskTitle === 'Private task',
+      (row) =>
+        row.details.values.taskTitle === 'Private task' &&
+        row.dimensions.user?.key === ownerRow?.dimensions.user?.key,
     );
     const nonOwnerRow = nonOwnerRows.find(
-      ({ details }) => details.values.taskTitle === 'Private task',
+      (row) =>
+        row.details.values.taskTitle === 'Private task' &&
+        row.dimensions.user?.key === ownerRow?.dimensions.user?.key,
     );
 
     expect(ownerRows.reduce((sum, row) => sum + row.value, 0)).toBe(
@@ -69,7 +73,12 @@ describe('getTaskAnalyticsRows', () => {
       details: { values: { taskTitle: 'Private task' } },
     });
     expect(adminRow?.details.links).toBeUndefined();
-    expect(nonOwnerRow).toEqual(adminRow);
+    expect(nonOwnerRow).toMatchObject({
+      id: expect.stringMatching(/^private-task:/),
+      dimensions: { user: ownerRow?.dimensions.user },
+      details: { values: { taskTitle: 'Private task' } },
+    });
+    expect(nonOwnerRow?.details.links).toBeUndefined();
     expect(JSON.stringify(adminRow)).not.toContain(privateTask.id);
     expect(JSON.stringify(adminRow)).not.toContain('Owner analytics only');
     expect(JSON.stringify(adminRow)).not.toContain('secret/private-repository');

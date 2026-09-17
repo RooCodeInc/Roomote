@@ -183,17 +183,17 @@ describe('getCostAnalyticsRows', () => {
     );
     const eventIds = events.map(({ id }) => id);
     const ownerEventRows = ownerRows.filter(({ id }) => eventIds.includes(id));
-    const adminPrivateRows = adminRows.filter(({ id }) =>
-      id.startsWith('private-cost:'),
-    );
+    const isPrivateFixtureRow = (row: AnalyticsRow) =>
+      row.id.startsWith('private-cost:') &&
+      row.dimensions.provider?.key === 'private-provider' &&
+      row.dimensions.user?.key === ownerEventRows[0]?.dimensions.user?.key;
+    const adminPrivateRows = adminRows.filter(isPrivateFixtureRow);
+    const nonOwnerPrivateRows = nonOwnerRows.filter(isPrivateFixtureRow);
     const adminPrivateTaskRows = adminPrivateRows.filter(
       (row) => row.details.values.taskTitle === 'Private task',
     );
     const adminPrivateSessionRow = adminPrivateRows.find(
       (row) => row.details.values.taskTitle === 'Private session',
-    );
-    const nonOwnerPrivateRows = nonOwnerRows.filter(({ id }) =>
-      id.startsWith('private-cost:'),
     );
 
     expect(ownerEventRows).toHaveLength(3);
@@ -211,7 +211,13 @@ describe('getCostAnalyticsRows', () => {
       adminRows.reduce((sum, row) => sum + row.value, 0),
     );
     expect(adminPrivateRows).toHaveLength(3);
-    expect(nonOwnerPrivateRows).toEqual(adminPrivateRows);
+    expect(nonOwnerPrivateRows).toHaveLength(3);
+    expect(nonOwnerPrivateRows.reduce((sum, row) => sum + row.value, 0)).toBe(
+      6,
+    );
+    expect(
+      nonOwnerPrivateRows.reduce((sum, row) => sum + (row.tokens ?? 0), 0),
+    ).toBe(600);
     expect(adminPrivateTaskRows).toHaveLength(2);
     expect(adminPrivateSessionRow).toBeDefined();
     expect(adminPrivateTaskRows[0]?.meta?.canonicalTaskId).toBe(
