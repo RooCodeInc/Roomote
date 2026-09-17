@@ -770,13 +770,17 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(enabledPrompt).not.toContain('If none is connected');
     expect(enabledPrompt).toContain(
-      "the service's official hosted remote MCP endpoint, when you know it or the human supplied a URL",
+      "research it before choosing: up to three `roomote_fetch_url` reads of the provider's own documentation",
     );
     expect(enabledPrompt).toContain(
       'only means nothing is installed for this one',
     );
+    expect(enabledPrompt).toContain('the page where the human creates a key');
     expect(enabledPrompt).toContain(
-      'a stdio project or a repository is not a hosted MCP',
+      'say in one sentence where they create that key',
+    );
+    expect(enabledPrompt).toContain(
+      'stdio project or a repository is not a hosted MCP',
     );
     expect(enabledPrompt).toContain(
       'A pending MCP state (an authorization link or manual client registration) means the MCP exists',
