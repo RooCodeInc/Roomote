@@ -1055,6 +1055,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         confidence: 0.9,
         probabilities: { default_model: 0.9 },
       },
+      modelGuidance: { type: 'noul', noul: 0.1 },
     });
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });

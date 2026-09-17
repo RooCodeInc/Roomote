@@ -81,11 +81,15 @@ describe('resolveFastAgentRoutingHint', () => {
     const hint = await resolveFastAgentRoutingHint({
       request: 'Refunds are double-charged, check the webhook handler',
       environments,
+      models,
     });
 
     expect(hint).toBe(
       'Routing hint: api [id: env-api] looks like the best environment (judgment model confidence 0.82). Verify against the listed environments, models, and routing guidance before delegating; an explicit user choice takes precedence, and ask when the request is still ambiguous.',
     );
+    expect(
+      mockEvaluateTypeSafeJudgments.mock.calls[0]![0].questions,
+    ).not.toHaveProperty('model');
   });
 
   it('returns enabled environment and model recommendations together', async () => {
@@ -102,6 +106,7 @@ describe('resolveFastAgentRoutingHint', () => {
         confidence: 0.91,
         probabilities: { model_2: 0.91 },
       },
+      modelGuidance: { type: 'noul', noul: 0.96 },
     });
 
     const hint = await resolveFastAgentRoutingHint({
@@ -121,9 +126,9 @@ describe('resolveFastAgentRoutingHint', () => {
     );
     expect(hint).not.toContain('reasoning effort');
     expect(
-      mockEvaluateTypeSafeJudgments.mock.calls[0]![0].questions.model.criteria
-        .model_1,
-    ).toContain('supports configurable reasoning effort');
+      mockEvaluateTypeSafeJudgments.mock.calls[0]![0].questions.modelGuidance
+        .instructions,
+    ).toContain('reasoning-effort preference by itself does not count');
   });
 
   it('returns a model-only recommendation when no environment choice is needed', async () => {
@@ -134,6 +139,7 @@ describe('resolveFastAgentRoutingHint', () => {
         confidence: 0.88,
         probabilities: { model_1: 0.88 },
       },
+      modelGuidance: { type: 'noul', noul: 0.93 },
     });
 
     const hint = await resolveFastAgentRoutingHint({
@@ -161,6 +167,7 @@ describe('resolveFastAgentRoutingHint', () => {
         confidence: 0.99,
         probabilities: { model_99: 0.99 },
       },
+      modelGuidance: { type: 'noul', noul: 0.99 },
     });
 
     await expect(
@@ -171,6 +178,34 @@ describe('resolveFastAgentRoutingHint', () => {
         routingGuidance: 'Prefer a model that is not enabled.',
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('ignores model optimization for environment-only guidance', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+      environment: {
+        type: 'choice',
+        choice: 'env_1',
+        confidence: 0.86,
+        probabilities: { env_1: 0.86 },
+      },
+      modelGuidance: { type: 'noul', noul: 0.1 },
+      model: {
+        type: 'choice',
+        choice: 'model_2',
+        confidence: 0.99,
+        probabilities: { model_2: 0.99 },
+      },
+    });
+
+    const hint = await resolveFastAgentRoutingHint({
+      request: 'Fix the login page',
+      environments,
+      models,
+      routingGuidance: 'Frontend work uses the web-app environment.',
+    });
+
+    expect(hint).toContain('web-app [id: env-web]');
+    expect(hint).not.toContain('best coding model');
   });
 
   it('passes free-text routing guidance to the judgment model', async () => {

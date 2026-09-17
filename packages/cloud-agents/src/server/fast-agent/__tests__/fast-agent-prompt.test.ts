@@ -684,7 +684,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'GPT-5.6 [id: openai/gpt-5.6] (deployment default)',
     );
     expect(prompt).toContain('Claude Sonnet 5 [id: anthropic/claude-sonnet-5]');
-    expect(prompt).toContain('Omit it to use the deployment default');
+    expect(prompt).toContain('Otherwise omit it to use the deployment default');
+    expect(prompt).toContain(
+      'when the user explicitly requests that enabled model or matching routing guidance directs this work to it',
+    );
     expect(prompt).toContain('manage_tasks');
     expect(prompt).toContain('get_chat_message_context');
     expect(prompt).toContain('get_chat_channel_messages');
