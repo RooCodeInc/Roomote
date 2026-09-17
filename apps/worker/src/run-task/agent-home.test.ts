@@ -1496,7 +1496,10 @@ describe('generateOpenCodeConfig provider support', () => {
       'Repository operations remain read-only on this task MCP path',
     );
     expect(integrationInstructions).toContain(
-      'The account-scoped create_gist tool is the only native write available here',
+      'The account-scoped gist tools are the only native writes available here',
+    );
+    expect(integrationInstructions).toContain(
+      'Existing gists are never listed or deleted',
     );
     expect(integrationInstructions).toContain(
       'use public: false unless the user explicitly requests public publishing',

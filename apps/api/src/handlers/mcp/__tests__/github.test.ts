@@ -421,6 +421,65 @@ describe('GitHub MCP proxy', () => {
     expect(new Headers(init.headers).get('mcp-session-id')).toBeNull();
   });
 
+  it('never offers a member the tools that list or delete gists', async () => {
+    mocks.userToken.mockResolvedValue('private-actor-token');
+    mocks.upstream.mockResolvedValueOnce(
+      Response.json({
+        jsonrpc: '2.0',
+        id: 2,
+        result: {
+          tools: [
+            'create_gist',
+            'get_gist',
+            'list_gists',
+            'update_gist',
+            'get_file_contents',
+          ].map((name) => ({ name, inputSchema: { type: 'object' } })),
+        },
+      }),
+    );
+    const response = await post({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/list',
+    });
+    expect(
+      (
+        (await response.json()) as { result: { tools: { name: string }[] } }
+      ).result.tools.map((tool) => tool.name),
+    ).toEqual(['create_gist', 'get_gist', 'update_gist', 'get_file_contents']);
+  });
+
+  it.each(['list_gists', 'delete_gist'])(
+    'refuses %s before any token is resolved',
+    async (name) => {
+      mocks.userToken.mockResolvedValue('private-actor-token');
+      expect((await call(name, { gist_id: 'abc123' })).status).toBe(403);
+      expect(mocks.userToken).not.toHaveBeenCalled();
+      expect(mocks.mint).not.toHaveBeenCalled();
+      expect(mocks.upstream).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['update_gist', { gist_id: 'abc123', filename: 'poem.md', content: 'v2' }],
+    ['get_gist', { gist_id: 'abc123' }],
+  ] as const)(
+    'runs %s under the member linked account, never an installation token',
+    async (name, arguments_) => {
+      mocks.userToken.mockResolvedValue('private-actor-token');
+      expect((await call(name, arguments_)).status).toBe(200);
+      expect(mocks.mint).not.toHaveBeenCalled();
+      const init = mocks.upstream.mock.calls[0]![1] as RequestInit;
+      expect(new Headers(init.headers).get('authorization')).toBe(
+        'Bearer private-actor-token',
+      );
+      expect(JSON.parse(init.body as string).params.arguments).toEqual(
+        arguments_,
+      );
+    },
+  );
+
   it.each([
     ['hides', null, false],
     ['offers', 'private-actor-token', true],
@@ -1422,6 +1481,9 @@ describe('GitHub MCP proxy', () => {
               { name: 'update_pull_request' },
               { name: 'merge_pull_request' },
               { name: 'create_gist' },
+              { name: 'get_gist' },
+              { name: 'list_gists' },
+              { name: 'update_gist' },
             ],
           },
         }),
@@ -1434,7 +1496,12 @@ describe('GitHub MCP proxy', () => {
         (await response.json()).result.tools.map(
           (tool: { name: string }) => tool.name,
         ),
-      ).toEqual(['pull_request_read', 'create_gist']);
+      ).toEqual([
+        'pull_request_read',
+        'create_gist',
+        'get_gist',
+        'update_gist',
+      ]);
       expect(
         new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
           'X-MCP-Readonly',
@@ -1445,6 +1512,39 @@ describe('GitHub MCP proxy', () => {
       await db.delete(tasks).where(eq(tasks.id, run.taskId));
     }
   });
+
+  it.each([
+    ['update_gist', { gist_id: 'abc123', filename: 'notes.md', content: 'v2' }],
+    ['get_gist', { gist_id: 'abc123' }],
+  ] as const)(
+    'lets a coding task %s under its human actor linked account',
+    async (name, arguments_) => {
+      const run = await runFactory.create({ actingUserId: actor.id });
+      try {
+        mocks.userToken.mockResolvedValue('actor-github-token');
+        const target = app({
+          tokenType: 'run',
+          version: 1,
+          runId: run.id,
+          userId: actor.id,
+          principal: 'user',
+        });
+        expect((await call(name, arguments_, target)).status).toBe(200);
+        expect(mocks.mint).not.toHaveBeenCalled();
+        expect(
+          new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
+            'authorization',
+          ),
+        ).toBe('Bearer actor-github-token');
+        mocks.upstream.mockClear();
+        expect((await call('list_gists', {}, target)).status).toBe(403);
+        expect(mocks.upstream).not.toHaveBeenCalled();
+      } finally {
+        await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
+        await db.delete(tasks).where(eq(tasks.id, run.taskId));
+      }
+    },
+  );
 
   it.each(writeCases)(
     'preserves upstream permission failures for %s without retrying or escalating credentials',

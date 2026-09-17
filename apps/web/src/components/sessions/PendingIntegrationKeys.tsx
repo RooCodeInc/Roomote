@@ -10,25 +10,35 @@ import {
   openIntegrationKeyDialog,
 } from './integration-key-dialog';
 
+interface OpenIntegrationKeyRequest {
+  /** Event id of the request; a new id refetches the approvals. */
+  eventId: string;
+  /** The approval that request created, when the tool output named it. */
+  pendingRef: string | null;
+}
+
 /**
- * One card per approval still waiting for a key, shown to the Session owner
- * at the end of the conversation. It stays until the key is saved or the
- * approval expires, so the dialog is always one click away even after it was
- * dismissed or the agent's link scrolled out of view.
+ * The card for the approval the Session owner is being asked for right now,
+ * shown at the end of the conversation while the agent's request is the open
+ * ask. It goes away once the key is saved, the approval expires, or the owner
+ * replies and the conversation moves on. Earlier approvals the owner never
+ * answered stay open in the key dialog but get no card of their own.
  */
 export function PendingIntegrationKeys({
   sessionId,
-  latestRequestId,
+  openRequest,
 }: {
   sessionId: string;
-  /** Event id of the newest key request in the transcript; a change refetches. */
-  latestRequestId: string | null;
+  /** The key request the conversation is still waiting on; null hides the card. */
+  openRequest: OpenIntegrationKeyRequest | null;
 }) {
   const { data, error, errorUpdatedAt, isFetching, refetch } =
     useSessionIntegrationApprovals(sessionId);
+  const openRequestId = openRequest?.eventId ?? null;
+  const openPendingRef = openRequest?.pendingRef ?? null;
   useEffect(() => {
-    if (latestRequestId) void refetch();
-  }, [latestRequestId, refetch]);
+    if (openRequestId) void refetch();
+  }, [openRequestId, refetch]);
   useEffect(() => {
     const handleChange = () => void refetch();
     window.addEventListener(INTEGRATION_KEYS_CHANGED_EVENT, handleChange);
@@ -36,7 +46,14 @@ export function PendingIntegrationKeys({
       window.removeEventListener(INTEGRATION_KEYS_CHANGED_EVENT, handleChange);
   }, [refetch]);
 
-  const pending = useMemo(() => data?.pending ?? [], [data]);
+  // Only the open request's approval gets a card. When the request did not
+  // name one, every open approval shows rather than none.
+  const pending = useMemo(() => {
+    const all = data?.pending ?? [];
+    return openPendingRef
+      ? all.filter((item) => item.pendingRef === openPendingRef)
+      : all;
+  }, [data, openPendingRef]);
   // Approvals stop accepting a key at expiresAt; refetch then so the card
   // disappears without waiting for another trigger.
   const nextExpiry = useMemo(
@@ -58,6 +75,7 @@ export function PendingIntegrationKeys({
     return () => window.clearTimeout(timer);
   }, [nextExpiry, refetch]);
 
+  if (!openRequestId) return null;
   // React Query clears error during an initial retry, but keeps its timestamp.
   if (!data && (error || (isFetching && errorUpdatedAt > 0))) {
     return (

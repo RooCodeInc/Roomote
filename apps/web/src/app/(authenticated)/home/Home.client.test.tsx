@@ -229,6 +229,7 @@ vi.mock('@/components/tasks', async () => {
       submitDisabledReason,
       submitWithMetaKey,
       tools,
+      submitLeadingAction,
       voice,
     }: {
       onSubmit: (message: PromptInputMessage) => Promise<void> | void;
@@ -241,6 +242,7 @@ vi.mock('@/components/tasks', async () => {
       submitDisabledReason?: string;
       submitWithMetaKey?: boolean;
       tools?: import('react').ReactNode;
+      submitLeadingAction?: import('react').ReactNode;
       voice?: { active: boolean; onToggle: () => void };
     }) => {
       capturedSubmitWithMetaKey = submitWithMetaKey;
@@ -287,6 +289,7 @@ vi.mock('@/components/tasks', async () => {
             onFocus={() => onPromptFocusChange?.(true)}
             onBlur={() => onPromptFocusChange?.(false)}
           />
+          {submitLeadingAction}
           <button type="submit" disabled={Boolean(submitDisabledReason)}>
             Submit prompt
           </button>
@@ -453,15 +456,30 @@ describe('Home', () => {
     );
   });
 
-  it('shows private Session creation only after experimental opt-in', async () => {
+  it('retains the private Session selection and sends it with creation', async () => {
     currentPrivateSessionsExperimentEnabled = true;
-    render(<Home initialHeading="Let's cook!" initialPlaceholderIndex={0} />);
+    const { rerender } = render(<NewTaskForm initialPrompt="First prompt" />);
 
-    const toggle = screen.getByRole('switch', {
-      name: 'Start a private Session',
+    const toggle = screen.getByRole('button', {
+      name: 'Private session',
     });
-    expect(toggle).not.toBeChecked();
+    expect(toggle.querySelector('.lucide-hat-glasses')).toBeInTheDocument();
+    expect(
+      toggle.compareDocumentPosition(
+        screen.getByRole('button', { name: 'Submit prompt' }),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(toggle);
+
+    rerender(<NewTaskForm initialPrompt="Reset prompt" />);
+    expect(
+      screen.getByRole('button', { name: 'Private session' }),
+    ).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
@@ -1124,5 +1142,31 @@ describe('Home', () => {
     // No call is opened on the home page itself; the Session page owns it.
     expect(voiceState.start).not.toHaveBeenCalled();
     expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1?voice=1');
+  });
+
+  it('opens an owner-only private Session for a private voice call', async () => {
+    currentPrivateSessionsExperimentEnabled = true;
+    voiceState.enabled = true;
+    mockStartFastSession.mockResolvedValue({ sessionId: 'private-session-1' });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Private session' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Voice conversation' }),
+    );
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: '',
+          privacy: 'private',
+          voiceCall: true,
+          conversationId: expect.any(String),
+        }),
+      );
+    });
+    expect(mockPush).toHaveBeenCalledWith(
+      '/sessions/private-session-1?voice=1',
+    );
   });
 });

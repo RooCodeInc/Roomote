@@ -20,6 +20,7 @@ vi.mock('@/lib/server/sessions', () => ({
       ownerEmail: 'test@example.com',
       ownerImageUrl: null,
       ownerUserId: 'user-1',
+      privacy: 'shared',
       sourceSurface: 'web',
       activityAt: 1_788_000_000,
       cachedStatus: status,

@@ -8,7 +8,7 @@ import {
 
 import {
   compareBigIntMessageIds,
-  evaluateUnmentionedThreadReplyRouting,
+  resolveUnmentionedThreadReplyRouting,
   type UnmentionedThreadHistoryMessage,
 } from '../shared/unmentioned-thread-reply.js';
 import type { DiscordThreadHistoryMessage } from './thread-context.js';
@@ -41,7 +41,7 @@ function mentionsDiscordUserOtherThanBotWithoutMentioningBot(
   return mentionedUserIds.size > 0 && !mentionedUserIds.has(botUserId ?? '');
 }
 
-function mentionsDiscordUserOtherThanBotOrUser(
+export function mentionsDiscordUserOtherThanBotOrUser(
   text: string,
   botUserId: string | undefined,
   discordUserId: string | null | undefined,
@@ -80,6 +80,7 @@ function toSharedHistoryMessages(
         botUserId,
         message.user,
       ),
+      text: message.text,
     };
   });
 }
@@ -105,6 +106,8 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   isAutomationReportThread?: boolean;
   /** True when the thread is an open Fast conversation. */
   isOpenConversationThread?: boolean;
+  /** Owner-controlled opt-in that keeps peer-mentioned Fast turns eligible. */
+  peerConversationsExperimentEnabled?: boolean;
   fetchThreadMessages: () => Promise<DiscordThreadHistoryMessage[] | null>;
 }): Promise<boolean> {
   const { message, botUserId } = params;
@@ -132,6 +135,10 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
       getDiscordMessageContent(message),
       getDiscordMessageMentions(message),
       botUserId,
+    ) &&
+    !(
+      params.peerConversationsExperimentEnabled &&
+      params.isOpenConversationThread
     )
   ) {
     return false;
@@ -141,6 +148,15 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   // completed run, or pending routing for this thread).
   if (!params.isRoomoteThread) {
     return false;
+  }
+
+  // The owner opt-in admits visible human discussion in this exact Fast
+  // thread. Provider and linked-sender checks above still fail closed.
+  if (
+    params.peerConversationsExperimentEnabled &&
+    params.isOpenConversationThread
+  ) {
+    return true;
   }
 
   const threadMessages = await params.fetchThreadMessages();
@@ -164,8 +180,9 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
     isHumanAuthoredHistoryMessage(rootMessage!, botUserId) &&
     rootMessage!.user === senderDiscordUserId;
 
-  const decision = evaluateUnmentionedThreadReplyRouting({
+  const decision = await resolveUnmentionedThreadReplyRouting({
     eventMessageId: message.id,
+    eventText: getDiscordMessageContent(message),
     senderUserId: senderDiscordUserId,
     isThreadTaskOwner:
       Boolean(params.ownedThreadUserId) &&

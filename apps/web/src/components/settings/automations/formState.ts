@@ -95,6 +95,7 @@ export type FormState = {
   issueFixerInstructions: string;
   /** Merged, provider-tagged auto-respond rows (Slack and Discord). */
   channelAutoStartChannels: ChannelAutoStartFormRow[];
+  channelAutoStartEnabled: boolean;
   managerSlackChannel: string;
   managerDiscordChannel: string;
   managerStatsFrequency: ManagerStatsFrequency;
@@ -171,6 +172,7 @@ const CONFLICT_RESOLVER_FIELDS: Array<keyof FormState> = [
 ];
 
 const CHANNEL_AUTO_START_FIELDS: Array<keyof FormState> = [
+  'channelAutoStartEnabled',
   'channelAutoStartChannels',
 ];
 
@@ -403,6 +405,7 @@ export function buildAutomationSettingsSaveInput(
         launchMode: row.launchMode,
         launchCriteria: row.launchCriteria.trim() || null,
       })),
+    channelAutoStartEnabled: stateToSave.channelAutoStartEnabled,
     // Always sent (even empty) — only legacy clients omit it, which the API
     // treats as "preserve the persisted Discord rows".
     channelAutoStartDiscordChannels: stateToSave.channelAutoStartChannels

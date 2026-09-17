@@ -17,7 +17,10 @@ import type {
   FastAgentConversationOwner,
   ReasoningEffort,
   RunStatus,
+  TaskSurface,
+  TaskTrigger,
 } from '@roomote/types';
+import { captureUserStartedSessionCreated } from '../session-telemetry';
 import type { FastAgentConversation } from './fast-agent-conversation';
 import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
 import type {
@@ -56,6 +59,7 @@ export async function getOrCreateFastAgentSession({
   initialModel,
   initialReasoningEffort,
   chatInitiationOrder,
+  userInitiated,
 }: {
   owner?: FastAgentConversationOwner;
   userId?: string;
@@ -64,11 +68,14 @@ export async function getOrCreateFastAgentSession({
   sessionId?: string;
   /** Title to seed only when this call creates the conversation. */
   initialTitle?: string;
+  /** Creation value or explicit assertion; omission preserves an existing mode. */
   privacy?: 'shared' | 'private';
   initialModel?: string;
   initialReasoningEffort?: ReasoningEffort;
   /** Human turn start order; records the provider only for a new Session. */
   chatInitiationOrder?: ChatInitiationOrder;
+  /** Origin supplied only when this call represents a person's request to start a Session. */
+  userInitiated?: { surface: TaskSurface; trigger: TaskTrigger };
 }): Promise<FastAgentSessionRecord> {
   const session = await fastAgentConversationRepository.getOrCreate({
     ...(owner ? { owner } : {}),
@@ -94,6 +101,19 @@ export async function getOrCreateFastAgentSession({
       console.warn(
         `[Fast Agent] Failed to record chat initiation provider: ${error instanceof Error ? error.message : String(error)}`,
       );
+    });
+  }
+  if (
+    userInitiated &&
+    session.created &&
+    !sessionId &&
+    session.userId &&
+    session.conversation.surface !== 'automation'
+  ) {
+    captureUserStartedSessionCreated({
+      userId: session.userId,
+      surface: userInitiated.surface,
+      trigger: userInitiated.trigger,
     });
   }
   return session;

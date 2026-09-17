@@ -30,7 +30,7 @@ const LOG_PREFIX = '[agentmail-outbound]';
 /**
  * Outbound-initiated (transactional) email. The consent invariant lives
  * here, enforced in code rather than call-site discipline: Roomote initiates
- * email only to the recipient's own verified account address, and never to a
+ * email only to the recipient's own account address, and never to a
  * suppressed address. Replies within an existing conversation do not pass
  * through this module and are never suppressed.
  */
@@ -84,7 +84,7 @@ export type AgentMailOutboundAddressResolution =
 export type AgentMailOutboundIdentity = {
   id: string;
   emailAddress: string;
-  kind: 'verified';
+  kind: 'account';
 };
 
 /** Thrown when a stored conversation's consented recipient is no longer eligible. */
@@ -108,11 +108,13 @@ export class AgentMailRecipientUnavailableError extends Error {
   }
 }
 
-function buildVerifiedEmailIdentityId(userId: string, emailAddress: string) {
+function buildAccountEmailIdentityId(userId: string, emailAddress: string) {
   const digest = createHash('sha256')
     .update(normalizeEmailAddress(emailAddress))
     .digest('hex')
     .slice(0, 24);
+  // Keep the existing opaque prefix so saved automation destinations remain
+  // bound to the same exact account address.
   return `verified:${userId}:${digest}`;
 }
 
@@ -125,11 +127,12 @@ async function findActiveMember(userId: string): Promise<boolean> {
 }
 
 /**
- * The user's explicitly verified account email as a selectable identity, or
- * why there is none. Shared by the identity list (which hides the reason) and
- * the exact-identity resolver (which reports it).
+ * The user's account email as a selectable outbound identity, or why there is
+ * none. Shared by the identity list (which hides the reason) and the exact-
+ * identity resolver (which reports it). Inbound sender authorization applies
+ * its separate verification requirement in the conversation store.
  */
-async function resolveVerifiedAccountIdentity(
+async function resolveAccountIdentity(
   userId: string,
 ): Promise<
   | { status: 'ok'; identity: AgentMailOutboundIdentity }
@@ -139,7 +142,7 @@ async function resolveVerifiedAccountIdentity(
     return { status: 'no_active_member' };
   }
   const authUser = await db.query.authUsers.findFirst({
-    where: and(eq(authUsers.id, userId), eq(authUsers.emailVerified, true)),
+    where: eq(authUsers.id, userId),
     columns: { email: true },
   });
   if (!authUser?.email) {
@@ -152,9 +155,9 @@ async function resolveVerifiedAccountIdentity(
   return {
     status: 'ok',
     identity: {
-      id: buildVerifiedEmailIdentityId(userId, emailAddress),
+      id: buildAccountEmailIdentityId(userId, emailAddress),
       emailAddress,
-      kind: 'verified',
+      kind: 'account',
     },
   };
 }
@@ -162,7 +165,7 @@ async function resolveVerifiedAccountIdentity(
 export async function listAgentMailOutboundIdentities(
   userId: string,
 ): Promise<AgentMailOutboundIdentity[]> {
-  const resolved = await resolveVerifiedAccountIdentity(userId);
+  const resolved = await resolveAccountIdentity(userId);
   return resolved.status === 'ok' ? [resolved.identity] : [];
 }
 
@@ -188,7 +191,7 @@ export async function resolveAgentMailOutboundIdentity(
   userId: string,
   identityId: string,
 ): Promise<AgentMailOutboundAddressResolution> {
-  const resolved = await resolveVerifiedAccountIdentity(userId);
+  const resolved = await resolveAccountIdentity(userId);
   if (resolved.status !== 'ok') {
     return { ok: false, reason: resolved.status };
   }
@@ -211,29 +214,16 @@ export async function resolveAgentMailOutboundRecipient(
 }
 
 /**
- * The address Roomote may initiate email to for this user: their verified
- * account email. Unverified account emails never qualify.
+ * The address Roomote may initiate email to for this user: their account
+ * email, whether or not it is verified for inbound sender authorization.
  */
 export async function resolveAgentMailOutboundAddress(
   userId: string,
 ): Promise<AgentMailOutboundAddressResolution> {
-  if (!(await findActiveMember(userId))) {
-    return { ok: false, reason: 'no_active_member' };
-  }
-
-  const authUser = await db.query.authUsers.findFirst({
-    where: and(eq(authUsers.id, userId), eq(authUsers.emailVerified, true)),
-    columns: { email: true },
-  });
-  if (!authUser?.email) {
-    return { ok: false, reason: 'no_permitted_address' };
-  }
-
-  const emailAddress = normalizeEmailAddress(authUser.email);
-  if (await isAgentMailAddressSuppressed(emailAddress)) {
-    return { ok: false, reason: 'suppressed' };
-  }
-  return { ok: true, emailAddress };
+  const resolved = await resolveAccountIdentity(userId);
+  return resolved.status === 'ok'
+    ? { ok: true, emailAddress: resolved.identity.emailAddress }
+    : { ok: false, reason: resolved.status };
 }
 
 /** Whether an outbound-initiated email to this user could be sent right now. */

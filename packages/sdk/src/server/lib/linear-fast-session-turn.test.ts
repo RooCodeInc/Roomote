@@ -232,6 +232,7 @@ describe('startLinearFastSessionTurn', () => {
     expect(result).toEqual({ status: 'queued', fastConversationId: 'fast-1' });
     expect(mocks.getOrCreateFastAgentSession).toHaveBeenCalledWith({
       userId: 'user-1',
+      userInitiated: { surface: 'linear', trigger: 'message' },
       conversation: {
         surface: 'linear',
         workspaceId: 'org-1',

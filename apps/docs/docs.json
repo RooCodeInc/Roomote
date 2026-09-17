@@ -93,6 +93,7 @@
               "providers/inference/openrouter",
               "providers/inference/requesty",
               "providers/inference/together-ai",
+              "providers/inference/typesafe",
               "providers/inference/vercel-ai-gateway",
               "providers/inference/vllm",
               "providers/inference/xai",

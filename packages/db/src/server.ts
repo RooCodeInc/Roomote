@@ -92,6 +92,7 @@ export * from './lib/agentmail-runtime-credentials';
 export * from './lib/discord-runtime-credentials';
 export * from './lib/pr-action-settings';
 export * from './lib/github-mention-settings';
+export * from './lib/judgment-model-settings';
 export * from './lib/pr-ready-after-clean-review-settings';
 export * from './lib/account-link-help-settings';
 export * from './lib/setup-qualification';

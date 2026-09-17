@@ -24,6 +24,11 @@ const providerCreditsData = vi.hoisted(() => ({
   current: null as Array<Record<string, unknown>> | null,
 }));
 const mutateAsyncMock = vi.hoisted(() => vi.fn());
+const judgmentSettingsData = vi.hoisted(() => ({
+  current: null as Record<string, unknown> | null,
+}));
+const saveTypeSafeKeyMock = vi.hoisted(() => vi.fn());
+const deleteTypeSafeKeyMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ mutateAsync: mutateAsyncMock }),
@@ -44,7 +49,28 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 
 vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
+}));
+
+vi.mock('@/hooks/task-models/useJudgmentModelSettings', () => ({
+  useJudgmentModelSettings: () => ({
+    data: judgmentSettingsData.current,
+    isPending: judgmentSettingsData.current === null,
+  }),
+}));
+
+vi.mock('@/hooks/task-models/useSaveTypeSafeKey', () => ({
+  useSaveTypeSafeKey: () => ({
+    mutateAsync: saveTypeSafeKeyMock,
+    isPending: false,
+  }),
+}));
+
+vi.mock('@/hooks/task-models/useDeleteTypeSafeKey', () => ({
+  useDeleteTypeSafeKey: () => ({
+    mutateAsync: deleteTypeSafeKeyMock,
+    isPending: false,
+  }),
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -155,7 +181,27 @@ vi.mock('@/components/settings/Section', () => ({
   ),
 }));
 
+import { toast } from 'sonner';
 import { InferenceProviderSection } from './InferenceProviderSection';
+
+function buildJudgmentSettings(
+  typeSafe: {
+    connected: boolean;
+    source: 'environment' | 'settings' | null;
+  } = {
+    connected: false,
+    source: null,
+  },
+) {
+  return {
+    typeSafe,
+    vercelGatewayConnected: false,
+    storedSelection: null,
+    envSelection: null,
+    effectiveSelection: typeSafe.connected ? 'typesafe' : 'off',
+    effectiveSelectionUsable: true,
+  };
+}
 
 function buildProviderSetup(
   overrides: {
@@ -351,6 +397,7 @@ describe('InferenceProviderSection', () => {
     xaiStatusData.current = null;
     subscriptionUsageData.current = null;
     providerCreditsData.current = null;
+    judgmentSettingsData.current = null;
   });
 
   const renderInferenceProviderSection = () => {
@@ -1247,5 +1294,191 @@ describe('InferenceProviderSection', () => {
     expect(screen.getByLabelText('Endpoint URL for Ollama')).toHaveValue(
       'http://127.0.0.1:11434',
     );
+  });
+  describe('TypeSafe judgment provider', () => {
+    it('adds TypeSafe from the Add provider picker without the chat provider save path', async () => {
+      providerSetupData.current = buildProviderSetup({
+        anthropicSavedKey: true,
+      });
+      judgmentSettingsData.current = buildJudgmentSettings();
+      saveTypeSafeKeyMock.mockResolvedValue({ keyCheck: 'verified' });
+
+      renderInferenceProviderSection();
+
+      expect(screen.queryByText('TypeSafe')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /Add provider/ }));
+      fireEvent.click(
+        screen.getByRole('combobox', { name: 'Provider to add' }),
+      );
+      fireEvent.click(screen.getByRole('option', { name: 'TypeSafe' }));
+
+      expect(
+        screen.getByText(
+          'Judgment model for fast routing and triage decisions. Not used for chat or tasks.',
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('link', { name: 'Create a TypeSafe API key' }),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.change(screen.getByLabelText('API key for TypeSafe'), {
+          target: { value: 'ts-key' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+      });
+
+      expect(saveTypeSafeKeyMock).toHaveBeenCalledWith({ apiKey: 'ts-key' });
+      expect(mutateAsyncMock).not.toHaveBeenCalled();
+      expect(toast.success).toHaveBeenCalledWith('Saved the TypeSafe API key.');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('shows a rejected key as a field error and keeps the dialog open', async () => {
+      providerSetupData.current = buildProviderSetup({
+        anthropicSavedKey: true,
+      });
+      judgmentSettingsData.current = buildJudgmentSettings();
+      saveTypeSafeKeyMock.mockRejectedValue(
+        new Error('TypeSafe rejected this API key.'),
+      );
+
+      renderInferenceProviderSection();
+
+      fireEvent.click(screen.getByRole('button', { name: /Add provider/ }));
+      fireEvent.click(
+        screen.getByRole('combobox', { name: 'Provider to add' }),
+      );
+      fireEvent.click(screen.getByRole('option', { name: 'TypeSafe' }));
+
+      await act(async () => {
+        fireEvent.change(screen.getByLabelText('API key for TypeSafe'), {
+          target: { value: 'ts-bad' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+      });
+
+      // Queried by text: Radix's aria-hidden bookkeeping from the previous
+      // test's dialog can hide this one from role queries in jsdom.
+      expect(
+        screen.getByText('TypeSafe rejected this API key.'),
+      ).toHaveAttribute('role', 'alert');
+      expect(screen.getByLabelText('API key for TypeSafe')).toHaveAttribute(
+        'aria-invalid',
+        'true',
+      );
+      expect(screen.getByLabelText('API key for TypeSafe')).toHaveValue(
+        'ts-bad',
+      );
+      expect(toast.error).not.toHaveBeenCalled();
+
+      fireEvent.change(screen.getByLabelText('API key for TypeSafe'), {
+        target: { value: 'ts-better' },
+      });
+      expect(
+        screen.queryByText('TypeSafe rejected this API key.'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('warns when the key was saved without verification', async () => {
+      providerSetupData.current = buildProviderSetup({
+        anthropicSavedKey: true,
+      });
+      judgmentSettingsData.current = buildJudgmentSettings({
+        connected: true,
+        source: 'settings',
+      });
+      saveTypeSafeKeyMock.mockResolvedValue({ keyCheck: 'unverified' });
+
+      renderInferenceProviderSection();
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Edit TypeSafe API key' }),
+      );
+
+      await act(async () => {
+        fireEvent.change(screen.getByLabelText('New API key for TypeSafe'), {
+          target: { value: 'ts-rotated' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      });
+
+      expect(saveTypeSafeKeyMock).toHaveBeenCalledWith({
+        apiKey: 'ts-rotated',
+      });
+      expect(toast.warning).toHaveBeenCalledWith(
+        'Saved the TypeSafe API key, but TypeSafe could not be reached to verify it.',
+      );
+    });
+
+    it('renders a connected key as a removable row that does not count as an inference provider', async () => {
+      providerSetupData.current = buildProviderSetup({
+        anthropicSavedKey: true,
+      });
+      judgmentSettingsData.current = buildJudgmentSettings({
+        connected: true,
+        source: 'settings',
+      });
+      deleteTypeSafeKeyMock.mockResolvedValue({});
+
+      renderInferenceProviderSection();
+
+      expect(screen.getByText('TypeSafe')).toBeInTheDocument();
+      // TypeSafe cannot keep a deployment runnable, so Anthropic is still
+      // the last deletable inference provider.
+      expect(
+        screen.getByRole('button', { name: 'Delete Anthropic provider' }),
+      ).toBeDisabled();
+
+      fireEvent.click(screen.getByRole('button', { name: /Add provider/ }));
+      fireEvent.click(
+        screen.getByRole('combobox', { name: 'Provider to add' }),
+      );
+      expect(
+        screen.queryByRole('option', { name: 'TypeSafe' }),
+      ).not.toBeInTheDocument();
+      fireEvent.keyDown(document.activeElement ?? document.body, {
+        key: 'Escape',
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Delete TypeSafe provider' }),
+      );
+      expect(screen.getByRole('dialog')).toHaveTextContent(
+        'fall back to the helper model',
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+      });
+
+      expect(deleteTypeSafeKeyMock).toHaveBeenCalledTimes(1);
+      expect(mutateAsyncMock).not.toHaveBeenCalled();
+    });
+
+    it('locks an environment TypeSafe key', () => {
+      providerSetupData.current = buildProviderSetup({
+        anthropicSavedKey: true,
+      });
+      judgmentSettingsData.current = buildJudgmentSettings({
+        connected: true,
+        source: 'environment',
+      });
+
+      renderInferenceProviderSection();
+
+      expect(
+        screen.getByLabelText(
+          'TypeSafe API key is managed by R_TYPESAFE_API_KEY',
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Edit TypeSafe API key' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Delete TypeSafe provider' }),
+      ).not.toBeInTheDocument();
+    });
   });
 });

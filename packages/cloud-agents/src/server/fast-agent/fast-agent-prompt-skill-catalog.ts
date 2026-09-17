@@ -18,6 +18,9 @@ export type FastAgentPromptSkillCatalog = {
   marketplaceSources: FastAgentSettingsPromptCatalog['marketplaceSources'];
   /** Skills omitted from the prompt after `FAST_AGENT_PROMPT_SKILL_LIMIT`. */
   omittedSkillCount: number;
+  /** The omitted skills themselves, in catalog order. They stay out of the
+   * system prompt; the per-turn skill relevance hint can still name one. */
+  omittedSkills?: FastAgentSkillSummary[];
   skills: FastAgentSkillSummary[];
   warnings: string[];
 };
@@ -101,6 +104,7 @@ export async function loadFastAgentPromptSkillCatalog(
       0,
       skills.length - FAST_AGENT_PROMPT_SKILL_LIMIT,
     ),
+    omittedSkills: skills.slice(FAST_AGENT_PROMPT_SKILL_LIMIT),
     skills: skills.slice(0, FAST_AGENT_PROMPT_SKILL_LIMIT),
     warnings,
   };

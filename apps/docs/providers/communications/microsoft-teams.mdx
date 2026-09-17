@@ -156,6 +156,12 @@ mention or eligible thread-reply signals used for task entry. Sessions are
 isolated by linked Roomote user even when several people share one Teams thread.
 Unlinked senders receive the account-link prompt instead of starting work.
 
+The **Peer conversations** experiment does not apply to Teams. Bot Framework
+webhooks provide addressed activity, and delegated Microsoft Graph access can
+supply bounded history for eligible thread replies, but Roomote still keeps
+each person's Fast Session separate. Those signals are not treated as one
+shared, owner-bound conversation or as permission to monitor a channel.
+
 Replies to Fast messages continue the bound Fast session. Existing task
 conversations keep their active-task and resumable-snapshot behavior, and Fast
 delegates repository work into normal Roomote tasks. If Fast cannot start a

@@ -47,7 +47,19 @@ const writeToolNames = [
   'add_issue_comment',
   'add_reply_to_pull_request_comment',
 ];
-const accountWriteToolNames = ['create_gist'];
+/**
+ * Gist tools act on the member's own GitHub account, so they run under the
+ * member's linked-account token; an installation token cannot reach gists.
+ * Updates are allowed because GitHub keeps every revision of a gist.
+ */
+const accountGistToolNames = ['create_gist', 'get_gist', 'update_gist'];
+/**
+ * A member's gists are personal and often unrelated to work, and Session
+ * transcripts are visible across the deployment. Roomote works only with a
+ * gist it created or one the member points it at: it never lists existing
+ * gists, and never deletes one, which GitHub cannot undo.
+ */
+const withheldGistToolNames = ['list_gists', 'delete_gist'];
 const gistArgs = z.object({
   filename: z.string().min(1),
   content: z.string(),
@@ -304,8 +316,16 @@ export function createGithubMcp(options?: {
             'GitHub MCP requires an active Roomote member',
           );
       }
-      if (name && accountWriteToolNames.includes(name)) {
-        if (!gistArgs.safeParse(toolArguments).success) {
+      if (name && withheldGistToolNames.includes(name))
+        throw new McpProxyError(
+          403,
+          'Roomote does not list or delete gists. Share the link to a specific gist to work with it.',
+        );
+      if (name && accountGistToolNames.includes(name)) {
+        if (
+          name === 'create_gist' &&
+          !gistArgs.safeParse(toolArguments).success
+        ) {
           throw new McpProxyError(
             400,
             'GitHub gist creation requires filename, content, and an explicit public boolean. Use false for a secret gist, which is link-accessible rather than private.',
@@ -338,11 +358,14 @@ export function createGithubMcp(options?: {
         if (!token) {
           throw new McpProxyError(
             403,
-            'Link your GitHub account under Settings > Linked Accounts before creating a gist.',
+            'Link your GitHub account under Settings > Linked Accounts before using gists.',
           );
         }
         return {
           authHeader: token,
+          // Members are not held to the coding-task allowlist, which only
+          // names create_gist.
+          ...(auth.tokenType === 'auth' ? { allowedToolNames: null } : {}),
           extraHeaders: buildRouterGitHubHeaders(false),
         };
       }
@@ -379,7 +402,10 @@ export function createGithubMcp(options?: {
           authHeader,
           ...responseBounds,
           allowedToolNames: null,
-          disabledToolNames: gistUnavailable ? accountWriteToolNames : [],
+          disabledToolNames: [
+            ...withheldGistToolNames,
+            ...(gistUnavailable ? accountGistToolNames : []),
+          ],
           extraHeaders: { 'X-MCP-Readonly': 'false', 'X-MCP-Toolsets': 'all' },
         };
       }
@@ -391,7 +417,7 @@ export function createGithubMcp(options?: {
         ...responseBounds,
         disabledToolNames: [
           ...writeToolNames,
-          ...(gistUnavailable ? accountWriteToolNames : []),
+          ...(gistUnavailable ? accountGistToolNames : []),
         ],
         // Discovery is not pinned read-only so the gist tool stays listed;
         // every call is.

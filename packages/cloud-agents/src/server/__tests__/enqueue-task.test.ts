@@ -8,10 +8,18 @@ import Redis from 'ioredis-mock';
 const { mockGenerateLlmTaskTitle } = vi.hoisted(() => ({
   mockGenerateLlmTaskTitle: vi.fn().mockResolvedValue('Generated title'),
 }));
+const { mockCaptureEvent } = vi.hoisted(() => ({
+  mockCaptureEvent: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock('../llm-task-title', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../llm-task-title')>()),
   generateLlmTaskTitle: mockGenerateLlmTaskTitle,
+}));
+
+vi.mock('@roomote/telemetry/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/telemetry/server')>()),
+  captureEvent: mockCaptureEvent,
 }));
 
 import {
@@ -787,6 +795,7 @@ describe('enqueueTask initiator stamping', () => {
       surface: 'web',
       trigger: 'manual',
     });
+    mockCaptureEvent.mockClear();
 
     const childRun = await launchFresh({
       task: standardTaskInput({
@@ -804,6 +813,11 @@ describe('enqueueTask initiator stamping', () => {
     });
 
     expect(childRun.sourceRunId).toBe(parentRun.id);
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(0);
     expect(
       (childRun.payload as { notifySourceRunOnSettle?: boolean })
         .notifySourceRunOnSettle,
@@ -998,6 +1012,49 @@ describe('enqueueTask initiator stamping', () => {
 });
 
 describe('enqueueTask Session linkage', () => {
+  it('captures one user-started Session creation with its origin', async () => {
+    const userId = await createUser();
+    mockCaptureEvent.mockClear();
+
+    await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+    });
+
+    expect(mockCaptureEvent).toHaveBeenCalledWith('session_created', {
+      userId,
+      properties: {
+        surface: 'slack',
+        trigger: 'message',
+        outcome: 'created',
+      },
+    });
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('does not capture Session creation for automation launches', async () => {
+    mockCaptureEvent.mockClear();
+
+    await launchFresh({
+      initiator: { kind: 'automation', key: 'custom_automation' },
+      workflow: 'standard',
+      surface: 'system',
+      trigger: 'schedule',
+    });
+
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(0);
+  });
+
   it('creates exactly one Session link for a visible fresh task', async () => {
     const userId = await createUser();
     const run = await launchFresh({
@@ -1150,6 +1207,7 @@ describe('enqueueTask Session linkage', () => {
         launchIdempotencyKey: 'setup-starter:concurrent-retry',
       },
     });
+    mockCaptureEvent.mockClear();
 
     const [first, second] = await Promise.all([
       launchFresh({
@@ -1167,6 +1225,16 @@ describe('enqueueTask Session linkage', () => {
         trigger: 'manual',
       }),
     ]);
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(0);
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_task_delegated',
+      ),
+    ).toHaveLength(1);
 
     expect(second.id).toBe(first.id);
     expect(second.taskId).toBe(first.taskId);
@@ -1216,6 +1284,7 @@ describe('enqueueTask Session linkage', () => {
       await cancellationHeld;
     });
     await cancellationReady;
+    mockCaptureEvent.mockClear();
 
     const retry = launchFresh({
       task,
@@ -1230,6 +1299,11 @@ describe('enqueueTask Session linkage', () => {
 
     expect(replacement.id).not.toBe(first.id);
     expect(replacement.taskId).not.toBe(first.taskId);
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(0);
   });
 
   it('rejects keyed reuse when the persisted Session attachment conflicts', async () => {

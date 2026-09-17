@@ -900,6 +900,7 @@ describe('Telegram webhook handler', () => {
     });
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'mapped-user-1',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
       conversation: {
         surface: 'telegram',
         workspaceId: '222',
@@ -1338,6 +1339,7 @@ describe('Telegram webhook handler', () => {
     });
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'mapped-user-1',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
       conversation: {
         surface: 'telegram',
         workspaceId: '-1007',
@@ -2080,6 +2082,7 @@ describe('Telegram webhook handler', () => {
     });
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'launch-owner-2',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
       conversation: {
         surface: 'telegram',
         workspaceId: '222',
@@ -2411,6 +2414,7 @@ describe('Telegram webhook handler', () => {
     // A plain private chat keeps one conversation, so the request joins it.
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'launch-owner-5',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
       conversation: {
         surface: 'telegram',
         workspaceId: '222',
@@ -2462,6 +2466,7 @@ describe('Telegram webhook handler', () => {
     );
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'launch-owner-5',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
       conversation: {
         surface: 'telegram',
         workspaceId: '222',
@@ -2618,6 +2623,7 @@ describe('Telegram webhook handler', () => {
     // A group without topics anchors the conversation on the command message.
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'launch-owner-10',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
       conversation: {
         surface: 'telegram',
         workspaceId: '-1007',

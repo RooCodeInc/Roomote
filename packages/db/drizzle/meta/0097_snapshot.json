@@ -1,5 +1,5 @@
 {
-  "id": "90fc2a56-ce9a-46a3-9f99-b2d23bba7b0a",
+  "id": "71e28947-c722-4a1b-a71f-617646fb614f",
   "prevId": "b7c6b7b1-30a1-45a3-a183-f96cc83d1be4",
   "version": "7",
   "dialect": "postgresql",
@@ -14157,18 +14157,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "ping_submitted_at": {
-          "name": "ping_submitted_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ping_submitted_by_user_id": {
-          "name": "ping_submitted_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -14275,15 +14263,6 @@
           "tableFrom": "task_platform_issue_reports",
           "tableTo": "task_messages",
           "columnsFrom": ["task_message_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "task_platform_issue_reports_ping_submitted_by_user_id_users_id_fk": {
-          "name": "task_platform_issue_reports_ping_submitted_by_user_id_users_id_fk",
-          "tableFrom": "task_platform_issue_reports",
-          "tableTo": "users",
-          "columnsFrom": ["ping_submitted_by_user_id"],
           "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
@@ -15395,6 +15374,22 @@
           ],
           "isUnique": true,
           "where": "\"task_runs\".\"payload\"->>'launchIdempotencyKey' IS NOT NULL AND \"task_runs\".\"canceled_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "task_runs_canceled_launch_idempotency_key_idx": {
+          "name": "task_runs_canceled_launch_idempotency_key_idx",
+          "columns": [
+            {
+              "expression": "(\"payload\"->>'launchIdempotencyKey')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"task_runs\".\"payload\"->>'launchIdempotencyKey' IS NOT NULL AND \"task_runs\".\"canceled_at\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
