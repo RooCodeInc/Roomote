@@ -7,6 +7,25 @@ import {
   SLACK_EVENT_DEDUP_PREFIX,
 } from './constants.js';
 
+const CLAIM_EVENT_SCRIPT = `
+local existing = redis.call('GET', KEYS[1])
+if existing == 'done' then
+  return 'completed'
+end
+if existing then
+  return 'processing'
+end
+local stored = redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2], 'NX')
+if stored then
+  return 'claimed'
+end
+existing = redis.call('GET', KEYS[1])
+if existing == 'done' then
+  return 'completed'
+end
+return 'processing'
+`;
+
 const COMPLETE_EVENT_SCRIPT = `
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then
   return false
@@ -27,20 +46,31 @@ export type SlackEventClaim = {
   token: string;
 };
 
+type SlackEventClaimResult =
+  | { status: 'claimed'; claim: SlackEventClaim }
+  | { status: 'processing' }
+  | { status: 'completed' };
+
 export async function claimSlackEvent(
   eventId: string,
-): Promise<SlackEventClaim | null> {
+): Promise<SlackEventClaimResult> {
   const key = `${SLACK_EVENT_DEDUP_PREFIX}${eventId}`;
   const token = `processing:${randomUUID()}`;
-  const claimed = await getRedis().set(
+  const result = await getRedis().eval(
+    CLAIM_EVENT_SCRIPT,
+    1,
     key,
     token,
-    'EX',
-    EVENT_DEDUP_TTL_SECONDS,
-    'NX',
+    EVENT_DEDUP_TTL_SECONDS.toString(),
   );
 
-  return claimed ? { key, token } : null;
+  if (result === 'claimed') {
+    return { status: 'claimed', claim: { key, token } };
+  }
+  if (result === 'completed') {
+    return { status: 'completed' };
+  }
+  return { status: 'processing' };
 }
 
 export async function completeSlackEventClaim(

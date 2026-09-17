@@ -168,12 +168,20 @@ slack.post('/', async (c) => {
     let eventClaim: SlackEventClaim | null = null;
 
     if (eventId) {
-      eventClaim = await claimSlackEvent(eventId);
+      const claimResult = await claimSlackEvent(eventId);
 
-      if (!eventClaim) {
+      if (claimResult.status === 'completed') {
         apiLogger.debug(`🔄 Skipping duplicate Slack event: ${eventId}`);
         return c.json({ ok: true });
       }
+      if (claimResult.status === 'processing') {
+        apiLogger.debug(`⏳ Slack event is still processing: ${eventId}`);
+        return c.json(
+          { ok: false, error: 'slack_event_processing' },
+          { status: 503 },
+        );
+      }
+      eventClaim = claimResult.claim;
     }
 
     const isAppAuthoredEvent = isAppAuthoredSlackEvent(event);

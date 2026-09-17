@@ -5,14 +5,12 @@ const mocks = vi.hoisted(() => ({
   dispatchSlackEvent: vi.fn(),
   findInstallation: vi.fn(),
   redisEval: vi.fn(),
-  redisSet: vi.fn(),
   redisValues: new Map<string, string>(),
 }));
 
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({
     eval: mocks.redisEval,
-    set: mocks.redisSet,
   }),
 }));
 
@@ -120,15 +118,19 @@ describe('Slack event callback deduplication', () => {
       },
     ]);
     mocks.dispatchSlackEvent.mockResolvedValue(undefined);
-    mocks.redisSet.mockImplementation(async (key: string, value: string) => {
-      if (mocks.redisValues.has(key)) {
-        return null;
-      }
-      mocks.redisValues.set(key, value);
-      return 'OK';
-    });
     mocks.redisEval.mockImplementation(
       async (script: string, _keys: number, key: string, token: string) => {
+        if (script.includes('local existing')) {
+          const existing = mocks.redisValues.get(key);
+          if (existing === 'done') {
+            return 'completed';
+          }
+          if (existing) {
+            return 'processing';
+          }
+          mocks.redisValues.set(key, token);
+          return 'claimed';
+        }
         if (mocks.redisValues.get(key) !== token) {
           return 0;
         }
@@ -164,6 +166,38 @@ describe('Slack event callback deduplication', () => {
     const duplicateResponse = await sendCallback();
     expect(duplicateResponse.status).toBe(200);
     await expect(duplicateResponse.json()).resolves.toEqual({ ok: true });
+    expect(mocks.dispatchSlackEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a redelivery retryable while the first attempt is processing', async () => {
+    let rejectDispatch: ((error: Error) => void) | undefined;
+    mocks.dispatchSlackEvent.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectDispatch = reject;
+        }),
+    );
+
+    const firstResponsePromise = sendCallback();
+    await vi.waitFor(() => {
+      expect(mocks.dispatchSlackEvent).toHaveBeenCalledTimes(1);
+    });
+
+    const redeliveryResponse = await sendCallback();
+    expect(redeliveryResponse.status).toBe(503);
+    await expect(redeliveryResponse.json()).resolves.toEqual({
+      ok: false,
+      error: 'slack_event_processing',
+    });
+    expect(mocks.dispatchSlackEvent).toHaveBeenCalledTimes(1);
+
+    rejectDispatch?.(new Error('transient database failure'));
+    const firstResponse = await firstResponsePromise;
+    expect(firstResponse.status).toBe(503);
+    expect(mocks.redisValues.has('slack:event:Ev123')).toBe(false);
+
+    const retryResponse = await sendCallback();
+    expect(retryResponse.status).toBe(200);
     expect(mocks.dispatchSlackEvent).toHaveBeenCalledTimes(2);
   });
 });
