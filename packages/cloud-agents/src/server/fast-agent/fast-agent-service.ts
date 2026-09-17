@@ -2285,6 +2285,19 @@ export async function answerFastAgentQuestion({
   const replyStream = createFastAgentReplyStreamPublisher({
     getConversationId: () => canonicalConversationId,
   });
+  let surfaceDisposed = false;
+  let surfaceActivityStarted = false;
+  const startSurfaceActivity = () => {
+    if (surfaceDisposed || surfaceActivityStarted || !adapter.activity) return;
+    surfaceActivityStarted = true;
+    try {
+      adapter.activity.start();
+    } catch (error) {
+      console.warn(
+        `[Fast Agent] Failed to start surface activity: ${formatErrorForLog(error)}`,
+      );
+    }
+  };
   let streamedReply:
     | { eventId: string; turnSeq: number; sentText: string }
     | undefined;
@@ -2308,6 +2321,7 @@ export async function answerFastAgentQuestion({
     if (isInstructionClosed(getInstructionVersion(update.messageId))) return;
     const text = replyTextTracker.unconsumedText();
     if (!text.trim()) return;
+    startSurfaceActivity();
     surfaceReplyStream.update(text, replyTextTracker.hasIncompleteUnconsumed());
     streamedReply ??= {
       ...allocateCanonicalEvent(`assistant:${nextAssistantOrdinal++}`),
@@ -2639,6 +2653,7 @@ export async function answerFastAgentQuestion({
         batch.some(({ followUp }) => followUp.allowSilentAmbientReply !== true)
       ) {
         steeredDirectedFollowUp = true;
+        startSurfaceActivity();
       }
       injectedHumanFollowUpMessages.push(...batchMessages);
       injectedHumanFollowUpFiles.push(...batchFiles);
@@ -2904,6 +2919,7 @@ export async function answerFastAgentQuestion({
     message: string,
     post: () => Promise<void>,
   ) => {
+    startSurfaceActivity();
     const call = await beginCanonicalToolEvent({
       title: FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
       args: { purpose: 'closeout', message },
@@ -3071,7 +3087,6 @@ export async function answerFastAgentQuestion({
     return true;
   };
 
-  let surfaceDisposed = false;
   const disposeSurface = () => {
     surfaceDisposed = true;
     surfaceReplyStream.dispose();
@@ -3090,8 +3105,12 @@ export async function answerFastAgentQuestion({
       });
     surfaceSettlement ??= (async () => {
       await surfaceReplyStream.close();
-      if (!surfaceDisposed)
+      if (surfaceDisposed) return;
+      if (surfaceActivityStarted) {
         await adapter.activity?.settle({ keepProcessing: durableTurnDeferred });
+      } else {
+        await adapter.activity?.dispose();
+      }
     })().catch((error) => {
       console.warn(
         `[Fast Agent] Failed to settle surface activity: ${formatErrorForLog(error)}`,
@@ -3140,17 +3159,15 @@ export async function answerFastAgentQuestion({
       );
     }
   };
-  try {
-    if (signal?.aborted || turnLockSignal?.aborted) {
-      // Setup can finish after an abort already released the lock.
-      await disposeSurface();
-    } else {
-      adapter.activity?.start();
-    }
-  } catch (error) {
-    console.warn(
-      `[Fast Agent] Failed to start surface activity: ${formatErrorForLog(error)}`,
-    );
+  if (signal?.aborted || turnLockSignal?.aborted) {
+    // Setup can finish after an abort already released the lock.
+    await disposeSurface().catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to dispose surface activity: ${formatErrorForLog(error)}`,
+      );
+    });
+  } else if (!allowSilentAmbientReply) {
+    startSurfaceActivity();
   }
 
   try {
@@ -3648,6 +3665,7 @@ export async function answerFastAgentQuestion({
       /** The streamed partial this reply finalizes, if one was shown. */
       streamedEvent?: { eventId: string; turnSeq: number },
     ) => {
+      startSurfaceActivity();
       const replyWithImages = {
         ...reply,
         ...(!reply.imageArtifactIds?.length && defaultImageArtifactIds.length
@@ -3779,6 +3797,7 @@ export async function answerFastAgentQuestion({
         return recordChatReaction(name, purpose, messageId, instructionVersion);
       }
       throwIfTurnCancelled();
+      startSurfaceActivity();
       await adapter.postReaction({ name, purpose, messageId });
       return recordChatReaction(name, purpose, messageId, instructionVersion);
     };
@@ -3832,6 +3851,7 @@ export async function answerFastAgentQuestion({
       }
 
       reportedInferenceNotices.add(message);
+      startSurfaceActivity();
       // Deliberately not the postReply closure: a system retry notice must
       // not satisfy the model's acknowledgement gate or close the turn.
       if (!(await replaceInferenceRetryReply(reply))) {

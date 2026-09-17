@@ -1493,20 +1493,9 @@ describe('generateOpenCodeConfig provider support', () => {
       'An eligible deployment GitHub App installation with an active connected repository is required',
     );
     expect(integrationInstructions).toContain(
-      'Repository operations remain read-only on this task MCP path',
+      'This task MCP path is read-only',
     );
-    expect(integrationInstructions).toContain(
-      'The account-scoped gist tools are the only native writes available here',
-    );
-    expect(integrationInstructions).toContain(
-      'Existing gists are never listed or deleted',
-    );
-    expect(integrationInstructions).toContain(
-      'use public: false unless the user explicitly requests public publishing',
-    );
-    expect(integrationInstructions).toContain(
-      'secret, link-accessible gist rather than private',
-    );
+    expect(integrationInstructions).not.toContain('gist');
   });
 
   it('mounts every server when no Roomote member server can proxy on-demand calls', () => {
