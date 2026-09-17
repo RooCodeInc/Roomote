@@ -118,11 +118,12 @@ export const MEDIA_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Judgment-model provider credentials. Only control-plane routing judgments
- * call the provider; a task never needs the key.
+ * Judgment-model credentials and selection. Only control-plane routing
+ * judgments call the provider; a task never needs either value.
  */
-const JUDGMENT_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
+const JUDGMENT_MODEL_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'R_TYPESAFE_API_KEY',
+  'R_JUDGMENT_MODEL',
 ]);
 
 /**
@@ -161,7 +162,7 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     ...PROVIDER_IDENTIFIER_ENV_VAR_NAMES,
     ...INSTANCE_SECRET_ENV_VAR_NAMES,
     ...MEDIA_PROVIDER_ENV_VAR_NAMES,
-    ...JUDGMENT_PROVIDER_ENV_VAR_NAMES,
+    ...JUDGMENT_MODEL_ENV_VAR_NAMES,
     ...DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES,
     ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
     // Hosting-managed Roomote inference is served only through the inference

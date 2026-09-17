@@ -1,15 +1,12 @@
-import { areCuratedIntegrationsDisabled, Env } from '@roomote/env';
+import { Env } from '@roomote/env';
 import {
-  and,
-  db,
-  deploymentMcpEnablements,
-  eq,
-  isNull,
-  mcpConnections,
+  getDeploymentJudgmentModelSelection,
   resolveModelProviderEnvValue,
 } from '@roomote/db/server';
-import { decrypt } from '@roomote/db/encryption';
-import { isMcpConnectionTypeSafeConfig } from '@roomote/types';
+import {
+  resolveEffectiveJudgmentModelSelection,
+  TYPESAFE_API_KEY_ENV_VAR_NAME,
+} from '@roomote/types';
 
 /**
  * Optional judgment-model backend (TypeSafe's Jev). Jev answers typed
@@ -23,10 +20,13 @@ import { isMcpConnectionTypeSafeConfig } from '@roomote/types';
  */
 const TYPESAFE_API_URL = 'https://api.typesafe.ai/v1/systemone';
 const TYPESAFE_MODEL = 'jev-latest';
-const TYPESAFE_MCP_ID = 'typesafe';
-const TYPESAFE_ENV_VAR_NAMES = ['R_TYPESAFE_API_KEY'] as const;
+const VERCEL_AI_GATEWAY_ENV_VAR_NAMES = ['AI_GATEWAY_API_KEY'] as const;
 const DEFAULT_TYPESAFE_TIMEOUT_MS = 3_000;
-const API_KEY_CACHE_TTL_MS = 30_000;
+const BACKEND_CACHE_TTL_MS = 30_000;
+const VERCEL_AI_GATEWAY_EVALUATION_URL =
+  'https://ai-gateway.vercel.sh/v4/ai/evaluation-model';
+const VERCEL_AI_GATEWAY_PROTOCOL_VERSION = '0.0.1';
+const VERCEL_AI_GATEWAY_JEV_MODEL_ID = 'typesafe-ai/jev';
 
 /**
  * One request carries at most this many questions. The API accepts more, but
@@ -85,67 +85,74 @@ type TypeSafeAnswers<TQuestions> = {
   [TKey in keyof TQuestions]: TypeSafeAnswerFor<TQuestions[TKey]>;
 };
 
-let cachedApiKey: { value: string | undefined; expiresAt: number } | undefined;
+/**
+ * Where judgment requests go. `typesafe` calls TypeSafe's API directly with a
+ * TypeSafe key; `vercel` calls Jev through Vercel AI Gateway with the
+ * deployment's AI Gateway key.
+ */
+export type JudgmentBackend =
+  | { provider: 'typesafe'; apiKey: string }
+  | { provider: 'vercel'; apiKey: string };
 
-/** The admin-entered key from Settings › Integrations › TypeSafe, if any. */
-async function resolveStoredApiKey(): Promise<string | undefined> {
-  if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
-    return undefined;
-  }
-
-  const connection = await db.query.mcpConnections.findFirst({
-    where: and(
-      eq(mcpConnections.mcpId, TYPESAFE_MCP_ID),
-      isNull(mcpConnections.userId),
-      eq(mcpConnections.enabled, true),
-      eq(mcpConnections.authStatus, 'authenticated'),
-    ),
-    columns: { authConfig: true },
-  });
-
-  if (!connection || !isMcpConnectionTypeSafeConfig(connection.authConfig)) {
-    return undefined;
-  }
-
-  const enablement = await db.query.deploymentMcpEnablements.findFirst({
-    where: eq(deploymentMcpEnablements.mcpId, TYPESAFE_MCP_ID),
-    columns: { enabled: true },
-  });
-
-  if (enablement?.enabled === false) {
-    return undefined;
-  }
-
-  return decrypt(connection.authConfig.encryptedApiKey).trim() || undefined;
-}
+let cachedBackend:
+  | { value: JudgmentBackend | undefined; expiresAt: number }
+  | undefined;
 
 /**
- * The Settings connection is the primary source; `R_TYPESAFE_API_KEY` is the
- * operator fallback. Cached briefly because judgments sit on hot paths.
+ * `R_JUDGMENT_MODEL` wins, then the Settings > Models choice; with neither, a
+ * TypeSafe key alone selects Jev via TypeSafe. A selection whose provider key
+ * is missing resolves to no backend rather than to a different provider.
  */
-async function resolveTypeSafeApiKey(): Promise<string | undefined> {
-  const now = Date.now();
+async function resolveJudgmentBackendUncached(): Promise<
+  JudgmentBackend | undefined
+> {
+  const [typeSafeKey, storedSelection] = await Promise.all([
+    resolveModelProviderEnvValue([TYPESAFE_API_KEY_ENV_VAR_NAME]),
+    getDeploymentJudgmentModelSelection(),
+  ]);
+  const selection = resolveEffectiveJudgmentModelSelection({
+    envSelection: Env.R_JUDGMENT_MODEL,
+    storedSelection,
+    hasTypeSafeKey: Boolean(typeSafeKey),
+  });
 
-  if (cachedApiKey && cachedApiKey.expiresAt > now) {
-    return cachedApiKey.value;
+  if (selection === 'typesafe') {
+    return typeSafeKey
+      ? { provider: 'typesafe', apiKey: typeSafeKey }
+      : undefined;
   }
 
-  const value =
-    (await resolveStoredApiKey()) ??
-    (await resolveModelProviderEnvValue(TYPESAFE_ENV_VAR_NAMES));
+  if (selection === 'vercel') {
+    const gatewayKey = await resolveModelProviderEnvValue(
+      VERCEL_AI_GATEWAY_ENV_VAR_NAMES,
+    );
+    return gatewayKey ? { provider: 'vercel', apiKey: gatewayKey } : undefined;
+  }
 
-  cachedApiKey = { value, expiresAt: now + API_KEY_CACHE_TTL_MS };
+  return undefined;
+}
+
+/** Cached briefly because judgments sit on hot paths. */
+async function resolveJudgmentBackend(): Promise<JudgmentBackend | undefined> {
+  const now = Date.now();
+
+  if (cachedBackend && cachedBackend.expiresAt > now) {
+    return cachedBackend.value;
+  }
+
+  const value = await resolveJudgmentBackendUncached();
+  cachedBackend = { value, expiresAt: now + BACKEND_CACHE_TTL_MS };
   return value;
 }
 
-/** Forget the cached key so the next call re-resolves it (tests, key saves). */
-export function resetTypeSafeApiKeyCache(): void {
-  cachedApiKey = undefined;
+/** Forget the cached backend so the next call re-resolves it (tests, saves). */
+export function resetJudgmentBackendCache(): void {
+  cachedBackend = undefined;
 }
 
 export async function isTypeSafeJudgmentConfigured(): Promise<boolean> {
   try {
-    return Boolean(await resolveTypeSafeApiKey());
+    return Boolean(await resolveJudgmentBackend());
   } catch {
     return false;
   }
@@ -191,9 +198,129 @@ function isValidAnswer(question: TypeSafeQuestion, answer: unknown): boolean {
   );
 }
 
+async function postJson(
+  url: string,
+  init: { headers: Record<string, string>; body: unknown; timeoutMs: number },
+): Promise<Record<string, unknown>> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { ...init.headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(init.body),
+    signal: AbortSignal.timeout(init.timeoutMs),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(
+      `Judgment model request failed with HTTP ${response.status}${
+        detail ? `: ${detail.slice(0, 200)}` : ''
+      }`,
+    );
+  }
+
+  return (await response.json()) as Record<string, unknown>;
+}
+
+async function requestTypeSafeDirect(
+  apiKey: string,
+  state: unknown,
+  questions: Record<string, TypeSafeQuestion>,
+  timeoutMs: number,
+): Promise<Record<string, unknown> | undefined> {
+  const body = await postJson(TYPESAFE_API_URL, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: { state, model: TYPESAFE_MODEL, questions },
+    timeoutMs,
+  });
+
+  return body.answers as Record<string, unknown> | undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/**
+ * The AI SDK evaluation spec renames `noul` to `boolean` and moves Choice and
+ * Score confidence into `providerMetadata.typesafe.confidence`. Translate both
+ * ways so callers see TypeSafe's native answer shape from either backend.
+ */
+async function requestVercelGateway(
+  apiKey: string,
+  state: unknown,
+  questions: Record<string, TypeSafeQuestion>,
+  timeoutMs: number,
+): Promise<Record<string, unknown> | undefined> {
+  const body = await postJson(VERCEL_AI_GATEWAY_EVALUATION_URL, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'ai-gateway-protocol-version': VERCEL_AI_GATEWAY_PROTOCOL_VERSION,
+      'ai-gateway-auth-method': 'api-key',
+      'ai-evaluation-model-specification-version': '4',
+      'ai-model-id': VERCEL_AI_GATEWAY_JEV_MODEL_ID,
+    },
+    body: {
+      state,
+      questions: Object.fromEntries(
+        Object.entries(questions).map(([id, question]) => [
+          id,
+          question.type === 'noul'
+            ? { ...question, type: 'boolean' }
+            : question,
+        ]),
+      ),
+    },
+    timeoutMs,
+  });
+
+  const answers = asRecord(body.answers);
+
+  if (!answers) {
+    return undefined;
+  }
+
+  const confidence = asRecord(
+    asRecord(asRecord(body.providerMetadata)?.typesafe)?.confidence,
+  );
+
+  return Object.fromEntries(
+    Object.entries(answers).map(([id, raw]) => {
+      const answer = asRecord(raw);
+
+      if (answer?.type === 'boolean') {
+        return [id, { type: 'noul', noul: answer.probability }];
+      }
+
+      const probabilities = asRecord(answer?.probabilities);
+      const reportedConfidence = confidence?.[id];
+
+      return [
+        id,
+        {
+          ...answer,
+          // Without TypeSafe's own confidence, the top probability is the
+          // closest stand-in for how concentrated the distribution is.
+          confidence:
+            typeof reportedConfidence === 'number'
+              ? reportedConfidence
+              : probabilities
+                ? Math.max(
+                    ...Object.values(probabilities).filter(
+                      (value): value is number => typeof value === 'number',
+                    ),
+                  )
+                : undefined,
+        },
+      ];
+    }),
+  );
+}
+
 /**
  * Ask Jev a set of independent questions over the same state. Returns `null`
- * when no TypeSafe key is configured so callers can keep their existing
+ * when no judgment model is configured so callers can keep their existing
  * behavior; throws on transport, HTTP, or response-shape failures so callers
  * can log and fall back.
  */
@@ -205,48 +332,37 @@ export async function evaluateTypeSafeJudgments<
   questions: TQuestions;
   timeoutMs?: number;
 }): Promise<TypeSafeAnswers<TQuestions> | null> {
-  const apiKey = await resolveTypeSafeApiKey();
+  const backend = await resolveJudgmentBackend();
 
-  if (!apiKey) {
+  if (!backend) {
     return null;
   }
 
-  const response = await fetch(TYPESAFE_API_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      state: params.state,
-      model: TYPESAFE_MODEL,
-      questions: params.questions,
-    }),
-    signal: AbortSignal.timeout(
-      params.timeoutMs ?? DEFAULT_TYPESAFE_TIMEOUT_MS,
-    ),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(
-      `TypeSafe request failed with HTTP ${response.status}${
-        detail ? `: ${detail.slice(0, 200)}` : ''
-      }`,
-    );
-  }
-
-  const body = (await response.json()) as { answers?: Record<string, unknown> };
+  const timeoutMs = params.timeoutMs ?? DEFAULT_TYPESAFE_TIMEOUT_MS;
+  const answers =
+    backend.provider === 'vercel'
+      ? await requestVercelGateway(
+          backend.apiKey,
+          params.state,
+          params.questions,
+          timeoutMs,
+        )
+      : await requestTypeSafeDirect(
+          backend.apiKey,
+          params.state,
+          params.questions,
+          timeoutMs,
+        );
 
   for (const [questionId, question] of Object.entries(params.questions)) {
-    if (!isValidAnswer(question, body.answers?.[questionId])) {
+    if (!isValidAnswer(question, answers?.[questionId])) {
       throw new Error(
-        `TypeSafe response is missing a valid answer for "${questionId}"`,
+        `Judgment model response is missing a valid answer for "${questionId}"`,
       );
     }
   }
 
-  return body.answers as TypeSafeAnswers<TQuestions>;
+  return answers as TypeSafeAnswers<TQuestions>;
 }
 
 /**
@@ -311,7 +427,7 @@ export async function scoreTypeSafeRelevance(params: {
       });
 
       if (!answers) {
-        throw new Error('TypeSafe key disappeared while ranking');
+        throw new Error('Judgment model became unconfigured while ranking');
       }
 
       return batch.map(
