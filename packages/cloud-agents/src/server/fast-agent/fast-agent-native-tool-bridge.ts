@@ -42,7 +42,6 @@ import { z } from 'zod';
 
 import {
   FAST_AGENT_NATIVE_TOOL_NAMES,
-  isFastAgentNativeToolEnabled,
   isFastAgentSpillTool,
   type FastAgentNativeToolName,
 } from './fast-agent-tool-policy';
@@ -764,24 +763,6 @@ export default {
   description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List integrations available to this human (their own and deployment-visible grants, with origin, header, allowed methods, visibility, and expiry) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready integrations are delivered automatically to coding tasks launched from this Session.",
   args: {},
   execute: (args, context) => invoke("list_integration_keys", args, context),
-}
-`,
-
-    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential]: String.raw`
-import { z } from "zod"
-import { invoke } from "../roomote-fast-tool-bridge.js"
-
-export default {
-  description: "Make one bounded request using a ready integration key reference without exposing the credential; the server sends it to the approved origin with the real key, using any method the human approved for that integration (reads, and POST/PUT/PATCH/DELETE when listed in its allowedMethods). Discover references with list_integration_keys; never invent one or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers; give a body and contentType for writes. For scripts, SDKs, CLIs, or many calls, launch a coding task attached to this Session instead: it receives the approved services as substitute tokens with a base URL. Call directly without an opening acknowledgement or another confirmation, and report the actual result.",
-  args: {
-    secretRef: z.string().uuid(),
-    method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]),
-    path: z.string().min(1).max(2048),
-    accept: z.enum(["application/json", "text/plain"]).optional(),
-    body: z.string().max(65536).nullish().describe("Request body for an approved write method. GET/HEAD have no body: omit, use null, or use an empty string."),
-    contentType: z.enum(["application/json", "text/plain", "application/x-www-form-urlencoded"]).optional().describe("Content type of the body; ignored for GET/HEAD."),
-  },
-  execute: (args, context) => invoke("request_with_integration_key", args, context),
 }
 `,
 
@@ -1515,10 +1496,6 @@ function createSharedToolsDirectory(): string {
         layout: 3,
         bridge: FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE,
         tools: FAST_AGENT_NATIVE_TOOL_SOURCES,
-        enabledTools: Object.keys(FAST_AGENT_NATIVE_TOOL_SOURCES).filter(
-          (name) =>
-            isFastAgentNativeToolEnabled(name as FastAgentNativeToolName),
-        ),
       }),
     )
     .digest('hex');
@@ -1550,8 +1527,6 @@ function createSharedToolsDirectory(): string {
     'utf8',
   );
   for (const [name, source] of Object.entries(FAST_AGENT_NATIVE_TOOL_SOURCES)) {
-    if (!isFastAgentNativeToolEnabled(name as FastAgentNativeToolName))
-      continue;
     writeFileSync(join(toolsDirectory, `${name}.js`), source, 'utf8');
   }
   return directory;

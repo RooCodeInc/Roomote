@@ -729,11 +729,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Tool arguments, results, and reasoning are retained natively',
     );
     expect(prompt).toContain('native JSON schema');
-    for (const name of [
-      'prepare_integration_key',
-      'list_integration_keys',
-      'request_with_integration_key',
-    ]) {
+    for (const name of ['prepare_integration_key', 'list_integration_keys']) {
       expect(prompt).not.toContain(name);
     }
     expect(prompt).toContain(
@@ -750,12 +746,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(enabledPrompt).toContain('`prepare_integration_key`');
     expect(enabledPrompt).toContain('`list_integration_keys`');
     expect(enabledPrompt).toContain(
-      'launch a coding task attached to this Session to use the integration',
+      'use the `_roomote_http_integrations` server for one or a few direct calls',
     );
-    expect(enabledPrompt).not.toContain('`request_with_integration_key`');
-    expect(enabledPrompt).not.toContain(
-      'for one or a few direct calls, call `request_with_integration_key` yourself',
-    );
+    expect(enabledPrompt).toContain('`integration_request` tool');
+    expect(enabledPrompt).toContain('a `session:` prefix');
     expect(enabledPrompt).toContain(
       'Never invent a reference or substitute another credential.',
     );

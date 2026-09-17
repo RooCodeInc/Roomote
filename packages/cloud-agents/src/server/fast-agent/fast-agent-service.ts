@@ -23,7 +23,6 @@ import {
   INFERENCE_PROVIDER_MAX_RETRIES,
   NO_REPOSITORIES,
   ROOMOTE_MCP_ID,
-  HTTP_INTEGRATIONS_MCP_ID,
   REASONING_EFFORT_VALUES,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
@@ -34,7 +33,6 @@ import {
   formatErrorForLog,
   formatSingleLineLog,
   manageWakeupsInputSchema,
-  serviceCredentialRequestSchema,
   serviceCredentialPrepareSchema,
   serviceCredentialPrepareToolSchema,
   resolveInferenceProviderRetryDelayMs,
@@ -192,7 +190,6 @@ import {
 import {
   getFastAgentNativeAcpKind,
   isFastAgentNativeIntegration,
-  isFastAgentNativeToolEnabled,
 } from './fast-agent-tool-policy';
 import {
   callFastAgentIntegration,
@@ -1739,20 +1736,6 @@ function isSuccessfulChatReactionResult(
     typeof value.name === 'string'
   );
 }
-
-/**
- * What the model is told when the API names why an integration-key request
- * was refused. Only reasons that carry no request values are ever named.
- */
-const INTEGRATION_REFUSAL_GUIDANCE: Readonly<Record<string, string>> = {
-  method_not_allowed:
-    'That method is not approved for this integration. Use one of its allowed methods, or prepare a new approval that includes it.',
-  credential_echo:
-    "The service's response contained the key itself, so it was withheld. Use an endpoint that does not echo request headers.",
-  credential_echo_encoded:
-    "The service's response contained the key itself, so it was withheld. Use an endpoint that does not echo request headers.",
-  path_too_long: 'The request path is too long; shorten it.',
-};
 
 const addRemoteMcpArgsSchema = z
   .object({
@@ -3935,7 +3918,6 @@ export async function answerFastAgentQuestion({
       ...(conversation.surface === 'web'
         ? [
             FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp,
-            FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
             FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
             FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
           ]
@@ -4218,13 +4200,6 @@ export async function answerFastAgentQuestion({
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
       try {
-        if (!isFastAgentNativeToolEnabled(call.name)) {
-          return {
-            success: false,
-            error:
-              'request_with_integration_key is unavailable in Fast mode. Launch a coding task from this Session to use the approved integration.',
-          };
-        }
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools) {
           return await describeIntegrationTools(
             findIntegrationToolsArgsSchema.parse(call.args),
@@ -4256,13 +4231,6 @@ export async function answerFastAgentQuestion({
       const instructionVersion = getInstructionVersion(call.messageId);
 
       try {
-        if (!isFastAgentNativeToolEnabled(call.name)) {
-          return {
-            success: false,
-            error:
-              'request_with_integration_key is unavailable in Fast mode. Launch a coding task from this Session to use the approved integration.',
-          };
-        }
         const closedError = requireOpen(call.messageId);
         if (closedError) return closedError;
         const ownershipError = requireLockOwnership();
@@ -4894,11 +4862,10 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential:
-          case FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials:
-          case FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential: {
+          case FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials: {
             // The model only ever sees the generic message; the bounded reason
-            // goes to server logs so operators can tell a disabled experiment
-            // from a missing Session binding or a broker denial.
+            // goes to server logs so operators can distinguish a disabled
+            // experiment from a missing Session binding.
             const unavailable = (reason: string, nameReason = false) => {
               console.warn(
                 `[Fast Agent] ${call.name} unavailable (reason=${reason})`,
@@ -4944,15 +4911,10 @@ export async function answerFastAgentQuestion({
                 call.name ===
                 FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential
                   ? serviceCredentialPrepareToolSchema
-                  : call.name ===
-                      FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials
-                    ? z.object({}).strict()
-                    : serviceCredentialRequestSchema;
+                  : z.object({}).strict();
               const args = schema.safeParse(call.args);
               if (!args.success) {
-                // Argument paths are the model's own field names, never values;
-                // the JSON tool schema cannot express cross-field rules such as
-                // "GET/HEAD carry no body", so the runtime says which field failed.
+                // Argument paths are the model's own field names, never values.
                 const fields = [
                   ...new Set(
                     args.error.issues.map((issue) =>
@@ -4965,7 +4927,7 @@ export async function answerFastAgentQuestion({
                 );
                 return {
                   success: false,
-                  error: `Invalid arguments: ${fields.join(', ')}. GET and HEAD carry no body; headerPrefix is Bearer, Basic, or Token; methods must be approved for the integration.`,
+                  error: `Invalid arguments: ${fields.join(', ')}. Check the integration label, HTTPS origin, credential header, and approved methods.`,
                 };
               }
               if (!userId) return unavailable('actor_missing');
@@ -4994,68 +4956,13 @@ export async function answerFastAgentQuestion({
                 );
                 return { pending, sessionUrl: sessionUrl.toString() };
               }
-              if (
-                call.name ===
-                FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials
-              ) {
-                return {
-                  ...(await listServiceCredentialApprovals(context)),
-                  sessionUrl: sessionUrl.toString(),
-                };
-              }
-              const request = serviceCredentialRequestSchema.parse(args.data);
-              const result = await callFastAgentIntegration(
-                {
-                  userId,
-                  apiBaseUrl,
-                  sessionId: session.id,
-                  humanTurn: true,
-                },
-                availableIntegrations,
-                {
-                  integrationId: HTTP_INTEGRATIONS_MCP_ID,
-                  toolName: 'integration_request',
-                  args: {
-                    integrationId: `session:${request.secretRef}`,
-                    method: request.method,
-                    path: request.path,
-                    body: request.body,
-                    contentType: request.contentType,
-                    accept: request.accept,
-                  },
-                },
-              );
-              return { success: true, ...(result as Record<string, unknown>) };
+              return {
+                ...(await listServiceCredentialApprovals(context)),
+                sessionUrl: sessionUrl.toString(),
+              };
             } catch (error) {
-              // The broker's isError text is our own constant copy, so it is
-              // safe to classify (never to log); anything else is logged by
-              // class name only because SDK/database messages can echo bound
-              // values.
-              const named =
-                error instanceof McpToolCallError
-                  ? /\(reason: ([a-z_]+)\)$/u.exec(
-                      error.upstreamText ?? '',
-                    )?.[1]
-                  : undefined;
-              const guidance = named
-                ? INTEGRATION_REFUSAL_GUIDANCE[named]
-                : undefined;
-              if (guidance) {
-                console.warn(
-                  `[Fast Agent] ${call.name} unavailable (reason=${named})`,
-                );
-                return { success: false, error: guidance };
-              }
               return unavailable(
-                error instanceof McpToolCallError
-                  ? error.upstreamText?.startsWith(
-                      'Integration request rejected',
-                    )
-                    ? 'broker_rejected'
-                    : 'broker_unavailable'
-                  : error instanceof Error
-                    ? error.name || 'Error'
-                    : 'unknown',
+                error instanceof Error ? error.name || 'Error' : 'unknown',
               );
             }
           }
