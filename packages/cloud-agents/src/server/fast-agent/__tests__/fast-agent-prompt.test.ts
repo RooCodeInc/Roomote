@@ -766,10 +766,33 @@ describe('buildFastAgentSystemPrompt', () => {
       'In web Sessions these tools need no opening `send_chat_reply`.',
     );
     expect(enabledPrompt).toContain(
-      'do not launch a coding task to build a connector when an integration key would do',
+      'pick one route in this order and act on it in the same turn',
     );
     expect(enabledPrompt).toContain(
-      'Do not probe whether the service is publicly reachable and do not delegate that check to a coding task',
+      'A connector for a different service does not count',
+    );
+    expect(enabledPrompt).not.toContain('If none is connected');
+    expect(enabledPrompt).toContain(
+      "research it before choosing: up to three `roomote_fetch_url` reads of the provider's own documentation",
+    );
+    expect(enabledPrompt).toContain(
+      'only means nothing is installed for this one',
+    );
+    expect(enabledPrompt).toContain('the page where the human creates a key');
+    expect(enabledPrompt).toContain(
+      'say in one sentence where they create that key',
+    );
+    expect(enabledPrompt).toContain(
+      'stdio project or a repository is not a hosted MCP',
+    );
+    expect(enabledPrompt).toContain(
+      'A pending MCP state (an authorization link or manual client registration) means the MCP exists',
+    );
+    expect(enabledPrompt).toContain(
+      'a denied authorization is never bypassed with a key',
+    );
+    expect(enabledPrompt).toContain(
+      'Do not ask for exports, screenshots, or pasted content, do not probe whether the service is reachable',
     );
     expect(enabledPrompt).toContain(
       'If available documentation cannot verify the API origin and credential header, say those details could not be verified and do not guess',
@@ -1952,5 +1975,41 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'do not mention integration IDs, catalog checks, probing, or internal recovery',
     );
+    expect(prompt).toContain(
+      'Remote MCP: call `add_remote_mcp` with only its name and URL',
+    );
+  });
+
+  it('does not bypass an applicable or indeterminate remote MCP with an integration key', () => {
+    const adminPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      addRemoteMcpEnabled: true,
+      serviceCredentialToolsEnabled: true,
+    });
+    const nonAdminPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      addRemoteMcpEnabled: false,
+      serviceCredentialToolsEnabled: true,
+    });
+
+    expect(adminPrompt).toContain(
+      'Treat a verification tool error, network failure, or otherwise indeterminate result as unresolved',
+    );
+    expect(adminPrompt).toContain('do not switch to the key route');
+    expect(adminPrompt).not.toContain(
+      'a failed verification only means there is no MCP and the key route applies',
+    );
+    expect(nonAdminPrompt).not.toContain('Remote MCP: call `add_remote_mcp`');
+    expect(nonAdminPrompt).toContain(
+      'Remote MCP setup is unavailable from this Session',
+    );
+    expect(nonAdminPrompt).toContain(
+      'stop with that outcome and do not offer an integration-key fallback unless the human explicitly asked for API access',
+    );
+    for (const prompt of [adminPrompt, nonAdminPrompt]) {
+      expect(prompt).not.toContain('Only deployment administrators');
+      expect(prompt).not.toContain('deployment administrator can connect');
+      expect(prompt).not.toContain('deployment administrator must authorize');
+    }
   });
 });
