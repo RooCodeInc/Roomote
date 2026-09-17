@@ -14,6 +14,7 @@ vi.mock('../../fast-agent-surface-reply', () => ({
 }));
 
 import {
+  agentmailConversationParticipants,
   agentmailConversations,
   agentmailInboundTurns,
   agentmailSuppressions,
@@ -95,6 +96,18 @@ async function createVerifiedSender() {
     name: user.name ?? 'Test User',
     email: senderEmail,
     emailVerified: true,
+  });
+  return { user, senderEmail };
+}
+
+async function createUnverifiedSender() {
+  const senderEmail = `${randomUUID()}@example.com`;
+  const user = await userFactory.create({ email: senderEmail });
+  await db.insert(authUsers).values({
+    id: user.id,
+    name: user.name ?? 'Test User',
+    email: senderEmail,
+    emailVerified: false,
   });
   return { user, senderEmail };
 }
@@ -229,6 +242,69 @@ describe('agentmail webhook event outbox (real database)', () => {
       where: eq(agentmailInboundTurns.conversationId, conversation!.id),
     });
     expect(turns).toHaveLength(1);
+  });
+
+  it('rejects an unverified sender replying to an existing outbound thread', async () => {
+    const { user, senderEmail } = await createUnverifiedSender();
+    const providerThreadId = `thread-${randomUUID()}`;
+    const [conversation] = await db
+      .insert(agentmailConversations)
+      .values({
+        inboxId: INBOX,
+        providerThreadId,
+        ownerUserId: user.id,
+        subject: 'Existing outbound thread',
+        outboundIdentityId: `verified:${user.id}:digest`,
+      })
+      .returning();
+    await db.insert(agentmailConversationParticipants).values({
+      conversationId: conversation!.id,
+      inboxId: INBOX,
+      providerThreadId,
+      userId: user.id,
+      role: 'owner',
+      source: 'outbound',
+    });
+
+    const originalFetch = globalThis.fetch;
+    let refusalAttempts = 0;
+    globalThis.fetch = (async () => {
+      refusalAttempts += 1;
+      return new Response(JSON.stringify({ message_id: 'm-refusal' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      const deliveryId = `msg_${randomUUID()}`;
+      await recordAgentMailWebhookEvent({
+        deliveryId,
+        eventId: null,
+        eventType: 'message.received',
+        payload: messageReceivedPayload({
+          eventId: `evt_${randomUUID()}`,
+          threadId: providerThreadId,
+          messageId: `m-${randomUUID()}`,
+          from: senderEmail,
+          text: 'Please continue this task',
+        }),
+      });
+
+      await processAgentMailWebhookEvent(deliveryId);
+
+      expect(refusalAttempts).toBe(1);
+      const turns = await db.query.agentmailInboundTurns.findMany({
+        where: eq(agentmailInboundTurns.conversationId, conversation!.id),
+      });
+      expect(turns).toHaveLength(0);
+      const unchanged = await db.query.agentmailConversations.findFirst({
+        where: eq(agentmailConversations.id, conversation!.id),
+      });
+      expect(unchanged?.latestInboundMessageId).toBeNull();
+      expect(unchanged?.latestInboundSenderEmail).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('silently drops a known sender whose message did not pass DMARC, without consuming refusal budget', async () => {

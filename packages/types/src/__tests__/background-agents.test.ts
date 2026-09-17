@@ -119,7 +119,7 @@ describe('background agent helpers', () => {
     },
   );
 
-  it('supports verified Email as a direct-message-only automation target', () => {
+  it('supports account Email as a direct-message-only automation target', () => {
     expect(getAutomationTargetKind('email', 'direct_message')).toBe(
       'email_user',
     );

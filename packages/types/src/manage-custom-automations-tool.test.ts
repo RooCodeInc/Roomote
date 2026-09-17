@@ -417,7 +417,7 @@ describe('manage custom automations tool contract', () => {
           {
             id: 'verified:user-1:abc',
             emailAddress: 'owner@example.com',
-            kind: 'verified',
+            kind: 'account',
             ignored: 'private',
           },
         ],
@@ -427,7 +427,7 @@ describe('manage custom automations tool contract', () => {
         {
           id: 'verified:user-1:abc',
           emailAddress: 'owner@example.com',
-          kind: 'verified',
+          kind: 'account',
         },
       ],
       defaultTarget: null,

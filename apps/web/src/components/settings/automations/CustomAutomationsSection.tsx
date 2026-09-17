@@ -576,7 +576,7 @@ export function CustomAutomationsSection({
       (emailIdentities ?? []).map((identity) => ({
         id: identity.id,
         name: identity.emailAddress,
-        label: `${identity.emailAddress} · Verified`,
+        label: `${identity.emailAddress} · Account email`,
       })),
     [emailIdentities],
   );

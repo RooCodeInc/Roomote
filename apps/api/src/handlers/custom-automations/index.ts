@@ -181,7 +181,7 @@ const VALIDATION_ERROR_PATTERNS: RegExp[] = [
   /^You can create at most \d+ custom automations\.$/,
   /^targetChannelId is required when targetProvider is set\.$/,
   /^Email destinations must use direct_message mode\.$/,
-  /^Choose a verified Email identity\.$/,
+  /^Choose an account Email identity\.$/,
   /^Timezone is required\.$/,
   /^Choose a valid IANA timezone\.$/,
 ];
@@ -242,7 +242,7 @@ function buildTarget(
       throw new Error('Email destinations must use direct_message mode.');
     }
     if (!input.targetChannelId) {
-      throw new Error('Choose a verified Email identity.');
+      throw new Error('Choose an account Email identity.');
     }
     // Email keeps the direct-message shape (externalRef = owner) and pins the
     // selected identity in metadata.
@@ -591,7 +591,7 @@ customAutomationsRouter.patch('/:id', async (c) => {
       }
       if (targetProvider === 'email') {
         if (!targetChannelId) {
-          throw new Error('Choose a verified Email identity.');
+          throw new Error('Choose an account Email identity.');
         }
         if (!existing.createdByUserId) {
           throw new Error('Automation owner is not configured.');

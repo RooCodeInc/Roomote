@@ -120,7 +120,8 @@ Roomote can also initiate email — for example, notifying you that a GitHub
 App installation you requested was approved when you have no chat
 integration linked. Strict consent rules are enforced in code:
 
-- Roomote only initiates email to your own verified account address. It
+- Roomote only initiates email to your own account address, including before
+  you verify it for inbound email. It
   never emails an address just because someone typed it in.
 - Every Roomote-initiated email carries a one-click unsubscribe link
   (RFC 8058 `List-Unsubscribe`). Unsubscribing stops Roomote from initiating
@@ -134,19 +135,21 @@ integration linked. Strict consent rules are enforced in code:
 
 Custom automations can explicitly select **Email** as their report destination.
 This is opt-in, never a fallback. The picker offers the automation owner's
-account email once Roomote records it as verified. Each run uses that exact
-selected identity for its initial message and threaded report. If verification or membership is
+account email, even when it has not been verified yet. Each run uses that exact
+selected identity for its initial message and threaded report. If membership is
 removed, the address changes, delivery is suppressed, or AgentMail is disabled
 or unconfigured, Roomote records a delivery failure and does not substitute
 another address or provider.
 
-Replying to a Roomote-initiated email works like any other thread: the reply
-routes back into the same conversation.
+Replying to a Roomote-initiated email works like any other inbound message: the
+sender address must first be verified on the account and pass DMARC. Until then,
+the reply cannot continue the conversation or start a task.
 
 ## Account email verification
 
-Roomote only initiates email to an address it has verified. With the email
-channel enabled:
+Roomote requires verification before an account email can initiate work or
+reply on the email channel. Receiving Roomote-initiated email does not require
+verification. With the email channel enabled:
 
 - New email-and-password sign-ups receive a verification email. Confirming
   it lets Roomote recognize the address on the email channel; signing in
@@ -176,8 +179,9 @@ Current limitations:
 
 - Email automation destinations are private; channel-style posting is not
   supported
-- each account has one email address for the channel, its verified login
-  email; there is no way to add other sender addresses
+- each account has one email address for outbound delivery; that login email
+  must be verified before it can send commands or replies to Roomote, and there
+  is no way to add other sender addresses
 - reactions are not supported
 - attachments from inbound email are not yet processed
 - each deployment has one inbox

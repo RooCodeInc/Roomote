@@ -193,7 +193,7 @@ describe('custom-automations MCP routes', () => {
       {
         id: 'verified:admin-1:digest',
         emailAddress: 'admin@example.com',
-        kind: 'verified',
+        kind: 'account',
       },
     ]);
     mockResolveDefaultAutomationTarget.mockResolvedValue(null);
@@ -259,7 +259,7 @@ describe('custom-automations MCP routes', () => {
         {
           id: 'verified:member-2:digest',
           emailAddress: 'member@example.com',
-          kind: 'verified',
+          kind: 'account',
         },
       ]);
 
@@ -277,7 +277,7 @@ describe('custom-automations MCP routes', () => {
             {
               id: 'verified:member-2:digest',
               emailAddress: 'member@example.com',
-              kind: 'verified',
+              kind: 'account',
             },
           ],
         },
@@ -871,7 +871,7 @@ describe('custom-automations MCP routes', () => {
       );
     });
 
-    it('lists and stores only a server-verified Email identity', async () => {
+    it('lists and stores only a server-issued account Email identity', async () => {
       const { app } = createApp();
       const defaultTarget = {
         provider: 'email' as const,
@@ -896,7 +896,7 @@ describe('custom-automations MCP routes', () => {
           {
             id: 'verified:admin-1:digest',
             emailAddress: 'admin@example.com',
-            kind: 'verified',
+            kind: 'account',
           },
         ],
         defaultTarget,
@@ -946,7 +946,7 @@ describe('custom-automations MCP routes', () => {
       );
     });
 
-    it('rejects a raw or otherwise unverified Email identity', async () => {
+    it('rejects a raw or otherwise unrecognized Email identity', async () => {
       const { app } = createApp();
       mockResolveCustomAutomationSchedule.mockResolvedValue({
         status: 'resolved',
