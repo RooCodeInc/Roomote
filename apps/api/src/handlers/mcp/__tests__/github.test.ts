@@ -1283,6 +1283,18 @@ describe('GitHub MCP proxy', () => {
           'X-MCP-Readonly',
         ),
       ).toBe('true');
+      mocks.mint.mockClear();
+      mocks.upstream.mockClear();
+      expect(
+        (await call('get_gist', { gist_id: 'public-gist-id' }, target)).status,
+      ).toBe(200);
+      expect(mocks.userToken).not.toHaveBeenCalled();
+      expect(mocks.mint).toHaveBeenCalledOnce();
+      expect(
+        new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
+          'X-MCP-Readonly',
+        ),
+      ).toBe('true');
       expect(
         (await call('update_pull_request', { ...args, repo: 'second' }, target))
           .status,

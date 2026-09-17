@@ -83,6 +83,7 @@ const ROUTER_GITHUB_ALLOWED_TOOLS = [
   'merge_pull_request',
   'add_issue_comment',
   'add_reply_to_pull_request_comment',
+  'get_gist',
   'create_gist',
 ] as const;
 

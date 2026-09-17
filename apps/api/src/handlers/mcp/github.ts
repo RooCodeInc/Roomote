@@ -29,6 +29,7 @@ import {
   createMcpProxy,
   McpProxyError,
   resolveActingUserId,
+  resolveActingUserIdOrNull,
 } from './proxy-utils';
 
 const DEFAULT_GITHUB_MCP_URL = 'https://api.githubcopilot.com/mcp/';
@@ -361,19 +362,23 @@ export function createGithubMcp(options?: {
         name === 'get_gist' ||
         (name === 'list_gists' && listsAuthenticatedUsersGists(toolArguments));
       if (accountGistRead) {
-        userId ??= await resolveActingUserId(auth);
-        const token = await resolveLinkedGitHubAccessToken(userId);
-        if (token) {
-          return {
-            authHeader: token,
-            allowedToolNames: auth.tokenType === 'auth' ? null : undefined,
-            extraHeaders: buildRouterGitHubHeaders(true),
-          };
+        const accountUserId = userId ?? (await resolveActingUserIdOrNull(auth));
+        if (accountUserId) {
+          const token = await resolveLinkedGitHubAccessToken(accountUserId);
+          if (token) {
+            return {
+              authHeader: token,
+              allowedToolNames: auth.tokenType === 'auth' ? null : undefined,
+              extraHeaders: buildRouterGitHubHeaders(true),
+            };
+          }
         }
         if (name === 'list_gists') {
           throw new McpProxyError(
             403,
-            'Link your GitHub account under Settings > Linked Accounts before listing your gists.',
+            accountUserId
+              ? 'Link your GitHub account under Settings > Linked Accounts before listing your gists.'
+              : 'GitHub gist listing requires a human actor on the task.',
           );
         }
         // Public gists remain readable through the installation credential.
