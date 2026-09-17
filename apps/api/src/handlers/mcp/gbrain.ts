@@ -3,6 +3,7 @@ import {
   resolveBrainConnection,
 } from '@roomote/sdk/server';
 
+import { rerankBrainQueryResult } from './gbrain-rerank';
 import { createMcpProxy, McpProxyError } from './proxy-utils';
 
 /**
@@ -57,6 +58,10 @@ export function createGbrainMcpProxy(options?: { allowAuthTokens?: boolean }) {
     name: 'Brain',
     allowAuthTokens: options?.allowAuthTokens,
     allowedToolNames: GBRAIN_READ_TOOL_NAMES,
+    // With a judgment model configured, `query` passages it confidently
+    // judges relevant or irrelevant are moved up or down; otherwise results
+    // pass through in gbrain's hybrid order.
+    transformToolCallResult: rerankBrainQueryResult,
     validateTaskRunToken: async () => null,
     resolveCredentials: async () => {
       // No enablement row and no connection dialog: a deployment with a Brain

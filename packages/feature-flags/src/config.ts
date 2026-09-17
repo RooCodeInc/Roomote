@@ -52,7 +52,7 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     kind: 'deployment-control',
     group: null,
     description:
-      'Allow Fast to observe human-to-human discussion in its Slack threads',
+      'Allow Fast to observe human-to-human discussion in established Slack and Discord threads',
   },
   [DEPLOYMENT_EXPERIMENT_METADATA_KEYS.homeComposerSuggestions]: {
     kind: 'deployment-control',

@@ -48,11 +48,6 @@ export {
 } from './github-token';
 
 export {
-  GitHubUserTokenError,
-  resolveGitHubUserAccessToken,
-} from './github-user-token';
-
-export {
   type CreatePreviewTokenOptions,
   createPreviewTokenOptionsSchema,
   createPreviewToken,

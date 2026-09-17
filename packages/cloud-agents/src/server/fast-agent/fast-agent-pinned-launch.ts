@@ -234,6 +234,10 @@ async function resolveConversationTarget(
   const created = await getOrCreateFastAgentSession({
     userId: input.userId,
     conversation: input.conversation ?? defaultWebConversation(input.userId),
+    userInitiated: {
+      surface: input.surface,
+      trigger: input.trigger ?? 'manual',
+    },
   });
   return {
     id: created.id,

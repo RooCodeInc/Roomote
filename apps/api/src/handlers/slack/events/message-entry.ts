@@ -84,7 +84,7 @@ import { resolveFastAgentReplyTasks } from '../pr-review-retire.js';
 import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
 import {
   compareNumericMessageIds,
-  evaluateUnmentionedThreadReplyRouting,
+  resolveUnmentionedThreadReplyRouting,
   type UnmentionedThreadHistoryMessage,
 } from '../../shared/unmentioned-thread-reply.js';
 
@@ -312,14 +312,16 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
           slackInstallation.botUserId,
           message.user,
         ),
+        text: message.text,
       };
     },
   );
 
   // Shared Slack/Discord/Teams core: eligibility (owner/root/prior mention)
   // and the interjection window since the bot's last reply.
-  const decision = evaluateUnmentionedThreadReplyRouting({
+  const decision = await resolveUnmentionedThreadReplyRouting({
     eventMessageId: event.ts,
+    eventText: event.text,
     senderUserId: event.user,
     isThreadTaskOwner,
     isThreadRootAuthor,
@@ -1067,6 +1069,7 @@ export function startFastAgentResponse(params: {
     run: ({ onAccepted, onRejected }) =>
       processFastAgentMessage({
         ...fastAgentParams,
+        userInitiated: delegatedTaskInitiator?.kind !== 'automation',
         roomoteSlackUserId: params.slackInstallation.botUserId ?? undefined,
         peerConversationsExperimentEnabled:
           params.peerConversationsExperimentEnabled,

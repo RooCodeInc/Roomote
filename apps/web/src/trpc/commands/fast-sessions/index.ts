@@ -444,9 +444,6 @@ export async function startFastSessionCommand(
   ) {
     throw new Error('Private Sessions are not enabled for this deployment.');
   }
-  if (input.privacy === 'private' && input.voiceCall) {
-    throw new Error('Private Sessions cannot start as voice calls.');
-  }
   if (input.pinnedLaunch) {
     if (input.privacy === 'private') {
       throw new Error(
@@ -473,6 +470,7 @@ export async function startFastSessionCommand(
     userId: auth.userId,
     conversation,
     ...(input.privacy ? { privacy: input.privacy } : {}),
+    userInitiated: { surface: 'web', trigger: 'message' },
   });
   const settings = await resolveSessionModelSettings(session.id, input, {
     model: null,

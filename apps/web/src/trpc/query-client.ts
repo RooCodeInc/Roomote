@@ -15,6 +15,8 @@ export function redirectUnauthorizedError(
   location: BrowserLocation,
 ): boolean {
   if (
+    location.pathname === '/sign-in' ||
+    location.pathname.startsWith('/sign-in/') ||
     typeof error !== 'object' ||
     error === null ||
     !('data' in error) ||

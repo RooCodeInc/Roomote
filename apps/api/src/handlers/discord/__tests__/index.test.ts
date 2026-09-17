@@ -53,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   markThreadHistoryDelivered: vi.fn(),
   fetchThreadHistory: vi.fn(),
   shouldRouteUnmentioned: vi.fn(),
+  mentionsPeer: vi.fn(),
   enqueueGatewayEvent: vi.fn(),
   callViaEmojiConfig: vi.fn(),
   appendAccountLinkHelpText: vi.fn(async (message: string) => message),
@@ -60,6 +61,8 @@ const mocks = vi.hoisted(() => ({
   acquireFastTurnLock: vi.fn(),
   answerFast: vi.fn(),
   hasFastSession: vi.fn(),
+  getFastSessionOwner: vi.fn(),
+  peerConversationsEnabled: vi.fn(),
   findFastMessageSession: vi.fn(),
   findFastReplySession: vi.fn(),
   isFastProviderMessage: vi.fn(),
@@ -174,6 +177,7 @@ vi.mock('../thread-context.js', () => ({
 }));
 
 vi.mock('../unmentioned-thread-reply.js', () => ({
+  mentionsDiscordUserOtherThanBotOrUser: mocks.mentionsPeer,
   shouldRouteUnmentionedDiscordThreadReplyToAgent: mocks.shouldRouteUnmentioned,
 }));
 
@@ -202,9 +206,15 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   resolveApiBaseUrl: () => 'https://roomote.example.com',
   getTaskUrl: mocks.getTaskUrl,
   hasFastAgentSession: mocks.hasFastSession,
+  getFastAgentSessionOwner: mocks.getFastSessionOwner,
   getOrCreateFastAgentSession: vi
     .fn()
     .mockResolvedValue({ id: 'fast-session-1' }),
+}));
+
+vi.mock('@roomote/db/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/db/server')>()),
+  isDeploymentExperimentEnabled: mocks.peerConversationsEnabled,
 }));
 
 import { discord, discordGatewayEventProcessingTimeout } from '../index.js';
@@ -345,6 +355,9 @@ describe('Discord Gateway event handler', () => {
     });
     mocks.answerFast.mockResolvedValue('A quick answer');
     mocks.hasFastSession.mockResolvedValue(false);
+    mocks.getFastSessionOwner.mockResolvedValue(null);
+    mocks.peerConversationsEnabled.mockResolvedValue(false);
+    mocks.mentionsPeer.mockReturnValue(false);
     mocks.findFastMessageSession.mockResolvedValue(null);
     mocks.findFastReplySession.mockResolvedValue(null);
     mocks.isFastProviderMessage.mockResolvedValue(false);
@@ -1465,6 +1478,88 @@ describe('Discord Gateway event handler', () => {
         conversation: expect.objectContaining({ surface: 'discord' }),
       }),
     );
+  });
+
+  it('uses the deployment experiment for an owner-bound Discord Fast thread', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'fast-thread',
+      type: 11,
+    });
+    mocks.findMappedUserId.mockResolvedValue('roomote-user-peer');
+    mocks.hasFastSession.mockResolvedValue(true);
+    mocks.getFastSessionOwner.mockResolvedValue({
+      kind: 'user',
+      userId: 'roomote-user-owner',
+    });
+    mocks.peerConversationsEnabled.mockResolvedValue(true);
+    mocks.mentionsPeer.mockReturnValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue(true);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: '<@discord-user-grace> what do you think?',
+          author: { id: 'discord-user-peer', username: 'matt' },
+          mentions: [{ id: 'discord-user-grace', username: 'grace' }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.peerConversationsEnabled).toHaveBeenCalledWith(
+      'slackPeerConversations',
+    );
+    expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
+      expect.objectContaining({ peerConversationsExperimentEnabled: true }),
+    );
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowSilentAmbientReply: true,
+        currentMessageAgentContext: expect.stringContaining(
+          'This message mentions another person and might not be for you',
+        ),
+      }),
+    );
+  });
+
+  it('does not enable peer conversations without an owner-bound Discord Fast thread', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'fast-thread',
+      type: 11,
+    });
+    mocks.findMappedUserId.mockResolvedValue('roomote-user-peer');
+    mocks.hasFastSession.mockResolvedValue(true);
+    mocks.getFastSessionOwner.mockResolvedValue(null);
+    mocks.peerConversationsEnabled.mockResolvedValue(true);
+    mocks.mentionsPeer.mockReturnValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: '<@discord-user-grace> what do you think?',
+          author: { id: 'discord-user-peer', username: 'matt' },
+          mentions: [{ id: 'discord-user-grace', username: 'grace' }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.peerConversationsEnabled).not.toHaveBeenCalled();
+    expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
+      expect.objectContaining({ peerConversationsExperimentEnabled: false }),
+    );
+    expect(mocks.answerFast).not.toHaveBeenCalled();
   });
 
   it('continues an existing fast-agent DM without Fast mode being the default', async () => {

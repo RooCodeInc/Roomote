@@ -17,6 +17,7 @@ type SessionSurfaceBrandIcon =
   | 'bitbucket'
   | 'ado'
   | 'discord'
+  | 'slack'
   | 'teams'
   | 'telegram';
 
@@ -36,7 +37,7 @@ const surface = (
 const SESSION_SURFACES: Record<string, SurfaceDescriptor> = {
   web: surface('web'),
   api: surface('api'),
-  slack: surface('slack'),
+  slack: surface('slack', 'slack'),
   teams: surface('teams', 'teams'),
   telegram: surface('telegram', 'telegram'),
   discord: surface('discord', 'discord'),

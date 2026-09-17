@@ -165,7 +165,7 @@ describe('custom automation activation telemetry', () => {
     },
   );
 
-  it('stores the exact server-verified Email identity', async () => {
+  it('stores the exact server-issued account Email identity', async () => {
     mocks.canStartAgentMailConversationWithUser.mockResolvedValue(true);
     mocks.createCustomAutomation.mockResolvedValue(
       customAutomation({ provider: 'email' }),
@@ -243,7 +243,7 @@ describe('custom automation activation telemetry', () => {
         enabled: true,
         targetChannelId: 'verified:user-admin:other',
       }),
-    ).rejects.toThrow('Verify your Email address');
+    ).rejects.toThrow('Choose your current account Email address');
   });
 
   it('tracks deletion with only the persisted destination provider classification', async () => {
@@ -336,14 +336,14 @@ describe('custom automation ownership', () => {
     ).rejects.toThrow('Custom automation was not found.');
   });
 
-  it('offers only currently usable verified Email identities', async () => {
+  it('offers currently usable account Email identities', async () => {
     mocks.listConnectedCommunicationProviders.mockResolvedValue([]);
     mocks.resolveDeploymentTimeZone.mockResolvedValue({ timeZone: 'UTC' });
     mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([
       {
         id: 'verified:member-1:digest',
         emailAddress: 'member@example.com',
-        kind: 'verified',
+        kind: 'account',
       },
     ]);
 
@@ -361,7 +361,7 @@ describe('custom automation ownership', () => {
         {
           id: 'verified:member-1:digest',
           emailAddress: 'member@example.com',
-          kind: 'verified',
+          kind: 'account',
         },
       ],
       managerSlackChannelId: null,

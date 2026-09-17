@@ -10,18 +10,18 @@ export function SlackPeerConversationsExperimentalSetting() {
     useSlackPeerConversationsExperiment();
 
   return (
-    <Section icon={MessagesSquare} title="Slack peer conversations">
-      <div className="flex items-center justify-between gap-4">
-        <p className="text-sm text-muted-foreground">
-          Let Fast observe human-to-human discussion in its Slack threads while
-          staying quiet unless addressed.
-        </p>
+    <Section icon={MessagesSquare} title="Peer conversations">
+      <div className="flex gap-3">
         <Switch
-          aria-label="Toggle Slack peer conversations"
+          aria-label="Toggle peer conversations"
           checked={enabled}
           disabled={isLoading || isUpdating}
           onCheckedChange={setEnabled}
         />
+        <p className="text-sm text-muted-foreground">
+          Let Fast observe human-to-human discussion in established Slack and
+          Discord threads while staying quiet unless addressed.
+        </p>
       </div>
     </Section>
   );

@@ -381,6 +381,7 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
       expect(input).toEqual({
         userId: 'user-1',
         conversation: canonicalConversation,
+        userInitiated: { surface: 'telegram', trigger: 'message' },
       });
       return { id: 'fast-origin', conversation: canonicalConversation };
     });

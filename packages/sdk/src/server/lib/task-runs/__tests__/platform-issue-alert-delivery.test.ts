@@ -436,6 +436,10 @@ describe('platform issue alert delivery', () => {
             type: 'actions',
             elements: expect.arrayContaining([
               expect.objectContaining({
+                action_id: 'platform_issue_review_and_send',
+                url: expect.stringContaining('/platform-issues/'),
+              }),
+              expect.objectContaining({
                 action_id: 'late_bound_automation_view_task',
                 url: expect.stringContaining('utm_source=slack'),
               }),
@@ -642,9 +646,12 @@ describe('platform issue alert delivery', () => {
     expect(mockSlackOpenConversation).toHaveBeenCalledWith('UADMIN');
     expect(mockSlackPostMessage).toHaveBeenCalledTimes(1);
     const [post] = mockSlackPostMessage.mock.calls[0] ?? [];
+    const expectedText =
+      `Platform issue reported: *${REPORT.title}*\n> ${REPORT.summary}\n` +
+      `Roomote has not received this report. Review what will be shared, then send it to Roomote if you'd like help.`;
     expect(post).toMatchObject({
       channel: 'DADMIN',
-      text: `Platform issue reported: *${REPORT.title}*\n> ${REPORT.summary}`,
+      text: expectedText,
       blocks: [
         expect.objectContaining({
           type: 'container',
@@ -658,7 +665,7 @@ describe('platform issue alert delivery', () => {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: `Platform issue reported: *${REPORT.title}*\n> ${REPORT.summary}`,
+                text: expectedText,
               },
             },
           ]),
@@ -672,6 +679,9 @@ describe('platform issue alert delivery', () => {
     );
     expect(JSON.stringify(post.blocks)).toContain(
       'late_bound_automation_configure',
+    );
+    expect(JSON.stringify(post.blocks)).toContain(
+      'platform_issue_review_and_send',
     );
     expect((await findReportRow(taskId))?.slackPostedAt).not.toBeNull();
   });

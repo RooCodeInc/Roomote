@@ -52,11 +52,11 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Settings2,
   Skeleton,
   Switch,
   Textarea,
   Trash2,
+  Wrench,
   Zap,
 } from '@/components/system';
 
@@ -70,7 +70,6 @@ import {
   type AutomationDestinationProvider,
 } from './AutomationDestinationPicker';
 import {
-  AutomationListHeader,
   AutomationListRow,
   AutomationListToolbar,
   type AutomationListFilter,
@@ -584,7 +583,7 @@ export function CustomAutomationsSection({
       (emailIdentities ?? []).map((identity) => ({
         id: identity.id,
         name: identity.emailAddress,
-        label: `${identity.emailAddress} · Verified`,
+        label: `${identity.emailAddress} · Account email`,
       })),
     [emailIdentities],
   );
@@ -803,16 +802,20 @@ export function CustomAutomationsSection({
     }
   };
 
-  const editAutomation = (row: CustomAutomationListItem) => {
+  const editAutomation = (
+    row: CustomAutomationListItem,
+    enabled = row.enabled,
+  ) => {
     setEditingId(row.id);
     setIsCreating(false);
     setFieldErrors({});
-    setForm(
-      formFromRow(
+    setForm({
+      ...formFromRow(
         row,
         capabilitiesLoaded ? connectedDestinationProviders : null,
       ),
-    );
+      enabled,
+    });
     setResolvedCron(row.cronExpression ?? null);
     setScheduleSummary(null);
     window.history.replaceState(
@@ -1234,13 +1237,14 @@ export function CustomAutomationsSection({
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Switch
+              id="custom-automation-enabled"
               checked={form.enabled}
               disabled={busy}
               onCheckedChange={(checked) =>
                 setForm((current) => ({ ...current, enabled: checked }))
               }
             />
-            <Label>Enabled</Label>
+            <Label htmlFor="custom-automation-enabled">Enabled</Label>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -1322,7 +1326,6 @@ export function CustomAutomationsSection({
       >
         <CardContent className="p-0!">
           <div role="table" aria-label="Automations">
-            <AutomationListHeader />
             <div role="rowgroup" className="divide-y divide-background">
               {initialListLoadFailed && filter !== 'built-in' ? (
                 <RetryableLoadError
@@ -1393,40 +1396,8 @@ export function CustomAutomationsSection({
                       icon={Zap}
                       name={row.name}
                       description={<p className="line-clamp-2">{row.prompt}</p>}
-                      enabledControl={
-                        <Switch
-                          aria-label={`Toggle ${row.name}`}
-                          checked={row.enabled}
-                          disabled={busy}
-                          className="border-border data-[state=unchecked]:bg-muted"
-                          onCheckedChange={(enabled) =>
-                            toggleMutation.mutate({
-                              id: row.id,
-                              ...writeInputFromRow(row),
-                              enabled,
-                            })
-                          }
-                        />
-                      }
-                      summary={
+                      metadata={
                         <>
-                          <span>
-                            {cadenceLabel(row, schedulingTimeZone)}
-                            {environmentName
-                              ? `, in ${environmentName}`
-                              : ''} →
-                          </span>
-                          {target.provider !== 'none' ? (
-                            <BrandIcon
-                              icon={target.provider}
-                              name=""
-                              className="size-4 shrink-0"
-                            />
-                          ) : null}
-                          <span>
-                            {destinationName}
-                            {destinationLabel ? ` ${destinationLabel}` : ''}
-                          </span>
                           <span>
                             Created by {row.createdByName ?? 'Unknown'}
                             {row.lastRunAt ? (
@@ -1455,6 +1426,48 @@ export function CustomAutomationsSection({
                           ) : null}
                         </>
                       }
+                      enabledControl={
+                        <Switch
+                          aria-label={`Toggle ${row.name}`}
+                          aria-busy={toggleMutation.isPending || undefined}
+                          checked={row.enabled}
+                          disabled={busy}
+                          className="border-border data-[state=unchecked]:bg-muted"
+                          onCheckedChange={(enabled) => {
+                            if (enabled && row.scheduleMode !== 'off') {
+                              editAutomation(row, true);
+                              return;
+                            }
+
+                            toggleMutation.mutate({
+                              id: row.id,
+                              ...writeInputFromRow(row),
+                              enabled,
+                            });
+                          }}
+                        />
+                      }
+                      summary={
+                        <>
+                          <span>
+                            {cadenceLabel(row, schedulingTimeZone)}
+                            {environmentName
+                              ? `, in ${environmentName}`
+                              : ''} →
+                          </span>
+                          {target.provider !== 'none' ? (
+                            <BrandIcon
+                              icon={target.provider}
+                              name=""
+                              className="size-4 shrink-0"
+                            />
+                          ) : null}
+                          <span>
+                            {destinationName}
+                            {destinationLabel ? ` ${destinationLabel}` : ''}
+                          </span>
+                        </>
+                      }
                       actions={
                         <>
                           <CustomAutomationRunButton
@@ -1470,13 +1483,13 @@ export function CustomAutomationsSection({
                               aria-label={`Configure ${row.name}`}
                               onClick={() => editAutomation(row)}
                             >
-                              <Settings2 />
+                              <Wrench />
                             </Button>
                           </BasicTooltip>
                           <BasicTooltip content="Delete">
                             <Button
                               type="button"
-                              size="sm"
+                              size="icon"
                               variant="ghost"
                               disabled={busy}
                               onClick={() => {

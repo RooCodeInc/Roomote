@@ -16,6 +16,7 @@ import {
   canStartAgentMailConversationWithUser,
   isAgentMailAddressSuppressed,
   listAgentMailOutboundIdentities,
+  listAvailableAgentMailOutboundIdentities,
   prepareAgentMailConversation,
   resolveAgentMailOutboundAddress,
   resolveAgentMailOutboundIdentity,
@@ -31,15 +32,19 @@ function uniqueEmail(prefix: string): string {
   return `${prefix}-${randomUUID()}@example.test`;
 }
 
-async function createVerifiedUser(email: string) {
+async function createAccountUser(email: string, emailVerified = true) {
   const user = await userFactory.create({ email });
   await db.insert(authUsers).values({
     id: user.id,
     name: user.name ?? 'Test User',
     email,
-    emailVerified: true,
+    emailVerified,
   });
   return user;
+}
+
+async function createVerifiedUser(email: string) {
+  return createAccountUser(email);
 }
 
 describe('agentmail suppression store (real database)', () => {
@@ -70,15 +75,18 @@ describe('agentmail suppression store (real database)', () => {
 });
 
 describe('resolveAgentMailOutboundAddress (real database)', () => {
-  it('resolves the verified account email', async () => {
-    const accountEmail = uniqueEmail('account');
-    const user = await createVerifiedUser(accountEmail);
+  it.each([true, false])(
+    'resolves the account email when verification is %s',
+    async (emailVerified) => {
+      const accountEmail = uniqueEmail('account');
+      const user = await createAccountUser(accountEmail, emailVerified);
 
-    expect(await resolveAgentMailOutboundAddress(user.id)).toEqual({
-      ok: true,
-      emailAddress: accountEmail.toLowerCase(),
-    });
-  });
+      expect(await resolveAgentMailOutboundAddress(user.id)).toEqual({
+        ok: true,
+        emailAddress: accountEmail.toLowerCase(),
+      });
+    },
+  );
 
   it('refuses when the account email is suppressed', async () => {
     const accountEmail = uniqueEmail('account');
@@ -94,7 +102,7 @@ describe('resolveAgentMailOutboundAddress (real database)', () => {
     });
   });
 
-  it('refuses users with no verified email', async () => {
+  it('refuses users with no account email identity', async () => {
     const user = await userFactory.create();
 
     expect(await resolveAgentMailOutboundAddress(user.id)).toEqual({
@@ -103,9 +111,9 @@ describe('resolveAgentMailOutboundAddress (real database)', () => {
     });
   });
 
-  it('lists the verified account identity for automation selection', async () => {
-    const accountEmail = uniqueEmail('verified');
-    const user = await createVerifiedUser(accountEmail);
+  it('lists an unverified account identity for automation selection', async () => {
+    const accountEmail = uniqueEmail('unverified');
+    const user = await createAccountUser(accountEmail, false);
 
     const identities = await listAgentMailOutboundIdentities(user.id);
 
@@ -113,7 +121,7 @@ describe('resolveAgentMailOutboundAddress (real database)', () => {
       {
         id: expect.stringMatching(`^verified:${user.id}:`),
         emailAddress: accountEmail.toLowerCase(),
-        kind: 'verified',
+        kind: 'account',
       },
     ]);
     expect(
@@ -121,7 +129,7 @@ describe('resolveAgentMailOutboundAddress (real database)', () => {
     ).toEqual({ ok: true, emailAddress: accountEmail.toLowerCase() });
   });
 
-  it('revokes an exact identity instead of substituting another address', async () => {
+  it('keeps the exact outbound identity when inbound verification is removed', async () => {
     const accountEmail = uniqueEmail('selected');
     const user = await createVerifiedUser(accountEmail);
     const [identity] = await listAgentMailOutboundIdentities(user.id);
@@ -132,7 +140,7 @@ describe('resolveAgentMailOutboundAddress (real database)', () => {
 
     expect(
       await resolveAgentMailOutboundIdentity(user.id, identity!.id),
-    ).toEqual({ ok: false, reason: 'no_permitted_address' });
+    ).toEqual({ ok: true, emailAddress: accountEmail.toLowerCase() });
   });
 });
 
@@ -189,9 +197,24 @@ describe('startAgentMailConversation (real database, stubbed AgentMail API)', ()
     globalThis.fetch = originalFetch;
   });
 
-  it('does not send until the prepared automation conversation has a report', async () => {
+  it('discovers an unverified account email as an available destination', async () => {
+    const accountEmail = uniqueEmail('automation-option');
+    const user = await createAccountUser(accountEmail, false);
+
+    await expect(
+      listAvailableAgentMailOutboundIdentities(user.id),
+    ).resolves.toEqual([
+      {
+        id: expect.stringMatching(`^verified:${user.id}:`),
+        emailAddress: accountEmail.toLowerCase(),
+        kind: 'account',
+      },
+    ]);
+  });
+
+  it('delivers an automation report to an unverified account email', async () => {
     const accountEmail = uniqueEmail('automation-prepared');
-    const user = await createVerifiedUser(accountEmail);
+    const user = await createAccountUser(accountEmail, false);
     const [identity] = await listAgentMailOutboundIdentities(user.id);
     const requests: { url: string; body: Record<string, unknown> }[] = [];
     globalThis.fetch = (async (

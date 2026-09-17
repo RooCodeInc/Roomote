@@ -53,7 +53,6 @@ interface EditEnvironmentPageProps {
   environmentId: string;
   onUpdated?: () => void;
   onCancel?: () => void;
-  onGoUseIt?: (environmentId: string) => void;
 }
 
 export function EditEnvironmentPage({

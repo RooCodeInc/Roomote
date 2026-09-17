@@ -847,6 +847,7 @@ describe('Teams webhook handler', () => {
     // next DM continues this session instead of orphaning it.
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'mapped-user-1',
+      userInitiated: { surface: 'teams', trigger: 'message' },
       conversation: {
         surface: 'teams',
         workspaceId: 'tenant-1',
@@ -968,6 +969,7 @@ describe('Teams webhook handler', () => {
       });
       expect(getFastSessionMock).toHaveBeenCalledWith({
         userId: 'mapped-user-1',
+        userInitiated: { surface: 'teams', trigger: 'message' },
         conversation: canonicalConversation,
       });
       expect(continueFastReplyMock).toHaveBeenCalledWith(
@@ -1924,6 +1926,7 @@ describe('Teams webhook handler', () => {
     });
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'mapped-user-1',
+      userInitiated: { surface: 'teams', trigger: 'message' },
       conversation: {
         surface: 'teams',
         workspaceId: 'tenant-1',
@@ -2208,6 +2211,7 @@ describe('Teams webhook handler', () => {
     );
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'mapped-user-1',
+      userInitiated: { surface: 'teams', trigger: 'message' },
       conversation: {
         surface: 'teams',
         workspaceId: 'tenant-1',
@@ -2296,6 +2300,7 @@ describe('Teams webhook handler', () => {
     });
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'mapped-user-1',
+      userInitiated: { surface: 'teams', trigger: 'message' },
       conversation: {
         surface: 'teams',
         workspaceId: 'tenant-1',

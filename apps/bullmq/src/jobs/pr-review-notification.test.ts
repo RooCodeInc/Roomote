@@ -192,6 +192,7 @@ vi.mock('@roomote/sdk/server', () => ({
     eventsTriaged: 0,
     triageInvoked: false,
     triageCacheHit: false,
+    triageJudgmentSkipped: false,
     triageInputChars: 0,
     triageInputTokenEstimate: 0,
   }),

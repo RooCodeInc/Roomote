@@ -1664,6 +1664,11 @@ export const taskRuns = pgTable(
       .where(
         sql`${table.payload}->>'launchIdempotencyKey' IS NOT NULL AND ${table.canceledAt} IS NULL`,
       ),
+    index('task_runs_canceled_launch_idempotency_key_idx')
+      .on(sql`(${table.payload}->>'launchIdempotencyKey')`)
+      .where(
+        sql`${table.payload}->>'launchIdempotencyKey' IS NOT NULL AND ${table.canceledAt} IS NOT NULL`,
+      ),
     index('task_runs_first_assistant_output_at_idx').on(
       table.firstAssistantOutputAt,
     ),
@@ -2020,6 +2025,11 @@ export const taskPlatformIssueReports = pgTable(
     }),
     report: jsonb('report').notNull().$type<PlatformIssueReport>(),
     slackPostedAt: timestamp('slack_posted_at'),
+    pingSubmittedAt: timestamp('ping_submitted_at'),
+    pingSubmittedByUserId: text('ping_submitted_by_user_id').references(
+      () => users.id,
+      { onDelete: 'set null' },
+    ),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [

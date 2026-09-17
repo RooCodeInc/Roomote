@@ -93,6 +93,29 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
+// The judgment model row renders inside Model mapping with its own query and
+// mutation; JudgmentModelRow.test.tsx covers its behavior.
+vi.mock('@/hooks/task-models/useJudgmentModelSettings', () => ({
+  useJudgmentModelSettings: () => ({
+    data: {
+      typeSafe: { connected: false, source: null },
+      vercelGatewayConnected: false,
+      storedSelection: null,
+      envSelection: null,
+      effectiveSelection: 'off',
+      effectiveSelectionUsable: true,
+    },
+    isPending: false,
+  }),
+}));
+
+vi.mock('@/hooks/task-models/useSetJudgmentModelSelection', () => ({
+  useSetJudgmentModelSelection: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+}));
+
 vi.mock('@/components/settings', () => ({
   Section: ({
     children,
@@ -429,8 +452,9 @@ describe('ModelSettingsSection', () => {
         '[data-slot="select-trigger"]',
       ),
     );
-    // 7 model selects + 7 reasoning selects + the add-model provider select.
-    expect(triggers).toHaveLength(15);
+    // 7 model selects + 7 reasoning selects + the judgment model select + the
+    // add-model provider select.
+    expect(triggers).toHaveLength(16);
     expect(triggers[0]).toBeDisabled();
     expect(triggers[2]).toBeDisabled();
     expect(triggers[4]).toBeDisabled();
@@ -446,9 +470,10 @@ describe('ModelSettingsSection', () => {
     expect(triggers[9]).not.toBeDisabled();
     expect(triggers[11]).not.toBeDisabled();
     expect(triggers[13]).not.toBeDisabled();
-    // The add-model provider select stays enabled regardless of env-managed
-    // runtime models.
+    // The judgment model and add-model provider selects stay enabled
+    // regardless of env-managed runtime models.
     expect(triggers[14]).not.toBeDisabled();
+    expect(triggers[15]).not.toBeDisabled();
 
     expect(screen.queryByText('Make default')).toBeNull();
     expect(screen.queryByText('Env-managed')).toBeNull();
@@ -475,7 +500,7 @@ describe('ModelSettingsSection', () => {
       ),
     );
 
-    expect(triggers).toHaveLength(15);
+    expect(triggers).toHaveLength(16);
     expect(triggers[0]).not.toBeDisabled();
     expect(triggers[1]).toBeDisabled();
     expect(triggers[12]).not.toBeDisabled();
@@ -553,7 +578,7 @@ describe('ModelSettingsSection', () => {
     const { container } = renderModelSettingsSection();
 
     const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    expect(triggers).toHaveLength(15);
+    expect(triggers).toHaveLength(16);
     for (const trigger of Array.from(triggers)) {
       expect(trigger).not.toBeDisabled();
     }
@@ -605,8 +630,9 @@ describe('ModelSettingsSection', () => {
     const { container } = renderModelSettingsSection();
 
     const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    // 7 model selects + the add-model provider select; no reasoning selectors.
-    expect(triggers).toHaveLength(8);
+    // 7 model selects + the judgment model select + the add-model provider
+    // select; no reasoning selectors.
+    expect(triggers).toHaveLength(9);
   });
 
   it('clears orchestration reasoning when switching to a non-reasoning model', async () => {

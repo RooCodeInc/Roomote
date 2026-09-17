@@ -777,6 +777,7 @@ describe('startFastSessionCommand', () => {
     expect(mocks.getOrCreateSession).toHaveBeenCalledTimes(2);
     expect(mocks.getOrCreateSession).toHaveBeenCalledWith({
       userId: 'user-1',
+      userInitiated: { surface: 'web', trigger: 'message' },
       conversation: {
         surface: 'web',
         workspaceId: 'user-1',
@@ -796,6 +797,7 @@ describe('startFastSessionCommand', () => {
     expect(mocks.getOrCreateSession).toHaveBeenCalledWith({
       userId: 'user-1',
       privacy: 'private',
+      userInitiated: { surface: 'web', trigger: 'message' },
       conversation: {
         surface: 'web',
         workspaceId: 'user-1',
@@ -841,15 +843,28 @@ describe('startFastSessionCommand', () => {
     );
   });
 
-  it('rejects private voice-call creation before creating a Session', async () => {
+  it('creates a private voice Session for its owner', async () => {
     await expect(
       startFastSessionCommand(auth, {
         text: '',
+        conversationId: '22222222-2222-4222-8222-222222222223',
         privacy: 'private',
         voiceCall: true,
       }),
-    ).rejects.toThrow('Private Sessions cannot start as voice calls');
-    expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
+    ).resolves.toEqual({
+      sessionId: 'unified-session-1',
+      fastConversationId: 'fast-session-1',
+    });
+    expect(mocks.getOrCreateSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      privacy: 'private',
+      userInitiated: { surface: 'web', trigger: 'message' },
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: '22222222-2222-4222-8222-222222222223',
+      },
+    });
   });
 
   it('seeds the launch tab presence before scheduling the first turn', async () => {

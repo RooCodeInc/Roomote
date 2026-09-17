@@ -24,6 +24,7 @@ import {
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
   SETUP_AUTH_PROVIDER_IDS,
   isSetupModelProviderId,
+  JUDGMENT_MODEL_SELECTIONS,
   isOpenAiCompatibleProviderId,
   customMcpServerInputSchema,
   isOpenAiRealtimeVoiceId,
@@ -465,6 +466,12 @@ import {
 } from '../commands/task-models';
 import { LOCAL_TASK_MODEL_PROVIDER_IDS } from '../commands/task-models/local-provider-discovery';
 import {
+  deleteJudgmentTypeSafeKeyCommand,
+  getJudgmentModelSettingsCommand,
+  saveJudgmentTypeSafeKeyCommand,
+  setJudgmentModelSelectionCommand,
+} from '../commands/task-models/judgment-model';
+import {
   disconnectChatGptSubscriptionCommand,
   getChatGptSubscriptionStatusCommand,
   isChatGptSubscriptionConnectedCommand,
@@ -521,6 +528,10 @@ import {
   getReleaseStatusCommand,
   getReleaseHistoryCommand,
 } from '../commands/product-releases';
+import {
+  getPlatformIssueReportCommand,
+  submitPlatformIssueReportCommand,
+} from '../commands/platform-issue-reports';
 import { getStatuspageIncident } from '@roomote/slack';
 
 const stateRecordSchema = z.record(z.string());
@@ -1156,6 +1167,19 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setTaskPinnedCommand(auth, input),
+      ),
+  }),
+
+  platformIssueReports: createRouter({
+    byId: protectedProcedure
+      .input(z.object({ reportId: z.string().uuid() }))
+      .query(({ ctx: { auth }, input }) =>
+        getPlatformIssueReportCommand(auth, input.reportId),
+      ),
+    submit: protectedProcedure
+      .input(z.object({ reportId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        submitPlatformIssueReportCommand(auth, input.reportId),
       ),
   }),
 
@@ -2471,6 +2495,30 @@ export const appRouter = createRouter({
           provider: input.provider,
         }),
       ),
+
+    // The judgment model (TypeSafe's Jev) is configured apart from chat
+    // providers and task model roles; see commands/task-models/judgment-model.
+    judgment: createRouter({
+      get: protectedProcedure.query(({ ctx: { auth } }) =>
+        getJudgmentModelSettingsCommand(auth),
+      ),
+
+      saveTypeSafeKey: protectedProcedure
+        .input(z.object({ apiKey: z.string().trim().min(1) }))
+        .mutation(({ ctx: { auth }, input }) =>
+          saveJudgmentTypeSafeKeyCommand(auth, input),
+        ),
+
+      deleteTypeSafeKey: protectedProcedure.mutation(({ ctx: { auth } }) =>
+        deleteJudgmentTypeSafeKeyCommand(auth),
+      ),
+
+      setSelection: protectedProcedure
+        .input(z.object({ selection: z.enum(JUDGMENT_MODEL_SELECTIONS) }))
+        .mutation(({ ctx: { auth }, input }) =>
+          setJudgmentModelSelectionCommand(auth, input),
+        ),
+    }),
 
     discoverProviderModels: protectedProcedure
       .input(
