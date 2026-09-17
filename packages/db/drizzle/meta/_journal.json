@@ -680,6 +680,13 @@
       "when": 1789569406816,
       "tag": "0096_special_polaris",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1789643236750,
+      "tag": "0097_first_iceman",
+      "breakpoints": true
     }
   ]
 }
