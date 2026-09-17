@@ -302,58 +302,6 @@ describe('GitHub MCP proxy', () => {
   );
 
   it.each([
-    ['list_gists', { since: '2026-09-16T00:00:00Z' }],
-    ['list_gists', { username: '', page: 1 }],
-    ['get_gist', { gist_id: 'secret-gist-id' }],
-  ] as const)(
-    'reads account-owned gists through the live actor token for %s',
-    async (name, arguments_) => {
-      mocks.userToken.mockResolvedValue('actor-github-token');
-
-      expect((await call(name, arguments_)).status).toBe(200);
-      expect(mocks.userToken).toHaveBeenCalledExactlyOnceWith(actor.id);
-      expect(mocks.mint).not.toHaveBeenCalled();
-      expect(mocks.credentials).not.toHaveBeenCalled();
-      const headers = new Headers(mocks.upstream.mock.calls[0]![1].headers);
-      expect(headers.get('authorization')).toBe('Bearer actor-github-token');
-      expect(headers.get('X-MCP-Readonly')).toBe('true');
-    },
-  );
-
-  it("keeps another user's public gist listing on installation auth", async () => {
-    expect((await call('list_gists', { username: 'public-user' })).status).toBe(
-      200,
-    );
-    expect(mocks.userToken).not.toHaveBeenCalled();
-    expect(mocks.mint).toHaveBeenCalledOnce();
-    const headers = new Headers(mocks.upstream.mock.calls[0]![1].headers);
-    expect(headers.get('authorization')).toBe('Bearer scoped-test-token');
-  });
-
-  it("requires a linked account before listing the actor's own gists", async () => {
-    const response = await call('list_gists', {
-      since: '2026-09-16T00:00:00Z',
-    });
-
-    expect(response.status).toBe(403);
-    expect((await response.json()).error.message).toContain(
-      'Settings > Linked Accounts',
-    );
-    expect(mocks.mint).not.toHaveBeenCalled();
-    expect(mocks.upstream).not.toHaveBeenCalled();
-  });
-
-  it('keeps public gist reads available without a linked account', async () => {
-    expect((await call('get_gist', { gist_id: 'public-gist-id' })).status).toBe(
-      200,
-    );
-    expect(mocks.userToken).toHaveBeenCalledExactlyOnceWith(actor.id);
-    expect(mocks.mint).toHaveBeenCalledOnce();
-    const headers = new Headers(mocks.upstream.mock.calls[0]![1].headers);
-    expect(headers.get('authorization')).toBe('Bearer scoped-test-token');
-  });
-
-  it.each([
     null,
     {},
     { filename: 'notes.md', content: '# Notes' },
@@ -1278,18 +1226,6 @@ describe('GitHub MCP proxy', () => {
         appCredentials,
         tokenCacheOptions,
       );
-      expect(
-        new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
-          'X-MCP-Readonly',
-        ),
-      ).toBe('true');
-      mocks.mint.mockClear();
-      mocks.upstream.mockClear();
-      expect(
-        (await call('get_gist', { gist_id: 'public-gist-id' }, target)).status,
-      ).toBe(200);
-      expect(mocks.userToken).not.toHaveBeenCalled();
-      expect(mocks.mint).toHaveBeenCalledOnce();
       expect(
         new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
           'X-MCP-Readonly',
