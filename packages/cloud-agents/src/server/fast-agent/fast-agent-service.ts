@@ -2292,6 +2292,7 @@ export async function answerFastAgentQuestion({
   });
   let surfaceDisposed = false;
   let surfaceActivityStarted = false;
+  let surfaceActiveTaskIds = new Set(activeTasks.map((task) => task.taskId));
   const startSurfaceActivity = () => {
     if (surfaceDisposed || surfaceActivityStarted || !adapter.activity) return;
     surfaceActivityStarted = true;
@@ -3111,8 +3112,10 @@ export async function answerFastAgentQuestion({
     surfaceSettlement ??= (async () => {
       await surfaceReplyStream.close();
       if (surfaceDisposed) return;
-      if (surfaceActivityStarted) {
-        await adapter.activity?.settle({ keepProcessing: durableTurnDeferred });
+      const keepProcessing =
+        durableTurnDeferred || surfaceActiveTaskIds.size > 0;
+      if (surfaceActivityStarted || keepProcessing) {
+        await adapter.activity?.settle({ keepProcessing });
       } else {
         await adapter.activity?.dispose();
       }
@@ -3551,6 +3554,7 @@ export async function answerFastAgentQuestion({
     const currentTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
     );
+    surfaceActiveTaskIds = new Set(currentTasks.keys());
     taskMessageGuard.restore(previousAttempt?.events ?? [], [
       ...currentTasks.keys(),
     ]);
@@ -4729,6 +4733,7 @@ export async function answerFastAgentQuestion({
             }
             if (result.success) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
+              surfaceActiveTaskIds.add(result.taskId);
               if (
                 substantiveHumanInput &&
                 currentSessionPrivacy !== 'private'
@@ -4830,6 +4835,7 @@ export async function answerFastAgentQuestion({
             }
             if (result.taskId) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
+              surfaceActiveTaskIds.add(result.taskId);
             }
             const kickoffMessage = [
               args.kickoffMessage,
@@ -4875,8 +4881,8 @@ export async function answerFastAgentQuestion({
                   attachmentTexts,
                 })
               : args.message;
-            return await taskMessageGuard.send(taskId, args, () =>
-              sendFastAgentTaskMessage(
+            return await taskMessageGuard.send(taskId, args, async () => {
+              const result = await sendFastAgentTaskMessage(
                 { userId, apiBaseUrl },
                 {
                   taskId,
@@ -4885,8 +4891,10 @@ export async function answerFastAgentQuestion({
                     ? { images }
                     : {}),
                 },
-              ),
-            );
+              );
+              if (result.success) surfaceActiveTaskIds.add(taskId);
+              return result;
+            });
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask: {
@@ -4920,6 +4928,7 @@ export async function answerFastAgentQuestion({
             );
             if (result.success) {
               currentTasks.delete(target.taskId);
+              surfaceActiveTaskIds.delete(target.taskId);
             }
             return result;
           }
@@ -5059,6 +5068,7 @@ export async function answerFastAgentQuestion({
               { userId, apiBaseUrl },
               { taskId: target.taskId, userInitiated: args.userInitiated },
             );
+            if (result.success) surfaceActiveTaskIds.delete(target.taskId);
             return result;
           }
 
