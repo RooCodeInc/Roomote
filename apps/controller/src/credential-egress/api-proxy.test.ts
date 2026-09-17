@@ -201,6 +201,24 @@ describe('API-proxy admission', () => {
     );
     expect(failing.startLeaseRenewal).not.toHaveBeenCalled();
 
+    const settledDuringDelivery = lifecycle();
+    const settledDeps = deps({
+      isRunActive: vi
+        .fn()
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false),
+      publish: vi.fn().mockRejectedValue(new Error('delivery unavailable')),
+    });
+    await expect(
+      admitCredentialEgressApiProxy(input(settledDuringDelivery), settledDeps),
+    ).rejects.toBeInstanceOf(CredentialEgressBootstrapRunInactiveError);
+    expect(settledDuringDelivery.terminate).toHaveBeenCalledWith(
+      7,
+      workloadId,
+      'provision_failed',
+    );
+    expect(settledDuringDelivery.startLeaseRenewal).not.toHaveBeenCalled();
+
     const inactive = lifecycle({
       status: 'skipped',
       reason: 'run_not_eligible',
