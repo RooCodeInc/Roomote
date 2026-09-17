@@ -1622,6 +1622,12 @@ describe('updateBackgroundAgentSettingsCommand Discord channel auto-start', () =
   });
 
   it('writes discord auto-respond targets alongside Slack ones with merged order', async () => {
+    await expect(
+      db.query.automations.findFirst({
+        where: eq(automations.key, 'slack_channel_auto_start'),
+      }),
+    ).resolves.toBeUndefined();
+
     await insertAvailableDiscordChannel({
       guildId: 'guild-1',
       channelId: 'D111',
