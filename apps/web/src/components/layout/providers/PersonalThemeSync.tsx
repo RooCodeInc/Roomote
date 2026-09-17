@@ -9,11 +9,18 @@ import { PERSONAL_THEME_STORAGE_KEY } from '@/types/preferences';
 
 export function PersonalThemeSync() {
   const { isSignedIn } = useUser();
-  const { preferences, hasLoadedPreferences, isLoading } =
-    usePersonalPreferences({
-      enabled: isSignedIn,
-    });
+  const {
+    preferences,
+    error,
+    hasLoadedPreferences,
+    isFetching,
+    isLoading,
+    isUpdating,
+  } = usePersonalPreferences({
+    enabled: isSignedIn,
+  });
   const { theme, setTheme } = useTheme();
+  const hasAuthoritativePreferencesRef = useRef(false);
   const wasSignedInRef = useRef(isSignedIn);
 
   useEffect(() => {
@@ -27,7 +34,16 @@ export function PersonalThemeSync() {
 
     wasSignedInRef.current = isSignedIn;
 
-    if (!isSignedIn || isLoading || !hasLoadedPreferences) {
+    if (!isSignedIn) {
+      hasAuthoritativePreferencesRef.current = false;
+      return;
+    }
+
+    if (hasLoadedPreferences && !error && !isFetching && !isUpdating) {
+      hasAuthoritativePreferencesRef.current = true;
+    }
+
+    if (isLoading || !hasAuthoritativePreferencesRef.current) {
       return;
     }
 
@@ -46,9 +62,12 @@ export function PersonalThemeSync() {
       );
     }
   }, [
+    error,
     hasLoadedPreferences,
+    isFetching,
     isLoading,
     isSignedIn,
+    isUpdating,
     preferences.colorTheme,
     setTheme,
     theme,

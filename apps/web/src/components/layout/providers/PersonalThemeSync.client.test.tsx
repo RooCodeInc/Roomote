@@ -8,8 +8,11 @@ const { personalPreferencesState, themeState, userState } = vi.hoisted(() => ({
       colorTheme: 'system' as PersonalColorTheme,
       narrationMode: false,
     },
+    error: null as Error | null,
     hasLoadedPreferences: true,
+    isFetching: false,
     isLoading: false,
+    isUpdating: false,
   },
   themeState: {
     theme: 'system',
@@ -43,7 +46,10 @@ describe('PersonalThemeSync', () => {
       colorTheme: 'system' as PersonalColorTheme,
       narrationMode: false,
     };
+    personalPreferencesState.error = null;
+    personalPreferencesState.isFetching = false;
     personalPreferencesState.isLoading = false;
+    personalPreferencesState.isUpdating = false;
     personalPreferencesState.hasLoadedPreferences = true;
     themeState.theme = 'system';
     userState.isSignedIn = true;
@@ -74,7 +80,8 @@ describe('PersonalThemeSync', () => {
     expect(themeState.setTheme).not.toHaveBeenCalled();
   });
 
-  it('preserves the cached theme through an initial load failure and syncs after recovery', () => {
+  it('preserves the cached theme through an initial load failure, optimistic updates, and recovery', () => {
+    personalPreferencesState.error = new Error('Failed to load');
     personalPreferencesState.hasLoadedPreferences = false;
     themeState.theme = 'dark';
     window.localStorage.setItem('roomote-color-theme', 'dark');
@@ -84,7 +91,21 @@ describe('PersonalThemeSync', () => {
     expect(themeState.setTheme).not.toHaveBeenCalled();
     expect(window.localStorage.getItem('roomote-color-theme')).toBe('dark');
 
+    personalPreferencesState.error = null;
     personalPreferencesState.hasLoadedPreferences = true;
+    personalPreferencesState.isUpdating = true;
+    rerender(<PersonalThemeSync />);
+
+    expect(themeState.setTheme).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem('roomote-color-theme')).toBe('dark');
+
+    personalPreferencesState.isUpdating = false;
+    personalPreferencesState.isFetching = true;
+    rerender(<PersonalThemeSync />);
+
+    expect(themeState.setTheme).not.toHaveBeenCalled();
+
+    personalPreferencesState.isFetching = false;
     personalPreferencesState.preferences = {
       colorTheme: 'light',
       narrationMode: false,
