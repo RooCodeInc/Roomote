@@ -106,7 +106,7 @@ describe('platform issue report commands', () => {
     });
   });
 
-  it('uses the owning Session as the Fast report context', async () => {
+  it('uses the owning session as the Fast report context', async () => {
     const owner = await userFactory.create();
     const [conversation] = await db
       .insert(fastAgentConversations)
@@ -134,7 +134,7 @@ describe('platform issue report commands', () => {
     await expect(
       getPlatformIssueReportCommand({ isAdmin: true }, reportId),
     ).resolves.toMatchObject({
-      sourceLabel: 'Session',
+      sourceLabel: 'session',
       taskUrl: expect.stringContaining(`/sessions/${session.id}`),
     });
     await expect(
