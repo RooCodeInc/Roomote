@@ -1242,6 +1242,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         initiatedAt: expect.any(String),
         order: expect.any(String),
       },
+      userInitiated: { surface: 'telegram', trigger: 'message' },
     });
     expect(mocks.captureInferenceContext).toHaveBeenCalledWith(
       expect.objectContaining({ surface: 'telegram' }),

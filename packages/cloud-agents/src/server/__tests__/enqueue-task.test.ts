@@ -1284,6 +1284,7 @@ describe('enqueueTask Session linkage', () => {
       await cancellationHeld;
     });
     await cancellationReady;
+    mockCaptureEvent.mockClear();
 
     const retry = launchFresh({
       task,
@@ -1298,6 +1299,11 @@ describe('enqueueTask Session linkage', () => {
 
     expect(replacement.id).not.toBe(first.id);
     expect(replacement.taskId).not.toBe(first.taskId);
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(0);
   });
 
   it('rejects keyed reuse when the persisted Session attachment conflicts', async () => {

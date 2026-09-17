@@ -71,6 +71,7 @@ import {
   desc,
   eq,
   inArray,
+  isNotNull,
   isNull,
   lt,
   recordSnapshotResumeEvent,
@@ -1585,6 +1586,7 @@ async function enqueueFreshLaunch(
   // durable task they continue.
   const runPersistTransaction = () =>
     db.transaction(async (tx) => {
+      let replayedCanceledLaunch = false;
       if (fastAgentSessionId) {
         // Parallel launch_task calls from one Fast turn write the same
         // session and conversation rows; serializing per parent conversation
@@ -1648,8 +1650,22 @@ async function enqueueFreshLaunch(
             taskRun: existingRun,
             createdRun: false,
             reusedTask: true,
+            replayedCanceledLaunch: false,
           };
         }
+        const [canceledRun] = await tx
+          .select({ id: taskRuns.id })
+          .from(taskRuns)
+          .where(
+            and(
+              sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
+              isNotNull(taskRuns.canceledAt),
+            ),
+          )
+          .orderBy(desc(taskRuns.id))
+          .limit(1)
+          .for('update');
+        replayedCanceledLaunch = Boolean(canceledRun);
       }
       const chatgptConnected = effectiveTaskModel.startsWith('openai/')
         ? await isChatGptSubscriptionConnected(tx)
@@ -1755,7 +1771,12 @@ async function enqueueFreshLaunch(
             origin: 'follow_up',
             existingTaskReused: true,
           });
-          return { taskRun: activeRun, createdRun: false, reusedTask: true };
+          return {
+            taskRun: activeRun,
+            createdRun: false,
+            reusedTask: true,
+            replayedCanceledLaunch: false,
+          };
         }
 
         taskId = existingTask.id;
@@ -1930,6 +1951,7 @@ async function enqueueFreshLaunch(
         taskRun: insertedRun,
         createdRun: true,
         reusedTask: Boolean(existingTask),
+        replayedCanceledLaunch,
       };
     });
 
@@ -1949,7 +1971,7 @@ async function enqueueFreshLaunch(
     );
     persisted = await runPersistTransaction();
   }
-  const { taskRun, createdRun, reusedTask } = persisted;
+  const { taskRun, createdRun, reusedTask, replayedCanceledLaunch } = persisted;
 
   if (!createdRun) {
     return taskRun;
@@ -1958,6 +1980,7 @@ async function enqueueFreshLaunch(
   const delegated = Boolean(reusedTask || fastAgentSessionId);
   const userStartedSession =
     !delegated &&
+    !replayedCanceledLaunch &&
     initiator.kind === 'user' &&
     linkedUserId !== null &&
     resolvedTaskPolicy.launchClass !== 'automation' &&
