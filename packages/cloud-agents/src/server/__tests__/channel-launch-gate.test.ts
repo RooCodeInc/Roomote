@@ -1,5 +1,11 @@
-const { mockGenerateTrackedNonTaskObject } = vi.hoisted(() => ({
-  mockGenerateTrackedNonTaskObject: vi.fn(),
+const { mockGenerateTrackedNonTaskObject, mockEvaluateTypeSafeJudgments } =
+  vi.hoisted(() => ({
+    mockGenerateTrackedNonTaskObject: vi.fn(),
+    mockEvaluateTypeSafeJudgments: vi.fn(),
+  }));
+
+vi.mock('../typesafe-judgment', () => ({
+  evaluateTypeSafeJudgments: mockEvaluateTypeSafeJudgments,
 }));
 
 vi.mock('../non-task-provider-usage', async (importOriginal) => {
@@ -23,6 +29,7 @@ function mockClassifierResponse(object: { launch: boolean; reason: string }) {
 describe('evaluateChannelLaunchCriteria', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(null);
   });
 
   it('returns a launch decision when the criteria are met', async () => {
@@ -193,5 +200,111 @@ describe('evaluateChannelLaunchCriteria', () => {
     expect(call.prompt).not.toContain(
       `- [4m ago] launched: ${maliciousSnippet}`,
     );
+  });
+
+  describe('with the judgment model configured', () => {
+    const launchedEarlier = [
+      {
+        ageDescription: '4m ago',
+        decision: 'launched' as const,
+        messageSnippet: 'Elevated 431 Errors. Status: Investigating.',
+      },
+    ];
+
+    it('launches without the helper model on a confident yes', async () => {
+      mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+        criteriaMet: { type: 'noul', noul: 0.94 },
+      });
+
+      const decision = await evaluateChannelLaunchCriteria({
+        messageText: 'Elevated 431 Errors. Status: Identified.',
+        launchCriteria: 'Launch for vendor incidents affecting our providers.',
+      });
+
+      expect(decision).toEqual({
+        status: 'launch',
+        reason: 'Judgment model: launch criteria met (p=0.94).',
+      });
+      expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+      expect(
+        Object.keys(mockEvaluateTypeSafeJudgments.mock.calls[0]?.[0].questions),
+      ).toEqual(['criteriaMet']);
+    });
+
+    it('skips on a confident no', async () => {
+      mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+        criteriaMet: { type: 'noul', noul: 0.03 },
+      });
+
+      const decision = await evaluateChannelLaunchCriteria({
+        messageText: 'Status: Resolved. All systems operational.',
+        launchCriteria: 'Never launch for resolved updates.',
+      });
+
+      expect(decision).toEqual({
+        status: 'skip',
+        reason: 'Judgment model: launch criteria not met (p=0.03).',
+      });
+      expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+    });
+
+    it('skips a confident duplicate of an earlier launch', async () => {
+      mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+        criteriaMet: { type: 'noul', noul: 0.9 },
+        duplicate: { type: 'noul', noul: 0.88 },
+      });
+
+      const decision = await evaluateChannelLaunchCriteria({
+        messageText: 'Elevated 431 Errors. Status: Monitoring.',
+        launchCriteria: 'Launch for vendor incidents affecting our providers.',
+        recentGateActivity: launchedEarlier,
+      });
+
+      expect(decision.status).toBe('skip');
+      expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['criteria', { criteriaMet: { type: 'noul', noul: 0.55 } }],
+      [
+        'duplicate',
+        {
+          criteriaMet: { type: 'noul', noul: 0.9 },
+          duplicate: { type: 'noul', noul: 0.5 },
+        },
+      ],
+    ])(
+      'defers to the helper model when the %s judgment is unsure',
+      async (_label, answers) => {
+        mockEvaluateTypeSafeJudgments.mockResolvedValueOnce(answers);
+        mockClassifierResponse({ launch: true, reason: 'Helper decided.' });
+
+        const decision = await evaluateChannelLaunchCriteria({
+          messageText: 'Some degraded performance reported.',
+          launchCriteria: 'Launch for vendor incidents. When unsure, launch.',
+          recentGateActivity: launchedEarlier,
+        });
+
+        expect(decision).toEqual({
+          status: 'launch',
+          reason: 'Helper decided.',
+        });
+      },
+    );
+
+    it('defers to the helper model when the judgment model fails', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      mockEvaluateTypeSafeJudgments.mockRejectedValueOnce(
+        new Error('TypeSafe request failed with HTTP 529'),
+      );
+      mockClassifierResponse({ launch: false, reason: 'Helper decided.' });
+
+      const decision = await evaluateChannelLaunchCriteria({
+        messageText: 'Status: Monitoring.',
+        launchCriteria: 'Launch only for new incidents.',
+      });
+
+      expect(decision).toEqual({ status: 'skip', reason: 'Helper decided.' });
+    });
   });
 });
