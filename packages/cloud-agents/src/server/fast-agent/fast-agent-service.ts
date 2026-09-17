@@ -33,6 +33,7 @@ import {
   REASONING_EFFORT_VALUES,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
+  buildEnvironmentVerificationPrompt,
   buildDataVisualizationBlocks,
   dataVisualizationInputsSchema,
   fastAgentHumanFollowUpEventSchema,
@@ -116,6 +117,8 @@ import {
 } from './fast-agent-constants';
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
+import { inspectRAnalysisScript } from './r-analysis-preflight';
+import { isCompatibleRAnalysisEnvironment } from './r-analysis-environment';
 import {
   enqueueUserPersonalizationUpdate,
   resolveFastAgentPersonalizationContext,
@@ -467,6 +470,10 @@ const launchTaskArgsSchema = z.object({
   model: z.string().trim().min(1).nullable().optional(),
   reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
   includeAttachments: z.boolean().optional().default(false),
+  mode: z
+    .enum(['standard', 'environment_verification'])
+    .optional()
+    .default('standard'),
 });
 
 const reviewPullRequestArgsSchema = z.object({
@@ -1746,6 +1753,51 @@ const nativeIntegrationIdSchema = z.enum(
 const connectIntegrationArgsSchema = z
   .object({ integrationId: nativeIntegrationIdSchema })
   .strict();
+
+function resolveRAnalysisPreflight(input: {
+  attachmentTexts: string[];
+  availableEnvironments: RoutableEnvironment[];
+}): {
+  rAnalysisPreflight?: {
+    filename: string;
+    packages: string[];
+    unresolvedPackageExpressions: string[];
+    compatibleEnvironmentId?: string;
+  };
+} {
+  const attachment = input.attachmentTexts
+    .map((text) => {
+      const match = /^Attachment:\s*([^\n]+\.R)\s*\n([\s\S]*)$/iu.exec(text);
+      return match ? { filename: match[1]!, source: match[2]! } : null;
+    })
+    .find((value) => value !== null);
+  if (!attachment) return {};
+
+  const preflight = inspectRAnalysisScript(attachment.source);
+  const compatible = input.availableEnvironments.find(
+    (environment) =>
+      environment.analysisRecipe &&
+      isCompatibleRAnalysisEnvironment(
+        {
+          isVerified: environment.isVerified ?? false,
+          config: {
+            name: environment.name,
+            repositories: [],
+            analysis_recipe: environment.analysisRecipe,
+          },
+        },
+        preflight.packages,
+      ),
+  );
+
+  return {
+    rAnalysisPreflight: {
+      filename: attachment.filename,
+      ...preflight,
+      ...(compatible ? { compatibleEnvironmentId: compatible.id } : {}),
+    },
+  };
+}
 
 export async function answerFastAgentQuestion({
   question,
@@ -3656,6 +3708,8 @@ export async function answerFastAgentQuestion({
         agentBehaviorSettings?.workspaceRoutingSettings?.rules,
       privacy: currentSessionPrivacy,
       codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
+      userIsAdmin: currentUser.isAdmin,
+      ...resolveRAnalysisPreflight({ attachmentTexts, availableEnvironments }),
     });
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,
@@ -4723,6 +4777,22 @@ export async function answerFastAgentQuestion({
                 error: 'The selected environment was not found.',
               };
             }
+            if (args.mode === 'environment_verification') {
+              if (!currentUser.isAdmin) {
+                return {
+                  success: false,
+                  error:
+                    'Only deployment administrators can start environment verification.',
+                };
+              }
+              if (!args.environmentId) {
+                return {
+                  success: false,
+                  error:
+                    'environmentId is required for environment verification.',
+                };
+              }
+            }
             if (
               selectedModel &&
               !taskModelOptions.models.some(
@@ -4759,6 +4829,7 @@ export async function answerFastAgentQuestion({
               selectedModel,
               selectedReasoningEffort,
               args.includeAttachments,
+              args.mode,
             ])}`;
             if (completedTaskActions.has(signature)) {
               return {
@@ -4814,12 +4885,24 @@ export async function answerFastAgentQuestion({
               }
             };
             throwIfTurnCancelled();
-            const prompt = args.includeAttachments
-              ? appendAttachmentTextsToPromptText({
-                  text: args.prompt,
-                  attachmentTexts,
-                })
-              : args.prompt;
+            const selectedEnvironment = args.environmentId
+              ? availableEnvironments.find(
+                  (environment) => environment.id === args.environmentId,
+                )
+              : undefined;
+            const prompt =
+              args.mode === 'environment_verification' && args.environmentId
+                ? buildEnvironmentVerificationPrompt({
+                    environmentId: args.environmentId,
+                    environmentName:
+                      selectedEnvironment?.name ?? 'R/Bioconductor analysis',
+                  })
+                : args.includeAttachments
+                  ? appendAttachmentTextsToPromptText({
+                      text: args.prompt,
+                      attachmentTexts,
+                    })
+                  : args.prompt;
             let result: Awaited<ReturnType<typeof adapter.launchTask>>;
             try {
               result = await adapter.launchTask({
@@ -4828,6 +4911,10 @@ export async function answerFastAgentQuestion({
                   ? { images }
                   : {}),
                 environmentId: args.environmentId ?? null,
+                ...(args.mode === 'environment_verification' &&
+                args.environmentId
+                  ? { verifiesEnvironmentId: args.environmentId }
+                  : {}),
                 model: selectedModel,
                 reasoningEffort: selectedReasoningEffort,
                 parentSessionId: session.id,

@@ -122,6 +122,8 @@ export type LaunchFastAgentTask = (params: {
   prompt: string;
   images?: string[];
   environmentId: string | null;
+  /** Exact environment for a fresh, server-authorized verification task. */
+  verifiesEnvironmentId?: string;
   branch?: string;
   /** Optional launch idempotency key persisted in the standard task-run
    * payload; a partial unique index makes concurrent retries converge. */

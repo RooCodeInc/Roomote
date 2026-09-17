@@ -463,6 +463,51 @@ commands:
 });
 
 describe('environmentConfigSchema', () => {
+  it('accepts the pinned repository-free R/Bioconductor recipe', () => {
+    const result = environmentConfigSchema.safeParse({
+      name: 'R analysis',
+      analysis_recipe: {
+        type: 'r-bioconductor',
+        schema_version: 1,
+        catalog_id: 'r-bioconductor-deseq2-v1',
+        image:
+          'bioconductor/bioconductor_docker@sha256:41ed449aa2181f330cdc8d0499a11a7435b04827ff926dc141584a34f65a12cb',
+        r_version: '4.5.2',
+        bioconductor_version: '3.21',
+        direct_packages: [
+          { name: 'DESeq2', source: 'bioconductor' },
+          { name: 'airway', source: 'bioconductor' },
+        ],
+        renv_lock: JSON.stringify({
+          R: { Version: '4.5.2' },
+          Bioconductor: { Version: '3.21' },
+          Packages: { DESeq2: {}, airway: {} },
+        }),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.repositories).toEqual([]);
+  });
+
+  it('rejects floating or incompatible R/Bioconductor recipes', () => {
+    const result = environmentConfigSchema.safeParse({
+      name: 'R analysis',
+      analysis_recipe: {
+        type: 'r-bioconductor',
+        schema_version: 1,
+        catalog_id: 'r-bioconductor-deseq2-v1',
+        image: 'bioconductor/bioconductor_docker:RELEASE_3_21',
+        r_version: '4.5.2',
+        bioconductor_version: '3.21',
+        direct_packages: [{ name: 'DESeq2', source: 'bioconductor' }],
+        renv_lock: '{}',
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it('accepts a repository-free environment', () => {
     expect(
       environmentConfigSchema.parse({
