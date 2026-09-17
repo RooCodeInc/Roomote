@@ -352,15 +352,15 @@ export async function updateBackgroundAgentSettingsCommand(
 > {
   assertAdmin(auth);
   const fieldErrors: BackgroundAgentFieldErrors = {};
+  // Capture row presence before the settings read can seed missing rows.
   const [
-    existingSettings,
     existingProviderUsageLimitAutomation,
     existingChannelAutoStartAutomation,
   ] = await Promise.all([
-    getBackgroundAgentSettingsForDeployment(),
     getAutomationByKey('provider_usage_limit'),
     getAutomationByKey('slack_channel_auto_start'),
   ]);
+  const existingSettings = await getBackgroundAgentSettingsForDeployment();
   const platformIssueAlertsEnabled =
     input.savingAutomation === 'platformIssueAlerts'
       ? (input.platformIssueAlertsEnabled ??
