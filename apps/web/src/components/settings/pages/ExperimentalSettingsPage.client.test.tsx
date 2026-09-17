@@ -6,7 +6,12 @@ const { refetchMock, state } = vi.hoisted(() => ({
     error: null as Error | null,
     hasLoadedPreferences: true,
     isFetching: false,
+    isAdmin: false,
   },
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({ isAdmin: state.isAdmin }),
 }));
 
 vi.mock('@/hooks/usePersonalPreferences', () => ({
@@ -18,6 +23,10 @@ vi.mock('@/hooks/usePersonalPreferences', () => ({
 
 vi.mock('@/components/settings/SettingsShell', () => ({
   SettingsShell: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+vi.mock('@/components/settings/PrivateSessionsExperimentalSetting', () => ({
+  PrivateSessionsExperimentalSetting: () => <div>Private Sessions setting</div>,
 }));
 
 vi.mock(
@@ -59,6 +68,20 @@ describe('ExperimentalSettingsPage', () => {
     state.error = null;
     state.hasLoadedPreferences = true;
     state.isFetching = false;
+    state.isAdmin = false;
+  });
+
+  it('shows the deployment-wide Private Sessions control only to admins', () => {
+    const { rerender } = render(<ExperimentalSettingsPage />);
+
+    expect(
+      screen.queryByText('Private Sessions setting'),
+    ).not.toBeInTheDocument();
+
+    state.isAdmin = true;
+    rerender(<ExperimentalSettingsPage />);
+
+    expect(screen.getByText('Private Sessions setting')).toBeInTheDocument();
   });
 
   it('shows one retryable error instead of default-valued settings after an initial load failure', () => {
