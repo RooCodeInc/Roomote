@@ -62,6 +62,7 @@ const {
   waitForVoiceCallLease,
   liveVoiceState,
   authenticatedUserState,
+  invalidateQueries,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
   startGoalMutate: vi.fn(),
@@ -89,6 +90,7 @@ const {
       };
     },
   },
+  invalidateQueries: vi.fn(),
   liveVoiceState: {
     active: false,
     status: 'idle' as
@@ -173,6 +175,9 @@ vi.mock('@/hooks/useNarrationMode', () => ({
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
     fastSessions: {
+      tasks: {
+        queryKey: (input: unknown) => ['fastSessions.tasks', input],
+      },
       reply: { mutate: replyMutate },
       startGoal: { mutate: startGoalMutate },
       reviewAction: { mutate: reviewActionMutate },
@@ -193,12 +198,25 @@ vi.mock('@/trpc/client', () => ({
       },
     },
     fastSessions: {
+      tasks: {
+        queryKey: (input: unknown) => ['fastSessions.tasks', input],
+      },
       composerSuggestion: {
         queryOptions: (input: unknown, options?: Record<string, unknown>) => ({
           ...options,
           queryKey: ['fastSessions.composerSuggestion', input],
           queryFn: async () => ({ suggestion: null, messageCount: 0 }),
         }),
+      },
+    },
+    sandboxSession: {
+      byTaskId: {
+        queryKey: (input: unknown) => ['sandboxSession.byTaskId', input],
+      },
+    },
+    artifacts: {
+      forTask: {
+        queryKey: (input: unknown) => ['artifacts.forTask', input],
       },
     },
   }),
@@ -209,6 +227,7 @@ vi.mock('@/trpc/client', () => ({
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
   useQuery: () => ({ data: composerSuggestionState.data }),
+  useQueryClient: () => ({ invalidateQueries }),
 }));
 
 // Wakeup polling has dedicated provider-backed tests. Keep this suite's query
@@ -350,6 +369,8 @@ beforeEach(() => {
   composerSuggestionState.data = undefined;
   openTaskPanel.mockReset();
   openTasksPanel.mockReset();
+  invalidateQueries.mockReset();
+  invalidateQueries.mockResolvedValue(undefined);
   voiceStatusQuery.mockReset();
   voiceStatusQuery.mockResolvedValue({ enabled: false });
   recordVoiceTurnMutate.mockReset();
@@ -3480,6 +3501,33 @@ describe('FastSessionTranscript', () => {
     });
     expect(screen.getByText('Looking into it now.')).toBeInTheDocument();
     expect(screen.getByText('Done.')).toBeInTheDocument();
+  });
+
+  it('refreshes task-backed panes when a task report admission is pushed', async () => {
+    render(
+      <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
+    );
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('task-report', {
+        type: 'task_report_admitted',
+        eventId: 'fast-parent-child-message:report-1:user',
+        taskId: 'task-1',
+        admittedAtMs: Date.now() - 20,
+        serverReceivedAtMs: Date.now() - 10,
+      });
+    });
+
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledTimes(3));
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['fastSessions.tasks', { sessionId: 'session-1' }],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['sandboxSession.byTaskId', { taskId: 'task-1' }],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['artifacts.forTask', { taskId: 'task-1' }],
+    });
   });
 
   it('withdraws streamed text that no reply delivered once the turn settles', () => {

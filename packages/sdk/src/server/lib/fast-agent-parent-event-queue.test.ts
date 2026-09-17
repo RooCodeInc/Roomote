@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
     findRun: vi.fn(),
     selectRows: vi.fn(),
     acquireLock: vi.fn(),
+    publishRefresh: vi.fn(),
     releaseLock: Object.assign(vi.fn(), {
       signal: new AbortController().signal,
     }),
@@ -48,6 +49,7 @@ vi.mock('@roomote/redis', () => ({ getRedis: vi.fn(() => ({})) }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
+  publishFastAgentSessionRefresh: mocks.publishRefresh,
   findFastAgentDurableRetryScheduledError: (error: unknown) =>
     error instanceof Error &&
     error.name === 'FastAgentDurableRetryScheduledError'
@@ -106,6 +108,10 @@ vi.mock('@roomote/db/server', () => ({
     deliveredAt: 'delivered_at',
     discardedAt: 'discarded_at',
   },
+  fastAgentMessages: {
+    conversationId: 'message_conversation_id',
+    eventId: 'message_event_id',
+  },
   taskRuns: { id: 'task_runs.id', status: 'task_runs.status' },
 }));
 
@@ -129,6 +135,7 @@ import {
   enqueueFastAgentParentEventForRun,
   FastAgentParentBusyError,
   recoverPendingFastAgentParentEvents,
+  wakeFastAgentParentEventsOnTurnRelease,
 } from './fast-agent-parent-event-queue';
 import type { FastAgentParentEvent } from './fast-agent-parent-event';
 
@@ -206,6 +213,7 @@ describe('Fast parent event durable queue', () => {
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
     mocks.releaseLock.mockResolvedValue(undefined);
     mocks.deliver.mockResolvedValue('delivered');
+    mocks.publishRefresh.mockResolvedValue(undefined);
   });
 
   it('persists before acknowledging and survives an immediate BullMQ failure', async () => {
@@ -232,8 +240,56 @@ describe('Fast parent event durable queue', () => {
       enqueueFastAgentParentEvent({ parent, event }),
     ).resolves.toEqual(expect.objectContaining({ queued: true }));
 
-    expect(mocks.insertOnConflict).toHaveBeenCalledOnce();
+    expect(mocks.insertOnConflict).toHaveBeenCalledTimes(2);
     expect(mocks.queueAdd).toHaveBeenCalledOnce();
+  });
+
+  it('persists and publishes one canonical child-report receipt before waking the parent', async () => {
+    await enqueueFastAgentParentEvent({ parent, event });
+
+    expect(mocks.insertValues).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        conversationId: parent.sessionId,
+        eventId: 'child_message:message-1:user',
+        turnId: 'child_message:message-1',
+        eventType: 'roomote_runtime.tool_result',
+        role: 'tool',
+        payload: expect.objectContaining({
+          toolName: 'receive_task_report',
+          output: 'Done.',
+        }),
+      }),
+    );
+    expect(mocks.publishRefresh).toHaveBeenCalledWith(parent.sessionId, {
+      type: 'task_report_admitted',
+      eventId: 'child_message:message-1:user',
+      taskId: 'child-task',
+      admittedAtMs: expect.any(Number),
+    });
+    expect(mocks.insertOnConflict.mock.invocationCallOrder[1]).toBeLessThan(
+      mocks.queueAdd.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('wakes the oldest pending row after the owning turn releases', async () => {
+    const lock = Object.assign(vi.fn(), {
+      signal: new AbortController().signal,
+      abort: vi.fn(),
+      abortForShutdown: vi.fn(),
+      shutdownCloseoutSettled: Promise.resolve(),
+      afterRelease: undefined as undefined | (() => Promise<void>),
+    });
+    mocks.findPending.mockResolvedValueOnce(pendingRow('pending'));
+
+    wakeFastAgentParentEventsOnTurnRelease(lock, parent.sessionId);
+    await lock.afterRelease?.();
+
+    expect(mocks.queueAdd).toHaveBeenCalledWith(
+      'deliver',
+      { conversationId: parent.sessionId, eventKey: 'key-pending' },
+      { jobId: expect.stringMatching(/^key-pending-release-\d+$/) },
+    );
   });
 
   it('builds a stable BullMQ-safe idempotency key', () => {

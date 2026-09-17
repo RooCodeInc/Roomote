@@ -516,6 +516,99 @@ describe('Fast session queries', () => {
     },
   );
 
+  it('keeps one task-report receipt when the eventual platform turn replaces its admission row', async () => {
+    const owner = await userFactory.create();
+    const session = await createFastSession({
+      userId: owner.id,
+      conversationId: 'admitted-child-receipt',
+      updatedAt: new Date('2026-09-17T16:00:00.000Z'),
+    });
+    const eventId = 'fast-parent-child-message:report-1:user';
+    const admittedAtMs = 1_789_660_000_000;
+    const event = {
+      type: 'child_message',
+      taskId: 'child-task-1',
+      runId: 42,
+      messageId: 'report-1',
+      admittedAtMs,
+      purpose: 'progress',
+      message: 'The child is running targeted tests.',
+    };
+    await createFastMessage({
+      conversationId: session.id,
+      eventId,
+      turnSeq: 0,
+      ts: admittedAtMs,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool',
+      contentBlocks: [{ type: 'text', text: event.message }],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        toolName: 'receive_task_report',
+        toolCallId: eventId,
+        status: 'completed',
+        rawInput: {
+          taskId: event.taskId,
+          runId: event.runId,
+          messageId: event.messageId,
+          purpose: event.purpose,
+        },
+        output: event.message,
+      },
+    });
+
+    const admitted = await getFastSessionMessagesSince(session.id, 0);
+    expect(admitted.messages).toEqual([
+      expect.objectContaining({
+        eventId,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        role: 'tool',
+        payload: expect.objectContaining({
+          toolName: 'receive_task_report',
+          output: event.message,
+        }),
+      }),
+    ]);
+
+    await db
+      .update(fastAgentMessages)
+      .set({
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: [
+          {
+            type: 'text',
+            text: `<platform_event>${JSON.stringify(event)}</platform_event>`,
+          },
+        ],
+        metadata: {
+          visibleInTranscript: false,
+          turnSource: 'platform_event',
+          platformEventKind: 'delegated_task',
+        },
+        payload: {},
+        updatedAt: sql`now()`,
+      })
+      .where(eq(fastAgentMessages.eventId, eventId));
+
+    const completed = await getFastSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+    expect(completed?.messages).toEqual([
+      expect.objectContaining({
+        eventId,
+        ts: admittedAtMs,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        role: 'tool',
+        payload: expect.objectContaining({
+          toolName: 'receive_task_report',
+          output: event.message,
+        }),
+      }),
+    ]);
+  });
+
   it.each(['history', 'polling'])(
     'enriches known task references with current non-deleted titles in %s',
     async (readMode) => {

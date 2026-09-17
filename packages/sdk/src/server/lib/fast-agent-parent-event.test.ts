@@ -1079,6 +1079,7 @@ describe('deliverFastAgentParentEvent', () => {
       taskId: 'task-1',
       runId: 42,
       messageId: '22222222-2222-4222-8222-222222222222',
+      admittedAtMs: 1_789_660_000_000,
       purpose: 'progress' as const,
       message: 'The child is running targeted tests.',
     };
@@ -1090,6 +1091,7 @@ describe('deliverFastAgentParentEvent', () => {
         question: expect.stringContaining(
           '"message":"The child is running targeted tests."',
         ),
+        platformEventTimestampMs: childEvent.admittedAtMs,
         turnSource: 'platform_event',
       }),
     );
