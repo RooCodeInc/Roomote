@@ -6,7 +6,7 @@ import {
 import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
 import {
   HTTP_INTEGRATIONS_MCP_ID,
-  HTTP_INTEGRATIONS_USAGE_INSTRUCTIONS,
+  HTTP_INTEGRATIONS_INSTRUCTIONS,
 } from '../../http-integrations';
 import {
   getBitbucketOAuthConnection,
@@ -304,7 +304,7 @@ function describeMcpServer(
       name: 'HTTP integrations',
       description:
         'API-mediated HTTP requests to operator-configured integrations.',
-      instructions: HTTP_INTEGRATIONS_USAGE_INSTRUCTIONS,
+      instructions: HTTP_INTEGRATIONS_INSTRUCTIONS,
     };
   }
   if (id === ROOMOTE_MCP_ID) {

@@ -409,10 +409,10 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       'use that exact integrationId with find_integration_tools and call_integration_tool',
     );
     expect(tool.description).toContain(
-      'official or provider-supported hosted endpoint',
+      "a service's official hosted remote MCP endpoint",
     );
     expect(tool.description).toContain(
-      'pending setup, not absence of MCP and not permission to create an API-key fallback',
+      'mean the MCP exists and setup is pending',
     );
 
     expect(Object.keys(tool.args!).sort()).toEqual(['name', 'url']);
@@ -433,7 +433,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     );
   });
 
-  it('keeps integration-key tool descriptions subordinate to MCP-first routing', () => {
+  it('keeps integration-key tool descriptions aware of the remote MCP route', () => {
     const prepare = tools.find(
       ({ name }) =>
         name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
@@ -443,15 +443,8 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
         name === FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
     )!;
 
-    expect(prepare.description).toContain(
-      'only after the integration routing policy selects that fallback',
-    );
-    expect(list.description).toContain(
-      'A missing connected connector is not proof that no compatible remote MCP exists',
-    );
-    expect(list.description).toContain(
-      'pending remote-MCP authorization or manual registration must not trigger an API approval',
-    );
+    expect(prepare.description).toContain('Call list_integration_keys first');
+    expect(list.description).toContain('official remote MCP, or skill covers');
   });
 
   it('covers every enabled native tool', () => {

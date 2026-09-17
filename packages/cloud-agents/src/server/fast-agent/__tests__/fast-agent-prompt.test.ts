@@ -750,7 +750,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(enabledPrompt).toContain('`prepare_integration_key`');
     expect(enabledPrompt).toContain('`list_integration_keys`');
     expect(enabledPrompt).toContain(
-      'launch a coding task attached to this Session to use it for scripts or many calls',
+      'launch a coding task attached to this Session to use the integration',
     );
     expect(enabledPrompt).not.toContain('`request_with_integration_key`');
     expect(enabledPrompt).not.toContain(
@@ -763,29 +763,29 @@ describe('buildFastAgentSystemPrompt', () => {
       'In web Sessions these tools need no opening `send_chat_reply`.',
     );
     expect(enabledPrompt).toContain(
-      'first reuse a suitable connected integration and its existing mediated tools',
+      'pick one route in this order and act on it in the same turn',
     );
     expect(enabledPrompt).toContain(
-      'If no suitable integration is connected for the requested service',
+      'A connector for a different service does not count',
     );
     expect(enabledPrompt).not.toContain('If none is connected');
     expect(enabledPrompt).toContain(
-      'do bounded discovery for an official or provider-supported hosted remote MCP server before considering an API key',
+      "the service's official hosted remote MCP endpoint, when you know it or the human supplied a URL",
     );
     expect(enabledPrompt).toContain(
-      'A missing installed connector is not proof that no remote MCP exists',
+      'only means nothing is installed for this one',
     );
     expect(enabledPrompt).toContain(
-      'never treat a local stdio project or repository as a compatible hosted MCP server',
+      'a stdio project or a repository is not a hosted MCP',
     );
     expect(enabledPrompt).toContain(
-      'Authorization-required, manual client-registration, and other pending setup states mean the MCP exists',
+      'A pending MCP state (an authorization link or manual client registration) means the MCP exists',
     );
     expect(enabledPrompt).toContain(
-      'An authorization denial must not be bypassed with another credential route',
+      'a denied authorization is never bypassed with a key',
     );
     expect(enabledPrompt).toContain(
-      'Only after the integration routing policy selects the custom HTTPS API fallback',
+      'Do not ask for exports, screenshots, or pasted content, do not probe whether the service is reachable',
     );
     expect(enabledPrompt).toContain(
       'If available documentation cannot verify the API origin and credential header, say those details could not be verified and do not guess',
@@ -797,7 +797,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Label that link with the service, for example "Connect Figma securely"',
     );
     expect(enabledPrompt).toContain(
-      'never guess either one or default blindly to `Authorization: Bearer`',
+      'never delegate that lookup to a coding task',
     );
     const platformEventPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -1976,7 +1976,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'do not mention integration IDs, catalog checks, probing, or internal recovery',
     );
     expect(prompt).toContain(
-      'After verifying a compatible hosted remote MCP endpoint',
+      'Remote MCP: call `add_remote_mcp` with only its name and URL',
     );
   });
 });

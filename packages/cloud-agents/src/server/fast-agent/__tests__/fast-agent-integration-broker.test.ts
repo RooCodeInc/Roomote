@@ -225,9 +225,6 @@ describe('fast-agent integration broker', () => {
     expect(available[0]?.instructions).toContain(
       'call list_integrations first',
     );
-    expect(available[0]?.instructions).not.toContain(
-      'A missing installed connector is not proof that no remote MCP exists',
-    );
     expect(available[0]?.instructions).toContain(
       'Never seek or return raw keys, credentials, tokens, or environment dumps',
     );

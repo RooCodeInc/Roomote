@@ -12,17 +12,12 @@ server-side credential, and sends the HTTPS request.
 This works through the same Roomote API for every sandbox provider, including
 Roomote Cloud, Modal, Docker, E2B, Daytona, Azure, Blaxel, and Box. It requires no
 provider-specific networking configuration or proxy service. Existing connected
-integration tools suitable for the requested service remain available and should
-be used first.
+integration tools remain available and should be used first.
 
-For a general "connect to X" request with no suitable connected integration,
-Roomote next performs bounded discovery for an official or provider-supported
-hosted remote MCP server. It prefers the verified remote MCP route when one is
-compatible and uses HTTP integrations or an owner-approved integration key only
-when no suitable connectable MCP is available, or when the user explicitly
-chooses API access. A missing installed connector is not proof that no remote
-MCP exists. Pending MCP authorization or manual client registration remains MCP
-setup and does not trigger a duplicate API-key approval.
+For a general "connect to X" request, Roomote prefers a connected integration
+for that service, then the service's official remote MCP server, and uses HTTP
+integrations or an integration key when neither applies or when you ask for the
+service's API.
 
 <Warning>
   This is credential mediation, not network isolation. Agents are instructed to
