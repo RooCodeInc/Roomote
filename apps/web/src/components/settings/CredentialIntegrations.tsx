@@ -158,6 +158,7 @@ type CredentialDefinition<Input> = {
   parse: (
     secret: string,
   ) => { success: true; data: Input } | { success: false; errors?: string[] };
+  getCredential: (input: Input) => string;
 };
 
 type CredentialRuntime = {
@@ -474,7 +475,7 @@ function useCredentialIntegration<Input>({
       return;
     }
 
-    if (!isConnected && secret.length === 0) {
+    if (!isConnected && definition.getCredential(parsed.data).length === 0) {
       setFieldErrors([definition.requiredMessage]);
       return;
     }
@@ -567,6 +568,7 @@ const credentialDefinitions = {
     connectedMessage: 'Asana connected for this deployment.',
     updatedMessage: 'Asana connection updated for this deployment.',
     canManageTools: true,
+    getCredential: (input) => input.accessToken ?? '',
     parse: (secret: string) => {
       const result = saveAsanaConnectionSchema.safeParse({
         accessToken: secret,
@@ -614,6 +616,7 @@ const credentialDefinitions = {
     updatedMessage: 'Notion connection updated for this deployment.',
     canManageTools: false,
     requireConnectionAuthentication: true,
+    getCredential: (input) => input.internalIntegrationSecret ?? '',
     parse: (secret: string) => {
       const result = saveNotionConnectionSchema.safeParse({
         internalIntegrationSecret: secret,
@@ -652,6 +655,7 @@ const credentialDefinitions = {
     updatedMessage: 'Rippling connection updated for this deployment.',
     canManageTools: false,
     requireConnectionAuthentication: true,
+    getCredential: (input) => input.apiToken ?? '',
     parse: (secret: string) => {
       const result = saveRipplingConnectionSchema.safeParse({
         apiToken: secret,
@@ -690,6 +694,7 @@ const credentialDefinitions = {
     connectedMessage: 'Granola connected for this deployment.',
     updatedMessage: 'Granola connection updated for this deployment.',
     canManageTools: true,
+    getCredential: (input) => input.apiKey ?? '',
     parse: (secret: string) => {
       const result = saveGranolaConnectionSchema.safeParse({ apiKey: secret });
       return result.success
@@ -728,6 +733,7 @@ const credentialDefinitions = {
     connectedMessage: 'X connected for this deployment.',
     updatedMessage: 'X connection updated for this deployment.',
     canManageTools: true,
+    getCredential: (input) => input.bearerToken ?? '',
     parse: (secret: string) => {
       const result = saveXConnectionSchema.safeParse({ bearerToken: secret });
       return result.success

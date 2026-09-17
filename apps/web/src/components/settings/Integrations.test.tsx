@@ -1937,6 +1937,57 @@ describe('Integrations settings', () => {
     );
   });
 
+  it.each([
+    {
+      integration: 'Asana',
+      inputLabel: 'Asana Access Token',
+      requiredMessage: 'Access token is required',
+      saveMutation: mutations.saveAsanaConnection,
+    },
+    {
+      integration: 'Notion',
+      inputLabel: 'Internal integration secret',
+      requiredMessage: 'Internal integration secret is required',
+      saveMutation: mutations.saveNotionConnection,
+    },
+    {
+      integration: 'Rippling',
+      inputLabel: 'API token',
+      requiredMessage: 'API token is required',
+      saveMutation: mutations.saveRipplingConnection,
+    },
+    {
+      integration: 'Granola',
+      inputLabel: 'Granola API Key',
+      requiredMessage: 'API key is required',
+      saveMutation: mutations.saveGranolaConnection,
+    },
+    {
+      integration: 'X',
+      inputLabel: 'X App-only Bearer Token',
+      requiredMessage: 'Bearer token is required',
+      saveMutation: mutations.saveXConnection,
+    },
+  ])(
+    'rejects a whitespace-only $integration credential before saving',
+    ({ integration, inputLabel, requiredMessage, saveMutation }) => {
+      render(<Integrations />);
+
+      fireEvent.click(
+        screen.getByRole('button', { name: `Configure ${integration}` }),
+      );
+      fireEvent.change(screen.getByLabelText(inputLabel), {
+        target: { value: '   ' },
+      });
+      fireEvent.click(
+        screen.getByRole('button', { name: `Connect ${integration}` }),
+      );
+
+      expect(screen.getByText(requiredMessage)).toBeInTheDocument();
+      expect(saveMutation).not.toHaveBeenCalled();
+    },
+  );
+
   it('submits a trimmed Exa API key from the dialog', () => {
     render(<Integrations />);
 
