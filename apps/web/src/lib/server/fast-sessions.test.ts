@@ -1135,6 +1135,19 @@ describe('Fast session queries', () => {
         fastAgentSessionId: session.id,
       },
     });
+    const failedStartTask = await taskFactory.create({
+      title: 'Failed start task',
+      state: 'failed',
+    });
+    await runFactory.create({
+      taskId: failedStartTask.id,
+      status: RunStatus.Failed,
+      payload: {
+        repo: 'acme/widgets',
+        description: 'Failed Fast task',
+        fastAgentSessionId: session.id,
+      },
+    });
     await db.insert(llmUsageEvents).values({
       eventKey: `fast-task-cost-${crypto.randomUUID()}`,
       taskId: delegatedTask.id,
@@ -1165,7 +1178,7 @@ describe('Fast session queries', () => {
       session.id,
     );
 
-    expect(result).toHaveLength(2);
+    expect(result).toHaveLength(3);
     expect(result).toEqual(
       expect.arrayContaining([
         {
@@ -1182,6 +1195,7 @@ describe('Fast session queries', () => {
           latestRun: {
             status: RunStatus.Running,
             taskPhase: 'running',
+            canRetryFailedStart: false,
           },
         },
         {
@@ -1193,6 +1207,19 @@ describe('Fast session queries', () => {
           latestRun: {
             status: RunStatus.Completed,
             taskPhase: null,
+            canRetryFailedStart: false,
+          },
+        },
+        {
+          taskId: failedStartTask.id,
+          title: 'Failed start task',
+          inferenceCostMicroUsd: 0,
+          artifacts: [],
+          previews: [],
+          latestRun: {
+            status: RunStatus.Failed,
+            taskPhase: null,
+            canRetryFailedStart: true,
           },
         },
       ]),

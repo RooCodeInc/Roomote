@@ -182,7 +182,12 @@ export function sessionWorkspacePanelReducer(
       let changed = false;
 
       for (const taskId of action.transitionedTaskIds) {
-        const taskIndex = taskPanelIds.indexOf(taskId);
+        let taskIndex = taskPanelIds.indexOf(taskId);
+        if (taskIndex < 0) {
+          taskPanelIds.push(taskId);
+          taskIndex = taskPanelIds.length - 1;
+          changed = true;
+        }
         if (
           taskId === action.selectedTaskId ||
           taskIndex < visibleSlotCount ||

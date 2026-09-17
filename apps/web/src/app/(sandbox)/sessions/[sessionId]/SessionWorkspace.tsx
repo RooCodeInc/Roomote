@@ -138,6 +138,7 @@ type SessionTaskSummary = {
     id: number;
     status: RunStatus;
     taskPhase: string | null;
+    canRetryFailedStart?: boolean;
     error: string | null;
     result: unknown;
   } | null;
@@ -200,7 +201,7 @@ export type SessionInfo = {
       inferenceCostMicroUsd?: number;
       latestRun: Pick<
         NonNullable<SessionTaskSummary['latestRun']>,
-        'status' | 'taskPhase'
+        'status' | 'taskPhase' | 'canRetryFailedStart'
       > | null;
     }
   >;
@@ -852,11 +853,14 @@ export function SessionWorkspace({
   );
   const automaticTaskPanelIds = useMemo(() => {
     const runningTaskIdSet = new Set(runningTaskIds);
+    const selectableTaskIds = taskCards
+      .filter((task) => task.latestRun?.canRetryFailedStart !== true)
+      .map((task) => task.taskId);
     return [
       ...runningTaskIds,
-      ...taskIds.filter((taskId) => !runningTaskIdSet.has(taskId)),
+      ...selectableTaskIds.filter((taskId) => !runningTaskIdSet.has(taskId)),
     ];
-  }, [runningTaskIds, taskIds]);
+  }, [runningTaskIds, taskCards]);
   const {
     utilityPanel,
     taskArtifacts,
