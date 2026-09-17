@@ -13,6 +13,13 @@ agent works with an opaque reference or a substitute token, and Roomote's API
 adds the real key on the way out. Integration keys are for HTTPS services, not
 a replacement for [connected integrations](/integrations).
 
+When you ask to connect a service without choosing a connection type, Roomote
+first reuses a suitable connected integration. If none is connected, it checks
+bounded official provider documentation for a compatible hosted remote MCP
+server. Integration keys are the fallback when no suitable connectable MCP is
+available, or when you explicitly ask to use the service's API. A missing
+installed connector alone does not skip MCP discovery.
+
 <Note>
   Integration keys are gated deployment-wide. An admin can turn on
   **Integration keys** under **Settings → Experimental** for all members.
@@ -20,7 +27,9 @@ a replacement for [connected integrations](/integrations).
 
 ## How an approval works
 
-1. You ask for something that needs a service you hold a key for, such as
+1. You explicitly choose API access, or Roomote determines that no suitable
+   connectable hosted MCP server is available for a service you hold a key for,
+   such as
    "list my Stripe customers", or share a link into a service Roomote has no
    connector for but whose API accepts a key you hold, such as a Figma frame
    or an Intercom conversation.
@@ -39,6 +48,11 @@ a replacement for [connected integrations](/integrations).
 4. The Session resumes on its own. Personal integrations are available to your
    Sessions and coding tasks. Deployment-wide integrations are available to
    active members while the integration owner remains active.
+
+If remote MCP setup instead returns an authorization link or asks for manual
+client registration, that setup is still pending. Roomote does not create a
+duplicate integration-key approval, and an authorization denial is not bypassed
+through the API-key route.
 
 You can also add a personal integration directly under **Personal Settings →
 Personal integrations**, naming the origin, header, methods, and key yourself.

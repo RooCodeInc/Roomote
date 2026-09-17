@@ -14,6 +14,15 @@ Roomote Cloud, Modal, Docker, E2B, Daytona, Azure, Blaxel, and Box. It requires 
 provider-specific networking configuration or proxy service. Existing connected
 integration tools remain available and should be used first.
 
+For a general "connect to X" request, Roomote next performs bounded discovery
+for an official or provider-supported hosted remote MCP server. It prefers the
+verified remote MCP route when one is compatible and uses HTTP integrations or
+an owner-approved integration key only when no suitable connectable MCP is
+available, or when the user explicitly chooses API access. A missing installed
+connector is not proof that no remote MCP exists. Pending MCP authorization or
+manual client registration remains MCP setup and does not trigger a duplicate
+API-key approval.
+
 <Warning>
   This is credential mediation, not network isolation. Agents are instructed to
   use the integration tools, but normal sandbox networking remains available.

@@ -408,6 +408,12 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     expect(tool.description).toContain(
       'use that exact integrationId with find_integration_tools and call_integration_tool',
     );
+    expect(tool.description).toContain(
+      'official or provider-supported hosted endpoint',
+    );
+    expect(tool.description).toContain(
+      'pending setup, not absence of MCP and not permission to create an API-key fallback',
+    );
 
     expect(Object.keys(tool.args!).sort()).toEqual(['name', 'url']);
     expect(schema).toMatchObject({
@@ -424,6 +430,27 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     });
     expect(JSON.stringify(schema)).not.toMatch(
       /secret|token|header|client[_-]?id/i,
+    );
+  });
+
+  it('keeps integration-key tool descriptions subordinate to MCP-first routing', () => {
+    const prepare = tools.find(
+      ({ name }) =>
+        name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
+    )!;
+    const list = tools.find(
+      ({ name }) =>
+        name === FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
+    )!;
+
+    expect(prepare.description).toContain(
+      'only after the integration routing policy selects that fallback',
+    );
+    expect(list.description).toContain(
+      'A missing connected connector is not proof that no compatible remote MCP exists',
+    );
+    expect(list.description).toContain(
+      'pending remote-MCP authorization or manual registration must not trigger an API approval',
     );
   });
 

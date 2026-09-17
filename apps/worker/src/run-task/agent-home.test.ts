@@ -48,6 +48,18 @@ describe('createIntegrationMcpInstructions', () => {
         },
       ]),
     ).toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
+    expect(
+      createIntegrationMcpInstructions([
+        {
+          type: 'remote',
+          name: 'runtime-broker',
+          url: 'https://api.test/prefixed/broker',
+          roomoteManaged: 'http-integrations-broker',
+        },
+      ]),
+    ).toContain(
+      'A missing installed connector is not proof that no remote MCP exists',
+    );
   });
   it('includes shared HTTP integrations guidance only when its remote server is present', () => {
     expect(
