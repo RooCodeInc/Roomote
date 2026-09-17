@@ -2,6 +2,7 @@ import {
   customMcpServers,
   db,
   eq,
+  inArray,
   mcpConnections,
   userFactory,
 } from '@roomote/db/server';
@@ -62,8 +63,23 @@ const remoteInput = {
 };
 
 async function cleanup() {
-  await db.delete(customMcpServers);
-  await db.delete(mcpConnections);
+  const servers = await db
+    .select({ id: customMcpServers.id })
+    .from(customMcpServers)
+    .where(eq(customMcpServers.createdByUserId, adminAuth.userId));
+
+  if (servers.length > 0) {
+    await db.delete(mcpConnections).where(
+      inArray(
+        mcpConnections.mcpId,
+        servers.map(({ id }) => customMcpConnectionId(id)),
+      ),
+    );
+  }
+
+  await db
+    .delete(customMcpServers)
+    .where(eq(customMcpServers.createdByUserId, adminAuth.userId));
 }
 
 describe('custom-mcp-servers commands', () => {
