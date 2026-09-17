@@ -4,7 +4,6 @@ import {
   db,
   eq,
   gte,
-  privateSessionAccess,
   sessions,
   sessionTasks,
   sql,
@@ -16,7 +15,17 @@ import { getUserDisplayName } from '@/lib';
 
 import type { AnalyticsRow } from './types';
 import { createLabelBackedDimensionValue, mapTaskSource } from './dimensions';
-import { formatAnalyticsDateTime, getTimeCutoff } from './time-buckets';
+import {
+  canViewPrivateAnalyticsDetails,
+  createPrivateAnalyticsIdMapper,
+  PRIVATE_SESSION_LABEL,
+  privateAnalyticsDimensionValue,
+} from './privacy';
+import {
+  formatAnalyticsDateTime,
+  formatPrivateAnalyticsDate,
+  getTimeCutoff,
+} from './time-buckets';
 
 export async function getSessionAnalyticsRows(
   auth: UserAuthSuccess,
@@ -45,6 +54,8 @@ export async function getSessionAnalyticsRows(
       executionCount: sql<number>`coalesce(${executionCounts.executionCount}, 0)::int`,
       status: sessions.cachedStatus,
       createdAt: sessions.createdAt,
+      privacy: sessions.privacy,
+      privateOwnerUserId: sessions.privateOwnerUserId,
     })
     .from(sessions)
     .leftJoin(users, eq(users.id, sessions.ownerUserId))
@@ -52,15 +63,46 @@ export async function getSessionAnalyticsRows(
     .where(
       and(
         eq(sessions.visibility, 'visible'),
-        privateSessionAccess(auth),
         cutoff ? gte(sessions.createdAt, cutoff) : undefined,
       ),
     );
 
-  return rows.map((row) => {
+  const getPrivateId = createPrivateAnalyticsIdMapper('private-session');
+
+  return rows.map<AnalyticsRow>((row) => {
     const owner =
       getUserDisplayName({ name: row.ownerName, email: row.ownerEmail }) ??
       'System';
+    const canViewDetails = canViewPrivateAnalyticsDetails(auth, row);
+    if (!canViewDetails) {
+      const id = getPrivateId(row.id);
+      const values: Record<string, string> = {
+        date: formatPrivateAnalyticsDate(row.createdAt),
+        user: owner,
+        source: PRIVATE_SESSION_LABEL,
+        status: PRIVATE_SESSION_LABEL,
+        ownerKind: PRIVATE_SESSION_LABEL,
+        hasExecution: PRIVATE_SESSION_LABEL,
+        sessionTitle: PRIVATE_SESSION_LABEL,
+      };
+      return {
+        id,
+        timestamp: row.createdAt,
+        value: 1,
+        dimensions: {
+          user: { key: owner, label: owner },
+          status: privateAnalyticsDimensionValue,
+          source: privateAnalyticsDimensionValue,
+          ownerKind: privateAnalyticsDimensionValue,
+          hasExecution: privateAnalyticsDimensionValue,
+        },
+        details: {
+          id,
+          values,
+        },
+      } satisfies AnalyticsRow;
+    }
+
     const status = row.status ?? 'ready';
     const hasExecution = row.executionCount > 0 ? 'yes' : 'no';
     // Session source surfaces are the task surfaces (plus 'automation', which
@@ -91,6 +133,6 @@ export async function getSessionAnalyticsRows(
         },
         links: { session: `/sessions/${row.id}` },
       },
-    };
+    } satisfies AnalyticsRow;
   });
 }

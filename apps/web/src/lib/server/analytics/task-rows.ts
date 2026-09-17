@@ -1,6 +1,5 @@
 import { type TaskSurface } from '@roomote/types';
 import {
-  and,
   db,
   tasks,
   users,
@@ -10,7 +9,6 @@ import {
   eq,
   inArray,
   isNull,
-  privateTaskAccess,
   sql,
 } from '@roomote/db/server';
 
@@ -32,7 +30,17 @@ import {
   getTaskTypeDimensionValue,
   mapTaskSource,
 } from './dimensions';
-import { formatAnalyticsDateTime, getTimeCutoff } from './time-buckets';
+import {
+  formatAnalyticsDateTime,
+  formatPrivateAnalyticsDate,
+  getTimeCutoff,
+} from './time-buckets';
+import {
+  canViewPrivateAnalyticsDetails,
+  createPrivateAnalyticsIdMapper,
+  PRIVATE_TASK_LABEL,
+  privateAnalyticsDimensionValue,
+} from './privacy';
 
 type TaskInferenceUsageTotals = {
   totalTokens: number;
@@ -116,10 +124,46 @@ export async function getTaskAnalyticsRows(
           taskRows.map((task) => task.id),
         );
 
+  const getPrivateId = createPrivateAnalyticsIdMapper('private-task');
+
   return taskRows.map((task) => {
     const sourceLabel = mapTaskSource(task.surface);
     const usage = usageByTaskId[task.id];
     const value = getTaskMetricValue(metric, usage);
+    if (!task.canViewDetails) {
+      const id = getPrivateId(task.id);
+      const values: Record<string, string> = {
+        date: formatPrivateAnalyticsDate(task.timestamp),
+        user: PRIVATE_TASK_LABEL,
+        project: PRIVATE_TASK_LABEL,
+        source: PRIVATE_TASK_LABEL,
+        taskType: PRIVATE_TASK_LABEL,
+        taskTitle: PRIVATE_TASK_LABEL,
+      };
+
+      if (metric === 'tokens') {
+        values.tokens = formatTaskMetricDetailValue(metric, usage);
+      } else if (metric === 'cost') {
+        values.cost = formatTaskMetricDetailValue(metric, usage);
+      }
+
+      return {
+        id,
+        timestamp: task.timestamp,
+        value,
+        dimensions: {
+          user: task.userDimension,
+          project: privateAnalyticsDimensionValue,
+          source: privateAnalyticsDimensionValue,
+          taskType: createLabelBackedDimensionValue(PRIVATE_TASK_LABEL),
+        },
+        details: {
+          id,
+          values: { ...values, user: task.userDimension.label },
+        },
+      } satisfies AnalyticsRow;
+    }
+
     const values: Record<string, string> = {
       date: formatAnalyticsDateTime(task.timestamp),
       user: task.userDimension.label,
@@ -165,6 +209,7 @@ type TaskAnalyticsBaseRow = {
   projectLabel: string;
   userDimension: AnalyticsDimensionValue;
   taskTypeDimension: AnalyticsDimensionValue;
+  canViewDetails: boolean;
 };
 
 async function getTaskAnalyticsBaseRows(
@@ -189,19 +234,22 @@ async function getTaskAnalyticsBaseRows(
       actorDisplayName: tasks.actorDisplayName,
       userName: users.name,
       userEmail: users.email,
+      privacy: tasks.privacy,
+      privateOwnerUserId: tasks.privateOwnerUserId,
     })
     .from(tasks)
     .leftJoin(users, eq(users.id, tasks.initiatorUserId))
-    .where(and(isNull(tasks.deletedAt), privateTaskAccess(auth)))
+    .where(isNull(tasks.deletedAt))
     .orderBy(desc(tasks.timestamp));
 
   const filteredTasks = cutoff
     ? taskResults.filter((task) => task.timestamp >= cutoff)
     : taskResults;
 
-  const latestRunsByTaskId = await getLatestTaskRunsByTaskId(
-    filteredTasks.map((task) => task.id),
-  );
+  const detailTaskIds = filteredTasks
+    .filter((task) => canViewPrivateAnalyticsDetails(auth, task))
+    .map((task) => task.id);
+  const latestRunsByTaskId = await getLatestTaskRunsByTaskId(detailTaskIds);
 
   const environmentIds = [
     ...new Set(
@@ -262,6 +310,7 @@ async function getTaskAnalyticsBaseRows(
   }
 
   return filteredTasks.map((task) => {
+    const canViewDetails = canViewPrivateAnalyticsDetails(auth, task);
     const latestRun = latestRunsByTaskId[task.id];
     const payload = latestRun?.payload;
     const environmentId =
@@ -282,9 +331,12 @@ async function getTaskAnalyticsBaseRows(
       title: task.title,
       timestamp: task.timestamp,
       surface: task.surface,
-      projectLabel: getProjectLabel(task.repositoryName, environmentId),
+      projectLabel: canViewDetails
+        ? getProjectLabel(task.repositoryName, environmentId)
+        : PRIVATE_TASK_LABEL,
       userDimension,
       taskTypeDimension: getTaskTypeDimensionValue(task),
+      canViewDetails,
     } satisfies TaskAnalyticsBaseRow;
   });
 }

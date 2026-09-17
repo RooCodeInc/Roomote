@@ -149,7 +149,7 @@ describe('getSessionAnalyticsRows', () => {
     );
   });
 
-  it('excludes private Sessions from non-owner admin analytics', async () => {
+  it('includes private Sessions for every viewer while redacting non-owner details', async () => {
     const owner = await userFactory.create();
     const other = await userFactory.create();
     const privateSession = await sessionFactory.create({
@@ -171,8 +171,48 @@ describe('getSessionAnalyticsRows', () => {
       'all',
       new Date(),
     );
+    const nonOwnerRows = await getSessionAnalyticsRows(
+      { userId: other.id, isAdmin: false } as UserAuthSuccess,
+      'all',
+      new Date(),
+    );
+    const ownerRow = ownerRows.find(({ id }) => id === privateSession.id);
+    const adminRow = adminRows.find(
+      ({ details }) => details.values.sessionTitle === 'Private session',
+    );
+    const nonOwnerRow = nonOwnerRows.find(
+      ({ details }) => details.values.sessionTitle === 'Private session',
+    );
 
-    expect(ownerRows.map(({ id }) => id)).toContain(privateSession.id);
-    expect(adminRows.map(({ id }) => id)).not.toContain(privateSession.id);
+    expect(ownerRows.reduce((sum, row) => sum + row.value, 0)).toBe(
+      adminRows.reduce((sum, row) => sum + row.value, 0),
+    );
+    expect(nonOwnerRows.reduce((sum, row) => sum + row.value, 0)).toBe(
+      adminRows.reduce((sum, row) => sum + row.value, 0),
+    );
+    expect(ownerRow).toMatchObject({
+      id: privateSession.id,
+      details: {
+        values: {
+          sessionTitle: 'Owner analytics only',
+          session: 'Open',
+        },
+        links: { session: `/sessions/${privateSession.id}` },
+      },
+    });
+    expect(adminRow).toMatchObject({
+      id: expect.stringMatching(/^private-session:/),
+      dimensions: {
+        user: ownerRow?.dimensions.user,
+        source: { key: 'Private', label: 'Private' },
+        status: { key: 'Private', label: 'Private' },
+      },
+      details: { values: { sessionTitle: 'Private session' } },
+    });
+    expect(adminRow?.details.links).toBeUndefined();
+    expect(nonOwnerRow).toEqual(adminRow);
+    expect(JSON.stringify(adminRow)).not.toContain(privateSession.id);
+    expect(JSON.stringify(adminRow)).not.toContain('Owner analytics only');
+    expect(adminRow?.details.values.user).toBe(ownerRow?.details.values.user);
   });
 });

@@ -25,7 +25,7 @@ import {
 import { buildChartData } from './chart';
 import { buildCostChartAnalytics } from './cost-summary';
 import { applyDimensionFilters, buildFilterOptions } from './dimensions';
-import { getAnalyticsDetails } from './index';
+import { getAnalyticsDetails, getAnalyticsExportData } from './index';
 import { getBucketStart } from './time-buckets';
 import type { AnalyticsRow } from './types';
 
@@ -100,7 +100,7 @@ describe('getCostAnalyticsRows', () => {
     expect(rowIds.has(oldEvent.id)).toBe(false);
   });
 
-  it('excludes private task and Fast usage from non-owner admin analytics', async () => {
+  it('includes private task and Fast usage with equal redacted non-owner totals', async () => {
     const owner = await userFactory.create();
     const other = await userFactory.create();
     userIds.push(owner.id, other.id);
@@ -108,6 +108,8 @@ describe('getCostAnalyticsRows', () => {
       initiatorUserId: owner.id,
       privacy: 'private',
       privateOwnerUserId: owner.id,
+      title: 'Private cost task title',
+      repositoryName: 'secret/private-cost-repository',
     });
     taskIds.push(task.id);
     const nativeSessionId = `private-native-${crypto.randomUUID()}`;
@@ -131,15 +133,34 @@ describe('getCostAnalyticsRows', () => {
           eventKey: `private-task-cost-${crypto.randomUUID()}`,
           taskId: task.id,
           userId: owner.id,
+          source: 'private_task_source',
+          providerId: 'private-provider',
+          modelId: 'private-model',
           costSource: 'missing',
-          costMicroUsd: 1,
+          costMicroUsd: 1_000_000,
+          totalTokens: 100,
+        },
+        {
+          eventKey: `private-task-cost-${crypto.randomUUID()}`,
+          taskId: task.id,
+          userId: owner.id,
+          source: 'private_task_source',
+          providerId: 'private-provider',
+          modelId: 'private-model',
+          costSource: 'missing',
+          costMicroUsd: 2_000_000,
+          totalTokens: 200,
         },
         {
           eventKey: `private-fast-cost-${crypto.randomUUID()}`,
           harnessSessionId: nativeSessionId,
           userId: owner.id,
+          source: 'fast_agent',
+          providerId: 'private-provider',
+          modelId: 'private-model',
           costSource: 'missing',
-          costMicroUsd: 1,
+          costMicroUsd: 3_000_000,
+          totalTokens: 300,
         },
       ])
       .returning({ id: llmUsageEvents.id });
@@ -155,14 +176,121 @@ describe('getCostAnalyticsRows', () => {
       'all',
       new Date(),
     );
+    const nonOwnerRows = await getCostAnalyticsRows(
+      { userId: other.id, isAdmin: false } as UserAuthSuccess,
+      'all',
+      new Date(),
+    );
     const eventIds = events.map(({ id }) => id);
+    const ownerEventRows = ownerRows.filter(({ id }) => eventIds.includes(id));
+    const adminPrivateRows = adminRows.filter(({ id }) =>
+      id.startsWith('private-cost:'),
+    );
+    const adminPrivateTaskRows = adminPrivateRows.filter(
+      (row) => row.details.values.taskTitle === 'Private task',
+    );
+    const adminPrivateSessionRow = adminPrivateRows.find(
+      (row) => row.details.values.taskTitle === 'Private session',
+    );
+    const nonOwnerPrivateRows = nonOwnerRows.filter(({ id }) =>
+      id.startsWith('private-cost:'),
+    );
 
-    expect(ownerRows.map(({ id }) => id)).toEqual(
-      expect.arrayContaining(eventIds),
+    expect(ownerEventRows).toHaveLength(3);
+    expect(ownerEventRows.reduce((sum, row) => sum + row.value, 0)).toBe(6);
+    expect(
+      ownerEventRows.reduce((sum, row) => sum + (row.tokens ?? 0), 0),
+    ).toBe(600);
+    expect(adminRows.reduce((sum, row) => sum + row.value, 0)).toBe(
+      ownerRows.reduce((sum, row) => sum + row.value, 0),
     );
-    expect(adminRows.map(({ id }) => id)).not.toEqual(
-      expect.arrayContaining(eventIds),
+    expect(adminRows.reduce((sum, row) => sum + (row.tokens ?? 0), 0)).toBe(
+      ownerRows.reduce((sum, row) => sum + (row.tokens ?? 0), 0),
     );
+    expect(nonOwnerRows.reduce((sum, row) => sum + row.value, 0)).toBe(
+      adminRows.reduce((sum, row) => sum + row.value, 0),
+    );
+    expect(adminPrivateRows).toHaveLength(3);
+    expect(nonOwnerPrivateRows).toEqual(adminPrivateRows);
+    expect(adminPrivateTaskRows).toHaveLength(2);
+    expect(adminPrivateSessionRow).toBeDefined();
+    expect(adminPrivateTaskRows[0]?.meta?.canonicalTaskId).toBe(
+      adminPrivateTaskRows[1]?.meta?.canonicalTaskId,
+    );
+    expect(adminPrivateTaskRows[0]?.meta?.canonicalTaskId).toMatch(
+      /^private-task:/,
+    );
+    expect(adminPrivateSessionRow?.meta?.canonicalTaskId).toBeNull();
+    expect(adminPrivateRows[0]?.dimensions.provider?.label).toBe(
+      'private-provider',
+    );
+    expect(adminPrivateRows[0]?.dimensions.model?.label).toBe('private-model');
+    expect(adminPrivateRows[0]?.dimensions.user).toEqual(
+      ownerEventRows[0]?.dimensions.user,
+    );
+    expect(adminPrivateRows[0]?.details.values.user).toBe(
+      ownerEventRows[0]?.details.values.user,
+    );
+    expect(adminPrivateRows.every((row) => !row.details.links)).toBe(true);
+
+    const adminPayload = JSON.stringify(adminPrivateRows);
+    expect(adminPayload).not.toContain(task.id);
+    expect(adminPayload).not.toContain(nativeSessionId);
+    expect(adminPayload).not.toContain('Private cost task title');
+    expect(adminPayload).not.toContain('secret/private-cost-repository');
+    expect(adminPayload).not.toContain('private_task_source');
+
+    const detailsInput = {
+      object: 'costs' as const,
+      viewBy: 'provider' as const,
+      metric: 'cost' as const,
+      filters: { provider: ['private-provider'] },
+      timePeriod: 'all' as const,
+      granularity: 'day' as const,
+      bucketKey: getBucketStart(
+        adminPrivateRows[0]!.timestamp,
+        'day',
+      ).toISOString(),
+      seriesKey: 'private-provider',
+    };
+    const ownerDetails = await getAnalyticsDetails(
+      { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+      detailsInput,
+      new Date(),
+    );
+    const adminDetails = await getAnalyticsDetails(
+      { userId: other.id, isAdmin: true } as UserAuthSuccess,
+      detailsInput,
+      new Date(),
+    );
+    const adminExport = await getAnalyticsExportData(
+      { userId: other.id, isAdmin: true } as UserAuthSuccess,
+      {
+        object: 'costs',
+        viewBy: 'provider',
+        metric: 'cost',
+        filters: { provider: ['private-provider'] },
+        timePeriod: 'all',
+        granularity: 'day',
+      },
+      new Date(),
+    );
+
+    expect(ownerDetails).toMatchObject({ total: 6 });
+    expect(adminDetails).toMatchObject({ total: 6 });
+    expect(adminDetails.rows).toHaveLength(2);
+    expect(adminExport).toMatchObject({ total: 6 });
+    expect(adminExport.rows).toHaveLength(3);
+    expect(JSON.stringify(ownerDetails)).toContain(task.id);
+    expect(JSON.stringify(ownerDetails)).toContain('Private cost task title');
+    for (const response of [adminDetails, adminExport]) {
+      const payload = JSON.stringify(response);
+      expect(payload).not.toContain(task.id);
+      expect(payload).not.toContain(nativeSessionId);
+      expect(payload).not.toContain('Private cost task title');
+      expect(payload).not.toContain('secret/private-cost-repository');
+      expect(payload).not.toContain('private_task_source');
+    }
   });
 
   it('includes stored token totals for zero-cost usage without recomputing components', async () => {
