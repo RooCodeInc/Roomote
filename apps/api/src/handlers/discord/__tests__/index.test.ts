@@ -214,7 +214,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/db/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/db/server')>()),
-  isPeerConversationsExperimentEnabledForUser: mocks.peerConversationsEnabled,
+  isDeploymentExperimentEnabled: mocks.peerConversationsEnabled,
 }));
 
 import { discord, discordGatewayEventProcessingTimeout } from '../index.js';
@@ -1480,7 +1480,7 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
-  it("uses the Fast owner's opt-in for Discord peer conversation routing", async () => {
+  it('uses the deployment experiment for an owner-bound Discord Fast thread', async () => {
     mocks.getChannel.mockResolvedValue({
       id: 'thread-1',
       guildId: 'guild-1',
@@ -1512,10 +1512,7 @@ describe('Discord Gateway event handler', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.peerConversationsEnabled).toHaveBeenCalledWith(
-      'roomote-user-owner',
-    );
-    expect(mocks.peerConversationsEnabled).not.toHaveBeenCalledWith(
-      'roomote-user-peer',
+      'slackPeerConversations',
     );
     expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
       expect.objectContaining({ peerConversationsExperimentEnabled: true }),
@@ -1528,6 +1525,41 @@ describe('Discord Gateway event handler', () => {
         ),
       }),
     );
+  });
+
+  it('does not enable peer conversations without an owner-bound Discord Fast thread', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'fast-thread',
+      type: 11,
+    });
+    mocks.findMappedUserId.mockResolvedValue('roomote-user-peer');
+    mocks.hasFastSession.mockResolvedValue(true);
+    mocks.getFastSessionOwner.mockResolvedValue(null);
+    mocks.peerConversationsEnabled.mockResolvedValue(true);
+    mocks.mentionsPeer.mockReturnValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: '<@discord-user-grace> what do you think?',
+          author: { id: 'discord-user-peer', username: 'matt' },
+          mentions: [{ id: 'discord-user-grace', username: 'grace' }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.peerConversationsEnabled).not.toHaveBeenCalled();
+    expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
+      expect.objectContaining({ peerConversationsExperimentEnabled: false }),
+    );
+    expect(mocks.answerFast).not.toHaveBeenCalled();
   });
 
   it('continues an existing fast-agent DM without Fast mode being the default', async () => {

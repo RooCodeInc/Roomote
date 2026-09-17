@@ -3,6 +3,7 @@ import {
   getMcpIntegration,
   getMcpIntegrationAuthorizationParameters,
   getMcpIntegrationConnectionScope,
+  getMcpIntegrationDataPolicy,
   getMcpIntegrationDefaultDisabledTools,
   getMcpIntegrationOauthResource,
   getMcpIntegrationOauthScopeMode,
@@ -11,12 +12,29 @@ import {
   isMcpConnectionRipplingConfig,
   isMcpConnectionElevenLabsConfig,
   isMcpConnectionVoiceConfig,
+  isMcpConnectionExaConfig,
   OPENAI_REALTIME_VOICE_OPTIONS,
   isMcpConnectionGbrainConfig,
   LINEAR_APP_OAUTH_SCOPES,
   MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
   RESEND_DEFAULT_DISABLED_TOOL_NAMES,
 } from '../mcp-oauth';
+
+describe('integration data policy', () => {
+  it('keeps existing and unknown integrations shared by default', () => {
+    expect(getMcpIntegrationDataPolicy('monday')).toBe('shared');
+    expect(getMcpIntegrationDataPolicy('unknown')).toBe('shared');
+    expect(
+      getMcpIntegrationDataPolicy({
+        id: 'private-example',
+        name: 'Private example',
+        description: 'Private data',
+        icon: 'lock',
+        dataPolicy: 'private',
+      }),
+    ).toBe('private');
+  });
+});
 
 describe('Linear OAuth scopes', () => {
   it('keeps issue comments separate from issue field updates', () => {
@@ -150,6 +168,25 @@ describe('Granola API key connection', () => {
     expect(getMcpIntegrationConnectionScope('granola')).toBe('deployment');
     expect(getMcpIntegrationOauthScopeMode('granola')).toBeUndefined();
     expect(getMcpIntegrationDefaultDisabledTools('granola')).toEqual([]);
+  });
+});
+
+describe('Exa optional API key connection', () => {
+  it('separates keyless and authenticated hosted MCP tools', () => {
+    expect(getMcpIntegration('exa')).toMatchObject({
+      name: 'Exa',
+      connectionScope: 'deployment',
+      connectionMode: 'admin_configured',
+      serverMode: 'upstream_proxy',
+      supportsKeylessAccess: true,
+      url: 'https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa',
+      authenticatedUrl:
+        'https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa,agent_run',
+    });
+    expect(
+      isMcpConnectionExaConfig({ type: 'exa', encryptedApiKey: 'enc' }),
+    ).toBe(true);
+    expect(isMcpConnectionExaConfig({ type: 'exa' } as never)).toBe(false);
   });
 });
 

@@ -5,6 +5,7 @@ import { createArtifact } from '../create';
 
 const {
   mockBuildSignedArtifactRawUrl,
+  mockAuthorizeTaskArtifactUpload,
   mockCreateTaskArtifactRecord,
   mockEnv,
   mockGenerateUploadUrl,
@@ -16,6 +17,7 @@ const {
     () =>
       'https://public.example.com/api/artifacts/art-1/raw?sig=signed&ts=1234',
   ),
+  mockAuthorizeTaskArtifactUpload: vi.fn(),
   mockCreateTaskArtifactRecord: vi.fn(),
   mockEnv: {
     R_APP_URL: 'https://app.example.com',
@@ -33,6 +35,7 @@ vi.mock('@roomote/env', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  authorizeTaskArtifactUpload: mockAuthorizeTaskArtifactUpload,
   buildSignedArtifactRawUrl: mockBuildSignedArtifactRawUrl,
   createTaskArtifactRecord: mockCreateTaskArtifactRecord,
   currentEpochSeconds: () => 1234,
@@ -79,9 +82,54 @@ beforeEach(() => {
     artifactType: 'general',
   });
   mockGenerateUploadUrl.mockResolvedValue('https://upload.example.com/art-1');
+  mockAuthorizeTaskArtifactUpload.mockResolvedValue(undefined);
 });
 
 describe('createArtifact', () => {
+  it('records upload authorization before returning its bearer URL', async () => {
+    const response = await createApp().request('http://localhost/artifacts', {
+      method: 'POST',
+      body: JSON.stringify({
+        taskId: 'task-1',
+        artifactType: 'general',
+        contentType: 'text/plain',
+        path: 'report.txt',
+        size: 100,
+      }),
+      headers: { 'content-type': 'application/json' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockAuthorizeTaskArtifactUpload).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      artifactId: 'art-1',
+      expiresAt: expect.any(Date),
+    });
+    expect(mockGenerateUploadUrl.mock.invocationCallOrder[0]).toBeLessThan(
+      mockAuthorizeTaskArtifactUpload.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('does not issue upload URLs when artifact publishing is unavailable', async () => {
+    mockVerifyTaskAccessForArtifact.mockResolvedValue(false);
+
+    const response = await createApp().request('http://localhost/artifacts', {
+      method: 'POST',
+      body: JSON.stringify({
+        taskId: 'task-1',
+        artifactType: 'general',
+        contentType: 'text/plain',
+        path: 'private.txt',
+        size: 100,
+      }),
+      headers: { 'content-type': 'application/json' },
+    });
+
+    expect(response.status).toBe(404);
+    expect(mockCreateTaskArtifactRecord).not.toHaveBeenCalled();
+    expect(mockGenerateUploadUrl).not.toHaveBeenCalled();
+  });
+
   it('normalizes the public URL for view and image raw URLs', async () => {
     mockEnv.R_PUBLIC_URL = 'https://public.example.com/';
 

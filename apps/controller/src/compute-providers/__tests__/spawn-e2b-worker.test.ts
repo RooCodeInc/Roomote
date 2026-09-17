@@ -65,8 +65,7 @@ vi.mock('../../sandbox-oidc', () => ({
 }));
 
 const { spawnE2bWorker } = await import('../spawn-e2b-worker');
-const { buildE2bWorkerEnv, cleanupE2bInstance } =
-  await import('@roomote/compute-providers');
+const { cleanupE2bInstance } = await import('@roomote/compute-providers');
 
 const config = {
   e2bApiKey: 'api-key',
@@ -130,7 +129,7 @@ describe('spawnE2bWorker', () => {
     });
   });
 
-  it('carries the Session egress bootstrap env and admits after the worker launches', async () => {
+  it('carries the Credential egress bootstrap env and admits after the worker launches', async () => {
     const admit = vi.fn().mockResolvedValue({
       workloadId: 'w1',
       generation: 1,
@@ -139,8 +138,8 @@ describe('spawnE2bWorker', () => {
     const planApiProxy = vi.fn().mockResolvedValue({
       required: true,
       bootstrapEnv: {
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
       },
       admit,
     });
@@ -155,15 +154,13 @@ describe('spawnE2bWorker', () => {
 
     await spawnE2bWorker(taskRun, 'auth_token', {
       ...config,
-      sessionEgress: { planApiProxy } as never,
+      credentialEgress: { planApiProxy } as never,
     });
 
     expect(planApiProxy).toHaveBeenCalledWith({ taskRun, provider: 'e2b' });
-    expect(
-      vi.mocked(buildE2bWorkerEnv).mock.calls.at(-1)![0].extraEnv,
-    ).toMatchObject({
-      ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
-      ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+    expect(mockRunCommand.mock.calls.at(-1)![0].env).toMatchObject({
+      ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+      ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
     });
     // Admission runs only once the worker is launched and waiting.
     expect(admit).toHaveBeenCalledOnce();
@@ -172,17 +169,17 @@ describe('spawnE2bWorker', () => {
     );
   });
 
-  it('cleans up the sandbox when Session egress admission fails after launch', async () => {
+  it('cleans up the sandbox when Credential egress admission fails after launch', async () => {
     const planApiProxy = vi.fn().mockResolvedValue({
       required: true,
       bootstrapEnv: {
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
       },
       admit: vi
         .fn()
         .mockRejectedValue(
-          new Error('Session egress bootstrap admission timed out'),
+          new Error('Credential egress bootstrap admission timed out'),
         ),
     });
 
@@ -197,9 +194,9 @@ describe('spawnE2bWorker', () => {
           payload: { repo: 'test/repo' },
         } as unknown as TaskRun,
         'auth_token',
-        { ...config, sessionEgress: { planApiProxy } as never },
+        { ...config, credentialEgress: { planApiProxy } as never },
       ),
-    ).rejects.toThrow('Session egress bootstrap admission timed out');
+    ).rejects.toThrow('Credential egress bootstrap admission timed out');
     expect(cleanupE2bInstance).toHaveBeenCalledWith(
       expect.objectContaining({
         instanceId: 'e2b-machine-123',

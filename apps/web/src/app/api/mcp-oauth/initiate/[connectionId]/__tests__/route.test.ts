@@ -19,9 +19,12 @@ const {
   isSelfServeMcpIntegrationMock,
   mcpConnectionsFindFirstMock,
   registerOAuthClientMock,
+  resolveCustomMcpAuthTargetMock,
+  ensureCustomMcpServerMetadataMock,
   resolveDeploymentStaticOauthClientInformationMock,
   storeClientInformationMock,
   storeOAuthStateWithIdMock,
+  updateAuthStatusMock,
 } = vi.hoisted(() => ({
   authorizeMock: vi.fn(),
   bootstrapWebRuntimeEnvMock: vi.fn(),
@@ -43,9 +46,12 @@ const {
   isSelfServeMcpIntegrationMock: vi.fn(),
   mcpConnectionsFindFirstMock: vi.fn(),
   registerOAuthClientMock: vi.fn(),
+  resolveCustomMcpAuthTargetMock: vi.fn(),
+  ensureCustomMcpServerMetadataMock: vi.fn(),
   resolveDeploymentStaticOauthClientInformationMock: vi.fn(),
   storeClientInformationMock: vi.fn(),
   storeOAuthStateWithIdMock: vi.fn(),
+  updateAuthStatusMock: vi.fn(),
 }));
 
 vi.mock('@/lib/server', () => ({
@@ -85,8 +91,9 @@ vi.mock('@roomote/sdk/server', () => ({
   storeOAuthStateWithId: storeOAuthStateWithIdMock,
   storeClientInformation: storeClientInformationMock,
   getClientInformation: getClientInformationMock,
-  resolveCustomMcpAuthTarget: vi.fn(async () => null),
-  ensureCustomMcpServerMetadata: vi.fn(),
+  resolveCustomMcpAuthTarget: resolveCustomMcpAuthTargetMock,
+  ensureCustomMcpServerMetadata: ensureCustomMcpServerMetadataMock,
+  updateAuthStatus: updateAuthStatusMock,
 }));
 
 vi.mock('@roomote/types', () => ({
@@ -168,6 +175,46 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
       client_id: 'fresh-client',
     });
     storeClientInformationMock.mockResolvedValue(undefined);
+    resolveCustomMcpAuthTargetMock.mockResolvedValue(null);
+    updateAuthStatusMock.mockResolvedValue(undefined);
+  });
+
+  it('marks a custom connection errored when dynamic registration is refused', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'custom:server-1',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue(undefined);
+    resolveCustomMcpAuthTargetMock.mockResolvedValue({
+      serverId: 'server-1',
+      name: 'accounting',
+      url: 'https://mcp.example.com/mcp',
+      manualClient: null,
+      oauthOptions: { resource: 'https://mcp.example.com/mcp' },
+    });
+    ensureCustomMcpServerMetadataMock.mockResolvedValue({
+      authorization_endpoint: 'https://auth.example.com/authorize',
+      token_endpoint: 'https://auth.example.com/token',
+      registration_endpoint: 'https://auth.example.com/register',
+    });
+    getClientInformationMock.mockResolvedValue(undefined);
+    registerOAuthClientMock.mockRejectedValue(new Error('registration denied'));
+
+    const response = await GET(buildRequest(), {
+      params: Promise.resolve({ connectionId: CONNECTION_ID }),
+    });
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=error&reason=registration_failed',
+    );
+    expect(updateAuthStatusMock).toHaveBeenCalledWith(
+      CONNECTION_ID,
+      'error',
+      false,
+    );
+    expect(storeOAuthStateWithIdMock).not.toHaveBeenCalled();
   });
 
   it('builds redirect_uri from R_PUBLIC_URL when set with loopback R_APP_URL', async () => {

@@ -5,10 +5,16 @@ import {
   getArtifactBySessionPath,
   generateDownloadUrl,
   generateOwnedDownloadUrl,
+  getOwnedArtifactObject,
   signArtifactId,
   currentEpochSeconds,
 } from '@/lib/server';
 import { findReadableSession } from '@/lib/server/sessions';
+import {
+  isHtmlArtifact,
+  isMarkdownArtifact,
+  isTabularArtifact,
+} from '@/lib/artifact-types';
 
 const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024; // 1MB
 const MAX_THUMBNAIL_PREVIEW_BYTES = 1024;
@@ -50,7 +56,7 @@ async function readTextWithByteLimit(
         chunks.push(value.subarray(0, remainingBytes));
         totalBytes += remainingBytes;
       }
-      await reader.cancel();
+      void reader.cancel().catch(() => {});
       if (!truncate) return undefined;
       break;
     }
@@ -58,7 +64,7 @@ async function readTextWithByteLimit(
     chunks.push(value);
     totalBytes += value.byteLength;
     if (truncate && totalBytes === maxBytes) {
-      await reader.cancel();
+      void reader.cancel().catch(() => {});
       break;
     }
   }
@@ -84,13 +90,13 @@ export async function getArtifactByPathCommand(
   },
 ): Promise<ArtifactWithContent | null> {
   const { taskId, sessionId, path, version, preview = false } = input;
-  if (
-    sessionId &&
-    !(await findReadableSession(
-      { userId: auth.userId, isAdmin: auth.isAdmin },
-      sessionId,
-    ))
-  ) {
+  const readableSession = sessionId
+    ? await findReadableSession(
+        { userId: auth.userId, isAdmin: auth.isAdmin },
+        sessionId,
+      )
+    : null;
+  if (sessionId && !readableSession) {
     return null;
   }
 
@@ -114,19 +120,31 @@ export async function getArtifactByPathCommand(
     return null;
   }
 
-  const downloadUrl = artifact.taskId
-    ? await generateDownloadUrl(
-        artifact.taskId,
-        artifact.id,
-        artifact.path,
-        artifact.version,
-      )
-    : await generateOwnedDownloadUrl(
-        { sessionId: artifact.sessionId! },
-        artifact.id,
-        artifact.path,
-        artifact.version,
-      );
+  const isPrivate = artifact.taskId
+    ? 'privacy' in artifact && artifact.privacy === 'private'
+    : readableSession?.privacy === 'private';
+  const rawTs = currentEpochSeconds();
+  const rawSig = signArtifactId(artifact.id, rawTs);
+  const signedRawUrl = `/api/artifacts/${artifact.id}/raw?sig=${rawSig}&ts=${rawTs}`;
+
+  const owner = artifact.taskId
+    ? ({ taskId: artifact.taskId } as const)
+    : ({ sessionId: artifact.sessionId! } as const);
+  const downloadUrl = isPrivate
+    ? `${signedRawUrl}&download=1`
+    : artifact.taskId
+      ? await generateDownloadUrl(
+          artifact.taskId,
+          artifact.id,
+          artifact.path,
+          artifact.version,
+        )
+      : await generateOwnedDownloadUrl(
+          owner,
+          artifact.id,
+          artifact.path,
+          artifact.version,
+        );
 
   let content: string | undefined;
 
@@ -147,9 +165,6 @@ export async function getArtifactByPathCommand(
   ]);
   const normalizedContentType =
     artifact.contentType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
-  const extension = artifact.path.split('.').pop()?.toLowerCase();
-  const hasHtmlExtension =
-    extension === 'html' || extension === 'htm' || extension === 'xhtml';
 
   const isTextBased =
     normalizedContentType.startsWith('text/') ||
@@ -157,23 +172,45 @@ export async function getArtifactByPathCommand(
     normalizedContentType.includes('+xml') ||
     normalizedContentType.includes('+json') ||
     textBasedApplicationTypes.has(normalizedContentType) ||
-    hasHtmlExtension;
+    isHtmlArtifact(artifact.contentType, artifact.path) ||
+    isMarkdownArtifact(artifact.contentType, artifact.path) ||
+    isTabularArtifact(artifact.contentType, artifact.path);
 
   if (isTextBased && (preview || artifact.size <= MAX_TEXT_PREVIEW_BYTES)) {
     try {
       const maxBytes = preview
         ? MAX_THUMBNAIL_PREVIEW_BYTES
         : MAX_TEXT_PREVIEW_BYTES;
-      const response = await fetch(
-        downloadUrl,
-        preview ? { headers: { Range: `bytes=0-${maxBytes - 1}` } } : undefined,
-      );
+      const response = isPrivate
+        ? await getOwnedArtifactObject(
+            owner,
+            artifact.id,
+            artifact.path,
+            artifact.version,
+          ).then((object) => {
+            if (!object.Body) throw new Error('Artifact content is empty');
+            return new Response(object.Body.transformToWebStream(), {
+              headers:
+                object.ContentLength === undefined
+                  ? undefined
+                  : { 'Content-Length': String(object.ContentLength) },
+            });
+          })
+        : await fetch(
+            downloadUrl,
+            preview
+              ? { headers: { Range: `bytes=0-${maxBytes - 1}` } }
+              : undefined,
+          );
 
       if (response.ok) {
         content = await readTextWithByteLimit(response, maxBytes, preview);
+      } else if (preview) {
+        throw new Error(`Artifact preview fetch returned ${response.status}`);
       }
     } catch (error) {
       console.error('Failed to fetch artifact content:', error);
+      if (preview) throw new Error('Failed to fetch artifact preview');
     }
   }
 
@@ -181,9 +218,7 @@ export async function getArtifactByPathCommand(
   const isImage = artifact.contentType.startsWith('image/');
   let rawUrl: string | undefined;
   if (isImage) {
-    const ts = currentEpochSeconds();
-    const sig = signArtifactId(artifact.id, ts);
-    rawUrl = `/api/artifacts/${artifact.id}/raw?sig=${sig}&ts=${ts}`;
+    rawUrl = signedRawUrl;
   }
 
   return {

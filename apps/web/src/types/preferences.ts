@@ -16,10 +16,6 @@ export interface PersonalPreferences {
   colorTheme: PersonalColorTheme;
   mindReaderMode: boolean;
   narrationMode: boolean;
-  resultsPageEnabled?: boolean;
-  slackPeerConversationsExperimentEnabled?: boolean;
-  homeComposerSuggestionsEnabled?: boolean;
-  sessionSecretToolsEnabled?: boolean;
 }
 
 export type PersonalPreferencesUpdate = Partial<PersonalPreferences>;
@@ -28,10 +24,6 @@ export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
   colorTheme: 'system',
   mindReaderMode: false,
   narrationMode: false,
-  resultsPageEnabled: false,
-  slackPeerConversationsExperimentEnabled: false,
-  homeComposerSuggestionsEnabled: false,
-  sessionSecretToolsEnabled: false,
 };
 
 export interface UserPersonalizationSettings {

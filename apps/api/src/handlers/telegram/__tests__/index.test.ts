@@ -544,7 +544,53 @@ describe('Telegram webhook handler', () => {
     );
   });
 
-  it('retires Auto-resolve controls through the managed Telegram footer path', async () => {
+  it('logs receipt and an explicit terminal reason without message content', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+
+    const response = await postTelegramUpdate({ update_id: 901 });
+
+    expect(response.status).toBe(200);
+    const logs = info.mock.calls.map(([message]) => String(message));
+    const terminal = logs
+      .map((message) => JSON.parse(message))
+      .find((entry) => entry.event === 'communication_webhook_terminal');
+    expect(terminal).toMatchObject({
+      provider: 'telegram',
+      updateId: 901,
+      externalEventId: '901',
+      outcome: 'skipped',
+      reason: 'unsupported_update',
+      status: 200,
+    });
+    expect(logs.join('\n')).not.toContain('continue the task');
+    info.mockRestore();
+  });
+
+  it('logs provider acceptance for outbound replies without reply content', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    mockTelegramLinkedSender();
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({ message: { text: '/help' } }),
+    );
+
+    expect(response.status).toBe(200);
+    const logs = info.mock.calls.map(([message]) => String(message));
+    const delivery = logs
+      .map((message) => JSON.parse(message))
+      .find((entry) => entry.event === 'communication_delivery_terminal');
+    expect(delivery).toMatchObject({
+      provider: 'telegram',
+      channelId: '222',
+      messageId: 'telegram-response',
+      outcome: 'accepted',
+      reason: 'provider_message_created',
+    });
+    expect(logs.join('\n')).not.toContain('Available commands');
+    info.mockRestore();
+  });
+
+  it('resolves Auto-resolve in the original Telegram offer without another reply', async () => {
     mockTelegramLinkedSender('linked-user-1');
     claimPendingPrReviewActionMock.mockResolvedValueOnce({
       nonce: 'review-action-1',
@@ -569,19 +615,23 @@ describe('Telegram webhook handler', () => {
           message_id: 777,
           message_thread_id: 7,
           chat: { id: 222, type: 'supergroup' },
+          text: 'Review feedback: add a regression test.',
         },
       },
     });
 
     expect(response.status).toBe(200);
-    expect(retirePrReviewActionMessagesBestEffortMock).toHaveBeenCalledWith([
-      {
-        provider: 'telegram',
-        channelId: '222',
-        threadId: '7',
-        messageId: '777',
-      },
-    ]);
+    expect(retirePrReviewActionMessagesBestEffortMock).toHaveBeenNthCalledWith(
+      1,
+      [
+        {
+          provider: 'telegram',
+          channelId: '222',
+          threadId: '7',
+          messageId: '777',
+        },
+      ],
+    );
     expect(editMessageReplyMarkupMock).not.toHaveBeenCalled();
     expect(dispatchPrReviewFollowUpMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -596,15 +646,23 @@ describe('Telegram webhook handler', () => {
       prNumber: 42,
       userId: 'linked-user-1',
     });
-    expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: '222',
-        replyToMessageId: '777',
-        text: expect.stringContaining(
-          'Future review feedback on this PR will get resolved automatically.',
-        ),
-      }),
+    expect(retirePrReviewActionMessagesBestEffortMock).toHaveBeenNthCalledWith(
+      2,
+      [
+        {
+          provider: 'telegram',
+          channelId: '222',
+          threadId: '7',
+          messageId: '777',
+          messageText: 'Review feedback: add a regression test.',
+        },
+      ],
+      {
+        resolution:
+          'OK, Ada. Future review feedback on this PR will get resolved automatically.',
+      },
     );
+    expect(postMessageMock).not.toHaveBeenCalled();
   });
 
   it('queues a new reaction on the owner’s bound Fast message', async () => {
@@ -842,6 +900,7 @@ describe('Telegram webhook handler', () => {
     });
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'mapped-user-1',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
       conversation: {
         surface: 'telegram',
         workspaceId: '222',
@@ -861,6 +920,7 @@ describe('Telegram webhook handler', () => {
   });
 
   it('continues a Telegram Fast reply without an automatic reaction', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     mockTelegramLinkedSender('mapped-user-1');
     findFastReplySessionMock.mockResolvedValueOnce({
       id: '22222222-2222-4222-8222-222222222222',
@@ -910,6 +970,17 @@ describe('Telegram webhook handler', () => {
     expect(addReactionMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
+    const operationalEvents = info.mock.calls
+      .map(([message]) => JSON.parse(String(message)))
+      .filter((entry) => entry.event === 'communication_dispatch_terminal');
+    expect(operationalEvents).toContainEqual(
+      expect.objectContaining({
+        sessionId: '22222222-2222-4222-8222-222222222222',
+        outcome: 'dispatched',
+        reason: 'fast_session_reply_queued',
+      }),
+    );
+    info.mockRestore();
   });
 
   it('continues a canonical web Session from a later Telegram reply', async () => {
@@ -1268,6 +1339,7 @@ describe('Telegram webhook handler', () => {
     });
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'mapped-user-1',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
       conversation: {
         surface: 'telegram',
         workspaceId: '-1007',
@@ -2010,6 +2082,7 @@ describe('Telegram webhook handler', () => {
     });
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'launch-owner-2',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
       conversation: {
         surface: 'telegram',
         workspaceId: '222',
@@ -2341,6 +2414,7 @@ describe('Telegram webhook handler', () => {
     // A plain private chat keeps one conversation, so the request joins it.
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'launch-owner-5',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
       conversation: {
         surface: 'telegram',
         workspaceId: '222',
@@ -2392,6 +2466,7 @@ describe('Telegram webhook handler', () => {
     );
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'launch-owner-5',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
       conversation: {
         surface: 'telegram',
         workspaceId: '222',
@@ -2548,6 +2623,7 @@ describe('Telegram webhook handler', () => {
     // A group without topics anchors the conversation on the command message.
     expect(getFastSessionMock).toHaveBeenCalledWith({
       userId: 'launch-owner-10',
+      userInitiated: { surface: 'telegram', trigger: 'message' },
       conversation: {
         surface: 'telegram',
         workspaceId: '-1007',

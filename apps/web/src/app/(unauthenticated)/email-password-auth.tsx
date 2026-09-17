@@ -37,6 +37,7 @@ export function EmailPasswordAuth({
   submitButtonClassName,
   submitLeadingAction,
   accountLinkHelpText = null,
+  passwordResetAvailable = false,
 }: {
   redirectUrl: string;
   defaultMode?: 'sign-in' | 'sign-up';
@@ -49,6 +50,7 @@ export function EmailPasswordAuth({
   submitButtonClassName?: string;
   submitLeadingAction?: ReactNode;
   accountLinkHelpText?: string | null;
+  passwordResetAvailable?: boolean;
 }) {
   const router = useRouter();
   const [modeState, setModeState] = useState<'sign-in' | 'sign-up'>(
@@ -60,6 +62,8 @@ export function EmailPasswordAuth({
   const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [forgotPassword, setForgotPassword] = useState(false);
+  const [resetRequested, setResetRequested] = useState(false);
   const showPasswordStrength = mode === 'sign-up';
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -102,6 +106,82 @@ export function EmailPasswordAuth({
       setIsSubmitting(false);
     }
   };
+
+  const handlePasswordResetRequest = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setErrorMessage(null);
+    setIsSubmitting(true);
+
+    try {
+      await fetch('/api/password-reset/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      setResetRequested(true);
+    } catch {
+      setErrorMessage('Unable to request a reset link. Try again shortly.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (forgotPassword) {
+    return (
+      <form
+        className="space-y-3 text-left max-w-sm"
+        onSubmit={handlePasswordResetRequest}
+      >
+        {resetRequested ? (
+          <Alert>
+            <AlertDescription>
+              If an active email/password account exists for that address, a
+              reset link will arrive shortly.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {errorMessage ? (
+          <Alert variant="destructive">
+            <AlertCircle />
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
+        ) : null}
+        <div className="space-y-1">
+          {labelsAsPlaceholders ? null : (
+            <Label htmlFor="password-reset-email">Email</Label>
+          )}
+          <Input
+            id="password-reset-email"
+            type="email"
+            aria-label={labelsAsPlaceholders ? 'Email' : undefined}
+            placeholder={labelsAsPlaceholders ? 'Email' : undefined}
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            disabled={isSubmitting}
+          />
+        </div>
+        <Button className="w-full" type="submit" disabled={isSubmitting}>
+          {isSubmitting ? <Spinner /> : null}
+          Send reset link
+          <ArrowRight />
+        </Button>
+        <Button
+          className="w-full"
+          type="button"
+          variant="outline"
+          disabled={isSubmitting}
+          onClick={() => {
+            setErrorMessage(null);
+            setForgotPassword(false);
+          }}
+        >
+          Back to sign in
+        </Button>
+      </form>
+    );
+  }
 
   return (
     <form className="space-y-3 text-left max-w-sm" onSubmit={handleSubmit}>
@@ -198,11 +278,30 @@ export function EmailPasswordAuth({
       )}
       {hideModeSwitchMessage ? null : (
         <div className="mt-8 w-full text-sm text-muted-foreground">
-          <p>
-            Need an account? Forgot your password?
-            <br />
-            Ask your admin.
-          </p>
+          {passwordResetAvailable && mode === 'sign-in' ? (
+            <p>
+              Need an account? Ask your admin.
+              <br />
+              Forgot your password?{' '}
+              <button
+                type="button"
+                className="font-medium underline underline-offset-2"
+                onClick={() => {
+                  setErrorMessage(null);
+                  setForgotPassword(true);
+                }}
+              >
+                Reset it
+              </button>
+              .
+            </p>
+          ) : (
+            <p>
+              Need an account? Forgot your password?
+              <br />
+              Ask your admin.
+            </p>
+          )}
           {accountLinkHelpText ? (
             <Streamdown className="mt-2 [&_a]:font-medium [&_a]:underline [&_a]:underline-offset-2 [&_h1]:text-sm! [&_h2]:text-sm! [&_h3]:text-sm! [&_img]:hidden [&_p]:m-0">
               {accountLinkHelpText}

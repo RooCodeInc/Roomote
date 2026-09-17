@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEPLOYMENT_EXPERIMENT_IDS } from '@roomote/feature-flags';
 import { instanceSkillsRouter } from './instance-skills';
 import {
   publicAuthTokenTimeoutMsSchema,
@@ -67,6 +68,7 @@ import {
   getSessions,
   getSessionTimeline,
   archiveSessionCommand,
+  deletePrivateSessionCommand,
   listSessionPins,
   markSessionReadCommand,
   sessionIdInputSchema,
@@ -91,6 +93,7 @@ import {
   saveNotionConnectionSchema,
   saveRipplingConnectionSchema,
   saveGranolaConnectionSchema,
+  saveExaConnectionSchema,
   saveElevenLabsConnectionSchema,
   saveVoiceConnectionSchema,
   saveGrafanaConnectionSchema,
@@ -213,6 +216,10 @@ import {
   updateUserPersonalizationCommand,
 } from '../commands/preferences';
 import {
+  getDeploymentExperimentsCommand,
+  setDeploymentExperimentCommand,
+} from '../commands/deployment-experiments';
+import {
   type EnvironmentConfigVersionDetail,
   getActiveEnvironmentDefinitionTaskCommand,
   getEnvironmentsCommand,
@@ -271,6 +278,7 @@ import {
   getNotionConnectionCommand,
   getRipplingConnectionCommand,
   getGranolaConnectionCommand,
+  getExaConnectionCommand,
   getElevenLabsConnectionCommand,
   getVoiceConnectionCommand,
   getGrafanaConnectionCommand,
@@ -282,6 +290,8 @@ import {
   saveNotionConnectionCommand,
   saveRipplingConnectionCommand,
   saveGranolaConnectionCommand,
+  saveExaConnectionCommand,
+  removeExaApiKeyCommand,
   saveElevenLabsConnectionCommand,
   saveVoiceConnectionCommand,
   saveGrafanaConnectionCommand,
@@ -1636,20 +1646,12 @@ export const appRouter = createRouter({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
-            resultsPageEnabled: z.boolean().optional(),
-            slackPeerConversationsExperimentEnabled: z.boolean().optional(),
-            homeComposerSuggestionsEnabled: z.boolean().optional(),
-            sessionSecretToolsEnabled: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
-              input.narrationMode !== undefined ||
-              input.resultsPageEnabled !== undefined ||
-              input.slackPeerConversationsExperimentEnabled !== undefined ||
-              input.homeComposerSuggestionsEnabled !== undefined ||
-              input.sessionSecretToolsEnabled !== undefined,
+              input.narrationMode !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -2008,6 +2010,10 @@ export const appRouter = createRouter({
       getGranolaConnectionCommand(auth),
     ),
 
+    exaConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getExaConnectionCommand(auth),
+    ),
+
     elevenLabsConnection: protectedProcedure.query(({ ctx: { auth } }) =>
       getElevenLabsConnectionCommand(auth),
     ),
@@ -2099,6 +2105,16 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         saveGranolaConnectionCommand(auth, input),
       ),
+
+    saveExaConnection: protectedProcedure
+      .input(saveExaConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveExaConnectionCommand(auth, input),
+      ),
+
+    removeExaApiKey: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      removeExaApiKeyCommand(auth),
+    ),
 
     saveElevenLabsConnection: protectedProcedure
       .input(saveElevenLabsConnectionSchema)
@@ -3233,6 +3249,11 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         archiveSessionCommand(auth, input.sessionId),
       ),
+    deletePrivate: protectedProcedure
+      .input(sessionIdInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        deletePrivateSessionCommand(auth, input.sessionId),
+      ),
     unarchive: protectedProcedure
       .input(sessionIdInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
@@ -3438,6 +3459,22 @@ export const appRouter = createRouter({
     retryFailedTaskMemories: protectedProcedure.mutation(({ ctx: { auth } }) =>
       retryFailedBrainTaskMemoriesCommand(auth),
     ),
+  }),
+
+  deploymentExperiments: createRouter({
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getDeploymentExperimentsCommand(auth),
+    ),
+    set: protectedProcedure
+      .input(
+        z.object({
+          id: z.enum(DEPLOYMENT_EXPERIMENT_IDS),
+          enabled: z.boolean(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setDeploymentExperimentCommand(auth, input),
+      ),
   }),
 
   miscSettings: createRouter({

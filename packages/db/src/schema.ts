@@ -74,10 +74,10 @@ import type {
   TrackedMessageKind,
   McpConnectionRole,
   SourceControlProvider,
-  SessionEgressDenialReason,
-  SessionEgressMethod,
-  SessionEgressPhase,
-  SessionEgressRevocationKind,
+  CredentialEgressDenialReason,
+  CredentialEgressMethod,
+  CredentialEgressPhase,
+  CredentialEgressRevocationKind,
   TaskModelSettings,
   WorkspaceRoutingSettings,
   TaskRunErrorCode,
@@ -88,6 +88,7 @@ import type {
   FastAgentSurface,
   ReasoningEffort,
   SessionStatus,
+  SessionPrivacy,
   SessionWakeupReportPolicy,
   SessionWakeupSchedule,
   SessionWakeupStatus,
@@ -200,7 +201,6 @@ export const userRelations = relations(users, ({ many }) => ({
   taskPins: many(taskPins),
   ownedSessions: many(sessions, { relationName: 'sessionOwnerUser' }),
   sessionParticipants: many(sessionParticipants),
-  slackFastIntegrationCalls: many(slackFastIntegrationCalls),
   workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
 }));
@@ -719,6 +719,14 @@ export const tasks = pgTable(
       .notNull()
       .default('visible')
       .$type<TaskVisibility>(),
+    privacy: text('privacy')
+      .notNull()
+      .default('shared')
+      .$type<SessionPrivacy>(),
+    privateOwnerUserId: text('private_owner_user_id').references(
+      () => users.id,
+      { onDelete: 'cascade' },
+    ),
     // Terminal task state. Only written by the finishRun terminal path;
     // live runtime phase stays on runs.
     state: text('state').notNull().default('active').$type<TaskState>(),
@@ -849,6 +857,14 @@ export const tasks = pgTable(
       sql`${table.visibility} in ('visible', 'hidden')`,
     ),
     check(
+      'tasks_privacy_check',
+      sql`${table.privacy} in ('shared', 'private')`,
+    ),
+    check(
+      'tasks_private_owner_check',
+      sql`(${table.privacy} = 'shared' AND ${table.privateOwnerUserId} IS NULL) OR (${table.privacy} = 'private' AND ${table.privateOwnerUserId} IS NOT NULL)`,
+    ),
+    check(
       'tasks_state_check',
       sql`${table.state} in ('active', 'completed', 'failed', 'canceled')`,
     ),
@@ -967,6 +983,7 @@ export const taskArtifacts = pgTable(
     version: integer('version').notNull().default(0),
     size: bigint('size', { mode: 'number' }).notNull(),
     uploaded: boolean('uploaded').notNull().default(false),
+    uploadUrlExpiresAt: timestamp('upload_url_expires_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -1646,6 +1663,11 @@ export const taskRuns = pgTable(
       .on(sql`(${table.payload}->>'launchIdempotencyKey')`)
       .where(
         sql`${table.payload}->>'launchIdempotencyKey' IS NOT NULL AND ${table.canceledAt} IS NULL`,
+      ),
+    index('task_runs_canceled_launch_idempotency_key_idx')
+      .on(sql`(${table.payload}->>'launchIdempotencyKey')`)
+      .where(
+        sql`${table.payload}->>'launchIdempotencyKey' IS NOT NULL AND ${table.canceledAt} IS NOT NULL`,
       ),
     index('task_runs_first_assistant_output_at_idx').on(
       table.firstAssistantOutputAt,
@@ -3435,6 +3457,14 @@ export const fastAgentConversations = pgTable(
       onDelete: 'cascade',
     }),
     ownerAutomation: text('owner_automation').$type<BackgroundAutomationKey>(),
+    privacy: text('privacy')
+      .notNull()
+      .default('shared')
+      .$type<SessionPrivacy>(),
+    privateOwnerUserId: text('private_owner_user_id').references(
+      () => users.id,
+      { onDelete: 'cascade' },
+    ),
     surface: text('surface').notNull().$type<FastAgentSurface>(),
     workspaceId: text('workspace_id').notNull(),
     conversationId: text('conversation_id').notNull(),
@@ -3478,6 +3508,14 @@ export const fastAgentConversations = pgTable(
         or
         (${table.userId} is null and ${table.ownerAutomation} is not null)
       )`,
+    ),
+    check(
+      'fast_agent_conversations_privacy_check',
+      sql`${table.privacy} in ('shared', 'private')`,
+    ),
+    check(
+      'fast_agent_conversations_private_owner_check',
+      sql`(${table.privacy} = 'shared' AND ${table.privateOwnerUserId} IS NULL) OR (${table.privacy} = 'private' AND ${table.privateOwnerUserId} IS NOT NULL AND ${table.privateOwnerUserId} = ${table.userId})`,
     ),
     index('fast_agent_conversations_legacy_ids_idx').using(
       'gin',
@@ -4014,17 +4052,13 @@ export const slackConversationMessagesRelations = relations(
   }),
 );
 
-export type SlackFastIntegrationCallStatus =
-  | 'executing'
-  | 'succeeded'
-  | 'failed';
-
 /**
  * slack_fast_integration_calls
  *
- * Durable audit trail for deployment MCP tools executed directly by runless
- * Fast conversations. An `executing` row is inserted before the external call
- * so a missing terminal update remains visibly ambiguous.
+ * N-1 rollback: no longer written after removal of the dedicated Fast
+ * integration-call audit. The previous release still inserts and updates this
+ * table; drop it only after that release is no longer the supported rollback
+ * target. Existing rows are retained until that follow-up migration.
  */
 export const slackFastIntegrationCalls = pgTable(
   'slack_fast_integration_calls',
@@ -4043,7 +4077,9 @@ export const slackFastIntegrationCalls = pgTable(
     integrationId: text('integration_id').notNull(),
     toolName: text('tool_name').notNull(),
     arguments: jsonb('arguments').notNull().$type<Record<string, unknown>>(),
-    status: text('status').notNull().$type<SlackFastIntegrationCallStatus>(),
+    status: text('status')
+      .notNull()
+      .$type<'executing' | 'succeeded' | 'failed'>(),
     resultPreview: text('result_preview'),
     error: text('error'),
     startedAt: timestamp('started_at').notNull().defaultNow(),
@@ -4066,20 +4102,6 @@ export const slackFastIntegrationCalls = pgTable(
       table.createdAt,
     ),
   ],
-);
-
-export const slackFastIntegrationCallsRelations = relations(
-  slackFastIntegrationCalls,
-  ({ one }) => ({
-    fastAgentConversation: one(fastAgentConversations, {
-      fields: [slackFastIntegrationCalls.fastAgentConversationId],
-      references: [fastAgentConversations.id],
-    }),
-    user: one(users, {
-      fields: [slackFastIntegrationCalls.userId],
-      references: [users.id],
-    }),
-  }),
 );
 
 /**
@@ -4178,7 +4200,7 @@ export const automationsRelations = relations(automations, ({ many }) => ({
 
 export type SessionOwnerKind = 'user' | 'automation' | 'system';
 export type SessionSourceSurface = TaskSurface | FastAgentSurface;
-export type { SessionStatus };
+export type { SessionPrivacy, SessionStatus };
 export type SessionTaskOrigin =
   | 'direct_launch'
   | 'fast_delegation'
@@ -4212,6 +4234,14 @@ export const sessions = pgTable(
     ownerAutomation: text('owner_automation')
       .$type<BackgroundAutomationKey>()
       .references(() => automations.key, { onDelete: 'set null' }),
+    privacy: text('privacy')
+      .notNull()
+      .default('shared')
+      .$type<SessionPrivacy>(),
+    privateOwnerUserId: text('private_owner_user_id').references(
+      () => users.id,
+      { onDelete: 'cascade' },
+    ),
     sourceSurface: text('source_surface')
       .notNull()
       .$type<SessionSourceSurface>(),
@@ -4256,6 +4286,14 @@ export const sessions = pgTable(
       sql`${table.ownerKind} in ('user', 'automation', 'system')`,
     ),
     check(
+      'sessions_privacy_check',
+      sql`${table.privacy} in ('shared', 'private')`,
+    ),
+    check(
+      'sessions_private_owner_check',
+      sql`(${table.privacy} = 'shared' AND ${table.privateOwnerUserId} IS NULL) OR (${table.privacy} = 'private' AND ${table.privateOwnerUserId} IS NOT NULL AND ${table.privateOwnerUserId} = ${table.ownerUserId})`,
+    ),
+    check(
       'sessions_source_surface_check',
       sql`${table.sourceSurface} in ('web', 'api', 'slack', 'teams', 'telegram', 'discord', 'agentmail', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system', 'automation')`,
     ),
@@ -4275,13 +4313,16 @@ export const sessions = pgTable(
 );
 
 /** Owner-bound credentials are additive and leave N-1 readers/writers untouched. */
-export const sessionSecrets = pgTable(
-  'session_secrets',
+export const serviceCredentials = pgTable(
+  'service_credentials',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    sessionId: uuid('session_id')
-      .notNull()
-      .references(() => sessions.id, { onDelete: 'cascade' }),
+    // Provenance only: the Session the key was approved in, or null when it
+    // was added from Settings. An integration belongs to its owner and is
+    // usable from every Session and coding run of that owner.
+    sessionId: uuid('session_id').references(() => sessions.id, {
+      onDelete: 'set null',
+    }),
     ownerUserId: text('owner_user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -4300,22 +4341,27 @@ export const sessionSecrets = pgTable(
       .array()
       .notNull()
       .default(sql`'{GET,HEAD}'::text[]`)
-      .$type<SessionEgressMethod[]>(),
+      .$type<CredentialEgressMethod[]>(),
+    visibility: text('visibility')
+      .notNull()
+      .default('owner')
+      .$type<import('@roomote/types').ServiceCredentialVisibility>(),
     value: encryptedText('value'),
-    expiresAt: timestamp('expires_at').notNull(),
+    /** Null: kept until revoked. */
+    expiresAt: timestamp('expires_at'),
     revokedAt: timestamp('revoked_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
-    index('session_secrets_session_owner_idx').on(
+    index('service_credentials_session_owner_idx').on(
       table.sessionId,
       table.ownerUserId,
     ),
   ],
 );
 
-export const sessionSecretApprovals = pgTable(
-  'session_secret_approvals',
+export const serviceCredentialApprovals = pgTable(
+  'service_credential_approvals',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     sessionId: uuid('session_id')
@@ -4336,13 +4382,20 @@ export const sessionSecretApprovals = pgTable(
       .array()
       .notNull()
       .default(sql`'{GET,HEAD}'::text[]`)
-      .$type<SessionEgressMethod[]>(),
+      .$type<CredentialEgressMethod[]>(),
+    visibility: text('visibility')
+      .notNull()
+      .default('owner')
+      .$type<import('@roomote/types').ServiceCredentialVisibility>(),
+    /** How long the resulting integration lives once the key is entered; null keeps it until revoked. */
+    lifetimeHours: integer('lifetime_hours'),
+    /** The window for entering the key, not the integration's lifetime. */
     expiresAt: timestamp('expires_at').notNull(),
     consumedAt: timestamp('consumed_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
-    index('session_secret_approvals_session_owner_idx').on(
+    index('service_credential_approvals_session_owner_idx').on(
       table.sessionId,
       table.ownerUserId,
     ),
@@ -4350,11 +4403,13 @@ export const sessionSecretApprovals = pgTable(
 );
 
 // No payload, URL query/path, headers, or error detail belongs in this audit.
-export const sessionSecretAudit = pgTable('session_secret_audit', {
+export const serviceCredentialAudit = pgTable('service_credential_audit', {
   id: uuid('id').primaryKey().defaultRandom(),
   actorUserId: text('actor_user_id'),
   secretRef: uuid('secret_ref'),
-  method: text('method').$type<'GET' | 'HEAD'>(),
+  method: text('method').$type<
+    'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  >(),
   destination: text('destination'),
   outcome: text('outcome')
     .notNull()
@@ -4363,14 +4418,14 @@ export const sessionSecretAudit = pgTable('session_secret_audit', {
 });
 
 /**
- * Session egress control plane (additive, N-1 safe: previous releases never
+ * Credential egress control plane (additive, N-1 safe: previous releases never
  * read these tables). One row per attached run that a trusted controller
  * registered with the credential-substituting egress gateway. The
  * `connectorIdentity` is what the gateway authenticates at connection time;
  * it is never derived from anything the sandbox sends.
  */
-export const sessionEgressWorkloads = pgTable(
-  'session_egress_workloads',
+export const credentialEgressWorkloads = pgTable(
+  'credential_egress_workloads',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     sessionId: uuid('session_id')
@@ -4399,15 +4454,15 @@ export const sessionEgressWorkloads = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex('session_egress_workloads_active_run_unique')
+    uniqueIndex('credential_egress_workloads_active_run_unique')
       .on(table.taskRunId)
       .where(sql`${table.status} = 'active'`),
-    uniqueIndex('session_egress_workloads_active_connector_unique')
+    uniqueIndex('credential_egress_workloads_active_connector_unique')
       .on(table.connectorIdentity)
       .where(sql`${table.status} = 'active'`),
-    index('session_egress_workloads_session_idx').on(table.sessionId),
+    index('credential_egress_workloads_session_idx').on(table.sessionId),
     check(
-      'session_egress_workloads_status_check',
+      'credential_egress_workloads_status_check',
       sql`${table.status} in ('active', 'terminated')`,
     ),
   ],
@@ -4469,27 +4524,27 @@ export const sessionGoals = pgTable(
 );
 
 /** Only a keyed hash of each substitute token is ever stored. */
-export const sessionEgressSubstitutes = pgTable(
-  'session_egress_substitutes',
+export const credentialEgressSubstitutes = pgTable(
+  'credential_egress_substitutes',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     workloadId: uuid('workload_id')
       .notNull()
-      .references(() => sessionEgressWorkloads.id, { onDelete: 'cascade' }),
+      .references(() => credentialEgressWorkloads.id, { onDelete: 'cascade' }),
     secretId: uuid('secret_id')
       .notNull()
-      .references(() => sessionSecrets.id, { onDelete: 'cascade' }),
+      .references(() => serviceCredentials.id, { onDelete: 'cascade' }),
     generation: integer('generation').notNull(),
     tokenHash: text('token_hash').notNull(),
     revokedAt: timestamp('revoked_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex('session_egress_substitutes_token_hash_unique').on(
+    uniqueIndex('credential_egress_substitutes_token_hash_unique').on(
       table.tokenHash,
     ),
     uniqueIndex(
-      'session_egress_substitutes_workload_secret_generation_unique',
+      'credential_egress_substitutes_workload_secret_generation_unique',
     ).on(table.workloadId, table.secretId, table.generation),
   ],
 );
@@ -4500,18 +4555,18 @@ export const sessionEgressSubstitutes = pgTable(
 // correlation only, never authority or a unique/final exchange outcome.
 // Bounded codes only: never paths, query strings, headers, tokens, upstream
 // errors, or credential material.
-export const sessionEgressAudit = pgTable('session_egress_audit', {
+export const credentialEgressAudit = pgTable('credential_egress_audit', {
   id: uuid('id').primaryKey().defaultRandom(),
   authorizationId: uuid('authorization_id'),
   workloadId: uuid('workload_id'),
   sessionId: uuid('session_id'),
   actorUserId: text('actor_user_id'),
   secretRef: uuid('secret_ref'),
-  phase: text('phase').notNull().$type<SessionEgressPhase>(),
-  method: text('method').$type<SessionEgressMethod>(),
+  phase: text('phase').notNull().$type<CredentialEgressPhase>(),
+  method: text('method').$type<CredentialEgressMethod>(),
   destination: text('destination'),
   decision: text('decision').notNull().$type<'allowed' | 'denied'>(),
-  reason: text('reason').$type<SessionEgressDenialReason>(),
+  reason: text('reason').$type<CredentialEgressDenialReason>(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
@@ -4520,14 +4575,17 @@ export const sessionEgressAudit = pgTable('session_egress_audit', {
  * streams early. Live per-request authorization stays the source of truth;
  * missing an event here never grants access.
  */
-export const sessionEgressRevocations = pgTable('session_egress_revocations', {
-  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
-  kind: text('kind').notNull().$type<SessionEgressRevocationKind>(),
-  workloadId: uuid('workload_id'),
-  secretRef: uuid('secret_ref'),
-  generation: integer('generation'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-});
+export const credentialEgressRevocations = pgTable(
+  'credential_egress_revocations',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    kind: text('kind').notNull().$type<CredentialEgressRevocationKind>(),
+    workloadId: uuid('workload_id'),
+    secretRef: uuid('secret_ref'),
+    generation: integer('generation'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+);
 
 /** Additive task linkage retained independently for N-1 rollback safety. */
 export const sessionTasks = pgTable(
@@ -5701,4 +5759,198 @@ export const brainMemoryEventsRelations = relations(
       references: [taskRuns.id],
     }),
   }),
+);
+
+/**
+ * N-1 ROLLBACK: legacy Session-secret and Session-egress tables.
+ *
+ * Release 1.9.2 still selects from and inserts into these seven tables. The
+ * rename to `service_credentials` / `credential_egress_*` (migration 0093)
+ * dropped them, which broke the upgrade-compatibility guarantee; migration
+ * 0094 recreates them, empty, with their 1.9.2 shapes so a rollback keeps
+ * working. No current code reads or writes them. Drop them (and delete these
+ * definitions) in the release after 1.9.3 ships.
+ */
+export const legacySessionSecrets = pgTable(
+  'session_secrets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    origin: text('origin').notNull(),
+    // Any lowercase RFC 7230 token; validated by the shared credential header
+    // schema at prepare time, never constrained here.
+    headerName: text('header_name').notNull(),
+    headerPrefix: text('header_prefix')
+      .notNull()
+      .$type<'' | 'Bearer ' | 'Basic ' | 'Token '>(),
+    // Method policy enforced by the egress gateway authorize path. Additive
+    // with a read-only default so grants approved before it existed stay
+    // GET/HEAD-only; N-1 code ignores the column.
+    allowedMethods: text('allowed_methods')
+      .array()
+      .notNull()
+      .default(sql`'{GET,HEAD}'::text[]`)
+      .$type<CredentialEgressMethod[]>(),
+    value: encryptedText('value'),
+    expiresAt: timestamp('expires_at').notNull(),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('session_secrets_session_owner_idx').on(
+      table.sessionId,
+      table.ownerUserId,
+    ),
+  ],
+);
+
+export const legacySessionSecretApprovals = pgTable(
+  'session_secret_approvals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    origin: text('origin').notNull(),
+    // Any lowercase RFC 7230 token; validated by the shared credential header
+    // schema at prepare time, never constrained here.
+    headerName: text('header_name').notNull(),
+    headerPrefix: text('header_prefix')
+      .notNull()
+      .$type<'' | 'Bearer ' | 'Basic ' | 'Token '>(),
+    allowedMethods: text('allowed_methods')
+      .array()
+      .notNull()
+      .default(sql`'{GET,HEAD}'::text[]`)
+      .$type<CredentialEgressMethod[]>(),
+    expiresAt: timestamp('expires_at').notNull(),
+    consumedAt: timestamp('consumed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('session_secret_approvals_session_owner_idx').on(
+      table.sessionId,
+      table.ownerUserId,
+    ),
+  ],
+);
+
+export const legacySessionSecretAudit = pgTable('session_secret_audit', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  actorUserId: text('actor_user_id'),
+  secretRef: uuid('secret_ref'),
+  method: text('method').$type<'GET' | 'HEAD'>(),
+  destination: text('destination'),
+  outcome: text('outcome')
+    .notNull()
+    .$type<'started' | 'succeeded' | 'denied' | 'failed'>(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export const legacySessionEgressWorkloads = pgTable(
+  'session_egress_workloads',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    taskRunId: integer('task_run_id')
+      .notNull()
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    connectorIdentity: text('connector_identity').notNull(),
+    // Bumped on re-registration (resume, actor change, connector rotation).
+    // Substitutes are bound to the generation they were minted in.
+    generation: integer('generation').notNull().default(1),
+    status: text('status')
+      .notNull()
+      .default('active')
+      .$type<'active' | 'terminated'>(),
+    // Controller-renewed lease; never extended on a sandbox's say-so.
+    expiresAt: timestamp('expires_at').notNull(),
+    terminatedAt: timestamp('terminated_at'),
+    terminationReason: text('termination_reason'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_egress_workloads_active_run_unique')
+      .on(table.taskRunId)
+      .where(sql`${table.status} = 'active'`),
+    uniqueIndex('session_egress_workloads_active_connector_unique')
+      .on(table.connectorIdentity)
+      .where(sql`${table.status} = 'active'`),
+    index('session_egress_workloads_session_idx').on(table.sessionId),
+    check(
+      'session_egress_workloads_status_check',
+      sql`${table.status} in ('active', 'terminated')`,
+    ),
+  ],
+);
+
+export const legacySessionEgressSubstitutes = pgTable(
+  'session_egress_substitutes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workloadId: uuid('workload_id')
+      .notNull()
+      .references(() => legacySessionEgressWorkloads.id, {
+        onDelete: 'cascade',
+      }),
+    secretId: uuid('secret_id')
+      .notNull()
+      .references(() => legacySessionSecrets.id, { onDelete: 'cascade' }),
+    generation: integer('generation').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_egress_substitutes_token_hash_unique').on(
+      table.tokenHash,
+    ),
+    uniqueIndex(
+      'session_egress_substitutes_workload_secret_generation_unique',
+    ).on(table.workloadId, table.secretId, table.generation),
+  ],
+);
+
+export const legacySessionEgressAudit = pgTable('session_egress_audit', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  authorizationId: uuid('authorization_id'),
+  workloadId: uuid('workload_id'),
+  sessionId: uuid('session_id'),
+  actorUserId: text('actor_user_id'),
+  secretRef: uuid('secret_ref'),
+  phase: text('phase').notNull().$type<CredentialEgressPhase>(),
+  method: text('method').$type<CredentialEgressMethod>(),
+  destination: text('destination'),
+  decision: text('decision').notNull().$type<'allowed' | 'denied'>(),
+  reason: text('reason').$type<CredentialEgressDenialReason>(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export const legacySessionEgressRevocations = pgTable(
+  'session_egress_revocations',
+  {
+    id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+    kind: text('kind').notNull().$type<CredentialEgressRevocationKind>(),
+    workloadId: uuid('workload_id'),
+    secretRef: uuid('secret_ref'),
+    generation: integer('generation'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
 );

@@ -16,7 +16,9 @@ import {
   type EnqueuePrReviewNotificationInput,
   type StartPrReviewNotificationCycleInput,
 } from '@roomote/sdk/server';
+import type { OperationalLogFields } from '@roomote/types';
 
+import { logApiOperationalEvent } from '../../logging';
 import { isMention } from './isMention';
 import type {
   WebhookIssueCommentCreated,
@@ -39,6 +41,37 @@ type GitHubWebhookContext = { deliveryId?: string };
 
 const MAX_SUMMARY_LENGTH = 300;
 const MAX_REVIEW_BODY_LENGTH = 10_000;
+
+function getPrReviewOperationalFields(
+  eventPayload: PrReviewActivityWebhookPayload,
+  deliveryId?: string,
+): OperationalLogFields {
+  const prNumber =
+    'issue' in eventPayload
+      ? eventPayload.issue.number
+      : eventPayload.pull_request.number;
+  const reviewId =
+    'review' in eventPayload
+      ? eventPayload.review.id
+      : 'pull_request_review_id' in eventPayload.comment
+        ? eventPayload.comment.pull_request_review_id
+        : undefined;
+  const externalEventId =
+    'review' in eventPayload
+      ? `github-review:${eventPayload.review.id}`
+      : `github-comment:${eventPayload.comment.id}`;
+
+  return {
+    provider: 'github',
+    surface: 'github',
+    deliveryId,
+    repository: eventPayload.repository.full_name,
+    prNumber,
+    reviewId: reviewId ?? undefined,
+    externalEventId,
+    eventType: 'review' in eventPayload ? 'pull_request_review' : 'comment',
+  };
+}
 
 function getReviewBody(value: string | null | undefined): string | undefined {
   const body = value?.trim();
@@ -119,10 +152,14 @@ function getTimestampLessSummaryCycleId(
  *   Roomote-authored new threads (e.g. findings from a Roomote PR review)
  *   still notify.
  */
-export function buildPrReviewActivityNotificationInput(
+type PrReviewActivityDecision =
+  | { input: EnqueuePrReviewNotificationInput; reason?: never }
+  | { input?: never; reason: string };
+
+function decidePrReviewActivityNotification(
   eventPayload: PrReviewActivityWebhookPayload,
   context: GitHubWebhookContext = {},
-): EnqueuePrReviewNotificationInput | null {
+): PrReviewActivityDecision {
   const author =
     'issue' in eventPayload
       ? eventPayload.comment.user
@@ -131,12 +168,12 @@ export function buildPrReviewActivityNotificationInput(
         : eventPayload.comment.user;
 
   if (isExternalBotAuthor(author)) {
-    return null;
+    return { reason: 'external_bot_not_trusted' };
   }
 
   if ('issue' in eventPayload) {
     if (!eventPayload.issue.pull_request) {
-      return null;
+      return { reason: 'not_pull_request_activity' };
     }
 
     const comment = eventPayload.comment;
@@ -145,28 +182,36 @@ export function buildPrReviewActivityNotificationInput(
     const authorLogin = comment.user?.login;
     const body = getReviewBody(comment.body);
 
-    if (
-      !authorLogin ||
-      GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin) ||
-      isMention({ body: comment.body ?? '', user: { login: authorLogin } })
-    ) {
-      return null;
+    if (!authorLogin) {
+      return { reason: 'author_missing' };
+    }
+    if (GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)) {
+      return { reason: 'managed_bot_issue_comment' };
+    }
+    if (isMention({ body: comment.body ?? '', user: { login: authorLogin } })) {
+      return { reason: 'mention_handled_separately' };
     }
 
     return {
-      repository: eventPayload.repository.full_name,
-      prNumber: eventPayload.issue.number,
-      prUrl:
-        eventPayload.issue.pull_request.html_url ?? eventPayload.issue.html_url,
-      sourceControlProvider: 'github',
-      event: {
-        kind: 'issue_comment',
-        providerEventId: `github-issue-comment:${comment.id}:${revision}`,
-        authorLogin,
-        ...getAutomatedAuthorMetadata(comment.user),
-        ...(body ? { body } : {}),
-        ...(comment.html_url ? { url: comment.html_url } : {}),
-        observedAt: getObservedAt(comment.updated_at ?? comment.created_at),
+      input: {
+        repository: eventPayload.repository.full_name,
+        prNumber: eventPayload.issue.number,
+        prUrl:
+          eventPayload.issue.pull_request.html_url ??
+          eventPayload.issue.html_url,
+        sourceControlProvider: 'github',
+        event: {
+          kind: 'issue_comment',
+          providerEventId: `github-issue-comment:${comment.id}:${revision}`,
+          ...(context.deliveryId
+            ? { sourceDeliveryId: context.deliveryId }
+            : {}),
+          authorLogin,
+          ...getAutomatedAuthorMetadata(comment.user),
+          ...(body ? { body } : {}),
+          ...(comment.html_url ? { url: comment.html_url } : {}),
+          observedAt: getObservedAt(comment.updated_at ?? comment.created_at),
+        },
       },
     };
   }
@@ -184,35 +229,40 @@ export function buildPrReviewActivityNotificationInput(
     const body = getReviewBody(review.body);
 
     if (!authorLogin) {
-      return null;
+      return { reason: 'author_missing' };
     }
 
     if (isMention({ body: review.body ?? '', user: { login: authorLogin } })) {
-      return null;
+      return { reason: 'mention_handled_separately' };
     }
 
     if (review.state === 'commented' && !review.body) {
-      return null;
+      return { reason: 'empty_review_wrapper' };
     }
 
     return {
-      ...base,
-      event: {
-        kind: 'review',
-        providerEventId: `github-review:${review.id}`,
-        authorLogin,
-        ...getAutomatedAuthorMetadata(review.user),
-        ...(body ? { body } : {}),
-        ...(review.commit_id ? { reviewHeadSha: review.commit_id } : {}),
-        batchId: `github-review:${review.id}`,
-        reviewState: review.state,
-        ...(review.html_url ? { url: review.html_url } : {}),
-        ...(review.submitted_at
-          ? { observedAt: getObservedAt(review.submitted_at) }
-          : {}),
-        ...(GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)
-          ? { roomoteAuthored: true }
-          : {}),
+      input: {
+        ...base,
+        event: {
+          kind: 'review',
+          providerEventId: `github-review:${review.id}`,
+          ...(context.deliveryId
+            ? { sourceDeliveryId: context.deliveryId }
+            : {}),
+          authorLogin,
+          ...getAutomatedAuthorMetadata(review.user),
+          ...(body ? { body } : {}),
+          ...(review.commit_id ? { reviewHeadSha: review.commit_id } : {}),
+          batchId: `github-review:${review.id}`,
+          reviewState: review.state,
+          ...(review.html_url ? { url: review.html_url } : {}),
+          ...(review.submitted_at
+            ? { observedAt: getObservedAt(review.submitted_at) }
+            : {}),
+          ...(GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)
+            ? { roomoteAuthored: true }
+            : {}),
+        },
       },
     };
   }
@@ -222,42 +272,54 @@ export function buildPrReviewActivityNotificationInput(
   const body = getReviewBody(comment.body);
 
   if (!authorLogin) {
-    return null;
+    return { reason: 'author_missing' };
   }
 
   if (isMention({ body: comment.body ?? '', user: { login: authorLogin } })) {
-    return null;
+    return { reason: 'mention_handled_separately' };
   }
 
   if (
     comment.in_reply_to_id &&
     GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)
   ) {
-    return null;
+    return { reason: 'managed_bot_thread_reply' };
   }
 
   return {
-    ...base,
-    event: {
-      kind: 'review_comment',
-      providerEventId: `github-review-comment:${comment.id}`,
-      authorLogin,
-      ...getAutomatedAuthorMetadata(comment.user),
-      ...(comment.in_reply_to_id
-        ? { inReplyToId: String(comment.in_reply_to_id) }
-        : {}),
-      ...(body ? { body } : {}),
-      ...(comment.commit_id ? { reviewHeadSha: comment.commit_id } : {}),
-      ...(comment.pull_request_review_id
-        ? { batchId: `github-review:${comment.pull_request_review_id}` }
-        : {}),
-      ...(comment.html_url ? { url: comment.html_url } : {}),
-      observedAt: getObservedAt(comment.created_at),
-      ...(GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)
-        ? { roomoteAuthored: true }
-        : {}),
+    input: {
+      ...base,
+      event: {
+        kind: 'review_comment',
+        providerEventId: `github-review-comment:${comment.id}`,
+        ...(context.deliveryId ? { sourceDeliveryId: context.deliveryId } : {}),
+        authorLogin,
+        ...getAutomatedAuthorMetadata(comment.user),
+        ...(comment.in_reply_to_id
+          ? { inReplyToId: String(comment.in_reply_to_id) }
+          : {}),
+        ...(body ? { body } : {}),
+        ...(comment.commit_id ? { reviewHeadSha: comment.commit_id } : {}),
+        ...(comment.pull_request_review_id
+          ? { batchId: `github-review:${comment.pull_request_review_id}` }
+          : {}),
+        ...(comment.html_url ? { url: comment.html_url } : {}),
+        observedAt: getObservedAt(comment.created_at),
+        ...(GitHubSchemas.isManagedRoomoteGitHubLogin(authorLogin)
+          ? { roomoteAuthored: true }
+          : {}),
+      },
     },
   };
+}
+
+export function buildPrReviewActivityNotificationInput(
+  eventPayload: PrReviewActivityWebhookPayload,
+  context: GitHubWebhookContext = {},
+): EnqueuePrReviewNotificationInput | null {
+  return (
+    decidePrReviewActivityNotification(eventPayload, context).input ?? null
+  );
 }
 
 /**
@@ -477,6 +539,9 @@ function buildPrReviewSummaryLifecycle(
         event: {
           kind: 'review_summary',
           providerEventId: `github-review-summary:${comment.id}:${revision}`,
+          ...(context.deliveryId
+            ? { sourceDeliveryId: context.deliveryId }
+            : {}),
           authorLogin,
           ...(markerSha ? { reviewHeadSha: markerSha } : {}),
           ...(reviewTaskId ? { reviewTaskId } : {}),
@@ -632,20 +697,46 @@ export async function queuePrReviewActivityNotification(
   eventPayload: PrReviewActivityWebhookPayload,
   deliveryId?: string,
 ): Promise<void> {
-  const input = buildPrReviewActivityNotificationInput(eventPayload, {
+  const fields = getPrReviewOperationalFields(eventPayload, deliveryId);
+  const decision = decidePrReviewActivityNotification(eventPayload, {
     deliveryId,
   });
 
-  if (!input) {
+  if (!decision.input) {
+    logApiOperationalEvent('info', 'source_control_review_admission', {
+      ...fields,
+      outcome: 'skipped',
+      reason: decision.reason,
+    });
     return;
   }
 
-  await enqueuePrReviewNotification(input).catch((error) => {
+  logApiOperationalEvent('info', 'source_control_review_admission', {
+    ...fields,
+    outcome: 'admitted',
+    reason: 'trusted_review_activity',
+  });
+
+  try {
+    const result = await enqueuePrReviewNotification(decision.input);
+    logApiOperationalEvent('info', 'source_control_review_persistence', {
+      ...fields,
+      outcome: 'persisted',
+      reason: result.reason ?? 'linked_tasks_projected',
+      taskCount: result.notifiedTaskCount,
+    });
+  } catch (error) {
+    logApiOperationalEvent('error', 'source_control_review_persistence', {
+      ...fields,
+      outcome: 'failed',
+      reason: error instanceof Error ? error.name : 'unknown_error',
+      retryable: true,
+    });
     console.warn(
-      `[queuePrReviewActivityNotification] Failed to persist review notification for ${input.repository}#${input.prNumber}: ${
+      `[queuePrReviewActivityNotification] Failed to persist review notification for ${decision.input.repository}#${decision.input.prNumber}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
     throw error;
-  });
+  }
 }

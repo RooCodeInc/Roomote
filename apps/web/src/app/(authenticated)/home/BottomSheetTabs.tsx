@@ -7,9 +7,11 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { BasicTooltip, X } from '@/components/system';
 import { cn } from '@/lib/utils';
+import { useTRPC } from '@/trpc/client';
 
 import { PullRequestsList } from './PullRequestsList';
 import { RecentSessionsList } from './RecentSessionsList';
@@ -21,10 +23,14 @@ type BottomSheetTabsProps = {
 };
 
 export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
+  const trpc = useTRPC();
   const [activeTab, setActiveTab] = useState<HomeTab | null>(null);
   const [renderedTab, setRenderedTab] = useState<HomeTab | null>(null);
   const [panelHeight, setPanelHeight] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
+  const pullRequestsQuery = useQuery(
+    trpc.tasks.recentPullRequests.queryOptions(),
+  );
 
   const isExpanded = activeTab !== null;
 
@@ -136,6 +142,9 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
               )}
             >
               Recent PRs
+              {pullRequestsQuery.data
+                ? ` (${pullRequestsQuery.data.openCount})`
+                : null}
             </button>
           </BasicTooltip>
 

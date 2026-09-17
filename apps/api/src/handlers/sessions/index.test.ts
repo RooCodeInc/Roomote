@@ -235,6 +235,66 @@ describe('MCP session routes', () => {
     );
   });
 
+  it('inherits private privacy and owner when a private task starts a Session', async () => {
+    const owner = await userFactory.create();
+    createdUserIds.push(owner.id);
+    const parentSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    createdSessionIds.push(parentSession.id);
+    const parentTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    createdTaskIds.push(parentTask.id);
+    await db.insert(sessionTasks).values({
+      sessionId: parentSession.id,
+      taskId: parentTask.id,
+      origin: 'fast_delegation',
+    });
+    const [parentRun] = await db
+      .insert(taskRuns)
+      .values({
+        taskId: parentTask.id,
+        actingUserId: owner.id,
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: '', description: 'Private request' },
+      })
+      .returning({ id: taskRuns.id });
+    mocks.getOrCreateFastAgentSession.mockResolvedValue({
+      id: crypto.randomUUID(),
+      created: true,
+    });
+    mocks.getSessionForFastConversation.mockResolvedValue({
+      id: crypto.randomUUID(),
+    });
+    mocks.queueFastAgentSurfaceReply.mockResolvedValue(true);
+
+    const response = await createApp({
+      runId: parentRun!.id,
+      userId: owner.id,
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    } as RunTokenContext).request('/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Continue privately' }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(mocks.getOrCreateFastAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: owner.id,
+        privacy: 'private',
+      }),
+    );
+  });
+
   it('returns accessible sessions with nested child-task state', async () => {
     const owner = await userFactory.create();
     createdUserIds.push(owner.id);

@@ -512,6 +512,119 @@ describe('canonical PR review notification ownership', () => {
     );
   });
 
+  it('retires a delivery that burned through its claims without completing', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/wasted-claims-${task.id}`;
+    await associate(task.id, repository, 9);
+    await persistPrReviewEvent(
+      eventInput({ repository, prNumber: 9, eventKey: `wasted-${task.id}` }),
+    );
+    const first = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    if (!first || first.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    // Eleven more leases came and went with nothing to show for them.
+    await db
+      .update(prReviewNotificationDeliveries)
+      .set({
+        attempt: 12,
+        leaseExpiresAt: new Date(CLAIM_AT.getTime() - 1),
+      })
+      .where(eq(prReviewNotificationDeliveries.id, first.deliveryId));
+
+    expect(
+      (await claimForRepository(repository)).some(
+        ({ repository: claimedRepository }) => claimedRepository === repository,
+      ),
+    ).toBe(false);
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.id, first.deliveryId),
+        columns: { status: true, leaseToken: true, completedAt: true },
+      }),
+    ).resolves.toMatchObject({
+      status: 'suppressed',
+      leaseToken: null,
+      completedAt: CLAIM_AT,
+    });
+  });
+
+  it('keeps reclaiming a delivery whose claims were deliberate deferrals', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/deferred-claims-${task.id}`;
+    await associate(task.id, repository, 10);
+    await persistPrReviewEvent(
+      eventInput({ repository, prNumber: 10, eventKey: `deferred-${task.id}` }),
+    );
+    const first = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    if (!first || first.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await db
+      .update(prReviewNotificationDeliveries)
+      .set({
+        attempt: 20,
+        deferrals: 15,
+        leaseExpiresAt: new Date(CLAIM_AT.getTime() - 1),
+      })
+      .where(eq(prReviewNotificationDeliveries.id, first.deliveryId));
+
+    const reclaimed = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    expect(reclaimed).toMatchObject({
+      ownershipVersion: 'canonical',
+      deliveryId: first.deliveryId,
+    });
+  });
+
+  it('retires a delivery that has been due for days before anyone can claim it', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/stale-age-${task.id}`;
+    await associate(task.id, repository, 11);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 11,
+        eventKey: `stale-age-${task.id}`,
+      }),
+    );
+    const [delivery] = await db
+      .select({ id: prReviewNotificationDeliveries.id })
+      .from(prReviewNotificationDeliveries)
+      .innerJoin(
+        prReviewNotificationUnits,
+        eq(
+          prReviewNotificationUnits.id,
+          prReviewNotificationDeliveries.notificationUnitId,
+        ),
+      )
+      .where(eq(prReviewNotificationUnits.repository, repository));
+    if (!delivery) throw new Error('expected a pending delivery');
+    // Created and due three days and a minute before the claim runs.
+    const staleAt = new Date(CLAIM_AT.getTime() - 72 * 60 * 60 * 1000 - 60_000);
+    await db
+      .update(prReviewNotificationDeliveries)
+      .set({ dueAt: staleAt, createdAt: staleAt })
+      .where(eq(prReviewNotificationDeliveries.id, delivery.id));
+
+    expect(
+      (await claimForRepository(repository)).some(
+        ({ repository: claimedRepository }) => claimedRepository === repository,
+      ),
+    ).toBe(false);
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.id, delivery.id),
+        columns: { status: true },
+      }),
+    ).resolves.toEqual({ status: 'suppressed' });
+  });
+
   it('reclaims deferred automatic work with the same delivery identity', async () => {
     const task = await taskFactory.create();
     const repository = `owner/deferred-canonical-${task.id}`;
@@ -1431,10 +1544,13 @@ describe('canonical PR review notification ownership', () => {
         .set({ superseded: true })
         .where(eq(prReviewEvents.eventKey, `${state}-old-head-${task.id}`));
       await expect(
-        releaseSupersededCanonicalPrReviewAction({
-          deliveryId: claim.deliveryId,
-          leaseToken: claim.leaseToken,
-        }),
+        releaseSupersededCanonicalPrReviewAction(
+          {
+            deliveryId: claim.deliveryId,
+            leaseToken: claim.leaseToken,
+          },
+          CLAIM_AT,
+        ),
       ).resolves.toBe(true);
       await expect(claimForRepository(repository, CLAIM_AT)).resolves.toEqual([
         expect.objectContaining({
@@ -1484,10 +1600,13 @@ describe('canonical PR review notification ownership', () => {
       currentHeadSha: 'new-head',
     });
     await expect(
-      releaseSupersededCanonicalPrReviewAction({
-        deliveryId: claim.deliveryId,
-        leaseToken: claim.leaseToken,
-      }),
+      releaseSupersededCanonicalPrReviewAction(
+        {
+          deliveryId: claim.deliveryId,
+          leaseToken: claim.leaseToken,
+        },
+        CLAIM_AT,
+      ),
     ).resolves.toBe(true);
     await expect(claimForRepository(repository, CLAIM_AT)).resolves.toEqual([
       expect.objectContaining({
@@ -1541,7 +1660,7 @@ describe('canonical PR review notification ownership', () => {
     );
   });
 
-  it('holds the old-head retirement fence through automatic dispatch', async () => {
+  it('claims before dispatch and lets old-head retirement mark the row while dispatch runs', async () => {
     const user = await userFactory.create();
     const task = await taskFactory.create({ initiatorUserId: user.id });
     const repository = `owner/locked-auto-dispatch-${task.id}`;
@@ -1598,25 +1717,243 @@ describe('canonical PR review notification ownership', () => {
     );
     await started;
 
-    const retirement = retireCanonicalPrReviewActionsForPullRequest({
-      sourceControlProvider: 'github',
-      repository,
-      prNumber: 33,
-      currentHeadSha: 'new-head',
-    }).then((result) => {
-      order.push('retirement-end');
-      return result;
+    // The claim has committed, so the row is already visible as pending
+    // dispatch and retirement is not held up behind the enqueue.
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.id, claim.deliveryId),
+        columns: { status: true, actionClaimedAt: true },
+      }),
+    ).resolves.toEqual({
+      status: 'auto_dispatch_pending',
+      actionClaimedAt: null,
     });
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    expect(order).toEqual(['dispatch-start']);
+
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 33,
+        currentHeadSha: 'new-head',
+      }),
+    ).resolves.toEqual([]);
+    order.push('retirement-end');
 
     releaseDispatch();
     await expect(dispatch).resolves.toEqual({
       acquired: true,
       result: 'queued',
     });
-    await expect(retirement).resolves.toEqual([]);
-    expect(order).toEqual(['dispatch-start', 'dispatch-end', 'retirement-end']);
+    expect(order).toEqual(['dispatch-start', 'retirement-end', 'dispatch-end']);
+    // Retirement fenced the row; the claimed dispatch still went out and can
+    // be completed, which is the same outcome the row lock used to produce.
+    const fenced = await db.query.prReviewNotificationDeliveries.findFirst({
+      where: eq(prReviewNotificationDeliveries.id, claim.deliveryId),
+      columns: { status: true, actionClaimedAt: true },
+    });
+    expect(fenced?.status).toBe('auto_dispatch_pending');
+    expect(fenced?.actionClaimedAt).not.toBeNull();
+
+    // The completion transition only guards action_claimed_at when moving
+    // into prompt_posting or auto_dispatch_pending, so the in-flight dispatch
+    // still records its run and finishes the delivery.
+    const run = await runFactory.create({ taskId: task.id });
+    await expect(
+      transitionCanonicalPrReviewDelivery({
+        deliveryId: claim.deliveryId,
+        leaseToken: claim.leaseToken,
+        expected: 'auto_dispatch_pending',
+        status: 'completed',
+        values: { dispatchedRunId: run.id },
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.id, claim.deliveryId),
+        columns: { status: true, dispatchedRunId: true },
+      }),
+    ).resolves.toEqual({ status: 'completed', dispatchedRunId: run.id });
+  });
+
+  it('refuses the automatic dispatch claim once retirement fenced the row', async () => {
+    const user = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    const repository = `owner/fenced-auto-dispatch-${task.id}`;
+    await associate(task.id, repository, 34);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 34,
+        eventKey: `fenced-auto-dispatch-${task.id}`,
+        headSha: 'old-head',
+      }),
+    );
+    const claim = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+    });
+    await retireCanonicalPrReviewActionsForPullRequest({
+      sourceControlProvider: 'github',
+      repository,
+      prNumber: 34,
+      currentHeadSha: 'new-head',
+    });
+
+    const dispatch = vi.fn(async () => 'queued');
+    await expect(
+      withCanonicalPrReviewAutoDispatchFence(
+        {
+          deliveryId: claim.deliveryId,
+          leaseToken: claim.leaseToken,
+          followUpPrompt: 'Resolve the review feedback.',
+          targetTaskId: task.id,
+          actingUserId: user.id,
+          routeProvider: 'slack',
+          routeWorkspaceId: 'T123',
+          routeChannelId: 'C123',
+          routeThreadId: '111.222',
+        },
+        dispatch,
+      ),
+    ).resolves.toEqual({ acquired: false });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('does not deadlock when the dispatch locks the target task in its own transaction', async () => {
+    // The production shape: the dispatch launches or resumes a run, which
+    // locks the target task row inside its own transaction. With the claim
+    // still open, its target_task_id foreign key held a key-share lock on
+    // that row and the two connections waited on each other forever.
+    const user = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    const repository = `owner/deadlock-auto-dispatch-${task.id}`;
+    await associate(task.id, repository, 35);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 35,
+        eventKey: `deadlock-auto-dispatch-${task.id}`,
+        headSha: 'old-head',
+      }),
+    );
+    const claim = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+    });
+
+    const result = withCanonicalPrReviewAutoDispatchFence(
+      {
+        deliveryId: claim.deliveryId,
+        leaseToken: claim.leaseToken,
+        followUpPrompt: 'Resolve the review feedback.',
+        targetTaskId: task.id,
+        actingUserId: user.id,
+        routeProvider: null,
+        routeWorkspaceId: null,
+        routeChannelId: null,
+        routeThreadId: null,
+      },
+      () =>
+        db.transaction(async (tx) => {
+          const [locked] = await tx
+            .select({ id: tasks.id })
+            .from(tasks)
+            .where(eq(tasks.id, task.id))
+            .for('update');
+          return locked?.id ?? null;
+        }),
+    );
+    await expect(
+      Promise.race([
+        result,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('dispatch deadlocked')), 5_000),
+        ),
+      ]),
+    ).resolves.toEqual({ acquired: true, result: task.id });
+  });
+
+  it('hands the delivery back when the dispatch throws', async () => {
+    const user = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    const repository = `owner/failed-auto-dispatch-${task.id}`;
+    await associate(task.id, repository, 36);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 36,
+        eventKey: `failed-auto-dispatch-${task.id}`,
+        headSha: 'old-head',
+      }),
+    );
+    const claim = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+    });
+
+    await expect(
+      withCanonicalPrReviewAutoDispatchFence(
+        {
+          deliveryId: claim.deliveryId,
+          leaseToken: claim.leaseToken,
+          followUpPrompt: 'Resolve the review feedback.',
+          targetTaskId: task.id,
+          actingUserId: user.id,
+          routeProvider: 'slack',
+          routeWorkspaceId: 'T123',
+          routeChannelId: 'C123',
+          routeThreadId: '111.222',
+        },
+        async () => {
+          throw new Error('enqueue failed');
+        },
+      ),
+    ).rejects.toThrow('enqueue failed');
+
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.id, claim.deliveryId),
+        columns: {
+          status: true,
+          followUpPrompt: true,
+          targetTaskId: true,
+          actingUserId: true,
+          routeProvider: true,
+          leaseToken: true,
+        },
+      }),
+    ).resolves.toEqual({
+      status: 'prepared',
+      followUpPrompt: null,
+      targetTaskId: null,
+      actingUserId: null,
+      routeProvider: null,
+      leaseToken: claim.leaseToken,
+    });
   });
 
   it('leaves a pending older-head delivery for the reviewer text to be delivered', async () => {

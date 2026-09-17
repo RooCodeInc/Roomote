@@ -223,6 +223,12 @@ async function resolveTaskRunRepositoryScope(
   taskRun: TaskRun,
 ): Promise<string[] | null> {
   const payload = getPayloadRecord(taskRun.payload);
+  const repositoryProviders = resolveRepositoryProvidersFromPayload(payload);
+
+  if (repositoryProviders) {
+    return Object.keys(repositoryProviders);
+  }
+
   const environmentId =
     typeof payload.environmentId === 'string'
       ? payload.environmentId.trim()

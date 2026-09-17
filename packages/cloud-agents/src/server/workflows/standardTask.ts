@@ -451,7 +451,7 @@ ${buildGitHubMessageInstructions()}`
 
   <task_context>
     <repository>${isAllRepositoriesSelection ? 'Repositories available in the workspace' : isBlankSlateSelection ? 'No repository checked out (Blank slate)' : repo}</repository>
-    <workspace_context>${usesSharedWorkspaceRoot ? getWorkspaceInstructions(repoFullNames, conflictResolverLabel, { repositoriesOnDemand: isAllRepositoriesSelection, blankSlate: isBlankSlateSelection }) : 'Single repository workspace.'}</workspace_context>
+    <workspace_context>${usesSharedWorkspaceRoot ? getWorkspaceInstructions(repoFullNames, conflictResolverLabel, { repositoriesOnDemand: isAllRepositoriesSelection, additionalRepositoriesOnDemand: !isAllRepositoriesSelection && !isBlankSlateSelection, blankSlate: isBlankSlateSelection }) : 'Single repository workspace.'}</workspace_context>
   </task_context>
 
   ${taskSurfaceContext}

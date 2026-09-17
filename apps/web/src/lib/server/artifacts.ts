@@ -2,6 +2,7 @@ import {
   db,
   taskArtifacts,
   tasks,
+  sessions,
   eq,
   and,
   desc,
@@ -57,7 +58,7 @@ export async function getArtifactById({
   artifactId: string;
   auth: ArtifactAuth;
 }) {
-  if (!auth.userId) return null;
+  if (!(await canReadTask(auth, taskId))) return null;
   const result = await db
     .select()
     .from(taskArtifacts)
@@ -93,7 +94,9 @@ export async function getArtifactByPath({
 }) {
   if (!(await canReadTask(auth, taskId))) return null;
   const artifact = await getTaskArtifactByPath({ taskId, path, version });
-  return artifact ? withTypedArtifactType(artifact) : null;
+  return artifact
+    ? { ...withTypedArtifactType(artifact), privacy: artifact.task.privacy }
+    : null;
 }
 
 export async function getArtifactBySessionPath({
@@ -153,7 +156,7 @@ export async function getArtifactVersionsByPath({
   path: string;
   auth: ArtifactAuth;
 }) {
-  if (!auth.userId) return [];
+  if (!(await canReadTask(auth, taskId))) return [];
   const result = await db
     .select({
       id: taskArtifacts.id,
@@ -187,7 +190,7 @@ export async function getArtifactsForTask({
   auth: ArtifactAuth;
   uploadedOnly?: boolean;
 }) {
-  if (!auth.userId) return [];
+  if (!(await canReadTask(auth, taskId))) return [];
   const artifactConditions = [eq(taskArtifacts.taskId, taskId)];
 
   if (uploadedOnly) {
@@ -203,6 +206,7 @@ export async function getArtifactsForTask({
       contentType: taskArtifacts.contentType,
       size: taskArtifacts.size,
       createdAt: taskArtifacts.createdAt,
+      privacy: tasks.privacy,
     })
     .from(taskArtifacts)
     .innerJoin(tasks, eq(taskArtifacts.taskId, tasks.id))
@@ -215,17 +219,36 @@ export async function getArtifactsForTask({
  * Get an artifact by ID without auth checks (for public raw endpoint).
  * Only returns artifacts that have been uploaded.
  */
-export async function getUploadedArtifactById(artifactId: string) {
-  const result = await db
-    .select()
+export async function getUploadedArtifactById(artifactId: string): Promise<
+  | (typeof taskArtifacts.$inferSelect & {
+      privacy?: 'shared' | 'private';
+      privateOwnerUserId?: string | null;
+    })
+  | null
+> {
+  const [row] = await db
+    .select({
+      artifact: taskArtifacts,
+      taskPrivacy: tasks.privacy,
+      taskPrivateOwnerUserId: tasks.privateOwnerUserId,
+      sessionPrivacy: sessions.privacy,
+      sessionPrivateOwnerUserId: sessions.privateOwnerUserId,
+    })
     .from(taskArtifacts)
+    .leftJoin(tasks, eq(taskArtifacts.taskId, tasks.id))
+    .leftJoin(sessions, eq(taskArtifacts.sessionId, sessions.id))
     .where(
       and(eq(taskArtifacts.id, artifactId), eq(taskArtifacts.uploaded, true)),
     )
     .limit(1);
 
-  if (result.length === 0) return null;
-  return result[0]!;
+  if (!row) return null;
+  return {
+    ...row.artifact,
+    privacy: row.taskPrivacy ?? row.sessionPrivacy ?? 'shared',
+    privateOwnerUserId:
+      row.taskPrivateOwnerUserId ?? row.sessionPrivateOwnerUserId,
+  };
 }
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB

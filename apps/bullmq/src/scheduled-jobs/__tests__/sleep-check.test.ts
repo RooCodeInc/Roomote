@@ -17,7 +17,7 @@ const {
   mockRecordTaskRunEvent,
   mockMarkTaskStartParallelCountEndedAt,
   mockSyncTaskStateFromRuns,
-  mockTerminateSessionEgress,
+  mockTerminateCredentialEgress,
   mockDbQueryTaskRunsFindFirst,
   captureBullMqMessageMock,
   transactionFn,
@@ -85,7 +85,7 @@ const {
     mockRecordTaskRunEvent: vi.fn() as AnyMock,
     mockMarkTaskStartParallelCountEndedAt: vi.fn() as AnyMock,
     mockSyncTaskStateFromRuns: vi.fn() as AnyMock,
-    mockTerminateSessionEgress: vi.fn().mockResolvedValue([]) as AnyMock,
+    mockTerminateCredentialEgress: vi.fn().mockResolvedValue([]) as AnyMock,
     mockDbQueryTaskRunsFindFirst: vi.fn() as AnyMock,
     captureBullMqMessageMock: vi.fn() as AnyMock,
     transactionFn: vi.fn() as AnyMock,
@@ -193,7 +193,7 @@ vi.mock('@roomote/db/server', () => ({
     mockCreateComputeProviderMutationEventRecorder,
   markTaskStartParallelCountEndedAt: mockMarkTaskStartParallelCountEndedAt,
   syncTaskStateFromRuns: mockSyncTaskStateFromRuns,
-  terminateSessionEgressWorkloadsForRun: mockTerminateSessionEgress,
+  terminateCredentialEgressWorkloadsForRun: mockTerminateCredentialEgress,
   recordTaskRunEvent: mockRecordTaskRunEvent,
   resolveComputeProviderEnvValues: vi.fn().mockResolvedValue({}),
 }));
@@ -288,7 +288,7 @@ describe('sleepTaskRunNow', () => {
       instanceId: 'docker-machine-1',
       commandId: 'command-1',
     });
-    expect(mockTerminateSessionEgress).toHaveBeenCalledWith(
+    expect(mockTerminateCredentialEgress).toHaveBeenCalledWith(
       123,
       'stopped',
       expect.anything(),

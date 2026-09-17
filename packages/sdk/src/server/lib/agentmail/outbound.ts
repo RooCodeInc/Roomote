@@ -576,7 +576,7 @@ export async function sendAgentMailSystemEmail(input: {
   });
   if (suppression && suppression.reason !== 'unsubscribe') {
     console.warn(
-      `${LOG_PREFIX} [${input.logContext}] Not sending system email to ${to}: address is suppressed (${suppression.reason}).`,
+      `${LOG_PREFIX} [${input.logContext}] Not sending system email: address is suppressed (${suppression.reason}).`,
     );
     return { sent: false, reason: 'suppressed' };
   }
@@ -594,9 +594,7 @@ export async function sendAgentMailSystemEmail(input: {
     return { sent: true };
   } catch (error) {
     console.warn(
-      `${LOG_PREFIX} [${input.logContext}] Failed to send system email to ${to}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      `${LOG_PREFIX} [${input.logContext}] Failed to send system email (${error instanceof Error ? error.name : typeof error}).`,
     );
     return { sent: false, reason: 'send_failed' };
   }

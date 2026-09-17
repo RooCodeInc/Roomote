@@ -19,6 +19,26 @@ const READING_CHARS_PER_SECOND = 10;
 
 export const PRODUCT_TIPS = [
   {
+    title: 'Triage issues as they arrive',
+    description:
+      'Roomote can investigate each newly opened issue and post a concrete implementation plan with the relevant code paths before anyone picks it up.',
+  },
+  {
+    title: 'Use Roomote from your favorite app',
+    description:
+      'Connect to the Roomote MCP and control it from Claude, ChatGPT and more. Learn more in the docs.',
+  },
+  {
+    title: 'Turn a task into an automation',
+    description:
+      'Want to do something you just asked Roomote for on a schedule? Just ask it to create an automation in the chat.',
+  },
+  {
+    title: 'Build directly from the spec',
+    description:
+      'Point Roomote at a Notion spec or Linear issue and ask it to trace affected code, identify missing decisions, implement the change, and link the PR back.',
+  },
+  {
     title: 'Debug production backward',
     description:
       'Ask Roomote to inspect a Sentry issue, deployment logs, or Grafana alert, trace it into the codebase, and prepare the smallest verified fix.',
@@ -27,31 +47,6 @@ export const PRODUCT_TIPS = [
     title: 'Turn failed CI into a fix',
     description:
       'CI Failure Triage can detect a persistent failure on the default branch, reproduce it in the configured environment, and open a fix PR.',
-  },
-  {
-    title: 'Investigate surprising metrics',
-    description:
-      'Connect PostHog and ask why a metric moved. Roomote can inspect events, experiments, and feature flags, then trace likely causes into the code.',
-  },
-  {
-    title: 'Debug with real database state',
-    description:
-      'Use read-only Supabase or Neon access to investigate data-dependent bugs, compare the live schema with application assumptions, and plan a safe fix.',
-  },
-  {
-    title: 'Build directly from the spec',
-    description:
-      'Point Roomote at a Notion spec or Linear issue and ask it to trace affected code, identify missing decisions, implement the change, and link the PR back.',
-  },
-  {
-    title: 'Turn support into engineering work',
-    description:
-      'Auto-respond in a support or bug channel so new reports become repository-grounded investigations—even when nobody explicitly mentions Roomote.',
-  },
-  {
-    title: 'Triage issues as they arrive',
-    description:
-      'Roomote can investigate each newly opened issue and post a concrete implementation plan with the relevant code paths before anyone picks it up.',
   },
   {
     title: 'Keep old PRs mergeable',
@@ -64,9 +59,14 @@ export const PRODUCT_TIPS = [
       'Run security and code-quality auditors over recently merged PRs to surface high-confidence risks and maintainability problems as follow-up work.',
   },
   {
-    title: 'Schedule repository-aware work',
+    title: 'Chat with Roomote out loud',
     description:
-      'Create recurring tasks such as release-readiness checks, dependency audits, or weekly product reports that can inspect your code and connected tools.',
+      'Start voice conversations to work through problems with Roomote in real time.',
+  },
+  {
+    title: 'Run data analysis from anywhere',
+    description:
+      'Give Roomote data (locally or via an integration) and ask it to analyze according to your parameters. Get inline charts and rich reports on the spot.',
   },
 ] as const;
 

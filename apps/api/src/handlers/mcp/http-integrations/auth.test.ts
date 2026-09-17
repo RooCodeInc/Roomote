@@ -25,10 +25,10 @@ import {
   sql,
 } from '@roomote/db/server';
 import {
-  createSessionSecret,
-  prepareSessionSecret,
-  revokeSessionSecret,
-} from '@roomote/sdk/server/session-secrets';
+  createServiceCredential,
+  prepareServiceCredential,
+  revokeServiceCredential,
+} from '@roomote/sdk/server/service-credentials';
 import { TaskPayloadKind } from '@roomote/types';
 import { routePolicyMiddleware } from '../../../middleware/routePolicyMiddleware';
 import { tokenAuthMiddleware } from '../../../middleware/tokenAuthMiddleware';
@@ -42,17 +42,22 @@ import {
 } from './broker';
 import { createHttpIntegrationsMcp } from './index';
 
-const { enabled, secretToolsEnabled, destroy } = vi.hoisted(() => ({
+const {
+  enabled,
+  secretToolsEnabled,
+  isDeploymentExperimentEnabledMock,
+  destroy,
+} = vi.hoisted(() => ({
   enabled: { value: true },
   secretToolsEnabled: { value: true },
+  isDeploymentExperimentEnabledMock: vi.fn(),
   destroy: vi.fn(async () => {}),
 }));
-// Retain coverage of the dormant implementation while testing the rollout pause below.
-vi.mock('@roomote/types', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@roomote/types')>();
+vi.mock('@roomote/db/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/db/server')>();
   return {
     ...actual,
-    isSessionSecretToolsExperimentEnabled: () => secretToolsEnabled.value,
+    isDeploymentExperimentEnabled: isDeploymentExperimentEnabledMock,
   };
 });
 vi.mock('@roomote/env', async (importOriginal) => {
@@ -135,6 +140,9 @@ beforeEach(() => {
   observedAuth.mockClear();
   enabled.value = true;
   secretToolsEnabled.value = true;
+  isDeploymentExperimentEnabledMock
+    .mockReset()
+    .mockImplementation(() => Promise.resolve(secretToolsEnabled.value));
   vi.mocked(integrationRequest).mockClear();
   vi.mocked(loadHttpIntegrationsConfig)
     .mockReset()
@@ -170,7 +178,7 @@ afterEach(async () => {
   delete config.integrations[0]!.allowedUserIds;
   if (secretRefs.length)
     await db.execute(
-      sql`delete from session_secret_audit where secret_ref in ${secretRefs.splice(0)}`,
+      sql`delete from service_credential_audit where secret_ref in ${secretRefs.splice(0)}`,
     );
   if (sessionIds.length)
     await db.delete(sessions).where(inArray(sessions.id, sessionIds.splice(0)));
@@ -346,11 +354,14 @@ it('publishes a provider-safe optional header prefix schema', async () => {
   const token = await createAuthToken({ userId: actor.id, timeoutMs: 60_000 });
   const listing = await (await post(token)).json();
   const schema = listing.result.tools.find(
-    (tool: { name: string }) => tool.name === 'prepare_session_secret',
+    (tool: { name: string }) => tool.name === 'prepare_integration_key',
   ).inputSchema;
 
   expect(schema.required).not.toContain('headerPrefix');
   expect(schema.properties.headerPrefix.enum).toEqual([
+    'Bearer',
+    'Basic',
+    'Token',
     'Bearer ',
     'Basic ',
     'Token ',
@@ -392,9 +403,9 @@ it.each(['auth', 'run', 'deployment-run'] as const)(
       tools.result.tools.map((tool: { name: string }) => tool.name).sort(),
     ).toEqual([
       'integration_request',
+      'list_integration_keys',
       'list_integrations',
-      'list_session_secrets',
-      'prepare_session_secret',
+      'prepare_integration_key',
     ]);
     const requestTool = tools.result.tools.find(
       (tool: { name: string }) => tool.name === 'integration_request',
@@ -618,6 +629,7 @@ const sessionPolicy = {
   origin: 'https://api.example.com',
   headerName: 'x-api-key' as const,
   headerPrefix: '' as const,
+  visibility: 'owner' as const,
 };
 
 async function sessionGrant(
@@ -640,8 +652,8 @@ async function sessionGrant(
   });
   sessionIds.push(session.id);
   const context = { userId: owner.id, sessionId: session.id };
-  const pending = await prepareSessionSecret(context, sessionPolicy);
-  const grant = await createSessionSecret(context, {
+  const pending = await prepareServiceCredential(context, sessionPolicy);
+  const grant = await createServiceCredential(context, {
     pendingRef: pending.pendingRef,
     secret: sessionKey,
   });
@@ -685,7 +697,7 @@ async function tool(
 }
 
 it.each(['broker', 'run'] as const)(
-  'lists and calls real Session grants through signed %s auth, middleware and MCP',
+  'lists and calls real integration keys through signed %s auth, middleware and MCP',
   async (kind) => {
     // Neither a manifest nor per-service API environment credentials are required.
     enabled.value = false;
@@ -705,9 +717,9 @@ it.each(['broker', 'run'] as const)(
       tools.result.tools.map((entry: { name: string }) => entry.name).sort(),
     ).toEqual([
       'integration_request',
+      'list_integration_keys',
       'list_integrations',
-      'list_session_secrets',
-      'prepare_session_secret',
+      'prepare_integration_key',
     ]);
     const list = await tool(token, 'list_integrations');
     expect(JSON.parse(list.content[0].text)).toEqual({
@@ -724,7 +736,7 @@ it.each(['broker', 'run'] as const)(
         },
       ],
     });
-    const metadata = await tool(token, 'list_session_secrets');
+    const metadata = await tool(token, 'list_integration_keys');
     expect(JSON.parse(metadata.content[0].text)).toMatchObject({
       pending: [],
       secrets: [{ secretRef: fixture.grant.secretRef }],
@@ -762,6 +774,18 @@ it.each(['broker', 'run'] as const)(
     expect(fetch).toHaveBeenCalledOnce();
   },
 );
+
+it('rechecks the deployment experiment before using an established integration-key tool', async () => {
+  const fixture = await sessionGrant();
+  isDeploymentExperimentEnabledMock
+    .mockReset()
+    .mockResolvedValueOnce(true)
+    .mockResolvedValue(false);
+
+  const response = await tool(fixture.brokerToken, 'list_integration_keys');
+
+  expect(response.isError).toBe(true);
+});
 
 it('keeps broker authority separate from ordinary auth and restricts it to the exact API resource', async () => {
   const fixture = await sessionGrant();
@@ -861,7 +885,7 @@ it.each(['broker', 'run'] as const)(
 );
 
 it.each(['internal', 'public'] as const)(
-  'denies %s user-only auth access to Session grants even with the owner identity and caller Session ID',
+  'denies %s user-only auth access to integration keys even with the owner identity and caller Session ID',
   async (kind) => {
     const fixture = await sessionGrant();
     if (kind === 'public')
@@ -874,11 +898,11 @@ it.each(['internal', 'public'] as const)(
         (entry: { id: string }) => entry.id,
       ),
     ).toEqual(['example']);
-    for (const name of ['list_session_secrets', 'prepare_session_secret']) {
+    for (const name of ['list_integration_keys', 'prepare_integration_key']) {
       const result = await tool(
         fixture.authToken,
         name,
-        name === 'prepare_session_secret' ? sessionPolicy : {},
+        name === 'prepare_integration_key' ? sessionPolicy : {},
       );
       expect(result.isError).toBe(true);
     }
@@ -922,7 +946,7 @@ it('denies a signed Fast token claiming the canonical Session UUID instead of it
       (entry: { id: string }) => entry.id,
     ),
   ).toEqual(['example']);
-  expect((await tool(token, 'list_session_secrets')).isError).toBe(true);
+  expect((await tool(token, 'list_integration_keys')).isError).toBe(true);
   expect(
     (
       await tool(token, 'integration_request', {
@@ -936,10 +960,11 @@ it('denies a signed Fast token claiming the canonical Session UUID instead of it
 });
 
 it.each(['broker', 'run'] as const)(
-  'denies cross-selection between unrelated same-owner Sessions through signed %s MCP calls',
+  'shares integrations between same-owner Sessions and denies other owners through signed %s MCP calls',
   async (kind) => {
     const a = await sessionGrant();
     const b = await sessionGrant(a.owner);
+    const stranger = await sessionGrant();
     for (const [current, other] of [
       [a, b],
       [b, a],
@@ -949,8 +974,10 @@ it.each(['broker', 'run'] as const)(
       const ids = JSON.parse(list.content[0].text).integrations.map(
         (entry: { id: string }) => entry.id,
       );
+      // An integration belongs to its owner, whichever Session approved it.
       expect(ids).toContain(`session:${current.grant.secretRef}`);
-      expect(ids).not.toContain(`session:${other.grant.secretRef}`);
+      expect(ids).toContain(`session:${other.grant.secretRef}`);
+      expect(ids).not.toContain(`session:${stranger.grant.secretRef}`);
       expect(
         (
           await tool(token, 'integration_request', {
@@ -959,17 +986,26 @@ it.each(['broker', 'run'] as const)(
             path: '/items',
           })
         ).isError,
+      ).not.toBe(true);
+      expect(
+        (
+          await tool(token, 'integration_request', {
+            integrationId: `session:${stranger.grant.secretRef}`,
+            method: 'GET',
+            path: '/items',
+          })
+        ).isError,
       ).toBe(true);
     }
-    expect(fetch).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(2);
   },
 );
 
 it.each(['before-call', 'in-flight'] as const)(
-  're-resolves a signed run reattached from Session A to same-owner Session B (%s)',
+  "re-resolves a signed run reattached from its owner's Session to another owner's Session (%s)",
   async (stage) => {
     const a = await sessionGrant();
-    const b = await sessionGrant(a.owner);
+    const b = await sessionGrant();
     const args = {
       integrationId: `session:${a.grant.secretRef}`,
       method: 'GET',
@@ -1012,31 +1048,53 @@ it.each(['before-call', 'in-flight'] as const)(
       'original-A-result-must-not-escape',
     );
     expect(fetch).toHaveBeenCalledTimes(stage === 'in-flight' ? 1 : 0);
-    expect(await listIds()).toEqual([
-      'example',
-      `session:${b.grant.secretRef}`,
-    ]);
-    expect((await tool(a.runToken, 'integration_request', args)).isError).toBe(
+    // The run's actor no longer owns its Session: nothing is listed or usable,
+    // neither its own owner's integrations nor the new Session owner's.
+    expect(await listIds()).toEqual(['example']);
+    expect((await tool(a.runToken, 'list_integration_keys')).isError).toBe(
       true,
     );
+    for (const integrationId of [
+      args.integrationId,
+      `session:${b.grant.secretRef}`,
+    ]) {
+      expect(
+        (
+          await tool(a.runToken, 'integration_request', {
+            ...args,
+            integrationId,
+          })
+        ).isError,
+      ).toBe(true);
+    }
     expect(fetch).toHaveBeenCalledTimes(stage === 'in-flight' ? 1 : 0);
-    const metadata = await tool(a.runToken, 'list_session_secrets');
-    expect(
-      JSON.parse(metadata.content[0].text).secrets.map(
-        (entry: { secretRef: string }) => entry.secretRef,
-      ),
-    ).toEqual([b.grant.secretRef]);
-    expect(
-      (
-        await tool(a.runToken, 'integration_request', {
-          ...args,
-          integrationId: `session:${b.grant.secretRef}`,
-        })
-      ).isError,
-    ).not.toBe(true);
-    expect(fetch).toHaveBeenCalledTimes(stage === 'in-flight' ? 2 : 1);
   },
 );
+
+it('names a safe refusal reason and advertises a grant by its own methods', async () => {
+  const fixture = await sessionGrant();
+  const listed = JSON.parse(
+    (await tool(fixture.brokerToken, 'list_integrations')).content[0].text,
+  ).integrations.find(
+    (entry: { id: string }) =>
+      entry.id === `session:${fixture.grant.secretRef}`,
+  );
+  expect(listed.rules).toEqual([
+    { method: 'GET', pathPrefix: '/' },
+    { method: 'HEAD', pathPrefix: '/' },
+  ]);
+  const refused = await tool(fixture.brokerToken, 'integration_request', {
+    integrationId: `session:${fixture.grant.secretRef}`,
+    method: 'POST',
+    path: '/',
+    body: '{}',
+    contentType: 'application/json',
+  });
+  expect(refused.isError).toBe(true);
+  expect(refused.content[0].text).toMatch(/\(reason: method_not_allowed\)$/);
+  expect(refused.content[0].text).not.toContain(sessionKey);
+  expect(fetch).not.toHaveBeenCalled();
+});
 
 it.each(['broker', 'run'] as const)(
   'reads fresh approvals and grants for %s while keeping operator configuration snapshotted',
@@ -1056,7 +1114,7 @@ it.each(['broker', 'run'] as const)(
     ]);
     vi.mocked(loadHttpIntegrationsConfig).mockReturnValue({ integrations: [] });
     const { headerPrefix: _headerPrefix, ...noPrefixPolicy } = sessionPolicy;
-    const prepared = await tool(token, 'prepare_session_secret', {
+    const prepared = await tool(token, 'prepare_integration_key', {
       ...noPrefixPolicy,
       label: 'Second API key',
       origin: 'https://second-api.example.com',
@@ -1065,13 +1123,13 @@ it.each(['broker', 'run'] as const)(
     const { pending, sessionUrl } = JSON.parse(prepared.content[0].text);
     expect(pending.headerPrefix).toBe('');
     expect(sessionUrl).toContain(
-      `/sessions/${fixture.context.sessionId}#session-secrets`,
+      `/sessions/${fixture.context.sessionId}#integrations`,
     );
     expect(
-      JSON.parse((await tool(token, 'list_session_secrets')).content[0].text)
+      JSON.parse((await tool(token, 'list_integration_keys')).content[0].text)
         .pending,
     ).toEqual([pending]);
-    const second = await createSessionSecret(fixture.context, {
+    const second = await createServiceCredential(fixture.context, {
       pendingRef: pending.pendingRef,
       secret: sessionKey,
     });
@@ -1083,7 +1141,7 @@ it.each(['broker', 'run'] as const)(
         `session:${second.secretRef}`,
       ]),
     );
-    await revokeSessionSecret(fixture.context, {
+    await revokeServiceCredential(fixture.context, {
       secretRef: fixture.grant.secretRef,
     });
     expect(await listIds()).toEqual(['example', `session:${second.secretRef}`]);
@@ -1097,7 +1155,7 @@ it.each(['broker', 'run'] as const)(
       ).isError,
     ).toBe(true);
     await db.execute(
-      sql`update session_secrets set expires_at = clock_timestamp() - interval '1 second' where id = ${second.secretRef}`,
+      sql`update service_credentials set expires_at = clock_timestamp() - interval '1 second' where id = ${second.secretRef}`,
     );
     expect(await listIds()).toEqual(['example']);
     expect(
@@ -1130,9 +1188,9 @@ it.each(['collaborator', 'deployment'] as const)(
         (entry: { id: string }) => entry.id,
       ),
     ).toEqual(['example']);
-    expect((await tool(token, 'list_session_secrets')).isError).toBe(true);
+    expect((await tool(token, 'list_integration_keys')).isError).toBe(true);
     expect(
-      (await tool(token, 'prepare_session_secret', sessionPolicy)).isError,
+      (await tool(token, 'prepare_integration_key', sessionPolicy)).isError,
     ).toBe(true);
     expect(
       (
@@ -1174,7 +1232,7 @@ it('denies a still-valid signed run token after its live bound actor drifts', as
       (entry: { id: string }) => entry.id,
     ),
   ).toEqual(['example']);
-  expect((await tool(fixture.runToken, 'list_session_secrets')).isError).toBe(
+  expect((await tool(fixture.runToken, 'list_integration_keys')).isError).toBe(
     true,
   );
   expect(
@@ -1184,11 +1242,8 @@ it('denies a still-valid signed run token after its live bound actor drifts', as
 });
 
 it.each(['broker', 'run'] as const)(
-  'hides paused Session-secret tools and grants for %s clients',
+  'hides paused Integration-key tools and grants for %s clients',
   async (kind) => {
-    const actual =
-      await vi.importActual<typeof import('@roomote/types')>('@roomote/types');
-    expect(actual.isSessionSecretToolsExperimentEnabled(undefined)).toBe(false);
     secretToolsEnabled.value = false;
     const fixture = await sessionGrant();
     const token = kind === 'broker' ? fixture.brokerToken : fixture.runToken;
@@ -1204,7 +1259,7 @@ it.each(['broker', 'run'] as const)(
     expect(
       entries.some((entry: { id: string }) => entry.id.startsWith('session:')),
     ).toBe(false);
-    for (const name of ['prepare_session_secret', 'list_session_secrets']) {
+    for (const name of ['prepare_integration_key', 'list_integration_keys']) {
       const denied = await post(token, 'tools/call', { name, arguments: {} });
       const payload = await denied.json();
       expect(

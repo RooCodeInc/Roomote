@@ -7,6 +7,7 @@ import {
 } from '@/components/settings/UserProfileSection';
 import { ChangePasswordSection } from '@/components/settings/ChangePasswordSection';
 import { LinkedAccounts } from '@/components/settings/LinkedAccounts';
+import { PersonalIntegrations } from '@/components/settings/YourIntegrations';
 import {
   PersonalizationSection,
   UserPreferencesSection,
@@ -33,6 +34,7 @@ export function PersonalSettingsPage({
       <UserPreferencesSection />
       <PersonalizationSection />
       <LinkedAccounts />
+      <PersonalIntegrations />
     </SettingsShell>
   );
 }

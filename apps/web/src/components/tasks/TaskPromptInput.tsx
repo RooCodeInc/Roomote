@@ -177,6 +177,7 @@ export function TaskPromptInput({
     suggestionHintId,
     acceptGhostSuggestion,
     handleSuggestionKeyDown,
+    handleSuggestionPointerDown,
   } = useGhostSuggestion({
     suggestion: promptSuggestion?.trim() || null,
     active: !promptText && !isBusy,
@@ -242,7 +243,7 @@ export function TaskPromptInput({
                   <button
                     type="button"
                     aria-label="Insert suggested task"
-                    onPointerDown={(event) => event.preventDefault()}
+                    onPointerDown={handleSuggestionPointerDown}
                     onClick={acceptGhostSuggestion}
                     className="mt-4 mr-4 shrink-0 whitespace-nowrap rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
                   >

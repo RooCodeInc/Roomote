@@ -10,6 +10,10 @@ export const SESSION_STATUSES = [
 
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
+export const SESSION_PRIVACY_VALUES = ['shared', 'private'] as const;
+
+export type SessionPrivacy = (typeof SESSION_PRIVACY_VALUES)[number];
+
 export function getSessionStatusLabel(status: SessionStatus | string): string {
   return status.replace('_', ' ');
 }

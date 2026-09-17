@@ -198,6 +198,7 @@ describe('startSourceControlFastSessionTurn', () => {
     expect(mocks.admitFastAgentHumanFollowUp).not.toHaveBeenCalled();
     expect(mocks.getOrCreateFastAgentSession).toHaveBeenCalledWith({
       userId: 'user-1',
+      userInitiated: { surface: 'github', trigger: 'message' },
       conversation: expect.objectContaining({
         surface: 'github',
         conversationId: 'pull/42',

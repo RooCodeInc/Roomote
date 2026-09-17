@@ -1,5 +1,5 @@
 import {
-  getComputeProviderSessionEgressCapability,
+  getComputeProviderCredentialEgressCapability,
   resolveRoomoteCloudBackend,
   resolveRoomoteCloudModalAppName,
   type ComputeProvider,
@@ -18,9 +18,9 @@ import { DEFAULT_BOX_TIMEOUT_MS } from '@roomote/compute-providers';
 
 import { BaseController } from './BaseController';
 import {
-  createSessionEgressLifecycle,
-  type SessionEgressLifecycle,
-} from './session-egress';
+  createCredentialEgressLifecycle,
+  type CredentialEgressLifecycle,
+} from './credential-egress';
 import {
   cleanupStaleDockerSandboxes,
   spawnDaytonaWorker,
@@ -36,17 +36,17 @@ import {
 export class RoomoteController extends BaseController {
   private dockerCleanupInterval?: NodeJS.Timeout;
   /** Session-egress workload registration; fails closed for every provider but Docker. */
-  private readonly sessionEgress: SessionEgressLifecycle;
+  private readonly credentialEgress: CredentialEgressLifecycle;
 
   public constructor(
     protected readonly appEnv: 'development' | 'preview' | 'production',
-    options: { sessionEgress?: SessionEgressLifecycle } = {},
+    options: { credentialEgress?: CredentialEgressLifecycle } = {},
   ) {
     super(appEnv);
-    // Misconfiguration (partial SESSION_EGRESS_* values, unusable CA) is a
+    // Misconfiguration (partial CREDENTIAL_EGRESS_* values, unusable CA) is a
     // startup error: never silently run without the enforcement it implies.
-    this.sessionEgress =
-      options.sessionEgress ?? createSessionEgressLifecycle();
+    this.credentialEgress =
+      options.credentialEgress ?? createCredentialEgressLifecycle();
 
     const hasAnyModalEcrConfig = !!(
       Env.MODAL_ECR_OIDC_ROLE_ARN || Env.MODAL_ECR_REGION
@@ -98,13 +98,15 @@ export class RoomoteController extends BaseController {
       runtimeEnv: Env,
     });
 
-    // Providers with no admission path fail closed for Session egress: the
+    // Providers with no admission path fail closed for Credential egress: the
     // run is spawned normally, receives no substitute tokens, and the Session
     // sees a nonsecret status explaining why. `register` returns `skipped`
     // here without contacting the control plane. Docker and every hosted
     // provider admit inside their own spawn paths after bootstrap.
-    if (getComputeProviderSessionEgressCapability(provider) === 'unsupported') {
-      await this.sessionEgress.register({
+    if (
+      getComputeProviderCredentialEgressCapability(provider) === 'unsupported'
+    ) {
+      await this.credentialEgress.register({
         taskRun: { id: taskRun.id, taskId: taskRun.taskId },
         provider,
         resume: false,
@@ -161,7 +163,7 @@ export class RoomoteController extends BaseController {
         await spawnModalWorker(taskRun, authToken, {
           vendor: provider,
           backend,
-          sessionEgress: this.sessionEgress,
+          credentialEgress: this.credentialEgress,
           ...(brokerUrl ? { brokerUrl } : {}),
           deploymentSlug: deploymentSlug,
           modalTags: this.buildSandboxTags(),
@@ -258,7 +260,7 @@ export class RoomoteController extends BaseController {
             localWorkerReleasePath: this.localWorkerReleasePath,
             deploymentSlug: deploymentSlug,
             signal: abortController.signal,
-            sessionEgress: this.sessionEgress,
+            credentialEgress: this.credentialEgress,
           });
         } finally {
           clearTimeout(timeoutId);
@@ -283,7 +285,7 @@ export class RoomoteController extends BaseController {
         }
 
         await spawnDaytonaWorker(taskRun, authToken, {
-          sessionEgress: this.sessionEgress,
+          credentialEgress: this.credentialEgress,
           deploymentSlug: deploymentSlug,
           daytonaTags: this.buildSandboxTags(),
           daytonaApiKey,
@@ -308,7 +310,7 @@ export class RoomoteController extends BaseController {
         }
 
         await spawnE2bWorker(taskRun, authToken, {
-          sessionEgress: this.sessionEgress,
+          credentialEgress: this.credentialEgress,
           deploymentSlug: deploymentSlug,
           e2bTags: this.buildSandboxTags(),
           e2bApiKey,
@@ -332,7 +334,7 @@ export class RoomoteController extends BaseController {
           );
         }
         await spawnBlaxelWorker(taskRun, authToken, {
-          sessionEgress: this.sessionEgress,
+          credentialEgress: this.credentialEgress,
           deploymentSlug,
           blaxelTags: this.buildSandboxTags(),
           blaxelApiKey,
@@ -360,7 +362,7 @@ export class RoomoteController extends BaseController {
         const machineType = resolvedEnv.BOX_MACHINE_TYPE;
 
         await spawnBoxWorker(taskRun, authToken, {
-          sessionEgress: this.sessionEgress,
+          credentialEgress: this.credentialEgress,
           deploymentSlug,
           boxApiKey,
           boxApiBaseUrl: resolvedEnv.BOX_API_BASE_URL,
@@ -413,7 +415,7 @@ export class RoomoteController extends BaseController {
         }
 
         await spawnAzureWorker(taskRun, authToken, {
-          sessionEgress: this.sessionEgress,
+          credentialEgress: this.credentialEgress,
           deploymentSlug,
           azureTags: this.buildSandboxTags(),
           azureSubscriptionId,

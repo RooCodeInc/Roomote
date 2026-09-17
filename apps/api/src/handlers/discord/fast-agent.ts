@@ -40,6 +40,7 @@ import {
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   type FastAgentConversation,
   type TaskInitiator,
 } from '@roomote/types';
@@ -260,6 +261,7 @@ export async function processDiscordFastAgentMessage(
     const session = await getOrCreateFastAgentSession({
       userId: input.senderUserId,
       conversation,
+      userInitiated: { surface: 'discord', trigger: 'message' },
     });
     const humanFollowUpEvent = {
       type: 'human_follow_up' as const,
@@ -450,17 +452,25 @@ export async function processDiscordFastAgentMessage(
           parentSessionId,
           postKickoff,
         }) => {
+          // Sentinels route without an environment lookup: the blank-slate
+          // sentinel is the repo itself, and the all-repositories sentinel
+          // or no target means every active repository.
           const workspace =
-            environmentId && environmentId !== ALL_REPOSITORIES
-              ? await resolveDiscordWorkspace({
-                  type: 'environment',
-                  id: environmentId,
-                  name: environmentId,
-                })
-              : {
-                  repoForPayload: ALL_REPOSITORIES,
-                  workspaceDisplayName: 'all repos',
-                };
+            environmentId === NO_REPOSITORIES
+              ? {
+                  repoForPayload: NO_REPOSITORIES,
+                  workspaceDisplayName: 'blank slate',
+                }
+              : environmentId && environmentId !== ALL_REPOSITORIES
+                ? await resolveDiscordWorkspace({
+                    type: 'environment',
+                    id: environmentId,
+                    name: environmentId,
+                  })
+                : {
+                    repoForPayload: ALL_REPOSITORIES,
+                    workspaceDisplayName: 'all repos',
+                  };
           if (!workspace) {
             return {
               success: false,

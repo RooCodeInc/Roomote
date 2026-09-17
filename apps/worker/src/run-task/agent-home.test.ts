@@ -80,6 +80,21 @@ describe('createIntegrationMcpInstructions', () => {
       ]),
     ).toBeUndefined();
   });
+  it('instructs coding tasks to use the Roomote fetch replacement', () => {
+    const instructions = createIntegrationMcpInstructions([
+      { type: 'local', name: 'roomote', command: 'node' },
+    ]);
+
+    expect(instructions).toContain('Use `roomote_fetch_url`');
+    expect(instructions).toContain('built-in webfetch tool is disabled');
+    expect(instructions).toContain('markdown, plain text, and raw HTML output');
+    expect(instructions).toContain(
+      'sensitive headers are stripped on cross-origin redirects',
+    );
+    expect(instructions).toContain(
+      'does not restrict other network access available inside the coding sandbox',
+    );
+  });
   it.each(['gbrain', 'supermemory'])(
     'injects shared memory lifecycle guidance for %s',
     (name) => {
@@ -244,7 +259,12 @@ describe('generateOpenCodeConfig provider support', () => {
       expect(JSON.parse(refreshed.configContent).mcp).not.toHaveProperty(
         '_roomote_http_integrations',
       );
-      expect(existsSync(instructionsPath)).toBe(false);
+      expect(readFileSync(instructionsPath, 'utf8')).toContain(
+        'Use `roomote_fetch_url`',
+      );
+      expect(JSON.parse(refreshed.configContent).permission.webfetch).toBe(
+        'deny',
+      );
       expect(existsSync(catalogPath)).toBe(false);
       expect(refreshed.configContent).not.toContain(
         'ROOMOTE_ON_DEMAND_MCP_CATALOG_PATH',
@@ -325,14 +345,15 @@ describe('generateOpenCodeConfig provider support', () => {
       type: 'local',
       command: ['operator-mcp'],
     });
-    expect(
-      existsSync(
-        join(
-          result.openCodeConfigDir,
-          'roomote-opencode-integration-instructions.md',
-        ),
+    const instructions = readFileSync(
+      join(
+        result.openCodeConfigDir,
+        'roomote-opencode-integration-instructions.md',
       ),
-    ).toBe(false);
+      'utf8',
+    );
+    expect(instructions).toContain('Use `roomote_fetch_url`');
+    expect(instructions).not.toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
     expect(
       existsSync(join(result.openCodeConfigDir, 'on-demand-mcp-servers.json')),
     ).toBe(false);
@@ -643,9 +664,10 @@ describe('generateOpenCodeConfig provider support', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
-        ROOMOTE_SESSION_EGRESS_API_PROXY: '1',
-        ROOMOTE_SERVICE_BASE_URL: 'https://api.example.com/api/session-egress',
-        ROOMOTE_SESSION_EGRESS_SERVICES: '[]',
+        ROOMOTE_CREDENTIAL_EGRESS_API_PROXY: '1',
+        ROOMOTE_SERVICE_BASE_URL:
+          'https://api.example.com/api/credential-egress',
+        ROOMOTE_CREDENTIAL_EGRESS_SERVICES: '[]',
         R_MODEL: 'openrouter/openai/gpt-4.1-mini',
         R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
         R_INFERENCE_GATEWAY_KEYS: 'OPENROUTER_API_KEY',
@@ -667,7 +689,7 @@ describe('generateOpenCodeConfig provider support', () => {
         allowedMethods: ['GET', 'POST'],
         expiresAt: '2030-01-01T00:00:00.000Z',
         envName: 'ROOMOTE_SERVICE_TOKEN_STRIPE',
-        baseUrl: 'https://api.example.com/api/session-egress',
+        baseUrl: 'https://api.example.com/api/credential-egress',
       },
       {
         secretRef: '44444444-4444-4444-8444-444444444444',
@@ -689,9 +711,10 @@ describe('generateOpenCodeConfig provider support', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
-        ROOMOTE_SESSION_EGRESS_API_PROXY: '1',
-        ROOMOTE_SERVICE_BASE_URL: 'https://api.example.com/api/session-egress',
-        ROOMOTE_SESSION_EGRESS_SERVICES: JSON.stringify(manifest),
+        ROOMOTE_CREDENTIAL_EGRESS_API_PROXY: '1',
+        ROOMOTE_SERVICE_BASE_URL:
+          'https://api.example.com/api/credential-egress',
+        ROOMOTE_CREDENTIAL_EGRESS_SERVICES: JSON.stringify(manifest),
         ROOMOTE_SERVICE_TOKEN_STRIPE: 'rses_secret',
         R_MODEL: 'openrouter/openai/gpt-4.1-mini',
         R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
@@ -732,10 +755,10 @@ describe('generateOpenCodeConfig provider support', () => {
       const result = generateOpenCodeConfig({
         homeDir: createHomeDir(),
         runtimeEnv: {
-          ROOMOTE_SESSION_EGRESS_API_PROXY: '1',
+          ROOMOTE_CREDENTIAL_EGRESS_API_PROXY: '1',
           ROOMOTE_SERVICE_BASE_URL:
-            'https://api.example.com/api/session-egress',
-          ROOMOTE_SESSION_EGRESS_SERVICES: services,
+            'https://api.example.com/api/credential-egress',
+          ROOMOTE_CREDENTIAL_EGRESS_SERVICES: services,
           R_MODEL: 'openrouter/openai/gpt-4.1-mini',
           R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
           R_INFERENCE_GATEWAY_KEYS: 'OPENROUTER_API_KEY',
@@ -1467,10 +1490,22 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(integrationInstructions).toContain('roomote_call_integration_tool');
     expect(integrationInstructions).toContain('- github [id: github]');
     expect(integrationInstructions).toContain(
-      'An eligible deployment GitHub App installation with an active connected repository is required, just as in Fast',
+      'An eligible deployment GitHub App installation with an active connected repository is required',
     );
     expect(integrationInstructions).toContain(
-      'This task MCP path is read-only',
+      'Repository operations remain read-only on this task MCP path',
+    );
+    expect(integrationInstructions).toContain(
+      'The account-scoped gist tools are the only native writes available here',
+    );
+    expect(integrationInstructions).toContain(
+      'Existing gists are never listed or deleted',
+    );
+    expect(integrationInstructions).toContain(
+      'use public: false unless the user explicitly requests public publishing',
+    );
+    expect(integrationInstructions).toContain(
+      'secret, link-accessible gist rather than private',
     );
   });
 

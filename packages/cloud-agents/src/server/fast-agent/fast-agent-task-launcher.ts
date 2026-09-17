@@ -1,7 +1,6 @@
 import {
-  ALL_REPOSITORIES,
-  NO_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
+  resolveFastAgentLaunchWorkspace,
   buildSlackThreadPermalink,
   TaskPayloadKind,
   type ReasoningEffort,
@@ -19,21 +18,6 @@ import {
 import { getTaskUrl } from '../task-url';
 import type { LaunchFastAgentTask } from './fast-agent-conversation';
 import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
-
-function resolveFastAgentChildWorkspace(
-  environmentId: string | null,
-  fallbackRepo: string = ALL_REPOSITORIES,
-): { repo: string; environmentId?: string } {
-  if (environmentId === NO_REPOSITORIES) {
-    return { repo: NO_REPOSITORIES };
-  }
-
-  if (environmentId && environmentId !== ALL_REPOSITORIES) {
-    return { repo: fallbackRepo, environmentId };
-  }
-
-  return { repo: fallbackRepo };
-}
 
 export type FastAgentTaskLaunchHooks = {
   /**
@@ -124,6 +108,9 @@ export function createFastAgentTaskLauncher(
         workflow: 'standard',
         surface: params.surface,
         trigger: params.trigger ?? 'message',
+        ...(parent.privacy === 'private'
+          ? { privacy: 'private' as const }
+          : {}),
         ...(params.channels ? { channels: params.channels } : {}),
         ...(params.prLinkage ? { prLinkage: params.prLinkage } : {}),
       },
@@ -218,7 +205,10 @@ export function createFastAgentSlackTaskLauncher(
     buildTask: ({ prompt, environmentId, model, reasoningEffort }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
-        ...resolveFastAgentChildWorkspace(environmentId, params.repoForPayload),
+        ...resolveFastAgentLaunchWorkspace(
+          environmentId,
+          params.repoForPayload,
+        ),
         description: prompt,
         ...(params.customAutomationId
           ? { customAutomationId: params.customAutomationId }
@@ -255,7 +245,7 @@ export function createFastAgentWebTaskLauncher(params: {
     buildTask: ({ prompt, environmentId, model, reasoningEffort }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
-        ...resolveFastAgentChildWorkspace(environmentId),
+        ...resolveFastAgentLaunchWorkspace(environmentId),
         description: prompt,
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }

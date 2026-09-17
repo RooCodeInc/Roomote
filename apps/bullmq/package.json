@@ -29,6 +29,7 @@
     "@roomote/env": "workspace:^",
     "@roomote/github": "workspace:^",
     "@roomote/linear": "workspace:^",
+    "@roomote/redis": "workspace:^",
     "@roomote/sdk": "workspace:^",
     "@roomote/slack": "workspace:^",
     "@roomote/telemetry": "workspace:^",

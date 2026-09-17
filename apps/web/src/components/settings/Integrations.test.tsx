@@ -1,5 +1,6 @@
 import type {
   ButtonHTMLAttributes,
+  ComponentProps,
   HTMLAttributes,
   InputHTMLAttributes,
   LabelHTMLAttributes,
@@ -43,6 +44,9 @@ const state = vi.hoisted(() => ({
     authStatus?: string | null;
   },
   granolaConnection: null as null | {
+    authStatus?: string | null;
+  },
+  exaConnection: null as null | {
     authStatus?: string | null;
   },
   elevenLabsConnection: null as null | {
@@ -117,6 +121,8 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     saveNotionConnection: vi.fn(),
     saveRipplingConnection: vi.fn(),
     saveGranolaConnection: vi.fn(),
+    saveExaConnection: vi.fn(),
+    removeExaApiKey: vi.fn(),
     saveElevenLabsConnection: vi.fn(),
     saveVoiceConnection: vi.fn(),
     previewVoice: vi.fn(),
@@ -324,6 +330,18 @@ vi.mock('@/hooks/mcp-connections', () => ({
     data: state.granolaConnection,
     isPending: false,
   }),
+  useSaveExaConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveExaConnection,
+  }),
+  useExaConnection: () => ({
+    data: state.exaConnection,
+    isPending: false,
+  }),
+  useRemoveExaApiKey: () => ({
+    isPending: false,
+    mutate: mutations.removeExaApiKey,
+  }),
   useSaveElevenLabsConnection: () => ({
     isPending: false,
     mutate: mutations.saveElevenLabsConnection,
@@ -388,6 +406,16 @@ vi.mock('./CustomMcpServers', () => ({
   useCustomMcpServers: () => ({
     isEnabled: true,
     items: [],
+    openAddDialog: vi.fn(),
+    dialogs: null,
+  }),
+}));
+
+vi.mock('./YourIntegrations', () => ({
+  useYourIntegrations: () => ({
+    items: [],
+    isLoading: false,
+    error: null,
     openAddDialog: vi.fn(),
     dialogs: null,
   }),
@@ -519,6 +547,7 @@ vi.mock('@/components/system', () => ({
   Spinner: () => <span>loading</span>,
   Star: () => <svg aria-hidden="true" />,
   Trash: () => <svg aria-hidden="true" />,
+  Trash2: () => <svg aria-hidden="true" data-icon="trash-2" />,
   Switch: ({
     checked,
     disabled,
@@ -546,11 +575,28 @@ vi.mock('@/components/system', () => ({
   ),
   ToggleLeft: () => <svg aria-hidden="true" />,
   ToggleRight: () => <svg aria-hidden="true" />,
+  Wrench: () => <svg aria-hidden="true" data-icon="wrench" />,
   X: () => <svg aria-hidden="true" />,
 }));
 
-import { Integrations, sortIntegrationItems } from './Integrations';
+import {
+  Integrations as ActualIntegrations,
+  sortIntegrationItems,
+} from './Integrations';
 import { splitIntegrationItems } from './integration-card';
+
+function Integrations(props: ComponentProps<typeof ActualIntegrations> = {}) {
+  if (props.integrationIds !== undefined || props.showCatalog === false) {
+    return <ActualIntegrations {...props} />;
+  }
+
+  return (
+    <ActualIntegrations
+      {...props}
+      integrationIds={['linear', ...MCP_INTEGRATIONS.map(({ id }) => id)]}
+    />
+  );
+}
 
 describe('Integrations settings', () => {
   beforeEach(() => {
@@ -572,6 +618,7 @@ describe('Integrations settings', () => {
     state.notionConnection = null;
     state.ripplingConnection = null;
     state.granolaConnection = null;
+    state.exaConnection = null;
     state.grafanaConnection = null;
     state.vercelConnection = null;
     state.xConnection = null;
@@ -598,7 +645,7 @@ describe('Integrations settings', () => {
   });
 
   it('returns Linear OAuth to a service-specific integrations URL', () => {
-    render(<Integrations />);
+    render(<ActualIntegrations />);
 
     expect(state.linearRedirectPath).toBe(
       '/settings/integrations?service=linear',
@@ -1027,26 +1074,16 @@ describe('Integrations settings', () => {
     ]);
   });
 
-  it('shows configured integrations separately and an empty connected state', () => {
+  it('shows only active integrations in one list', () => {
     state.linearInstallation = null;
 
-    render(<Integrations />);
+    render(<ActualIntegrations />);
 
-    const connectedSection = screen
-      .getByRole('heading', { name: 'Connected' })
-      .closest('section');
-    const configuredSection = screen
-      .getByRole('heading', { name: 'Configured' })
-      .closest('section');
-
-    expect(connectedSection).toHaveTextContent(
-      "You haven't connected any integrations yet.",
-    );
     expect(
-      within(configuredSection as HTMLElement).getByRole('heading', {
-        name: 'Linear',
-      }),
-    ).toBeInTheDocument();
+      screen.getByRole('table', { name: 'Integrations' }),
+    ).toHaveTextContent('No active integrations yet.');
+    expect(screen.queryByText('Linear')).not.toBeInTheDocument();
+    expect(screen.queryByText('Available')).not.toBeInTheDocument();
   });
 
   it('highlights a selected integration above alphabetical order', () => {
@@ -1066,109 +1103,32 @@ describe('Integrations settings', () => {
     ]);
   });
 
-  it('renders connected and available sections with compact action buttons', () => {
-    render(<Integrations />);
+  it('renders active rows with icon-only actions and keeps inactive integrations in the catalog', () => {
+    const { rerender } = render(<ActualIntegrations />);
 
-    const connectedSection = screen
-      .getByRole('heading', { name: 'Connected' })
-      .closest('section');
-    const availableSection = screen
-      .getByRole('heading', { name: 'Available' })
-      .closest('section');
-    expect(connectedSection).not.toBeNull();
-    expect(availableSection).not.toBeNull();
+    const table = screen.getByRole('table', { name: 'Integrations' });
     expect(
-      screen.queryByRole('heading', { name: 'Configured' }),
+      screen.queryByRole('heading', { name: 'Connected' }),
     ).not.toBeInTheDocument();
+    expect(within(table).getByText('Linear')).toBeInTheDocument();
+    expect(within(table).queryByText('Asana')).not.toBeInTheDocument();
+    expect(
+      within(table).getByRole('button', { name: 'Configure Linear' }),
+    ).toHaveTextContent('');
+    expect(
+      within(table).getByRole('button', { name: 'Remove Linear' }),
+    ).toHaveTextContent('');
 
-    expect(
-      within(connectedSection as HTMLElement)
-        .getAllByRole('heading', { level: 3 })
-        .map((heading) => heading.textContent),
-    ).toEqual(['Linear']);
-    expect(
-      within(availableSection as HTMLElement)
-        .getAllByRole('heading', { level: 3 })
-        .map((heading) => heading.textContent),
-    ).toEqual([
-      'Asana',
-      'Better Stack',
-      'Braintrust',
-      'ElevenLabs',
-      'Grafana',
-      'Granola',
-      'Jira',
-      'monday.com',
-      'Neon',
-      'Notion',
-      'PostHog',
-      'Pylon',
-      'Railway',
-      'Resend',
-      'Rippling',
-      'Sentry',
-      'Snowflake',
-      'Supabase',
-      'Supermemory',
-      'Vercel',
-      'Voice',
-      'X',
-      'Zero',
-    ]);
-    expect(
-      screen.getAllByText('First-class integration').length,
-    ).toBeGreaterThan(0);
-    expect(screen.getAllByText('MCP-based integration').length).toBeGreaterThan(
-      0,
+    rerender(
+      <ActualIntegrations addRequest={{ type: 'catalog', sequence: 1 }} />,
     );
     expect(
-      screen.queryByText('Connected once for everyone in your workspace.'),
+      screen.getByRole('heading', { name: 'Add from the catalog' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Asana')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Disable Linear' }),
     ).not.toBeInTheDocument();
-
-    expect(
-      screen.getByRole('button', { name: 'Disable Linear' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Better Stack' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable PostHog' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Pylon' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Railway' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Resend' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'Inspect and manage shared email infrastructure through Resend from Roomote tasks.',
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Jira' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Sentry' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Asana' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Grafana' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Granola' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Snowflake' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Vercel' }),
-    ).toBeInTheDocument();
   });
 
   it('shows operator policy instead of integration controls when disabled', () => {
@@ -1185,6 +1145,18 @@ describe('Integrations settings', () => {
     expect(
       screen.queryByRole('button', { name: 'Disable Linear' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows the empty state when curated integrations are disabled and only retained built-ins are active', () => {
+    state.integrationsEnabled = false;
+
+    render(<ActualIntegrations />);
+
+    const table = screen.getByRole('table', { name: 'Integrations' });
+    expect(
+      within(table).getByText('No active integrations yet.'),
+    ).toBeInTheDocument();
+    expect(within(table).queryByText('Linear')).not.toBeInTheDocument();
   });
 
   it('connects and enables an org-scoped MCP from the integrations page', () => {
@@ -1291,7 +1263,7 @@ describe('Integrations settings', () => {
     );
   });
 
-  it('keeps the disable toast unchanged for Jira after it is workspace-scoped', () => {
+  it('describes removing Jira after it is workspace-scoped', () => {
     state.deploymentEnablements = [{ mcpId: 'jira', enabled: true }];
     mutations.setDeploymentEnabled.mockImplementation((_variables, options) => {
       options?.onSuccess?.();
@@ -1308,9 +1280,7 @@ describe('Integrations settings', () => {
         onError: expect.any(Function),
       }),
     );
-    expect(toast.success).toHaveBeenCalledWith(
-      'Jira disabled for this deployment.',
-    );
+    expect(toast.success).toHaveBeenCalledWith('Jira removed.');
   });
 
   it('surfaces the highlighted integration from the URL', () => {
@@ -1579,7 +1549,7 @@ describe('Integrations settings', () => {
     );
 
     expect(
-      screen.getByRole('heading', { name: 'Manage Sentry tools' }),
+      screen.getByRole('heading', { name: 'Manage tools for Sentry' }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Disable get_sentry_resource' }),
@@ -1867,6 +1837,24 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
   });
 
+  it('opens the Exa API-key dialog with secure deployment guidance', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Exa API key' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Add Exa API key' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Exa API Key')).toBeInTheDocument();
+    expect(
+      screen.getByText(/The key stays encrypted server-side/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Exa Agent runs are usage-based/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/free keyless access/)).toBeInTheDocument();
+  });
+
   it('submits an Asana token from the dialog', () => {
     render(<Integrations />);
 
@@ -1947,6 +1935,160 @@ describe('Integrations settings', () => {
         onError: expect.any(Function),
       }),
     );
+  });
+
+  it.each([
+    {
+      integration: 'Asana',
+      inputLabel: 'Asana Access Token',
+      requiredMessage: 'Access token is required',
+      saveMutation: mutations.saveAsanaConnection,
+    },
+    {
+      integration: 'Notion',
+      inputLabel: 'Internal integration secret',
+      requiredMessage: 'Internal integration secret is required',
+      saveMutation: mutations.saveNotionConnection,
+    },
+    {
+      integration: 'Rippling',
+      inputLabel: 'API token',
+      requiredMessage: 'API token is required',
+      saveMutation: mutations.saveRipplingConnection,
+    },
+    {
+      integration: 'Granola',
+      inputLabel: 'Granola API Key',
+      requiredMessage: 'API key is required',
+      saveMutation: mutations.saveGranolaConnection,
+    },
+    {
+      integration: 'X',
+      inputLabel: 'X App-only Bearer Token',
+      requiredMessage: 'Bearer token is required',
+      saveMutation: mutations.saveXConnection,
+    },
+  ])(
+    'rejects a whitespace-only $integration credential before saving',
+    ({ integration, inputLabel, requiredMessage, saveMutation }) => {
+      render(<Integrations />);
+
+      fireEvent.click(
+        screen.getByRole('button', { name: `Configure ${integration}` }),
+      );
+      fireEvent.change(screen.getByLabelText(inputLabel), {
+        target: { value: '   ' },
+      });
+      fireEvent.click(
+        screen.getByRole('button', { name: `Connect ${integration}` }),
+      );
+
+      expect(screen.getByText(requiredMessage)).toBeInTheDocument();
+      expect(saveMutation).not.toHaveBeenCalled();
+    },
+  );
+
+  it('submits a trimmed Exa API key from the dialog', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Exa API key' }));
+    fireEvent.change(screen.getByLabelText('Exa API Key'), {
+      target: { value: '  exa-secret-key  ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add API key' }));
+
+    expect(mutations.saveExaConnection).toHaveBeenCalledWith(
+      { apiKey: 'exa-secret-key' },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+  });
+
+  it('keeps Exa off by default and enables keyless access explicitly', () => {
+    render(<Integrations />);
+
+    expect(
+      screen.getByText(
+        'Disabled. Enable Exa for free keyless search, or add a deployment API key.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Enable Exa' }));
+
+    expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(
+      { mcpId: 'exa', enabled: true },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(mutations.saveExaConnection).not.toHaveBeenCalled();
+  });
+
+  it('shows authenticated Exa separately and removes only its API key', () => {
+    state.deploymentEnablements = [{ mcpId: 'exa', enabled: true }];
+    state.userConnections = [{ mcpId: 'exa', authStatus: 'authenticated' }];
+    state.exaConnection = { authStatus: 'authenticated' };
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByText(
+        'Enabled with a deployment API key. Exa Agent is available and usage-based.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Exa API key' }));
+    expect(
+      screen.getByText(/continue with free keyless access/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove key' }));
+
+    expect(mutations.removeExaApiKey).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(mutations.setDeploymentEnabled).not.toHaveBeenCalled();
+  });
+
+  it('keeps a disabled Exa API key configurable from the catalog', () => {
+    state.userConnections = [{ mcpId: 'exa', authStatus: 'authenticated' }];
+    state.exaConnection = { authStatus: 'authenticated' };
+
+    render(
+      <ActualIntegrations addRequest={{ type: 'catalog', sequence: 1 }} />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Edit Exa API key' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Remove Exa API key' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Exa API key' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Edit Exa API key' }),
+    ).toBeInTheDocument();
+  });
+
+  it('labels enabled keyless Exa without advertising Exa Agent', () => {
+    state.deploymentEnablements = [{ mcpId: 'exa', enabled: true }];
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByText(
+        'Enabled with free keyless access. Exa rate limits apply, and Exa Agent is unavailable.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Disable Exa' }),
+    ).toBeInTheDocument();
   });
 
   it('shows Asana connected controls and supports editing', () => {
@@ -2451,7 +2593,7 @@ describe('Integrations settings', () => {
     rerender(<Integrations />);
 
     expect(
-      screen.getByRole('heading', { name: 'Manage Sentry tools' }),
+      screen.getByRole('heading', { name: 'Manage tools for Sentry' }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Enable get_sentry_resource' }),
@@ -2522,17 +2664,9 @@ describe('Integrations settings', () => {
       options?.onSuccess?.();
     });
 
-    render(<Integrations />);
+    render(<ActualIntegrations />);
 
-    const connectedSection = (
-      await screen.findByRole('heading', { name: 'Connected' })
-    ).closest('section');
-    expect(
-      within(connectedSection as HTMLElement).getByRole('heading', {
-        level: 3,
-        name: 'Voice',
-      }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('Voice')).toBeInTheDocument();
     // The key is not the admin's to edit, and where it came from is not
     // something the card needs to say.
     expect(
@@ -2545,7 +2679,14 @@ describe('Integrations settings', () => {
       screen.queryByRole('button', { name: 'Configure Voice' }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Disable Voice' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Voice' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Remove Voice?' }),
+    ).toBeInTheDocument();
+    expect(mutations.setDeploymentEnabled).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
 
     expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(
       { mcpId: 'voice', enabled: false },
@@ -2554,9 +2695,7 @@ describe('Integrations settings', () => {
         onError: expect.any(Function),
       }),
     );
-    expect(toast.success).toHaveBeenCalledWith(
-      'Voice disabled for this deployment.',
-    );
+    expect(toast.success).toHaveBeenCalledWith('Voice removed.');
   });
 
   it('lets an admin turn environment-keyed Voice back on after disabling it', async () => {
@@ -2569,19 +2708,19 @@ describe('Integrations settings', () => {
       enabled: false,
     };
 
-    render(<Integrations />);
+    render(
+      <ActualIntegrations addRequest={{ type: 'catalog', sequence: 1 }} />,
+    );
 
-    const availableSection = (
-      await screen.findByRole('heading', { name: 'Available' })
-    ).closest('section');
     expect(
-      within(availableSection as HTMLElement).getByRole('heading', {
-        level: 3,
-        name: 'Voice',
-      }),
+      await screen.findByRole('heading', { name: 'Add from the catalog' }),
     ).toBeInTheDocument();
+    const voiceCatalogRow = screen.getByText('Voice').parentElement
+      ?.parentElement as HTMLElement;
 
-    fireEvent.click(screen.getByRole('button', { name: 'Enable Voice' }));
+    fireEvent.click(
+      within(voiceCatalogRow).getByRole('button', { name: 'Add' }),
+    );
 
     expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(
       { mcpId: 'voice', enabled: true },

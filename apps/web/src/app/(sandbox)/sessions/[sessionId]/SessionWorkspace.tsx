@@ -28,7 +28,7 @@ import {
   humanizeFilename,
 } from '@/lib';
 import { type SessionArtifactSelection } from '@/lib/artifact-view-urls';
-import { isMarkdownArtifact } from '@/lib/artifact-types';
+import { isMarkdownArtifact, isTabularArtifact } from '@/lib/artifact-types';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
 import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInferenceCostBreakdown';
 import { PullRequestBadge } from '@/components/sandbox';
@@ -93,6 +93,7 @@ import {
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
 import { TaskRobotIconProvider } from '@/components/tasks/TaskRobotIcon';
 import { MarkdownArtifactPreview } from '@/components/tasks/MarkdownArtifactPreview';
+import { TabularArtifactPreview } from '@/components/tasks/TabularArtifactPreview';
 import { useArtifactByPath } from '@/hooks/use-artifact-by-path';
 import { PreviewPaneProvider } from '../../task/[taskId]/hooks/use-preview-pane';
 import { humanizePortName } from '../../task/[taskId]/preview-port-utils';
@@ -137,6 +138,7 @@ type SessionTaskSummary = {
     id: number;
     status: RunStatus;
     taskPhase: string | null;
+    canRetryFailedStart?: boolean;
     error: string | null;
     result: unknown;
   } | null;
@@ -199,7 +201,7 @@ export type SessionInfo = {
       inferenceCostMicroUsd?: number;
       latestRun: Pick<
         NonNullable<SessionTaskSummary['latestRun']>,
-        'status' | 'taskPhase'
+        'status' | 'taskPhase' | 'canRetryFailedStart'
       > | null;
     }
   >;
@@ -245,6 +247,7 @@ function SessionArtifactCard({
   const isImage = artifact.contentType.startsWith('image/');
   const isVideo = artifact.contentType.startsWith('video/');
   const isMarkdown = isMarkdownArtifact(artifact.contentType, artifact.path);
+  const isTabular = isTabularArtifact(artifact.contentType, artifact.path);
   const thumbnailUrl = artifact.thumbnailUrl;
   const videoPreviewUrl = artifact.previewUrl;
 
@@ -260,6 +263,12 @@ function SessionArtifactCard({
     >
       {isMarkdown ? (
         <MarkdownArtifactPreview
+          owner={owner}
+          path={artifact.path}
+          version={artifact.version}
+        />
+      ) : isTabular ? (
+        <TabularArtifactPreview
           owner={owner}
           path={artifact.path}
           version={artifact.version}
@@ -813,8 +822,12 @@ export function SessionWorkspace({
   const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
   const sessionPullRequests = getSessionPullRequests(sessionTasks);
   const sessionPreviewCount = getSessionPreviews(taskCards).length;
-  const runningTasks = taskCards.filter((task) =>
-    isTaskExecutingTurn(task.latestRun?.status, task.latestRun?.taskPhase),
+  const runningTasks = useMemo(
+    () =>
+      taskCards.filter((task) =>
+        isTaskExecutingTurn(task.latestRun?.status, task.latestRun?.taskPhase),
+      ),
+    [taskCards],
   );
   const runningTaskCount = runningTasks.length;
   const taskStateRevision = useMemo(
@@ -834,6 +847,20 @@ export function SessionWorkspace({
     () => taskCards.map((task) => task.taskId),
     [taskCards],
   );
+  const runningTaskIds = useMemo(
+    () => runningTasks.map((task) => task.taskId),
+    [runningTasks],
+  );
+  const automaticTaskPanelIds = useMemo(() => {
+    const runningTaskIdSet = new Set(runningTaskIds);
+    const selectableTaskIds = taskCards
+      .filter((task) => task.latestRun?.canRetryFailedStart !== true)
+      .map((task) => task.taskId);
+    return [
+      ...runningTaskIds,
+      ...selectableTaskIds.filter((taskId) => !runningTaskIdSet.has(taskId)),
+    ];
+  }, [runningTaskIds, taskCards]);
   const {
     utilityPanel,
     taskArtifacts,
@@ -859,6 +886,8 @@ export function SessionWorkspace({
   } = useSessionWorkspacePanels({
     sessionId: session.id,
     taskIds,
+    automaticTaskPanelIds,
+    runningTaskIds,
     singleRunningTaskId: singleRunningTaskId ?? null,
     taskPanelCapacity,
     isMdOrLarger,

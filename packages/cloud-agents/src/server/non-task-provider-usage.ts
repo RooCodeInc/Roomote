@@ -54,6 +54,9 @@ export const FAST_AGENT_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
 ).map((permission) => ({
   permission,
   pattern: '*',
+  // `task` is the only OpenCode built-in Fast exposes. In particular,
+  // `webfetch` remains denied here as well as in the generated agent filter:
+  // it would otherwise issue model-selected requests from the control plane.
   action: permission === 'task' ? 'allow' : 'deny',
 }));
 
@@ -1916,6 +1919,24 @@ function unwrapNonTaskInferenceError(error: unknown): unknown {
     : error;
 }
 
+function formatNativeErrorCauseDetail(error: unknown): string {
+  const detail: string[] = [];
+  const seen = new Set<object>();
+  let current = error;
+
+  for (let depth = 0; depth <= 4; depth += 1) {
+    if (!current || typeof current !== 'object' || seen.has(current)) break;
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    for (const key of ['message', 'code'] as const) {
+      if (typeof record[key] === 'string') detail.push(record[key]);
+    }
+    current = record.cause;
+  }
+
+  return detail.join(' ');
+}
+
 function findInferenceErrorStatusCode(error: unknown): number | undefined {
   for (const record of decodeInferenceErrorEnvelope(error, 'classification')) {
     if (typeof record === 'string') continue;
@@ -1992,7 +2013,7 @@ export function classifyNonTaskInferenceError(
   const responseBody =
     typeof data?.responseBody === 'string' ? data.responseBody : '';
   const detail =
-    `${formatOpenCodeSdkError(inferenceError)} ${responseBody}`.toLowerCase();
+    `${formatOpenCodeSdkError(inferenceError)} ${formatNativeErrorCauseDetail(inferenceError)} ${responseBody}`.toLowerCase();
   const errorName = typeof record?.name === 'string' ? record.name : '';
   const gatewayBlocked =
     (statusCode === 403 && /^\s*(?:<!doctype|<html)/iu.test(responseBody)) ||

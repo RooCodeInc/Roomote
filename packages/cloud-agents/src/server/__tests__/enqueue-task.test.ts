@@ -8,10 +8,18 @@ import Redis from 'ioredis-mock';
 const { mockGenerateLlmTaskTitle } = vi.hoisted(() => ({
   mockGenerateLlmTaskTitle: vi.fn().mockResolvedValue('Generated title'),
 }));
+const { mockCaptureEvent } = vi.hoisted(() => ({
+  mockCaptureEvent: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock('../llm-task-title', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../llm-task-title')>()),
   generateLlmTaskTitle: mockGenerateLlmTaskTitle,
+}));
+
+vi.mock('@roomote/telemetry/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/telemetry/server')>()),
+  captureEvent: mockCaptureEvent,
 }));
 
 import {
@@ -38,6 +46,7 @@ import {
   taskRunEvents,
   deploymentSettings,
   fastAgentConversations,
+  getUserChatInitiationProvider,
   users,
   environments,
   environmentRepositoryMappings,
@@ -71,6 +80,7 @@ import { getPrSha } from '../workflows/utils';
 
 const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
+const createdRepositoryIds: string[] = [];
 
 const explicitWorkKind = {
   kind: 'implement',
@@ -214,12 +224,116 @@ afterAll(async () => {
     await db.delete(tasks).where(inArray(tasks.id, createdTaskIds));
   }
 
+  if (createdRepositoryIds.length > 0) {
+    await db
+      .delete(repositories)
+      .where(inArray(repositories.id, createdRepositoryIds));
+  }
+
   if (createdUserIds.length > 0) {
     await db.delete(users).where(inArray(users.id, createdUserIds));
   }
 });
 
 describe('enqueueTask initiator stamping', () => {
+  it('stamps private web tasks and rejects non-web private launches', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+      privacy: 'private',
+    });
+
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, run.taskId) }),
+    ).resolves.toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: userId,
+    });
+    await expect(
+      launchFresh({
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'slack',
+        trigger: 'message',
+        privacy: 'private',
+      }),
+    ).rejects.toThrow('linked user on the web surface');
+  });
+
+  it.each(['slack', 'teams', 'telegram', 'discord'] as const)(
+    'records %s as the authenticated user task-starting chat provider',
+    async (surface) => {
+      const userId = await createUser();
+
+      await launchFresh({
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface,
+        trigger: 'message',
+      });
+
+      await expect(getUserChatInitiationProvider(userId)).resolves.toBe(
+        surface,
+      );
+    },
+  );
+
+  it('does not let web or automation task launches overwrite the chat preference', async () => {
+    const userId = await createUser();
+    await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+    });
+
+    await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    await launchFresh({
+      initiator: {
+        kind: 'automation',
+        key: 'custom_automation',
+        actingUserId: userId,
+      },
+      workflow: 'standard',
+      surface: 'discord',
+      trigger: 'message',
+    });
+
+    await expect(getUserChatInitiationProvider(userId)).resolves.toBe('slack');
+  });
+
+  it('keeps task-starting chat preferences isolated per user', async () => {
+    const firstUserId = await createUser();
+    const secondUserId = await createUser();
+    await launchFresh({
+      initiator: { kind: 'user', userId: firstUserId },
+      workflow: 'standard',
+      surface: 'teams',
+      trigger: 'message',
+    });
+    await launchFresh({
+      initiator: { kind: 'user', userId: secondUserId },
+      workflow: 'standard',
+      surface: 'telegram',
+      trigger: 'message',
+    });
+
+    await expect(getUserChatInitiationProvider(firstUserId)).resolves.toBe(
+      'teams',
+    );
+    await expect(getUserChatInitiationProvider(secondUserId)).resolves.toBe(
+      'telegram',
+    );
+  });
+
   it('blocks fresh launches when managed access is read-only', async () => {
     const priorSettings = await db.query.deploymentSettings.findFirst({
       where: eq(deploymentSettings.id, 'default'),
@@ -681,6 +795,7 @@ describe('enqueueTask initiator stamping', () => {
       surface: 'web',
       trigger: 'manual',
     });
+    mockCaptureEvent.mockClear();
 
     const childRun = await launchFresh({
       task: standardTaskInput({
@@ -698,6 +813,11 @@ describe('enqueueTask initiator stamping', () => {
     });
 
     expect(childRun.sourceRunId).toBe(parentRun.id);
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(0);
     expect(
       (childRun.payload as { notifySourceRunOnSettle?: boolean })
         .notifySourceRunOnSettle,
@@ -892,6 +1012,49 @@ describe('enqueueTask initiator stamping', () => {
 });
 
 describe('enqueueTask Session linkage', () => {
+  it('captures one user-started Session creation with its origin', async () => {
+    const userId = await createUser();
+    mockCaptureEvent.mockClear();
+
+    await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+    });
+
+    expect(mockCaptureEvent).toHaveBeenCalledWith('session_created', {
+      userId,
+      properties: {
+        surface: 'slack',
+        trigger: 'message',
+        outcome: 'created',
+      },
+    });
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('does not capture Session creation for automation launches', async () => {
+    mockCaptureEvent.mockClear();
+
+    await launchFresh({
+      initiator: { kind: 'automation', key: 'custom_automation' },
+      workflow: 'standard',
+      surface: 'system',
+      trigger: 'schedule',
+    });
+
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(0);
+  });
+
   it('creates exactly one Session link for a visible fresh task', async () => {
     const userId = await createUser();
     const run = await launchFresh({
@@ -1044,6 +1207,7 @@ describe('enqueueTask Session linkage', () => {
         launchIdempotencyKey: 'setup-starter:concurrent-retry',
       },
     });
+    mockCaptureEvent.mockClear();
 
     const [first, second] = await Promise.all([
       launchFresh({
@@ -1061,6 +1225,16 @@ describe('enqueueTask Session linkage', () => {
         trigger: 'manual',
       }),
     ]);
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(0);
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_task_delegated',
+      ),
+    ).toHaveLength(1);
 
     expect(second.id).toBe(first.id);
     expect(second.taskId).toBe(first.taskId);
@@ -1110,6 +1284,7 @@ describe('enqueueTask Session linkage', () => {
       await cancellationHeld;
     });
     await cancellationReady;
+    mockCaptureEvent.mockClear();
 
     const retry = launchFresh({
       task,
@@ -1124,6 +1299,11 @@ describe('enqueueTask Session linkage', () => {
 
     expect(replacement.id).not.toBe(first.id);
     expect(replacement.taskId).not.toBe(first.taskId);
+    expect(
+      mockCaptureEvent.mock.calls.filter(
+        ([event]) => event === 'session_created',
+      ),
+    ).toHaveLength(0);
   });
 
   it('rejects keyed reuse when the persisted Session attachment conflicts', async () => {
@@ -1353,17 +1533,34 @@ describe('enqueueTask snapshot resume', () => {
 
   it('inherits source-control stamps from the source run payload', async () => {
     const userId = await createUser();
+    const suffix = crypto.randomUUID();
+    const adoRepositoryFullName = `roomote/Test ADO/Test ADO-${suffix}`;
+    const gitLabRepositoryFullName = `group/web-${suffix}`;
+    const adoRepository = await repositoryFactory.create({
+      linkedByUserId: userId,
+      fullName: adoRepositoryFullName,
+      sourceControlProvider: 'ado',
+      host: 'dev.azure.com',
+      isActive: true,
+    });
+    const gitLabRepository = await repositoryFactory.create({
+      linkedByUserId: userId,
+      fullName: gitLabRepositoryFullName,
+      sourceControlProvider: 'gitlab',
+      isActive: true,
+    });
+    createdRepositoryIds.push(adoRepository.id, gitLabRepository.id);
 
     const freshRun = await launchFresh({
       task: standardTaskInput({
         payload: {
-          repo: 'roomote/Test ADO/Test ADO',
+          repo: adoRepositoryFullName,
           description: 'Do the thing',
           sourceControlProvider: 'ado',
           sourceControlHost: 'dev.azure.com',
           repositoryProviders: {
-            'roomote/Test ADO/Test ADO': 'ado',
-            'group/web': 'gitlab',
+            [adoRepositoryFullName]: 'ado',
+            [gitLabRepositoryFullName]: 'gitlab',
           },
         },
       }),
@@ -1379,7 +1576,7 @@ describe('enqueueTask snapshot resume', () => {
     const resumeTask: SnapshotResumeTask = {
       type: TaskPayloadKind.SnapshotResume,
       payload: {
-        repo: 'roomote/Test ADO/Test ADO',
+        repo: adoRepositoryFullName,
         sourceSnapshotId: 'snap-ado-1',
         sourceRunId: freshRun.id,
       },
@@ -1398,10 +1595,13 @@ describe('enqueueTask snapshot resume', () => {
 
     expect(resumePayload.sourceControlProvider).toBe('ado');
     expect(resumePayload.sourceControlHost).toBe('dev.azure.com');
-    expect(resumePayload.repositoryProviders).toEqual({
-      'roomote/Test ADO/Test ADO': 'ado',
-      'group/web': 'gitlab',
+    expect(freshRun.payload.repositoryProviders).toMatchObject({
+      [adoRepositoryFullName]: 'ado',
+      [gitLabRepositoryFullName]: 'gitlab',
     });
+    expect(resumePayload.repositoryProviders).toEqual(
+      freshRun.payload.repositoryProviders,
+    );
   });
 
   it('preserves Fast parent routing and communication isolation across resume', async () => {
@@ -2450,7 +2650,14 @@ describe('enqueueTask source-control provider stamping', () => {
       fullName: 'group/project',
       isActive: true,
     });
-    createdRepositoryIds.push(repository.id);
+    const additionalRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
+      linkedByUserId: userId,
+      fullName: 'group/additional-project',
+      isActive: true,
+    });
+    createdRepositoryIds.push(repository.id, additionalRepository.id);
 
     const environment = await environmentFactory.create({
       createdByUserId: userId,
@@ -2495,8 +2702,9 @@ describe('enqueueTask source-control provider stamping', () => {
       provider: 'gitea',
       host: 'gitea.example.com',
     });
-    expect(persistedRun!.payload.repositoryProviders).toEqual({
+    expect(persistedRun!.payload.repositoryProviders).toMatchObject({
       'group/project': 'gitea',
+      'group/additional-project': 'gitea',
     });
   });
 

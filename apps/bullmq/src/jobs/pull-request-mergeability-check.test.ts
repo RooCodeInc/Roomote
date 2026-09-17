@@ -145,6 +145,23 @@ const data: TestRequest = {
 };
 const conflictNotificationClaimedAt = new Date('2026-08-24T23:00:01.000Z');
 
+function getOperationalEvents(
+  spy: { mock: { calls: unknown[][] } },
+  event: string,
+): Array<Record<string, unknown>> {
+  return spy.mock.calls
+    .map((call) => {
+      try {
+        return JSON.parse(String(call[0])) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    })
+    .filter(
+      (entry): entry is Record<string, unknown> => entry?.event === event,
+    );
+}
+
 describe('pullRequestMergeabilityCheckJob', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -152,7 +169,16 @@ describe('pullRequestMergeabilityCheckJob', () => {
     mocks.findRun.mockResolvedValue({
       id: 10,
       taskId: 'task-1',
-      payload: { fastAgentParent: {} },
+      payload: {
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'automation',
+            workspaceId: 'automation-1',
+            conversationId: 'occurrence-1',
+          },
+        },
+      },
     });
     mocks.claim.mockResolvedValue(conflictNotificationClaimedAt);
     mocks.markNotified.mockResolvedValue(true);
@@ -161,7 +187,7 @@ describe('pullRequestMergeabilityCheckJob', () => {
     mocks.findSlackInstallation.mockResolvedValue({ botAccessToken: 'token' });
     mocks.postMessage.mockResolvedValue({ messageId: 'discord-message' });
     mocks.postSlack.mockResolvedValue('123.456');
-    mocks.recordHistory.mockResolvedValue(undefined);
+    mocks.recordHistory.mockResolvedValue(true);
     mocks.releaseClaim.mockResolvedValue(undefined);
     mocks.resolveRoute.mockResolvedValue(null);
     mocks.record.mockResolvedValue({
@@ -189,7 +215,10 @@ describe('pullRequestMergeabilityCheckJob', () => {
   });
 
   it('fetches a branch batch in one aliased GraphQL call and retries only unknown PRs', async () => {
-    await pullRequestMergeabilityCheckJob({ data } as Job<
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await pullRequestMergeabilityCheckJob({ id: 'check-1', data } as Job<
       typeof data,
       void,
       string
@@ -230,6 +259,55 @@ describe('pullRequestMergeabilityCheckJob', () => {
       retryAttempt: 1,
       allowNotifiedConflictCheck: false,
     });
+    expect(
+      getOperationalEvents(warn, 'source_control_pr_mergeability_check'),
+    ).toContainEqual(
+      expect.objectContaining({
+        repository: 'owner/repo',
+        prNumber: 41,
+        jobId: 'check-1',
+        outcome: 'unknown',
+        reason: 'provider_mergeability_unknown',
+        retryable: true,
+      }),
+    );
+    expect(
+      getOperationalEvents(log, 'source_control_pr_mergeability_check'),
+    ).toContainEqual(
+      expect.objectContaining({
+        repository: 'owner/repo',
+        prNumber: 42,
+        jobId: 'check-1',
+        outcome: 'clean',
+        reason: 'provider_reported_mergeable',
+      }),
+    );
+    log.mockRestore();
+    warn.mockRestore();
+  });
+
+  it('logs an eligibility skip when no tracked pull requests qualify', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    mocks.list.mockResolvedValue([]);
+
+    await pullRequestMergeabilityCheckJob({ id: 'check-empty', data } as Job<
+      typeof data,
+      void,
+      string
+    >);
+
+    expect(
+      getOperationalEvents(log, 'source_control_pr_mergeability_check'),
+    ).toContainEqual(
+      expect.objectContaining({
+        repository: 'owner/repo',
+        jobId: 'check-empty',
+        outcome: 'skipped',
+        reason: 'no_eligible_tracked_pull_requests',
+      }),
+    );
+    expect(mocks.graphql).not.toHaveBeenCalled();
+    log.mockRestore();
   });
 
   it('builds variables instead of interpolating PR numbers into GraphQL', () => {
@@ -240,6 +318,7 @@ describe('pullRequestMergeabilityCheckJob', () => {
   });
 
   it('delivers and marks a durable transition into conflicting', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const conflictDetectedAt = new Date('2026-08-24T23:00:00.000Z');
     mocks.list.mockResolvedValue([candidates[0]]);
     mocks.graphql.mockResolvedValue({
@@ -258,6 +337,7 @@ describe('pullRequestMergeabilityCheckJob', () => {
     });
 
     await pullRequestMergeabilityCheckJob({
+      id: 'check-conflict',
       data: { ...data, taskPullRequestIds: [candidates[0]!.id] },
     } as Job<typeof data, void, string>);
 
@@ -275,6 +355,73 @@ describe('pullRequestMergeabilityCheckJob', () => {
       conflictDetectedAt,
       conflictNotificationClaimedAt,
     });
+    expect(
+      getOperationalEvents(log, 'source_control_pr_mergeability_check'),
+    ).toContainEqual(
+      expect.objectContaining({
+        repository: 'owner/repo',
+        prNumber: 41,
+        jobId: 'check-conflict',
+        outcome: 'conflicting',
+        reason: 'provider_reported_conflicting',
+      }),
+    );
+    expect(
+      getOperationalEvents(log, 'source_control_pr_conflict_notification'),
+    ).toEqual([
+      expect.objectContaining({
+        repository: 'owner/repo',
+        prNumber: 41,
+        taskId: 'task-1',
+        runId: 10,
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        jobId: 'check-conflict',
+        outcome: 'delivered',
+        reason: 'fast_parent_notified',
+      }),
+    ]);
+    expect(log.mock.calls.join('\n')).not.toContain(candidates[0]!.prTitle);
+    expect(log.mock.calls.join('\n')).not.toContain(candidates[0]!.prUrl);
+    log.mockRestore();
+  });
+
+  it('logs no-route persistence as skipped rather than delivered', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const conflictDetectedAt = new Date('2026-08-24T23:00:00.000Z');
+    mocks.list.mockResolvedValue([candidates[0]]);
+    mocks.graphql.mockResolvedValue({
+      repository: {
+        pr0: {
+          number: 41,
+          mergeable: 'CONFLICTING',
+          state: 'OPEN',
+          baseRefName: 'main',
+        },
+      },
+    });
+    mocks.record.mockResolvedValue({ shouldNotify: true, conflictDetectedAt });
+    mocks.notifyFast.mockResolvedValue(false);
+    mocks.resolveRoute.mockResolvedValue(null);
+
+    await pullRequestMergeabilityCheckJob({
+      id: 'check-no-route',
+      data,
+    } as Job<typeof data, void, string>);
+
+    expect(
+      getOperationalEvents(log, 'source_control_pr_conflict_notification'),
+    ).toEqual([
+      expect.objectContaining({
+        repository: 'owner/repo',
+        prNumber: 41,
+        taskId: 'task-1',
+        runId: 10,
+        jobId: 'check-no-route',
+        outcome: 'skipped',
+        reason: 'no_notification_route',
+      }),
+    ]);
+    log.mockRestore();
   });
 
   it.each([
@@ -417,6 +564,7 @@ describe('pullRequestMergeabilityCheckJob', () => {
   });
 
   it('allows only one concurrent job to claim a conflict notification', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const conflictDetectedAt = new Date('2026-08-24T23:00:00.000Z');
     mocks.list.mockResolvedValue([candidates[0]]);
     mocks.graphql.mockResolvedValue({
@@ -448,5 +596,83 @@ describe('pullRequestMergeabilityCheckJob', () => {
 
     expect(mocks.notifyFast).toHaveBeenCalledOnce();
     expect(mocks.markNotified).toHaveBeenCalledOnce();
+    expect(
+      getOperationalEvents(log, 'source_control_pr_conflict_notification'),
+    ).toContainEqual(
+      expect.objectContaining({
+        taskId: 'task-1',
+        outcome: 'skipped',
+        reason: 'notification_claim_unavailable',
+      }),
+    );
+    log.mockRestore();
+  });
+
+  it('logs notification and check failures without error details or message content', async () => {
+    const error = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const conflictDetectedAt = new Date('2026-08-24T23:00:00.000Z');
+    const sensitiveError = new Error('secret provider response');
+    mocks.list.mockResolvedValue([
+      {
+        ...candidates[0],
+        prTitle: 'private title',
+        prUrl: 'https://example.test/private-url',
+      },
+    ]);
+    mocks.graphql.mockResolvedValue({
+      repository: {
+        pr0: {
+          number: 41,
+          mergeable: 'CONFLICTING',
+          state: 'OPEN',
+          baseRefName: 'main',
+        },
+      },
+    });
+    mocks.record.mockResolvedValue({ shouldNotify: true, conflictDetectedAt });
+    mocks.notifyFast.mockResolvedValue(false);
+    mocks.resolveRoute.mockResolvedValue({
+      provider: 'discord',
+      channelId: 'discord-channel',
+      threadId: 'discord-thread',
+    });
+    mocks.postMessage.mockRejectedValue(sensitiveError);
+
+    await expect(
+      pullRequestMergeabilityCheckJob({
+        id: 'check-failed',
+        data,
+      } as Job<typeof data, void, string>),
+    ).rejects.toThrow(sensitiveError);
+
+    expect(
+      getOperationalEvents(error, 'source_control_pr_conflict_notification'),
+    ).toEqual([
+      expect.objectContaining({
+        repository: 'owner/repo',
+        prNumber: 41,
+        taskId: 'task-1',
+        jobId: 'check-failed',
+        outcome: 'failed',
+        reason: 'Error',
+      }),
+    ]);
+    expect(
+      getOperationalEvents(error, 'source_control_pr_mergeability_check'),
+    ).toEqual([
+      expect.objectContaining({
+        repository: 'owner/repo',
+        jobId: 'check-failed',
+        outcome: 'failed',
+        reason: 'Error',
+      }),
+    ]);
+    const serializedLogs = error.mock.calls.join('\n');
+    expect(serializedLogs).not.toContain('secret provider response');
+    expect(serializedLogs).not.toContain('private title');
+    expect(serializedLogs).not.toContain('private-url');
+    error.mockRestore();
   });
 });

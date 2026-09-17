@@ -37,15 +37,16 @@ export type RoutePolicyClass =
 
 /**
  * How a rate limit derives its bucket key:
- * - `client`: best-effort client IP from proxy headers. Server-to-server
- *   callers that send none of those headers collapse into one shared bucket,
- *   so client-keyed limits must be sized as global ceilings, not per-user
- *   quotas.
+ * - `client`: client IP from the operator-configured trusted proxy header.
+ *   Deployments without one collapse into a shared bucket, so these limits
+ *   must be sized as global ceilings, not per-user quotas.
+ * - `principal`: validated run or user identity attached by token middleware.
+ *   Unauthenticated requests collapse into one shared bucket.
  * - `state-token`: SHA-256 of the `state` string field in the JSON request
  *   body. Legitimate callers use a fresh single-use token per flow, so they
  *   never share a bucket; repeated hammering of one token is throttled.
  */
-export type RouteRateLimitKeySource = 'client' | 'state-token';
+export type RouteRateLimitKeySource = 'client' | 'principal' | 'state-token';
 
 export type RouteRateLimit = {
   keySource: RouteRateLimitKeySource;
@@ -117,6 +118,11 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   {
     name: 'health-controller',
     match: { type: 'prefix', path: '/health/controller' },
+    policy: 'public',
+  },
+  {
+    name: 'health-bullmq',
+    match: { type: 'prefix', path: '/health/bullmq' },
     policy: 'public',
   },
   {
@@ -259,19 +265,19 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'webhook',
   },
   {
-    // Session egress control plane. Callers are the trusted controller (a
+    // Credential egress control plane. Callers are the trusted controller (a
     // job-auth-signed service token) and the credential-substituting egress
     // gateway (a shared deployment secret); the handler verifies both itself
     // and rejects run, user, MCP, and session-broker tokens. No client-keyed
     // limit: the gateway calls authorize on every proxied request and has no
     // meaningful client IP, so a shared bucket would only throttle it.
-    name: 'internal-session-egress',
-    match: { type: 'prefix', path: '/api/internal/session-egress' },
+    name: 'internal-credential-egress',
+    match: { type: 'prefix', path: '/api/internal/credential-egress' },
     policy: 'webhook',
   },
 
-  // Session egress substitution proxy: attached coding runs call an owner-
-  // approved origin through `/api/session-egress/<grant>` with a substitute
+  // Credential egress substitution proxy: attached coding runs call an owner-
+  // approved origin through `/api/credential-egress/<grant>` with a substitute
   // token in the grant's own header slot; the API injects the real credential
   // and forwards. The substitute is not a Roomote bearer, so the handler owns
   // authentication (live workload, Session, run, grant, generation, expiry)
@@ -279,8 +285,8 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   // The client-keyed limit bounds the database work an unauthenticated caller
   // can cause by spraying tokens; a sandbox's legitimate use sits far below it.
   {
-    name: 'session-egress-proxy',
-    match: { type: 'prefix', path: '/api/session-egress' },
+    name: 'credential-egress-proxy',
+    match: { type: 'prefix', path: '/api/credential-egress' },
     policy: 'webhook',
     rateLimits: [
       {
@@ -313,17 +319,15 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   },
 
   // Narration text-to-speech for task sandboxes: the ElevenLabs key is
-  // injected server-side and never enters the sandbox. The client-keyed
-  // limit is a global ceiling (server-to-server callers share one bucket)
-  // sized far above legitimate use — a demo narrates a handful of lines
-  // once — to blunt credit-drain from a leaked run token.
+  // injected server-side and never enters the sandbox. Key the credit-drain
+  // ceiling on the validated run so callers cannot rotate network headers.
   {
     name: 'tts',
     match: { type: 'prefix', path: '/api/tts' },
     policy: 'task-token',
     rateLimits: [
       {
-        keySource: 'client',
+        keySource: 'principal',
         limit: 60,
         windowSeconds: 60,
       },

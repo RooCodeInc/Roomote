@@ -4,6 +4,7 @@ import {
   db,
   eq,
   gte,
+  privateSessionAccess,
   sessions,
   sessionTasks,
   sql,
@@ -18,7 +19,7 @@ import { createLabelBackedDimensionValue, mapTaskSource } from './dimensions';
 import { formatAnalyticsDateTime, getTimeCutoff } from './time-buckets';
 
 export async function getSessionAnalyticsRows(
-  _auth: UserAuthSuccess,
+  auth: UserAuthSuccess,
   timePeriod: TimePeriodFilter | undefined,
   now: Date,
 ): Promise<AnalyticsRow[]> {
@@ -51,6 +52,7 @@ export async function getSessionAnalyticsRows(
     .where(
       and(
         eq(sessions.visibility, 'visible'),
+        privateSessionAccess(auth),
         cutoff ? gte(sessions.createdAt, cutoff) : undefined,
       ),
     );

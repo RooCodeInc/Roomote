@@ -198,9 +198,20 @@ describe('AcpTextMessage', () => {
         choice: 'yes',
       }),
     );
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('pr-review-notification-actions'),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not render a persisted resolved offer', () => {
+    render(<AcpTextMessage msg={reviewOfferMessage('resolved')} />);
+
     expect(
-      await screen.findByText('Resolving the current review issues.'),
-    ).toBeVisible();
+      screen.queryByTestId('pr-review-notification-actions'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Review feedback remains.')).toBeVisible();
   });
 
   it('does not render a persisted dismissed offer', () => {

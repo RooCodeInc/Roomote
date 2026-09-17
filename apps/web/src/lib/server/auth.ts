@@ -8,7 +8,10 @@ import { drizzleAdapter } from '@better-auth/drizzle-adapter';
 import { normalizeAdoLinkedAccountKey } from '@roomote/ado';
 // Subpath import on purpose: the SDK barrel drags the whole server graph
 // into auth, which the auth unit tests mock only partially.
-import { sendAgentMailSystemEmail } from '@roomote/sdk/server/agentmail-outbound';
+import {
+  sendAgentMailSystemEmail,
+  type AgentMailSystemEmailResult,
+} from '@roomote/sdk/server/agentmail-outbound';
 import type { SourceControlTokenBackedProvider } from '@roomote/types';
 
 import {
@@ -86,6 +89,9 @@ let authSignature: string | null = null;
 const resetPasswordLinkCapture = new AsyncLocalStorage<{
   url?: string;
 }>();
+const resetPasswordDeliveryCapture = new AsyncLocalStorage<{
+  result?: AgentMailSystemEmailResult;
+}>();
 const verificationEmailDeliveryRequired = new AsyncLocalStorage<boolean>();
 export const PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS = 60 * 60;
 
@@ -95,6 +101,14 @@ export async function capturePasswordResetLink(
   const capture: { url?: string } = {};
   await resetPasswordLinkCapture.run(capture, callback);
   return capture.url ?? null;
+}
+
+export async function capturePasswordResetDelivery(
+  callback: () => Promise<void>,
+): Promise<AgentMailSystemEmailResult | null> {
+  const capture: { result?: AgentMailSystemEmailResult } = {};
+  await resetPasswordDeliveryCapture.run(capture, callback);
+  return capture.result ?? null;
 }
 
 export async function sendAuthenticatedVerificationEmail(input: {
@@ -1110,19 +1124,23 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
         if (capture) {
           capture.url = url;
         }
-        if (emailChannelEnabled) {
-          await sendAgentMailSystemEmail({
-            to: user.email,
-            subject: 'Reset your Roomote password',
-            text: [
-              'A password reset was requested for your Roomote account.',
-              '',
-              `[Reset your password](${url})`,
-              '',
-              `This link expires in ${Math.round(PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS / 60)} minutes. If you did not request a reset, you can ignore this email.`,
-            ].join('\n'),
-            logContext: 'auth.sendResetPassword',
-          });
+        const deliveryResult: AgentMailSystemEmailResult = emailChannelEnabled
+          ? await sendAgentMailSystemEmail({
+              to: user.email,
+              subject: 'Reset your Roomote password',
+              text: [
+                'A password reset was requested for your Roomote account.',
+                '',
+                `[Reset your password](${url})`,
+                '',
+                `This link expires in ${Math.round(PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS / 60)} minutes. If you did not request a reset, you can ignore this email.`,
+              ].join('\n'),
+              logContext: 'auth.sendResetPassword',
+            })
+          : { sent: false, reason: 'channel_disabled' };
+        const deliveryCapture = resetPasswordDeliveryCapture.getStore();
+        if (deliveryCapture) {
+          deliveryCapture.result = deliveryResult;
         }
       },
     },

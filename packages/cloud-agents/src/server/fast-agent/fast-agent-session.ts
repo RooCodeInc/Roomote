@@ -1,12 +1,15 @@
 import type { ModelMessage } from 'ai';
 import {
+  type ChatInitiationOrder,
   and,
   desc,
   db,
   eq,
   inArray,
   isTaskRunFollowUpCandidate,
+  isChatInitiationProvider,
   isNull,
+  recordUserChatInitiationProvider,
   taskRuns,
   tasks,
 } from '@roomote/db/server';
@@ -14,7 +17,10 @@ import type {
   FastAgentConversationOwner,
   ReasoningEffort,
   RunStatus,
+  TaskSurface,
+  TaskTrigger,
 } from '@roomote/types';
+import { captureUserStartedSessionCreated } from '../session-telemetry';
 import type { FastAgentConversation } from './fast-agent-conversation';
 import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
 import type {
@@ -26,6 +32,8 @@ type FastAgentSessionRecord = {
   id: string;
   userId: string | null;
   owner: FastAgentConversationOwner;
+  privacy?: 'shared' | 'private';
+  privateOwnerUserId?: string | null;
   title: string | null;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
@@ -47,8 +55,11 @@ export async function getOrCreateFastAgentSession({
   conversation,
   sessionId,
   initialTitle,
+  privacy,
   initialModel,
   initialReasoningEffort,
+  chatInitiationOrder,
+  userInitiated,
 }: {
   owner?: FastAgentConversationOwner;
   userId?: string;
@@ -57,18 +68,54 @@ export async function getOrCreateFastAgentSession({
   sessionId?: string;
   /** Title to seed only when this call creates the conversation. */
   initialTitle?: string;
+  privacy?: 'shared' | 'private';
   initialModel?: string;
   initialReasoningEffort?: ReasoningEffort;
+  /** Human turn start order; records the provider only for a new Session. */
+  chatInitiationOrder?: ChatInitiationOrder;
+  /** Origin supplied only when this call represents a person's request to start a Session. */
+  userInitiated?: { surface: TaskSurface; trigger: TaskTrigger };
 }): Promise<FastAgentSessionRecord> {
-  return fastAgentConversationRepository.getOrCreate({
+  const session = await fastAgentConversationRepository.getOrCreate({
     ...(owner ? { owner } : {}),
     ...(userId ? { userId } : {}),
     conversation,
     ...(sessionId ? { sessionId } : {}),
     ...(initialTitle ? { initialTitle } : {}),
+    ...(privacy ? { privacy } : {}),
     ...(initialModel !== undefined ? { initialModel } : {}),
     ...(initialReasoningEffort !== undefined ? { initialReasoningEffort } : {}),
   });
+  if (
+    chatInitiationOrder &&
+    session.created &&
+    userId &&
+    isChatInitiationProvider(conversation.surface)
+  ) {
+    await recordUserChatInitiationProvider(
+      userId,
+      conversation.surface,
+      chatInitiationOrder,
+    ).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to record chat initiation provider: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  }
+  if (
+    userInitiated &&
+    session.created &&
+    !sessionId &&
+    session.userId &&
+    session.conversation.surface !== 'automation'
+  ) {
+    captureUserStartedSessionCreated({
+      userId: session.userId,
+      surface: userInitiated.surface,
+      trigger: userInitiated.trigger,
+    });
+  }
+  return session;
 }
 
 export async function hasFastAgentSession(

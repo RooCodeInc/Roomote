@@ -2,9 +2,12 @@ import type { Redis } from 'ioredis';
 
 import {
   disconnectSessionPresence,
+  disconnectSessionVoiceCall,
+  isSessionVoiceCallActive,
   isSessionUserPresent,
   listSessionPresentUserIds,
   refreshSessionPresence,
+  refreshSessionVoiceCall,
   SESSION_PRESENCE_LEASE_MS,
 } from '../session-presence';
 
@@ -14,8 +17,15 @@ class PresenceRedis {
   multi() {
     const operations: Array<() => void> = [];
     const chain = {
-      zadd: (key: string, score: number, member: string) => {
-        operations.push(() => this.zadd(key, score, member));
+      zadd: (
+        key: string,
+        scoreOrMode: number | 'GT',
+        memberOrScore: string | number,
+        maybeMember?: string,
+      ) => {
+        operations.push(() =>
+          this.zadd(key, scoreOrMode, memberOrScore, maybeMember),
+        );
         return chain;
       },
       zremrangebyscore: (key: string, min: string, max: number) => {
@@ -37,8 +47,17 @@ class PresenceRedis {
     return chain;
   }
 
-  zadd(key: string, score: number, member: string) {
+  zadd(
+    key: string,
+    scoreOrMode: number | 'GT',
+    memberOrScore: string | number,
+    maybeMember?: string,
+  ) {
+    const gt = scoreOrMode === 'GT';
+    const score = gt ? Number(memberOrScore) : scoreOrMode;
+    const member = gt ? maybeMember! : String(memberOrScore);
     const set = this.sets.get(key) ?? new Map<string, number>();
+    if (gt && (set.get(member) ?? -Infinity) >= score) return 0;
     set.set(member, score);
     this.sets.set(key, set);
     return 1;
@@ -63,6 +82,10 @@ class PresenceRedis {
 
   async zcard(key: string) {
     return this.sets.get(key)?.size ?? 0;
+  }
+
+  async zscore(key: string, member: string) {
+    return this.sets.get(key)?.get(member)?.toString() ?? null;
   }
 
   async zrangebyscore(key: string, min: string, _max: string) {
@@ -217,5 +240,70 @@ describe('Session presence leases', () => {
         { now: 1_000, redis },
       ),
     ).resolves.toBe(false);
+  });
+});
+
+describe('Session voice-call leases', () => {
+  let redis: Redis;
+
+  beforeEach(() => {
+    redis = new PresenceRedis() as unknown as Redis;
+  });
+
+  it('refreshes, disconnects, and expires independently from view presence', async () => {
+    const lease = { ...identity, clientId: 'tab-1' };
+    await refreshSessionPresence(lease, { now: 1_000, redis });
+    await refreshSessionVoiceCall(
+      { ...lease, generation: 1 },
+      { now: 2_000, redis },
+    );
+
+    await disconnectSessionPresence(lease, { redis });
+    await expect(
+      isSessionUserPresent(identity, { now: 2_000, redis }),
+    ).resolves.toBe(false);
+    await expect(
+      isSessionVoiceCallActive(identity, { now: 2_000, redis }),
+    ).resolves.toBe(true);
+    await expect(
+      isSessionVoiceCallActive(identity, {
+        now: 2_000 + SESSION_PRESENCE_LEASE_MS,
+        redis,
+      }),
+    ).resolves.toBe(false);
+
+    await refreshSessionVoiceCall(
+      { ...lease, generation: 2 },
+      { now: 40_000, redis },
+    );
+    await disconnectSessionVoiceCall({ ...lease, generation: 3 }, { redis });
+    await expect(
+      isSessionVoiceCallActive(identity, { now: 40_000, redis }),
+    ).resolves.toBe(false);
+  });
+
+  it('keeps a newer disconnect authoritative over a late heartbeat', async () => {
+    const lease = { ...identity, clientId: 'tab-1' };
+    await refreshSessionVoiceCall(
+      { ...lease, generation: 1 },
+      { now: 1_000, redis },
+    );
+    await disconnectSessionVoiceCall({ ...lease, generation: 2 }, { redis });
+    await refreshSessionVoiceCall(
+      { ...lease, generation: 1 },
+      { now: 2_000, redis },
+    );
+
+    await expect(
+      isSessionVoiceCallActive(identity, { now: 2_000, redis }),
+    ).resolves.toBe(false);
+
+    await refreshSessionVoiceCall(
+      { ...lease, generation: 3 },
+      { now: 3_000, redis },
+    );
+    await expect(
+      isSessionVoiceCallActive(identity, { now: 3_000, redis }),
+    ).resolves.toBe(true);
   });
 });

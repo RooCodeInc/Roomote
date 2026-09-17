@@ -27,7 +27,7 @@ import {
   hasFastAgentSession,
   type FastAgentReactionExternalInput,
 } from '@roomote/cloud-agents/server';
-import { isPeerConversationsExperimentEnabledForUser } from '@roomote/db/server';
+import { isDeploymentExperimentEnabled } from '@roomote/db/server';
 import {
   RunStatus,
   activeRunStatuses,
@@ -802,9 +802,7 @@ async function processDiscordGatewayEvent(
       : null;
     peerConversationsExperimentEnabled =
       fastSessionOwner?.kind === 'user' &&
-      (await isPeerConversationsExperimentEnabledForUser(
-        fastSessionOwner.userId,
-      ));
+      (await isDeploymentExperimentEnabled('slackPeerConversations'));
     const shouldRouteUnmentioned =
       await shouldRouteUnmentionedDiscordThreadReplyToAgent({
         message,
@@ -885,6 +883,7 @@ async function processDiscordGatewayEvent(
     const session = await getOrCreateFastAgentSession({
       userId: senderUserId,
       conversation: fastConversation,
+      userInitiated: { surface: 'discord', trigger: 'message' },
     });
     const result = await startFastSessionGoal({
       sessionId: session.id,

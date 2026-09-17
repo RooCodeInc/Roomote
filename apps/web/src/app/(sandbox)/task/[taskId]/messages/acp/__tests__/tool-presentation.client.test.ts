@@ -27,7 +27,7 @@ function toolData(
 }
 
 function toolMessage(
-  overrides: Partial<AcpToolResultPayload> = {},
+  overrides: Partial<AcpToolResultPayload> & { rawInput?: unknown } = {},
 ): AcpToolResultUiMessage {
   const data = toolData(overrides);
   return {
@@ -388,6 +388,81 @@ describe('tool presentation resolver', () => {
     ).toMatchObject({ verb: 'Failed to Start', object: 'coding task' });
   });
 
+  it('describes integration key tools in plain words', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'prepare_integration_key',
+          rawInput: {
+            arguments: { label: 'Kagi', origin: 'https://kagi.com' },
+          },
+        }),
+      ),
+    ).toMatchObject({ verb: 'Requested', object: 'a key for Kagi' });
+    expect(
+      resolveToolPresentation(toolData({ toolName: 'list_integration_keys' })),
+    ).toMatchObject({ verb: 'Checked', object: 'your integrations' });
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'request_with_integration_key',
+          rawInput: {
+            arguments: { method: 'post', path: '/api/v1/search' },
+          },
+          output: JSON.stringify({ success: true, status: 200 }),
+        }),
+      ),
+    ).toMatchObject({ verb: 'Called', object: 'POST /api/v1/search (200)' });
+  });
+
+  it.each([
+    ['in_progress', {}, 'Adding', 'remote MCP DeepWiki'],
+    [
+      'completed',
+      { status: 'connected', name: 'deepwiki', tools: [{}, {}, {}] },
+      'Added',
+      'remote MCP deepwiki (3 tools)',
+    ],
+    [
+      'completed',
+      { status: 'authorization_required', name: 'linear-remote' },
+      'Prepared',
+      'remote MCP linear-remote for authorization',
+    ],
+    [
+      'completed',
+      { status: 'connected', name: 'deepwiki', reused: true },
+      'Found',
+      'remote MCP deepwiki',
+    ],
+    [
+      'completed',
+      { status: 'disabled', name: 'deepwiki', reused: true },
+      'Found',
+      'remote MCP deepwiki (disabled)',
+    ],
+    ['failed', {}, 'Failed to Add', 'remote MCP DeepWiki'],
+  ] as const)(
+    'presents add_remote_mcp while %s',
+    (status, output, verb, object) => {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            toolName: 'add_remote_mcp',
+            status,
+            rawInput: { arguments: { name: 'DeepWiki' } },
+            output: JSON.stringify(output),
+          } as never),
+        ),
+      ).toMatchObject({
+        verb,
+        object,
+        category: 'generic',
+        iconKey: 'tool',
+      });
+    },
+  );
+
   it('never uses native fallback titles for headers or identity', () => {
     expect(
       resolveToolPresentation(
@@ -514,6 +589,32 @@ describe('tool presentation resolver', () => {
         }),
       ).object,
     ).toBe('skill capture-visual-proof');
+  });
+
+  it('uses the transcript-safe result name for Fast skill loads without exposing instance IDs', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'load_skill',
+          rawInput: {
+            arguments: { id: 'instance:00000000-0000-4000-8000-000000000001' },
+          },
+          output: JSON.stringify({
+            success: true,
+            id: 'instance:00000000-0000-4000-8000-000000000001',
+            name: 'daily-brief',
+          }),
+        }),
+      ).object,
+    ).toBe('skill daily-brief');
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'load_skill',
+          rawInput: { name: 'instance:00000000-0000-4000-8000-000000000001' },
+        }),
+      ).object,
+    ).toBe('skill');
   });
 
   it('sanitizes before truncating paths and handles malformed arguments', () => {
@@ -765,7 +866,7 @@ describe('tool presentation policy', () => {
     });
   });
 
-  it.each(['read', 'read_file', 'spill_read', 'load_skill'])(
+  it.each(['read', 'read_file', 'spill_read'])(
     'keeps ordinary %s details hidden',
     (toolName) => {
       expect(
@@ -773,6 +874,65 @@ describe('tool presentation policy', () => {
       ).toBe('none');
     },
   );
+
+  it('only expands skill receipts when they contain meaningful detail', () => {
+    const missingOutput = toolMessage({
+      toolName: 'skill',
+      rawInput: { name: 'implement-changes' },
+    });
+    delete (missingOutput.data as Partial<AcpToolResultPayload>).output;
+
+    expect(resolveToolPresentationPolicy(missingOutput).detailMode).toBe(
+      'none',
+    );
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'skill',
+          rawInput: { name: 'implement-changes' },
+        }),
+      ).detailMode,
+    ).toBe('none');
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'load_skill',
+          rawInput: {
+            arguments: {
+              id: 'instance:00000000-0000-4000-8000-000000000001',
+            },
+          },
+          output: JSON.stringify({ success: true, name: 'daily-brief' }),
+        }),
+      ).detailMode,
+    ).toBe('none');
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'load_skill',
+          rawInput: {
+            arguments: {
+              id: 'instance:00000000-0000-4000-8000-000000000001',
+            },
+          },
+          output: JSON.stringify({
+            success: true,
+            name: 'daily-brief',
+            resource: 'SKILL.md',
+          }),
+        }),
+      ).detailMode,
+    ).toBe('expandable');
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({
+          toolName: 'skill',
+          rawInput: { name: 'implement-changes' },
+          output: '# Implementation workflow',
+        }),
+      ).detailMode,
+    ).toBe('expandable');
+  });
 
   it('keeps consequential receipts outside collapsed activity', () => {
     expect(

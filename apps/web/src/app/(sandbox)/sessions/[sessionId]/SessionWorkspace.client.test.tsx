@@ -839,6 +839,389 @@ describe('SessionWorkspace', () => {
     expect(screen.queryByLabelText('Full task task-5')).toBeNull();
   });
 
+  it('automatically opens running tasks first while preserving relative status order', async () => {
+    const task = (
+      taskId: string,
+      status: RunStatus,
+      taskPhase: string | null,
+    ): SessionInfo['tasks'][number] => ({
+      ...singleTask,
+      taskId,
+      title: taskId,
+      latestRun: {
+        id: 1,
+        status,
+        taskPhase,
+        error: null,
+        result: null,
+      },
+    });
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1920,
+      sessionOverride: {
+        tasks: [
+          task('inactive-1', RunStatus.Completed, null),
+          task('running-1', RunStatus.Running, 'running'),
+          task('inactive-2', RunStatus.Completed, null),
+          task('running-2', RunStatus.Pending, null),
+          task('inactive-3', RunStatus.Completed, null),
+        ],
+      },
+    });
+
+    const firstRunning = await screen.findByLabelText('Full task running-1');
+    const secondRunning = screen.getByLabelText('Full task running-2');
+    const firstInactive = screen.getByLabelText('Full task inactive-1');
+
+    expect(firstRunning.compareDocumentPosition(secondRunning)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(secondRunning.compareDocumentPosition(firstInactive)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.queryByLabelText('Full task inactive-2')).toBeNull();
+    expect(screen.queryByLabelText('Full task inactive-3')).toBeNull();
+  });
+
+  it.each(['unified', 'fast'] as const)(
+    'does not automatically open failed starts from the %s task source',
+    async (taskSource) => {
+      const task = (
+        taskId: string,
+        status: RunStatus,
+        canRetryFailedStart: boolean,
+      ) => ({
+        ...singleTask,
+        taskId,
+        title: taskId,
+        latestRun: {
+          id: 1,
+          status,
+          taskPhase: null,
+          canRetryFailedStart,
+          error: status === RunStatus.Failed ? 'Task failed' : null,
+          result: null,
+        },
+      });
+      const tasks = [
+        task('failed-start', RunStatus.Failed, true),
+        task('failed-after-execution', RunStatus.Failed, false),
+        task('completed', RunStatus.Completed, false),
+      ];
+
+      renderWorkspace({
+        isMobile: false,
+        workspaceWidth: 1280,
+        sessionOverride:
+          taskSource === 'fast'
+            ? { taskSource: 'fast', tasks: [], taskCards: tasks }
+            : { tasks },
+      });
+
+      expect(
+        await screen.findByLabelText('Full task failed-after-execution'),
+      ).toBeVisible();
+      expect(screen.getByLabelText('Full task completed')).toBeVisible();
+      expect(screen.queryByLabelText('Full task failed-start')).toBeNull();
+    },
+  );
+
+  it('does not automatically open a newly arrived failed start', async () => {
+    const failedStart = {
+      ...singleTask,
+      taskId: 'failed-start',
+      title: 'Failed start',
+      latestRun: {
+        id: 2,
+        status: RunStatus.Failed,
+        taskPhase: null,
+        canRetryFailedStart: true,
+        error: 'Task failed to start',
+        result: null,
+      },
+    };
+    const completedTask = {
+      ...secondTask,
+      latestRun: {
+        id: 3,
+        status: RunStatus.Completed,
+        taskPhase: null,
+        canRetryFailedStart: false,
+        error: null,
+        result: null,
+      },
+    };
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [singleTask, failedStart, completedTask],
+      });
+    });
+
+    expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.queryByLabelText('Full task failed-start')).toBeNull();
+  });
+
+  it('keeps failed starts available through explicit task links', async () => {
+    const failedStart = {
+      ...singleTask,
+      taskId: 'failed-start',
+      title: 'Failed start',
+      latestRun: {
+        id: 2,
+        status: RunStatus.Failed,
+        taskPhase: null,
+        canRetryFailedStart: true,
+        error: 'Task failed to start',
+        result: null,
+      },
+    };
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [failedStart, secondTask] },
+      selectedTaskId: failedStart.taskId,
+    });
+
+    expect(
+      await screen.findByLabelText('Full task failed-start'),
+    ).toBeVisible();
+    expect(screen.getByLabelText('Full task task-2')).toBeVisible();
+  });
+
+  it('automatically opens a failed start after its retry begins booting', async () => {
+    const failedStart = {
+      ...singleTask,
+      taskId: 'failed-start',
+      title: 'Failed start',
+      latestRun: {
+        id: 2,
+        status: RunStatus.Failed,
+        taskPhase: null,
+        canRetryFailedStart: true,
+        error: 'Task failed to start',
+        result: null,
+      },
+    };
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [failedStart, secondTask] },
+    });
+
+    expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.queryByLabelText('Full task failed-start')).toBeNull();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [
+          {
+            ...failedStart,
+            latestRun: {
+              ...failedStart.latestRun,
+              id: 3,
+              status: RunStatus.Pending,
+              canRetryFailedStart: false,
+              error: null,
+            },
+          },
+          secondTask,
+        ],
+      });
+    });
+
+    expect(
+      await screen.findByLabelText('Full task failed-start'),
+    ).toBeVisible();
+  });
+
+  it('prioritizes running tasks within an automatically opened arrival batch', async () => {
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1920,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+    });
+    const inactiveTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Completed task',
+      latestRun: {
+        id: 3,
+        status: RunStatus.Completed,
+        taskPhase: null,
+        error: null,
+        result: null,
+      },
+    };
+    const runningTask = {
+      ...singleTask,
+      taskId: 'task-4',
+      title: 'Running task',
+      latestRun: {
+        id: 4,
+        status: RunStatus.Running,
+        taskPhase: 'running',
+        error: null,
+        result: null,
+      },
+    };
+
+    expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [singleTask, secondTask, inactiveTask, runningTask],
+      });
+    });
+
+    expect(await screen.findByLabelText('Full task task-4')).toBeVisible();
+    expect(screen.queryByLabelText('Full task task-3')).toBeNull();
+  });
+
+  it('promotes an existing hidden task when it begins running', async () => {
+    const existingRunningTask = {
+      ...secondTask,
+      latestRun: {
+        id: 2,
+        status: RunStatus.Running,
+        taskPhase: 'running',
+        error: null,
+        result: null,
+      },
+    };
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Hidden task',
+    };
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: {
+        tasks: [singleTask, existingRunningTask, thirdTask],
+      },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.queryByLabelText('Full task task-3')).toBeNull();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [
+          singleTask,
+          existingRunningTask,
+          {
+            ...thirdTask,
+            latestRun: {
+              id: 3,
+              status: RunStatus.Running,
+              taskPhase: 'running',
+              error: null,
+              result: null,
+            },
+          },
+        ],
+      });
+    });
+
+    const existingRunningPanel = screen.getByLabelText('Full task task-2');
+    const promotedRunningPanel =
+      await screen.findByLabelText('Full task task-3');
+    expect(
+      existingRunningPanel.compareDocumentPosition(promotedRunningPanel),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
+  });
+
+  it('preserves manual panel selections when a hidden task begins running', async () => {
+    const existingRunningTask = {
+      ...secondTask,
+      latestRun: {
+        id: 2,
+        status: RunStatus.Running,
+        taskPhase: 'running',
+        error: null,
+        result: null,
+      },
+    };
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Third task',
+    };
+    const manuallySelectedTask = {
+      ...singleTask,
+      taskId: 'task-4',
+      title: 'Manually selected task',
+    };
+    const hiddenTask = {
+      ...singleTask,
+      taskId: 'task-5',
+      title: 'Hidden task',
+    };
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1920,
+      sessionOverride: {
+        tasks: [
+          singleTask,
+          existingRunningTask,
+          thirdTask,
+          manuallySelectedTask,
+          hiddenTask,
+        ],
+      },
+    });
+
+    expect(await screen.findByLabelText('Full task task-3')).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Select task-4 from task-3' }),
+    );
+    expect(screen.getByLabelText('Full task task-4')).toBeVisible();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [
+          singleTask,
+          existingRunningTask,
+          thirdTask,
+          manuallySelectedTask,
+          {
+            ...hiddenTask,
+            latestRun: {
+              id: 5,
+              status: RunStatus.Running,
+              taskPhase: 'running',
+              error: null,
+              result: null,
+            },
+          },
+        ],
+      });
+    });
+
+    const existingRunningPanel = screen.getByLabelText('Full task task-2');
+    const promotedRunningPanel =
+      await screen.findByLabelText('Full task task-5');
+    const manualPanel = screen.getByLabelText('Full task task-4');
+    expect(
+      existingRunningPanel.compareDocumentPosition(promotedRunningPanel),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(promotedRunningPanel.compareDocumentPosition(manualPanel)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
+  });
+
   it('keeps closed task panels dismissed after navigating away and back', async () => {
     const { navigateAwayAndBack } = renderWorkspace({
       isMobile: false,
@@ -1317,6 +1700,61 @@ describe('SessionWorkspace', () => {
         version: 1,
       }),
     );
+  });
+
+  it('shows a bounded tabular thumbnail for Session artifacts', async () => {
+    artifactQueryState.dataByPath['session-1:reports/results.csv'] = {
+      id: 'session-csv',
+      taskId: null,
+      sessionId: 'session-1',
+      path: 'reports/results.csv',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/csv',
+      content: 'name,score\nAda,98',
+      size: 20,
+      createdAt: new Date('2026-01-05T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/session-csv/download',
+    };
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: {
+        artifacts: [
+          {
+            id: 'session-csv',
+            path: 'reports/results.csv',
+            version: 1,
+            artifactType: 'general',
+            contentType: 'text/csv',
+            size: 20,
+            createdAt: new Date('2026-01-05T00:00:00.000Z'),
+          },
+        ],
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Open Results from Session' }),
+    ).toBeVisible();
+    const card = screen.getByRole('button', {
+      name: 'Open Results from Session',
+    });
+    await waitFor(() => {
+      expect(artifactQueryInputs).toContainEqual({
+        sessionId: 'session-1',
+        path: 'reports/results.csv',
+        version: 1,
+        preview: true,
+      });
+      expect(card.querySelector('.tabular-artifact-grid')).toHaveAttribute(
+        'data-state',
+        'ready',
+      );
+    });
+    expect(card).toHaveTextContent('Ada');
+    expect(card).toHaveTextContent('98');
   });
 
   it('opens a deep-linked Session artifact without a click and clears the link on back', async () => {

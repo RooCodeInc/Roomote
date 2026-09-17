@@ -35,7 +35,10 @@ conversation around that task.
 
 Fast is the default for unpinned requests across the web dashboard and
 supported chat providers. Choose an environment or repository explicitly when
-you already know where the work should run.
+you already know where the work should run. That choice controls the initial
+checkout and tooling, while the sandbox can still check out other active
+repositories authorized for the task through its `REPOSITORIES.md` index. An
+additional checkout does not provision another environment's services.
 
 When work needs a sandbox but no source code, ask Fast to delegate it to
 **Blank slate**. The delegated task starts with an empty workspace and clones
@@ -141,6 +144,11 @@ timeline shows the live task count. Select that activity to open the **Tasks**
 panel. The **Artifacts** panel combines the latest uploaded outputs from every
 task with documents created directly during the conversation, labels each item
 by its Session or task source, and opens previews without leaving the Session.
+CSV and TSV files use abstract table thumbnails and open as bounded table
+previews. Turn on **First row is a header** when the file includes column names,
+scroll horizontally through wide tables, or switch to **Source** for the complete
+loaded text. The viewer reports malformed or truncated data without discarding
+the values it can display.
 Links to a Session-created artifact, including the link the Session shares when
 it creates one, open that artifact directly in the Artifacts panel. Individual
 task details continue to show their own artifacts. When a reply attaches

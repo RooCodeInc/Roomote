@@ -26,6 +26,7 @@ import {
   FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+  isPublicUrlFetchImageResult,
   NO_REPOSITORIES,
   REASONING_EFFORT_VALUES,
   MANAGE_WAKEUPS_TOOL_DESCRIPTION,
@@ -41,6 +42,7 @@ import { z } from 'zod';
 
 import {
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  isFastAgentNativeToolEnabled,
   isFastAgentSpillTool,
   type FastAgentNativeToolName,
 } from './fast-agent-tool-policy';
@@ -49,6 +51,7 @@ import {
   FastAgentSkillStore,
   fastAgentSkillStore,
   type FastAgentSkillDocument,
+  type FastAgentSkillListResult,
 } from './fast-agent-skill-store';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import {
@@ -129,6 +132,27 @@ type FastAgentNativeToolBridge = {
   url: string;
 };
 
+/**
+ * Transcript-safe record of a `list_skills` or `load_skill` call. The bridge
+ * answers those tools itself, ahead of the turn executor, so nothing else
+ * sees them; this is what lets a Session show that a skill was (or was not)
+ * actually loaded, instead of taking the model's word for it. Skill content
+ * stays out of the record: the summary names what was loaded, not its body.
+ */
+type FastAgentSkillToolCallRecord = {
+  name:
+    | typeof FAST_AGENT_NATIVE_TOOL_NAMES.listSkills
+    | typeof FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill;
+  args: Record<string, unknown>;
+  messageId?: string;
+  agent?: string;
+  result: Record<string, unknown>;
+};
+
+type FastAgentSkillToolCallRecorder = (
+  record: FastAgentSkillToolCallRecord,
+) => Promise<void>;
+
 type ActiveExecutor = {
   allowSkillAccess: boolean;
   allowSpillRecovery: boolean;
@@ -136,6 +160,7 @@ type ActiveExecutor = {
   executor: FastAgentNativeToolExecutor;
   skillStore: FastAgentSkillStore;
   spillBudget: FastAgentSpillTurnBudget;
+  recordSkillToolCall?: FastAgentSkillToolCallRecorder;
 };
 
 type FastAgentNativeToolBindingOptions = {
@@ -143,7 +168,51 @@ type FastAgentNativeToolBindingOptions = {
   allowSpillRecovery: boolean;
   skillStore?: FastAgentSkillStore;
   spillBudget?: FastAgentSpillTurnBudget;
+  /** Receives every skill catalog or load call the bridge answers for this session. */
+  recordSkillToolCall?: FastAgentSkillToolCallRecorder;
 };
+
+const SKILL_RECORD_NAME_LIMIT = 20;
+
+export function summarizeSkillListForRecord(
+  catalog: FastAgentSkillListResult,
+): Record<string, unknown> {
+  return {
+    success: true,
+    skillCount: catalog.skills.length,
+    skills: catalog.skills.slice(0, SKILL_RECORD_NAME_LIMIT).map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      source: skill.source,
+    })),
+    ...(catalog.skills.length > SKILL_RECORD_NAME_LIMIT
+      ? { omittedSkillCount: catalog.skills.length - SKILL_RECORD_NAME_LIMIT }
+      : {}),
+    ...(catalog.nextSourceOffset !== undefined
+      ? { nextSourceOffset: catalog.nextSourceOffset }
+      : {}),
+    // Warning text interpolates caught error messages from settings and
+    // repository lookups; the transcript gets only that some were raised.
+    ...(catalog.warnings.length > 0
+      ? { warningCount: catalog.warnings.length }
+      : {}),
+  };
+}
+
+function summarizeSkillDocumentForRecord(
+  document: FastAgentSkillDocument,
+): Record<string, unknown> {
+  return {
+    success: true,
+    id: document.id,
+    name: document.name,
+    source: document.source,
+    ...(document.version !== undefined ? { version: document.version } : {}),
+    resource: document.resource,
+    resources: document.resources,
+    byteLength: document.byteLength,
+  };
+}
 
 type FastAgentSpillTurnBudget = {
   calls: number;
@@ -574,6 +643,20 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Add or reconnect one deployment-shared remote MCP integration from its HTTPS endpoint. Use this when an administrator asks to connect a service or provides a remote MCP URL that is not already available. The server verifies the endpoint before saving it, reuses an existing matching integration, and returns either connected tools, a secure OAuth authorization link, or the existing Settings link for static headers/manual OAuth client setup. Server-backed results include integrationId, the actual Fast catalog ID: use that exact integrationId with find_integration_tools and call_integration_tool, never a server UUID, but do not narrate IDs or catalog checks to the human. Share authorizeUrl and settingsUrl exactly unchanged, labeled 'Authorize <name>' and 'Integration settings' respectively; never rewrite either target to /settings. The conversation resumes automatically after the requesting administrator authorizes, so never ask them to send a follow-up. In user-visible progress say at most that you are checking. Never ask for or accept secrets in chat or tool arguments.",
+  args: {
+    name: z.string().trim().min(1).max(80).describe("Short deployment-visible integration name; Roomote normalizes it to a lowercase slug"),
+    url: z.string().url().startsWith("https://").max(2048).describe("HTTPS streamable-HTTP MCP endpoint"),
+  },
+  execute: (args, context) => invoke("add_remote_mcp", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
@@ -649,12 +732,12 @@ export default {
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret]: String.raw`
+    [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Prepare a Session credential approval using only nonsecret metadata from the service documentation. Call list_session_secrets first: a pending approval for the same service means re-share its link, not prepare again. Choose the HTTPS origin and the header that carries the key (authorization, x-api-key, api-key, or the service's own header), omitting headerPrefix when the key needs no scheme, then share the returned secure Session link so the human can enter the key privately. Omit allowedMethods for read-only access; list the exact HTTP methods only when the requested work needs writes, and say so in the Session before the human approves. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
+  description: "Prepare an integration approval using only nonsecret metadata from the service documentation. Call list_integration_keys first: a ready integration for the service means no approval is needed, and a pending one means re-share its link, not prepare again. Choose the HTTPS origin and the header that carries the key (authorization, x-api-key, api-key, or the service's own header), omitting headerPrefix when the key needs no scheme, then share the returned secure link so the human can enter the key privately. New integrations default to everyone in the deployment; pass owner only when the human asked to keep it private, and the approval form still lets them choose. Omit allowedMethods for read-only access; list the exact HTTP methods only when the requested work needs writes, and say so before the human approves. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
   args: {
     label: z.string().trim().min(1).max(80),
     origin: z.string().min(1).max(2048),
@@ -665,38 +748,40 @@ export default {
       .describe(
         "Lowercase HTTP header that carries the key at this service: authorization, x-api-key, api-key, or the service's own name such as private-token or x-shopify-access-token",
       ),
-    headerPrefix: z.enum(["Bearer ", "Basic ", "Token "]).optional(),
-    ttlHours: z.number().int().min(1).max(720).optional().default(24),
+    headerPrefix: z.enum(["Bearer", "Basic", "Token", "Bearer ", "Basic ", "Token "]).optional().describe("Scheme before the key, with or without the trailing space; omit when the header takes the bare key"),
+    lifetimeHours: z.number().int().min(1).max(8760).optional().describe("Hours until the integration expires. Omit unless the human asked for a temporary key; integrations are kept until revoked."),
     allowedMethods: z.array(z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])).min(1).max(6).optional().describe("HTTP methods the approved key may be used with. Defaults to GET and HEAD."),
+    visibility: z.enum(["owner", "deployment"]).optional().describe("Who may use the integration. Defaults to deployment; use owner only when the human requested private access."),
   },
-  execute: (args, context) => invoke("prepare_session_secret", args, context),
+  execute: (args, context) => invoke("prepare_integration_key", args, context),
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets]: String.raw`
+    [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: String.raw`
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "List this Session's pending credential approvals and ready secret references with their origin, header, allowed methods, and expiry, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval and before using a reference; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready references are usable by request_with_session_secret for reads and are delivered automatically to coding tasks launched from this Session.",
+  description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List integrations available to this human (their own and deployment-visible grants, with origin, header, allowed methods, visibility, and expiry) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready integrations are delivered automatically to coding tasks launched from this Session.",
   args: {},
-  execute: (args, context) => invoke("list_session_secrets", args, context),
+  execute: (args, context) => invoke("list_integration_keys", args, context),
 }
 `,
 
-    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret]: String.raw`
+    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Make one bounded GET or HEAD request using a ready Session secret reference without exposing the credential; the server sends the request to the approved origin with the real key. Discover references with list_session_secrets; never invent one or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers. For scripts, SDKs, CLIs, repeated calls, or approved write methods, launch a coding task attached to this Session instead: it receives the approved services as substitute tokens with a base URL. Call directly without an opening acknowledgement or another confirmation, and report the actual result.",
+  description: "Make one bounded request using a ready integration key reference without exposing the credential; the server sends it to the approved origin with the real key, using any method the human approved for that integration (reads, and POST/PUT/PATCH/DELETE when listed in its allowedMethods). Discover references with list_integration_keys; never invent one or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers; give a body and contentType for writes. For scripts, SDKs, CLIs, or many calls, launch a coding task attached to this Session instead: it receives the approved services as substitute tokens with a base URL. Call directly without an opening acknowledgement or another confirmation, and report the actual result.",
   args: {
     secretRef: z.string().uuid(),
-    method: z.enum(["GET", "HEAD"]),
+    method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]),
     path: z.string().min(1).max(2048),
     accept: z.enum(["application/json", "text/plain"]).optional(),
-    body: z.literal("").nullish().describe("GET/HEAD have no body. Omit, use null, or use an empty string."),
+    body: z.string().max(65536).nullish().describe("Request body for an approved write method. GET/HEAD have no body: omit, use null, or use an empty string."),
+    contentType: z.enum(["application/json", "text/plain", "application/x-www-form-urlencoded"]).optional().describe("Content type of the body; ignored for GET/HEAD."),
   },
-  execute: (args, context) => invoke("request_with_session_secret", args, context),
+  execute: (args, context) => invoke("request_with_integration_key", args, context),
 }
 `,
 
@@ -1062,6 +1147,18 @@ async function handleMcpRequest(
       args: params.arguments ?? {},
     });
     assertFastTurnActive(isActive);
+    if (isPublicUrlFetchImageResult(result)) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Image fetched successfully' },
+          {
+            type: 'image' as const,
+            data: result.data,
+            mimeType: result.mimeType,
+          },
+        ],
+      };
+    }
     return {
       content: [
         {
@@ -1170,10 +1267,38 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
           return;
         }
       }
+      const recordSkillToolCall = async (
+        result: Record<string, unknown>,
+      ): Promise<void> => {
+        if (
+          parsed.tool !== FAST_AGENT_NATIVE_TOOL_NAMES.listSkills &&
+          parsed.tool !== FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill
+        ) {
+          return;
+        }
+        try {
+          await activeExecutor.recordSkillToolCall?.({
+            name: parsed.tool,
+            args: parsed.args,
+            ...(parsed.messageID ? { messageId: parsed.messageID } : {}),
+            ...(parsed.agent ? { agent: parsed.agent } : {}),
+            result,
+          });
+        } catch (error) {
+          // The record is diagnostic; a failure to write it must not turn a
+          // successful skill call into a failed one for the model.
+          console.warn(
+            `[Fast Agent] Failed to record ${parsed.tool} call for session ${parsed.sessionID}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      };
       if (parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.listSkills) {
         try {
           const args = listSkillsArgsSchema.parse(parsed.args);
           const catalog = await activeExecutor.skillStore.list(args);
+          await recordSkillToolCall(summarizeSkillListForRecord(catalog));
           writeJson(response, 200, {
             ok: true,
             ...(await formatFastAgentNativeToolResult(
@@ -1196,15 +1321,16 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
               }`,
             );
           }
+          const failure = {
+            success: false,
+            error: argsError ?? 'The requested skill catalog is unavailable.',
+          };
+          await recordSkillToolCall(failure);
           writeJson(response, 200, {
             ok: true,
             ...(await formatFastAgentNativeToolResult(
               parsed.sessionID,
-              {
-                success: false,
-                error:
-                  argsError ?? 'The requested skill catalog is unavailable.',
-              },
+              failure,
               { allowSpill: false },
             )),
           });
@@ -1228,20 +1354,23 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
               }`,
             );
           }
+          const failure = {
+            success: false,
+            error:
+              argsError ?? 'The skill or Markdown resource is unavailable.',
+          };
+          await recordSkillToolCall(failure);
           writeJson(response, 200, {
             ok: true,
             ...(await formatFastAgentNativeToolResult(
               parsed.sessionID,
-              {
-                success: false,
-                error:
-                  argsError ?? 'The skill or Markdown resource is unavailable.',
-              },
+              failure,
               { allowSpill: false },
             )),
           });
           return;
         }
+        await recordSkillToolCall(summarizeSkillDocumentForRecord(document));
         writeJson(response, 200, {
           ok: true,
           ...(await formatFastAgentSkillDocumentForModel(
@@ -1386,6 +1515,10 @@ function createSharedToolsDirectory(): string {
         layout: 3,
         bridge: FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE,
         tools: FAST_AGENT_NATIVE_TOOL_SOURCES,
+        enabledTools: Object.keys(FAST_AGENT_NATIVE_TOOL_SOURCES).filter(
+          (name) =>
+            isFastAgentNativeToolEnabled(name as FastAgentNativeToolName),
+        ),
       }),
     )
     .digest('hex');
@@ -1417,6 +1550,8 @@ function createSharedToolsDirectory(): string {
     'utf8',
   );
   for (const [name, source] of Object.entries(FAST_AGENT_NATIVE_TOOL_SOURCES)) {
+    if (!isFastAgentNativeToolEnabled(name as FastAgentNativeToolName))
+      continue;
     writeFileSync(join(toolsDirectory, `${name}.js`), source, 'utf8');
   }
   return directory;
@@ -1457,7 +1592,9 @@ export async function getFastAgentNativeToolRuntime(
   integrations: FastAgentIntegration[],
   options: {
     surface?: FastAgentSurface;
-    sessionSecretToolsEnabled?: boolean;
+    serviceCredentialToolsEnabled?: boolean;
+    serviceCredentialPrepareEnabled?: boolean;
+    addRemoteMcpEnabled?: boolean;
   } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
@@ -1514,8 +1651,11 @@ export async function getFastAgentNativeToolRuntime(
             nativeIntegrations.map((integration) => integration.id),
             {
               surface: options.surface ?? 'web',
-              sessionSecretToolsEnabled:
-                options.sessionSecretToolsEnabled === true,
+              serviceCredentialToolsEnabled:
+                options.serviceCredentialToolsEnabled === true,
+              serviceCredentialPrepareEnabled:
+                options.serviceCredentialPrepareEnabled,
+              addRemoteMcpEnabled: options.addRemoteMcpEnabled,
             },
           ),
         },
@@ -1603,6 +1743,9 @@ export function bindFastAgentNativeToolExecutor(
     conversationId,
     executor,
     skillStore: options.skillStore ?? fastAgentSkillStore,
+    ...(options.recordSkillToolCall
+      ? { recordSkillToolCall: options.recordSkillToolCall }
+      : {}),
     spillBudget: options.spillBudget ?? createFastAgentSpillTurnBudget(),
   });
 

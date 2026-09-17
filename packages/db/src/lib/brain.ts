@@ -30,6 +30,7 @@ import {
   users,
 } from '../schema';
 import { runInTransactionIfAvailable } from './transaction-utils';
+import { isDeploymentExperimentEnabled } from './deployment-experiments';
 import { createMemoryOutboxLifecycle } from './memory-outbox-lifecycle';
 import { isVisibleTask } from './tasks';
 
@@ -112,19 +113,19 @@ export async function findHomeComposerPrecomputeUserForRun(
   database: DatabaseOrTransaction,
   runId: number,
 ): Promise<string | null> {
+  if (
+    !(await isDeploymentExperimentEnabled('homeComposerSuggestions', database))
+  ) {
+    return null;
+  }
+
   const [row] = await database
     .select({ userId: tasks.initiatorUserId })
     .from(brainMemoryEvents)
     .innerJoin(taskRuns, eq(taskRuns.id, brainMemoryEvents.runId))
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .innerJoin(users, eq(users.id, tasks.initiatorUserId))
-    .where(
-      and(
-        ...eligibleUserTaskMemoryConditions(),
-        eq(taskRuns.id, runId),
-        sql`${users.metadata} @> '{"home_composer_suggestions_enabled": true}'::jsonb`,
-      ),
-    )
+    .where(and(...eligibleUserTaskMemoryConditions(), eq(taskRuns.id, runId)))
     .limit(1);
 
   return row?.userId ?? null;
@@ -132,20 +133,8 @@ export async function findHomeComposerPrecomputeUserForRun(
 
 export async function isHomeComposerSuggestionsEnabled(
   database: DatabaseOrTransaction,
-  userId: string,
 ): Promise<boolean> {
-  const [row] = await database
-    .select({ id: users.id })
-    .from(users)
-    .where(
-      and(
-        eq(users.id, userId),
-        sql`${users.metadata} @> '{"home_composer_suggestions_enabled": true}'::jsonb`,
-      ),
-    )
-    .limit(1);
-
-  return Boolean(row);
+  return isDeploymentExperimentEnabled('homeComposerSuggestions', database);
 }
 
 export async function upsertBrainCollectorItems(
@@ -463,17 +452,26 @@ export async function resetBrainIngestionState(
     ), reset_sync_state AS (
       DELETE FROM ${brainSyncState}
       RETURNING 1
+    ), skip_private_tasks AS (
+      UPDATE ${brainMemoryEvents} AS private_event
+      SET status = 'skipped', agent_summary = NULL, last_error = 'private task', processed_at = now(), updated_at = now()
+      FROM ${taskRuns} AS private_run
+      JOIN ${tasks} AS private_task ON private_task.id = private_run.task_id
+      WHERE private_event.run_id = private_run.id AND private_task.privacy = 'private'
+      RETURNING 1
     )
-    UPDATE ${brainMemoryEvents}
+    UPDATE ${brainMemoryEvents} AS event
     SET
       status = 'pending',
       attempts = 0,
       last_error = NULL,
       processed_at = NULL,
       updated_at = now()
-    WHERE run_id IN (
-      SELECT id FROM ${taskRuns} WHERE status = 'completed'
-    )
+    FROM ${taskRuns} AS run
+    JOIN ${tasks} AS task ON task.id = run.task_id
+    WHERE event.run_id = run.id
+      AND run.status = 'completed'
+      AND task.privacy = 'shared'
   `);
 }
 
@@ -481,6 +479,19 @@ export type BrainMemoryEventRow = typeof brainMemoryEvents.$inferSelect;
 
 const brainMemoryOutboxLifecycle =
   createMemoryOutboxLifecycle<BrainMemoryEventRow>(brainMemoryEvents);
+
+export async function isTaskRunSharedBrainEligible(
+  database: DatabaseOrTransaction,
+  runId: number,
+): Promise<boolean> {
+  const [row] = await database
+    .select({ privacy: tasks.privacy })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(eq(taskRuns.id, runId))
+    .limit(1);
+  return row?.privacy === 'shared';
+}
 
 /**
  * Transactional-outbox insert for a completed run's memory candidate. Called
@@ -495,6 +506,27 @@ export async function maybeEnqueueBrainMemoryEvent(
   tx: DatabaseOrTransaction,
   runId: number,
 ): Promise<void> {
+  if (!(await isTaskRunSharedBrainEligible(tx, runId))) {
+    await tx
+      .insert(brainMemoryEvents)
+      .values({
+        runId,
+        status: 'skipped',
+        lastError: 'private task',
+        processedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: brainMemoryEvents.runId,
+        set: {
+          status: 'skipped',
+          agentSummary: null,
+          lastError: 'private task',
+          processedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+    return;
+  }
   await tx
     .insert(brainMemoryEvents)
     .values({ runId })
@@ -522,6 +554,10 @@ export async function saveBrainAgentSummary(
   runId: number,
   agentSummary: string,
 ): Promise<void> {
+  if (!(await isTaskRunSharedBrainEligible(database, runId))) {
+    await maybeEnqueueBrainMemoryEvent(database, runId);
+    return;
+  }
   await database
     .insert(brainMemoryEvents)
     .values({ runId, agentSummary })
@@ -557,13 +593,26 @@ export async function requeueBrainMemoryEventsForTasks(
     return 0;
   }
 
+  await database.execute(sql`UPDATE ${brainMemoryEvents} AS event
+    SET status = 'skipped', agent_summary = NULL, last_error = 'private task', processed_at = now(), updated_at = now()
+    FROM ${taskRuns} AS run
+    JOIN ${tasks} AS task ON task.id = run.task_id
+    WHERE event.run_id = run.id
+      AND task.id IN (${sql.join(
+        taskIds.map((taskId) => sql`${taskId}`),
+        sql`, `,
+      )})
+      AND task.privacy = 'private'`);
+
   const rows = (await database.execute(
     sql`INSERT INTO ${brainMemoryEvents} (run_id)
-        SELECT id FROM ${taskRuns}
-        WHERE task_id IN (${sql.join(
+        SELECT run.id FROM ${taskRuns} AS run
+        JOIN ${tasks} AS task ON task.id = run.task_id
+        WHERE run.task_id IN (${sql.join(
           taskIds.map((taskId) => sql`${taskId}`),
           sql`, `,
-        )}) AND status = ${RunStatus.Completed}
+        )}) AND run.status = ${RunStatus.Completed}
+          AND task.privacy = 'shared'
         ON CONFLICT (run_id) DO UPDATE SET
           revision = ${brainMemoryEvents}.revision + 1,
           status = CASE WHEN ${brainMemoryEvents}.status = 'processing' THEN 'processing' ELSE 'pending' END,
@@ -606,12 +655,15 @@ export async function backfillBrainMemoryEvents(
               AND run.completed_at > ${options.requeueLinkable.completedAfter.toISOString()}::timestamptz
               AND task.workflow = 'standard'
               AND task.initiator_user_id IS NOT NULL
+              AND task.privacy = 'shared'
             RETURNING event.id`,
       )) as unknown as Array<{ id: string }>)
     : [];
   const rows = (await database.execute(
     sql`INSERT INTO ${brainMemoryEvents} (run_id)
-        SELECT id FROM ${taskRuns} WHERE status = 'completed'
+        SELECT run.id FROM ${taskRuns} AS run
+        JOIN ${tasks} AS task ON task.id = run.task_id
+        WHERE run.status = 'completed' AND task.privacy = 'shared'
         ON CONFLICT (run_id) DO NOTHING
         RETURNING id`,
   )) as unknown as Array<{ id: string }>;
@@ -719,6 +771,10 @@ export async function getBrainMemoryEventSummary(
     SELECT 1 FROM ${brainMemoryEvents}
     WHERE ${brainMemoryEvents.runId} = ${taskRuns.id}
   )`;
+  const sharedTask = sql`EXISTS (
+    SELECT 1 FROM ${tasks}
+    WHERE ${tasks.id} = ${taskRuns.taskId} AND ${tasks.privacy} = 'shared'
+  )`;
   const [
     statusRows,
     processedRow,
@@ -750,6 +806,7 @@ export async function getBrainMemoryEventSummary(
       .where(
         and(
           eq(taskRuns.status, RunStatus.Completed),
+          sharedTask,
           missingEvent,
           historyCutoff
             ? or(
@@ -767,6 +824,7 @@ export async function getBrainMemoryEventSummary(
           .where(
             and(
               eq(taskRuns.status, RunStatus.Completed),
+              sharedTask,
               gt(taskRuns.completedAt, historyCutoff),
               missingEvent,
             ),
@@ -799,16 +857,16 @@ export async function getBrainMemoryEventSummary(
 export async function requeueFailedBrainMemoryEvents(
   database: DatabaseOrTransaction,
 ): Promise<number> {
-  const rows = await database
-    .update(brainMemoryEvents)
-    .set({
-      status: 'pending',
-      attempts: 0,
-      lastError: null,
-      updatedAt: sql`now()`,
-    })
-    .where(eq(brainMemoryEvents.status, 'failed'))
-    .returning({ id: brainMemoryEvents.id });
+  const rows = (await database.execute(sql`
+    UPDATE ${brainMemoryEvents} AS event
+    SET status = 'pending', attempts = 0, last_error = NULL, updated_at = now()
+    FROM ${taskRuns} AS run
+    JOIN ${tasks} AS task ON task.id = run.task_id
+    WHERE event.run_id = run.id
+      AND event.status = 'failed'
+      AND task.privacy = 'shared'
+    RETURNING event.id
+  `)) as unknown as Array<{ id: string }>;
 
   return rows.length;
 }

@@ -63,6 +63,29 @@ function optInBoolean() {
     .transform((value) => value === 'true' || value === '1');
 }
 
+export const TRUSTED_PROXY_CLIENT_IP_HEADERS = [
+  'fly-client-ip',
+  'x-forwarded-for',
+  'x-real-ip',
+] as const;
+
+export type TrustedProxyClientIpHeader =
+  (typeof TRUSTED_PROXY_CLIENT_IP_HEADERS)[number];
+
+export function resolveTrustedClientAddress(
+  headers: Pick<Headers, 'get'>,
+  trustedHeader: TrustedProxyClientIpHeader | undefined,
+): string | null {
+  if (!trustedHeader) return null;
+
+  const value = headers.get(trustedHeader)?.trim();
+  if (!value) return null;
+
+  return trustedHeader === 'x-forwarded-for'
+    ? (value.split(',')[0]?.trim() ?? null)
+    : value;
+}
+
 const serverSchema = {
   R_APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
@@ -113,6 +136,11 @@ const serverSchema = {
   BOX_STANDBY_MAX_AGE_HOURS: z.coerce.number().positive().optional(),
   R_PUBLIC_URL: z.string().url().optional(),
   R_APP_URL: z.string().min(1),
+  // Set only when the deployment ingress overwrites this header rather than
+  // passing through a caller-supplied value.
+  R_TRUSTED_PROXY_CLIENT_IP_HEADER: z
+    .enum(TRUSTED_PROXY_CLIENT_IP_HEADERS)
+    .optional(),
   // Anonymous telemetry + version checks (Ping service).
   R_PING_BASE_URL: z.string().url().default('https://ping.roomote.dev'),
   R_INSTANCE_ID: z
@@ -428,13 +456,13 @@ const serverSchema = {
   // second value for an operator to remember.
   R_BRAIN_GATEWAY_TOKEN_FILE: z.string().min(1).optional(),
   // Shared secret the credential-substituting egress gateway presents to
-  // Optional dedicated hostname for the API-side session egress proxy. When a
-  // request arrives for this host, the API serves `/api/session-egress` at the
+  // Optional dedicated hostname for the API-side credential egress proxy. When a
+  // request arrives for this host, the API serves `/api/credential-egress` at the
   // root, so SDK clients that allow only a host override (no path prefix) can
   // use it. Same route and checks; only the address differs. Point DNS for the
   // name at the API service; the path form keeps working on the API host. Set
   // the same value on the controller: it delivers the base URL to sandboxes.
-  R_SESSION_EGRESS_PROXY_HOST: z
+  R_CREDENTIAL_EGRESS_PROXY_HOST: z
     .string()
     .trim()
     .toLowerCase()
@@ -599,6 +627,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_BRAIN_EMBEDDING_DIMENSIONS',
   'R_APP_ENV',
   'R_PUBLIC_URL',
+  'R_TRUSTED_PROXY_CLIENT_IP_HEADER',
   'R_APP_URL',
   'R_AUTO_GENERATE_KEYS',
   'S3_AUTO_CREATE_BUCKET',

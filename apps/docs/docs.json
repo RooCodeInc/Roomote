@@ -53,7 +53,8 @@
           "live-previews",
           "goal-mode",
           "fast-sessions",
-          "session-secrets",
+          "private-sessions",
+          "integration-keys",
           "memory",
           "file-attachments",
           "voice"
@@ -154,6 +155,7 @@
           "integrations/better-stack",
           "integrations/braintrust",
           "integrations/elevenlabs",
+          "integrations/exa",
           "integrations/grafana",
           "integrations/granola",
           "integrations/jira",

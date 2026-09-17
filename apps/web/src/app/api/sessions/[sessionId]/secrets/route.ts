@@ -1,20 +1,26 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { db, eq, sessions, users } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  isDeploymentExperimentEnabled,
+  sessions,
+} from '@roomote/db/server';
 import { replyToFastSessionCommand } from '@/trpc/commands/fast-sessions';
 
 import {
-  createSessionSecret,
-  listSessionSecretApprovals,
-  revokeSessionSecret,
-} from '@roomote/sdk/server/session-secrets';
+  createServiceCredential,
+  listServiceCredentialApprovals,
+  revokeServiceCredential,
+} from '@roomote/sdk/server/service-credentials';
 import {
-  isSessionSecretToolsExperimentEnabled,
-  sessionSecretCreateSchema,
-  sessionSecretRevokeSchema,
+  serviceCredentialCreateSchema,
+  serviceCredentialRevokeSchema,
 } from '@roomote/types';
 
 import { authorize } from '@/lib/server/auth-context';
+import { readBoundedJsonBody } from '@/lib/server/bounded-json-body';
+import { buildIntegrationSavedContinuation } from '@/lib/server/integration-saved-continuation';
 import { Env } from '@/lib/server/env';
 
 export const runtime = 'nodejs';
@@ -46,7 +52,7 @@ async function handle(
     const context = { sessionId: params.data.sessionId, userId: auth.userId };
 
     if (method === 'GET') {
-      return NextResponse.json(await listSessionSecretApprovals(context), {
+      return NextResponse.json(await listServiceCredentialApprovals(context), {
         headers,
       });
     }
@@ -70,52 +76,19 @@ async function handle(
       return error(415);
     }
 
-    const reader = request.body?.getReader();
-    if (!reader) return error(400);
-    const decoder = new TextDecoder('utf-8', { fatal: true });
-    let body = '';
-    let bytes = 0;
-    let timedOut = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        timedOut = true;
-        reject(new Error('Request unavailable'));
-        void reader.cancel().catch(() => {});
-      }, 10_000);
+    const body = await readBoundedJsonBody(request, {
+      maxBytes: maxBodyBytes,
+      timeoutMs: 10_000,
     });
-    try {
-      for (;;) {
-        const { done, value } = await Promise.race([reader.read(), deadline]);
-        if (done) break;
-        bytes += value.byteLength;
-        if (bytes > maxBodyBytes) {
-          void reader.cancel().catch(() => {});
-          return error(413);
-        }
-        body += decoder.decode(value, { stream: true });
-      }
-      body += decoder.decode();
-    } catch {
-      return error(timedOut ? 408 : 400);
-    } finally {
-      clearTimeout(timer!);
-      reader.releaseLock();
-    }
-
-    let rawArgs: unknown;
-    try {
-      rawArgs = JSON.parse(body);
-    } catch {
-      return error(400);
-    }
+    if (!body.ok) return error(body.status);
+    const rawArgs = body.value;
     if (method === 'POST') {
-      const args = sessionSecretCreateSchema.safeParse(rawArgs);
+      const args = serviceCredentialCreateSchema.safeParse(rawArgs);
       if (!args.success) return error(400);
-      const secret = await createSessionSecret(context, args.data);
+      const secret = await createServiceCredential(context, args.data);
       let resumed = false;
       try {
-        const [session, user] = await Promise.all([
+        const [session, serviceCredentialToolsEnabled] = await Promise.all([
           db.query.sessions.findFirst({
             where: eq(sessions.id, context.sessionId),
             columns: {
@@ -125,10 +98,7 @@ async function handle(
               archivedAt: true,
             },
           }),
-          db.query.users.findFirst({
-            where: eq(users.id, auth.userId),
-            columns: { metadata: true },
-          }),
+          isDeploymentExperimentEnabled('serviceCredentialTools'),
         ]);
         if (
           session?.fastConversationId &&
@@ -138,9 +108,9 @@ async function handle(
         ) {
           await replyToFastSessionCommand(auth, {
             sessionId: session.fastConversationId,
-            text: isSessionSecretToolsExperimentEnabled(user?.metadata)
-              ? 'I saved an API key approval securely for this Session. Check list_session_secrets for ready approvals and continue the requested work using only the approved methods and destination. Attached coding runs may use this same approval. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.'
-              : 'I saved an API key approval securely for this Session. Credential-backed Session access is temporarily unavailable. Explain that the approval was saved but cannot currently be used; do not attempt a credential-backed request or ask me to paste credentials into chat.',
+            text: buildIntegrationSavedContinuation(
+              serviceCredentialToolsEnabled,
+            ),
           });
           resumed = true;
         }
@@ -149,9 +119,9 @@ async function handle(
       }
       return NextResponse.json({ secret, resumed }, { status: 201, headers });
     }
-    const args = sessionSecretRevokeSchema.safeParse(rawArgs);
+    const args = serviceCredentialRevokeSchema.safeParse(rawArgs);
     if (!args.success) return error(400);
-    await revokeSessionSecret(context, args.data);
+    await revokeServiceCredential(context, args.data);
     return new NextResponse(null, { status: 204, headers });
   } catch {
     // Never log request values, validation details, or upstream exception messages.

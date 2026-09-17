@@ -462,3 +462,15 @@ Save a memory by calling the \`save_memory\` native tool (not a Brain tool). Roo
 Save when the user explicitly asks you to remember something, or states a durable preference, decision, correction, or fact that will materially help future conversations. Keep each memory concise and self-contained: one fact per call, phrased so a future agent can act on it without this conversation's context.
 
 Do not save secrets or credentials, transient requests, casual chatter, speculative conclusions, or facts already durable in a connected source the Brain ingests. When you save, tell the user plainly that you have remembered it; do not promise instant recall.`;
+
+/**
+ * Caps on agent-authored task memory. A memory is a distillation for future
+ * agents, not a transcript, and the same numbers must reach the agent through
+ * the tool schema so a rejection never arrives as a bare 400.
+ */
+export const TASK_MEMORY_LIMITS = {
+  outcomeMaxChars: 2_000,
+  rationaleMaxChars: 2_000,
+  listEntryMaxChars: 1_000,
+  listMaxEntries: 20,
+} as const;

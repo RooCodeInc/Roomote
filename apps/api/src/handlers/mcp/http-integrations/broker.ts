@@ -7,13 +7,13 @@ import {
 } from '@roomote/sdk/server/safe-fetch';
 import { z } from 'zod';
 import {
-  recordSessionSecretAudit,
-  resolveOwnedSessionSecret,
-  SessionSecretUnavailableError,
-  type SessionSecretContext,
+  recordServiceCredentialAudit,
+  resolveOwnedServiceCredential,
+  ServiceCredentialUnavailableError,
+  type ServiceCredentialContext,
 } from '@roomote/db/server';
-import { redactEcho } from '@roomote/sdk/server/session-secrets';
-import { isSessionEgressCredentialHeaderName } from '@roomote/types';
+import { redactEcho } from '@roomote/sdk/server/service-credentials';
+import { isCredentialEgressCredentialHeaderName } from '@roomote/types';
 
 /**
  * Fail-closed broker errors keep their client-facing message but carry a
@@ -44,7 +44,7 @@ const abortReasons: Record<string, string> = {
  */
 export function integrationFailureReason(error: unknown): string {
   if (error instanceof IntegrationRequestError) return error.reason;
-  if (error instanceof SessionSecretUnavailableError) return error.reason;
+  if (error instanceof ServiceCredentialUnavailableError) return error.reason;
   if (!(error instanceof Error)) return 'unknown';
   const name = error.name || 'Error';
   if (abortReasons[name]) return abortReasons[name];
@@ -203,7 +203,7 @@ export const integrationRequestSchema = z
     accept: z
       .enum(['application/json', 'text/plain'])
       .nullish()
-      .describe('Optional response preference for Session grants only.'),
+      .describe('Optional response preference for integration keys only.'),
   })
   .strict();
 
@@ -233,13 +233,13 @@ let active = 0;
 const scopes = new Map<string, number>();
 
 /**
- * Operator-manifest requests and `session:` grant reads share this broker.
+ * Operator-manifest requests and `session:` grant requests share this broker.
  *
- * For `session:` IDs this is the read-only floor: a GET or HEAD made by the
- * API itself, available on every compute provider and to Fast. It is never
- * widened; a grant's `allowedMethods` apply to the session egress proxy
- * (`apps/api/src/handlers/session-egress-proxy`), where attached runs use
- * ordinary clients with a delivered substitute token.
+ * For `session:` IDs the request is made by the API itself, available on
+ * every compute provider and to Fast, and limited to the grant's approved
+ * `allowedMethods` on any path under the origin. The same policy applies to
+ * the credential egress proxy (`apps/api/src/handlers/credential-egress-proxy`),
+ * where attached runs use ordinary clients with a delivered substitute token.
  */
 export async function integrationRequest(
   config: HttpIntegrationsConfig,
@@ -247,7 +247,7 @@ export async function integrationRequest(
   input: unknown,
   userId: string,
   signal?: AbortSignal,
-  resolveContext?: () => Promise<SessionSecretContext>,
+  resolveContext?: () => Promise<ServiceCredentialContext>,
 ) {
   // The reserved prefix cannot collide with operator manifest IDs.
   const parsed = integrationRequestSchema.safeParse(input);
@@ -282,7 +282,7 @@ export async function integrationRequest(
       throw error;
     }
   }
-  let audit: Parameters<typeof recordSessionSecretAudit>[0] = {
+  let audit: Parameters<typeof recordServiceCredentialAudit>[0] = {
     secretRef: secretRef.data,
     outcome: 'denied',
   };
@@ -292,9 +292,9 @@ export async function integrationRequest(
       throw new IntegrationRequestError('context_unavailable');
     if (!parsed.success) throw new IntegrationRequestError('malformed_request');
     const context = await resolveContext();
-    const grant = await resolveOwnedSessionSecret(context, secretRef.data);
+    const grant = await resolveOwnedServiceCredential(context, secretRef.data);
     const args = parsed.data;
-    if (args.method !== 'GET' && args.method !== 'HEAD')
+    if (!grant.allowedMethods.includes(args.method))
       throw new IntegrationRequestError('method_not_allowed');
     if (args.path.length > 2048)
       throw new IntegrationRequestError('path_too_long');
@@ -308,7 +308,7 @@ export async function integrationRequest(
     if (
       origin.protocol !== 'https:' ||
       origin.origin !== grant.origin ||
-      !isSessionEgressCredentialHeaderName(grant.headerName) ||
+      !isCredentialEgressCredentialHeaderName(grant.headerName) ||
       !['', 'Bearer ', 'Basic ', 'Token '].includes(grant.headerPrefix) ||
       (grant.headerName !== 'authorization' && grant.headerPrefix !== '')
     )
@@ -320,9 +320,9 @@ export async function integrationRequest(
         live.userId !== context.userId
       )
         throw new IntegrationRequestError('binding_changed');
-      await resolveOwnedSessionSecret(live, secretRef.data);
+      await resolveOwnedServiceCredential(live, secretRef.data);
     };
-    await recordSessionSecretAudit({ ...audit, outcome: 'started' });
+    await recordServiceCredentialAudit({ ...audit, outcome: 'started' });
     const result = await performIntegrationRequest(
       {
         integrations: [
@@ -330,10 +330,10 @@ export async function integrationRequest(
             id: args.integrationId,
             description: grant.label,
             origin: grant.origin,
-            rules: [
-              { method: 'GET', pathPrefix: '/' },
-              { method: 'HEAD', pathPrefix: '/' },
-            ],
+            rules: grant.allowedMethods.map((method) => ({
+              method,
+              pathPrefix: '/',
+            })),
             credential: {
               header: grant.headerName,
               prefix: grant.headerPrefix,
@@ -348,7 +348,7 @@ export async function integrationRequest(
       signal,
       { value: grant.value, expiresAt: grant.expiresAt, revalidate },
     );
-    await recordSessionSecretAudit({
+    await recordServiceCredentialAudit({
       ...audit,
       id: completionId,
       outcome: 'succeeded',
@@ -361,9 +361,9 @@ export async function integrationRequest(
     // Bounded metadata only: the audit row and this line carry no path,
     // query, header, body, credential or upstream error text.
     console.warn(
-      `[HTTP integrations] Session grant request ${outcome} (scope=${scope}, secretRef=${secretRef.data}, method=${parsed.success ? parsed.data.method : 'invalid'}, reason=${integrationFailureReason(error)})`,
+      `[HTTP integrations] integration key request ${outcome} (scope=${scope}, secretRef=${secretRef.data}, method=${parsed.success ? parsed.data.method : 'invalid'}, reason=${integrationFailureReason(error)})`,
     );
-    await recordSessionSecretAudit({
+    await recordServiceCredentialAudit({
       ...audit,
       id: completionId,
       outcome,
@@ -383,7 +383,8 @@ async function performIntegrationRequest(
   signal?: AbortSignal,
   sessionGrant?: {
     value: string;
-    expiresAt: string;
+    /** Null: the grant is kept until revoked. */
+    expiresAt: string | null;
     revalidate: () => Promise<void>;
   },
 ) {
@@ -453,7 +454,12 @@ async function performIntegrationRequest(
       connect: createGuardedConnectOptions({ allowedPrivateCidrs: undefined }),
     });
     const timeoutMs = sessionGrant
-      ? Math.min(10_000, Date.parse(sessionGrant.expiresAt) - Date.now())
+      ? Math.min(
+          10_000,
+          sessionGrant.expiresAt
+            ? Date.parse(sessionGrant.expiresAt) - Date.now()
+            : 10_000,
+        )
       : 30_000;
     if (timeoutMs <= 0) throw new IntegrationRequestError('grant_expired');
     const timeout = AbortSignal.timeout(timeoutMs);

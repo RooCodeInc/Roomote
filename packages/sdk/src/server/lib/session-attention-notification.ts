@@ -7,6 +7,7 @@ import {
   db,
   desc,
   eq,
+  getUserChatInitiationProvider,
   getSessionForTask,
   gt,
   isNotNull,
@@ -23,7 +24,7 @@ import {
   fastAgentMessages,
   users,
 } from '@roomote/db/server';
-import { isSessionUserPresent } from '@roomote/redis';
+import { isSessionUserPresent, isSessionVoiceCallActive } from '@roomote/redis';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   extractAcpMessageText,
@@ -179,6 +180,21 @@ async function deliverNotification(
       await markOutcome(claim.id, claim.leaseToken, 'skipped_present', tx);
       return 'skipped';
     }
+    const voiceCallActive = subject.fastConversationId
+      ? await isSessionVoiceCallActive({
+          sessionId: subject.sessionId,
+          userId: subject.userId,
+        }).catch((error) => {
+          console.warn(
+            `[sessionAttentionNotification] Voice state lookup failed for ${subject.eventKey}; notifying defensively: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return false;
+        })
+      : false;
+    if (voiceCallActive) {
+      await markOutcome(claim.id, claim.leaseToken, 'skipped_present', tx);
+      return 'skipped';
+    }
 
     const responseText = subject.message?.trim();
     const notificationText =
@@ -237,6 +253,10 @@ async function deliverNotification(
       includeInitialMessage: false,
       ...(continuation ? { continuation } : {}),
     });
+    const preferredProvider = await getUserChatInitiationProvider(
+      subject.userId,
+      tx,
+    );
     const { receipts } = await sendUserDirectMessageBestEffortWithReceipts({
       userId: subject.userId,
       text: notificationText,
@@ -244,6 +264,7 @@ async function deliverNotification(
       logContext: 'sessionAttentionNotification',
       idempotencyKey: buildIdempotencyKey(subject.sessionId, subject.eventKey),
       ...(previousDelivery ? { replyAnchor: previousDelivery.receipt } : {}),
+      ...(preferredProvider ? { preferredProvider } : {}),
       presentation: initialPresentation,
       replyPresentation,
     });
@@ -291,6 +312,7 @@ export async function notifyDirectWebTaskAttention(
           initiatorKind: true,
           trigger: true,
           surface: true,
+          privacy: true,
           prompt: true,
         },
       },
@@ -298,6 +320,7 @@ export async function notifyDirectWebTaskAttention(
   });
   if (
     !run?.task ||
+    run.task.privacy === 'private' ||
     run.task.surface !== 'web' ||
     run.task.trigger !== 'manual' ||
     run.task.initiatorKind !== 'user' ||
@@ -363,11 +386,13 @@ export async function notifyFastWebSessionAttention(
       id: true,
       ownerUserId: true,
       sourceSurface: true,
+      privacy: true,
     },
   });
   if (
     !session?.ownerUserId ||
     session.sourceSurface !== 'web' ||
+    session.privacy === 'private' ||
     input.manual !== true
   ) {
     return 'not_applicable';

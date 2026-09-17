@@ -108,37 +108,44 @@ export async function initializeRepositories(
     workspaceManager.configure({ gitAuthorName, gitAuthorEmail }),
   );
 
+  const indexOnDemandRepositories = async (
+    preparedRepoPaths: Record<string, string> = {},
+  ) => {
+    // Checkouts left by a previous run (snapshot resume) are kept as-is.
+    const onDemandRepositories = await timedStep(
+      logger,
+      'initializeRepositories: list repositories',
+      () =>
+        listOnDemandRepositories({
+          sourceControlProvider: resolvedSourceControlProvider,
+          repositoryProviders,
+        }),
+    );
+    const repoPaths = {
+      ...discoverClonedRepositoryPaths(workspaceRoot, onDemandRepositories),
+      ...preparedRepoPaths,
+    };
+    const clonedCount = Object.keys(repoPaths).length;
+
+    writeRepositoriesManifest({
+      workspaceRoot,
+      repositories: onDemandRepositories,
+      clonedPaths: repoPaths,
+    });
+    logger.userLog.info(
+      `Indexed ${pluralizeRepositories(onDemandRepositories.length)} for on-demand checkout${
+        clonedCount > 0
+          ? ` (${pluralizeRepositories(clonedCount)} already checked out)`
+          : ''
+      }`,
+    );
+
+    return { onDemandRepositories, repoPaths };
+  };
   const prepareOnDemandWorkspace =
     async (): Promise<PrepareWorkspaceResult> => {
-      // Checkouts left by a previous run (snapshot resume) are kept as-is.
-      const onDemandRepositories = await timedStep(
-        logger,
-        'initializeRepositories: list repositories',
-        () =>
-          listOnDemandRepositories({
-            sourceControlProvider: resolvedSourceControlProvider,
-            repositoryProviders,
-          }),
-      );
-      const repoPaths = discoverClonedRepositoryPaths(
-        workspaceRoot,
-        onDemandRepositories,
-      );
-      const clonedCount = Object.keys(repoPaths).length;
-
-      writeRepositoriesManifest({
-        workspaceRoot,
-        repositories: onDemandRepositories,
-        clonedPaths: repoPaths,
-      });
-      logger.userLog.info(
-        `Indexed ${pluralizeRepositories(onDemandRepositories.length)} for on-demand checkout${
-          clonedCount > 0
-            ? ` (${pluralizeRepositories(clonedCount)} already checked out)`
-            : ''
-        }`,
-      );
-
+      const { onDemandRepositories, repoPaths } =
+        await indexOnDemandRepositories();
       const repoLocalSkills = await discoverWorkspaceRepoLocalSkills({
         repoPaths,
         repoFullNamesByDir: Object.fromEntries(
@@ -154,6 +161,12 @@ export async function initializeRepositories(
         onDemandRepositories,
       };
     };
+  const indexAdditionalRepositories = async (
+    repoPaths: Record<string, string>,
+  ) =>
+    Object.keys(repositoryProviders ?? {}).length > 0
+      ? (await indexOnDemandRepositories(repoPaths)).onDemandRepositories
+      : undefined;
 
   switch (workspace.type) {
     case 'no_repositories': {
@@ -213,6 +226,9 @@ export async function initializeRepositories(
           ]),
         ),
       });
+      const onDemandRepositories = await indexAdditionalRepositories(
+        environment.repoPaths,
+      );
 
       return {
         workspacePath: workspaceRoot,
@@ -220,6 +236,7 @@ export async function initializeRepositories(
         repoPaths: environment.repoPaths,
         repoLocalSkills,
         usesSharedWorkspaceRoot: true,
+        ...(onDemandRepositories ? { onDemandRepositories } : {}),
       };
     }
 
@@ -338,12 +355,15 @@ export async function initializeRepositories(
               ]),
             ),
           });
+          const onDemandRepositories =
+            await indexAdditionalRepositories(repoPaths);
 
           return {
             workspacePath: workspaceRoot,
             repoPaths,
             repoLocalSkills,
             usesSharedWorkspaceRoot: true,
+            ...(onDemandRepositories ? { onDemandRepositories } : {}),
             repositoryPreparationOutcome: {
               mode: 'continued',
               workspaceType: workspace.type,
@@ -380,12 +400,14 @@ export async function initializeRepositories(
           ]),
         ),
       });
+      const onDemandRepositories = await indexAdditionalRepositories(repoPaths);
 
       return {
         workspacePath: workspaceRoot,
         repoPaths,
         repoLocalSkills,
         usesSharedWorkspaceRoot: true,
+        ...(onDemandRepositories ? { onDemandRepositories } : {}),
       };
     }
 
@@ -426,12 +448,14 @@ export async function initializeRepositories(
         repoPaths,
         repoFullNamesByDir: { [repoName]: workspace.repository },
       });
+      const onDemandRepositories = await indexAdditionalRepositories(repoPaths);
 
       return {
         workspacePath: workspaceRoot,
         repoPaths,
         repoLocalSkills,
         usesSharedWorkspaceRoot: true,
+        ...(onDemandRepositories ? { onDemandRepositories } : {}),
       };
     }
   }

@@ -324,6 +324,14 @@ export async function processSlackWorkflowFunctionExecuted(params: {
     // The step's outputs point at the Session that now owns the request.
     const fastSession = await getOrCreateFastAgentSession({
       userId: fastUserId,
+      ...(initiator.kind === 'user'
+        ? {
+            userInitiated: {
+              surface: 'slack' as const,
+              trigger: 'message' as const,
+            },
+          }
+        : {}),
       conversation: {
         surface: 'slack',
         workspaceId: context.teamId,

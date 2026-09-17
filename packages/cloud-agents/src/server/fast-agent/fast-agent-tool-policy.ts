@@ -13,15 +13,26 @@ export {
   type FastAgentNativeToolName,
 };
 
+const FAST_AGENT_DISABLED_NATIVE_TOOLS = new Set<FastAgentNativeToolName>([
+  FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
+]);
+
+export function isFastAgentNativeToolEnabled(
+  name: FastAgentNativeToolName,
+): boolean {
+  return !FAST_AGENT_DISABLED_NATIVE_TOOLS.has(name);
+}
+
 export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
   '*': false,
   task: true,
   ...Object.fromEntries(
     Object.values(FAST_AGENT_NATIVE_TOOL_NAMES).map((name) => [name, true]),
   ),
-  [FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret]: false,
-  [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets]: false,
-  [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret]: false,
+  [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]: false,
+  [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: false,
+  [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential]: false,
+  [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]: false,
 };
 
 export const FAST_AGENT_SUBAGENT_TOOL_FILTER: Record<string, boolean> = {
@@ -56,17 +67,21 @@ export function buildFastAgentToolFilter(
   integrationIds: string[],
   options: {
     surface?: FastAgentSurface;
-    sessionSecretToolsEnabled?: boolean;
+    serviceCredentialToolsEnabled?: boolean;
+    serviceCredentialPrepareEnabled?: boolean;
+    addRemoteMcpEnabled?: boolean;
   } = {},
 ): Record<string, boolean> {
   return {
     ...FAST_AGENT_NATIVE_TOOL_FILTER,
-    [FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret]:
-      options.sessionSecretToolsEnabled === true,
-    [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets]:
-      options.sessionSecretToolsEnabled === true,
-    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret]:
-      options.sessionSecretToolsEnabled === true,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]:
+      options.serviceCredentialPrepareEnabled ??
+      options.serviceCredentialToolsEnabled === true,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]:
+      options.serviceCredentialToolsEnabled === true,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential]: false,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]:
+      options.addRemoteMcpEnabled === true,
     ...(options.surface && options.surface !== 'web'
       ? {
           [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: false,

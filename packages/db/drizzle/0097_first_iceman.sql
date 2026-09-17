@@ -1,0 +1,1 @@
+CREATE INDEX "task_runs_canceled_launch_idempotency_key_idx" ON "task_runs" USING btree (("payload"->>'launchIdempotencyKey')) WHERE "task_runs"."payload"->>'launchIdempotencyKey' IS NOT NULL AND "task_runs"."canceled_at" IS NOT NULL;

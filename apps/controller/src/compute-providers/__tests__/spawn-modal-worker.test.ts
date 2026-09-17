@@ -129,7 +129,7 @@ describe('spawnModalWorker', () => {
     mockPrimeEnvironmentOidcForMachine.mockResolvedValue(undefined);
   });
 
-  it('carries the Session egress bootstrap env and admits after the worker launches', async () => {
+  it('carries the Credential egress bootstrap env and admits after the worker launches', async () => {
     const admit = vi.fn().mockResolvedValue({
       workloadId: 'w1',
       generation: 1,
@@ -138,8 +138,8 @@ describe('spawnModalWorker', () => {
     const planApiProxy = vi.fn().mockResolvedValue({
       required: true,
       bootstrapEnv: {
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
       },
       admit,
     });
@@ -154,14 +154,12 @@ describe('spawnModalWorker', () => {
       modalBaseImageRef: 'ghcr.io/roomote/worker:test',
       modalVmMemoryMiB: 8192,
       modalTimeoutMs: 60_000,
-      sessionEgress: { planApiProxy } as never,
+      credentialEgress: { planApiProxy } as never,
     });
     expect(planApiProxy).toHaveBeenCalledWith({ taskRun, provider: 'modal' });
-    const extraEnv = vi.mocked(buildModalWorkerEnv).mock.calls.at(-1)![0]
-      .extraEnv as Record<string, string>;
-    expect(extraEnv).toMatchObject({
-      ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
-      ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+    expect(mockRunCommand.mock.calls.at(-1)![0].env).toMatchObject({
+      ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+      ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
     });
     // Admission runs only once the worker is launched and waiting.
     expect(mockRunCommand).toHaveBeenCalledOnce();
@@ -190,27 +188,27 @@ describe('spawnModalWorker', () => {
         modalBaseImageRef: 'ghcr.io/roomote/worker:test',
         modalVmMemoryMiB: 8192,
         modalTimeoutMs: 60_000,
-        sessionEgress: { planApiProxy } as never,
+        credentialEgress: { planApiProxy } as never,
       },
     );
     const extraEnv = vi.mocked(buildModalWorkerEnv).mock.calls.at(-1)![0]
       .extraEnv as Record<string, string>;
     expect(extraEnv).not.toHaveProperty(
-      'ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED',
+      'ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED',
     );
   });
 
-  it('cleans up the sandbox when Session egress admission fails after launch', async () => {
+  it('cleans up the sandbox when Credential egress admission fails after launch', async () => {
     const planApiProxy = vi.fn().mockResolvedValue({
       required: true,
       bootstrapEnv: {
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED: '1',
-        ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
       },
       admit: vi
         .fn()
         .mockRejectedValue(
-          new Error('Session egress bootstrap admission timed out'),
+          new Error('Credential egress bootstrap admission timed out'),
         ),
     });
     await expect(
@@ -227,10 +225,10 @@ describe('spawnModalWorker', () => {
           modalBaseImageRef: 'ghcr.io/roomote/worker:test',
           modalVmMemoryMiB: 8192,
           modalTimeoutMs: 60_000,
-          sessionEgress: { planApiProxy } as never,
+          credentialEgress: { planApiProxy } as never,
         },
       ),
-    ).rejects.toThrow('Session egress bootstrap admission timed out');
+    ).rejects.toThrow('Credential egress bootstrap admission timed out');
     expect(mockCleanupModalInstance).toHaveBeenCalledWith(
       expect.objectContaining({
         instanceId: 'modal-machine-123',

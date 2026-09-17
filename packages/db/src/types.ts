@@ -56,7 +56,6 @@ import type {
   discordGatewaySessions,
   teamsInstallations,
   teamsUserMappings,
-  slackFastIntegrationCalls,
   linearPendingSelections,
   environmentVariables,
   environments,
@@ -322,18 +321,6 @@ export type FastAgentProviderMessage =
 
 export type CreateFastAgentProviderMessage = Omit<
   typeof fastAgentProviderMessages.$inferInsert,
-  Generated
->;
-
-/**
- * slackFastIntegrationCalls
- */
-
-export type SlackFastIntegrationCall =
-  typeof slackFastIntegrationCalls.$inferSelect;
-
-export type CreateSlackFastIntegrationCall = Omit<
-  typeof slackFastIntegrationCalls.$inferInsert,
   Generated
 >;
 

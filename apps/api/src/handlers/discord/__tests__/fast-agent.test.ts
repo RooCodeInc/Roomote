@@ -123,7 +123,7 @@ vi.mock('../task-orchestration.js', () => ({
   startNewDiscordTask: mocks.startTask,
 }));
 
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
 
 import {
   getDiscordFastLaunchSourceEventId,
@@ -263,6 +263,7 @@ describe('processDiscordFastAgentMessage', () => {
     expect(mocks.getSession).toHaveBeenCalledWith({
       userId: 'acting-user',
       conversation,
+      userInitiated: { surface: 'discord', trigger: 'message' },
     });
     expect(mocks.fetchHistory).toHaveBeenCalledWith({
       provider,
@@ -877,6 +878,61 @@ describe('processDiscordFastAgentMessage', () => {
       text: 'Reconnected to the inference provider.',
     });
     expect(mocks.reply).toHaveBeenCalledTimes(2);
+  });
+
+  it('launches the blank-slate sentinel as the repo without resolving an environment', async () => {
+    // The tool advertises "__no_repositories__" for a sandbox with nothing
+    // checked out; looking that up as an environment id fails as a
+    // malformed uuid and the launch dies before it starts.
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: {
+          launchTask: (input: {
+            prompt: string;
+            environmentId: string;
+            parentSessionId: string;
+            postKickoff: () => Promise<void>;
+          }) => Promise<unknown>;
+        };
+      }) =>
+        adapter.launchTask({
+          prompt: 'Research the article and report back.',
+          environmentId: NO_REPOSITORIES,
+          parentSessionId: 'session-1',
+          postKickoff: vi.fn().mockResolvedValue(undefined),
+        }),
+    );
+
+    await processDiscordFastAgentMessage({
+      event: { eventId: 'event-1' } as never,
+      question: 'Would this make you more powerful?',
+      sender: { id: 'discord-user-1', username: 'matt' } as never,
+      senderUserId: 'user-1',
+      provider: {} as never,
+      applicationId: 'application-1',
+      channel: {
+        channelId: 'channel-1',
+        guildId: null,
+        isDirectMessage: true,
+        isThread: false,
+      } as never,
+      metadata: {
+        communicationChannelId: 'channel-1',
+      } as never,
+      conversationId: 'channel-1',
+    });
+
+    expect(mocks.resolveWorkspace).not.toHaveBeenCalled();
+    expect(mocks.startTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace: {
+          repoForPayload: NO_REPOSITORIES,
+          workspaceDisplayName: 'blank slate',
+        },
+      }),
+    );
   });
 
   it('launches the all-repositories sentinel without resolving an environment', async () => {

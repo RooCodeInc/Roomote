@@ -60,6 +60,7 @@ export function AuthForm({
   hideModeSwitchMessage = false,
   noticeMessage = null,
   accountLinkHelpText = null,
+  passwordResetAvailable = false,
 }: {
   enabledProviders?: AuthProvider[];
   /**
@@ -79,6 +80,7 @@ export function AuthForm({
    */
   noticeMessage?: string | null;
   accountLinkHelpText?: string | null;
+  passwordResetAvailable?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -211,6 +213,7 @@ export function AuthForm({
               <EmailPasswordAuth
                 redirectUrl={redirectUrl}
                 accountLinkHelpText={accountLinkHelpText}
+                passwordResetAvailable={passwordResetAvailable}
                 allowSignUp={canSignUp}
                 labelsAsPlaceholders={true}
                 hideModeSwitchMessage={

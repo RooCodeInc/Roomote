@@ -7,6 +7,7 @@ import {
   eq,
   isNotNull,
   isNull,
+  isDeploymentExperimentEnabled,
   or,
   sql,
   tasks,
@@ -19,7 +20,6 @@ import {
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
-import { getPersonalPreferencesCommand } from './preferences';
 
 export type ResultInboxItem = {
   id: string;
@@ -56,8 +56,8 @@ function githubRepositoryUrl(
   }
 }
 
-async function assertResultsEnabled(auth: UserAuthSuccess) {
-  if (!(await getPersonalPreferencesCommand(auth)).resultsPageEnabled) {
+async function assertResultsEnabled() {
+  if (!(await isDeploymentExperimentEnabled('results'))) {
     throw new Error('Results is not enabled.');
   }
 }
@@ -73,7 +73,7 @@ const visibleSuggestion = (userId: string) =>
 export async function listResultsCommand(
   auth: UserAuthSuccess,
 ): Promise<ResultInboxItem[]> {
-  await assertResultsEnabled(auth);
+  await assertResultsEnabled();
   const [reports, suggestions] = await Promise.all([
     db
       .select({
@@ -181,7 +181,7 @@ export async function listResultsCommand(
 }
 
 export async function getUnreadResultCountCommand(auth: UserAuthSuccess) {
-  if (!(await getPersonalPreferencesCommand(auth)).resultsPageEnabled) return 0;
+  if (!(await isDeploymentExperimentEnabled('results'))) return 0;
   const [reportRows, suggestionRows] = await Promise.all([
     db
       .select({ count: count() })
@@ -217,7 +217,7 @@ export async function actOnResultCommand(
     action: 'accept' | 'ignore';
   },
 ) {
-  await assertResultsEnabled(auth);
+  await assertResultsEnabled();
   const now = new Date();
   const values =
     input.action === 'accept'
@@ -256,7 +256,7 @@ export async function actOnResultCommand(
 }
 
 export async function clearResultsCommand(auth: UserAuthSuccess) {
-  await assertResultsEnabled(auth);
+  await assertResultsEnabled();
   const now = new Date();
   await Promise.all([
     db

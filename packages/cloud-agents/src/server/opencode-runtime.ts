@@ -215,6 +215,9 @@ export const NON_TASK_TOOL_PERMISSION_DENIALS = {
   external_directory: 'deny',
   todowrite: 'deny',
   question: 'deny',
+  // OpenCode's built-in fetch executes on this control-plane host and only
+  // validates the URL scheme. Keep it denied until requests are isolated or
+  // every DNS resolution and redirect hop is constrained to public networks.
   webfetch: 'deny',
   websearch: 'deny',
   lsp: 'deny',

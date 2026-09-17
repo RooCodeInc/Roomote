@@ -23,7 +23,7 @@ import {
 } from '@roomote/slack';
 import {
   getBackgroundAgentSettingsForDeployment,
-  isPeerConversationsExperimentEnabledForUser,
+  isDeploymentExperimentEnabled,
   type SlackInstallation,
   type SlackUserMapping,
 } from '@roomote/db/server';
@@ -217,9 +217,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   });
   const peerConversationsExperimentEnabled =
     fastSessionOwner?.kind === 'user' &&
-    (await isPeerConversationsExperimentEnabledForUser(
-      fastSessionOwner.userId,
-    ));
+    (await isDeploymentExperimentEnabled('slackPeerConversations'));
   if (peerConversationsExperimentEnabled) {
     return { shouldRoute: true, peerConversationsExperimentEnabled: true };
   }
@@ -1069,6 +1067,7 @@ export function startFastAgentResponse(params: {
     run: ({ onAccepted, onRejected }) =>
       processFastAgentMessage({
         ...fastAgentParams,
+        userInitiated: delegatedTaskInitiator?.kind !== 'automation',
         roomoteSlackUserId: params.slackInstallation.botUserId ?? undefined,
         peerConversationsExperimentEnabled:
           params.peerConversationsExperimentEnabled,

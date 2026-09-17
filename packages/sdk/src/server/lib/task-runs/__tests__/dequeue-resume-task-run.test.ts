@@ -309,6 +309,61 @@ describe('dequeueResumeTaskRun', () => {
     );
   });
 
+  it.each(['github', 'gitlab'] as const)(
+    'cancels and releases a private %s resume when read-only credential setup throws',
+    async (provider) => {
+      const resumeRun = makeSnapshotResumeRun(
+        {
+          payload: {
+            sourceRunId: 99,
+            sourceSnapshotId: 'snap-1',
+            repo: 'owner/repo',
+            environmentId: 'env-1',
+            sourceControlProvider: provider,
+          },
+        },
+        {
+          privacy: 'private',
+          privateOwnerUserId: 'user-1',
+        },
+      );
+      mockTxExecute.mockResolvedValue([{ id: resumeRun.id }]);
+      mockTxFindFirstTaskRuns.mockResolvedValueOnce(resumeRun);
+      mockCreateSourceControlTokenForTaskRun.mockRejectedValueOnce(
+        new Error(
+          'Private tasks require proxy-held read-only source-control credentials.',
+        ),
+      );
+
+      await expect(
+        dequeueResumeTaskRun({ orgId: 'org-1' } as never, {
+          runId: resumeRun.id,
+        }),
+      ).resolves.toBeUndefined();
+      expect(mockCreateSourceControlTokenForTaskRun).toHaveBeenCalledWith(
+        resumeRun,
+        '[dequeueResumeTaskRun]',
+        { readOnly: true },
+      );
+      expect(mockRecordSnapshotResumeEvent).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          eventType: 'failed',
+          details: expect.objectContaining({
+            reason: 'source_control_token_creation_failed',
+            provider,
+            error: expect.stringContaining('proxy-held read-only'),
+          }),
+        }),
+      );
+      expect(mockCancelAndReleaseTaskRun).toHaveBeenCalledWith(
+        resumeRun,
+        'Failed to create source control token.',
+        '[dequeueResumeTaskRun]',
+      );
+    },
+  );
+
   it('marks resumed setup onboarding jobs when routing resolves /setup', async () => {
     const resumeRun = makeSnapshotResumeRun();
 

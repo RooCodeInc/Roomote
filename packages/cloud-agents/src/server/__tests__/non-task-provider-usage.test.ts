@@ -507,6 +507,13 @@ describe('resolveOpenCodeSmallModel', () => {
     const onAssistantTextUpdated = vi.fn();
     const session: { id?: string } = {};
 
+    expect(FAST_AGENT_SESSION_PERMISSIONS).toEqual(
+      expect.arrayContaining([
+        { permission: 'task', pattern: '*', action: 'allow' },
+        { permission: 'webfetch', pattern: '*', action: 'deny' },
+      ]),
+    );
+
     await expect(
       generateTrackedNonTaskTextInOpenCodeSession(
         {
@@ -2261,6 +2268,24 @@ describe('resolveOpenCodeSmallModel', () => {
       }),
     ).toMatchObject({ retryable: false });
   });
+
+  it.each(['fetch failed', 'request terminated'])(
+    'classifies a wrapped fetch reset with root message %j',
+    async (message) => {
+      const { classifyNonTaskInferenceError } =
+        await import('../non-task-provider-usage.js');
+      const reset = Object.assign(new Error('read ECONNRESET'), {
+        code: 'ECONNRESET',
+      });
+      const error = new TypeError(message, { cause: reset });
+
+      expect(classifyNonTaskInferenceError(error)).toEqual({
+        message: 'Roomote could not reach the inference provider endpoint.',
+        reason: 'endpoint_unreachable',
+        retryable: true,
+      });
+    },
+  );
 
   it.each([
     [{ statusCode: ' 429 ', status: 401 }, 'rate_limited', true],

@@ -35,6 +35,7 @@ import {
 import {
   apiHealth,
   apiLiveness,
+  bullmqHealth,
   controllerHealth,
   github,
   gitlab,
@@ -49,9 +50,9 @@ import {
   discord,
   cloudDeploymentAccess,
   brainInference,
-  sessionEgress,
-  sessionEgressProxy,
-  sessionEgressProxyHostAlias,
+  credentialEgress,
+  credentialEgressProxy,
+  credentialEgressProxyHostAlias,
   inference,
   tts,
   mcp,
@@ -171,17 +172,17 @@ export function createApiApp(): ApiApp {
   // Uncomment this to enable verbose per-request logging.
   // app.use(logger());
 
-  // A deployment may serve the session egress proxy at the root of its own
+  // A deployment may serve the credential egress proxy at the root of its own
   // hostname so host-only SDK clients need no path prefix. The alias
   // re-dispatches through the app, so the request still passes observability,
   // token handling, route policy, and rate limits exactly once before it
-  // reaches the same route as `/api/session-egress`.
-  if (Env.R_SESSION_EGRESS_PROXY_HOST)
+  // reaches the same route as `/api/credential-egress`.
+  if (Env.R_CREDENTIAL_EGRESS_PROXY_HOST)
     app.use(
       '*',
-      sessionEgressProxyHostAlias(
+      credentialEgressProxyHostAlias(
         (request) => app.fetch(request),
-        Env.R_SESSION_EGRESS_PROXY_HOST,
+        Env.R_CREDENTIAL_EGRESS_PROXY_HOST,
       ),
     );
 
@@ -225,6 +226,7 @@ export function createApiApp(): ApiApp {
   app.route('/health/api', apiHealth);
   app.route('/health/liveness', apiLiveness);
   app.route('/health/controller', controllerHealth);
+  app.route('/health/bullmq', bullmqHealth);
 
   app.route('/api/webhooks/github', github);
   app.route('/api/webhooks/gitlab', gitlab);
@@ -240,8 +242,8 @@ export function createApiApp(): ApiApp {
   app.route('/api/internal/cloud', cloudDeploymentAccess);
   app.route('/api/inference', inference);
   app.route('/api/brain/inference', brainInference);
-  app.route('/api/internal/session-egress', sessionEgress);
-  app.route('/api/session-egress', sessionEgressProxy);
+  app.route('/api/internal/credential-egress', credentialEgress);
+  app.route('/api/credential-egress', credentialEgressProxy);
   app.route('/api/tts', tts);
   app.route('/api/mcp', mcp);
   app.route('/api/mcp-routing', mcpRouting);
