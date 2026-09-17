@@ -26,6 +26,7 @@ import {
   startFastSessionGoal,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
+  wakeFastAgentParentEventsOnTurnRelease,
   type FastAgentSurfaceReplyDelivery,
 } from '@roomote/sdk/server';
 import {
@@ -242,6 +243,9 @@ async function runWebFastAgentTurn({
       `[Fast Web] Turn lock did not become available for ${conversation.conversationId}`,
     );
     return;
+  }
+  if (durableSessionId) {
+    wakeFastAgentParentEventsOnTurnRelease(release, durableSessionId);
   }
 
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;

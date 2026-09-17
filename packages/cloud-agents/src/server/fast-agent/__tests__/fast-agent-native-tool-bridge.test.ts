@@ -133,10 +133,6 @@ describe('Fast native OpenCode tool bridge', () => {
 
     expect(installedToolFiles.sort()).toEqual(
       Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)
-        .filter(
-          (name) =>
-            name !== FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
-        )
         .map((name) => `${name}.js`)
         .sort(),
     );
@@ -1172,7 +1168,6 @@ describe('Fast native OpenCode tool bridge', () => {
       [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]: true,
-      [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential]: false,
     });
     expect(config.agent.build.tools).not.toHaveProperty('github_*');
     const toolsDirectory = join(runtime.env.OPENCODE_CONFIG_DIR!, 'tools');
@@ -1185,7 +1180,6 @@ describe('Fast native OpenCode tool bridge', () => {
         'prepare_integration_key.js',
       ]),
     );
-    expect(toolFiles).not.toContain('request_with_integration_key.js');
   });
 
   it('keeps member task inspection namespaced from native task mutations', async () => {
@@ -1956,71 +1950,10 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
-  it.each([undefined, null, ''] as const)(
-    'preserves the opaque Session request reference and empty body through the native bridge: %j',
-    async (body) => {
-      const runtime = await getFastAgentNativeToolRuntime(
-        'service-credential-bridge',
-        [],
-      );
-      const executor = vi.fn(async () => ({
-        success: true,
-        status: 200,
-        body: 'healthy',
-      }));
-      const unbind = bindFastAgentNativeToolExecutor(
-        'opencode-secret-session',
-        'persisted-conversation',
-        executor,
-        { allowSpillRecovery: false },
-      );
-      const args = {
-        secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
-        method: 'GET',
-        path: '/status',
-        ...(body === undefined ? {} : { body }),
-      };
-      try {
-        const response = await fetch(
-          runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!,
-          {
-            method: 'POST',
-            headers: {
-              authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
-              'content-type': 'application/json',
-            },
-            body: JSON.stringify({
-              sessionID: 'opencode-secret-session',
-              tool: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
-              args,
-            }),
-          },
-        );
-        expect(response.status).toBe(200);
-        expect(executor).toHaveBeenCalledExactlyOnceWith(
-          expect.objectContaining({
-            sessionId: 'opencode-secret-session',
-            name: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
-            args,
-          }),
-        );
-        expect(await response.json()).toMatchObject({
-          ok: true,
-          metadata: {
-            roomoteResult: { success: true, status: 200, body: 'healthy' },
-          },
-        });
-      } finally {
-        unbind();
-      }
-    },
-  );
-
   it.each([
     FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
     FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
     FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
-    FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
   ])('rejects unauthenticated and inactive-session %s calls', async (tool) => {
     const runtime = await getFastAgentNativeToolRuntime('native-auth', []);
     const body = JSON.stringify({

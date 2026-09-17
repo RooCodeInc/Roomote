@@ -1,6 +1,9 @@
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
-import { parseFastSessionReplyChunkEvent } from './fast-session-reply-stream';
+import {
+  parseFastSessionLiveEvent,
+  parseFastSessionReplyChunkEvent,
+} from './fast-session-reply-stream';
 
 describe('parseFastSessionReplyChunkEvent', () => {
   it('accepts an assistant_message_chunk event and derives its kind', () => {
@@ -43,5 +46,20 @@ describe('parseFastSessionReplyChunkEvent', () => {
         }),
       ),
     ).toBeUndefined();
+  });
+});
+
+describe('parseFastSessionLiveEvent', () => {
+  it('accepts a bounded task-report refresh without treating it as assistant text', () => {
+    const raw = JSON.stringify({
+      type: 'task_report_admitted',
+      eventId: 'fast-parent-child-message:report-1:user',
+      taskId: 'task-1',
+      admittedAtMs: 1_700_000_000_000,
+      publishedAtMs: 1_700_000_000_010,
+    });
+
+    expect(parseFastSessionLiveEvent(raw)).toEqual(JSON.parse(raw));
+    expect(parseFastSessionReplyChunkEvent(raw)).toBeUndefined();
   });
 });

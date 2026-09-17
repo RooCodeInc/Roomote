@@ -83,6 +83,7 @@ vi.mock('@roomote/sdk/server', () => ({
   createFastAgentConversationArtifact: mocks.createConversationArtifact,
   persistFastAgentInlineHumanTurn: vi.fn(async () => null),
   wakeFastAgentParentEventNow: vi.fn(async () => undefined),
+  wakeFastAgentParentEventsOnTurnRelease: vi.fn(),
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   resolveFastAgentSessionImages: mocks.resolveSessionImages,
   deliverFastAgentSessionVideos: mocks.deliverVideos,

@@ -121,6 +121,7 @@ export {
 } from './lib/task-runs/pull-request-mergeability-check';
 export * from './lib/manager-slack';
 export * from './lib/automation-result-metadata';
+export * from './lib/automation-result-visibility';
 export * from './automations';
 export * from './lib/manager-stats';
 export {
@@ -262,6 +263,7 @@ export {
   recoverPendingFastAgentParentEvents,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
+  wakeFastAgentParentEventsOnTurnRelease,
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';
 export {

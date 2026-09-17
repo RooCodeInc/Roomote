@@ -128,6 +128,7 @@ vi.mock('@roomote/sdk/server', () => ({
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   persistFastAgentInlineHumanTurn: vi.fn(async () => null),
   wakeFastAgentParentEventNow: vi.fn(async () => undefined),
+  wakeFastAgentParentEventsOnTurnRelease: vi.fn(),
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
 }));
 vi.mock('../../tasks/continue-session-attention-reply', () => ({

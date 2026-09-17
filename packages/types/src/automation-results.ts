@@ -7,6 +7,9 @@ export const AUTOMATION_RESULT_PRIORITIES = [
 export type AutomationResultPriority =
   (typeof AUTOMATION_RESULT_PRIORITIES)[number];
 
+/** Immutable Results-page eligibility captured when automation output is stored. */
+export type AutomationResultVisibility = 'shared' | 'private';
+
 export const AUTOMATION_RESULT_PRIORITY_LABELS: Record<
   AutomationResultPriority,
   string

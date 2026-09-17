@@ -42,6 +42,16 @@ export type FastAgentReplyChunk = {
   text: string;
 };
 
+export type FastAgentSessionRefresh = {
+  type: 'task_report_admitted';
+  eventId: string;
+  taskId: string;
+  admittedAtMs: number;
+  publishedAtMs: number;
+};
+
+export type FastAgentSessionStreamEvent = AcpMessage | FastAgentSessionRefresh;
+
 /**
  * The chunk as the task runtime would stream it. `id` is the reply's event
  * id so every chunk of one reply extends the same live message, and the
@@ -181,6 +191,25 @@ function defaultPublish(): PublishFn | undefined {
       `[Fast Agent] Reply streaming is unavailable: ${error instanceof Error ? error.message : String(error)}`,
     );
     return undefined;
+  }
+}
+
+/** Best-effort hint for open web Sessions; persisted rows remain authoritative. */
+export async function publishFastAgentSessionRefresh(
+  conversationId: string,
+  event: Omit<FastAgentSessionRefresh, 'publishedAtMs'>,
+  publish: PublishFn | undefined = defaultPublish(),
+): Promise<void> {
+  if (!publish) return;
+  try {
+    await publish(
+      getFastAgentReplyStreamChannel(conversationId),
+      JSON.stringify({ ...event, publishedAtMs: Date.now() }),
+    );
+  } catch (error) {
+    console.warn(
+      `[Fast Agent] Failed to publish a Session refresh: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 

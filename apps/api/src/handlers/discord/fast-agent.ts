@@ -35,6 +35,7 @@ import {
   resolveUserMcpServerConfigs,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
+  wakeFastAgentParentEventsOnTurnRelease,
   type FastAgentDurableTurn,
 } from '@roomote/sdk/server';
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
@@ -297,6 +298,7 @@ export async function processDiscordFastAgentMessage(
       return false;
     }
     const activeTurnLock = releaseFastAgentLock;
+    wakeFastAgentParentEventsOnTurnRelease(activeTurnLock, session.id);
     // Durable admission: the turn is persisted under this process's claim
     // before it runs, so an interruption hands it to the queue.
     durableTurn ??= await persistFastAgentInlineHumanTurn({

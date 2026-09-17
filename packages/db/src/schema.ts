@@ -93,6 +93,7 @@ import type {
   SessionWakeupSchedule,
   SessionWakeupStatus,
   AutomationResultPriority,
+  AutomationResultVisibility,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -646,6 +647,9 @@ export const workItems = pgTable(
     resultUserId: text('result_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
+    // Null marks legacy/unknown provenance and intentionally fails closed.
+    resultVisibility:
+      text('result_visibility').$type<AutomationResultVisibility>(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -4852,6 +4856,9 @@ export const automationResults = pgTable(
     userId: text('user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
+    // Null marks legacy/unknown provenance and intentionally fails closed.
+    resultVisibility:
+      text('result_visibility').$type<AutomationResultVisibility>(),
     automationName: text('automation_name').notNull(),
     content: text('content').notNull(),
     priority: text('priority')

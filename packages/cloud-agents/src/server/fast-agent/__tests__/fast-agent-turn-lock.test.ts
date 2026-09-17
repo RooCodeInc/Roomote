@@ -112,6 +112,36 @@ describe('Fast conversation turn locking', () => {
     }
   });
 
+  it('runs post-release work once and only after Redis ownership is released', async () => {
+    const calls: string[] = [];
+    const releaseRedisLock = Object.assign(
+      vi.fn(async () => {
+        calls.push('redis');
+      }),
+      {
+        renew: vi.fn().mockResolvedValue(true),
+        renewDetailed: vi.fn().mockResolvedValue('renewed'),
+      },
+    );
+    acquireRedisLockMock.mockResolvedValue(releaseRedisLock);
+    const releaseTurnLock = await acquireFastAgentTurnLock({
+      conversation: {
+        surface: 'web',
+        workspaceId: 'workspace-1',
+        conversationId: 'conversation-1',
+      },
+    });
+    expect(releaseTurnLock).not.toBeNull();
+    releaseTurnLock!.afterRelease = vi.fn(async () => {
+      calls.push('after');
+    });
+
+    await Promise.all([releaseTurnLock!(), releaseTurnLock!()]);
+
+    expect(calls).toEqual(['redis', 'after']);
+    expect(releaseTurnLock!.afterRelease).toHaveBeenCalledOnce();
+  });
+
   it('aborts the owning turn when lock renewal loses ownership', async () => {
     vi.useFakeTimers();
     try {

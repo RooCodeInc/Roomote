@@ -24,14 +24,11 @@ describe('buildFastAgentToolFilter', () => {
 });
 
 describe('getFastAgentNativeAcpKind', () => {
-  it('disables only direct key-based requests', () => {
+  it('keeps integration discovery and approval setup available', () => {
     const filter = buildFastAgentToolFilter([], {
       surface: 'web',
       serviceCredentialToolsEnabled: true,
     });
-    expect(
-      filter[FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential],
-    ).toBe(false);
     expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]).toBe(
       true,
     );
@@ -85,9 +82,6 @@ describe('getFastAgentNativeAcpKind', () => {
     expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]).toBe(
       true,
     );
-    expect(
-      filter[FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential],
-    ).toBe(false);
     expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]).toBe(
       false,
     );

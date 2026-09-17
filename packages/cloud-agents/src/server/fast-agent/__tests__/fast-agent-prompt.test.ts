@@ -572,7 +572,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).not.toContain('`send_chat_reaction` with purpose `ack`');
     expect(prompt).toContain(
-      'A direct closeout or clarification that fully handles the turn is already the first communication',
+      'A direct closeout or clarification that fully handles the turn without bypassing required Brain recall or other investigation is already the first communication',
     );
     expect(prompt).toContain(
       'The acknowledgement streams independently of coding-task startup',
@@ -729,11 +729,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Tool arguments, results, and reasoning are retained natively',
     );
     expect(prompt).toContain('native JSON schema');
-    for (const name of [
-      'prepare_integration_key',
-      'list_integration_keys',
-      'request_with_integration_key',
-    ]) {
+    for (const name of ['prepare_integration_key', 'list_integration_keys']) {
       expect(prompt).not.toContain(name);
     }
     expect(prompt).toContain(
@@ -750,12 +746,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(enabledPrompt).toContain('`prepare_integration_key`');
     expect(enabledPrompt).toContain('`list_integration_keys`');
     expect(enabledPrompt).toContain(
-      'launch a coding task attached to this Session to use the integration',
+      'use the `_roomote_http_integrations` server for one or a few direct calls',
     );
-    expect(enabledPrompt).not.toContain('`request_with_integration_key`');
-    expect(enabledPrompt).not.toContain(
-      'for one or a few direct calls, call `request_with_integration_key` yourself',
-    );
+    expect(enabledPrompt).toContain('`integration_request` tool');
+    expect(enabledPrompt).toContain('a `session:` prefix');
     expect(enabledPrompt).toContain(
       'Never invent a reference or substitute another credential.',
     );
@@ -802,6 +796,15 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(enabledPrompt).toContain(
       'never delegate that lookup to a coding task',
+    );
+    expect(enabledPrompt).toContain(
+      'For custom integration connection, setup, and result replies, lead with the plain-language outcome',
+    );
+    expect(enabledPrompt).toContain(
+      'Omit endpoint paths, request methods, status codes, authentication jargon, and implementation or process details',
+    );
+    expect(enabledPrompt).toContain(
+      'Do not claim broader access than the completed check established; state meaningful permission limits in plain language',
     );
     const platformEventPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -1179,6 +1182,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('remain visible in the session');
     expect(prompt).toContain('Treat Brain recall as a sequential preflight');
     expect(prompt).toContain(
+      'An unfamiliar person, project, company, name, or term is a reason to retrieve relevant memory, not to immediately ask the user what it means',
+    );
+    expect(prompt).toContain(
       'durable preference, decision, correction, or fact',
     );
     expect(prompt).toContain('save_memory');
@@ -1204,7 +1210,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Use deployment MCP servers as relevant sources of truth',
     );
     expect(prompt).toContain(
-      'Ask for clarification only when ambiguity blocks meaningful investigation',
+      'Ask for clarification only after required recall and available-source inspection',
     );
     expect(prompt).toContain(
       'regardless of whether the message is phrased as a question, request, or declarative feedback',

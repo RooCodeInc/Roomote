@@ -23,6 +23,7 @@ import {
 } from '@roomote/types';
 
 import { getCommunicationProviderAdapter } from '../lib/communication-providers';
+import { resolveBackgroundAutomationResultVisibility } from '../lib/automation-result-visibility';
 import {
   buildAutomationIconUrl,
   buildManagerSlackSettingsUrl,
@@ -429,6 +430,9 @@ export async function providerUsageLimitJob(
           automationKey: 'provider_usage_limit',
           content: message.text,
           dedupeKey: `provider-usage-limit:${now.toISOString()}`,
+          visibility: await resolveBackgroundAutomationResultVisibility(
+            'provider_usage_limit',
+          ).catch(() => 'private' as const),
         })
         .catch((error) => {
           console.warn(

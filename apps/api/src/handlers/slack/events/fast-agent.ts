@@ -29,6 +29,7 @@ import {
   persistFastAgentInlineHumanTurn,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
+  wakeFastAgentParentEventsOnTurnRelease,
   type FastAgentDurableTurn,
   createSlackFastReplyStream,
   recordFastAgentConversationMessageBestEffort,
@@ -286,6 +287,7 @@ export async function processFastAgentMessage(params: {
       params.onRejected?.();
       return;
     }
+    wakeFastAgentParentEventsOnTurnRelease(activeTurnLock, session.id);
     // Durable admission: the turn is persisted under this process's claim
     // before it runs, so an interruption hands it to the queue.
     durableTurn ??= await persistFastAgentInlineHumanTurn({
