@@ -1402,10 +1402,6 @@ describe('buildFastAgentSystemPrompt', () => {
         "A permission denial is not a reason to bypass the integration's authorization",
       );
       for (const guidance of [
-        "`create_gist` is available, it uses the current member's linked GitHub account",
-        'requires an explicit `public` value',
-        'Use `public: false` unless the user explicitly requests public publishing',
-        'secret, link-accessible gist rather than private',
         'Follow their discovered descriptions, schemas, and arguments',
         'For repository writes, read the target first, send only the requested fields',
         'report success only after the tool confirms it',
@@ -1420,6 +1416,7 @@ describe('buildFastAgentSystemPrompt', () => {
       ]) {
         expect(prompt).toContain(guidance);
       }
+      expect(prompt).not.toContain('create_gist');
     },
   );
 
