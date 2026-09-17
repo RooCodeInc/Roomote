@@ -68,15 +68,17 @@ export function SessionCard({
   query?: string;
   view?: 'list' | 'board';
 }) {
+  const ownerDisplayName =
+    getUserDisplayName({
+      name: session.ownerName,
+      email: session.ownerEmail,
+    }) ?? 'Roomote';
   const actorName =
     session.ownerKind === 'user' && session.ownerUserId === viewerUserId
       ? 'You'
       : session.ownerKind === 'automation' && session.ownerAutomation
         ? formatAutomationLabel(session.ownerAutomation)
-        : (getUserDisplayName({
-            name: session.ownerName,
-            email: session.ownerEmail,
-          }) ?? 'Roomote');
+        : ownerDisplayName;
   const status = session.cachedStatus ?? 'ready';
   const surfaceLabel = getSessionSurfaceLabel(session.sourceSurface);
   const surfaceBrandIcon = getSessionSurfaceBrandIcon(session.sourceSurface);
@@ -103,10 +105,10 @@ export function SessionCard({
         ) : (
           <Avatar
             imageUrl={session.ownerImageUrl}
-            name={actorName}
+            name={ownerDisplayName}
             email={session.ownerEmail ?? undefined}
             size="md"
-            alt={actorName}
+            alt={ownerDisplayName}
           />
         )}
         {session.unread && session.ownerUserId === viewerUserId ? (

@@ -287,6 +287,15 @@ describe('SessionCard', () => {
 
     rerender(<SessionCard session={session} viewerUserId="owner-user" />);
     expect(screen.getByText('You')).toBeInTheDocument();
+    expect(screen.getByLabelText('Same Display Name')).toHaveTextContent('SD');
+    expect(screen.queryByText('Y')).not.toBeInTheDocument();
+
+    rerender(
+      <SessionCard view="board" session={session} viewerUserId="owner-user" />,
+    );
+    expect(screen.getByText('You')).toBeInTheDocument();
+    expect(screen.getByLabelText('Same Display Name')).toHaveTextContent('SD');
+    expect(screen.queryByText('Y')).not.toBeInTheDocument();
   });
 
   it.each(['list', 'board'] as const)(
