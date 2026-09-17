@@ -176,6 +176,7 @@ export function NewTaskForm({
           ...(selectedReasoningEffort !== undefined
             ? { reasoningEffort: selectedReasoningEffort }
             : {}),
+          ...(privateModeActive ? { privacy: 'private' as const } : {}),
           voiceCall: true,
         },
         { voice: true },
@@ -184,13 +185,14 @@ export function NewTaskForm({
   }, [
     openingVoiceSession,
     promptText,
+    privateModeActive,
     selectedModelOverrideId,
     selectedReasoningEffort,
   ]);
   const voiceActive = openingVoiceSession;
 
   // Voice only applies to Fast sessions; an environment launch is a task.
-  const showVoice = voiceEnabled && !environmentIdParam && !privateModeActive;
+  const showVoice = voiceEnabled && !environmentIdParam;
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {

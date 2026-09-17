@@ -1125,4 +1125,32 @@ describe('Home', () => {
     expect(voiceState.start).not.toHaveBeenCalled();
     expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1?voice=1');
   });
+
+  it('opens an owner-only private Session for a private voice call', async () => {
+    currentPrivateSessionsExperimentEnabled = true;
+    voiceState.enabled = true;
+    mockStartFastSession.mockResolvedValue({ sessionId: 'private-session-1' });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Start a private Session' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Voice conversation' }),
+    );
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: '',
+          privacy: 'private',
+          voiceCall: true,
+          conversationId: expect.any(String),
+        }),
+      );
+    });
+    expect(mockPush).toHaveBeenCalledWith(
+      '/sessions/private-session-1?voice=1',
+    );
+  });
 });
