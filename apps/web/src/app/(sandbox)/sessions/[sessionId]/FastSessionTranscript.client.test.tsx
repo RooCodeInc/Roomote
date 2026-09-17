@@ -382,8 +382,15 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
-  /** A completed `prepare_integration_key` call at `ts` that created `pendingRef`. */
-  const keyRequestMessage = (ts: number, pendingRef: string) => ({
+  /**
+   * A completed `prepare_integration_key` call at `ts` that created
+   * `pendingRef`, persisted as the tool returns it or under a result wrapper.
+   */
+  const keyRequestMessage = (
+    ts: number,
+    pendingRef: string,
+    shape: 'plain' | 'wrapped' = 'plain',
+  ) => ({
     id: `key-request-${ts}`,
     eventId: `key-request-${ts}:event`,
     turnId: `key-request-${ts}:turn`,
@@ -410,11 +417,15 @@ describe('FastSessionTranscript', () => {
       mcpToolName: null,
       toolName: 'prepare_integration_key',
       command: null,
-      output: JSON.stringify({
-        pending: { pendingRef },
-        sessionUrl:
-          'https://app.example/sessions/canonical-session#integrations',
-      }),
+      output: JSON.stringify(
+        shape === 'plain'
+          ? {
+              pending: { pendingRef },
+              sessionUrl:
+                'https://app.example/sessions/canonical-session#integrations',
+            }
+          : { success: true, result: { pending: { pendingRef } } },
+      ),
     },
     source: 'web',
     nativeSessionId: 'opencode-1',
@@ -555,7 +566,11 @@ describe('FastSessionTranscript', () => {
             text: 'Skip Figma, read Intercom instead',
             ts: 2,
           }),
-          keyRequestMessage(3, '6a1f8f1e-0000-4000-8000-000000000013'),
+          keyRequestMessage(
+            3,
+            '6a1f8f1e-0000-4000-8000-000000000013',
+            'wrapped',
+          ),
         ]}
         canReply
       />,
