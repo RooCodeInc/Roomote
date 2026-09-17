@@ -1,8 +1,13 @@
 const mocks = vi.hoisted(() => ({
+  decrypt: vi.fn((value: string) => value),
   execute: vi.fn(),
   findFirst: vi.fn(),
   resolveDeploymentEnvVar: vi.fn(),
   update: vi.fn(),
+}));
+
+vi.mock('@roomote/db/encryption', () => ({
+  decrypt: mocks.decrypt,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -40,6 +45,7 @@ describe('resolveGitHubUserAccessToken', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.decrypt.mockImplementation((value: string) => value);
     mocks.execute.mockResolvedValue(undefined);
     mocks.update.mockReturnValue({ set });
     mocks.resolveDeploymentEnvVar.mockImplementation(async (name: string) =>
@@ -61,25 +67,35 @@ describe('resolveGitHubUserAccessToken', () => {
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
-  it('returns the latest actor-owned token while it is valid', async () => {
+  it('decrypts and returns the latest actor-owned token while it is valid', async () => {
+    mocks.decrypt.mockImplementation((value: string) =>
+      value === 'encrypted-actor-token' ? 'actor-token' : value,
+    );
     mocks.findFirst.mockResolvedValue({
       id: 'mapping-1',
-      accessToken: 'actor-token',
-      refreshToken: 'refresh-token',
+      accessToken: 'encrypted-actor-token',
+      refreshToken: 'encrypted-refresh-token',
       tokenExpiresAt: new Date(now + 60 * 60 * 1000),
     });
 
     await expect(
       resolveGitHubUserAccessToken('actor-1', { now }),
     ).resolves.toBe('actor-token');
+    expect(mocks.decrypt).toHaveBeenCalledWith('encrypted-actor-token');
+    expect(mocks.decrypt).toHaveBeenCalledTimes(1);
     expect(mocks.resolveDeploymentEnvVar).not.toHaveBeenCalled();
   });
 
   it('refreshes an expiring token and persists rotated credentials for only that actor mapping', async () => {
+    mocks.decrypt.mockImplementation((value: string) => {
+      if (value === 'encrypted-expiring-token') return 'expiring-token';
+      if (value === 'encrypted-refresh-token') return 'refresh-token';
+      return value;
+    });
     mocks.findFirst.mockResolvedValue({
       id: 'mapping-1',
-      accessToken: 'expiring-token',
-      refreshToken: 'refresh-token',
+      accessToken: 'encrypted-expiring-token',
+      refreshToken: 'encrypted-refresh-token',
       tokenExpiresAt: new Date(now + 60_000),
     });
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
@@ -95,8 +111,11 @@ describe('resolveGitHubUserAccessToken', () => {
     ).resolves.toBe('refreshed-token');
     const init = fetchImpl.mock.calls[0]![1]!;
     expect(init.redirect).toBe('error');
-    expect(String(init.body)).toContain('grant_type=refresh_token');
-    expect(String(init.body)).toContain('refresh_token=refresh-token');
+    const body = new URLSearchParams(String(init.body));
+    expect(body.get('grant_type')).toBe('refresh_token');
+    expect(body.get('refresh_token')).toBe('refresh-token');
+    expect(mocks.decrypt).toHaveBeenCalledWith('encrypted-expiring-token');
+    expect(mocks.decrypt).toHaveBeenCalledWith('encrypted-refresh-token');
     expect(set).toHaveBeenCalledWith({
       accessToken: 'refreshed-token',
       refreshToken: 'rotated-refresh-token',

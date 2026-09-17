@@ -7,6 +7,7 @@ import {
   resolveDeploymentEnvVar,
   sql,
 } from '@roomote/db/server';
+import { decrypt } from '@roomote/db/encryption';
 
 const GITHUB_USER_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const GITHUB_USER_TOKEN_REFRESH_TIMEOUT_MS = 15_000;
@@ -43,19 +44,23 @@ export async function resolveGitHubUserAccessToken(
     });
 
     if (!mapping?.accessToken) return null;
+    const accessToken = decrypt(mapping.accessToken);
     if (
       !mapping.tokenExpiresAt ||
       mapping.tokenExpiresAt.getTime() >
         now + GITHUB_USER_TOKEN_REFRESH_BUFFER_MS
     ) {
-      return mapping.accessToken;
+      return accessToken;
     }
+    const refreshToken = mapping.refreshToken
+      ? decrypt(mapping.refreshToken)
+      : null;
 
     const [clientId, clientSecret] = await Promise.all([
       resolveDeploymentEnvVar('R_GITHUB_CLIENT_ID'),
       resolveDeploymentEnvVar('R_GITHUB_CLIENT_SECRET'),
     ]);
-    if (!mapping.refreshToken || !clientId?.trim() || !clientSecret?.trim()) {
+    if (!refreshToken || !clientId?.trim() || !clientSecret?.trim()) {
       throw new GitHubUserTokenError(
         'GitHub account authorization has expired. Reconnect GitHub under Settings > Linked Accounts.',
         true,
@@ -77,7 +82,7 @@ export async function resolveGitHubUserAccessToken(
             client_id: clientId.trim(),
             client_secret: clientSecret.trim(),
             grant_type: 'refresh_token',
-            refresh_token: mapping.refreshToken,
+            refresh_token: refreshToken,
           }),
           signal: AbortSignal.timeout(
             options?.timeoutMs ?? GITHUB_USER_TOKEN_REFRESH_TIMEOUT_MS,
@@ -114,19 +119,19 @@ export async function resolveGitHubUserAccessToken(
         false,
       );
     }
-    const accessToken =
+    const refreshedAccessToken =
       typeof payload.access_token === 'string' ? payload.access_token : null;
-    if (!accessToken) {
+    if (!refreshedAccessToken) {
       throw new GitHubUserTokenError(
         'GitHub account authorization could not be refreshed. Reconnect GitHub under Settings > Linked Accounts.',
         true,
       );
     }
 
-    const refreshToken =
+    const refreshedRefreshToken =
       typeof payload.refresh_token === 'string'
         ? payload.refresh_token
-        : mapping.refreshToken;
+        : refreshToken;
     const tokenExpiresAt =
       typeof payload.expires_in === 'number' && payload.expires_in > 0
         ? new Date(now + payload.expires_in * 1000)
@@ -134,8 +139,8 @@ export async function resolveGitHubUserAccessToken(
     await tx
       .update(githubUserMappings)
       .set({
-        accessToken,
-        refreshToken,
+        accessToken: refreshedAccessToken,
+        refreshToken: refreshedRefreshToken,
         tokenExpiresAt,
         updatedAt: new Date(now),
       })
@@ -146,6 +151,6 @@ export async function resolveGitHubUserAccessToken(
         ),
       );
 
-    return accessToken;
+    return refreshedAccessToken;
   });
 }
