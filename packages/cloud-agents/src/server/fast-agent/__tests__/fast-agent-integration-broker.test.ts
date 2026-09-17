@@ -796,6 +796,7 @@ describe('fast-agent integration broker', () => {
         name: 'add_reply_to_pull_request_comment',
         inputSchema: { type: 'object' },
       },
+      { name: 'create_gist', inputSchema: { type: 'object' } },
     ]);
 
     const integrations = await listFastAgentIntegrations({
@@ -814,9 +815,13 @@ describe('fast-agent integration broker', () => {
       'merge_pull_request',
       'add_issue_comment',
       'add_reply_to_pull_request_comment',
+      'create_gist',
     ]);
     expect(integrations[0]?.description).toContain(
       'including reviewer requests, draft status, merges, and comment reactions',
+    );
+    expect(integrations[0]?.description).toContain(
+      'secret, link-accessible gist, not a private gist',
     );
     expect(integrations[0]?.description).toContain(
       'Follow the discovered native tool descriptions and schemas',

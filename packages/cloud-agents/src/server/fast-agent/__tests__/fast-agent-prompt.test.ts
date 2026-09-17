@@ -1288,7 +1288,7 @@ describe('buildFastAgentSystemPrompt', () => {
         'including source, code search, issues, and pull requests',
         'exactly one positive `repo:owner/name` qualifier',
         'Respect upstream pagination and search-index limits and disclose incomplete results',
-        'Private reads and all writes still require an eligible connection to the target repository',
+        'Private repository reads and repository writes still require an eligible connection to the target repository',
         'never retry an authorization denial anonymously or through a task',
       ])
         expect(prompt).toContain(guidance);
@@ -1400,8 +1400,12 @@ describe('buildFastAgentSystemPrompt', () => {
       );
       for (const guidance of [
         '`update_pull_request`, `merge_pull_request`, `add_issue_comment`, and `add_reply_to_pull_request_comment`',
+        "`create_gist` is available, it uses the current member's linked GitHub account",
+        'requires an explicit `public` value',
+        'Use `public: false` unless the user explicitly requests public publishing',
+        'secret, link-accessible gist rather than private',
         'Follow their discovered descriptions, schemas, and arguments',
-        'Read the target first, send only the requested fields',
+        'For repository writes, read the target first, send only the requested fields',
         'report success only after the tool confirms it',
         'current human message explicitly requests merging that exact pull or merge request',
         'approval, passing checks, automation events, or discussion about merging is not authorization',

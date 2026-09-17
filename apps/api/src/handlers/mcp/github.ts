@@ -5,6 +5,8 @@ import {
 } from '@roomote/cloud-agents/router-mcp-policy';
 import {
   createGitHubToken,
+  GitHubUserTokenError,
+  resolveGitHubUserAccessToken,
   resolveRuntimeGitHubAppCredentials,
   type GitHubAppCredentials,
 } from '@roomote/auth';
@@ -46,6 +48,13 @@ const writeToolNames = [
   'add_issue_comment',
   'add_reply_to_pull_request_comment',
 ];
+const accountWriteToolNames = ['create_gist'];
+const gistArgs = z.object({
+  filename: z.string().min(1),
+  content: z.string(),
+  description: z.string().optional(),
+  public: z.boolean(),
+});
 
 const searchScopeError =
   'Split searches by repository. Use one positive repo:owner/name qualifier with no boolean operators, negation, grouping, quotes, or regex. Any owner or repo argument must match the query scope.';
@@ -286,6 +295,56 @@ export function createGithubMcp(options?: {
           extraHeaders: buildRouterGitHubHeaders(false),
         };
       }
+      if (name && accountWriteToolNames.includes(name)) {
+        if (!gistArgs.safeParse(rpc?.params?.arguments).success) {
+          throw new McpProxyError(
+            400,
+            'GitHub gist creation requires filename, content, and an explicit public boolean. Use false for a secret gist, which is link-accessible rather than private.',
+          );
+        }
+        userId ??= await resolveActingUserId(auth);
+        if (auth.tokenType === 'run') {
+          const actor = await db.query.users.findFirst({
+            where: and(eq(users.id, userId), isNull(users.deletedAt)),
+            columns: { id: true },
+          });
+          if (!actor)
+            throw new McpProxyError(
+              403,
+              'GitHub gist creation requires an active Roomote member',
+            );
+        }
+        let token: string | null;
+        try {
+          token = await resolveGitHubUserAccessToken(userId);
+        } catch (error) {
+          if (error instanceof GitHubUserTokenError) {
+            throw new McpProxyError(
+              error.reauthorizationRequired ? 403 : 502,
+              error.message,
+            );
+          }
+          throw error;
+        }
+        if (!token) {
+          throw new McpProxyError(
+            403,
+            'Link your GitHub account under Settings > Linked Accounts before creating a gist.',
+          );
+        }
+        console.info(
+          JSON.stringify({
+            event: 'github_mcp_account_write_authorized',
+            userId,
+            runId: auth.runId,
+            tool: name,
+          }),
+        );
+        return {
+          authHeader: token,
+          extraHeaders: buildRouterGitHubHeaders(false),
+        };
+      }
       // Unconnected targets use a single connected repository's credential;
       // GitHub denies private repositories outside that token's scope.
       const target = name
@@ -320,9 +379,7 @@ export function createGithubMcp(options?: {
           : {}),
         disabledToolNames:
           auth.tokenType === 'run' ? writeToolNames : undefined,
-        extraHeaders: buildRouterGitHubHeaders(
-          auth.tokenType === 'run' || rpc?.method !== 'tools/list',
-        ),
+        extraHeaders: buildRouterGitHubHeaders(rpc?.method !== 'tools/list'),
       };
     },
   });

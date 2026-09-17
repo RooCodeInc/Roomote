@@ -1490,10 +1490,19 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(integrationInstructions).toContain('roomote_call_integration_tool');
     expect(integrationInstructions).toContain('- github [id: github]');
     expect(integrationInstructions).toContain(
-      'An eligible deployment GitHub App installation with an active connected repository is required, just as in Fast',
+      'An eligible deployment GitHub App installation with an active connected repository is required',
     );
     expect(integrationInstructions).toContain(
-      'This task MCP path is read-only',
+      'Repository operations remain read-only on this task MCP path',
+    );
+    expect(integrationInstructions).toContain(
+      'The account-scoped create_gist tool is the only native write available here',
+    );
+    expect(integrationInstructions).toContain(
+      'use public: false unless the user explicitly requests public publishing',
+    );
+    expect(integrationInstructions).toContain(
+      'secret, link-accessible gist rather than private',
     );
   });
 

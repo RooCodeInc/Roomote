@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { generateKeyPairSync } from 'node:crypto';
 import { configureAuthClientEnv } from '@roomote/auth/client';
+import { GitHubUserTokenError } from '@roomote/auth';
 import {
   db,
   eq,
@@ -21,11 +22,13 @@ import type { Variables } from '../../../types';
 const mocks = vi.hoisted(() => ({
   mint: vi.fn(),
   credentials: vi.fn(),
+  userToken: vi.fn(),
   upstream: vi.fn(),
 }));
 vi.mock('@roomote/auth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/auth')>()),
   createGitHubToken: mocks.mint,
+  resolveGitHubUserAccessToken: mocks.userToken,
   resolveRuntimeGitHubAppCredentials: mocks.credentials,
 }));
 vi.mock('../../long-lived-fetch', () => ({
@@ -96,6 +99,7 @@ describe('GitHub MCP bounded writes', () => {
   beforeEach(async () => {
     mocks.mint.mockReset().mockResolvedValue('scoped-test-token');
     mocks.credentials.mockReset().mockResolvedValue(appCredentials);
+    mocks.userToken.mockReset().mockResolvedValue(null);
     mocks.upstream
       .mockReset()
       .mockImplementation(async () =>
@@ -237,6 +241,145 @@ describe('GitHub MCP bounded writes', () => {
         })
       ).status,
     ).toBe(200);
+  });
+
+  it.each([false, true])(
+    'creates an account-owned gist with explicit public=%s using only the live actor token',
+    async (isPublic) => {
+      mocks.userToken.mockImplementation(async (userId: string) => {
+        expect(userId).toBe(actor.id);
+        return 'actor-github-token';
+      });
+      const arguments_ = {
+        filename: 'notes.md',
+        content: '# Notes',
+        description: 'Useful notes',
+        public: isPublic,
+      };
+
+      expect((await call('create_gist', arguments_)).status).toBe(200);
+      expect(mocks.mint).not.toHaveBeenCalled();
+      expect(mocks.credentials).not.toHaveBeenCalled();
+      expect(
+        JSON.parse(mocks.upstream.mock.calls[0]![1].body).params.arguments,
+      ).toEqual(arguments_);
+      const headers = new Headers(mocks.upstream.mock.calls[0]![1].headers);
+      expect(headers.get('authorization')).toBe('Bearer actor-github-token');
+      expect(headers.get('X-MCP-Readonly')).toBe('false');
+      expect(headers.get('X-MCP-Toolsets')).toContain('gists');
+    },
+  );
+
+  it.each([
+    null,
+    {},
+    { filename: 'notes.md', content: '# Notes' },
+    { filename: '', content: '# Notes', public: false },
+    { filename: 'notes.md', content: 42, public: false },
+    { filename: 'notes.md', content: '# Notes', public: 'false' },
+  ])('rejects an invalid or implicit gist payload: %j', async (arguments_) => {
+    mocks.userToken.mockResolvedValue('actor-github-token');
+
+    const response = await call('create_gist', arguments_);
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.message).toContain(
+      'explicit public boolean',
+    );
+    expect(mocks.userToken).not.toHaveBeenCalled();
+    expect(mocks.upstream).not.toHaveBeenCalled();
+  });
+
+  it('returns actionable linking guidance without falling back to an installation token', async () => {
+    const response = await call('create_gist', {
+      filename: 'notes.md',
+      content: '# Notes',
+      public: false,
+    });
+
+    expect(response.status).toBe(403);
+    expect((await response.json()).error.message).toContain(
+      'Settings > Linked Accounts',
+    );
+    expect(mocks.mint).not.toHaveBeenCalled();
+    expect(mocks.upstream).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [true, 403, 'reconnect'],
+    [false, 502, 'try again'],
+  ] as const)(
+    'returns an actionable token refresh error (reauthorization=%s)',
+    async (reauthorizationRequired, status, guidance) => {
+      mocks.userToken.mockRejectedValue(
+        new GitHubUserTokenError(
+          `GitHub authorization failed; ${guidance}`,
+          reauthorizationRequired,
+        ),
+      );
+
+      const response = await call('create_gist', {
+        filename: 'notes.md',
+        content: '# Notes',
+        public: false,
+      });
+
+      expect(response.status).toBe(status);
+      expect((await response.json()).error.message).toContain(guidance);
+      expect(mocks.mint).not.toHaveBeenCalled();
+      expect(mocks.upstream).not.toHaveBeenCalled();
+    },
+  );
+
+  it('uses the authenticated actor identity rather than another linked member', async () => {
+    const other = await userFactory.create({ role: 'member' });
+    try {
+      mocks.userToken.mockImplementation(async (userId: string) =>
+        userId === other.id ? 'other-user-token' : null,
+      );
+      const response = await call(
+        'create_gist',
+        { filename: 'notes.md', content: '# Notes', public: false },
+        app({ tokenType: 'auth', userId: other.id, version: 1 }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(mocks.userToken).toHaveBeenCalledExactlyOnceWith(other.id);
+      expect(
+        new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
+          'authorization',
+        ),
+      ).toBe('Bearer other-user-token');
+    } finally {
+      await db.delete(users).where(eq(users.id, other.id));
+    }
+  });
+
+  it('audits gist authorization without logging content, filenames, or credentials', async () => {
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    mocks.userToken.mockResolvedValue('private-actor-token');
+    try {
+      expect(
+        (
+          await call('create_gist', {
+            filename: 'private-name.md',
+            content: 'private-gist-content',
+            description: 'private-description',
+            public: false,
+          })
+        ).status,
+      ).toBe(200);
+      expect(log).toHaveBeenCalledWith(
+        expect.stringContaining('github_mcp_account_write_authorized'),
+      );
+      const serialized = JSON.stringify(log.mock.calls);
+      expect(serialized).not.toContain('private-name.md');
+      expect(serialized).not.toContain('private-gist-content');
+      expect(serialized).not.toContain('private-description');
+      expect(serialized).not.toContain('private-actor-token');
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('selects the target installation even when another active installation exists', async () => {
@@ -433,6 +576,20 @@ describe('GitHub MCP bounded writes', () => {
           },
         },
       },
+      {
+        name: 'create_gist',
+        description: 'Create a new gist',
+        inputSchema: {
+          type: 'object',
+          required: ['filename', 'content'],
+          properties: {
+            filename: { type: 'string' },
+            content: { type: 'string' },
+            description: { type: 'string' },
+            public: { type: 'boolean', default: false },
+          },
+        },
+      },
       { name: 'actions_run_trigger' },
       { name: 'issue_write' },
     ];
@@ -451,7 +608,7 @@ describe('GitHub MCP bounded writes', () => {
         method: 'tools/list',
       });
       const visible = (await response.json()).result.tools;
-      expect(visible).toEqual(tools.slice(0, 5));
+      expect(visible).toEqual(tools.slice(0, 6));
     }
     expect(
       new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
@@ -868,6 +1025,16 @@ describe('GitHub MCP bounded writes', () => {
         (await call('update_pull_request', { ...args, repo: 'second' }, target))
           .status,
       ).toBe(403);
+      expect(
+        (
+          await call(
+            'create_gist',
+            { filename: 'notes.md', content: '# Notes', public: false },
+            target,
+          )
+        ).status,
+      ).toBe(403);
+      expect(mocks.userToken).not.toHaveBeenCalled();
       await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
       expect(
         (await call('get_file_contents', { owner, repo: 'second' }, target))
@@ -973,7 +1140,7 @@ describe('GitHub MCP bounded writes', () => {
     expect(mocks.upstream).not.toHaveBeenCalled();
   });
 
-  it('keeps run tokens read-only, including runs with a human actor', async () => {
+  it('keeps run-token repository tools read-only while allowing actor-owned gists', async () => {
     const run = await runFactory.create({ actingUserId: actor.id });
     try {
       const target = app({
@@ -984,8 +1151,29 @@ describe('GitHub MCP bounded writes', () => {
         principal: 'user',
       });
       expect((await call('merge_pull_request', args, target)).status).toBe(403);
+      mocks.userToken.mockResolvedValue('actor-github-token');
+      expect(
+        (
+          await call(
+            'create_gist',
+            { filename: 'notes.md', content: '# Notes', public: false },
+            target,
+          )
+        ).status,
+      ).toBe(200);
+      expect(mocks.userToken).toHaveBeenCalledExactlyOnceWith(actor.id);
       expect(mocks.mint).not.toHaveBeenCalled();
-      expect(mocks.upstream).not.toHaveBeenCalled();
+      expect(
+        new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
+          'authorization',
+        ),
+      ).toBe('Bearer actor-github-token');
+      expect(
+        new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
+          'X-MCP-Readonly',
+        ),
+      ).toBe('false');
+      mocks.upstream.mockClear();
       mocks.upstream.mockResolvedValueOnce(
         Response.json({
           jsonrpc: '2.0',
@@ -995,6 +1183,7 @@ describe('GitHub MCP bounded writes', () => {
               { name: 'pull_request_read' },
               { name: 'update_pull_request' },
               { name: 'merge_pull_request' },
+              { name: 'create_gist' },
             ],
           },
         }),
@@ -1007,12 +1196,12 @@ describe('GitHub MCP bounded writes', () => {
         (await response.json()).result.tools.map(
           (tool: { name: string }) => tool.name,
         ),
-      ).toEqual(['pull_request_read']);
+      ).toEqual(['pull_request_read', 'create_gist']);
       expect(
         new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
           'X-MCP-Readonly',
         ),
-      ).toBe('true');
+      ).toBe('false');
     } finally {
       await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
       await db.delete(tasks).where(eq(tasks.id, run.taskId));

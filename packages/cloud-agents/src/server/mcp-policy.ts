@@ -83,6 +83,7 @@ const ROUTER_GITHUB_ALLOWED_TOOLS = [
   'merge_pull_request',
   'add_issue_comment',
   'add_reply_to_pull_request_comment',
+  'create_gist',
 ] as const;
 
 const ROUTER_MCP_SERVER_POLICIES: Record<
@@ -113,7 +114,7 @@ const ROUTER_MCP_SERVER_POLICIES: Record<
       // Discovery includes bounded writes; the GitHub proxy validates each
       // invocation and keeps read calls and run tokens upstream-readonly.
       readonly: false,
-      toolsets: ['repos', 'pull_requests', 'issues', 'actions'],
+      toolsets: ['repos', 'pull_requests', 'issues', 'actions', 'gists'],
     },
   },
 };
