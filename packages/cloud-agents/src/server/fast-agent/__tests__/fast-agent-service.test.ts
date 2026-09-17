@@ -10852,13 +10852,55 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         return '';
       },
     );
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
 
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks({ activity }),
+    });
 
     expect(mocks.stopTask).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       { taskId: 'task-1', userInitiated: true },
     );
+    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
+  });
+
+  it('keeps processing when another task remains after a soft stop', async () => {
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', title: 'Checkout', status: 'running' },
+      { taskId: 'task-2', title: 'Tests', status: 'running' },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll stop it.',
+        });
+        await invokeTool(nativeToolNames.stopTask, {
+          taskId: 'task-1',
+          userInitiated: true,
+        });
+        return '';
+      },
+    );
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks({ activity }),
+    });
+
+    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: true });
   });
 
   it('silently ignores optional human reaction input through the existing native tool', async () => {

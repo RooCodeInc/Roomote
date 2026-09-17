@@ -2287,7 +2287,7 @@ export async function answerFastAgentQuestion({
   });
   let surfaceDisposed = false;
   let surfaceActivityStarted = false;
-  let surfaceHasOngoingWork = activeTasks.length > 0;
+  let surfaceActiveTaskIds = new Set(activeTasks.map((task) => task.taskId));
   const startSurfaceActivity = () => {
     if (surfaceDisposed || surfaceActivityStarted || !adapter.activity) return;
     surfaceActivityStarted = true;
@@ -3107,7 +3107,8 @@ export async function answerFastAgentQuestion({
     surfaceSettlement ??= (async () => {
       await surfaceReplyStream.close();
       if (surfaceDisposed) return;
-      const keepProcessing = durableTurnDeferred || surfaceHasOngoingWork;
+      const keepProcessing =
+        durableTurnDeferred || surfaceActiveTaskIds.size > 0;
       if (surfaceActivityStarted || keepProcessing) {
         await adapter.activity?.settle({ keepProcessing });
       } else {
@@ -3547,7 +3548,7 @@ export async function answerFastAgentQuestion({
     const currentTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
     );
-    surfaceHasOngoingWork = currentTasks.size > 0;
+    surfaceActiveTaskIds = new Set(currentTasks.keys());
     taskMessageGuard.restore(previousAttempt?.events ?? [], [
       ...currentTasks.keys(),
     ]);
@@ -4708,7 +4709,7 @@ export async function answerFastAgentQuestion({
             }
             if (result.success) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
-              surfaceHasOngoingWork = true;
+              surfaceActiveTaskIds.add(result.taskId);
               if (
                 substantiveHumanInput &&
                 currentSessionPrivacy !== 'private'
@@ -4810,7 +4811,7 @@ export async function answerFastAgentQuestion({
             }
             if (result.taskId) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
-              surfaceHasOngoingWork = true;
+              surfaceActiveTaskIds.add(result.taskId);
             }
             const kickoffMessage = [
               args.kickoffMessage,
@@ -4901,7 +4902,7 @@ export async function answerFastAgentQuestion({
             );
             if (result.success) {
               currentTasks.delete(target.taskId);
-              surfaceHasOngoingWork = currentTasks.size > 0;
+              surfaceActiveTaskIds.delete(target.taskId);
             }
             return result;
           }
@@ -5041,6 +5042,7 @@ export async function answerFastAgentQuestion({
               { userId, apiBaseUrl },
               { taskId: target.taskId, userInitiated: args.userInitiated },
             );
+            if (result.success) surfaceActiveTaskIds.delete(target.taskId);
             return result;
           }
 
