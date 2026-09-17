@@ -38,28 +38,23 @@ describe('createIntegrationMcpInstructions', () => {
     expect(instructions).toBeUndefined();
   });
   it('uses runtime provenance rather than a name or URL convention', () => {
-    expect(
-      createIntegrationMcpInstructions([
-        {
-          type: 'remote',
-          name: 'runtime-broker',
-          url: 'https://api.test/prefixed/broker',
-          roomoteManaged: 'http-integrations-broker',
-        },
-      ]),
-    ).toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
-    expect(
-      createIntegrationMcpInstructions([
-        {
-          type: 'remote',
-          name: 'runtime-broker',
-          url: 'https://api.test/prefixed/broker',
-          roomoteManaged: 'http-integrations-broker',
-        },
-      ]),
-    ).toContain(
+    const instructions = createIntegrationMcpInstructions([
+      {
+        type: 'remote',
+        name: 'runtime-broker',
+        url: 'https://api.test/prefixed/broker',
+        roomoteManaged: 'http-integrations-broker',
+      },
+    ]);
+
+    expect(instructions).toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
+    expect(instructions).toContain(
       'A missing installed connector is not proof that no remote MCP exists',
     );
+    expect(instructions).toContain(
+      'If no suitable integration is connected for the requested service',
+    );
+    expect(instructions).not.toContain('If none is connected');
   });
   it('includes shared HTTP integrations guidance only when its remote server is present', () => {
     expect(

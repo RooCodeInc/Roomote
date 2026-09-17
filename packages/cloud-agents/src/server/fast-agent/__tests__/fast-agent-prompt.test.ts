@@ -766,6 +766,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'first reuse a suitable connected integration and its existing mediated tools',
     );
     expect(enabledPrompt).toContain(
+      'If no suitable integration is connected for the requested service',
+    );
+    expect(enabledPrompt).not.toContain('If none is connected');
+    expect(enabledPrompt).toContain(
       'do bounded discovery for an official or provider-supported hosted remote MCP server before considering an API key',
     );
     expect(enabledPrompt).toContain(

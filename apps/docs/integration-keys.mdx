@@ -14,11 +14,12 @@ adds the real key on the way out. Integration keys are for HTTPS services, not
 a replacement for [connected integrations](/integrations).
 
 When you ask to connect a service without choosing a connection type, Roomote
-first reuses a suitable connected integration. If none is connected, it checks
-bounded official provider documentation for a compatible hosted remote MCP
-server. Integration keys are the fallback when no suitable connectable MCP is
-available, or when you explicitly ask to use the service's API. A missing
-installed connector alone does not skip MCP discovery.
+first reuses a suitable connected integration. If no suitable integration is
+connected for the requested service, it checks bounded official provider
+documentation for a compatible hosted remote MCP server. Integration keys are
+the fallback when no suitable connectable MCP is available, or when you
+explicitly ask to use the service's API. A missing installed connector alone
+does not skip MCP discovery.
 
 <Note>
   Integration keys are gated deployment-wide. An admin can turn on
