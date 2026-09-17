@@ -408,6 +408,12 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     expect(tool.description).toContain(
       'use that exact integrationId with find_integration_tools and call_integration_tool',
     );
+    expect(tool.description).toContain(
+      "a service's official hosted remote MCP endpoint",
+    );
+    expect(tool.description).toContain(
+      'mean the MCP exists and setup is pending',
+    );
 
     expect(Object.keys(tool.args!).sort()).toEqual(['name', 'url']);
     expect(schema).toMatchObject({
@@ -425,6 +431,20 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     expect(JSON.stringify(schema)).not.toMatch(
       /secret|token|header|client[_-]?id/i,
     );
+  });
+
+  it('keeps integration-key tool descriptions aware of the remote MCP route', () => {
+    const prepare = tools.find(
+      ({ name }) =>
+        name === FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
+    )!;
+    const list = tools.find(
+      ({ name }) =>
+        name === FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
+    )!;
+
+    expect(prepare.description).toContain('Call list_integration_keys first');
+    expect(list.description).toContain('official remote MCP, or skill covers');
   });
 
   it('covers every enabled native tool', () => {
