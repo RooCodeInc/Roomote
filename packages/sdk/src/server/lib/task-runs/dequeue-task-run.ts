@@ -455,9 +455,7 @@ export const dequeueTaskRun = async (
                   'Source control token creation exhausted retries and returned no token.',
               },
         fn: async () =>
-          await createSourceControlTokenForTaskRun(txResult.taskRun, tag, {
-            readOnly: txResult.task.privacy === 'private',
-          }),
+          await createSourceControlTokenForTaskRun(txResult.taskRun, tag),
       });
     } catch (error) {
       await recordTaskRunLifecycleEventSafe({

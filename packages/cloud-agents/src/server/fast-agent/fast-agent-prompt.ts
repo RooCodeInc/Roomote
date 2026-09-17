@@ -21,6 +21,7 @@ import {
 import type { FastAgentPromptSkillCatalog } from './fast-agent-prompt-skill-catalog';
 import type { FastAgentActiveTask } from './fast-agent-session';
 import { isFastAgentNativeIntegration } from './fast-agent-tool-policy';
+import { buildPrivateSessionGuidance } from '../../private-session-guidance';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
 import { buildRoomoteReleaseIdentifier } from '../../release-version';
 import { buildUserPersonalizationInstructions } from '../user-personalization';
@@ -232,6 +233,7 @@ export function buildFastAgentSystemPrompt({
   personalizationContext,
   globalAgentInstructions,
   workspaceRoutingRules = [],
+  privacy = 'shared',
 }: {
   availableEnvironments: RoutableEnvironment[];
   /** Instance and inline environment skills already discovered for this turn.
@@ -271,6 +273,8 @@ export function buildFastAgentSystemPrompt({
   } | null;
   globalAgentInstructions?: string | null;
   workspaceRoutingRules?: WorkspaceRoutingSettings['rules'];
+  /** Privacy of the Session this turn belongs to. */
+  privacy?: 'shared' | 'private';
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
@@ -361,7 +365,7 @@ ${releaseIdentifier}## Turn Startup (Highest Priority)
 - After acknowledging, continue the same turn through the needed work and finish with a closeout or clarification. Do not stop at the acknowledgement.
 - An eligible ambient message or optional human reaction may use \`ignore_event\` under its narrow rule below. Trusted platform events follow their dedicated rules instead of this startup contract.
 
-## All Environments
+${privacy === 'private' ? `${buildPrivateSessionGuidance('fast')}\n\n` : ''}## All Environments
 ${formatRepositoriesForPrompt(availableEnvironments)}
 
 ${

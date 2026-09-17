@@ -751,7 +751,6 @@ export async function createSourceControlTokenForTaskRun(
   {
     maxRetries = SOURCE_CONTROL_TOKEN_MAX_RETRIES,
     baseDelayMs = SOURCE_CONTROL_TOKEN_BASE_DELAY_MS,
-    readOnly = false,
   } = {},
 ): Promise<SourceControlRuntimeToken | null> {
   const providers = await resolveTaskRunSourceControlProviders(taskRun);
@@ -792,27 +791,9 @@ export async function createSourceControlTokenForTaskRun(
     tokensByProvider.set(provider, token);
   }
 
-  const merged = mergeProviderTokens(
+  return mergeProviderTokens(
     providers.map((provider) => tokensByProvider.get(provider)!),
   );
-  if (!readOnly) return merged;
-
-  const exposesRawCredential =
-    Boolean(merged.token) ||
-    Object.values(merged.envVars).some(Boolean) ||
-    (merged.gitCredentials?.some((credential) => Boolean(credential.token)) ??
-      false);
-  if (exposesRawCredential) {
-    throw new Error(
-      'This source-control provider cannot supply read-only credentials to a private task.',
-    );
-  }
-  return {
-    ...merged,
-    gitProxyCredentials: (merged.gitProxyCredentials ?? []).map(
-      (credential) => ({ ...credential, readOnly: true }),
-    ),
-  };
 }
 
 /**

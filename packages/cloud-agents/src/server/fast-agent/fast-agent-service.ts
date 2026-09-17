@@ -3353,13 +3353,12 @@ export async function answerFastAgentQuestion({
       conversation,
       currentMessageReactable,
     });
-    availableIntegrations = availableIntegrations.filter((integration) =>
-      currentSessionPrivacy !== 'private'
-        ? integration.dataPolicy !== 'private'
-        : integration.id === BRAIN_MCP_ID ||
-          (integration.dataPolicy === 'private' &&
-            privateSessionsExperimentEnabled &&
-            currentPrivateOwnerUserId === userId),
+    availableIntegrations = availableIntegrations.filter(
+      (integration) =>
+        integration.dataPolicy !== 'private' ||
+        (currentSessionPrivacy === 'private' &&
+          privateSessionsExperimentEnabled &&
+          currentPrivateOwnerUserId === userId),
     );
     if (currentSessionPrivacy === 'private') {
       availableIntegrations = availableIntegrations
@@ -3632,6 +3631,7 @@ export async function answerFastAgentQuestion({
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
         agentBehaviorSettings?.workspaceRoutingSettings?.rules,
+      privacy: currentSessionPrivacy,
     });
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,
@@ -4718,10 +4718,7 @@ export async function answerFastAgentQuestion({
             }
             if (result.success) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
-              if (
-                substantiveHumanInput &&
-                currentSessionPrivacy !== 'private'
-              ) {
+              if (substantiveHumanInput) {
                 try {
                   await ensureOwnTaskFollowThroughWakeup({
                     conversationId: session.id,
@@ -4744,13 +4741,6 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest: {
-            if (currentSessionPrivacy === 'private') {
-              return {
-                success: false,
-                error:
-                  'Pull request review is unavailable in private Sessions.',
-              };
-            }
             const args = reviewPullRequestArgsSchema.parse(call.args);
             const conversationTarget =
               getConversationPullRequestTarget(conversation);
@@ -5113,12 +5103,6 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups: {
-            if (currentSessionPrivacy === 'private') {
-              return {
-                success: false,
-                error: 'Wakeups are unavailable in private Sessions.',
-              };
-            }
             const args = manageWakeupsInputSchema.parse(
               normalizeManageWakeupsArgs(call.args),
             );

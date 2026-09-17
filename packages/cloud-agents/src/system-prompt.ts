@@ -8,6 +8,7 @@ import {
   buildRoomoteStyleGuidanceSection,
   ROOMOTE_OWNERSHIP_GUIDANCE,
 } from './style-guidance';
+import { buildPrivateSessionGuidance } from './private-session-guidance';
 import { buildRoomoteReleaseIdentifier } from './release-version';
 import type { TaskReportConsumer } from '@roomote/types';
 
@@ -40,6 +41,7 @@ export function buildRoomoteSystemPrompt(
     reportConsumer?: TaskReportConsumer;
     commitSha?: string;
     appEnv?: string;
+    privacy?: 'shared' | 'private';
   } = {},
 ): string {
   const orchestratorOwned = options.reportConsumer === 'orchestrator';
@@ -51,6 +53,7 @@ export function buildRoomoteSystemPrompt(
     orchestratorOwned
       ? `${ORCHESTRATOR_ENGINEERING_SECTION}\n\n${ROOMOTE_OWNERSHIP_GUIDANCE}`
       : buildDirectUserGuidanceSection(),
+    options.privacy === 'private' ? buildPrivateSessionGuidance('task') : null,
   ]
     .filter((section): section is string => section !== null)
     .join('\n\n');

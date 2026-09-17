@@ -46,7 +46,6 @@ export async function refreshGitHubTokenWithMetadata(
 }> {
   const taskRun = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, runId),
-    with: { task: { columns: { privacy: true } } },
   });
 
   if (!taskRun) {
@@ -56,7 +55,6 @@ export async function refreshGitHubTokenWithMetadata(
   const tokenResult = await createSourceControlTokenForTaskRun(
     taskRun,
     '[refreshGitHubTokenWithMetadata]',
-    { readOnly: taskRun.task?.privacy === 'private' },
   );
 
   if (!tokenResult) {
