@@ -23,7 +23,7 @@ type PlatformIssueSubmissionProps = {
     id: string;
     title: string;
     summary: string;
-    sourceLabel: 'task' | 'Session';
+    sourceLabel: 'task' | 'session';
     taskUrl: string;
     submittedAt: Date | null;
   };
@@ -103,7 +103,7 @@ export function PlatformIssueSubmission({
           </div>
           <div className="space-y-1">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              {report.sourceLabel === 'task' ? 'Task' : 'Session'} link
+              {report.sourceLabel} link
             </p>
             <p className="break-all text-muted-foreground">{report.taskUrl}</p>
           </div>

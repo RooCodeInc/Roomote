@@ -187,7 +187,7 @@ describe('platform issue alert delivery', () => {
     await db.delete(slackInstallations);
   });
 
-  it('persists a Fast report with canonical Session and actor identity', async () => {
+  it('persists a Fast report with canonical session and actor identity', async () => {
     const user = await userFactory.create();
     const [conversation] = await db
       .insert(fastAgentConversations)
@@ -243,7 +243,7 @@ describe('platform issue alert delivery', () => {
     });
   });
 
-  it('rejects a Fast report from a non-owner of a private Session', async () => {
+  it('rejects a Fast report from a non-owner of a private session', async () => {
     const owner = await userFactory.create();
     const otherUser = await userFactory.create();
     const [conversation] = await db
@@ -275,7 +275,7 @@ describe('platform issue alert delivery', () => {
         userId: otherUser.id,
       }),
     ).rejects.toThrow(
-      'This user cannot report issues from this private Session.',
+      'This user cannot report issues from this private session.',
     );
   });
 

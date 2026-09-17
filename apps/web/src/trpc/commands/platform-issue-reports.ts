@@ -50,7 +50,7 @@ export async function getPlatformIssueReportCommand(
     id: report.id,
     title: report.report.title,
     summary: report.report.summary,
-    sourceLabel: report.taskId ? ('task' as const) : ('Session' as const),
+    sourceLabel: report.taskId ? ('task' as const) : ('session' as const),
     taskUrl: buildPlatformIssueSourceUrl(
       getReportSource(report),
       'platform_issue_submission',
