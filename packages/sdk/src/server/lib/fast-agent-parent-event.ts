@@ -91,6 +91,7 @@ import {
   type SourceControlFastDiscussion,
 } from './source-control-fast-delivery';
 import { buildCustomAutomationSlackMessage } from './manager-slack';
+import { resolveCustomAutomationResultVisibility } from './automation-result-visibility';
 import {
   appendFastAutomationSuggestionInstruction,
   postFastAutomationSuggestionsToDiscord,
@@ -2789,6 +2790,9 @@ export async function deliverFastAgentParentEventWithLock(
                   : {}),
                 content: reply.message,
                 dedupeKey: `fast:${buildFastAutomationSuggestionEventId(reportEvent)}`,
+                visibility: await resolveCustomAutomationResultVisibility(
+                  automationId,
+                ).catch(() => 'private' as const),
               }).catch(() => undefined);
             }
             return baseAdapter.postReply(reply);

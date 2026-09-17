@@ -1,6 +1,7 @@
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
   type AutomationResultPriority,
+  type AutomationResultVisibility,
 } from '@roomote/types';
 import { and, eq, isNull } from 'drizzle-orm';
 
@@ -59,7 +60,12 @@ export async function reconcileAutomationResultAcceptance(
 }
 
 async function recordAutomationResultForTaskWithClient(
-  params: { taskId: string; content: string; dedupeKey: string },
+  params: {
+    taskId: string;
+    content: string;
+    dedupeKey: string;
+    visibility: AutomationResultVisibility;
+  },
   client: DatabaseOrTransaction,
 ) {
   const [task] = await client
@@ -98,6 +104,7 @@ async function recordAutomationResultForTaskWithClient(
       customAutomationId: customAutomation?.id ?? null,
       sourceTaskId: params.taskId,
       userId: customAutomation?.createdByUserId ?? task.initiatorUserId,
+      resultVisibility: params.visibility,
       automationName:
         customAutomation?.name ??
         task.actorDisplayName ??
@@ -120,7 +127,12 @@ async function recordAutomationResultForTaskWithClient(
 }
 
 export async function recordAutomationResultForTask(
-  params: { taskId: string; content: string; dedupeKey: string },
+  params: {
+    taskId: string;
+    content: string;
+    dedupeKey: string;
+    visibility: AutomationResultVisibility;
+  },
   client: DatabaseOrTransaction = db,
 ) {
   if (client === db) {
@@ -140,6 +152,7 @@ async function recordCustomAutomationResultWithClient(
     content: string;
     dedupeKey: string;
     priority?: AutomationResultPriority;
+    visibility: AutomationResultVisibility;
   },
   client: DatabaseOrTransaction,
 ) {
@@ -164,6 +177,7 @@ async function recordCustomAutomationResultWithClient(
       customAutomationId: automation.id,
       sourceTaskId: params.sourceTaskId,
       userId: params.userId,
+      resultVisibility: params.visibility,
       automationName: automation.name,
       content: params.content,
       priority: params.priority ?? automation.resultPriority,
@@ -186,6 +200,7 @@ export async function recordBackgroundAutomationResult(
     >[0];
     content: string;
     dedupeKey: string;
+    visibility: AutomationResultVisibility;
   },
   client: DatabaseOrTransaction = db,
 ) {
@@ -202,6 +217,7 @@ export async function recordBackgroundAutomationResult(
         descriptor && 'resultPriority' in descriptor
           ? descriptor.resultPriority
           : 'normal',
+      resultVisibility: params.visibility,
       dedupeKey: params.dedupeKey,
     })
     .onConflictDoNothing({ target: automationResults.dedupeKey })
@@ -218,6 +234,7 @@ export async function recordCustomAutomationResult(
     content: string;
     dedupeKey: string;
     priority?: AutomationResultPriority;
+    visibility: AutomationResultVisibility;
   },
   client: DatabaseOrTransaction = db,
 ) {

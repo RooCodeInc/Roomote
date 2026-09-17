@@ -61,6 +61,7 @@ describe('recordAutomationResult', () => {
       taskId: 'task-1',
       content: 'Result body',
       dedupeKey: 'result-1',
+      visibility: 'private',
     });
   });
 
