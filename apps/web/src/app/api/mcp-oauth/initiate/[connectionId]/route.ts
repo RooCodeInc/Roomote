@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { db, mcpConnections, eq } from '@roomote/db/server';
 import {
+  OAuthClientRegistrationError,
   describeRegistrationRefusal,
   discoverOAuthEndpoints,
   discoverOAuthProtectedResourceMetadata,
@@ -332,6 +333,13 @@ export async function GET(
             );
       } catch (error) {
         if (!customTarget) throw error;
+        // Only the provider's decision is a refusal; a timeout or a 5xx is
+        // rethrown so the connection stays pending and retryable.
+        if (
+          !(error instanceof OAuthClientRegistrationError && error.isRefusal)
+        ) {
+          throw error;
+        }
         await updateAuthStatus(connectionId, 'error', false);
         // The link came from a Session: tell that Session why authorization
         // never started so the agent can say so and move on, instead of the

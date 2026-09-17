@@ -523,9 +523,10 @@ async function ensureRegisteredClient(
     if (error instanceof OAuthClientRegistrationError && error.isRefusal) {
       return { ok: false, reason: describeRegistrationRefusal(error) };
     }
+    const detail = describeRegistrationRefusal(error);
     throw new Error(
-      `Could not register with the provider right now; try again later. ${
-        error instanceof Error ? error.message : String(error)
+      `Could not register with the provider right now; try again later.${
+        detail ? ` (${detail})` : ''
       }`,
     );
   }

@@ -27,9 +27,21 @@ const {
   updateAuthStatusMock,
   describeRegistrationRefusalMock,
   resumeFastSessionFromReplayMock,
+  MockRegistrationError,
 } = vi.hoisted(() => ({
   describeRegistrationRefusalMock: vi.fn(),
   resumeFastSessionFromReplayMock: vi.fn(),
+  MockRegistrationError: class extends Error {
+    constructor(
+      readonly status: number,
+      readonly body: string,
+    ) {
+      super(`OAuth client registration failed: ${body}`);
+    }
+    get isRefusal() {
+      return this.status >= 400 && this.status < 500;
+    }
+  },
   authorizeMock: vi.fn(),
   bootstrapWebRuntimeEnvMock: vi.fn(),
   discoverOAuthEndpointsMock: vi.fn(),
@@ -88,6 +100,7 @@ vi.mock('@/lib/server/mcp-oauth-replay-continuation', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  OAuthClientRegistrationError: MockRegistrationError,
   describeRegistrationRefusal: describeRegistrationRefusalMock,
   discoverOAuthEndpoints: discoverOAuthEndpointsMock,
   discoverOAuthProtectedResourceMetadata:
@@ -210,7 +223,9 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
       registration_endpoint: 'https://auth.example.com/register',
     });
     getClientInformationMock.mockResolvedValue(undefined);
-    registerOAuthClientMock.mockRejectedValue(new Error('registration denied'));
+    registerOAuthClientMock.mockRejectedValue(
+      new MockRegistrationError(400, 'registration denied'),
+    );
 
     const response = await GET(buildRequest(), {
       params: Promise.resolve({ connectionId: CONNECTION_ID }),
@@ -248,7 +263,9 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
       registration_endpoint: 'https://auth.example.com/register',
     });
     getClientInformationMock.mockResolvedValue(undefined);
-    registerOAuthClientMock.mockRejectedValue(new Error('registration denied'));
+    registerOAuthClientMock.mockRejectedValue(
+      new MockRegistrationError(400, 'registration denied'),
+    );
     describeRegistrationRefusalMock.mockReturnValue(
       'Redirect URI is not in the allowlist',
     );
@@ -302,12 +319,53 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
       registration_endpoint: 'https://auth.example.com/register',
     });
     getClientInformationMock.mockResolvedValue(undefined);
-    registerOAuthClientMock.mockRejectedValue(new Error('registration denied'));
+    registerOAuthClientMock.mockRejectedValue(
+      new MockRegistrationError(400, 'registration denied'),
+    );
 
     await GET(buildRequest(), {
       params: Promise.resolve({ connectionId: CONNECTION_ID }),
     });
 
+    expect(resumeFastSessionFromReplayMock).not.toHaveBeenCalled();
+  });
+
+  it('leaves a custom connection pending when registration fails transiently', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'custom:server-1',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue(undefined);
+    resolveCustomMcpAuthTargetMock.mockResolvedValue({
+      serverId: 'server-1',
+      name: 'accounting',
+      url: 'https://mcp.example.com/mcp',
+      manualClient: null,
+      oauthOptions: { resource: 'https://mcp.example.com/mcp' },
+    });
+    ensureCustomMcpServerMetadataMock.mockResolvedValue({
+      authorization_endpoint: 'https://auth.example.com/authorize',
+      token_endpoint: 'https://auth.example.com/token',
+      registration_endpoint: 'https://auth.example.com/register',
+    });
+    getClientInformationMock.mockResolvedValue(undefined);
+    registerOAuthClientMock.mockRejectedValue(
+      new MockRegistrationError(503, 'upstream down'),
+    );
+
+    const response = await GET(
+      buildRequest(
+        `/api/mcp-oauth/initiate/${CONNECTION_ID}?replayToken=replay-1`,
+      ),
+      { params: Promise.resolve({ connectionId: CONNECTION_ID }) },
+    );
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=error',
+    );
+    expect(updateAuthStatusMock).not.toHaveBeenCalled();
     expect(resumeFastSessionFromReplayMock).not.toHaveBeenCalled();
   });
 

@@ -568,7 +568,7 @@ describe('addRemoteCustomMcpForFast', () => {
   it.each([
     [
       'a 5xx from the provider',
-      () => new Response('upstream down', { status: 503 }),
+      () => new Response('upstream <b>down</b>', { status: 503 }),
     ],
     [
       'a network failure',
@@ -586,7 +586,9 @@ describe('addRemoteCustomMcpForFast', () => {
         name: 'accounting',
         url: 'https://mcp.example.com/mcp',
       }),
-    ).rejects.toThrow(/try again later/);
+    ).rejects.toThrow(
+      /^Could not register with the provider right now; try again later\.(?: \([^<>]*\))?$/,
+    );
 
     expect(await db.query.mcpConnections.findFirst()).toMatchObject({
       authStatus: 'pending',
