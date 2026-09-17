@@ -213,7 +213,8 @@ export async function GET(
 
       if (
         !integration ||
-        !isSelfServeMcpIntegration(integration) ||
+        (!isSelfServeMcpIntegration(integration) &&
+          !integration.oauthEndpoints) ||
         !integration.url
       ) {
         return NextResponse.redirect(
@@ -368,8 +369,10 @@ export async function GET(
     authUrl.searchParams.set('response_type', 'code');
     authUrl.searchParams.set('redirect_uri', redirectUri);
     authUrl.searchParams.set('state', state);
-    authUrl.searchParams.set('code_challenge', codeChallenge);
-    authUrl.searchParams.set('code_challenge_method', 'S256');
+    if (customTarget || integration?.oauthPkce !== false) {
+      authUrl.searchParams.set('code_challenge', codeChallenge);
+      authUrl.searchParams.set('code_challenge_method', 'S256');
+    }
     if (requestedScope) {
       authUrl.searchParams.set('scope', requestedScope);
     }

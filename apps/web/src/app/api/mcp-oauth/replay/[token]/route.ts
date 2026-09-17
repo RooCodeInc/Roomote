@@ -114,6 +114,18 @@ export async function GET(
     connectionRole,
   );
 
+  if (
+    (replay.userId != null && replay.userId !== authResult.userId) ||
+    (connectionScope === 'deployment' && !authResult.isAdmin)
+  ) {
+    return NextResponse.redirect(
+      new URL(
+        '/error?message=This authorization link belongs to another administrator',
+        webUrl,
+      ),
+    );
+  }
+
   const targetUserId =
     connectionScope === 'deployment' ? null : authResult.userId;
 

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { addRemoteCustomMcpForFast } from '@roomote/sdk/server/add-remote-custom-mcp';
+import { setupNativeIntegrationForFast } from '@roomote/sdk/server/setup-native-integration';
 import {
   listServiceCredentialApprovals,
   prepareServiceCredential,
@@ -1759,6 +1760,10 @@ const addRemoteMcpArgsSchema = z
     name: z.string().trim().min(1).max(80),
     url: z.string().url().startsWith('https://').max(2_048),
   })
+  .strict();
+
+const setupNativeIntegrationArgsSchema = z
+  .object({ integration: z.string().trim().min(1).max(80) })
   .strict();
 
 export async function answerFastAgentQuestion({
@@ -4306,6 +4311,51 @@ export async function answerFastAgentQuestion({
           };
         }
         switch (call.name) {
+          case FAST_AGENT_NATIVE_TOOL_NAMES.setupNativeIntegration: {
+            if (platformEvent) {
+              return {
+                success: false,
+                error:
+                  'A human must request integration setup before it can start.',
+              };
+            }
+            const args = setupNativeIntegrationArgsSchema.parse(call.args);
+            const canonicalSession = await getSessionForFastConversation(
+              db,
+              session.id,
+            );
+            if (!canonicalSession) {
+              return {
+                success: false,
+                error: 'This Fast conversation is not attached to a Session.',
+              };
+            }
+            const result = await setupNativeIntegrationForFast({
+              userId,
+              sessionId: canonicalSession.id,
+              integration: args.integration,
+            });
+            if (result.status === 'connected') {
+              const refreshedIntegrations = await listFastAgentIntegrations(
+                { userId, apiBaseUrl },
+                adapter.resolveMcpServerConfigs,
+              );
+              availableIntegrations.splice(
+                0,
+                availableIntegrations.length,
+                ...refreshedIntegrations,
+              );
+              onDemandIntegrations.splice(
+                0,
+                onDemandIntegrations.length,
+                ...refreshedIntegrations.filter(
+                  (integration) =>
+                    !isFastAgentNativeIntegration(integration.id),
+                ),
+              );
+            }
+            return { success: true, ...result };
+          }
           case FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp: {
             if (platformEvent) {
               return {

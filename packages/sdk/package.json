@@ -72,6 +72,10 @@
       "import": "./src/server/lib/mcp/add-remote-custom-mcp.ts",
       "require": "./src/server/lib/mcp/add-remote-custom-mcp.ts"
     },
+    "./server/setup-native-integration": {
+      "import": "./src/server/lib/mcp/setup-native-integration.ts",
+      "require": "./src/server/lib/mcp/setup-native-integration.ts"
+    },
     "./server/credential-egress": {
       "import": "./src/server/lib/credential-egress.ts",
       "require": "./src/server/lib/credential-egress.ts"
@@ -79,6 +83,10 @@
     "./server/notion-api": {
       "import": "./src/server/lib/notion-api.ts",
       "require": "./src/server/lib/notion-api.ts"
+    },
+    "./server/mcp-data": {
+      "import": "./src/server/lib/mcp/data.ts",
+      "require": "./src/server/lib/mcp/data.ts"
     },
     "./server/rippling-api": {
       "import": "./src/server/lib/rippling-api.ts",

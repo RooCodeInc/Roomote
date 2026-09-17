@@ -59,6 +59,7 @@ const mocks = vi.hoisted(() => ({
   prepareServiceCredential: vi.fn(),
   listServiceCredentialApprovals: vi.fn(),
   addRemoteMcp: vi.fn(),
+  setupNativeIntegration: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
   getPendingHumanFollowUp: vi.fn(),
@@ -99,6 +100,7 @@ const nativeToolNames = vi.hoisted(
     ({
       callIntegrationTool: 'call_integration_tool',
       addRemoteMcp: 'add_remote_mcp',
+      setupNativeIntegration: 'setup_native_integration',
       cancelTask: 'cancel_task',
       createArtifact: 'create_artifact',
       findIntegrationTools: 'find_integration_tools',
@@ -131,7 +133,10 @@ const nativeToolNames = vi.hoisted(
 const fastAgentSessionPermissions = vi.hoisted(() => [
   { permission: 'task', pattern: '*', action: 'allow' },
 ]);
-const fastAgentSessionToolFilter = vi.hoisted(() => ({ task: true }));
+const fastAgentSessionToolFilter = vi.hoisted(() => ({
+  task: true,
+  setup_native_integration: true,
+}));
 
 vi.mock('@roomote/sdk/server/service-credentials', () => ({
   prepareServiceCredential: mocks.prepareServiceCredential,
@@ -140,6 +145,10 @@ vi.mock('@roomote/sdk/server/service-credentials', () => ({
 
 vi.mock('@roomote/sdk/server/add-remote-custom-mcp', () => ({
   addRemoteCustomMcpForFast: mocks.addRemoteMcp,
+}));
+
+vi.mock('@roomote/sdk/server/setup-native-integration', () => ({
+  setupNativeIntegrationForFast: mocks.setupNativeIntegration,
 }));
 
 vi.mock('@roomote/telemetry/server', () => ({
@@ -289,6 +298,7 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
   FAST_AGENT_NATIVE_TOOL_FILTER: {
     '*': false,
     send_chat_reply: true,
+    setup_native_integration: true,
     task: true,
   },
   getFastAgentNativeToolRuntime: mocks.getNativeRuntime,
@@ -5738,6 +5748,49 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }),
       }),
     ]);
+  });
+
+  it('starts native integration setup against the canonical Session', async () => {
+    mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
+    mocks.setupNativeIntegration.mockResolvedValue({
+      status: 'authorization_required',
+      id: 'notion',
+      name: 'Notion',
+      authorizeUrl: 'https://roomote.example/api/mcp-oauth/replay/token',
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll check the built-in integration.',
+        });
+        const result = await invokeTool(
+          nativeToolNames.setupNativeIntegration,
+          { integration: 'Notion' },
+        );
+        expect(result).toEqual({
+          success: true,
+          status: 'authorization_required',
+          id: 'notion',
+          name: 'Notion',
+          authorizeUrl: 'https://roomote.example/api/mcp-oauth/replay/token',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Authorize Notion securely.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.setupNativeIntegration).toHaveBeenCalledWith({
+      userId: 'user-1',
+      sessionId: 'canonical-session-1',
+      integration: 'Notion',
+    });
   });
 
   it('saves a conversation memory through the outbox', async () => {

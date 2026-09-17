@@ -657,6 +657,19 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.setupNativeIntegration]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Check Roomote's complete built-in integration catalog and start setup for one service, including integrations that are currently disabled or unconfigured. Call this before researching or adding a remote MCP or integration key whenever the user names a third-party service. A supported result is authoritative: use its exact authorizeUrl or settingsUrl and do not create a custom MCP or generic key fallback. Authorization and configuration remain pending until the human completes the secure flow; never accept credentials in chat. Unsupported means the service is not in the native catalog and fallback discovery may continue.",
+  args: {
+    integration: z.string().trim().min(1).max(80).describe("Service name or native integration ID named by the human"),
+  },
+  execute: (args, context) => invoke("setup_native_integration", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"

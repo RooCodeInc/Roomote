@@ -97,7 +97,15 @@ describe('Notion internal integration', () => {
       connectionMode: 'admin_configured',
       serverMode: 'native',
     });
-    expect(getMcpIntegration('notion')?.url).toBeUndefined();
+    expect(getMcpIntegration('notion')).toMatchObject({
+      url: 'https://api.notion.com',
+      oauthClientEnv: {
+        clientIdEnv: 'R_NOTION_CLIENT_ID',
+        clientSecretEnv: 'R_NOTION_CLIENT_SECRET',
+      },
+      oauthTokenRequestFormat: 'json',
+      oauthPkce: false,
+    });
     expect(getMcpIntegrationConnectionScope('notion')).toBe('deployment');
   });
 

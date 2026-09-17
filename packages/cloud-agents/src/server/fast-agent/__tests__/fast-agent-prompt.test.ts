@@ -1981,6 +1981,24 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('checks the full built-in catalog before fallback setup routes', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      addRemoteMcpEnabled: true,
+      serviceCredentialToolsEnabled: true,
+    });
+
+    expect(prompt).toContain(
+      'Before researching or configuring an unconnected third-party service, call `setup_native_integration`',
+    );
+    expect(prompt).toContain(
+      'includes supported integrations even when they are disabled or unconfigured',
+    );
+    expect(prompt).toContain(
+      'Continue to the remote MCP and key routes below only when the native result is unsupported',
+    );
+  });
+
   it('does not bypass an applicable or indeterminate remote MCP with an integration key', () => {
     const adminPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
