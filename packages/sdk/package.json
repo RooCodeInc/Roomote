@@ -44,6 +44,10 @@
       "import": "./src/server/lib/automation-recommendations.ts",
       "require": "./src/server/lib/automation-recommendations.ts"
     },
+    "./server/automation-result-visibility": {
+      "import": "./src/server/lib/automation-result-visibility.ts",
+      "require": "./src/server/lib/automation-result-visibility.ts"
+    },
     "./server/telegram-primary-chat": {
       "import": "./src/server/lib/telegram-primary-chat.ts",
       "require": "./src/server/lib/telegram-primary-chat.ts"

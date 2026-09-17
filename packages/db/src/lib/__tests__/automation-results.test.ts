@@ -180,6 +180,7 @@ describe('automation result acceptance', () => {
       taskId: task.id,
       content: 'Published after merge',
       dedupeKey: `automation-result-acceptance:${task.id}:published`,
+      visibility: 'shared',
     });
 
     expect(result).not.toBeNull();

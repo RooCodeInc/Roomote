@@ -35,6 +35,7 @@ import {
   buildAutomationRootSummaryText,
   enqueueSlackSuggestedTasksOnboardingFollowup,
   shouldPostHistoricalThreadFeedbackDebugSnippet,
+  resolveTaskAutomationResultVisibility,
 } from '@roomote/sdk/server';
 import {
   and,
@@ -1507,6 +1508,9 @@ export async function submitTaskSuggestions(
             (suggestion) => suggestion.targetRepositoryFullName !== null,
           );
 
+    const resultVisibility = await resolveTaskAutomationResultVisibility(
+      taskId,
+    ).catch(() => 'private' as const);
     const persistedSuggestions = await db.transaction(async (tx) => {
       const workItemColumns = {
         id: workItems.id,
@@ -1609,6 +1613,7 @@ export async function submitTaskSuggestions(
                   ? automationDescriptor.resultPriority
                   : 'normal'),
               resultUserId: createdByUserId,
+              resultVisibility,
               targetEnvironmentId: suggestion.targetEnvironmentId,
               workspaceReadiness: suggestion.workspaceReadiness,
               readinessMessage: suggestion.readinessMessage,
