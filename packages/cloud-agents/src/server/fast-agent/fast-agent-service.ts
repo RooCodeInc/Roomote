@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { ModelMessage } from 'ai';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { addRemoteCustomMcpForFast } from '@roomote/sdk/server/add-remote-custom-mcp';
@@ -410,27 +410,11 @@ async function setFastSessionResponding(
 
 function buildFastAgentTurnId({
   currentMessageId,
-  conversation,
-  question,
 }: {
   currentMessageId?: string;
-  conversation: FastAgentConversation;
-  question: string;
 }): string {
   if (currentMessageId) return currentMessageId;
-
-  const digest = createHash('sha256')
-    .update(
-      JSON.stringify([
-        conversation.surface,
-        conversation.workspaceId,
-        conversation.conversationId,
-        question,
-      ]),
-    )
-    .digest('hex')
-    .slice(0, 24);
-  return `fallback:${digest}`;
+  return `fallback:${randomUUID()}`;
 }
 
 function serializeFastAgentToolOutput(result: unknown): {
@@ -1883,8 +1867,6 @@ export async function answerFastAgentQuestion({
   const chatInitiationOrder = createChatInitiationOrder();
   const turnId = buildFastAgentTurnId({
     currentMessageId,
-    conversation,
-    question,
   });
   const diagnostics = new FastAgentTurnDiagnostics({
     conversation,
@@ -2515,8 +2497,6 @@ export async function answerFastAgentQuestion({
 
         const followUpTurnId = buildFastAgentTurnId({
           currentMessageId: followUp.currentMessageId,
-          conversation,
-          question: followUp.question,
         });
         const { turnMessages } = buildFastAgentMessages({
           question: followUp.question,
