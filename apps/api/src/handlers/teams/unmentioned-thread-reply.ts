@@ -13,7 +13,7 @@ import type {
 
 import {
   compareNumericMessageIds,
-  evaluateUnmentionedThreadReplyRouting,
+  resolveUnmentionedThreadReplyRouting,
   type UnmentionedThreadHistoryMessage,
 } from '../shared/unmentioned-thread-reply.js';
 import {
@@ -85,6 +85,7 @@ function toSharedHistoryMessages(
             (Boolean(mention.userId) &&
               mention.userId !== message.authorUserId)),
       ),
+      text: message.text,
     };
   });
 }
@@ -183,8 +184,9 @@ export async function shouldRouteUnmentionedTeamsThreadReplyToAgent(params: {
       message.authorUserId === senderAadObjectId,
   );
 
-  const decision = evaluateUnmentionedThreadReplyRouting({
+  const decision = await resolveUnmentionedThreadReplyRouting({
     eventMessageId: messageId,
+    eventText: activity.text ?? '',
     senderUserId: senderAadObjectId,
     isThreadTaskOwner:
       Boolean(taskBackedThreadRun.userId) &&

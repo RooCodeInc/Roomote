@@ -1,16 +1,29 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { mockEvaluateTypeSafeJudgments } = vi.hoisted(() => ({
+  mockEvaluateTypeSafeJudgments: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
+  evaluateTypeSafeJudgments: mockEvaluateTypeSafeJudgments,
+}));
 
 import {
   compareBigIntMessageIds,
   compareNumericMessageIds,
   evaluateUnmentionedThreadReplyRouting,
+  resolveUnmentionedThreadReplyRouting,
   type UnmentionedThreadHistoryMessage,
 } from './unmentioned-thread-reply.js';
 
 function human(
   id: string,
   authorUserId: string,
-  options: { mentionsBot?: boolean; mentionsSomebodyElse?: boolean } = {},
+  options: {
+    mentionsBot?: boolean;
+    mentionsSomebodyElse?: boolean;
+    text?: string;
+  } = {},
 ): UnmentionedThreadHistoryMessage {
   return {
     id,
@@ -18,16 +31,18 @@ function human(
     isBot: false,
     mentionsBot: options.mentionsBot ?? false,
     mentionsSomebodyElse: options.mentionsSomebodyElse ?? false,
+    ...(options.text !== undefined ? { text: options.text } : {}),
   };
 }
 
-function bot(id: string): UnmentionedThreadHistoryMessage {
+function bot(id: string, text?: string): UnmentionedThreadHistoryMessage {
   return {
     id,
     authorUserId: 'bot',
     isBot: true,
     mentionsBot: false,
     mentionsSomebodyElse: false,
+    ...(text !== undefined ? { text } : {}),
   };
 }
 
@@ -225,6 +240,167 @@ describe('evaluateUnmentionedThreadReplyRouting', () => {
       shouldRoute: false,
       interjectionDetected: false,
     });
+  });
+});
+
+function addresseeAnswer(
+  choice: 'roomote' | 'participant' | 'unclear',
+  probability: number,
+) {
+  const rest = (1 - probability) / 2;
+  return {
+    addressee: {
+      type: 'choice',
+      choice,
+      confidence: probability,
+      probabilities: {
+        roomote: choice === 'roomote' ? probability : rest,
+        participant: choice === 'participant' ? probability : rest,
+        unclear: choice === 'unclear' ? probability : rest,
+      },
+    },
+  };
+}
+
+describe('resolveUnmentionedThreadReplyRouting', () => {
+  const interjectedThread = [
+    human('100', 'U1', { mentionsBot: true, text: 'please fix the bug' }),
+    bot('200', 'I opened a PR with the fix.'),
+    human('300', 'U2', { text: 'nice, looks good' }),
+    human('600', 'U2', { text: 'a later message' }),
+  ];
+
+  function resolve(
+    input: {
+      senderUserId?: string;
+      isThreadTaskOwner?: boolean;
+      threadMessages?: UnmentionedThreadHistoryMessage[];
+      eventText?: string;
+    } = {},
+  ) {
+    return resolveUnmentionedThreadReplyRouting({
+      eventMessageId: '500',
+      eventText: input.eventText ?? 'can you also add a test?',
+      senderUserId: input.senderUserId ?? 'U1',
+      isThreadTaskOwner: input.isThreadTaskOwner ?? true,
+      isThreadRootAuthor: false,
+      threadMessages: input.threadMessages ?? interjectedThread,
+      compareMessageIds: compareNumericMessageIds,
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(null);
+  });
+
+  it('keeps the interjection refusal when the judgment model is not configured', async () => {
+    await expect(resolve()).resolves.toEqual({
+      shouldRoute: false,
+      interjectionDetected: true,
+    });
+    expect(mockEvaluateTypeSafeJudgments).toHaveBeenCalledOnce();
+  });
+
+  it('routes an interjected reply the judgment model confidently gives to Roomote', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(
+      addresseeAnswer('roomote', 0.9),
+    );
+
+    await expect(resolve()).resolves.toEqual({
+      shouldRoute: true,
+      interjectionDetected: false,
+      routedByJudgmentModel: true,
+    });
+
+    const { state } = mockEvaluateTypeSafeJudgments.mock.calls[0]![0];
+    expect(state).toEqual({
+      thread: {
+        messages: [
+          {
+            author: 'reply author',
+            text: 'please fix the bug',
+            mentionsRoomote: true,
+            mentionsSomebodyElse: false,
+          },
+          {
+            author: 'Roomote',
+            text: 'I opened a PR with the fix.',
+            mentionsRoomote: false,
+            mentionsSomebodyElse: false,
+          },
+          {
+            author: 'participant 1',
+            text: 'nice, looks good',
+            mentionsRoomote: false,
+            mentionsSomebodyElse: false,
+          },
+        ],
+      },
+      reply: { author: 'reply author', text: 'can you also add a test?' },
+    });
+  });
+
+  it('keeps the refusal when Roomote is the likeliest addressee but below the threshold', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(
+      addresseeAnswer('roomote', 0.7),
+    );
+
+    await expect(resolve()).resolves.toEqual({
+      shouldRoute: false,
+      interjectionDetected: true,
+    });
+  });
+
+  it('keeps the refusal when the judgment model says the reply is for a participant', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(
+      addresseeAnswer('participant', 0.95),
+    );
+
+    await expect(resolve()).resolves.toEqual({
+      shouldRoute: false,
+      interjectionDetected: true,
+    });
+  });
+
+  it('keeps the refusal when the judgment model fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockEvaluateTypeSafeJudgments.mockRejectedValue(new Error('timeout'));
+
+    await expect(resolve()).resolves.toEqual({
+      shouldRoute: false,
+      interjectionDetected: true,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('[UnmentionedThreadReply]'),
+    );
+    warn.mockRestore();
+  });
+
+  it('does not consult the judgment model for a reply with no text', async () => {
+    await expect(resolve({ eventText: '   ' })).resolves.toEqual({
+      shouldRoute: false,
+      interjectionDetected: true,
+    });
+    expect(mockEvaluateTypeSafeJudgments).not.toHaveBeenCalled();
+  });
+
+  it('does not consult the judgment model when the heuristic already routes', async () => {
+    await expect(
+      resolve({ threadMessages: [human('100', 'U1'), bot('200')] }),
+    ).resolves.toEqual({ shouldRoute: true, interjectionDetected: false });
+    expect(mockEvaluateTypeSafeJudgments).not.toHaveBeenCalled();
+  });
+
+  it('never consults the judgment model for an ineligible sender', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(
+      addresseeAnswer('roomote', 1),
+    );
+
+    await expect(
+      resolve({ senderUserId: 'U3', isThreadTaskOwner: false }),
+    ).resolves.toEqual({ shouldRoute: false, interjectionDetected: false });
+    expect(mockEvaluateTypeSafeJudgments).not.toHaveBeenCalled();
   });
 });
 
