@@ -20,7 +20,6 @@ import {
   deploymentSecrets,
   eq,
   githubInstallations,
-  githubUserMappings,
   isNull,
   repositories,
   users,
@@ -486,8 +485,6 @@ export async function listFastAgentIntegrations(
   const [
     configuredServers,
     githubInstallation,
-    githubRepository,
-    githubAccount,
     gitlabConnection,
     bitbucketAvailable,
     giteaAvailable,
@@ -500,34 +497,15 @@ export async function listFastAgentIntegrations(
           columns: { id: true },
         })
       : Promise.resolve(undefined),
-    isRouterMcpServerEnabled('github')
-      ? db.query.repositories.findFirst({
-          where: and(
-            eq(repositories.sourceControlProvider, 'github'),
-            eq(repositories.isActive, true),
-          ),
-          columns: { id: true },
-        })
-      : Promise.resolve(undefined),
-    isRouterMcpServerEnabled('github')
-      ? db.query.githubUserMappings.findFirst({
-          where: eq(githubUserMappings.userId, context.userId),
-          columns: { id: true },
-        })
-      : Promise.resolve(undefined),
     hasGitLabDiscoveryConnection().catch(() => false),
     isBitbucketAvailable(context.userId),
     isNativeProviderMergeAvailable(context.userId, 'gitea').catch(() => false),
     isNativeProviderMergeAvailable(context.userId, 'ado').catch(() => false),
   ]);
-  const githubRepositoryAvailable = Boolean(
-    githubInstallation && githubRepository,
-  );
 
   if (
     Object.keys(configuredServers).length === 0 &&
-    !githubRepositoryAvailable &&
-    !githubAccount &&
+    !githubInstallation &&
     !gitlabConnection &&
     !bitbucketAvailable &&
     !giteaAvailable &&
@@ -551,10 +529,7 @@ export async function listFastAgentIntegrations(
     disabledTools: new Set(config.disabledTools ?? []),
   }));
 
-  if (
-    (githubRepositoryAvailable || githubAccount) &&
-    !configuredServers.github
-  ) {
+  if (githubInstallation && !configuredServers.github) {
     candidates.push({
       id: 'github',
       name: 'GitHub',
@@ -623,27 +598,21 @@ export async function listFastAgentIntegrations(
   }
 
   const results = await Promise.allSettled(
-    candidates.map(async (integration) => {
-      const githubCapabilityRevision =
-        integration.id === 'github'
-          ? `${githubRepositoryAvailable}:${Boolean(githubAccount)}`
-          : '';
-      return {
-        ...integration,
-        tools: (
-          await listCachedIntegrationTools({
-            cacheKey: `${context.userId}:${integration.endpoint!.url}:${configuredServers[integration.id]?.cacheRevision ?? githubCapabilityRevision}`,
-            url: integration.endpoint!.url,
-            headers: integration.endpoint!.headers,
-          })
-        )
-          .filter((tool) => !integration.disabledTools.has(tool.name))
-          .flatMap((tool) => {
-            const shaped = shapeFastIntegrationTool(integration.id, tool);
-            return shaped ? [shaped] : [];
-          }),
-      };
-    }),
+    candidates.map(async (integration) => ({
+      ...integration,
+      tools: (
+        await listCachedIntegrationTools({
+          cacheKey: `${context.userId}:${integration.endpoint!.url}:${configuredServers[integration.id]?.cacheRevision ?? ''}`,
+          url: integration.endpoint!.url,
+          headers: integration.endpoint!.headers,
+        })
+      )
+        .filter((tool) => !integration.disabledTools.has(tool.name))
+        .flatMap((tool) => {
+          const shaped = shapeFastIntegrationTool(integration.id, tool);
+          return shaped ? [shaped] : [];
+        }),
+    })),
   );
 
   let hasPrimaryMemory = false;

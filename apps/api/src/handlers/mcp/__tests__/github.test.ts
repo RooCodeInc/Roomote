@@ -382,47 +382,6 @@ describe('GitHub MCP bounded writes', () => {
     }
   });
 
-  it('discovers only the account tool when the member has no connected repository', async () => {
-    await db
-      .update(repositories)
-      .set({ isActive: false })
-      .where(eq(repositories.id, repository.id));
-    await db
-      .update(repositories)
-      .set({ isActive: false })
-      .where(eq(repositories.id, secondRepository.id));
-    mocks.userToken.mockResolvedValue('actor-github-token');
-    mocks.upstream.mockResolvedValueOnce(
-      Response.json({
-        jsonrpc: '2.0',
-        id: 7,
-        result: {
-          tools: [{ name: 'get_file_contents' }, { name: 'create_gist' }],
-        },
-      }),
-    );
-    try {
-      const response = await post({
-        jsonrpc: '2.0',
-        id: 7,
-        method: 'tools/list',
-      });
-
-      expect(response.status).toBe(200);
-      expect(
-        (await response.json()).result.tools.map(
-          (tool: { name: string }) => tool.name,
-        ),
-      ).toEqual(['create_gist']);
-      expect(mocks.mint).not.toHaveBeenCalled();
-    } finally {
-      await db
-        .update(repositories)
-        .set({ isActive: true })
-        .where(eq(repositories.id, secondRepository.id));
-    }
-  });
-
   it('selects the target installation even when another active installation exists', async () => {
     const other = await githubInstallationFactory.create({
       installedByUserId: installer.id,
@@ -1066,6 +1025,16 @@ describe('GitHub MCP bounded writes', () => {
         (await call('update_pull_request', { ...args, repo: 'second' }, target))
           .status,
       ).toBe(403);
+      expect(
+        (
+          await call(
+            'create_gist',
+            { filename: 'notes.md', content: '# Notes', public: false },
+            target,
+          )
+        ).status,
+      ).toBe(403);
+      expect(mocks.userToken).not.toHaveBeenCalled();
       await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
       expect(
         (await call('get_file_contents', { owner, repo: 'second' }, target))
@@ -1171,7 +1140,7 @@ describe('GitHub MCP bounded writes', () => {
     expect(mocks.upstream).not.toHaveBeenCalled();
   });
 
-  it('keeps run tokens read-only, including runs with a human actor', async () => {
+  it('keeps run-token repository tools read-only while allowing actor-owned gists', async () => {
     const run = await runFactory.create({ actingUserId: actor.id });
     try {
       const target = app({
@@ -1182,6 +1151,7 @@ describe('GitHub MCP bounded writes', () => {
         principal: 'user',
       });
       expect((await call('merge_pull_request', args, target)).status).toBe(403);
+      mocks.userToken.mockResolvedValue('actor-github-token');
       expect(
         (
           await call(
@@ -1190,9 +1160,20 @@ describe('GitHub MCP bounded writes', () => {
             target,
           )
         ).status,
-      ).toBe(403);
+      ).toBe(200);
+      expect(mocks.userToken).toHaveBeenCalledExactlyOnceWith(actor.id);
       expect(mocks.mint).not.toHaveBeenCalled();
-      expect(mocks.upstream).not.toHaveBeenCalled();
+      expect(
+        new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
+          'authorization',
+        ),
+      ).toBe('Bearer actor-github-token');
+      expect(
+        new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
+          'X-MCP-Readonly',
+        ),
+      ).toBe('false');
+      mocks.upstream.mockClear();
       mocks.upstream.mockResolvedValueOnce(
         Response.json({
           jsonrpc: '2.0',
@@ -1215,12 +1196,12 @@ describe('GitHub MCP bounded writes', () => {
         (await response.json()).result.tools.map(
           (tool: { name: string }) => tool.name,
         ),
-      ).toEqual(['pull_request_read']);
+      ).toEqual(['pull_request_read', 'create_gist']);
       expect(
         new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
           'X-MCP-Readonly',
         ),
-      ).toBe('true');
+      ).toBe('false');
     } finally {
       await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
       await db.delete(tasks).where(eq(tasks.id, run.taskId));

@@ -290,20 +290,21 @@ that already succeeded is not blindly repeated.
 
 ### Create gists
 
-Fast can create a gist owned by the requesting member's linked GitHub account.
-This account-level action does not use a repository installation token and does
-not require a connected repository. Link GitHub under **Settings -> Linked
-Accounts** first. The deployment's GitHub App must have the **Gists: Read and
-write** account permission; after an operator adds that permission, members must
-reauthorize or reconnect their linked GitHub accounts before creating gists.
+Fast Sessions and coding tasks can create a gist owned by the acting member's
+linked GitHub account. Tool discovery requires the deployment's normal eligible
+GitHub App installation and active connected repository, but gist creation uses
+the member's user access token rather than a repository installation token. Link
+GitHub under **Settings -> Linked Accounts** first. The deployment's GitHub App
+must have the **Gists: Read and write** account permission; after an operator
+adds that permission, members must reauthorize or reconnect their linked GitHub
+accounts before creating gists.
 
 Gist visibility is always explicit. Roomote uses `public: false` unless the user
 explicitly requests public publishing. GitHub calls this a secret gist: anyone
 with the URL can access it, so it is link-accessible rather than private. Public
 gists are discoverable and should be created only after an explicit request.
-Gist creation is available in Fast, not from coding-run GitHub tools, and the
-result belongs to the authenticated requesting member rather than the Roomote
-GitHub App or an installation owner.
+The result belongs to the acting member rather than the Roomote GitHub App or an
+installation owner. Coding runs without a human actor cannot create gists.
 
 Roomote tasks can manage routine repository work through the GitHub App
 installation. Requests default to the repository mapped to the task:
