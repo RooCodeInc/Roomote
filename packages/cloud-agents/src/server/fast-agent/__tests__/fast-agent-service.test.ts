@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getEnvironments: vi.fn(),
   listCustomSkills: vi.fn(),
   getCustomSkill: vi.fn(),
+  scoreTypeSafeRelevance: vi.fn(),
   getTaskModelOptions: vi.fn(),
   getDeploymentSettings: vi.fn(),
   appendMemory: vi.fn(),
@@ -273,6 +274,7 @@ vi.mock('../../non-task-provider-usage', () => ({
 
 vi.mock('../../typesafe-judgment', () => ({
   evaluateTypeSafeJudgments: mocks.evaluateJudgments,
+  scoreTypeSafeRelevance: mocks.scoreTypeSafeRelevance,
 }));
 
 vi.mock('../fast-agent-opencode-session', () => ({
@@ -593,6 +595,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.listCustomSkills.mockResolvedValue([]);
     mocks.getCustomSkill.mockResolvedValue(null);
+    mocks.scoreTypeSafeRelevance.mockResolvedValue(null);
     mocks.getEnvironments.mockResolvedValue([
       {
         id: 'env-1',
@@ -713,6 +716,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
       'Reply in pirate style.',
+    );
+  });
+
+  it('adds the judgment-model skill hint to the turn prompt, not the system prompt', async () => {
+    const skill = {
+      id: '00000000-0000-4000-8000-000000000002',
+      name: 'deploy-staging',
+      description: 'Deploy main to staging and run smoke checks.',
+      content: '# Deploy staging',
+    };
+    mocks.listCustomSkills.mockResolvedValue([skill]);
+    mocks.scoreTypeSafeRelevance.mockResolvedValueOnce(
+      new Map([[`instance:${skill.id}`, 0.92]]),
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.scoreTypeSafeRelevance).toHaveBeenCalledOnce();
+    const params = mocks.generateText.mock.calls[0]?.[0];
+    expect(params.prompt).toContain(
+      `<skill_relevance>\nRelevant to the current request: deploy-staging [id: instance:${skill.id}].`,
+    );
+    expect(params.system).not.toContain('skill_relevance');
+  });
+
+  it('skips the judgment-model skill hint when no skills are configured', async () => {
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.scoreTypeSafeRelevance).not.toHaveBeenCalled();
+    expect(mocks.generateText.mock.calls[0]?.[0].prompt).not.toContain(
+      'skill_relevance',
     );
   });
 
