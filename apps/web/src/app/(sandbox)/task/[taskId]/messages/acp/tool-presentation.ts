@@ -32,6 +32,7 @@ export type ToolIconKey =
   | 'task'
   | 'message'
   | 'memory'
+  | 'book-heart'
   | 'artifact'
   | 'widget'
   | 'roomote'
@@ -117,6 +118,7 @@ const TOOL_ICON_OVERRIDES: Readonly<Partial<Record<string, ToolIconKey>>> = {
   manage_source_control: 'pull-request',
   manage_environments: 'environment',
   save_task_memory: 'memory',
+  update_personalization: 'book-heart',
   request_environment_variables: 'terminal',
   report_platform_issue: 'alert',
   submit_automation_work_items: 'task',
@@ -169,7 +171,12 @@ export function resolveToolPresentation(
     providerKind === 'mcp' && serverName
       ? getMcpIntegration(serverName)
       : undefined;
-  const displayName = toolName ? formatToolIdentifier(toolName) : 'Tool';
+  const displayName =
+    toolName === 'manage_wakeups'
+      ? 'Timer'
+      : toolName
+        ? formatToolIdentifier(toolName)
+        : 'Tool';
   const providerLabel =
     serverName === 'roomote' || serverName === 'gbrain'
       ? undefined
@@ -179,7 +186,7 @@ export function resolveToolPresentation(
     toolName,
     phase,
     readToolArguments(data),
-    toolName === 'manage_wakeups' ? readToolResult(data) : null,
+    readToolResult(data),
     category,
     serverName,
     providerKind === 'native'
@@ -326,6 +333,71 @@ function resolveReceiptLanguage(
       verb: byPhase('Starting', 'Started', 'Failed to Start'),
       object: 'coding task',
     };
+  if (toolName === 'prepare_integration_key') {
+    const label = typeof args?.label === 'string' ? args.label.trim() : '';
+    return {
+      verb: byPhase('Requesting', 'Requested', 'Failed to Request'),
+      object: label ? `a key for ${label}` : 'an integration key',
+    };
+  }
+  if (toolName === 'add_remote_mcp') {
+    const requestedName = stringArgument(args, 'name') ?? 'a remote MCP';
+    const resultName = stringArgument(result, 'name') ?? requestedName;
+    const remoteMcp =
+      resultName === 'a remote MCP' ? resultName : `remote MCP ${resultName}`;
+    if (phase === 'running') return { verb: 'Adding', object: remoteMcp };
+    if (phase === 'failed') {
+      return { verb: 'Failed to Add', object: remoteMcp };
+    }
+
+    const status = stringArgument(result, 'status');
+    if (status === 'connected') {
+      const toolCount = Array.isArray(result?.tools)
+        ? ` (${result.tools.length} tools)`
+        : '';
+      return {
+        verb: result?.reused === true ? 'Found' : 'Added',
+        object: `${remoteMcp}${toolCount}`,
+      };
+    }
+    if (status === 'oauth' || status === 'authorization_required') {
+      return { verb: 'Prepared', object: `${remoteMcp} for authorization` };
+    }
+    if (status === 'disabled') {
+      return { verb: 'Found', object: `${remoteMcp} (disabled)` };
+    }
+    if (
+      status === 'needs_static_headers' ||
+      status === 'client_registration_required'
+    ) {
+      return {
+        verb: 'Checked',
+        object: `${remoteMcp}, needs setup in Settings`,
+      };
+    }
+    return { verb: 'Checked', object: remoteMcp };
+  }
+  if (toolName === 'list_integration_keys')
+    return {
+      verb: byPhase('Checking', 'Checked', 'Failed to Check'),
+      object: 'your integrations',
+    };
+  if (toolName === 'request_with_integration_key') {
+    const method =
+      typeof args?.method === 'string' ? args.method.toUpperCase() : '';
+    const path = typeof args?.path === 'string' ? args.path : '';
+    const status =
+      phase !== 'running' && typeof result?.status === 'number'
+        ? ` (${result.status})`
+        : '';
+    return {
+      verb: byPhase('Calling', 'Called', 'Failed to Call'),
+      object:
+        method && path
+          ? `${method} ${path}${status}`
+          : `an integration${status}`,
+    };
+  }
   if (toolName === 'review_pull_request')
     return {
       verb: byPhase('Starting', 'Started', 'Failed to Start'),
@@ -351,6 +423,11 @@ function resolveReceiptLanguage(
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),
       object: 'chat reply',
     };
+  if (toolName === 'update_personalization')
+    return {
+      verb: byPhase('Updating', 'Personalization', 'Failed to update'),
+      object: byPhase('personalization', 'updated', 'personalization'),
+    };
   if (toolName === 'request_user_input')
     return {
       verb: byPhase('Asking for', 'Asked for', 'Failed to Ask for'),
@@ -365,6 +442,11 @@ function resolveReceiptLanguage(
     return {
       verb: byPhase('Receiving', 'Received', 'Failed to Receive'),
       object: 'task report',
+    };
+  if (toolName === 'report_to_voice')
+    return {
+      verb: byPhase('Reporting', 'Reported', 'Failed to Report'),
+      object: 'result to voice',
     };
   if (toolName === 'post_to_channel')
     return {
@@ -432,7 +514,7 @@ function resolveReceiptLanguage(
       object: 'Images',
     };
   if (nativeToolName === 'skill' || nativeToolName === 'load_skill') {
-    const name = stringArgument(args, 'name');
+    const name = humanReadableSkillName(args) ?? humanReadableSkillName(result);
     return {
       verb: byPhase('Loading', 'Loaded', 'Failed to Load'),
       object: name ? `skill ${name}` : 'skill',
@@ -486,6 +568,11 @@ function resolveReceiptLanguage(
         'file',
     };
   return null;
+}
+
+function humanReadableSkillName(args: ToolArguments | null): string | null {
+  const name = stringArgument(args, 'name');
+  return name && !/^instance:[0-9a-f-]{36}$/i.test(name) ? name : null;
 }
 
 export function readToolArguments(data: ToolData): ToolArguments | null {
@@ -570,8 +657,8 @@ function manageTasksReceipt(
       object: 'task',
     },
     get_messages: {
-      verb: byPhase('Getting', 'Received', 'Failed to Get'),
-      object: `message from ${target}`,
+      verb: byPhase('Checking', 'Checked', 'Failed to Check'),
+      object: `recent ${target} messages`,
     },
     send_message: {
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),

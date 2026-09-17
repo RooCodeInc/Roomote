@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 
 import { agentmailSuppressions, db, eq } from '@roomote/db/server';
 import {
-  buildAgentMailEmailLinkToken,
   buildAgentMailUnsubscribeToken,
   buildAgentMailUnsubscribeUrl,
   isAgentMailAddressSuppressed,
@@ -27,13 +26,6 @@ describe('agentmail unsubscribe tokens', () => {
       verifyAgentMailUnsubscribeToken(
         buildAgentMailUnsubscribeToken(email, Date.now() - 1_000),
       ),
-    ).toBeNull();
-  });
-
-  it('is domain-separated from email-link tokens', () => {
-    const email = uniqueEmail();
-    expect(
-      verifyAgentMailUnsubscribeToken(buildAgentMailEmailLinkToken(email)),
     ).toBeNull();
   });
 });

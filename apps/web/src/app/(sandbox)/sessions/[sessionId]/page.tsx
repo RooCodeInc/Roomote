@@ -20,8 +20,10 @@ import {
 import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
 import { SessionViewers } from '@/components/sessions/SessionViewers';
+import { ServiceCredentials } from '@/components/sessions/ServiceCredentials';
+import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 
-import { findDeploymentSetupSessionId } from '@/trpc/commands/setup/setup-session';
+import { hasVoiceAutostartFlag } from '@/lib/voice-autostart';
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionTaskTimeline } from './SessionTaskTimeline';
 import {
@@ -30,9 +32,6 @@ import {
   type SessionInfo,
 } from './SessionWorkspace';
 import { SessionReadTracker } from './SessionReadTracker';
-import { SetupAutomationRecommendationsCard } from './setup/SetupAutomationRecommendationsCard';
-import { SetupSandboxCard } from './setup/SetupSandboxCard';
-import { SetupSessionSourceControlCard } from './setup/SetupSourceControlCard';
 import {
   SESSION_HEADER_CONTENT_CLASS_NAME,
   SESSION_HEADER_TITLE_CLASS_NAME,
@@ -71,6 +70,7 @@ const getSessionPageData = cache(async (sessionId: string) => {
 
 type SessionDetailPageProps = {
   params: Promise<{ sessionId: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 export async function generateMetadata({
@@ -93,14 +93,24 @@ export async function generateMetadata({
 
 export default async function SessionDetailPage({
   params,
+  searchParams,
 }: SessionDetailPageProps) {
   const { sessionId } = await params;
-  const { authorizedUser, unifiedSession, session } =
-    await getSessionPageData(sessionId);
+  const sessionPageDataPromise = getSessionPageData(sessionId);
+  const modelEnvPromise: Promise<Record<string, string>> =
+    resolveEffectiveModelRuntimeEnv().catch(() => ({}));
+  const [
+    { authorizedUser, unifiedSession, session },
+    modelEnv,
+    resolvedParams,
+  ] = await Promise.all([
+    sessionPageDataPromise,
+    modelEnvPromise,
+    searchParams,
+  ]);
+  const autoStartVoice = hasVoiceAutostartFlag(resolvedParams);
   // The chip's "default" must reflect what Fast actually runs with: the
   // deployment's orchestration model, not the task launch default.
-  const modelEnv: Record<string, string> =
-    await resolveEffectiveModelRuntimeEnv().catch(() => ({}));
   const defaultModelId =
     modelEnv.R_ORCHESTRATION_MODEL || modelEnv.R_MODEL || null;
   const rawDefaultEffort = modelEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
@@ -116,6 +126,7 @@ export default async function SessionDetailPage({
       ownerName: unifiedSession.ownerName,
       ownerEmail: unifiedSession.ownerEmail,
       ownerImageUrl: unifiedSession.ownerImageUrl,
+      privacy: unifiedSession.privacy,
       surface: unifiedSession.sourceSurface,
       model: session?.model ?? defaultModelId,
       reasoningEffort: session?.reasoningEffort ?? defaultReasoningEffort,
@@ -130,22 +141,10 @@ export default async function SessionDetailPage({
       },
       createdAt: unifiedSession.createdAt,
       status: unifiedSession.status,
+      goal: unifiedSession.goal,
       tasks: unifiedSession.tasks,
       artifacts: unifiedSession.artifacts,
     };
-    // The setup session keeps its inline automation-recommendations card on
-    // its normal route after activation: recommendations are optional and
-    // must not interrupt activation, so they surface here once ready.
-    const isSetupSession =
-      authorizedUser.isAdmin &&
-      unifiedSession.id === (await findDeploymentSetupSessionId());
-    const setupTimelineExtras = isSetupSession ? (
-      <div className="space-y-3">
-        <SetupSessionSourceControlCard sessionId={unifiedSession.id} />
-        <SetupSandboxCard />
-        <SetupAutomationRecommendationsCard sessionId={unifiedSession.id} />
-      </div>
-    ) : null;
     return (
       <SessionWorkspace session={sessionInfo}>
         <SessionReadTracker sessionId={unifiedSession.id} />
@@ -155,6 +154,11 @@ export default async function SessionDetailPage({
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <FastSessionTranscript
                   sessionId={session.id}
+                  secretSessionId={
+                    unifiedSession.ownerUserId === authorizedUser.userId
+                      ? unifiedSession.id
+                      : undefined
+                  }
                   initialMessages={session.messages}
                   hasOlderMessages={session.hasOlderMessages}
                   canReply
@@ -164,6 +168,9 @@ export default async function SessionDetailPage({
                   sessionReasoningEffort={session.reasoningEffort}
                   defaultModelId={defaultModelId}
                   defaultReasoningEffort={defaultReasoningEffort}
+                  autoStartVoice={autoStartVoice}
+                  privateSession={unifiedSession.privacy === 'private'}
+                  sessionGoal={unifiedSession.goal}
                   {...(unifiedSession.ownerUserId
                     ? {
                         owner: {
@@ -178,11 +185,11 @@ export default async function SessionDetailPage({
                     <SessionHeaderPullRequests key="session-pull-requests" />
                   }
                   headerActions={
-                    <SessionViewers sessionId={unifiedSession.id} />
+                    <SessionViewers
+                      key="session-viewers"
+                      sessionId={unifiedSession.id}
+                    />
                   }
-                  {...(isSetupSession
-                    ? { timelineExtras: setupTimelineExtras }
-                    : {})}
                 />
               </div>
             </div>
@@ -191,13 +198,25 @@ export default async function SessionDetailPage({
               <WorkspaceHeader
                 className="py-4"
                 contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-nowrap`}
-                actions={<SessionViewers sessionId={unifiedSession.id} />}
+                actions={
+                  <>
+                    {unifiedSession.ownerUserId === authorizedUser.userId ? (
+                      <ServiceCredentials sessionId={unifiedSession.id} />
+                    ) : null}
+                    <SessionViewers sessionId={unifiedSession.id} />
+                  </>
+                }
               >
-                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <h1 className={SESSION_HEADER_TITLE_CLASS_NAME}>
                     {unifiedSession.title}
                   </h1>
-                  <SessionHeaderPullRequests />
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 text-xs text-muted-foreground">
+                    {unifiedSession.privacy === 'private' ? (
+                      <PrivateSessionIcon className="text-accent-foreground" />
+                    ) : null}
+                    <SessionHeaderPullRequests />
+                  </div>
                 </div>
               </WorkspaceHeader>
               <SessionTaskTimeline
@@ -226,6 +245,7 @@ export default async function SessionDetailPage({
     ownerName: session.ownerName,
     ownerEmail: session.ownerEmail,
     ownerImageUrl: session.ownerImageUrl,
+    privacy: session.privacy,
     surface: session.surface,
     model: session.model ?? defaultModelId,
     reasoningEffort: session.reasoningEffort ?? defaultReasoningEffort,
@@ -236,6 +256,7 @@ export default async function SessionDetailPage({
     },
     createdAt: session.createdAt,
     status: null,
+    goal: null,
     tasks: [],
     artifacts: [],
     taskSource: 'fast',
@@ -262,6 +283,8 @@ export default async function SessionDetailPage({
           sessionReasoningEffort={session.reasoningEffort}
           defaultModelId={defaultModelId}
           defaultReasoningEffort={defaultReasoningEffort}
+          autoStartVoice={autoStartVoice}
+          privateSession={session.privacy === 'private'}
           {...(session.userId
             ? {
                 owner: {

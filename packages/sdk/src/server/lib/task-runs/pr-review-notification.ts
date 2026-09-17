@@ -22,10 +22,12 @@ import {
 import { getRedis } from '@roomote/redis';
 import {
   type CommunicationProvider,
+  formatOperationalEvent,
   getCommunicationChannelFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
+  getOperationalLogRuntimeFields,
   sourceControlProviderSchema,
 } from '@roomote/types';
 
@@ -37,6 +39,28 @@ import {
 } from './pr-review-follow-up-dispatch';
 
 export const PR_REVIEW_NOTIFICATION_QUEUE_NAME = 'pr-review-notification-jobs';
+
+function logPrReviewOperationalEvent(
+  level: 'info' | 'warn' | 'error',
+  event: string,
+  fields: Parameters<typeof formatOperationalEvent>[1],
+): void {
+  const writer =
+    level === 'error'
+      ? console.error
+      : level === 'warn'
+        ? console.warn
+        : console.log;
+  writer(
+    formatOperationalEvent(event, {
+      ...getOperationalLogRuntimeFields(
+        process.env.RAILWAY_SERVICE_NAME?.trim() || 'sdk-server',
+        process.env,
+      ),
+      ...fields,
+    }),
+  );
+}
 
 /**
  * Debounce window for ordinary PR review activity so related review comments
@@ -52,19 +76,17 @@ export const PR_REVIEW_NOTIFICATION_DEBOUNCE_MS = 1 * 60 * 1000;
 export const PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS = 5 * 60 * 1000;
 
 /**
- * Delay before re-checking an owner task that is still actively running when
- * the notification job fires. The notification is intentionally held until
- * the task goes idle.
+ * Delay before re-checking a notification target that is still active. Fast
+ * tasks wait for their parent Session conversation; direct tasks wait for the
+ * task itself.
  */
 export const PR_REVIEW_NOTIFICATION_DEFER_MS = 5 * 60 * 1000;
 
 /**
- * Upper bound on idle-wait deferrals. The notification only posts while the
- * owning task is idle, so once the cap is reached the pending feedback is
- * dropped instead of being posted mid-run. At the 5-minute recheck interval
- * this cap roughly matches the 24-hour pending-events TTL, so it mainly
- * protects against tasks stuck in a running state scheduling deferral jobs
- * forever.
+ * Upper bound on idle-wait deferrals. Once the cap is reached, pending feedback
+ * is dropped instead of interrupting an active conversation. At the 5-minute
+ * recheck interval this cap roughly matches the 24-hour pending-events TTL, so
+ * it mainly protects against stale activity scheduling deferral jobs forever.
  */
 export const PR_REVIEW_NOTIFICATION_MAX_DEFERRALS = 288;
 
@@ -130,6 +152,8 @@ export const prReviewActivityEventSchema = z.object({
   roomoteAuthored: z.boolean().optional(),
   /** Provider-stable webhook object id used for durable ingestion dedupe. */
   providerEventId: z.string().optional(),
+  /** Original webhook delivery id retained only for cross-service correlation. */
+  sourceDeliveryId: z.string().optional(),
 });
 
 export type PrReviewActivityEvent = z.infer<typeof prReviewActivityEventSchema>;
@@ -694,7 +718,7 @@ export async function migrateLegacyPrReviewNotificationRequest(
  * originating conversation route, but web-only tasks are enqueued too so the
  * summary can land in task history.
  * The notification is informational only: it tells the user about the review
- * feedback once the task is idle. No agent turn is started.
+ * feedback once its user-facing conversation is idle. No agent turn is started.
  */
 export async function enqueuePrReviewNotification(
   input: EnqueuePrReviewNotificationInput,
@@ -764,47 +788,85 @@ export async function dispatchDuePrReviewNotifications(): Promise<number> {
   let enqueueFailures = 0;
 
   for (const claim of claims) {
+    const events = claim.events.map((event) =>
+      prReviewActivityEventSchema.parse(event),
+    );
+    const sourceDeliveryId = events.find(
+      (event) => event.sourceDeliveryId,
+    )?.sourceDeliveryId;
+    const externalEventId = events.find(
+      (event) => event.providerEventId,
+    )?.providerEventId;
+    const routeProvider =
+      claim.ownershipVersion === 'canonical' ? claim.routeProvider : undefined;
     try {
-      await getPrReviewNotificationQueue().add('notify-pr-review-activity', {
-        taskId: claim.taskId,
+      const job = await getPrReviewNotificationQueue().add(
+        'notify-pr-review-activity',
+        {
+          taskId: claim.taskId,
+          repository: claim.repository,
+          prNumber: claim.prNumber,
+          prUrl: claim.prUrl,
+          deferrals: claim.deferrals,
+          immediate: claim.batchKind === 'roomote',
+          batchKind: claim.batchKind,
+          ...(claim.batchId ? { batchId: claim.batchId } : {}),
+          sourceControlProvider: claim.sourceControlProvider,
+          deliveryIds: claim.deliveryIds,
+          leaseToken: claim.leaseToken,
+          events,
+          ownershipVersion: claim.ownershipVersion,
+          ...(claim.ownershipVersion === 'canonical'
+            ? {
+                deliveryId: claim.deliveryId,
+                notificationUnitId: claim.notificationUnitId,
+                destinationKey: claim.destinationKey,
+                host: claim.host,
+                repositoryId: claim.repositoryId,
+                deliveryState: claim.state,
+                followUpPrompt: claim.followUpPrompt,
+                reviewActionSuperseded: claim.reviewActionSuperseded,
+                targetTaskId: claim.targetTaskId,
+                actingUserId: claim.actingUserId,
+                routeProvider: claim.routeProvider,
+                routeWorkspaceId: claim.routeWorkspaceId,
+                routeChannelId: claim.routeChannelId,
+                routeThreadId: claim.routeThreadId,
+                dispatchKey: claim.dispatchKey,
+              }
+            : {}),
+        },
+      );
+      enqueued += 1;
+      logPrReviewOperationalEvent('info', 'source_control_review_enqueue', {
+        provider: claim.sourceControlProvider,
+        deliveryId: sourceDeliveryId,
+        externalEventId,
         repository: claim.repository,
         prNumber: claim.prNumber,
-        prUrl: claim.prUrl,
-        deferrals: claim.deferrals,
-        immediate: claim.batchKind === 'roomote',
-        batchKind: claim.batchKind,
-        ...(claim.batchId ? { batchId: claim.batchId } : {}),
-        sourceControlProvider: claim.sourceControlProvider,
-        deliveryIds: claim.deliveryIds,
-        leaseToken: claim.leaseToken,
-        events: claim.events.map((event) =>
-          prReviewActivityEventSchema.parse(event),
-        ),
-        ownershipVersion: claim.ownershipVersion,
-        ...(claim.ownershipVersion === 'canonical'
-          ? {
-              deliveryId: claim.deliveryId,
-              notificationUnitId: claim.notificationUnitId,
-              destinationKey: claim.destinationKey,
-              host: claim.host,
-              repositoryId: claim.repositoryId,
-              deliveryState: claim.state,
-              followUpPrompt: claim.followUpPrompt,
-              reviewActionSuperseded: claim.reviewActionSuperseded,
-              targetTaskId: claim.targetTaskId,
-              actingUserId: claim.actingUserId,
-              routeProvider: claim.routeProvider,
-              routeWorkspaceId: claim.routeWorkspaceId,
-              routeChannelId: claim.routeChannelId,
-              routeThreadId: claim.routeThreadId,
-              dispatchKey: claim.dispatchKey,
-            }
-          : {}),
+        taskId: claim.taskId,
+        jobId: job.id,
+        routeProvider,
+        eventCount: events.length,
+        outcome: 'enqueued',
+        reason: routeProvider ? 'conversation_route' : 'route_pending',
       });
-      enqueued += 1;
     } catch (error) {
       enqueueFailures += 1;
       await releasePrReviewDeliveries(claim);
+      logPrReviewOperationalEvent('error', 'source_control_review_enqueue', {
+        provider: claim.sourceControlProvider,
+        deliveryId: sourceDeliveryId,
+        externalEventId,
+        repository: claim.repository,
+        prNumber: claim.prNumber,
+        taskId: claim.taskId,
+        routeProvider,
+        eventCount: events.length,
+        outcome: 'failed',
+        reason: error instanceof Error ? error.name : 'unknown_error',
+        retryable: true,
+      });
       console.warn(
         `[dispatchDuePrReviewNotifications] Failed to wake ${claim.repository}#${claim.prNumber}: ${error instanceof Error ? error.message : String(error)}`,
       );

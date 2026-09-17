@@ -18,6 +18,7 @@ import {
 import {
   bindFastAgentMcpToolExecutor,
   bindFastAgentNativeToolExecutor,
+  summarizeSkillListForRecord,
   countFastAgentModelOutputLines,
   createFastAgentSpillTurnBudget,
   FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -132,6 +133,10 @@ describe('Fast native OpenCode tool bridge', () => {
 
     expect(installedToolFiles.sort()).toEqual(
       Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)
+        .filter(
+          (name) =>
+            name !== FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
+        )
         .map((name) => `${name}.js`)
         .sort(),
     );
@@ -196,11 +201,18 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(showWidgetSource).toContain('invoke("show_widget"');
     expect(showWidgetSource).toContain('textFallback: z.string().max(4000)');
     expect(showWidgetSource).toContain(
-      'On Slack or Discord, textFallback is posted as a chat preview with a link to open the rendered widget',
+      'Create and share a rendered visual in the Session transcript',
     );
     expect(showWidgetSource).toContain(
-      'Optional chat preview shown on Slack or Discord with a link to open the rendered widget',
+      'Use it proactively to show, mock up, preview, or visualize an interface or interaction',
     );
+    expect(showWidgetSource).toContain(
+      'Optional short plain-text preview of the rendered visual',
+    );
+    expect(showWidgetSource).not.toContain('On Slack');
+    expect(showWidgetSource).not.toContain('communication provider');
+    expect(showWidgetSource).not.toContain('link to open');
+    expect(showWidgetSource).not.toContain('HTML inline');
     expect(showWidgetSource).not.toContain('textFallback is posted instead');
     expect(showWidgetSource).toContain(SHOW_WIDGET_THEME_GUIDANCE);
     expect(showWidgetSource).toContain(SHOW_WIDGET_FIXED_CANVAS_GUIDANCE);
@@ -241,16 +253,17 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(skillListSource).toContain('sourceOffset: z.number()');
     expect(skillListSource).toContain('nextSourceOffset');
     expect(skillListSource).toContain('Omit scope and name');
-    expect(skillListSource).toContain(
-      'exactly one of environmentId or repositoryId',
-    );
+    expect(skillListSource).toContain('environmentId wins when both are given');
+    expect(skillListSource).toContain('omit or pass null');
     // OpenCode wraps `args` in z.object itself; a bare union there produces
     // a schema OpenAI rejects, which takes every Fast turn down on its models.
     expect(requestUserInputSource).toContain('args: {');
     expect(requestUserInputSource).not.toContain('z.union');
     expect(requestUserInputSource).toContain('questions: z.array');
     expect(requestUserInputSource).toContain('.max(4).optional()');
-    expect(requestUserInputSource).toContain('preset: z.enum');
+    expect(requestUserInputSource).toContain(
+      'z.enum(["setup_source_control", "setup_starter_tasks", "setup_integrations"])',
+    );
     expect(requestUserInputSource).toContain(
       'questions are ignored when a preset is set',
     );
@@ -287,6 +300,7 @@ describe('Fast native OpenCode tool bridge', () => {
       task: false,
       roomote_manage_custom_automations: false,
       roomote_create_custom_skill: false,
+      roomote_update_custom_skill: false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: false,
     });
     for (const rawFilesystemTool of [
@@ -365,17 +379,12 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
-  it('normalizes null skill arguments only for a Roomote-on-Roomote Fast host', async () => {
-    const inheritedTaskId = process.env.ROOMOTE_TASK_ID;
-    delete process.env.ROOMOTE_TASK_ID;
-    const runtime = await getFastAgentNativeToolRuntime(
-      'roomote-on-roomote-null-skill-args',
-      [],
-    );
-    const sessionId = 'roomote-on-roomote-null-skill-args-parent';
+  it('accepts null and filler optional skill arguments on every Fast host', async () => {
+    const runtime = await getFastAgentNativeToolRuntime('null-skill-args', []);
+    const sessionId = 'null-skill-args-parent';
     const unbind = bindFastAgentNativeToolExecutor(
       sessionId,
-      'roomote-on-roomote-null-skill-args-conversation',
+      'null-skill-args-conversation',
       async () => null,
       { allowSkillAccess: true, allowSpillRecovery: true },
     );
@@ -395,20 +404,32 @@ describe('Fast native OpenCode tool bridge', () => {
       await expect(
         callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.listSkills, {
           environmentId: null,
+          name: null,
           repositoryId: null,
+          sourceOffset: null,
         }),
-      ).resolves.toEqual({
-        success: false,
-        error: 'The requested skill catalog is unavailable.',
+      ).resolves.toMatchObject({
+        success: true,
+        result: {
+          counts: { packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length },
+        },
       });
-
-      process.env.ROOMOTE_TASK_ID = 'outer-coding-task';
+      // gpt-5.x models send every optional argument; an exact-name lookup
+      // with a filler continuation offset must still resolve the skill.
       await expect(
         callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.listSkills, {
           environmentId: null,
+          name: 'security-review',
           repositoryId: null,
+          sourceOffset: 0,
         }),
-      ).resolves.toMatchObject({ success: true });
+      ).resolves.toMatchObject({
+        success: true,
+        result: {
+          counts: { packaged: 1, total: 1 },
+          skills: [expect.objectContaining({ id: 'packaged:security-review' })],
+        },
+      });
       await expect(
         callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill, {
           id: 'packaged:security-review',
@@ -418,13 +439,26 @@ describe('Fast native OpenCode tool bridge', () => {
         success: true,
         result: { resource: 'SKILL.md' },
       });
+      await expect(
+        callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.listSkills, {
+          environmentId: '',
+        }),
+      ).resolves.toEqual({
+        success: false,
+        error: expect.stringContaining(
+          'Invalid list_skills arguments: environmentId:',
+        ),
+      });
+      await expect(
+        callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill, {
+          id: null,
+        }),
+      ).resolves.toEqual({
+        success: false,
+        error: expect.stringContaining('Invalid load_skill arguments: id:'),
+      });
     } finally {
       unbind();
-      if (inheritedTaskId === undefined) {
-        delete process.env.ROOMOTE_TASK_ID;
-      } else {
-        process.env.ROOMOTE_TASK_ID = inheritedTaskId;
-      }
     }
   });
 
@@ -497,6 +531,158 @@ describe('Fast native OpenCode tool bridge', () => {
       expect(loaded).toMatchObject({ success: true, result: document });
       expect(loaded.result).not.toHaveProperty('environmentIds');
       expect(read).toHaveBeenCalledExactlyOnceWith(skill.id, undefined);
+    } finally {
+      unbind();
+      list.mockRestore();
+      read.mockRestore();
+    }
+  });
+
+  it('summarizes a skill catalog for the transcript without warning text', () => {
+    const skills = Array.from({ length: 23 }, (_, index) => ({
+      id: `instance:${String(index).padStart(8, '0')}-0000-4000-8000-000000000000`,
+      name: `skill-${index}`,
+      description: 'A skill.',
+      source: 'instance' as const,
+    }));
+    const summary = summarizeSkillListForRecord({
+      skills,
+      warnings: [
+        'Settings skills could not be listed: ECONNREFUSED 10.0.0.5:5432',
+      ],
+      nextSourceOffset: 4,
+    });
+
+    expect(summary).toEqual({
+      success: true,
+      skillCount: 23,
+      skills: skills
+        .slice(0, 20)
+        .map(({ id, name, source }) => ({ id, name, source })),
+      omittedSkillCount: 3,
+      nextSourceOffset: 4,
+      warningCount: 1,
+    });
+    expect(JSON.stringify(summary)).not.toContain('ECONNREFUSED');
+  });
+
+  it('records skill catalog and load calls for the transcript without the skill body', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'native-skill-record',
+      [],
+    );
+    const sessionId = 'opencode-skill-record';
+    const skill = {
+      id: 'instance:00000000-0000-4000-8000-000000000002',
+      name: 'incident-create',
+      invocation: 'incident-create',
+      description: 'Create incidents.',
+      source: 'instance' as const,
+      version: 3,
+    };
+    const content = '# Incident Create\n\nLong body that must not be recorded.';
+    const document = {
+      ...skill,
+      content,
+      byteLength: Buffer.byteLength(content),
+      resource: 'SKILL.md',
+      resources: ['SKILL.md', 'checklist.md'],
+    };
+    const skillStore = new FastAgentSkillStore();
+    const list = vi
+      .spyOn(skillStore, 'list')
+      .mockImplementation(
+        vi.fn().mockResolvedValue({ skills: [skill], warnings: [] }),
+      );
+    const read = vi.spyOn(skillStore, 'read').mockImplementation(
+      vi.fn(async (id: string) => {
+        if (id !== skill.id) throw new Error('missing');
+        return document;
+      }),
+    );
+    const records: unknown[] = [];
+    const unbind = bindFastAgentNativeToolExecutor(
+      sessionId,
+      'conversation-skill-record',
+      async () => null,
+      {
+        allowSkillAccess: true,
+        allowSpillRecovery: true,
+        skillStore,
+        recordSkillToolCall: async (record) => {
+          records.push(record);
+        },
+      },
+    );
+    const callBridge = (tool: string, args: Record<string, unknown>) =>
+      fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionID: sessionId,
+          messageID: 'msg-skill-record',
+          tool,
+          args,
+        }),
+      })
+        .then((response) => response.json())
+        .then((payload) => JSON.parse(payload.output));
+
+    try {
+      await callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.listSkills, {
+        name: skill.name,
+      });
+      const loaded = await callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill, {
+        id: skill.id,
+      });
+      expect(loaded).toMatchObject({ success: true, result: document });
+      const failed = await callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill, {
+        id: 'instance:00000000-0000-4000-8000-00000000dead',
+      });
+      expect(failed).toMatchObject({ success: false });
+
+      expect(records).toEqual([
+        {
+          name: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
+          args: { name: skill.name },
+          messageId: 'msg-skill-record',
+          result: {
+            success: true,
+            skillCount: 1,
+            skills: [{ id: skill.id, name: skill.name, source: 'instance' }],
+          },
+        },
+        {
+          name: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
+          args: { id: skill.id },
+          messageId: 'msg-skill-record',
+          result: {
+            success: true,
+            id: skill.id,
+            name: skill.name,
+            source: 'instance',
+            version: 3,
+            resource: 'SKILL.md',
+            resources: ['SKILL.md', 'checklist.md'],
+            byteLength: document.byteLength,
+          },
+        },
+        {
+          name: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
+          args: { id: 'instance:00000000-0000-4000-8000-00000000dead' },
+          messageId: 'msg-skill-record',
+          result: {
+            success: false,
+            error: 'The skill or Markdown resource is unavailable.',
+          },
+        },
+      ]);
+      expect(JSON.stringify(records)).not.toContain('Long body');
+      expect(list).toHaveBeenCalledTimes(1);
+      expect(read).toHaveBeenCalledTimes(2);
     } finally {
       unbind();
       list.mockRestore();
@@ -607,27 +793,36 @@ describe('Fast native OpenCode tool bridge', () => {
         },
       });
 
+      // The environment scope wins when a model also fills repositoryId.
       const ambiguousCatalog = await callBridge({
         sessionID: parentSession,
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
         args: {
           environmentId: 'environment-1',
-          repositoryId: 'repo-1',
+          repositoryId: ',',
         },
       });
-      expect(JSON.parse(ambiguousCatalog.output)).toEqual({
-        success: false,
-        error: 'The requested skill catalog is unavailable.',
+      expect(JSON.parse(ambiguousCatalog.output)).toMatchObject({
+        success: true,
+        result: {
+          counts: { repository: 1 },
+          skills: expect.arrayContaining([
+            expect.objectContaining({ id: repositorySkillId }),
+          ]),
+        },
       });
 
+      // A continuation offset without an exact name is ignored.
       const invalidContinuation = await callBridge({
         sessionID: parentSession,
         tool: FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
         args: { sourceOffset: 8 },
       });
-      expect(JSON.parse(invalidContinuation.output)).toEqual({
-        success: false,
-        error: 'The requested skill catalog is unavailable.',
+      expect(JSON.parse(invalidContinuation.output)).toMatchObject({
+        success: true,
+        result: {
+          counts: { packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length },
+        },
       });
 
       const skill = await callBridge({
@@ -793,6 +988,20 @@ describe('Fast native OpenCode tool bridge', () => {
       required: ['query'],
       additionalProperties: false,
     };
+    const fetchInputSchema = {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        format: { type: 'string', enum: ['text', 'markdown', 'html'] },
+        timeout: { type: 'number', maximum: 120 },
+        headers: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+        },
+      },
+      required: ['url'],
+      additionalProperties: false,
+    };
     const runtime = await getFastAgentNativeToolRuntime('native-mcp', [
       {
         id: 'roomote',
@@ -800,6 +1009,11 @@ describe('Fast native OpenCode tool bridge', () => {
         description: 'Repository access',
         tools: [
           { name: 'search_code', description: 'Search code', inputSchema },
+          {
+            name: 'fetch_url',
+            description: 'Fetch public content',
+            inputSchema: fetchInputSchema,
+          },
         ],
       },
     ]);
@@ -809,7 +1023,19 @@ describe('Fast native OpenCode tool bridge', () => {
       agent: { build: { tools: Record<string, boolean> } };
       mcp: Record<string, { url: string; headers: Record<string, string> }>;
     };
-    const executor = vi.fn(async ({ args }) => ({ matches: [args.query] }));
+    const executor = vi.fn(async ({ toolName, args }) =>
+      toolName === 'fetch_url'
+        ? {
+            kind: 'image',
+            url: 'https://example.com/image.png',
+            status: 200,
+            contentType: 'image/png',
+            mimeType: 'image/png',
+            data: 'aW1hZ2U=',
+            size: 5,
+          }
+        : { matches: [args.query] },
+    );
     expect(config.mcp.roomote!.headers.Authorization).toBe(
       `Bearer ${runtime.mcpCapability}`,
     );
@@ -821,6 +1047,7 @@ describe('Fast native OpenCode tool bridge', () => {
       task: true,
       'roomote_*': true,
     });
+    expect(config.agent.build.tools.webfetch).not.toBe(true);
     const serverConfig = JSON.parse(
       buildOpenCodeCliEnv(runtime.env, {
         preserveReasoning: true,
@@ -834,6 +1061,7 @@ describe('Fast native OpenCode tool bridge', () => {
       task: false,
       roomote_manage_custom_automations: false,
       roomote_create_custom_skill: false,
+      roomote_update_custom_skill: false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: false,
     });
     const unbind = bindFastAgentMcpToolExecutor(
@@ -849,6 +1077,11 @@ describe('Fast native OpenCode tool bridge', () => {
         }),
       ).resolves.toEqual([
         { name: 'search_code', description: 'Search code', inputSchema },
+        {
+          name: 'fetch_url',
+          description: 'Fetch public content',
+          inputSchema: fetchInputSchema,
+        },
       ]);
       await expect(
         callMcpTool({
@@ -863,6 +1096,17 @@ describe('Fast native OpenCode tool bridge', () => {
         toolName: 'search_code',
         args: { query: 'Fast', filters: null },
       });
+      await expect(
+        callMcpTool({
+          url: config.mcp.roomote!.url,
+          headers: config.mcp.roomote!.headers,
+          toolName: 'fetch_url',
+          args: { url: 'https://example.com/image.png' },
+        }),
+      ).resolves.toEqual([
+        { type: 'text', text: 'Image fetched successfully' },
+        { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
+      ]);
     } finally {
       unbind();
     }
@@ -885,30 +1129,34 @@ describe('Fast native OpenCode tool bridge', () => {
     ).toBe(false);
   });
 
-  it('registers only native servers with OpenCode and keeps on-demand servers off the request', async () => {
-    const runtime = await getFastAgentNativeToolRuntime('lazy-mcp', [
-      {
-        id: 'roomote',
-        name: 'Roomote',
-        description: 'Deployment access',
-        tools: [{ name: 'manage_tasks', inputSchema: { type: 'object' } }],
-      },
-      {
-        id: 'gbrain',
-        name: 'Brain',
-        description: 'Deployment memory',
-        tools: [{ name: 'query', inputSchema: { type: 'object' } }],
-      },
-      {
-        id: 'github',
-        name: 'GitHub',
-        description: 'Repository access',
-        tools: Array.from({ length: 40 }, (_, index) => ({
-          name: `tool_${index}`,
-          inputSchema: { type: 'object' },
-        })),
-      },
-    ]);
+  it('registers discovery and setup without direct key-based requests', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'lazy-mcp',
+      [
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Deployment access',
+          tools: [{ name: 'manage_tasks', inputSchema: { type: 'object' } }],
+        },
+        {
+          id: 'gbrain',
+          name: 'Brain',
+          description: 'Deployment memory',
+          tools: [{ name: 'query', inputSchema: { type: 'object' } }],
+        },
+        {
+          id: 'github',
+          name: 'GitHub',
+          description: 'Repository access',
+          tools: Array.from({ length: 40 }, (_, index) => ({
+            name: `tool_${index}`,
+            inputSchema: { type: 'object' },
+          })),
+        },
+      ],
+      { serviceCredentialToolsEnabled: true },
+    );
     const config = JSON.parse(
       await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
     ) as {
@@ -922,15 +1170,22 @@ describe('Fast native OpenCode tool bridge', () => {
       'gbrain_*': true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential]: false,
     });
     expect(config.agent.build.tools).not.toHaveProperty('github_*');
     const toolsDirectory = join(runtime.env.OPENCODE_CONFIG_DIR!, 'tools');
-    expect(await readdir(toolsDirectory)).toEqual(
+    const toolFiles = await readdir(toolsDirectory);
+    expect(toolFiles).toEqual(
       expect.arrayContaining([
         'find_integration_tools.js',
         'call_integration_tool.js',
+        'list_integration_keys.js',
+        'prepare_integration_key.js',
       ]),
     );
+    expect(toolFiles).not.toContain('request_with_integration_key.js');
   });
 
   it('keeps member task inspection namespaced from native task mutations', async () => {
@@ -1701,11 +1956,76 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
-  it('rejects unauthenticated and inactive-session calls', async () => {
+  it.each([undefined, null, ''] as const)(
+    'preserves the opaque Session request reference and empty body through the native bridge: %j',
+    async (body) => {
+      const runtime = await getFastAgentNativeToolRuntime(
+        'service-credential-bridge',
+        [],
+      );
+      const executor = vi.fn(async () => ({
+        success: true,
+        status: 200,
+        body: 'healthy',
+      }));
+      const unbind = bindFastAgentNativeToolExecutor(
+        'opencode-secret-session',
+        'persisted-conversation',
+        executor,
+        { allowSpillRecovery: false },
+      );
+      const args = {
+        secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+        method: 'GET',
+        path: '/status',
+        ...(body === undefined ? {} : { body }),
+      };
+      try {
+        const response = await fetch(
+          runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!,
+          {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              sessionID: 'opencode-secret-session',
+              tool: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
+              args,
+            }),
+          },
+        );
+        expect(response.status).toBe(200);
+        expect(executor).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            sessionId: 'opencode-secret-session',
+            name: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
+            args,
+          }),
+        );
+        expect(await response.json()).toMatchObject({
+          ok: true,
+          metadata: {
+            roomoteResult: { success: true, status: 200, body: 'healthy' },
+          },
+        });
+      } finally {
+        unbind();
+      }
+    },
+  );
+
+  it.each([
+    FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+    FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
+    FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
+    FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
+  ])('rejects unauthenticated and inactive-session %s calls', async (tool) => {
     const runtime = await getFastAgentNativeToolRuntime('native-auth', []);
     const body = JSON.stringify({
       sessionID: 'missing-session',
-      tool: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+      tool,
       args: { reason: 'duplicate' },
     });
 
@@ -1728,5 +2048,14 @@ describe('Fast native OpenCode tool bridge', () => {
       body,
     });
     expect(inactive.status).toBe(409);
+    const contextless = await fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ tool, args: {} }),
+    });
+    expect(contextless.status).toBe(400);
   });
 });

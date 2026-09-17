@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { db, sql } from '../server';
 
 const migrationPath = fileURLToPath(
-  new URL('../../drizzle/0082_workspace_routing_guidance.sql', import.meta.url),
+  new URL('../../drizzle/0098_workspace_routing_guidance.sql', import.meta.url),
 );
 
 describe('workspace routing guidance migration', () => {

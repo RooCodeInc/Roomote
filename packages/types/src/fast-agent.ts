@@ -245,6 +245,23 @@ export const fastAgentPlatformEventVisibilitySchema = z.enum([
   'required',
 ]);
 
+export const fastAgentSetupTurnContextSchema = z.object({
+  sessionId: z.string().min(1),
+  fastConversationId: z.string().min(1),
+  setupSnapshot: z.string().min(1),
+  starterTaskOptions: z.array(
+    z.object({
+      id: z.string().min(1),
+      label: z.string().min(1),
+      description: z.string(),
+    }),
+  ),
+});
+
+export type FastAgentSetupTurnContext = z.infer<
+  typeof fastAgentSetupTurnContextSchema
+>;
+
 export const fastAgentHumanFollowUpEventSchema = z.object({
   type: z.literal(FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE),
   eventId: z.string().min(1),
@@ -252,15 +269,20 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
   userId: z.string().min(1),
   question: z.string().min(1),
   images: z.array(z.string()).optional(),
+  attachmentTexts: z.array(z.string()).optional(),
   senderDisplayName: z.string().min(1).optional(),
   senderExternalId: z.string().min(1).optional(),
   /**
    * Whether the surface classified the message as addressed to Roomote (a
    * mention, a DM, a reply to it) rather than ambient conversation between
-   * people. When this message is steered into a running turn, only `false`
-   * lets that turn end without a visible reply; absent means directed.
+   * people. This is context about directedness, not permission to stay silent.
    */
   directedAtRoomote: z.boolean().optional(),
+  /**
+   * Explicit surface decision that this turn may end without a visible reply.
+   * Absent and false both require a response, including for older durable rows.
+   */
+  allowSilentAmbientReply: z.boolean().optional(),
   /**
    * Surface context the model reads with the message (the pull request a
    * mention is on, for example). Persisted so a queued or resumed turn keeps
@@ -277,6 +299,8 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
       }),
     )
     .optional(),
+  /** Per-turn reply route for an explicit cross-surface notification reply. */
+  deliveryConversation: fastAgentConversationSchema.optional(),
   /**
    * Set when the message came from a source-control discussion that another
    * Session owns through a task: the answer posts there as well as on the
@@ -302,6 +326,15 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
   platformEventKind: fastAgentPlatformEventKindSchema.optional(),
   platformEventVisibility: fastAgentPlatformEventVisibilitySchema.optional(),
   setupSession: z.boolean().optional(),
+  /**
+   * Set when the message was spoken on a voice call. The reply is returned
+   * to the call for the voice to report rather than shown as a chat reply,
+   * so a resumed run must keep that framing.
+   */
+  voiceMode: z.boolean().optional(),
+  /** Serializable setup context used to rebuild trusted setup capabilities
+   * when an admitted web turn resumes in another process. */
+  setupContext: fastAgentSetupTurnContextSchema.optional(),
 });
 
 export type FastAgentHumanFollowUpEvent = z.infer<

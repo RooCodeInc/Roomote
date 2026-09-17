@@ -47,8 +47,15 @@ vi.mock('../slack-messages', () => ({
     _channel: string,
     _thread: string,
     ts: string,
+    options?: { lock?: { key: string; ownerId: string } },
   ) => {
+    if (
+      options?.lock &&
+      mocks.store.get(options.lock.key) !== options.lock.ownerId
+    )
+      return false;
     mocks.current = ts;
+    return true;
   },
 }));
 
@@ -275,6 +282,77 @@ describe('Slack lifecycle footer refresh', () => {
     expect(mocks.forget).toHaveBeenCalledTimes(1);
     expect(provider.updateMessage).not.toHaveBeenCalled();
     warning.mockRestore();
+  });
+
+  it('does not forget a settled carrier when Slack rejects the edit', async () => {
+    const provider = slack();
+    provider.updateMessage.mockResolvedValue(false);
+    mocks.activity.active = false;
+    mocks.activity.settled = true;
+
+    await expect(
+      refreshSlackThreadReplyFooter({
+        slack: provider,
+        channel: 'C',
+        threadTs: 'T',
+      }),
+    ).rejects.toThrow('Slack footer edit failed');
+    expect(mocks.forget).not.toHaveBeenCalled();
+  });
+
+  it('re-reads the carrier under its lock so an in-place body update is preserved', async () => {
+    const provider = slack();
+    const latestBody = { type: 'markdown', text: 'New narrative' };
+    provider.getMessageBlocks
+      .mockResolvedValueOnce([
+        body,
+        buildSlackThreadReplyFooterBlock({ footerText: 'idle' }),
+      ])
+      .mockResolvedValueOnce([
+        latestBody,
+        buildSlackThreadReplyFooterBlock({ footerText: 'idle' }),
+      ]);
+
+    await refreshSlackThreadReplyFooter({
+      slack: provider,
+      channel: 'C',
+      threadTs: 'T',
+    });
+
+    expect(provider.updateMessage).toHaveBeenCalledWith({
+      channel: 'C',
+      ts: 'old',
+      message: {
+        blocks: [
+          latestBody,
+          buildSlackThreadReplyFooterBlock({ footerText: 'running' }),
+        ],
+      },
+    });
+  });
+
+  it('strips a late refresh from a carrier relocated during the Slack edit', async () => {
+    const provider = slack();
+    provider.updateMessage.mockImplementationOnce(async () => {
+      mocks.current = 'new';
+      mocks.store.set('slack:thread_reply_footer_lock:C:T', 'competitor');
+      return true;
+    });
+
+    expect(
+      await refreshSlackThreadReplyFooter({
+        slack: provider,
+        channel: 'C',
+        threadTs: 'T',
+      }),
+    ).toBe('active');
+    expect(provider.updateMessage).toHaveBeenCalledTimes(2);
+    expect(provider.updateMessage).toHaveBeenLastCalledWith({
+      channel: 'C',
+      ts: 'old',
+      message: { blocks: [body, image] },
+    });
+    expect(mocks.forget).not.toHaveBeenCalled();
   });
 
   it('yields to a reply holding the thread instead of waiting for it', async () => {

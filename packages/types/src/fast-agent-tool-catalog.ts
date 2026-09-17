@@ -5,6 +5,7 @@ import { ACP_TOOL_KINDS, type KnownAcpToolKind } from './acp';
  * contract so runtime policy and transcript fixtures describe the same set.
  */
 export const FAST_AGENT_NATIVE_TOOL_NAMES = {
+  addRemoteMcp: 'add_remote_mcp',
   callIntegrationTool: 'call_integration_tool',
   cancelTask: 'cancel_task',
   createArtifact: 'create_artifact',
@@ -13,8 +14,10 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   inspectImages: 'inspect_images',
   launchTask: 'launch_task',
   manageWakeups: 'manage_wakeups',
+  manageGoal: 'manage_goal',
   retryTaskStart: 'retry_task_start',
   saveMemory: 'save_memory',
+  updatePersonalization: 'update_personalization',
   sendChatReaction: 'send_chat_reaction',
   sendChatReply: 'send_chat_reply',
   sendTaskMessage: 'send_task_message',
@@ -25,6 +28,10 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   spillRead: 'spill_read',
   stopTask: 'stop_task',
   requestUserInput: 'request_user_input',
+  offerCapability: 'offer_capability',
+  requestWithServiceCredential: 'request_with_integration_key',
+  prepareServiceCredential: 'prepare_integration_key',
+  listServiceCredentials: 'list_integration_keys',
   reviewPullRequest: 'review_pull_request',
 } as const;
 
@@ -32,6 +39,10 @@ export type FastAgentNativeToolName =
   (typeof FAST_AGENT_NATIVE_TOOL_NAMES)[keyof typeof FAST_AGENT_NATIVE_TOOL_NAMES];
 
 export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp,
+    kind: ACP_TOOL_KINDS.tool,
+  },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
     kind: ACP_TOOL_KINDS.mcp,
@@ -63,11 +74,19 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
     kind: ACP_TOOL_KINDS.task,
   },
   {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.manageGoal,
+    kind: ACP_TOOL_KINDS.task,
+  },
+  {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart,
     kind: ACP_TOOL_KINDS.task,
   },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.saveMemory,
+    kind: ACP_TOOL_KINDS.memory,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization,
     kind: ACP_TOOL_KINDS.memory,
   },
   {
@@ -92,7 +111,23 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead, kind: ACP_TOOL_KINDS.read },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.stopTask, kind: ACP_TOOL_KINDS.task },
   {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
+    kind: ACP_TOOL_KINDS.read,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential,
+    kind: ACP_TOOL_KINDS.tool,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials,
+    kind: ACP_TOOL_KINDS.list,
+  },
+  {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
+    kind: ACP_TOOL_KINDS.communication,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability,
     kind: ACP_TOOL_KINDS.communication,
   },
 ] as const satisfies readonly {

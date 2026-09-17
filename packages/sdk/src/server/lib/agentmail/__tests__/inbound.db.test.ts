@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto';
 
 const mocks = vi.hoisted(() => ({
   continueWithLock: vi.fn(),
+  evaluateTypeSafeJudgments: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
+  evaluateTypeSafeJudgments: mocks.evaluateTypeSafeJudgments,
 }));
 
 vi.mock('../../fast-agent-surface-reply', () => ({
@@ -9,12 +14,13 @@ vi.mock('../../fast-agent-surface-reply', () => ({
 }));
 
 import {
+  agentmailConversationParticipants,
   agentmailConversations,
   agentmailInboundTurns,
   agentmailSuppressions,
-  agentmailUserMappings,
   agentmailWebhookEvents,
   asc,
+  authUsers,
   db,
   eq,
   userFactory,
@@ -31,6 +37,8 @@ import { isAgentMailAddressSuppressed } from '../outbound';
 
 const INBOX = 'roomote-test@agentmail.to';
 
+const DMARC_PASS = { spf: 'pass', dkim: 'pass', dmarc: 'pass' } as const;
+
 function messageReceivedPayload(input: {
   eventId: string;
   threadId: string;
@@ -38,7 +46,21 @@ function messageReceivedPayload(input: {
   from: string;
   text: string;
   timestamp?: string;
+  /**
+   * The provider's verdicts. Defaults to a full pass, which is what an
+   * ordinary delivery carries; `null` omits the field to exercise the
+   * re-fetch path.
+   */
+  authenticationResults?: {
+    spf?: string;
+    dkim?: string;
+    dmarc?: string;
+  } | null;
 }) {
+  const authenticationResults =
+    input.authenticationResults === undefined
+      ? DMARC_PASS
+      : input.authenticationResults;
   return {
     type: 'event',
     event_type: 'message.received',
@@ -53,6 +75,9 @@ function messageReceivedPayload(input: {
       text: input.text,
       extracted_text: input.text,
       timestamp: input.timestamp ?? new Date().toISOString(),
+      ...(authenticationResults
+        ? { authentication_results: authenticationResults }
+        : {}),
     },
     thread: {
       thread_id: input.threadId,
@@ -62,12 +87,42 @@ function messageReceivedPayload(input: {
   };
 }
 
+// Senders are recognized only by a verified account email.
+async function createVerifiedSender() {
+  const senderEmail = `${randomUUID()}@example.com`;
+  const user = await userFactory.create({ email: senderEmail });
+  await db.insert(authUsers).values({
+    id: user.id,
+    name: user.name ?? 'Test User',
+    email: senderEmail,
+    emailVerified: true,
+  });
+  return { user, senderEmail };
+}
+
+async function createUnverifiedSender() {
+  const senderEmail = `${randomUUID()}@example.com`;
+  const user = await userFactory.create({ email: senderEmail });
+  await db.insert(authUsers).values({
+    id: user.id,
+    name: user.name ?? 'Test User',
+    email: senderEmail,
+    emailVerified: false,
+  });
+  return { user, senderEmail };
+}
+
 describe('agentmail webhook event outbox (real database)', () => {
   beforeAll(() => {
     process.env.R_EMAIL_CHANNEL_ENABLED = 'true';
     process.env.R_AGENTMAIL_API_KEY = 'am_test_key';
     process.env.R_AGENTMAIL_WEBHOOK_SECRET = 'whsec_dGVzdA==';
     process.env.R_AGENTMAIL_INBOX_ID = INBOX;
+  });
+
+  beforeEach(() => {
+    mocks.evaluateTypeSafeJudgments.mockReset();
+    mocks.evaluateTypeSafeJudgments.mockResolvedValue(null);
   });
 
   it('acknowledges and drops deliveries while the email channel is disabled', async () => {
@@ -142,13 +197,7 @@ describe('agentmail webhook event outbox (real database)', () => {
   });
 
   it('admits a known sender as a durable inbound turn before marking the event processed', async () => {
-    const user = await userFactory.create();
-    const senderEmail = `${randomUUID()}@example.com`;
-    await db.insert(agentmailUserMappings).values({
-      emailAddress: senderEmail,
-      userId: user.id,
-      source: 'link_code',
-    });
+    const { user, senderEmail } = await createVerifiedSender();
 
     const deliveryId = `msg_${randomUUID()}`;
     const threadId = `thread-${randomUUID()}`;
@@ -195,14 +244,193 @@ describe('agentmail webhook event outbox (real database)', () => {
     expect(turns).toHaveLength(1);
   });
 
-  it('drops auto-generated mail without admitting a turn', async () => {
-    const user = await userFactory.create();
-    const senderEmail = `${randomUUID()}@example.com`;
-    await db.insert(agentmailUserMappings).values({
-      emailAddress: senderEmail,
+  it('rejects an unverified sender replying to an existing outbound thread', async () => {
+    const { user, senderEmail } = await createUnverifiedSender();
+    const providerThreadId = `thread-${randomUUID()}`;
+    const [conversation] = await db
+      .insert(agentmailConversations)
+      .values({
+        inboxId: INBOX,
+        providerThreadId,
+        ownerUserId: user.id,
+        subject: 'Existing outbound thread',
+        outboundIdentityId: `verified:${user.id}:digest`,
+      })
+      .returning();
+    await db.insert(agentmailConversationParticipants).values({
+      conversationId: conversation!.id,
+      inboxId: INBOX,
+      providerThreadId,
       userId: user.id,
-      source: 'link_code',
+      role: 'owner',
+      source: 'outbound',
     });
+
+    const originalFetch = globalThis.fetch;
+    let refusalAttempts = 0;
+    globalThis.fetch = (async () => {
+      refusalAttempts += 1;
+      return new Response(JSON.stringify({ message_id: 'm-refusal' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      const deliveryId = `msg_${randomUUID()}`;
+      await recordAgentMailWebhookEvent({
+        deliveryId,
+        eventId: null,
+        eventType: 'message.received',
+        payload: messageReceivedPayload({
+          eventId: `evt_${randomUUID()}`,
+          threadId: providerThreadId,
+          messageId: `m-${randomUUID()}`,
+          from: senderEmail,
+          text: 'Please continue this task',
+        }),
+      });
+
+      await processAgentMailWebhookEvent(deliveryId);
+
+      expect(refusalAttempts).toBe(1);
+      const turns = await db.query.agentmailInboundTurns.findMany({
+        where: eq(agentmailInboundTurns.conversationId, conversation!.id),
+      });
+      expect(turns).toHaveLength(0);
+      const unchanged = await db.query.agentmailConversations.findFirst({
+        where: eq(agentmailConversations.id, conversation!.id),
+      });
+      expect(unchanged?.latestInboundMessageId).toBeNull();
+      expect(unchanged?.latestInboundSenderEmail).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('silently drops a known sender whose message did not pass DMARC, without consuming refusal budget', async () => {
+    const { senderEmail } = await createVerifiedSender();
+    const originalFetch = globalThis.fetch;
+    let outboundRequests = 0;
+    globalThis.fetch = (async () => {
+      outboundRequests += 1;
+      return new Response(JSON.stringify({ message_id: 'm-refusal' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      const deliveryId = `msg_${randomUUID()}`;
+      const threadId = `thread-${randomUUID()}`;
+      const redis = getRedis();
+      const dailyKey = `agentmail:stranger_refusal:daily:${new Date().toISOString().slice(0, 10)}`;
+      const dailyCountBefore = await redis.get(dailyKey);
+      await recordAgentMailWebhookEvent({
+        deliveryId,
+        eventId: null,
+        eventType: 'message.received',
+        payload: messageReceivedPayload({
+          eventId: `evt_${randomUUID()}`,
+          threadId,
+          messageId: `m-${randomUUID()}`,
+          from: `Sender <${senderEmail}>`,
+          text: 'Please look into the flaky test',
+          // A domain with no DMARC policy: nothing ties the From header to
+          // the message, so a verified account address proves nothing.
+          authenticationResults: { spf: 'pass', dkim: 'pass', dmarc: 'none' },
+        }),
+      });
+
+      await processAgentMailWebhookEvent(deliveryId);
+
+      const eventRow = await db.query.agentmailWebhookEvents.findFirst({
+        where: eq(agentmailWebhookEvents.deliveryId, deliveryId),
+      });
+      expect(eventRow?.state).toBe('processed');
+      const conversation = await db.query.agentmailConversations.findFirst({
+        where: eq(agentmailConversations.providerThreadId, threadId),
+      });
+      expect(conversation).toBeUndefined();
+      expect(outboundRequests).toBe(0);
+      expect(await redis.get(dailyKey)).toBe(dailyCountBefore);
+      expect(
+        await redis.get(
+          `agentmail:stranger_refusal:${INBOX}:${threadId}:${senderEmail}`,
+        ),
+      ).toBeNull();
+      expect(
+        await redis.get(`agentmail:stranger_refusal:sender:${senderEmail}`),
+      ).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('re-fetches the message when the webhook omits the verdicts, then admits the turn', async () => {
+    const { user, senderEmail } = await createVerifiedSender();
+    const originalFetch = globalThis.fetch;
+    const fetched: string[] = [];
+    const messageId = `m-${randomUUID()}`;
+    const threadId = `thread-${randomUUID()}`;
+    globalThis.fetch = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const href = String(url);
+      if ((init?.method ?? 'GET') === 'GET' && href.includes('/messages/')) {
+        fetched.push(href);
+        return new Response(
+          JSON.stringify({
+            message_id: messageId,
+            thread_id: threadId,
+            inbox_id: INBOX,
+            from: `Sender <${senderEmail}>`,
+            to: [INBOX],
+            subject: 'Test request',
+            text: 'Please look into the flaky test',
+            extracted_text: 'Please look into the flaky test',
+            timestamp: new Date().toISOString(),
+            authentication_results: DMARC_PASS,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? 'GET'} ${href}`);
+    }) as typeof fetch;
+    try {
+      const deliveryId = `msg_${randomUUID()}`;
+      await recordAgentMailWebhookEvent({
+        deliveryId,
+        eventId: null,
+        eventType: 'message.received',
+        payload: messageReceivedPayload({
+          eventId: `evt_${randomUUID()}`,
+          threadId,
+          messageId,
+          from: `Sender <${senderEmail}>`,
+          text: 'Please look into the flaky test',
+          authenticationResults: null,
+        }),
+      });
+
+      await processAgentMailWebhookEvent(deliveryId);
+
+      expect(fetched).toHaveLength(1);
+      expect(fetched[0]).toContain(encodeURIComponent(messageId));
+      const conversation = await db.query.agentmailConversations.findFirst({
+        where: eq(agentmailConversations.providerThreadId, threadId),
+      });
+      expect(conversation?.ownerUserId).toBe(user.id);
+      const turn = await db.query.agentmailInboundTurns.findFirst({
+        where: eq(agentmailInboundTurns.conversationId, conversation!.id),
+      });
+      expect(turn?.state).toBe('pending');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('drops auto-generated mail without admitting a turn', async () => {
+    const { senderEmail } = await createVerifiedSender();
 
     const deliveryId = `msg_${randomUUID()}`;
     const threadId = `thread-${randomUUID()}`;
@@ -225,6 +453,40 @@ describe('agentmail webhook event outbox (real database)', () => {
     });
     await processAgentMailWebhookEvent(deliveryId);
 
+    const eventRow = await db.query.agentmailWebhookEvents.findFirst({
+      where: eq(agentmailWebhookEvents.deliveryId, deliveryId),
+    });
+    expect(eventRow?.state).toBe('processed');
+
+    const conversation = await db.query.agentmailConversations.findFirst({
+      where: eq(agentmailConversations.providerThreadId, threadId),
+    });
+    expect(conversation).toBeUndefined();
+  });
+
+  it('drops mail the judgment model confidently judges an automatic reply', async () => {
+    const { senderEmail } = await createVerifiedSender();
+    mocks.evaluateTypeSafeJudgments.mockResolvedValue({
+      autoReply: { type: 'noul', noul: 0.97 },
+    });
+
+    const deliveryId = `msg_${randomUUID()}`;
+    const threadId = `thread-${randomUUID()}`;
+    await recordAgentMailWebhookEvent({
+      deliveryId,
+      eventId: null,
+      eventType: 'message.received',
+      payload: messageReceivedPayload({
+        eventId: `evt_${randomUUID()}`,
+        threadId,
+        messageId: `m-${randomUUID()}`,
+        from: senderEmail,
+        text: 'I am out of the office until Monday with limited access to email.',
+      }),
+    });
+    await processAgentMailWebhookEvent(deliveryId);
+
+    expect(mocks.evaluateTypeSafeJudgments).toHaveBeenCalledTimes(1);
     const eventRow = await db.query.agentmailWebhookEvents.findFirst({
       where: eq(agentmailWebhookEvents.deliveryId, deliveryId),
     });
@@ -459,13 +721,7 @@ describe('agentmail inbound turn drain (real database)', () => {
   });
 
   async function seedConversation(turnTexts: string[]) {
-    const user = await userFactory.create();
-    const senderEmail = `${randomUUID()}@example.com`;
-    await db.insert(agentmailUserMappings).values({
-      emailAddress: senderEmail,
-      userId: user.id,
-      source: 'link_code',
-    });
+    const { user, senderEmail } = await createVerifiedSender();
     const threadId = `thread-${randomUUID()}`;
     const messageIds: string[] = [];
     const base = Date.now() - 60_000;

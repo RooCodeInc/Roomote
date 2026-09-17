@@ -15,6 +15,8 @@ const {
   setupMock,
   workerEnvFromProcessEnvMock,
   writeBashrcMock,
+  markEgressReadyMock,
+  readEgressDeliveryMock,
 } = vi.hoisted(() => ({
   buildEnvironmentShellEnvVarsMock: vi.fn(() => ({ FOO: 'bar' })),
   createHarnessLoggerMock: vi.fn(),
@@ -35,6 +37,8 @@ const {
   setupMock: vi.fn(),
   workerEnvFromProcessEnvMock: vi.fn(),
   writeBashrcMock: vi.fn(),
+  markEgressReadyMock: vi.fn().mockResolvedValue({ requested: true }),
+  readEgressDeliveryMock: vi.fn(),
 }));
 
 const { captureWorkerExceptionMock } = vi.hoisted(() => ({
@@ -47,6 +51,10 @@ const { resolveWorkerReleaseMetadataMock } = vi.hoisted(() => ({
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
+    mcpConnections: {
+      markCredentialEgressBootstrapReady: markEgressReadyMock,
+      getCredentialEgressDelivery: readEgressDeliveryMock,
+    },
     taskRuns: {
       findFirstById: findFirstByIdMock,
       recordEvent: sdkTaskRunsRecordEventMock,
@@ -121,6 +129,78 @@ import * as executeTaskRunModule from './execute-task-run';
 const { executeTaskRun } = executeTaskRunModule;
 
 describe('executeTaskRun', () => {
+  it('finishes normal bootstrap and waits for verified delivery before protected model execution', async () => {
+    let release!: (value: { environment: Record<string, string> }) => void;
+    readEgressDeliveryMock.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    const nonce = '11111111-1111-4111-8111-111111111111';
+    let admitted = false;
+    const workerEnv = {
+      authToken: 'run-token-123',
+      trpcUrl: 'http://api:3001',
+      appEnv: 'development',
+      credentialEgressBootstrapRequired: true,
+      credentialEgressBootstrapNonce: nonce,
+      setRuntimeEnv: vi.fn(),
+      buildUserFacingEnv: vi.fn(() => ({ PATH: '/usr/bin' })),
+      acceptCredentialEgressDelivery: vi.fn(() => {
+        admitted = true;
+      }),
+      buildCredentialEgressClientEnv: vi.fn(() =>
+        admitted
+          ? {
+              ROOMOTE_SERVICE_BASE_URL: 'http://api:3001/api/credential-egress',
+            }
+          : {},
+      ),
+    };
+    workerEnvFromProcessEnvMock.mockReturnValueOnce(workerEnv);
+    const runFn = vi.fn().mockResolvedValue({ status: RunStatus.Idle });
+    const execution = executeTaskRun({
+      runId: 42,
+      setupMode: 'full',
+      fetchFn: vi.fn().mockResolvedValue({
+        taskRun: {
+          id: 42,
+          taskId: 'task-42',
+          payloadKind: TaskPayloadKind.StandardTask,
+          harness: 'opencode-server',
+          payload: { repo: 'owner/repo', environmentId: 'env-1' },
+        },
+        envVars: {},
+      }),
+      workspaceConfigFn: vi.fn().mockResolvedValue({
+        type: 'environment',
+        environmentId: 'env-1',
+        environmentConfig: {
+          name: 'Test',
+          repositories: [{ repository: 'owner/repo' }],
+        },
+      }),
+      runFn,
+    });
+    await vi.waitFor(() =>
+      expect(readEgressDeliveryMock).toHaveBeenCalledWith(nonce),
+    );
+    expect(markEgressReadyMock).toHaveBeenCalledWith(nonce);
+    expect(setupMock).toHaveBeenCalledWith(
+      expect.objectContaining({ backgroundEnvironmentSetup: false }),
+    );
+    expect(runFn).not.toHaveBeenCalled();
+    expect(workerEnv.acceptCredentialEgressDelivery).not.toHaveBeenCalled();
+    release({
+      environment: {
+        ROOMOTE_SERVICE_BASE_URL: 'http://api:3001/api/credential-egress',
+      },
+    });
+    await expect(execution).resolves.toBe(true);
+    expect(workerEnv.acceptCredentialEgressDelivery).toHaveBeenCalledTimes(1);
+    expect(runFn).toHaveBeenCalledTimes(1);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
@@ -145,6 +225,7 @@ describe('executeTaskRun', () => {
     });
 
     workerEnvFromProcessEnvMock.mockReturnValue({
+      buildCredentialEgressClientEnv: vi.fn(() => ({})),
       authToken: 'run-token-123',
       trpcUrl: 'https://api-example.ngrok.dev',
       appEnv: 'development',
@@ -299,6 +380,7 @@ describe('executeTaskRun', () => {
       R_VISION_MODEL: 'openai/nested-vision-model',
     }));
     workerEnvFromProcessEnvMock.mockReturnValueOnce({
+      buildCredentialEgressClientEnv: vi.fn(() => ({})),
       authToken: 'run-token-123',
       trpcUrl: 'https://api-example.ngrok.dev',
       appEnv: 'development',

@@ -51,6 +51,7 @@ export const ACTIVATION_SETUP_MILESTONES = [
   'comms_authed',
   'source_control_configured',
   'source_control_authed',
+  'integrations_decided',
   'inference_configured',
   'sandbox_configured',
 ] as const;
@@ -150,7 +151,8 @@ export type ActivationAutomationDestinationProvider =
   | 'slack'
   | 'discord'
   | 'teams'
-  | 'telegram';
+  | 'telegram'
+  | 'email';
 
 export function toActivationAutomationDestinationProvider(
   provider: string | null | undefined,
@@ -158,7 +160,8 @@ export function toActivationAutomationDestinationProvider(
   return provider === 'slack' ||
     provider === 'discord' ||
     provider === 'teams' ||
-    provider === 'telegram'
+    provider === 'telegram' ||
+    provider === 'email'
     ? provider
     : null;
 }

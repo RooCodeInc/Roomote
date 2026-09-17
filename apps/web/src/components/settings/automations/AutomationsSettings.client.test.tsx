@@ -45,6 +45,7 @@ const baseFormState: FormState = {
   conflictResolverMaxPrAgeDays: 7 as const,
   conflictResolverLabel: 'roomote:auto-resolve-conflicts',
   conflictResolverInstructions: '',
+  channelAutoStartEnabled: false,
   channelAutoStartChannels: [],
   managerSlackChannel: '',
   managerDiscordChannel: '',

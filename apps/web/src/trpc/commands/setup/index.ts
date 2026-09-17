@@ -62,15 +62,8 @@ export async function batchCreateEnvironmentsCommand(
   assertAdmin(auth);
   const { userId } = auth;
 
-  if (
-    input.environments.length === 0 ||
-    input.environments.every(
-      (environment) => environment.repositoryIds.length === 0,
-    )
-  ) {
-    throw new Error(
-      'At least one environment with at least one repository is required',
-    );
+  if (input.environments.length === 0) {
+    throw new Error('At least one environment is required');
   }
 
   // Collect all unique repository IDs to look up in one query
@@ -80,10 +73,13 @@ export async function batchCreateEnvironmentsCommand(
     ),
   ];
 
-  const repos = await db
-    .select({ id: repositories.id, fullName: repositories.fullName })
-    .from(repositories)
-    .where(inArray(repositories.id, allRepoIds));
+  const repos =
+    allRepoIds.length > 0
+      ? await db
+          .select({ id: repositories.id, fullName: repositories.fullName })
+          .from(repositories)
+          .where(inArray(repositories.id, allRepoIds))
+      : [];
 
   const repoMap = new Map(repos.map((r) => [r.id, r.fullName]));
 

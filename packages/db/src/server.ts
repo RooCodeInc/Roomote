@@ -54,11 +54,14 @@ export * from './lib/tracked-suggestion-cards';
 export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
 export * from './lib/sessions';
-export * from './lib/task-goals';
+export * from './lib/service-credentials';
+export * from './lib/credential-egress';
+export * from './lib/session-goals';
 export * from './lib/source-control-provider';
 export * from './lib/sync-task-state';
 export * from './lib/cancel-task-run';
 export * from './lib/automations';
+export * from './lib/automation-results';
 export * from './lib/custom-automations';
 export * from './lib/custom-automation-access';
 export * from './lib/custom-skills';
@@ -87,9 +90,9 @@ export * from './lib/teams-runtime-credentials';
 export * from './lib/telegram-runtime-credentials';
 export * from './lib/agentmail-runtime-credentials';
 export * from './lib/discord-runtime-credentials';
-export * from './lib/slack-fast-integration-calls';
 export * from './lib/pr-action-settings';
 export * from './lib/github-mention-settings';
+export * from './lib/judgment-model-settings';
 export * from './lib/pr-ready-after-clean-review-settings';
 export * from './lib/account-link-help-settings';
 export * from './lib/setup-qualification';
@@ -107,9 +110,16 @@ export * from './lib/webhook-retention';
 export * from './lib/brain';
 export * from './lib/fast-agent-memory';
 export * from './lib/managed-access';
+export * from './lib/user-personalization';
+export * from './lib/personal-preferences';
+export * from './lib/deployment-experiments';
+export * from './lib/private-sessions-experiment';
+export * from './fixtures/development-fixtures';
 
 export {
   users,
+  userPersonalizations,
+  userPersonalizationRelations,
   instanceSkills,
   userRelations,
   deploymentSettings,
@@ -130,9 +140,17 @@ export {
   taskPins,
   taskPinsRelations,
   sessions,
+  sessionGoals,
   sessionsRelations,
   sessionTasks,
   sessionTasksRelations,
+  serviceCredentials,
+  serviceCredentialApprovals,
+  serviceCredentialAudit,
+  credentialEgressWorkloads,
+  credentialEgressSubstitutes,
+  credentialEgressAudit,
+  credentialEgressRevocations,
   sessionParticipants,
   sessionParticipantsRelations,
   sessionPins,
@@ -220,18 +238,19 @@ export {
   sessionWakeupsRelations,
   fastAgentProviderMessages,
   fastAgentProviderMessagesRelations,
+  sessionAttentionNotifications,
+  sessionAttentionNotificationMessages,
   fastAgentPrFeedbackDeliveries,
   fastAgentPrFeedbackDeliveriesRelations,
   slackConversationMessages,
   slackConversationMessagesRelations,
-  slackFastIntegrationCalls,
-  slackFastIntegrationCallsRelations,
   linearPendingSelections,
   linearPendingSelectionsRelations,
   automations,
   automationsRelations,
   customAutomations,
   customAutomationsRelations,
+  automationResults,
   trackedMessages,
   trackedMessagesRelations,
   environmentVariables,

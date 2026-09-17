@@ -19,7 +19,13 @@ describe('Brain MCP instructions', () => {
       "never expose Brain's `source` field or other internal provenance metadata",
     );
     expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
-      'When recalled context materially shapes the path or approach you choose, casually and concisely mention the specific insight that informed it; do not merely say that memory or history was helpful',
+      'When specific information returned by a Brain memory retrieval materially informs your answer or work, naturally tell the user which remembered fact you retrieved and how you used it',
+    );
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      'Do not mention retrieval that did not inform the outcome',
+    );
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      'Never expose internal memory IDs, page slugs, storage paths, raw metadata, source fields, or other internal provenance',
     );
     expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
       'Before relying on one, revalidate it with the cheapest authoritative tool call available. Recalled context must never suppress that check.',
@@ -91,9 +97,9 @@ describe('resolveBrainSourceIdForCollector', () => {
   });
 
   it('maps the outbox-fed checkpoints back to their sources', () => {
-    expect(
-      resolveBrainSourceIdForCollector('task-memory:effective-date-v2'),
-    ).toBe('task-memories');
+    expect(resolveBrainSourceIdForCollector('task-memory:initiator-v3')).toBe(
+      'task-memories',
+    );
     expect(
       resolveBrainSourceIdForCollector('pull-request-facts:occurrence-date-v3'),
     ).toBe('pull-request-facts');

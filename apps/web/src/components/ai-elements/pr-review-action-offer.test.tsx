@@ -42,6 +42,46 @@ describe('PrReviewActionOffer', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('does not render an offer with persisted resolved state', () => {
+    const { container } = render(
+      <PrReviewActionOffer
+        offer={{ ...offer, status: 'resolved' }}
+        onAction={vi.fn()}
+      />,
+    );
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('keeps the standing auto-resolve state visible', () => {
+    render(
+      <PrReviewActionOffer
+        offer={{ ...offer, status: 'auto_resolved' }}
+        onAction={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText('Auto-resolve is enabled for this pull request.'),
+    ).toBeVisible();
+  });
+
+  it('removes the offer container after resolving', async () => {
+    const onAction = vi.fn().mockResolvedValue('resolved');
+    render(<PrReviewActionOffer offer={offer} onAction={onAction} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Resolve these issues' }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('pr-review-action-offer'),
+      ).not.toBeInTheDocument();
+    });
+    expect(onAction).toHaveBeenCalledWith('yes');
+  });
+
   it('removes the offer container after dismissal', async () => {
     const onAction = vi.fn().mockResolvedValue('dismissed');
     render(<PrReviewActionOffer offer={offer} onAction={onAction} />);

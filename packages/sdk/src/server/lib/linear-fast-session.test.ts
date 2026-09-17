@@ -28,7 +28,11 @@ vi.mock('./mcp/linear-connections', () => ({
   findLinearDeploymentMcpConnectionByIdentity: mocks.findConnection,
 }));
 
-import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  NO_REPOSITORIES,
+  TaskPayloadKind,
+} from '@roomote/types';
 
 import {
   buildLinearFastConversation,
@@ -140,6 +144,33 @@ describe('createFastAgentLinearTaskLauncher', () => {
       ],
       harnessModelOverrides: { 'opencode-server': 'openrouter/z-ai/glm-5.2' },
     });
+  });
+
+  it('launches a blank-slate sandbox as the repo without an environment id', async () => {
+    const launch = createFastAgentLinearTaskLauncher({
+      userId: 'user-1',
+      conversation,
+      resolveIssue: vi.fn().mockResolvedValue(null),
+    });
+    await launch({
+      prompt: 'Research the proposal',
+      environmentId: NO_REPOSITORIES,
+      parentSessionId: 'fast-1',
+      postKickoff: vi.fn(),
+    });
+
+    const params = mocks.createFastAgentTaskLauncher.mock.calls[0]?.[0] as {
+      buildTask: (input: Record<string, unknown>) => {
+        payload: Record<string, unknown>;
+      };
+    };
+    const task = params.buildTask({
+      prompt: 'Research the proposal',
+      environmentId: NO_REPOSITORIES,
+      parentSessionId: 'fast-1',
+    });
+    expect(task.payload).toMatchObject({ repo: NO_REPOSITORIES });
+    expect(task.payload).not.toHaveProperty('environmentId');
   });
 
   it('still launches when the issue cannot be resolved', async () => {

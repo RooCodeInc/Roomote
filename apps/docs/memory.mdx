@@ -13,15 +13,25 @@ Memory is deployment-wide by design. There is no per-user corpus and no
 per-task corpus: one deployment, one memory, shared by everyone who can run a
 Roomote task.
 
+When a specific remembered fact materially informs an answer or task, Roomote
+names that fact in human terms and explains how it was used. It does not narrate
+unrelated retrievals or expose internal memory identifiers, storage paths,
+metadata, or provenance fields.
+
 ## What goes into it
 
 Roomote fills Memory from what it can already see:
 
-- **completed Roomote tasks**, including a short memory the agent writes about
-  its own work: what it decided, why, and what is still open. When a pull
+- **completed Roomote tasks**, including the request that started the task
+  and a short memory the agent writes about its own work: what it decided,
+  why, and what is still open. The request is bounded and only recorded for
+  tasks a person asked for, never for generated work such as reviews. When a pull
   request the task opened later merges or closes unmerged, the task's memory is
   refreshed with that outcome, so recall can tell work that shipped from work
-  that was abandoned
+  that was abandoned. Each memory also records who started the task: a linked
+  Roomote member is connected to their person page, so recall can answer what
+  someone has been working on. Automated work such as pull request reviews
+  names the automation instead of linking a person
 - **pull requests** from your connected source-control provider
 - **public Slack channels** the Roomote bot has been added to
 - **public Discord server channels and active public threads** the Roomote bot
@@ -203,10 +213,6 @@ everything semantic.
 they were last read, and how far their one-time history sweep has got. Sources
 without a connected upstream integration are omitted.
 
-**Configuration** appears last and shows the synthesis model (changeable through
-`R_BRAIN_MODEL`, applied immediately) and the embedding model, which is fixed
-when Memory is created because it sizes the vector store.
-
 ## How agents use it
 
 Agents get the built-in Memory as an MCP server with read-only tools. They can
@@ -254,7 +260,11 @@ Leave them unset and Memory uses OpenAI's `gpt-5.6-luna` and
 
 Memory search does not use a cross-encoder reranker: retrieval is hybrid
 (vector + keyword fusion), which keeps search latency flat and provider
-requirements minimal.
+requirements minimal. When the optional [judgment model](/models#judgment-model)
+is on, Roomote reorders `query` results it returns to agents: passages the
+judgment model confidently finds relevant move up and ones it confidently finds
+irrelevant move down. Nothing is removed, and the passage text is sent to the
+judgment model provider.
 
 The synthesis model is applied by Roomote when it forwards the call and passed
 to the provider as written, so use that provider's naming

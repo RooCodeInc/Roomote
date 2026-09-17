@@ -1,4 +1,4 @@
-import { ALL_REPOSITORIES, PRODUCT_NAME } from './constants';
+import { ALL_REPOSITORIES, NO_REPOSITORIES, PRODUCT_NAME } from './constants';
 
 type RepositoryReference = {
   id: string;
@@ -99,10 +99,14 @@ ${emptyRepositories.map((fullName) => `- ${fullName}`).join('\n')}
 For each empty repository, follow the skill's empty-repository bootstrap: push exactly one initial commit containing only a README.md and a minimal .gitignore to its default branch (never force-push), then define the smallest valid environment for it — typically the repository mapping alone, with no commands, services, or ports. Do not scaffold application code, frameworks, package manifests, or CI config; building the actual project is the user's next task.`
       : '';
 
+  const setupTarget =
+    orderedRepositories.length > 0
+      ? ` for this repository set:\n${repositoryLines}${emptyRepositorySection}`
+      : '';
+
   return `$environment-setup
 
-Set up a ${PRODUCT_NAME} environment for this repository set:
-${repositoryLines}${emptyRepositorySection}
+Set up a ${PRODUCT_NAME} environment${setupTarget}
 
 Focus on the smallest correct environment that gets this setup target running locally.
 Use a plain, stable environment name based on the product or repository name. Do not append qualifiers like "Localhost", "Minimal", or similar unless the user explicitly asked for that distinction.
@@ -167,7 +171,7 @@ export function buildEnvironmentDefinitionWorkspacePayload(
   const primaryRepository = normalizedRepositories[0];
 
   if (!primaryRepository) {
-    throw new Error('Select at least one repository before starting setup.');
+    return { repo: NO_REPOSITORIES };
   }
 
   if (normalizedRepositories.length === 1) {

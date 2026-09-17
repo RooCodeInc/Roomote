@@ -7,8 +7,6 @@ import {
   type TaskRun,
   createComputeProviderMutationEventRecorder,
   db,
-  eq,
-  taskRuns,
 } from '@roomote/db/server';
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
@@ -26,6 +24,10 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
+import {
+  prepareHostedWorkerLaunch,
+  type CredentialEgressLifecycle,
+} from '../credential-egress';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 import {
   COMPUTE_BOOTSTRAP_TIMEOUT_MS,
@@ -44,6 +46,8 @@ export async function spawnBlaxelWorker(
     localTarballPath?: string;
     deploymentSlug?: string;
     blaxelTags?: Record<string, string>;
+    /** Session-egress admission; omitted in unit paths that do not exercise it. */
+    credentialEgress?: CredentialEgressLifecycle;
   },
 ): Promise<{ machineId: string; sandboxCmdId?: string }> {
   if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
@@ -114,6 +118,13 @@ export async function spawnBlaxelWorker(
     field: 'provisionStartedAt',
     launchMode: launchOptions.launchMode,
   });
+
+  const launchHostedWorker = await prepareHostedWorkerLaunch({
+    credentialEgress: config.credentialEgress,
+    taskRun,
+    provider: 'blaxel',
+  });
+
   const machine = await createBlaxelMachine({
     blaxelApiKey: config.blaxelApiKey,
     blaxelWorkspace: config.blaxelWorkspace,
@@ -183,44 +194,47 @@ export async function spawnBlaxelWorker(
         phase: 'launch_worker',
       }),
     });
-    const result = await computeClient.runCommand({
-      instanceId: machine.machineId,
-      cmd: 'worker',
-      args,
-      env: buildBlaxelWorkerEnv({
+    const result = await launchHostedWorker(
+      buildBlaxelWorkerEnv({
         authToken,
         sandboxExpiresAtMs: Date.now() + config.blaxelTimeoutMs,
         deploymentSlug: config.deploymentSlug,
         environmentId,
         image: config.blaxelImage,
-        extraEnv: { SANDBOX_TIMEOUT_MS: String(config.blaxelTimeoutMs) },
+        extraEnv: {
+          SANDBOX_TIMEOUT_MS: String(config.blaxelTimeoutMs),
+        },
       }),
-      detached: true,
-      signal: AbortSignal.timeout(60_000),
-    });
-    launchedCommandId = result.commandId;
-    if (result.exitCode !== null && result.exitCode !== 0) {
-      throw new Error(
-        `Detached Blaxel worker exited with code ${result.exitCode}: ${result.stderr ?? result.stdout ?? 'no output'}`,
-      );
-    }
-    await recordMutation({
-      provider: 'blaxel',
-      operation: 'run_command',
-      eventType: 'completed',
-      instanceId: machine.machineId,
-      message: `Detached worker launched for Blaxel sandbox ${machine.machineId}.`,
-      details: buildComputeProviderMutationDetails(mutationContext, {
-        commandId: result.commandId ?? null,
-        exitCode: result.exitCode,
-      }),
-    });
-    if (result.commandId) {
-      await db
-        .update(taskRuns)
-        .set({ sandboxCmdId: result.commandId })
-        .where(eq(taskRuns.id, taskRun.id));
-    }
+      async (env) => {
+        const launchResult = await computeClient.runCommand({
+          instanceId: machine.machineId,
+          cmd: 'worker',
+          args,
+          env,
+          detached: true,
+          signal: AbortSignal.timeout(60_000),
+        });
+        launchedCommandId = launchResult.commandId;
+        if (launchResult.exitCode !== null && launchResult.exitCode !== 0) {
+          throw new Error(
+            `Detached Blaxel worker exited with code ${launchResult.exitCode}: ${launchResult.stderr ?? launchResult.stdout ?? 'no output'}`,
+          );
+        }
+        await recordMutation({
+          provider: 'blaxel',
+          operation: 'run_command',
+          eventType: 'completed',
+          instanceId: machine.machineId,
+          message: `Detached worker launched for Blaxel sandbox ${machine.machineId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            commandId: launchResult.commandId ?? null,
+            exitCode: launchResult.exitCode,
+          }),
+        });
+        return launchResult;
+      },
+    );
+
     return {
       machineId: machine.machineId,
       ...(result.commandId ? { sandboxCmdId: result.commandId } : {}),

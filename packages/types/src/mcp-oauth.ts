@@ -171,6 +171,67 @@ export interface McpConnectionElevenLabsConfig {
   voiceId: string;
 }
 
+export interface OpenAiRealtimeVoiceOption {
+  id: string;
+  label: string;
+  locale?: string;
+  recommended?: boolean;
+}
+
+/**
+ * Voice metadata documented for OpenAI Realtime sessions, alphabetical for
+ * the picker. `recommended` marks OpenAI's recommended voices; the default is
+ * chosen by id below, not by position.
+ */
+export const OPENAI_REALTIME_VOICE_OPTIONS = [
+  { id: 'alloy', label: 'Alloy', locale: undefined, recommended: false },
+  { id: 'ash', label: 'Ash', locale: undefined, recommended: false },
+  { id: 'ballad', label: 'Ballad', locale: undefined, recommended: false },
+  { id: 'cedar', label: 'Cedar', locale: undefined, recommended: true },
+  { id: 'coral', label: 'Coral', locale: undefined, recommended: false },
+  { id: 'echo', label: 'Echo', locale: undefined, recommended: false },
+  { id: 'marin', label: 'Marin', locale: undefined, recommended: true },
+  { id: 'sage', label: 'Sage', locale: undefined, recommended: false },
+  { id: 'shimmer', label: 'Shimmer', locale: undefined, recommended: false },
+  { id: 'verse', label: 'Verse', locale: undefined, recommended: false },
+] as const satisfies readonly OpenAiRealtimeVoiceOption[];
+
+export type OpenAiRealtimeVoiceId =
+  (typeof OPENAI_REALTIME_VOICE_OPTIONS)[number]['id'];
+
+export function isOpenAiRealtimeVoiceId(
+  value: unknown,
+): value is OpenAiRealtimeVoiceId {
+  return (
+    typeof value === 'string' &&
+    OPENAI_REALTIME_VOICE_OPTIONS.some((option) => option.id === value)
+  );
+}
+
+/** Prefer a documented Australian voice, then Marin, one of OpenAI's recommended voices. */
+export const DEFAULT_OPENAI_REALTIME_VOICE_ID: OpenAiRealtimeVoiceId =
+  OPENAI_REALTIME_VOICE_OPTIONS.find((option) => option.locale === 'en-AU')
+    ?.id ??
+  OPENAI_REALTIME_VOICE_OPTIONS.find((option) => option.id === 'marin')?.id ??
+  OPENAI_REALTIME_VOICE_OPTIONS.find((option) => option.recommended)?.id ??
+  OPENAI_REALTIME_VOICE_OPTIONS[0]!.id;
+
+/**
+ * Deployment-scoped Voice connection config stored in
+ * mcpConnections.authConfig.
+ *
+ * Credential-only: an OpenAI API key with GPT-Live access, consumed by the
+ * control plane to open voice calls on Fast Sessions and to clean spoken
+ * transcripts. Excluded from agent MCP config delivery so the key never
+ * reaches a task sandbox. The `R_VOICE_OPENAI_API_KEY` environment variable,
+ * when set, takes precedence over this connection.
+ */
+export interface McpConnectionVoiceConfig {
+  type: 'voice';
+  encryptedApiKey: string;
+  voiceId?: OpenAiRealtimeVoiceId;
+}
+
 /**
  * Deployment-scoped X connection config stored in mcpConnections.authConfig.
  *
@@ -183,6 +244,17 @@ export interface McpConnectionElevenLabsConfig {
 export interface McpConnectionXConfig {
   type: 'x';
   encryptedBearerToken: string;
+}
+
+/**
+ * Deployment-scoped Exa connection config stored in mcpConnections.authConfig.
+ *
+ * The API key is expected to be encrypted before persistence and is forwarded
+ * to Exa's hosted MCP server through the control-plane proxy only.
+ */
+export interface McpConnectionExaConfig {
+  type: 'exa';
+  encryptedApiKey: string;
 }
 
 /**
@@ -252,10 +324,12 @@ export type McpConnectionAuthConfig =
   | McpConnectionRipplingConfig
   | McpConnectionGranolaConfig
   | McpConnectionElevenLabsConfig
+  | McpConnectionVoiceConfig
   | McpConnectionVercelConfig
   | McpConnectionGrafanaConfig
   | McpConnectionGbrainConfig
   | McpConnectionXConfig
+  | McpConnectionExaConfig
   | Record<string, never>;
 
 export type McpConnectionRole =
@@ -343,6 +417,38 @@ export type McpIntegrationServerMode =
   | 'native'
   | 'credential_only';
 
+export type EffectiveMcpIntegrationStatus =
+  | 'unavailable'
+  | 'not_enabled'
+  | 'needs_connection'
+  | 'connected';
+
+export type McpIntegrationOauthReadiness =
+  | 'not_required'
+  | 'ready'
+  | 'missing'
+  | 'partial';
+
+/** Public-safe, actor-scoped integration state for product UI. */
+export type EffectiveMcpIntegration = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  connectionScope: 'user' | 'deployment';
+  connectionMode: McpIntegrationConnectionMode;
+  serverMode: McpIntegrationServerMode;
+  available: boolean;
+  enabled: boolean;
+  authStatus: 'pending' | 'authenticated' | 'error' | null;
+  oauthReadiness: McpIntegrationOauthReadiness;
+  status: EffectiveMcpIntegrationStatus;
+  capabilities: {
+    agentTools: boolean;
+    toolManagement: boolean;
+  };
+};
+
 export type McpIntegrationCategory = 'memory';
 
 export type McpIntegrationOAuthClientEnv = {
@@ -380,6 +486,8 @@ export type McpIntegration = {
   instructions?: string;
   linkedAccountSetup?: LinkedAccountSetup;
   connectionScope?: 'user' | 'deployment';
+  /** Confidentiality of tool inputs, outputs, and derivatives. */
+  dataPolicy?: 'shared' | 'private';
   authorizationParameters?: McpIntegrationAuthorizationParameter[];
   oauthClientEnv?: McpIntegrationOAuthClientEnv;
   oauthEndpoints?: McpIntegrationOAuthEndpoints;
@@ -390,6 +498,10 @@ export type McpIntegration = {
   oauthScopeMode?: McpIntegrationOauthScopeMode;
   connectionMode?: McpIntegrationConnectionMode;
   serverMode?: McpIntegrationServerMode;
+  /** The integration remains usable through its upstream MCP without credentials. */
+  supportsKeylessAccess?: boolean;
+  /** Alternate upstream used when an optional admin credential is present. */
+  authenticatedUrl?: string;
   defaultDisabledTools?: string[];
 };
 
@@ -635,10 +747,34 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
       'Use Granola to browse and read meeting notes, transcripts, folders, decisions, and action items through the deployment API key. The built-in tools are read-only.',
   },
   {
+    id: 'exa',
+    name: 'Exa',
+    url: 'https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa',
+    authenticatedUrl:
+      'https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa,agent_run',
+    description: `Enable Exa so your agents can search and fetch the web, with an optional API key for multi-step research from ${PRODUCT_NAME} tasks`,
+    icon: 'exa',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'upstream_proxy',
+    supportsKeylessAccess: true,
+    instructions:
+      "Use Exa for web search, page fetching, and advanced filtered search. Keyless access uses Exa's free rate limits and does not include agent_run. When a deployment operator adds an API key, the key stays on the Roomote control plane and agent_run becomes available for usage-based multi-step research.",
+  },
+  {
     id: 'elevenlabs',
     name: 'ElevenLabs',
     description: `Connect ElevenLabs so ${PRODUCT_NAME} can narrate feature-demo videos with your voice`,
     icon: 'elevenlabs',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'credential_only',
+  },
+  {
+    id: 'voice',
+    name: 'Voice',
+    description: `Add an OpenAI key with GPT-Live access so your team can talk to ${PRODUCT_NAME} on a call`,
+    icon: 'voice',
     connectionScope: 'deployment',
     connectionMode: 'admin_configured',
     serverMode: 'credential_only',
@@ -716,6 +852,16 @@ export function getMcpIntegrationConnectionScope(
   }
 
   return integration?.connectionScope ?? 'user';
+}
+
+export function getMcpIntegrationDataPolicy(
+  integrationOrId: McpIntegration | string | undefined,
+): 'shared' | 'private' {
+  const integration =
+    typeof integrationOrId === 'string'
+      ? getMcpIntegration(integrationOrId)
+      : integrationOrId;
+  return integration?.dataPolicy ?? 'shared';
 }
 
 export function getDefaultMcpConnectionRole(
@@ -1020,6 +1166,19 @@ export function isMcpConnectionGranolaConfig(
   );
 }
 
+export function isMcpConnectionExaConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionExaConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'exa' &&
+    'encryptedApiKey' in authConfig &&
+    typeof authConfig.encryptedApiKey === 'string',
+  );
+}
+
 export function isMcpConnectionElevenLabsConfig(
   authConfig: McpConnectionAuthConfig | null | undefined,
 ): authConfig is McpConnectionElevenLabsConfig {
@@ -1032,6 +1191,23 @@ export function isMcpConnectionElevenLabsConfig(
     typeof authConfig.encryptedApiKey === 'string' &&
     'voiceId' in authConfig &&
     typeof authConfig.voiceId === 'string',
+  );
+}
+
+export function isMcpConnectionVoiceConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionVoiceConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'voice' &&
+    'encryptedApiKey' in authConfig &&
+    typeof authConfig.encryptedApiKey === 'string' &&
+    authConfig.encryptedApiKey.length > 0 &&
+    (!('voiceId' in authConfig) ||
+      authConfig.voiceId === undefined ||
+      isOpenAiRealtimeVoiceId(authConfig.voiceId)),
   );
 }
 

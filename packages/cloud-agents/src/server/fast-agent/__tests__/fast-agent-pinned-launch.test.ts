@@ -148,6 +148,7 @@ describe('launchPinnedFastSessionTask', () => {
     });
     expect(mocks.getOrCreateFastAgentSession).toHaveBeenCalledWith({
       userId: 'user-1',
+      userInitiated: { surface: 'web', trigger: 'manual' },
       conversation: expect.objectContaining({
         surface: 'web',
         workspaceId: 'user-1',
@@ -348,6 +349,7 @@ describe('launchPinnedFastSessionTask', () => {
 
     expect(mocks.getOrCreateFastAgentSession).toHaveBeenCalledWith({
       userId: 'user-1',
+      userInitiated: { surface: 'web', trigger: 'manual' },
       conversation: expect.objectContaining({ surface: 'web' }),
     });
   });

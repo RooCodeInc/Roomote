@@ -8,6 +8,7 @@ import {
 import { Env } from '@roomote/env';
 import {
   getArtifactStorageKey,
+  ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
   type TaskArtifactType,
   validateTaskArtifactPath,
 } from '@roomote/types';
@@ -53,6 +54,11 @@ export async function createSessionArtifact(input: {
     contentType: input.contentType,
     path: input.path,
     size: content.length,
+    // The Session row lock in deletion prevents a new record, while this
+    // lease covers the object write after the record transaction commits.
+    uploadUrlExpiresAt: new Date(
+      Date.now() + ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS * 1_000,
+    ),
   });
   if (!artifact) throw new Error('Failed to create artifact record.');
 
@@ -73,7 +79,11 @@ export async function createSessionArtifact(input: {
 
   const [uploaded] = await db
     .update(taskArtifacts)
-    .set({ uploaded: true, updatedAt: new Date() })
+    .set({
+      uploaded: true,
+      uploadUrlExpiresAt: new Date(),
+      updatedAt: new Date(),
+    })
     .where(eq(taskArtifacts.id, artifact.id))
     .returning();
   if (!uploaded) throw new Error('Failed to complete artifact upload.');

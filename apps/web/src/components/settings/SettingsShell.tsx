@@ -19,6 +19,7 @@ type SettingsShellProps = {
   adminOnly?: boolean;
   headerAction?: ReactNode;
   showHeaderActionOnMobile?: boolean;
+  boundedContentOnDesktop?: boolean;
   children: ReactNode;
 };
 
@@ -27,6 +28,7 @@ export function SettingsShell({
   adminOnly = false,
   headerAction,
   showHeaderActionOnMobile,
+  boundedContentOnDesktop,
   children,
 }: SettingsShellProps) {
   const router = useRouter();
@@ -56,6 +58,7 @@ export function SettingsShell({
       mobileLabel="Settings page"
       headerAction={headerAction}
       showHeaderActionOnMobile={showHeaderActionOnMobile}
+      boundedContentOnDesktop={boundedContentOnDesktop}
       onItemSelect={(value) => {
         const nextItem = accessibleItems.find((item) => item.id === value);
         if (nextItem) {

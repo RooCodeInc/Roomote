@@ -16,7 +16,6 @@ export interface PersonalPreferences {
   colorTheme: PersonalColorTheme;
   mindReaderMode: boolean;
   narrationMode: boolean;
-  therapistMode: boolean;
 }
 
 export type PersonalPreferencesUpdate = Partial<PersonalPreferences>;
@@ -25,5 +24,10 @@ export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
   colorTheme: 'system',
   mindReaderMode: false,
   narrationMode: false,
-  therapistMode: false,
 };
+
+export interface UserPersonalizationSettings {
+  instructions: string;
+  learnFromConversations: boolean;
+  version: number;
+}

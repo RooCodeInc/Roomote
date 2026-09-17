@@ -1,5 +1,6 @@
 import {
   db,
+  demoSeedLifecycleSessions,
   eq,
   fastAgentConversations,
   fastAgentMessages,
@@ -10,6 +11,7 @@ import {
   sessions,
   taskFactory,
   userFactory,
+  users,
 } from '@roomote/db/server';
 import { sessionsReconcileJob } from '../sessions-reconcile';
 
@@ -208,6 +210,34 @@ describe('sessionsReconcileJob', () => {
     expect(healed?.cachedStatus).toBe('ready');
 
     await db.delete(sessions).where(eq(sessions.id, wedged.id));
+  });
+
+  it('preserves the owned legacy-null development fixture', async () => {
+    const fixture = demoSeedLifecycleSessions.legacyReady;
+    await db.delete(sessions).where(eq(sessions.id, fixture.id));
+    const user = await userFactory.create();
+    await db.insert(sessions).values({
+      id: fixture.id,
+      title: fixture.title,
+      ownerKind: 'user',
+      ownerUserId: user.id,
+      sourceSurface: 'web',
+      sourceTrigger: 'manual',
+      visibility: 'visible',
+      cachedStatus: null,
+      activityAt: Math.floor(Date.now() / 1_000),
+    });
+
+    try {
+      await sessionsReconcileJob();
+      const preserved = await db.query.sessions.findFirst({
+        where: eq(sessions.id, fixture.id),
+      });
+      expect(preserved?.cachedStatus).toBeNull();
+    } finally {
+      await db.delete(sessions).where(eq(sessions.id, fixture.id));
+      await db.delete(users).where(eq(users.id, user.id));
+    }
   });
 
   it('reconciles persisted retry notices after the responding lease expires', async () => {

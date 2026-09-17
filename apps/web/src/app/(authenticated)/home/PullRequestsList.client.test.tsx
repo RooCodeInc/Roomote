@@ -160,7 +160,7 @@ describe('PullRequestsList', () => {
     localStorage.clear();
     vi.clearAllMocks();
     useQueryMock.mockReturnValue({
-      data: pullRequests,
+      data: { pullRequests, openCount: 2 },
       isPending: false,
     });
   });

@@ -4,7 +4,6 @@ import {
   agentmailConversationParticipants,
   agentmailConversations,
   agentmailSuppressions,
-  agentmailUserMappings,
   authUsers,
   db,
   eq,
@@ -12,12 +11,18 @@ import {
 } from '@roomote/db/server';
 
 import { createAgentMailCommunicationProviderFromRuntimeCredentials } from '../../agentmail-communication';
+import { advanceAgentMailInboundAnchor } from '../conversation-store';
 import {
   canStartAgentMailConversationWithUser,
   isAgentMailAddressSuppressed,
+  listAgentMailOutboundIdentities,
+  listAvailableAgentMailOutboundIdentities,
+  prepareAgentMailConversation,
   resolveAgentMailOutboundAddress,
+  resolveAgentMailOutboundIdentity,
   sendAgentMailSystemEmail,
   startAgentMailConversation,
+  startAgentMailConversationWithResult,
   suppressAgentMailAddress,
 } from '../outbound';
 
@@ -27,15 +32,19 @@ function uniqueEmail(prefix: string): string {
   return `${prefix}-${randomUUID()}@example.test`;
 }
 
-async function createVerifiedUser(email: string) {
+async function createAccountUser(email: string, emailVerified = true) {
   const user = await userFactory.create({ email });
   await db.insert(authUsers).values({
     id: user.id,
     name: user.name ?? 'Test User',
     email,
-    emailVerified: true,
+    emailVerified,
   });
   return user;
+}
+
+async function createVerifiedUser(email: string) {
+  return createAccountUser(email);
 }
 
 describe('agentmail suppression store (real database)', () => {
@@ -66,43 +75,20 @@ describe('agentmail suppression store (real database)', () => {
 });
 
 describe('resolveAgentMailOutboundAddress (real database)', () => {
-  it('prefers the verified account email over a linked mapping', async () => {
-    const accountEmail = uniqueEmail('account');
-    const linkedEmail = uniqueEmail('linked');
-    const user = await createVerifiedUser(accountEmail);
-    await db.insert(agentmailUserMappings).values({
-      emailAddress: linkedEmail,
-      userId: user.id,
-      source: 'link_code',
-    });
+  it.each([true, false])(
+    'resolves the account email when verification is %s',
+    async (emailVerified) => {
+      const accountEmail = uniqueEmail('account');
+      const user = await createAccountUser(accountEmail, emailVerified);
 
-    expect(await resolveAgentMailOutboundAddress(user.id)).toEqual({
-      ok: true,
-      emailAddress: accountEmail.toLowerCase(),
-    });
-  });
+      expect(await resolveAgentMailOutboundAddress(user.id)).toEqual({
+        ok: true,
+        emailAddress: accountEmail.toLowerCase(),
+      });
+    },
+  );
 
-  it('falls back to a linked mapping when the account email is suppressed', async () => {
-    const accountEmail = uniqueEmail('account');
-    const linkedEmail = uniqueEmail('linked');
-    const user = await createVerifiedUser(accountEmail);
-    await db.insert(agentmailUserMappings).values({
-      emailAddress: linkedEmail,
-      userId: user.id,
-      source: 'link_code',
-    });
-    await suppressAgentMailAddress({
-      emailAddress: accountEmail,
-      reason: 'unsubscribe',
-    });
-
-    expect(await resolveAgentMailOutboundAddress(user.id)).toEqual({
-      ok: true,
-      emailAddress: linkedEmail.toLowerCase(),
-    });
-  });
-
-  it('refuses when every permitted address is suppressed', async () => {
+  it('refuses when the account email is suppressed', async () => {
     const accountEmail = uniqueEmail('account');
     const user = await createVerifiedUser(accountEmail);
     await suppressAgentMailAddress({
@@ -116,13 +102,45 @@ describe('resolveAgentMailOutboundAddress (real database)', () => {
     });
   });
 
-  it('refuses users with no verified email and no mapping', async () => {
+  it('refuses users with no account email identity', async () => {
     const user = await userFactory.create();
 
     expect(await resolveAgentMailOutboundAddress(user.id)).toEqual({
       ok: false,
       reason: 'no_permitted_address',
     });
+  });
+
+  it('lists an unverified account identity for automation selection', async () => {
+    const accountEmail = uniqueEmail('unverified');
+    const user = await createAccountUser(accountEmail, false);
+
+    const identities = await listAgentMailOutboundIdentities(user.id);
+
+    expect(identities).toEqual([
+      {
+        id: expect.stringMatching(`^verified:${user.id}:`),
+        emailAddress: accountEmail.toLowerCase(),
+        kind: 'account',
+      },
+    ]);
+    expect(
+      await resolveAgentMailOutboundIdentity(user.id, identities[0]!.id),
+    ).toEqual({ ok: true, emailAddress: accountEmail.toLowerCase() });
+  });
+
+  it('keeps the exact outbound identity when inbound verification is removed', async () => {
+    const accountEmail = uniqueEmail('selected');
+    const user = await createVerifiedUser(accountEmail);
+    const [identity] = await listAgentMailOutboundIdentities(user.id);
+    await db
+      .update(authUsers)
+      .set({ emailVerified: false })
+      .where(eq(authUsers.id, user.id));
+
+    expect(
+      await resolveAgentMailOutboundIdentity(user.id, identity!.id),
+    ).toEqual({ ok: true, emailAddress: accountEmail.toLowerCase() });
   });
 });
 
@@ -177,6 +195,91 @@ describe('startAgentMailConversation (real database, stubbed AgentMail API)', ()
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+  });
+
+  it('discovers an unverified account email as an available destination', async () => {
+    const accountEmail = uniqueEmail('automation-option');
+    const user = await createAccountUser(accountEmail, false);
+
+    await expect(
+      listAvailableAgentMailOutboundIdentities(user.id),
+    ).resolves.toEqual([
+      {
+        id: expect.stringMatching(`^verified:${user.id}:`),
+        emailAddress: accountEmail.toLowerCase(),
+        kind: 'account',
+      },
+    ]);
+  });
+
+  it('delivers an automation report to an unverified account email', async () => {
+    const accountEmail = uniqueEmail('automation-prepared');
+    const user = await createAccountUser(accountEmail, false);
+    const [identity] = await listAgentMailOutboundIdentities(user.id);
+    const requests: { url: string; body: Record<string, unknown> }[] = [];
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      requests.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      });
+      return new Response(
+        JSON.stringify({
+          message_id: `<${randomUUID()}@agentmail.to>`,
+          thread_id: 'thread_final_report',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const prepared = await prepareAgentMailConversation({
+      userId: user.id,
+      identityId: identity!.id,
+      subject: 'Automation report',
+      conversationKey: `automation-run-${randomUUID()}`,
+    });
+    expect(prepared).not.toBeNull();
+    expect(requests).toHaveLength(0);
+
+    const provider =
+      await createAgentMailCommunicationProviderFromRuntimeCredentials();
+    await provider!.postMessage({
+      channelId: INBOX,
+      threadId: prepared!.conversationId,
+      text: 'Final report',
+      textFormat: 'markdown',
+      idempotencyKey: 'automation-final-report',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.url).toContain('/messages/send');
+    expect(requests[0]!.body).toMatchObject({
+      to: [accountEmail.toLowerCase()],
+      subject: 'Automation report',
+      text: expect.stringContaining('Final report'),
+    });
+    expect(String(requests[0]!.body.text)).not.toContain('is running');
+    const conversation = await db.query.agentmailConversations.findFirst({
+      where: eq(agentmailConversations.id, prepared!.conversationId),
+    });
+    expect(conversation).toMatchObject({
+      providerThreadId: 'thread_final_report',
+      latestOutboundMessageId: expect.any(String),
+    });
+    const participant =
+      await db.query.agentmailConversationParticipants.findFirst({
+        where: eq(
+          agentmailConversationParticipants.conversationId,
+          prepared!.conversationId,
+        ),
+      });
+    expect(participant).toMatchObject({
+      userId: user.id,
+      providerThreadId: 'thread_final_report',
+      source: 'outbound',
+    });
   });
 
   it('sends with List-Unsubscribe headers and records a replyable conversation', async () => {
@@ -275,6 +378,166 @@ describe('startAgentMailConversation (real database, stubbed AgentMail API)', ()
     expect(sent).toBe(false);
     expect(called).toBe(false);
   });
+
+  it('refuses later delivery after the selected identity is revoked', async () => {
+    const accountEmail = uniqueEmail('automation');
+    const changedEmail = uniqueEmail('changed');
+    const user = await createVerifiedUser(accountEmail);
+    const [identity] = await listAgentMailOutboundIdentities(user.id);
+    const requests: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return new Response(
+        JSON.stringify({
+          message_id: `<${randomUUID()}@agentmail.to>`,
+          thread_id: `thread_${randomUUID()}`,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const started = await startAgentMailConversationWithResult({
+      userId: user.id,
+      identityId: identity!.id,
+      subject: 'Automation report',
+      text: 'The automation is running.',
+      logContext: 'automation-test',
+      clientSendId: 'automation-run-1',
+    });
+    expect(started).toMatchObject({ sent: true, conversation: {} });
+    await db
+      .update(authUsers)
+      .set({ email: changedEmail, emailVerified: true })
+      .where(eq(authUsers.id, user.id));
+
+    const provider =
+      await createAgentMailCommunicationProviderFromRuntimeCredentials();
+    await expect(
+      provider!.postMessage({
+        channelId: INBOX,
+        threadId: started.sent
+          ? started.conversation?.conversationId
+          : undefined,
+        text: 'Final report',
+        textFormat: 'markdown',
+        idempotencyKey: 'automation-report-1',
+      }),
+    ).rejects.toThrow('recipient identity is no longer eligible');
+    expect(requests).toHaveLength(1);
+  });
+
+  it('threads the report on its own root message until someone replies', async () => {
+    const accountEmail = uniqueEmail('automation');
+    const user = await createVerifiedUser(accountEmail);
+    const [identity] = await listAgentMailOutboundIdentities(user.id);
+    const rootMessageId = `<${randomUUID()}@agentmail.to>`;
+    const requests: { url: string; body: Record<string, unknown> }[] = [];
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      requests.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      });
+      return new Response(
+        JSON.stringify({
+          message_id:
+            requests.length === 1
+              ? rootMessageId
+              : `<${randomUUID()}@agentmail.to>`,
+          thread_id: `thread_${randomUUID()}`,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const started = await startAgentMailConversationWithResult({
+      userId: user.id,
+      identityId: identity!.id,
+      subject: 'Automation report',
+      text: 'The automation is running.',
+      logContext: 'automation-test',
+      clientSendId: 'automation-run-2',
+    });
+    if (!started.sent || !started.conversation) {
+      throw new Error('expected the root email to be recorded');
+    }
+
+    const provider =
+      await createAgentMailCommunicationProviderFromRuntimeCredentials();
+    await provider!.postMessage({
+      channelId: INBOX,
+      threadId: started.conversation.conversationId,
+      text: 'Final report',
+      textFormat: 'markdown',
+      idempotencyKey: 'automation-report-2',
+    });
+    expect(requests[1]!.url).toContain(
+      `/messages/${encodeURIComponent(rootMessageId)}/reply`,
+    );
+    expect(requests[1]!.body.to).toEqual([accountEmail.toLowerCase()]);
+  });
+
+  it('answers whoever last wrote in, even on an outbound-initiated thread', async () => {
+    const accountEmail = uniqueEmail('owner');
+    const colleagueEmail = uniqueEmail('colleague');
+    const user = await createVerifiedUser(accountEmail);
+    const [identity] = await listAgentMailOutboundIdentities(user.id);
+    const requests: { url: string; body: Record<string, unknown> }[] = [];
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      requests.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      });
+      return new Response(
+        JSON.stringify({
+          message_id: `<${randomUUID()}@agentmail.to>`,
+          thread_id: `thread_${randomUUID()}`,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const started = await startAgentMailConversationWithResult({
+      userId: user.id,
+      identityId: identity!.id,
+      subject: 'Automation report',
+      text: 'The automation is running.',
+      logContext: 'automation-test',
+      clientSendId: 'automation-run-3',
+    });
+    if (!started.sent || !started.conversation) {
+      throw new Error('expected the root email to be recorded');
+    }
+    const colleagueMessageId = `<${randomUUID()}@example.com>`;
+    expect(
+      await advanceAgentMailInboundAnchor({
+        conversationId: started.conversation.conversationId,
+        messageId: colleagueMessageId,
+        providerTimestamp: new Date(),
+        senderEmail: colleagueEmail,
+        senderUserId: null,
+      }),
+    ).toBe(true);
+
+    const provider =
+      await createAgentMailCommunicationProviderFromRuntimeCredentials();
+    await provider!.postMessage({
+      channelId: INBOX,
+      threadId: started.conversation.conversationId,
+      text: 'Answer',
+      textFormat: 'markdown',
+      idempotencyKey: 'automation-report-3',
+    });
+    expect(requests[1]!.url).toContain(
+      `/messages/${encodeURIComponent(colleagueMessageId)}/reply`,
+    );
+    expect(requests[1]!.body.to).toEqual([colleagueEmail.toLowerCase()]);
+  });
 });
 
 describe('sendAgentMailSystemEmail (real database, stubbed AgentMail API)', () => {
@@ -289,6 +552,7 @@ describe('sendAgentMailSystemEmail (real database, stubbed AgentMail API)', () =
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
   function stubSend() {
@@ -345,6 +609,7 @@ describe('sendAgentMailSystemEmail (real database, stubbed AgentMail API)', () =
   it('never sends to a bounced or complained address', async () => {
     const requests = stubSend();
     const to = uniqueEmail('bounced');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     await suppressAgentMailAddress({ emailAddress: to, reason: 'bounce' });
 
     const result = await sendAgentMailSystemEmail({
@@ -356,5 +621,24 @@ describe('sendAgentMailSystemEmail (real database, stubbed AgentMail API)', () =
 
     expect(result).toEqual({ sent: false, reason: 'suppressed' });
     expect(requests).toHaveLength(0);
+    expect(String(warn.mock.calls[0]?.[0])).not.toContain(to.toLowerCase());
+  });
+
+  it('reports provider failures without logging the recipient', async () => {
+    const to = uniqueEmail('failed');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    globalThis.fetch = vi.fn(async () =>
+      Response.json({ message: `Could not deliver to ${to}` }, { status: 500 }),
+    ) as typeof fetch;
+
+    const result = await sendAgentMailSystemEmail({
+      to,
+      subject: 'Reset your Roomote password',
+      text: 'reset',
+      logContext: 'outbound-test',
+    });
+
+    expect(result).toEqual({ sent: false, reason: 'send_failed' });
+    expect(String(warn.mock.calls[0]?.[0])).not.toContain(to.toLowerCase());
   });
 });

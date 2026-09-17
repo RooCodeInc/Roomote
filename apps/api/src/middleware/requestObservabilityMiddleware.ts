@@ -10,6 +10,7 @@ const EXCLUDED_REQUEST_METRICS_PATHS = new Set([
   '/health/api',
   '/health/liveness',
   '/health/controller',
+  '/health/bullmq',
 ]);
 
 const TRPC_PATH_PREFIX = '/trpc';

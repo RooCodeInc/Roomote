@@ -864,10 +864,6 @@ export async function startEnvironmentDefinitionTaskCommand(
 ) {
   assertAdmin(auth);
 
-  if (input.repositoryIds.length === 0) {
-    throw new Error('Select at least one repository before starting setup.');
-  }
-
   const { userId } = auth;
   const { selectedRepositories } = await resolveSelectedRepositories(
     auth,
@@ -910,9 +906,14 @@ export async function startEnvironmentDefinitionTaskCommand(
     // environment-setup skill bootstraps them with an initial commit, so the
     // prompt flags which selected repositories are empty. Non-GitHub repos
     // never appear in the empty-state map and are treated as non-empty.
-    const emptyStates = await GitHub.getRepositoryEmptyStates({
-      repositoryIds: selectedRepositories.map((repository) => repository.id),
-    });
+    const emptyStates =
+      selectedRepositories.length > 0
+        ? await GitHub.getRepositoryEmptyStates({
+            repositoryIds: selectedRepositories.map(
+              (repository) => repository.id,
+            ),
+          })
+        : new Map<string, boolean>();
 
     const emptyRepositoryFullNames = selectedRepositories
       .filter((repository) => emptyStates.get(repository.id) === true)

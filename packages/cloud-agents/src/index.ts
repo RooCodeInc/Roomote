@@ -24,6 +24,7 @@ export {
 } from './task-runtime-defaults';
 export {
   PACKAGED_AUTOMATION_SKILL_INVOCATIONS,
+  FAST_ONLY_PACKAGED_SKILL_INVOCATIONS,
   PACKAGED_SKILL_INVOCATIONS,
   PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS,
 } from './packaged-skill-invocations';

@@ -32,7 +32,16 @@ describe('Standard Task visual-proof step', () => {
       'For repository-changing `implement-changes` runs that stay on the parent delivery path, after implementation and before the policy-selected delivery skill, if repository files changed the active workflow must load `capture-visual-proof` as one bounded proof step. Browser capture belongs inside that step and follows its `agent-browser` rules.',
     );
     expect(harnessInstructions).toContain(
-      'the workflow must not proceed to the judge pass or the delivery skill until `capture-visual-proof` has run or explicitly returned a no-op or blocker result',
+      'the workflow must not proceed to the judge pass or the delivery skill until `capture-visual-proof` has returned a finished proof report or explicitly returned a no-op or blocker result',
+    );
+    expect(harnessInstructions).toContain(
+      'it is unfinished until the capturing agent has opened and visually verified the exact final screenshots and final-video keyframes as required by the skill',
+    );
+    expect(harnessInstructions).toContain(
+      'capture, upload, and browser assertions alone do not satisfy this gate',
+    );
+    expect(harnessInstructions).toContain(
+      "The judge remains an independent second review, not a substitute for the capturing agent's inspection.",
     );
     expect(harnessInstructions).toContain(
       'that active workflow owns both the proof step and the delivery transition and must not split them into a second post-completion sequence',

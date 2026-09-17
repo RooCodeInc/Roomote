@@ -103,6 +103,22 @@ describe('bounded Bitbucket repository client', () => {
     );
   });
 
+  it('merges without deleting the source branch or following provider links', async () => {
+    const { client, fetchImpl } = setup();
+    await client.mergePullRequest(3, { mergeStrategy: 'squash' });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://api.bitbucket.org/2.0/repositories/acme/repo/pullrequests/3/merge',
+      expect.objectContaining({
+        method: 'POST',
+        redirect: 'error',
+        body: JSON.stringify({
+          close_source_branch: false,
+          merge_strategy: 'squash',
+        }),
+      }),
+    );
+  });
+
   it.each([
     '../repo',
     'acme/..',

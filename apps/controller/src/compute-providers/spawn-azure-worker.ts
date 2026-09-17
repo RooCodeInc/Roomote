@@ -7,8 +7,6 @@ import {
   type TaskRun,
   createComputeProviderMutationEventRecorder,
   db,
-  taskRuns,
-  eq,
 } from '@roomote/db/server';
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
@@ -30,6 +28,10 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
+import {
+  prepareHostedWorkerLaunch,
+  type CredentialEgressLifecycle,
+} from '../credential-egress';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 import {
   COMPUTE_BOOTSTRAP_TIMEOUT_MS,
@@ -149,6 +151,8 @@ export async function spawnAzureWorker(
     localTarballPath?: string;
     deploymentSlug?: string;
     azureTags?: Record<string, string>;
+    /** Session-egress admission; omitted in unit paths that do not exercise it. */
+    credentialEgress?: CredentialEgressLifecycle;
   },
 ): Promise<{
   machineId: string;
@@ -168,6 +172,7 @@ export async function spawnAzureWorker(
     localTarballPath,
     deploymentSlug,
     azureTags,
+    credentialEgress,
   } = config;
 
   const environmentId = taskRun.payload.environmentId;
@@ -335,6 +340,12 @@ export async function spawnAzureWorker(
     );
   });
 
+  const launchHostedWorker = await prepareHostedWorkerLaunch({
+    credentialEgress,
+    taskRun,
+    provider: 'azure',
+  });
+
   const machine = await createAzureMachine({
     azureSubscriptionId,
     azureResourceGroup,
@@ -440,11 +451,8 @@ export async function spawnAzureWorker(
       }),
     });
 
-    const result = await computeClient.runCommand({
-      instanceId: machine.machineId,
-      cmd: 'worker',
-      args,
-      env: buildAzureWorkerEnv({
+    const result = await launchHostedWorker(
+      buildAzureWorkerEnv({
         authToken,
         sandboxExpiresAtMs: Date.now() + azureTimeoutMs,
         deploymentSlug,
@@ -454,36 +462,39 @@ export async function spawnAzureWorker(
           SANDBOX_TIMEOUT_MS: String(azureTimeoutMs),
         },
       }),
-      detached: true,
-      signal: AbortSignal.timeout(60_000),
-    });
+      async (env) => {
+        const launchResult = await computeClient.runCommand({
+          instanceId: machine.machineId,
+          cmd: 'worker',
+          args,
+          env,
+          detached: true,
+          signal: AbortSignal.timeout(60_000),
+        });
 
-    if (result.exitCode !== null && result.exitCode !== 0) {
-      throw buildDetachedWorkerExitError(workerCommand, result);
-    }
+        if (launchResult.exitCode !== null && launchResult.exitCode !== 0) {
+          throw buildDetachedWorkerExitError(workerCommand, launchResult);
+        }
 
-    await recordMutation({
-      provider: 'azure',
-      operation: 'run_command',
-      eventType: 'completed',
-      instanceId: machine.machineId,
-      message: `runCommand launched detached worker ${workerCommand} for Azure instance ${machine.machineId}.`,
-      details: buildComputeProviderMutationDetails(mutationContext, {
-        command: 'worker',
-        args,
-        detached: true,
-        phase: 'launch_worker',
-        commandId: result.commandId ?? null,
-        exitCode: result.exitCode,
-      }),
-    });
+        await recordMutation({
+          provider: 'azure',
+          operation: 'run_command',
+          eventType: 'completed',
+          instanceId: machine.machineId,
+          message: `runCommand launched detached worker ${workerCommand} for Azure instance ${machine.machineId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            command: 'worker',
+            args,
+            detached: true,
+            phase: 'launch_worker',
+            commandId: launchResult.commandId ?? null,
+            exitCode: launchResult.exitCode,
+          }),
+        });
 
-    if (result.commandId) {
-      await db
-        .update(taskRuns)
-        .set({ sandboxCmdId: result.commandId })
-        .where(eq(taskRuns.id, taskRun.id));
-    }
+        return launchResult;
+      },
+    );
 
     return {
       machineId: machine.machineId,

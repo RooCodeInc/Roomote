@@ -6,7 +6,6 @@ const {
   mockFindFirstRun,
   mockFindFallbackRun,
   mockFindFirstRepository,
-  mockGetTaskGoalForRun,
   mockIsNull,
   mockSendPrompt,
   mockUpdateWhere,
@@ -22,7 +21,6 @@ const {
   mockFindFirstRun: vi.fn(),
   mockFindFallbackRun: vi.fn(),
   mockFindFirstRepository: vi.fn(),
-  mockGetTaskGoalForRun: vi.fn(),
   mockIsNull: vi.fn((...args: unknown[]) => args),
   mockSendPrompt: vi.fn(),
   mockUpdateWhere: vi.fn(),
@@ -70,7 +68,6 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args: unknown[]) => args),
   isNull: (...args: unknown[]) => mockIsNull(...args),
   sql: vi.fn((...args: unknown[]) => args),
-  getTaskGoalForRun: (...args: unknown[]) => mockGetTaskGoalForRun(...args),
   repositories: { id: 'repositories.id' },
   taskPullRequests: { taskId: 'taskPullRequests.taskId' },
   taskRuns: {
@@ -154,7 +151,6 @@ describe('activePrReviewFollowUpJob', () => {
     mockBuildPrompt.mockReturnValue('Review the latest live PR head.');
     mockEnqueueTask.mockResolvedValue({ id: 200 });
     mockSendPrompt.mockResolvedValue({ success: true });
-    mockGetTaskGoalForRun.mockResolvedValue(null);
     mockUpdateWhere.mockResolvedValue(undefined);
     mockWithSandboxServerRpcClient.mockImplementation(
       ({ call }: { call: (client: unknown) => Promise<unknown> }) =>
@@ -196,37 +192,6 @@ describe('activePrReviewFollowUpJob', () => {
     expect(mockUpdateWhere).toHaveBeenCalledOnce();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockTransferGithubPrReviewCheckToRun).not.toHaveBeenCalled();
-  });
-
-  it('includes active goal context in a live review follow-up', async () => {
-    const goal = {
-      objective: 'Finish reviewing the pull request',
-      generation: 'goal-generation:review',
-      status: 'active' as const,
-      maxContinuations: 5,
-      continuationsUsed: 1,
-      blockedReason: null,
-      completedAt: null,
-    };
-    mockFindFirstRun.mockResolvedValue({
-      id: 100,
-      taskId: 'task-100',
-      status: RunStatus.Running,
-      sandboxServerUrl: 'https://sandbox.example.test',
-      snapshotId: null,
-      snapshotCreatedAt: null,
-      port: null,
-      payload: { repo: 'owner/repo' },
-      actingUserId: null,
-    });
-    mockGetTaskGoalForRun.mockResolvedValue(goal);
-
-    await activePrReviewFollowUpJob(makeJob());
-
-    expect(mockGetTaskGoalForRun).toHaveBeenCalledWith(100);
-    expect(mockSendPrompt).toHaveBeenCalledWith(
-      expect.objectContaining({ goalContext: goal }),
-    );
   });
 
   it('keeps a failed live delivery retryable without advancing the PR head', async () => {

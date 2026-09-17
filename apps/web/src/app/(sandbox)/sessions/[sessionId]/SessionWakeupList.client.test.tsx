@@ -147,6 +147,9 @@ describe('SessionWakeupList', () => {
     render(
       <SessionWakeupList wakeups={[wakeup()]} canCancel onCancel={onCancel} />,
     );
+    expect(
+      screen.getByRole('list', { name: 'Scheduled timers' }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel Check build' }));
     const button = screen.getByRole('button', {
       name: 'Cancelling Check build',

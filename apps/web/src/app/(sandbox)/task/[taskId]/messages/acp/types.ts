@@ -5,6 +5,7 @@ import type {
   AcpToolResultPayload,
   AcpEventType,
   DataVisualizationBlock,
+  SetupReceiptPayload,
   TaskMessageRole,
 } from '@roomote/types';
 
@@ -50,6 +51,11 @@ export interface AcpToolResultUiMessage extends AcpUiMessageBase {
   data: AcpToolResultPayload;
 }
 
+export interface AcpSetupReceiptUiMessage extends AcpUiMessageBase {
+  kind: 'setup_receipt';
+  data: SetupReceiptPayload;
+}
+
 export interface AcpPlanUiMessage extends AcpUiMessageBase {
   kind: 'plan';
   data: AcpPlanPayload;
@@ -64,7 +70,10 @@ export interface AcpTodoSectionUiMessage extends AcpUiMessageBase {
 }
 
 export interface AcpOtherUiMessage extends AcpUiMessageBase {
-  kind: Exclude<AcpMessageKind, 'tool_call' | 'tool_result' | 'plan'>;
+  kind: Exclude<
+    AcpMessageKind,
+    'tool_call' | 'tool_result' | 'plan' | 'setup_receipt'
+  >;
   data: Record<string, unknown>;
   /** Source chunks before reasoning-only display normalization. */
   rawText?: string;
@@ -73,6 +82,7 @@ export interface AcpOtherUiMessage extends AcpUiMessageBase {
 export type AcpUiMessage =
   | AcpToolCallUiMessage
   | AcpToolResultUiMessage
+  | AcpSetupReceiptUiMessage
   | AcpPlanUiMessage
   | AcpTodoSectionUiMessage
   | AcpOtherUiMessage;

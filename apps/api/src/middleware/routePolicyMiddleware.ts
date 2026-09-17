@@ -6,7 +6,7 @@ import { createMiddleware } from 'hono/factory';
 import type { McpAccessTokenContext, RunTokenContext } from '@roomote/types';
 import { getRedis } from '@roomote/redis';
 import { getRoomoteMcpProtectedResourceMetadataUrl } from '@roomote/auth';
-import { Env } from '@roomote/env';
+import { Env, resolveTrustedClientAddress } from '@roomote/env';
 
 import type { Variables } from '../types';
 import {
@@ -140,11 +140,18 @@ function rejectionResponse(
 
 function resolveClientKey(c: Context<{ Variables: Variables }>): string {
   return (
-    c.req.header('fly-client-ip') ??
-    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ??
-    c.req.header('x-real-ip') ??
-    'unknown'
+    resolveTrustedClientAddress(
+      c.req.raw.headers,
+      Env.R_TRUSTED_PROXY_CLIENT_IP_HEADER,
+    ) ?? 'unknown'
   );
+}
+
+function resolvePrincipalKey(c: Context<{ Variables: Variables }>): string {
+  const auth = c.get('authContext');
+  if (!auth) return 'unauthenticated';
+  if (isRunTokenContext(auth)) return `run:${auth.runId}`;
+  return `user:${auth.userId}`;
 }
 
 /**
@@ -184,6 +191,8 @@ function resolveRateLimitBucketKey(
   switch (rateLimit.keySource) {
     case 'client':
       return resolveClientKey(c);
+    case 'principal':
+      return resolvePrincipalKey(c);
     case 'state-token':
       return resolveStateTokenKey(c);
   }
@@ -269,7 +278,11 @@ export const routePolicyMiddleware = createMiddleware<{
     }
   }
 
-  const rejection = evaluateRoutePolicy(rule.policy, c.get('authContext'));
+  const sessionBroker =
+    c.req.path === '/api/mcp/http-integrations' && c.get('sessionBrokerAuth');
+  const rejection = sessionBroker
+    ? undefined
+    : evaluateRoutePolicy(rule.policy, c.get('authContext'));
 
   if (rejection) {
     return rejectionResponse(c, rule, rejection);

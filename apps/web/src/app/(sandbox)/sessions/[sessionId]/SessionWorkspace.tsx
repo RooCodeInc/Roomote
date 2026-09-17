@@ -19,6 +19,7 @@ import {
   isTaskExecutingTurn,
   type ReasoningEffort,
   type RunStatus,
+  type SessionGoal,
 } from '@roomote/types';
 
 import {
@@ -27,7 +28,7 @@ import {
   humanizeFilename,
 } from '@/lib';
 import { type SessionArtifactSelection } from '@/lib/artifact-view-urls';
-import { isMarkdownArtifact } from '@/lib/artifact-types';
+import { isMarkdownArtifact, isTabularArtifact } from '@/lib/artifact-types';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
 import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInferenceCostBreakdown';
 import { PullRequestBadge } from '@/components/sandbox';
@@ -92,6 +93,7 @@ import {
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
 import { TaskRobotIconProvider } from '@/components/tasks/TaskRobotIcon';
 import { MarkdownArtifactPreview } from '@/components/tasks/MarkdownArtifactPreview';
+import { TabularArtifactPreview } from '@/components/tasks/TabularArtifactPreview';
 import { useArtifactByPath } from '@/hooks/use-artifact-by-path';
 import { PreviewPaneProvider } from '../../task/[taskId]/hooks/use-preview-pane';
 import { humanizePortName } from '../../task/[taskId]/preview-port-utils';
@@ -136,6 +138,7 @@ type SessionTaskSummary = {
     id: number;
     status: RunStatus;
     taskPhase: string | null;
+    canRetryFailedStart?: boolean;
     error: string | null;
     result: unknown;
   } | null;
@@ -176,6 +179,7 @@ export type SessionInfo = {
   ownerName: string | null;
   ownerEmail: string | null;
   ownerImageUrl: string | null;
+  privacy: 'shared' | 'private';
   surface: string;
   /** Effective model for the session's turns (stored override or default). */
   model: string | null;
@@ -189,6 +193,7 @@ export type SessionInfo = {
   };
   createdAt: Date;
   status: string | null;
+  goal?: SessionGoal | null;
   tasks: SessionTaskSummary[];
   artifacts?: SessionArtifact[];
   taskSource?: 'unified' | 'fast';
@@ -197,7 +202,7 @@ export type SessionInfo = {
       inferenceCostMicroUsd?: number;
       latestRun: Pick<
         NonNullable<SessionTaskSummary['latestRun']>,
-        'status' | 'taskPhase'
+        'status' | 'taskPhase' | 'canRetryFailedStart'
       > | null;
     }
   >;
@@ -243,6 +248,7 @@ function SessionArtifactCard({
   const isImage = artifact.contentType.startsWith('image/');
   const isVideo = artifact.contentType.startsWith('video/');
   const isMarkdown = isMarkdownArtifact(artifact.contentType, artifact.path);
+  const isTabular = isTabularArtifact(artifact.contentType, artifact.path);
   const thumbnailUrl = artifact.thumbnailUrl;
   const videoPreviewUrl = artifact.previewUrl;
 
@@ -258,6 +264,12 @@ function SessionArtifactCard({
     >
       {isMarkdown ? (
         <MarkdownArtifactPreview
+          owner={owner}
+          path={artifact.path}
+          version={artifact.version}
+        />
+      ) : isTabular ? (
+        <TabularArtifactPreview
           owner={owner}
           path={artifact.path}
           version={artifact.version}
@@ -399,7 +411,7 @@ function SessionArtifactViewer({
         onClose={onClose}
         closeLabel={closeLabel}
       />
-      <div className="min-h-0 flex-1 bg-zinc-800">
+      <div className="min-h-0 flex-1 bg-background">
         <ArtifactViewerContent
           artifact={selectedArtifact}
           owner={selection.owner}
@@ -630,6 +642,7 @@ function SessionTasksPanel({
               size="icon"
               className="size-8"
               aria-label="Open side-by-side"
+              onPointerDown={(event) => event.preventDefault()}
               onClick={onOpenSideBySide}
             >
               <Columns3 />
@@ -808,10 +821,18 @@ export function SessionWorkspace({
   const fastTasks = currentFastTasks ?? session.taskCards ?? [];
   const taskCards = isFastTaskSource ? fastTasks : sessionTasks;
   const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
+  const sessionArtifacts = currentSession?.artifacts ?? session.artifacts ?? [];
+  const hasSessionArtifacts =
+    getLatestSessionArtifacts(artifactTasks, session.id, sessionArtifacts)
+      .length > 0;
   const sessionPullRequests = getSessionPullRequests(sessionTasks);
   const sessionPreviewCount = getSessionPreviews(taskCards).length;
-  const runningTasks = taskCards.filter((task) =>
-    isTaskExecutingTurn(task.latestRun?.status, task.latestRun?.taskPhase),
+  const runningTasks = useMemo(
+    () =>
+      taskCards.filter((task) =>
+        isTaskExecutingTurn(task.latestRun?.status, task.latestRun?.taskPhase),
+      ),
+    [taskCards],
   );
   const runningTaskCount = runningTasks.length;
   const taskStateRevision = useMemo(
@@ -831,6 +852,20 @@ export function SessionWorkspace({
     () => taskCards.map((task) => task.taskId),
     [taskCards],
   );
+  const runningTaskIds = useMemo(
+    () => runningTasks.map((task) => task.taskId),
+    [runningTasks],
+  );
+  const automaticTaskPanelIds = useMemo(() => {
+    const runningTaskIdSet = new Set(runningTaskIds);
+    const selectableTaskIds = taskCards
+      .filter((task) => task.latestRun?.canRetryFailedStart !== true)
+      .map((task) => task.taskId);
+    return [
+      ...runningTaskIds,
+      ...selectableTaskIds.filter((taskId) => !runningTaskIdSet.has(taskId)),
+    ];
+  }, [runningTaskIds, taskCards]);
   const {
     utilityPanel,
     taskArtifacts,
@@ -856,6 +891,8 @@ export function SessionWorkspace({
   } = useSessionWorkspacePanels({
     sessionId: session.id,
     taskIds,
+    automaticTaskPanelIds,
+    runningTaskIds,
     singleRunningTaskId: singleRunningTaskId ?? null,
     taskPanelCapacity,
     isMdOrLarger,
@@ -915,7 +952,7 @@ export function SessionWorkspace({
       <SessionArtifactsPanel
         tasks={artifactTasks}
         sessionId={session.id}
-        sessionArtifacts={session.artifacts ?? []}
+        sessionArtifacts={sessionArtifacts}
         initialSelection={requestedArtifact}
         onDeselect={clearRequestedArtifact}
         onClose={closeSessionArtifact}
@@ -1014,8 +1051,10 @@ export function SessionWorkspace({
                   tooltip="Tasks"
                   description="Middle-click to open side-by-side"
                   active={utilityPanel?.kind === 'tasks'}
+                  aria-expanded={utilityPanel?.kind === 'tasks'}
                   disabled={taskCards.length === 0}
                   icon={Rows4}
+                  onPointerDown={(event) => event.preventDefault()}
                   onClick={() => togglePanel('tasks')}
                   onAuxClick={(event) => {
                     if (event.button !== 1) return;
@@ -1028,6 +1067,7 @@ export function SessionWorkspace({
                   label="Live Preview"
                   tooltip="Live Preview"
                   active={utilityPanel?.kind === 'previews'}
+                  aria-expanded={utilityPanel?.kind === 'previews'}
                   disabled={sessionPreviewCount === 0}
                   icon={AppWindow}
                   onClick={() => togglePanel('previews')}
@@ -1037,6 +1077,8 @@ export function SessionWorkspace({
                   label="Artifacts"
                   tooltip="Artifacts"
                   active={utilityPanel?.kind === 'artifacts'}
+                  aria-expanded={utilityPanel?.kind === 'artifacts'}
+                  disabled={!hasSessionArtifacts}
                   icon={LayoutGrid}
                   onClick={() => togglePanel('artifacts')}
                 />
@@ -1045,6 +1087,7 @@ export function SessionWorkspace({
                   label="Session info"
                   tooltip="Session info"
                   active={utilityPanel?.kind === 'info'}
+                  aria-expanded={utilityPanel?.kind === 'info'}
                   icon={Info}
                   onClick={() => togglePanel('info')}
                 />

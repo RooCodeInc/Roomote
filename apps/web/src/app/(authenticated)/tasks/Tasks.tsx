@@ -18,6 +18,7 @@ import {
   getTaskCategoryById,
 } from '@/lib';
 import { cn } from '@/lib/utils';
+import { parsePullRequestFilterValue } from '@/lib/pull-request-filter';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
 import {
@@ -319,10 +320,15 @@ export const Tasks = () => {
 
     // Add pull request filter.
     if (pullRequest) {
+      const parsedPullRequest = parsePullRequestFilterValue(pullRequest);
       const pullRequestLabel =
         pullRequest === HAS_PULL_REQUEST_FILTER_VALUE
           ? 'Has PR'
-          : formatRepositoryName(pullRequest);
+          : parsedPullRequest
+            ? formatRepositoryName(
+                `${parsedPullRequest.repository}#${parsedPullRequest.number}`,
+              )
+            : formatRepositoryName(pullRequest);
 
       result.push({
         type: 'pullRequest',
@@ -650,7 +656,7 @@ export const Tasks = () => {
         </div>
       ) : isError ? (
         <div className="flex min-h-0 flex-1 bg-background">
-          <TaskCardError />
+          <TaskCardError onRetry={() => void infiniteTasks.refetch()} />
         </div>
       ) : tasks.length === 0 ? (
         <div className="flex min-h-0 flex-1 bg-background">

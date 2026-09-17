@@ -2,7 +2,7 @@ import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { Hono } from 'hono';
-import type { RunTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
@@ -68,11 +68,19 @@ function createRunToken(): RunTokenContext {
   };
 }
 
-function createApp() {
+function createAuthToken(): AuthTokenContext {
+  return {
+    userId: 'user-1',
+    tokenType: 'auth',
+    version: 1,
+  };
+}
+
+function createApp(authContext: Variables['authContext'] = createRunToken()) {
   const app = new Hono<{ Variables: Variables }>();
 
   app.use('*', async (c, next) => {
-    c.set('authContext', createRunToken());
+    c.set('authContext', authContext);
     await next();
   });
 
@@ -187,6 +195,42 @@ describe('createCustomMcpProxy', () => {
     expect(response.status).toBe(404);
     expect(mockFindCustomServer).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      authType: 'none',
+      headers: null,
+      expectedAuthorization: undefined,
+    },
+    {
+      authType: 'static_headers',
+      headers: { Authorization: 'enc(Bearer operator-api-key)' },
+      expectedAuthorization: 'Bearer operator-api-key',
+    },
+    {
+      authType: 'oauth',
+      headers: null,
+      expectedAuthorization: 'Bearer custom-access-token',
+    },
+  ])(
+    'accepts Fast user auth for remote servers using $authType authentication',
+    async ({ authType, headers, expectedAuthorization }) => {
+      mockFindCustomServer.mockResolvedValue(
+        buildServerRow({ url: upstreamUrl(), authType, headers }),
+      );
+      mockFindConnection.mockResolvedValue({ id: 'conn-1' });
+      mockGetValidAccessToken.mockResolvedValue('custom-access-token');
+
+      const response = await postMcp(
+        createApp(createAuthToken()),
+        initializeRequest,
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockFindTaskRun).not.toHaveBeenCalled();
+      expect(lastUpstreamHeaders?.authorization).toBe(expectedAuthorization);
+    },
+  );
 
   it('404s for unknown servers', async () => {
     mockFindCustomServer.mockResolvedValue(undefined);

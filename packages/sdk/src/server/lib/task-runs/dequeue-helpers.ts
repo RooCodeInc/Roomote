@@ -53,7 +53,9 @@ import {
 import { withBootstrapFailureSignal } from '../../../bootstrap-failure-signal';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
 import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
-import { settleSlackLiveTaskCardOnExit } from './settle-slack-live-task-card-on-exit';
+import { notifyWebTaskInitiatorOnSettle } from './notify-web-task-initiator-on-settle';
+import { enqueueWebTaskInitiatorSettleNotification } from './enqueue-web-task-initiator-settle-notification';
+import { settleLiveTaskMessageOnExit } from './settle-live-task-message-on-exit';
 
 /**
  * Resolved git author identity for commits made by the worker.
@@ -424,6 +426,17 @@ export async function notifyCanceledTaskRunOnSettle(
       RunStatus.Canceled,
       taskTitle,
     );
+    const notification = await notifyWebTaskInitiatorOnSettle(
+      taskRun,
+      RunStatus.Canceled,
+    );
+    if (notification === 'failed') {
+      await enqueueWebTaskInitiatorSettleNotification({
+        runId: taskRun.id,
+        taskId: taskRun.taskId,
+        status: RunStatus.Canceled,
+      });
+    }
     // Detached like the finishRun call site: never block the cancel path on
     // the parent's turn lock plus an orchestrator turn.
     void notifyFastAgentParentOnSettle(
@@ -434,7 +447,7 @@ export async function notifyCanceledTaskRunOnSettle(
       RunStatus.Canceled,
       taskTitle,
     );
-    void settleSlackLiveTaskCardOnExit(taskRun, RunStatus.Canceled, taskTitle);
+    void settleLiveTaskMessageOnExit(taskRun, RunStatus.Canceled, taskTitle);
   } catch (error) {
     console.error(
       `[notifyCanceledTaskRunOnSettle] Failed for run ${taskRun.id}: ${
@@ -470,10 +483,6 @@ export async function resolveTaskRunSourceControlProviders(
   };
   const workspace = resolveTaskWorkspace(taskRun.payload);
 
-  if (workspace.type === 'no_repositories') {
-    return [];
-  }
-
   if (
     payload.repositoryProviders &&
     Object.keys(payload.repositoryProviders).length > 0
@@ -501,6 +510,13 @@ export async function resolveTaskRunSourceControlProviders(
     payload.sourceControlProvider !== ''
   ) {
     return [resolveSourceControlProviderFromPayload(payload)];
+  }
+
+  // A Blank slate is stamped at launch only when the deployment has active
+  // repositories to check out on demand; without a stamp it needs no
+  // source-control credentials, so never fall back to a provider default.
+  if (workspace.type === 'no_repositories') {
+    return [];
   }
 
   // No explicit stamp: resolve from the workspace's synced repositories via the
@@ -735,6 +751,7 @@ export async function createSourceControlTokenForTaskRun(
   {
     maxRetries = SOURCE_CONTROL_TOKEN_MAX_RETRIES,
     baseDelayMs = SOURCE_CONTROL_TOKEN_BASE_DELAY_MS,
+    readOnly = false,
   } = {},
 ): Promise<SourceControlRuntimeToken | null> {
   const providers = await resolveTaskRunSourceControlProviders(taskRun);
@@ -775,9 +792,27 @@ export async function createSourceControlTokenForTaskRun(
     tokensByProvider.set(provider, token);
   }
 
-  return mergeProviderTokens(
+  const merged = mergeProviderTokens(
     providers.map((provider) => tokensByProvider.get(provider)!),
   );
+  if (!readOnly) return merged;
+
+  const exposesRawCredential =
+    Boolean(merged.token) ||
+    Object.values(merged.envVars).some(Boolean) ||
+    (merged.gitCredentials?.some((credential) => Boolean(credential.token)) ??
+      false);
+  if (exposesRawCredential) {
+    throw new Error(
+      'This source-control provider cannot supply read-only credentials to a private task.',
+    );
+  }
+  return {
+    ...merged,
+    gitProxyCredentials: (merged.gitProxyCredentials ?? []).map(
+      (credential) => ({ ...credential, readOnly: true }),
+    ),
+  };
 }
 
 /**

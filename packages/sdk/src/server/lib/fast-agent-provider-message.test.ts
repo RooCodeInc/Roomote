@@ -32,6 +32,46 @@ async function createFastConversation(input: {
 }
 
 describe('Fast provider message bindings', () => {
+  it('resolves an explicitly owned cross-surface notification reply', async () => {
+    const suffix = crypto.randomUUID();
+    const user = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: 'web',
+        conversationId: `web:${suffix}`,
+      })
+      .returning();
+    await recordFastAgentProviderMessage({
+      sessionId: conversation!.id,
+      provider: 'slack',
+      workspaceId: `team:${suffix}`,
+      channelId: `dm:${suffix}`,
+      messageId: `message:${suffix}`,
+    });
+
+    await expect(
+      findFastAgentSessionForProviderReply({
+        provider: 'slack',
+        workspaceId: `team:${suffix}`,
+        channelId: `dm:${suffix}`,
+        replyToMessageId: `message:${suffix}`,
+        userId: user.id,
+      }),
+    ).resolves.toMatchObject({ id: conversation!.id, userId: user.id });
+    await expect(
+      findFastAgentSessionForProviderReply({
+        provider: 'slack',
+        workspaceId: `team:${suffix}`,
+        channelId: `dm:${suffix}`,
+        replyToMessageId: `message:${suffix}`,
+        userId: 'another-user',
+      }),
+    ).resolves.toBeNull();
+  });
+
   it('resolves a Slack reaction target to its bound Fast session owner', async () => {
     const suffix = crypto.randomUUID();
     const { user, conversation } = await createFastConversation({

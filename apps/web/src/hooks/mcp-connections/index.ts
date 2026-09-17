@@ -1,9 +1,9 @@
 // Queries
 export { useDeploymentMcpEnablements } from './useDeploymentMcpEnablements';
-export { useCuratedIntegrationsAvailability } from './useCuratedIntegrationsAvailability';
 export { useUserMcpConnections } from './useUserMcpConnections';
 export { useMcpConnectionTools } from './useMcpConnectionTools';
-export { useMcpOauthReadiness } from './useMcpOauthReadiness';
+export { useEffectiveMcpIntegrations } from './useEffectiveMcpIntegrations';
+export { invalidateMcpIntegrationStatusQueries } from './invalidateMcpIntegrationStatusQueries';
 
 // Mutations
 export { useSetDeploymentMcpEnabled } from './useSetDeploymentMcpEnabled';
@@ -17,8 +17,14 @@ export { useRipplingConnection } from './useRipplingConnection';
 export { useSaveRipplingConnection } from './useSaveRipplingConnection';
 export { useGranolaConnection } from './useGranolaConnection';
 export { useSaveGranolaConnection } from './useSaveGranolaConnection';
+export { useExaConnection } from './useExaConnection';
+export { useSaveExaConnection } from './useSaveExaConnection';
+export { useRemoveExaApiKey } from './useRemoveExaApiKey';
 export { useElevenLabsConnection } from './useElevenLabsConnection';
 export { useSaveElevenLabsConnection } from './useSaveElevenLabsConnection';
+export { useVoiceConnection } from './useVoiceConnection';
+export { useSaveVoiceConnection } from './useSaveVoiceConnection';
+export { usePreviewVoice } from './usePreviewVoice';
 export { useSaveGrafanaConnection } from './useSaveGrafanaConnection';
 export { useSaveSnowflakeConnection } from './useSaveSnowflakeConnection';
 export { useSnowflakeConnection } from './useSnowflakeConnection';

@@ -129,6 +129,29 @@ describe('FastAgentSkillStore', () => {
     expect(reference.content).toContain('Authentication');
   });
 
+  it('discovers delegation exploration as an unscoped packaged skill', async () => {
+    const store = new FastAgentSkillStore();
+
+    await expect(
+      store.list({ name: 'explore-delegation' }),
+    ).resolves.toMatchObject({
+      counts: {
+        packaged: 1,
+        repository: 0,
+        settings: 0,
+        total: 1,
+      },
+      skills: [
+        {
+          id: 'packaged:explore-delegation',
+          invocation: 'explore-delegation',
+          name: 'explore-delegation',
+          source: 'packaged',
+        },
+      ],
+    });
+  });
+
   it('loads the shipped implement-changes default workflow as a separate resource', async () => {
     const skillRoot = resolve(
       import.meta.dirname,
@@ -157,6 +180,36 @@ describe('FastAgentSkillStore', () => {
       content: expectedContent,
       byteLength: Buffer.byteLength(expectedContent, 'utf8'),
     });
+  });
+
+  it('degrades a failing optional source to a warning', async () => {
+    const repositorySkills = {
+      list: vi.fn().mockRejectedValue(new Error('Unknown Fast environment.')),
+      read: vi.fn(),
+    };
+    const settingsSkills = {
+      list: vi.fn().mockRejectedValue(new Error('Unknown Fast environment.')),
+      read: vi.fn(),
+    };
+    const store = new FastAgentSkillStore(
+      undefined,
+      repositorySkills,
+      settingsSkills,
+    );
+
+    const catalog = await store.list({ environmentId: 'environment-filler' });
+
+    expect(catalog.counts).toEqual({
+      instance: 0,
+      packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+      repository: 0,
+      settings: 0,
+      total: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+    });
+    expect(catalog.warnings).toEqual([
+      'Skipped legacy Settings skills: Unknown Fast environment.',
+      'Skipped repository skills: Unknown Fast environment.',
+    ]);
   });
 
   it('combines packaged and repository-defined skill catalogs', async () => {

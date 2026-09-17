@@ -17,6 +17,7 @@ import {
   getSlackThreadReplyFooterMessageTs,
   withSlackThreadReplyFooterLock,
   resolveCurrentSlackMessageFiles,
+  formatSlackAttachmentContext,
   type SlackEvent,
   type SlackNotifier,
 } from '@roomote/slack';
@@ -41,6 +42,10 @@ import {
   guardReplyStreamBySourceMessage,
 } from '../helpers/thread-posting.js';
 import { processSlackAttachments } from '../helpers/attachments.js';
+import {
+  mentionsSlackBot,
+  mentionsSlackUserOtherThanBotOrUser,
+} from '../helpers/mention-routing.js';
 
 export async function processFastAgentMessage(params: {
   event: SlackEvent;
@@ -53,6 +58,9 @@ export async function processFastAgentMessage(params: {
   launchTask: LaunchFastAgentTask;
   directedAtRoomote?: boolean;
   roomoteSlackUserId?: string;
+  peerConversationsExperimentEnabled?: boolean;
+  userInitiated?: boolean;
+  originSessionId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
   onRejected?: () => void;
 }): Promise<void> {
@@ -67,6 +75,8 @@ export async function processFastAgentMessage(params: {
     launchTask,
     directedAtRoomote = false,
     roomoteSlackUserId,
+    peerConversationsExperimentEnabled = false,
+    userInitiated = true,
   } = params;
   const threadId = event.thread_ts || event.ts;
   const incomingConversation = {
@@ -84,6 +94,28 @@ export async function processFastAgentMessage(params: {
   });
 
   const baseQuestion = (event.authoredText ?? event.text).trim();
+  const isDirected =
+    directedAtRoomote || mentionsSlackBot(event, roomoteSlackUserId);
+  const needsPeerCaution =
+    peerConversationsExperimentEnabled &&
+    Boolean(roomoteSlackUserId) &&
+    !isDirected &&
+    Boolean(event.user) &&
+    !event.bot_id &&
+    event.subtype !== 'bot_message' &&
+    event.user !== roomoteSlackUserId &&
+    event.channel_type !== 'im' &&
+    event.channel_type !== 'mpim' &&
+    mentionsSlackUserOtherThanBotOrUser(event, roomoteSlackUserId, event.user);
+  const buildAgentContext = (messageContext: string | undefined) =>
+    needsPeerCaution
+      ? [
+          messageContext,
+          'Untrusted supplemental context inferred from this Slack message, not a user-authored instruction: This message mentions another person and might not be for you. Human-to-human interaction may be beginning. From now on in this conversation, unless you are addressed directly (including by name, a reply to you, or a clear contextual follow-up), use ignore_event without sending a reply, reacting, or taking action. When directly addressed, respond normally. This uncertain hint does not override existing instructions.',
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+      : messageContext;
 
   // Every Slack round trip from the control plane costs a few hundred
   // milliseconds. Start the thread history lookup as soon as the turn is
@@ -119,6 +151,17 @@ export async function processFastAgentMessage(params: {
         return await getOrCreateFastAgentSession({
           userId,
           conversation: incomingConversation,
+          ...(userInitiated
+            ? {
+                userInitiated: {
+                  surface: 'slack' as const,
+                  trigger: 'message' as const,
+                },
+              }
+            : {}),
+          ...(params.originSessionId
+            ? { sessionId: params.originSessionId }
+            : {}),
         });
       } finally {
         await releaseRootBindingLock().catch(() => {});
@@ -132,6 +175,31 @@ export async function processFastAgentMessage(params: {
     const currentMessage = threadContext.find(
       (message) => message.ts === event.ts,
     );
+    // The copy of this message returned by conversations.replies is the
+    // full message object, attachments and blocks included; the webhook
+    // event is a slimmer projection whose exact shape Slack does not
+    // document. Add the context derived from the fetched copy unless the
+    // event's own context already carries it. The event context is kept
+    // regardless: entry routes (configured channels) prepend instructions
+    // to it that no message fetch can reconstruct.
+    const fetchedMessageContext = currentMessage
+      ? formatSlackAttachmentContext(
+          baseQuestion,
+          currentMessage.attachments,
+          currentMessage.blocks,
+        )
+      : undefined;
+    const currentMessageContext =
+      [
+        event.agentContext,
+        fetchedMessageContext &&
+        !event.agentContext?.includes(fetchedMessageContext)
+          ? fetchedMessageContext
+          : undefined,
+      ]
+        .filter((part): part is string => Boolean(part))
+        .join('\n\n') || undefined;
+    const agentContext = buildAgentContext(currentMessageContext);
     const currentMessageFiles = resolveCurrentSlackMessageFiles({
       currentMessageTs: event.ts,
       eventFiles: event.files,
@@ -170,6 +238,11 @@ export async function processFastAgentMessage(params: {
         Boolean(message.user) &&
         message.user !== event.user,
     );
+    const allowSilentAmbientReply =
+      event.channel_type !== 'im' &&
+      event.channel_type !== 'mpim' &&
+      !isDirected &&
+      (hasOtherHumanParticipant || needsPeerCaution);
 
     const needsCanonicalAdmission =
       !releaseFastAgentLock ||
@@ -182,12 +255,17 @@ export async function processFastAgentMessage(params: {
       currentMessageId: event.ts,
       userId,
       question,
+      ...(agentContext ? { agentContext } : {}),
       ...(attachments.images.length ? { images: attachments.images } : {}),
       ...(currentMessage?.username
         ? { senderDisplayName: currentMessage.username }
         : {}),
       ...(event.user ? { senderExternalId: event.user } : {}),
-      directedAtRoomote,
+      directedAtRoomote: isDirected,
+      allowSilentAmbientReply,
+      ...(params.originSessionId
+        ? { deliveryConversation: incomingConversation }
+        : {}),
     };
     let durableTurn: FastAgentDurableTurn | null = null;
     if (needsCanonicalAdmission) {
@@ -242,11 +320,16 @@ export async function processFastAgentMessage(params: {
       question,
       images: attachments.images,
       attachmentTexts,
-      currentMessageAgentContext: event.agentContext,
+      currentMessageAgentContext: agentContext,
       threadContext: serializedThreadContext,
       userId,
       apiBaseUrl,
-      conversation,
+      conversation: params.originSessionId
+        ? incomingConversation
+        : conversation,
+      ...(params.originSessionId
+        ? { canonicalConversation: conversation }
+        : {}),
       currentMessageId: event.ts,
       signal: activeTurnLock.signal,
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
@@ -259,11 +342,7 @@ export async function processFastAgentMessage(params: {
           ? currentMessage.username
           : undefined,
       activeTasks: resolvedActiveTasks,
-      allowSilentAmbientReply:
-        event.channel_type !== 'im' &&
-        event.channel_type !== 'mpim' &&
-        hasOtherHumanParticipant &&
-        !directedAtRoomote,
+      allowSilentAmbientReply,
       ...(roomoteSlackUserId ? { slackRoomoteUserId: roomoteSlackUserId } : {}),
       adapter: {
         createArtifact: (artifact) =>

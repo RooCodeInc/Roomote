@@ -9,6 +9,7 @@ import {
   type TaskPayload,
   TaskPayloadKind,
   getScheduledSuggestionBackgroundAutomationDescriptor,
+  getTriggerableBackgroundAutomationDescriptorByKey,
   supportsHistoricalThreadFeedback,
   normalizeSetupNewState,
   SUGGESTION_PRIORITY_EMOJIS,
@@ -39,6 +40,7 @@ import {
   and,
   asc,
   buildTaskSuggestionContentHash,
+  customAutomations,
   db,
   environments,
   eq,
@@ -1252,6 +1254,8 @@ export async function submitTaskSuggestions(
         columns: {
           initiatorUserId: true,
           initiatorAutomation: true,
+          actorExternalId: true,
+          actorDisplayName: true,
           slackChannelId: true,
           slackThreadTs: true,
         },
@@ -1316,6 +1320,18 @@ export async function submitTaskSuggestions(
     );
     const createdByUserId =
       auth.userId ?? run.actingUserId ?? task?.initiatorUserId ?? null;
+    const customAutomation =
+      task?.initiatorAutomation === 'custom_automation' && task.actorExternalId
+        ? await db.query.customAutomations.findFirst({
+            where: eq(customAutomations.id, task.actorExternalId),
+            columns: { id: true, name: true, resultPriority: true },
+          })
+        : null;
+    const automationDescriptor = task?.initiatorAutomation
+      ? getTriggerableBackgroundAutomationDescriptorByKey(
+          task.initiatorAutomation,
+        )
+      : null;
     const isOnboardingTrigger =
       run.payloadKind === TaskPayloadKind.Scan &&
       !isCurrentThreadTask &&
@@ -1581,6 +1597,18 @@ export async function submitTaskSuggestions(
                 ? `${submissionPrefix}${index}:${contentHash}`
                 : contentHash,
               status: 'open',
+              resultAutomationName:
+                customAutomation?.name ??
+                task?.actorDisplayName ??
+                automationDescriptor?.label ??
+                null,
+              resultPriority:
+                customAutomation?.resultPriority ??
+                (automationDescriptor &&
+                'resultPriority' in automationDescriptor
+                  ? automationDescriptor.resultPriority
+                  : 'normal'),
+              resultUserId: createdByUserId,
               targetEnvironmentId: suggestion.targetEnvironmentId,
               workspaceReadiness: suggestion.workspaceReadiness,
               readinessMessage: suggestion.readinessMessage,

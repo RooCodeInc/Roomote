@@ -1,5 +1,6 @@
 import { type TaskSurface } from '@roomote/types';
 import {
+  and,
   db,
   tasks,
   users,
@@ -9,6 +10,7 @@ import {
   eq,
   inArray,
   isNull,
+  privateTaskAccess,
   sql,
 } from '@roomote/db/server';
 
@@ -190,7 +192,7 @@ async function getTaskAnalyticsBaseRows(
     })
     .from(tasks)
     .leftJoin(users, eq(users.id, tasks.initiatorUserId))
-    .where(isNull(tasks.deletedAt))
+    .where(and(isNull(tasks.deletedAt), privateTaskAccess(auth)))
     .orderBy(desc(tasks.timestamp));
 
   const filteredTasks = cutoff

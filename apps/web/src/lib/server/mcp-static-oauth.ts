@@ -1,4 +1,8 @@
-import { MCP_INTEGRATIONS, type McpIntegration } from '@roomote/types';
+import {
+  MCP_INTEGRATIONS,
+  type McpIntegration,
+  type McpIntegrationOauthReadiness,
+} from '@roomote/types';
 
 type StaticOauthClientEnv = NonNullable<McpIntegration['oauthClientEnv']>;
 type StaticOauthPairResolution =
@@ -10,11 +14,7 @@ type StaticOauthPairResolution =
       status: 'missing' | 'partial';
     };
 
-export type StaticOauthReadiness =
-  | 'not_required'
-  | 'ready'
-  | 'missing'
-  | 'partial';
+export type StaticOauthReadiness = McpIntegrationOauthReadiness;
 
 const STATIC_OAUTH_FALLBACKS: Partial<Record<string, StaticOauthClientEnv[]>> =
   {};

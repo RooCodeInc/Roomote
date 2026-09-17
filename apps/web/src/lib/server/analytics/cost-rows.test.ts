@@ -2,6 +2,7 @@ import {
   db,
   environmentFactory,
   environments,
+  eq,
   fastAgentConversations,
   fastAgentMessages,
   inArray,
@@ -29,6 +30,10 @@ import { getBucketStart } from './time-buckets';
 import type { AnalyticsRow } from './types';
 
 describe('getCostAnalyticsRows', () => {
+  const analyticsAuth = {
+    userId: 'cost-analytics-user',
+    isAdmin: true,
+  } as UserAuthSuccess;
   const usageEventIds: string[] = [];
   const taskIds: string[] = [];
   const environmentIds: string[] = [];
@@ -88,11 +93,76 @@ describe('getCostAnalyticsRows', () => {
 
     usageEventIds.push(recentEvent.id, oldEvent.id);
 
-    const rows = await getCostAnalyticsRows({} as UserAuthSuccess, 7, now);
+    const rows = await getCostAnalyticsRows(analyticsAuth, 7, now);
     const rowIds = new Set(rows.map((row) => row.id));
 
     expect(rowIds.has(recentEvent.id)).toBe(true);
     expect(rowIds.has(oldEvent.id)).toBe(false);
+  });
+
+  it('excludes private task and Fast usage from non-owner admin analytics', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    userIds.push(owner.id, other.id);
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    taskIds.push(task.id);
+    const nativeSessionId = `private-native-${crypto.randomUUID()}`;
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        privacy: 'private',
+        privateOwnerUserId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+        openCodeSessionId: nativeSessionId,
+      })
+      .returning();
+    fastSessionIds.push(conversation!.id);
+    const events = await db
+      .insert(llmUsageEvents)
+      .values([
+        {
+          eventKey: `private-task-cost-${crypto.randomUUID()}`,
+          taskId: task.id,
+          userId: owner.id,
+          costSource: 'missing',
+          costMicroUsd: 1,
+        },
+        {
+          eventKey: `private-fast-cost-${crypto.randomUUID()}`,
+          harnessSessionId: nativeSessionId,
+          userId: owner.id,
+          costSource: 'missing',
+          costMicroUsd: 1,
+        },
+      ])
+      .returning({ id: llmUsageEvents.id });
+    usageEventIds.push(...events.map(({ id }) => id));
+
+    const ownerRows = await getCostAnalyticsRows(
+      { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+      'all',
+      new Date(),
+    );
+    const adminRows = await getCostAnalyticsRows(
+      { userId: other.id, isAdmin: true } as UserAuthSuccess,
+      'all',
+      new Date(),
+    );
+    const eventIds = events.map(({ id }) => id);
+
+    expect(ownerRows.map(({ id }) => id)).toEqual(
+      expect.arrayContaining(eventIds),
+    );
+    expect(adminRows.map(({ id }) => id)).not.toEqual(
+      expect.arrayContaining(eventIds),
+    );
   });
 
   it('includes stored token totals for zero-cost usage without recomputing components', async () => {
@@ -116,7 +186,7 @@ describe('getCostAnalyticsRows', () => {
     usageEventIds.push(insertedEvent!.id);
 
     const rows = await getCostAnalyticsRows(
-      {} as UserAuthSuccess,
+      analyticsAuth,
       'all',
       new Date('2026-07-16T16:00:00.000Z'),
     );
@@ -160,7 +230,7 @@ describe('getCostAnalyticsRows', () => {
     ]);
 
     const details = await getAnalyticsDetails(
-      {} as UserAuthSuccess,
+      analyticsAuth,
       {
         object: 'costs',
         viewBy: 'provider',
@@ -234,7 +304,7 @@ describe('getCostAnalyticsRows', () => {
     usageEventIds.push(...usageEvents.map((event) => event.id));
 
     const rows = await getCostAnalyticsRows(
-      {} as UserAuthSuccess,
+      analyticsAuth,
       'all',
       new Date('2026-07-16T16:00:00.000Z'),
     );
@@ -247,6 +317,89 @@ describe('getCostAnalyticsRows', () => {
     });
     expect(row?.details.values.source).toBe('task_title_generation');
     expect(row?.meta?.prKeys).toEqual(['github:github.com:roomote/test#42']);
+  });
+
+  it('retains deleted-task spend without exposing task attribution', async () => {
+    const user = await userFactory.create();
+    userIds.push(user.id);
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+      title: 'Private deleted task title',
+    });
+    taskIds.push(task.id);
+    await db.insert(taskPullRequests).values({
+      taskId: task.id,
+      prUrl: 'https://github.com/roomote/private/pull/99',
+      prNumber: 99,
+      repository: 'roomote/private',
+      sourceControlProvider: 'github',
+      host: 'github.com',
+    });
+    const [usageEvent] = await db
+      .insert(llmUsageEvents)
+      .values({
+        eventKey: `deleted-task-cost-analytics-${crypto.randomUUID()}`,
+        taskId: task.id,
+        userId: user.id,
+        costSource: 'opencode_message',
+        costMicroUsd: 40_000_000,
+        totalTokens: 12_345,
+        messageCompletedAt: new Date('2026-07-15T12:00:00.000Z'),
+      })
+      .returning({ id: llmUsageEvents.id });
+    usageEventIds.push(usageEvent!.id);
+    await db
+      .update(tasks)
+      .set({ deletedAt: new Date('2026-07-16T12:00:00.000Z') })
+      .where(eq(tasks.id, task.id));
+
+    const rows = await getCostAnalyticsRows(
+      analyticsAuth,
+      'all',
+      new Date('2026-07-17T12:00:00.000Z'),
+    );
+    const row = rows.find((candidate) => candidate.id === usageEvent!.id)!;
+    const chart = buildChartData(
+      [row],
+      'costs',
+      'taskType',
+      'cost',
+      'all',
+      'day',
+      new Date('2026-07-17T12:00:00.000Z'),
+    );
+
+    expect(row).toMatchObject({
+      value: 40,
+      tokens: 12_345,
+      dimensions: {
+        taskType: { key: 'Deleted task', label: 'Deleted task' },
+        user: { key: '—', label: '—' },
+      },
+      details: {
+        values: {
+          user: '—',
+          taskType: 'Deleted task',
+          taskTitle: 'Deleted task',
+          cost: '40.00',
+          tokens: '12345',
+        },
+      },
+      meta: {
+        canonicalTaskId: task.id,
+        prKeys: [],
+      },
+    });
+    expect(row.details.links).toBeUndefined();
+    expect(JSON.stringify(row)).not.toContain('Private deleted task title');
+    expect(JSON.stringify(row)).not.toContain('roomote/private');
+    expect(chart.total).toBe(40);
+    expect(chart.tokenTotal).toBe(12_345);
+    expect(chart.costSummary).toMatchObject({
+      totalInferenceCost: 40,
+      taskCount: 1,
+      prCount: 0,
+    });
   });
 
   it('includes Fast parent and advisor/judge usage in Costs', async () => {
@@ -273,7 +426,7 @@ describe('getCostAnalyticsRows', () => {
     usageEventIds.push(...insertedEvents.map((event) => event.id));
 
     const rows = await getCostAnalyticsRows(
-      {} as UserAuthSuccess,
+      analyticsAuth,
       'all',
       new Date('2026-07-16T16:00:00.000Z'),
     );
@@ -404,11 +557,7 @@ describe('getCostAnalyticsRows', () => {
       .returning({ id: llmUsageEvents.id });
     usageEventIds.push(...insertedEvents.map((event) => event.id));
 
-    const rows = await getCostAnalyticsRows(
-      {} as UserAuthSuccess,
-      'all',
-      new Date(),
-    );
+    const rows = await getCostAnalyticsRows(analyticsAuth, 'all', new Date());
     const insertedRows = rows.filter((row) =>
       insertedEvents.some((event) => event.id === row.id),
     );

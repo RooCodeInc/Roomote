@@ -10,6 +10,7 @@ import {
   lt,
   lte,
   max,
+  ne,
   or,
   sql,
 } from 'drizzle-orm';
@@ -25,12 +26,116 @@ import {
   brainMemoryEvents,
   brainSyncState,
   taskRuns,
+  tasks,
+  users,
 } from '../schema';
 import { runInTransactionIfAvailable } from './transaction-utils';
+import { isDeploymentExperimentEnabled } from './deployment-experiments';
 import { createMemoryOutboxLifecycle } from './memory-outbox-lifecycle';
+import { isVisibleTask } from './tasks';
 
 export type BrainSyncStateRow = typeof brainSyncState.$inferSelect;
 export type BrainCollectorItemRow = typeof brainCollectorItems.$inferSelect;
+
+export type RecentUserTaskMemoryRun = {
+  taskId: string;
+  runId: number;
+  completedAt: Date | null;
+  memoryRevision: number;
+};
+
+function eligibleUserTaskMemoryConditions() {
+  return [
+    eq(brainMemoryEvents.status, 'done'),
+    eq(taskRuns.status, RunStatus.Completed),
+    eq(tasks.initiatorKind, 'user'),
+    ne(tasks.surface, 'system'),
+    isVisibleTask(),
+  ];
+}
+
+const recentUserTaskMemorySelection = {
+  taskId: tasks.id,
+  runId: taskRuns.id,
+  completedAt: taskRuns.completedAt,
+  memoryRevision: brainMemoryEvents.revision,
+};
+
+/**
+ * Recent task-memory pages known to have landed for one user-initiated task.
+ * Selecting ownership and origin here avoids reading another member's or a
+ * system-launched task's Brain page merely to inspect its metadata.
+ */
+export async function listRecentUserTaskMemoryRuns(
+  database: DatabaseOrTransaction,
+  input: { userId: string; limit: number },
+): Promise<RecentUserTaskMemoryRun[]> {
+  return database
+    .select(recentUserTaskMemorySelection)
+    .from(brainMemoryEvents)
+    .innerJoin(taskRuns, eq(taskRuns.id, brainMemoryEvents.runId))
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        ...eligibleUserTaskMemoryConditions(),
+        eq(tasks.initiatorUserId, input.userId),
+      ),
+    )
+    .orderBy(desc(taskRuns.completedAt), desc(taskRuns.id))
+    .limit(input.limit);
+}
+
+/** Revalidate exact cached sources before showing their derived suggestions. */
+export async function listEligibleUserTaskMemoryRuns(
+  database: DatabaseOrTransaction,
+  input: { userId: string; runIds: number[] },
+): Promise<RecentUserTaskMemoryRun[]> {
+  if (input.runIds.length === 0) {
+    return [];
+  }
+
+  return database
+    .select(recentUserTaskMemorySelection)
+    .from(brainMemoryEvents)
+    .innerJoin(taskRuns, eq(taskRuns.id, brainMemoryEvents.runId))
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        ...eligibleUserTaskMemoryConditions(),
+        eq(tasks.initiatorUserId, input.userId),
+        inArray(taskRuns.id, input.runIds),
+      ),
+    );
+}
+
+/** Resolve a successfully ingested eligible run to its opted-in owner. */
+export async function findHomeComposerPrecomputeUserForRun(
+  database: DatabaseOrTransaction,
+  runId: number,
+): Promise<string | null> {
+  if (
+    !(await isDeploymentExperimentEnabled('homeComposerSuggestions', database))
+  ) {
+    return null;
+  }
+
+  const [row] = await database
+    .select({ userId: tasks.initiatorUserId })
+    .from(brainMemoryEvents)
+    .innerJoin(taskRuns, eq(taskRuns.id, brainMemoryEvents.runId))
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .innerJoin(users, eq(users.id, tasks.initiatorUserId))
+    .where(and(...eligibleUserTaskMemoryConditions(), eq(taskRuns.id, runId)))
+    .limit(1);
+
+  return row?.userId ?? null;
+}
+
+export async function isHomeComposerSuggestionsEnabled(
+  database: DatabaseOrTransaction,
+): Promise<boolean> {
+  return isDeploymentExperimentEnabled('homeComposerSuggestions', database);
+}
 
 export async function upsertBrainCollectorItems(
   database: DatabaseOrTransaction,
@@ -347,17 +452,26 @@ export async function resetBrainIngestionState(
     ), reset_sync_state AS (
       DELETE FROM ${brainSyncState}
       RETURNING 1
+    ), skip_private_tasks AS (
+      UPDATE ${brainMemoryEvents} AS private_event
+      SET status = 'skipped', agent_summary = NULL, last_error = 'private task', processed_at = now(), updated_at = now()
+      FROM ${taskRuns} AS private_run
+      JOIN ${tasks} AS private_task ON private_task.id = private_run.task_id
+      WHERE private_event.run_id = private_run.id AND private_task.privacy = 'private'
+      RETURNING 1
     )
-    UPDATE ${brainMemoryEvents}
+    UPDATE ${brainMemoryEvents} AS event
     SET
       status = 'pending',
       attempts = 0,
       last_error = NULL,
       processed_at = NULL,
       updated_at = now()
-    WHERE run_id IN (
-      SELECT id FROM ${taskRuns} WHERE status = 'completed'
-    )
+    FROM ${taskRuns} AS run
+    JOIN ${tasks} AS task ON task.id = run.task_id
+    WHERE event.run_id = run.id
+      AND run.status = 'completed'
+      AND task.privacy = 'shared'
   `);
 }
 
@@ -365,6 +479,19 @@ export type BrainMemoryEventRow = typeof brainMemoryEvents.$inferSelect;
 
 const brainMemoryOutboxLifecycle =
   createMemoryOutboxLifecycle<BrainMemoryEventRow>(brainMemoryEvents);
+
+export async function isTaskRunSharedBrainEligible(
+  database: DatabaseOrTransaction,
+  runId: number,
+): Promise<boolean> {
+  const [row] = await database
+    .select({ privacy: tasks.privacy })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(eq(taskRuns.id, runId))
+    .limit(1);
+  return row?.privacy === 'shared';
+}
 
 /**
  * Transactional-outbox insert for a completed run's memory candidate. Called
@@ -379,6 +506,27 @@ export async function maybeEnqueueBrainMemoryEvent(
   tx: DatabaseOrTransaction,
   runId: number,
 ): Promise<void> {
+  if (!(await isTaskRunSharedBrainEligible(tx, runId))) {
+    await tx
+      .insert(brainMemoryEvents)
+      .values({
+        runId,
+        status: 'skipped',
+        lastError: 'private task',
+        processedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: brainMemoryEvents.runId,
+        set: {
+          status: 'skipped',
+          agentSummary: null,
+          lastError: 'private task',
+          processedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+    return;
+  }
   await tx
     .insert(brainMemoryEvents)
     .values({ runId })
@@ -406,6 +554,10 @@ export async function saveBrainAgentSummary(
   runId: number,
   agentSummary: string,
 ): Promise<void> {
+  if (!(await isTaskRunSharedBrainEligible(database, runId))) {
+    await maybeEnqueueBrainMemoryEvent(database, runId);
+    return;
+  }
   await database
     .insert(brainMemoryEvents)
     .values({ runId, agentSummary })
@@ -441,13 +593,26 @@ export async function requeueBrainMemoryEventsForTasks(
     return 0;
   }
 
+  await database.execute(sql`UPDATE ${brainMemoryEvents} AS event
+    SET status = 'skipped', agent_summary = NULL, last_error = 'private task', processed_at = now(), updated_at = now()
+    FROM ${taskRuns} AS run
+    JOIN ${tasks} AS task ON task.id = run.task_id
+    WHERE event.run_id = run.id
+      AND task.id IN (${sql.join(
+        taskIds.map((taskId) => sql`${taskId}`),
+        sql`, `,
+      )})
+      AND task.privacy = 'private'`);
+
   const rows = (await database.execute(
     sql`INSERT INTO ${brainMemoryEvents} (run_id)
-        SELECT id FROM ${taskRuns}
-        WHERE task_id IN (${sql.join(
+        SELECT run.id FROM ${taskRuns} AS run
+        JOIN ${tasks} AS task ON task.id = run.task_id
+        WHERE run.task_id IN (${sql.join(
           taskIds.map((taskId) => sql`${taskId}`),
           sql`, `,
-        )}) AND status = ${RunStatus.Completed}
+        )}) AND run.status = ${RunStatus.Completed}
+          AND task.privacy = 'shared'
         ON CONFLICT (run_id) DO UPDATE SET
           revision = ${brainMemoryEvents}.revision + 1,
           status = CASE WHEN ${brainMemoryEvents}.status = 'processing' THEN 'processing' ELSE 'pending' END,
@@ -465,25 +630,40 @@ export async function requeueBrainMemoryEventsForTasks(
  * connecting the brain sucks in the deployment's task history rather than
  * only learning from tasks completed after enablement. Idempotent via the
  * unique(runId) constraint; the drainer distills the backlog batch by batch.
+ *
+ * `requeueLinkable` re-puts memories already in the Brain so a page-shape
+ * change reaches them. It is deliberately narrow: only standard-workflow
+ * tasks a linked Roomote member started, completed after the given time.
+ * Reviews, conflict resolution, scans, and automation-started work gain
+ * nothing from the replay, and a deployment's whole history re-embedded at
+ * once is a burst every managed tenant would land on the shared embedder
+ * together.
  */
 export async function backfillBrainMemoryEvents(
   database: DatabaseOrTransaction,
-  options: { requeueCompleted?: boolean } = {},
+  options: { requeueLinkable?: { completedAfter: Date } } = {},
 ): Promise<number> {
-  const requeued = options.requeueCompleted
+  const requeued = options.requeueLinkable
     ? ((await database.execute(
         sql`UPDATE ${brainMemoryEvents} AS event
             SET status = 'pending', attempts = 0, last_error = NULL, updated_at = now()
             FROM ${taskRuns} AS run
+            JOIN ${tasks} AS task ON task.id = run.task_id
             WHERE event.run_id = run.id
               AND event.status = 'done'
               AND run.status = 'completed'
+              AND run.completed_at > ${options.requeueLinkable.completedAfter.toISOString()}::timestamptz
+              AND task.workflow = 'standard'
+              AND task.initiator_user_id IS NOT NULL
+              AND task.privacy = 'shared'
             RETURNING event.id`,
       )) as unknown as Array<{ id: string }>)
     : [];
   const rows = (await database.execute(
     sql`INSERT INTO ${brainMemoryEvents} (run_id)
-        SELECT id FROM ${taskRuns} WHERE status = 'completed'
+        SELECT run.id FROM ${taskRuns} AS run
+        JOIN ${tasks} AS task ON task.id = run.task_id
+        WHERE run.status = 'completed' AND task.privacy = 'shared'
         ON CONFLICT (run_id) DO NOTHING
         RETURNING id`,
   )) as unknown as Array<{ id: string }>;
@@ -591,6 +771,10 @@ export async function getBrainMemoryEventSummary(
     SELECT 1 FROM ${brainMemoryEvents}
     WHERE ${brainMemoryEvents.runId} = ${taskRuns.id}
   )`;
+  const sharedTask = sql`EXISTS (
+    SELECT 1 FROM ${tasks}
+    WHERE ${tasks.id} = ${taskRuns.taskId} AND ${tasks.privacy} = 'shared'
+  )`;
   const [
     statusRows,
     processedRow,
@@ -622,6 +806,7 @@ export async function getBrainMemoryEventSummary(
       .where(
         and(
           eq(taskRuns.status, RunStatus.Completed),
+          sharedTask,
           missingEvent,
           historyCutoff
             ? or(
@@ -639,6 +824,7 @@ export async function getBrainMemoryEventSummary(
           .where(
             and(
               eq(taskRuns.status, RunStatus.Completed),
+              sharedTask,
               gt(taskRuns.completedAt, historyCutoff),
               missingEvent,
             ),
@@ -671,16 +857,16 @@ export async function getBrainMemoryEventSummary(
 export async function requeueFailedBrainMemoryEvents(
   database: DatabaseOrTransaction,
 ): Promise<number> {
-  const rows = await database
-    .update(brainMemoryEvents)
-    .set({
-      status: 'pending',
-      attempts: 0,
-      lastError: null,
-      updatedAt: sql`now()`,
-    })
-    .where(eq(brainMemoryEvents.status, 'failed'))
-    .returning({ id: brainMemoryEvents.id });
+  const rows = (await database.execute(sql`
+    UPDATE ${brainMemoryEvents} AS event
+    SET status = 'pending', attempts = 0, last_error = NULL, updated_at = now()
+    FROM ${taskRuns} AS run
+    JOIN ${tasks} AS task ON task.id = run.task_id
+    WHERE event.run_id = run.id
+      AND event.status = 'failed'
+      AND task.privacy = 'shared'
+    RETURNING event.id
+  `)) as unknown as Array<{ id: string }>;
 
   return rows.length;
 }

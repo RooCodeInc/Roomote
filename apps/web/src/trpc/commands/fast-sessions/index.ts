@@ -6,6 +6,7 @@ import { after } from 'next/server';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  buildFastAgentSetupAdapter,
   createFastAgentWebTaskLauncher,
   FastAgentDurableRetryScheduledError,
   getOrCreateFastAgentSession,
@@ -19,8 +20,10 @@ import {
   buildFastAgentArtifactCreator,
   buildFastAgentSurfaceReplyDelivery,
   createFastAgentSessionArtifact,
+  notifyFastWebSessionAttention,
   persistFastAgentInlineHumanTurn,
   resolveUserMcpServerConfigs,
+  startFastSessionGoal,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
   type FastAgentSurfaceReplyDelivery,
@@ -28,6 +31,7 @@ import {
 import {
   and,
   db,
+  deploymentSettings,
   ensureSessionForFastConversation,
   eq,
   fastAgentConversations,
@@ -35,6 +39,7 @@ import {
   getSessionForFastConversation,
   retireCanonicalPrReviewActionsForDestinationKey,
   sessions,
+  isPrivateSessionsExperimentEnabled,
   sql,
 } from '@roomote/db/server';
 import {
@@ -43,14 +48,24 @@ import {
   formatErrorForLog,
   getAcpRequestUserInputValidationError,
   getUserDisplayName,
+  isSetupIntegrationDiscoveryQuestionId,
+  isSetupStarterTaskId,
   parseAcpRequestUserInputAnswers,
   parseAcpRequestUserInputPayload,
   parseAcpRequestUserInputResponsePayload,
+  parseFastAgentCapabilityOfferPayload,
+  type FastAgentCapabilityId,
+  normalizeSetupNewSetupSession,
+  normalizeSetupNewState,
+  normalizeAcpRequestUserInputAnswers,
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
+  type FastAgentSetupTurnContext,
   type ReasoningEffort,
 } from '@roomote/types';
 import type { FastAgentTurnAdapter } from '@roomote/cloud-agents/server';
+import { refreshSessionPresence } from '@roomote/redis';
+import { captureEvent } from '@roomote/telemetry/server';
 
 import type { UserAuthSuccess } from '@/types';
 import {
@@ -158,6 +173,10 @@ type WebFastAgentTurnInput = {
   skipIfTurnCompleted?: { conversationId: string; turnId: string };
   setupSnapshot?: string;
   setupSession?: boolean;
+  /** Spoken on a voice call: Fast returns its result to the voice instead
+   * of writing a chat reply. */
+  voiceMode?: boolean;
+  setupContext?: FastAgentSetupTurnContext;
   adapterExtensions?: Partial<FastAgentTurnAdapter>;
 };
 
@@ -175,7 +194,10 @@ async function hasCompletedWebFastAgentTurn(input: {
         sql`(
           (${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.AssistantMessage}
             AND ${fastAgentMessages.metadata} ->> 'purpose' IN ('closeout', 'clarification'))
-          OR ${fastAgentMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.RequestUserInput}
+          OR ${fastAgentMessages.eventType} IN (
+            ${ACP_ENVELOPE_EVENT_TYPES.RequestUserInput},
+            ${ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer}
+          )
         )`,
       ),
     )
@@ -208,6 +230,8 @@ async function runWebFastAgentTurn({
   platformEventVisibility,
   setupSnapshot,
   setupSession,
+  voiceMode,
+  setupContext,
   adapterExtensions,
   durableSessionId,
 }: WebFastAgentTurnInput): Promise<void> {
@@ -256,11 +280,10 @@ async function runWebFastAgentTurn({
     const turnMessageId = currentMessageId ?? `web-${randomUUID()}`;
     // Durable admission: a web turn is persisted under this process's claim
     // before it runs, so an interruption hands it to the queue. Platform
-    // events ride the same row with their framing recorded; the ones that
-    // need adapter extensions or a setup snapshot cannot be rebuilt by the
-    // queue and stay process-bound.
+    // events ride the same row with their framing recorded. Setup context is
+    // serializable, so its trusted adapter can be rebuilt by queue recovery.
     const durableTurn =
-      durableSessionId && !adapterExtensions && !setupSnapshot
+      durableSessionId && (!adapterExtensions || setupContext)
         ? await persistFastAgentInlineHumanTurn({
             parent: { sessionId: durableSessionId, conversation },
             event: {
@@ -281,6 +304,8 @@ async function runWebFastAgentTurn({
                   }
                 : {}),
               ...(setupSession ? { setupSession: true } : {}),
+              ...(voiceMode ? { voiceMode: true } : {}),
+              ...(setupContext ? { setupContext } : {}),
             },
           }).catch((error) => {
             console.error(
@@ -321,9 +346,24 @@ async function runWebFastAgentTurn({
             ...(platformEventVisibility ? { platformEventVisibility } : {}),
           }
         : {}),
-      ...(setupSnapshot ? { setupSnapshot } : {}),
+      ...(setupContext?.setupSnapshot || setupSnapshot
+        ? { setupSnapshot: setupContext?.setupSnapshot ?? setupSnapshot }
+        : {}),
       setupSession,
+      ...(voiceMode ? { voiceMode: true } : {}),
       adapter: {
+        ...(durableSessionId
+          ? {
+              notifyUserAttention: ({ kind, eventId, message, manual }) =>
+                notifyFastWebSessionAttention({
+                  fastConversationId: durableSessionId,
+                  kind,
+                  eventId,
+                  message,
+                  manual,
+                }).then(() => undefined),
+            }
+          : {}),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId,
@@ -348,6 +388,9 @@ async function runWebFastAgentTurn({
             }
           : {}),
         ...delivery.adapter,
+        ...(setupContext
+          ? buildFastAgentSetupAdapter(setupContext, { setupSession })
+          : {}),
         ...adapterExtensions,
       },
     });
@@ -364,6 +407,11 @@ async function runWebFastAgentTurn({
     );
   } finally {
     await release().catch(() => {});
+    await adapterExtensions?.onTurnSettled?.().catch((error) => {
+      console.error(
+        `[Fast Web] Post-turn reconciliation failed for ${conversation.conversationId}: ${formatErrorForLog(error)}`,
+      );
+    });
   }
 }
 
@@ -381,14 +429,27 @@ export async function startFastSessionCommand(
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
     conversationId?: string;
+    privacy?: 'shared' | 'private';
     pinnedLaunch?: PinnedFastSessionLaunchInput;
+    voiceCall?: boolean;
   },
 ): Promise<{
   sessionId: string;
   fastConversationId?: string;
   taskId?: string;
 }> {
+  if (
+    input.privacy === 'private' &&
+    !(await isPrivateSessionsExperimentEnabled())
+  ) {
+    throw new Error('Private Sessions are not enabled for this deployment.');
+  }
   if (input.pinnedLaunch) {
+    if (input.privacy === 'private') {
+      throw new Error(
+        'Private Sessions cannot start as pinned environment tasks.',
+      );
+    }
     return startPinnedFastSessionLaunch(auth, {
       text: input.text,
       images: input.images,
@@ -408,6 +469,8 @@ export async function startFastSessionCommand(
   const session = await getOrCreateFastAgentSession({
     userId: auth.userId,
     conversation,
+    ...(input.privacy ? { privacy: input.privacy } : {}),
+    userInitiated: { surface: 'web', trigger: 'message' },
   });
   const settings = await resolveSessionModelSettings(session.id, input, {
     model: null,
@@ -421,8 +484,13 @@ export async function startFastSessionCommand(
   const kickoffPromptEventId = kickoffTurnId
     ? `${kickoffTurnId}:user`
     : undefined;
-  let scheduleKickoff = session.created;
-  if (!scheduleKickoff && kickoffPromptEventId) {
+  // A voice call with nothing pre-typed opens an empty Session; the first
+  // thing the person says arrives as an ordinary reply once the call is up.
+  const hasKickoffContent = Boolean(
+    input.text.trim() || input.images?.length || input.attachmentTexts?.length,
+  );
+  let scheduleKickoff = session.created && hasKickoffContent;
+  if (!scheduleKickoff && hasKickoffContent && kickoffPromptEventId) {
     const [existingKickoff] = await db
       .select({ id: fastAgentMessages.id })
       .from(fastAgentMessages)
@@ -439,9 +507,26 @@ export async function startFastSessionCommand(
   }
 
   if (scheduleKickoff) {
+    if (input.conversationId) {
+      await refreshSessionPresence({
+        sessionId: unifiedSession.id,
+        userId: auth.userId,
+        clientId: input.conversationId,
+      }).catch((error) => {
+        console.warn(
+          `[Fast Web] Failed to seed Session presence before kickoff: ${formatErrorForLog(error)}`,
+        );
+      });
+    }
     const launchTask = createFastAgentWebTaskLauncher({
       userId: auth.userId,
     });
+    const { resolveSetupSessionTurnContext } =
+      await import('../setup/setup-session');
+    const capabilityContext = await resolveSetupSessionTurnContext(
+      auth,
+      unifiedSession.id,
+    );
 
     scheduleWebFastAgentTurn({
       userId: auth.userId,
@@ -464,6 +549,8 @@ export async function startFastSessionCommand(
       model: settings.model,
       reasoningEffort: settings.reasoningEffort,
       durableSessionId: session.id,
+      // A call opened with typed text: its first reply belongs to the voice.
+      ...(input.voiceCall ? { voiceMode: true } : {}),
       ...(kickoffTurnId && kickoffPromptEventId
         ? {
             currentMessageId: kickoffTurnId,
@@ -473,6 +560,7 @@ export async function startFastSessionCommand(
             },
           }
         : {}),
+      ...capabilityContext,
     });
   }
 
@@ -655,6 +743,8 @@ export async function replyToFastSessionCommand(
   auth: UserAuthSuccess,
   input: {
     sessionId: string;
+    clientMessageId?: string;
+    voiceMode?: boolean;
     text: string;
     images?: string[];
     attachmentTexts?: string[];
@@ -666,6 +756,9 @@ export async function replyToFastSessionCommand(
   if (!session) {
     throw new Error('Fast session not found');
   }
+  const { resolveSetupSessionTurnContext } =
+    await import('../setup/setup-session');
+  const setupContext = await resolveSetupSessionTurnContext(auth, session.id);
 
   const senderDisplayName =
     getUserDisplayName({ name: auth.name, email: auth.primaryEmail }) ?? null;
@@ -707,10 +800,29 @@ export async function replyToFastSessionCommand(
     model: settings.model,
     reasoningEffort: settings.reasoningEffort,
     ...(senderDisplayName ? { senderDisplayName } : {}),
+    currentMessageId: input.clientMessageId,
     durableSessionId: session.id,
+    ...(input.voiceMode ? { voiceMode: true } : {}),
+    ...setupContext,
   });
 
   return { success: true };
+}
+
+export async function startFastSessionGoalCommand(
+  auth: UserAuthSuccess,
+  input: { sessionId: string; objective: string; clientMessageId?: string },
+) {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) throw new Error('Fast session not found');
+  return startFastSessionGoal({
+    sessionId: session.id,
+    userId: auth.userId,
+    senderDisplayName:
+      getUserDisplayName({ name: auth.name, email: auth.primaryEmail }) ?? null,
+    objective: input.objective,
+    currentMessageId: input.clientMessageId ?? `web-goal:${randomUUID()}`,
+  });
 }
 
 export async function handleFastSessionPrReviewActionCommand(
@@ -743,6 +855,198 @@ export async function handleFastSessionPrReviewActionCommand(
   });
 }
 
+export async function resolveFastSessionCapabilityOfferCommand(
+  auth: UserAuthSuccess,
+  input: {
+    sessionId: string;
+    offerId: string;
+    capability: FastAgentCapabilityId;
+    resolution: 'completed' | 'dismissed';
+    selectedIds?: string[];
+  },
+): Promise<{ success: true }> {
+  if (!auth.isAdmin)
+    throw new Error('Only administrators can use capability cards.');
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) throw new Error('Fast session not found');
+  const [offer] = await db
+    .select({
+      eventId: fastAgentMessages.eventId,
+      payload: fastAgentMessages.payload,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, session.id),
+        eq(
+          fastAgentMessages.eventType,
+          ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+        ),
+        sql`${fastAgentMessages.payload}->>'offerId' = ${input.offerId}`,
+      ),
+    )
+    .limit(1);
+  const parsed = parseFastAgentCapabilityOfferPayload(offer?.payload);
+  if (!offer || !parsed || parsed.capability !== input.capability) {
+    throw new Error('This capability offer is no longer valid.');
+  }
+  const selectedStarterIds = (input.selectedIds ?? []).filter(
+    isSetupStarterTaskId,
+  );
+  if (input.capability !== 'starter_work' && input.selectedIds?.length) {
+    throw new Error('Selections are only valid for starter-work offers.');
+  }
+  if (
+    input.capability === 'starter_work' &&
+    selectedStarterIds.length !== (input.selectedIds ?? []).length
+  ) {
+    throw new Error('A selected starter task was not found.');
+  }
+  const now = new Date();
+  let responseCreated = false;
+  let advancedInitialSetup = false;
+  await db.transaction(async (tx) => {
+    const insertedResponses = await tx
+      .insert(fastAgentMessages)
+      .values({
+        conversationId: session.id,
+        eventId: `${offer.eventId}:response`,
+        turnId: offer.eventId,
+        turnSeq: 2_000_000_000,
+        ts: now.getTime(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse,
+        role: 'user',
+        contentBlocks: [
+          {
+            type: 'text',
+            text:
+              input.resolution === 'dismissed'
+                ? `Not now: ${input.capability.replaceAll('_', ' ')}.`
+                : `Completed: ${input.capability.replaceAll('_', ' ')}.`,
+          },
+        ],
+        metadata: {
+          visibleInTranscript: true,
+          inputKind: 'capability_offer_response',
+        },
+        payload: {
+          offerId: input.offerId,
+          capability: input.capability,
+          resolution: input.resolution,
+          ...(selectedStarterIds.length
+            ? { selectedIds: selectedStarterIds }
+            : {}),
+        },
+        source: 'web',
+      })
+      .onConflictDoNothing({
+        target: [fastAgentMessages.conversationId, fastAgentMessages.eventId],
+      })
+      .returning({ eventId: fastAgentMessages.eventId });
+    responseCreated = insertedResponses.length > 0;
+    if (!responseCreated) return;
+
+    const [settings] = await tx
+      .select({ setupNewState: deploymentSettings.setupNewState })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, 'default'))
+      .limit(1);
+    const state = normalizeSetupNewState(settings?.setupNewState ?? {});
+    const setupSession = normalizeSetupNewSetupSession(state.setupSession);
+    if (!setupSession) return;
+    const [setupSessionRecord] = await tx
+      .select({ fastConversationId: sessions.fastConversationId })
+      .from(sessions)
+      .where(eq(sessions.id, setupSession.sessionId))
+      .limit(1);
+    if (setupSessionRecord?.fastConversationId !== session.id) return;
+    const setupUpdates =
+      input.capability === 'source_control' &&
+      input.resolution === 'dismissed' &&
+      setupSession.sourceControlSkippedAt === null
+        ? { sourceControlSkippedAt: now.toISOString() }
+        : input.capability === 'integrations' &&
+            setupSession.integrationDiscoveryCompletedAt === null
+          ? { integrationDiscoveryCompletedAt: now.toISOString() }
+          : input.capability === 'starter_work' &&
+              setupSession.starterTaskSelection === null
+            ? {
+                starterTaskSelection: {
+                  requestId: input.offerId,
+                  taskIds: selectedStarterIds,
+                  selectedAt: now.toISOString(),
+                },
+              }
+            : null;
+    if (!setupUpdates) return;
+    advancedInitialSetup = true;
+    await tx
+      .update(deploymentSettings)
+      .set({
+        setupNewState: {
+          ...state,
+          setupSession: { ...setupSession, ...setupUpdates },
+        },
+        updatedAt: now,
+      })
+      .where(eq(deploymentSettings.id, 'default'));
+  });
+  if (!responseCreated) return { success: true };
+
+  void captureEvent(`capability_offer_${input.resolution}`, {
+    userId: auth.userId,
+    properties: {
+      capability: input.capability,
+      advanced_initial_setup: advancedInitialSetup,
+    },
+  });
+
+  if (advancedInitialSetup) {
+    const { reconcileSetupPlatformEvents } =
+      await import('../setup/setup-session');
+    await reconcileSetupPlatformEvents(auth);
+  }
+
+  const { resolveSetupSessionTurnContext } =
+    await import('../setup/setup-session');
+  const freshCapabilityContext = await resolveSetupSessionTurnContext(
+    auth,
+    session.id,
+  );
+  const responseTurnId = `capability-response:${input.offerId}`;
+  scheduleWebFastAgentTurn({
+    userId: auth.userId,
+    delivery: {
+      conversation: {
+        surface: 'web',
+        workspaceId: session.userId ?? auth.userId,
+        conversationId: session.conversationId,
+      },
+      adapter: {
+        createArtifact: buildFastAgentArtifactCreator(session.id),
+        launchTask: createFastAgentWebTaskLauncher({ userId: auth.userId }),
+        postReply: async () => {},
+      },
+    },
+    question: `<capability_offer_response>${JSON.stringify({
+      offerId: input.offerId,
+      capability: input.capability,
+      resolution: input.resolution,
+    })}</capability_offer_response>`,
+    turnSource: 'platform_event',
+    platformEventKind: 'input_response',
+    platformEventVisibility: 'required',
+    currentMessageId: responseTurnId,
+    durableSessionId: session.id,
+    skipIfTurnCompleted: {
+      conversationId: session.id,
+      turnId: responseTurnId,
+    },
+    ...freshCapabilityContext,
+  });
+  return { success: true };
+}
+
 /**
  * Submit an authenticated structured response to a Fast session's pending
  * `request_user_input` request. The response is persisted as a canonical
@@ -763,6 +1067,7 @@ export async function submitFastSessionUserInputCommand(
     adapterExtensions?: Partial<FastAgentTurnAdapter>;
     setupSnapshot?: string;
     setupSession?: boolean;
+    setupContext?: FastAgentSetupTurnContext;
     persistSetupPresetResponse?: (input: {
       fastConversationId: string;
       request: {
@@ -778,6 +1083,13 @@ export async function submitFastSessionUserInputCommand(
   if (!session) {
     throw new Error('Fast session not found');
   }
+  const {
+    reconcileSetupPlatformEvents,
+    resolveSetupSessionTurnContext,
+    submitSetupSessionUserInputCommand,
+  } = await import('../setup/setup-session');
+  // Check setup ownership before persisting input; rebuild its snapshot after the write.
+  const setupContext = await resolveSetupSessionTurnContext(auth, session.id);
 
   const [request] = await db
     .select({
@@ -818,8 +1130,18 @@ export async function submitFastSessionUserInputCommand(
   if (!requestPayload) {
     throw new Error('This input request is no longer valid.');
   }
-  const submitted = parseAcpRequestUserInputAnswers(input.answers) ?? {};
+  const parsedAnswers = parseAcpRequestUserInputAnswers(input.answers) ?? {};
+  const submitted = normalizeAcpRequestUserInputAnswers(
+    requestPayload.questions,
+    parsedAnswers,
+  );
   const resolution = input.resolution ?? 'submitted';
+  // Starter work is optional: an explicitly empty submitted response means the
+  // administrator will begin the conversation in their own words.
+  const skippedOptionalStarterTasks =
+    requestPayload.preset === 'setup_starter_tasks' &&
+    resolution === 'submitted' &&
+    Object.keys(submitted).length === 0;
   if (requestPayload.preset && resolution === 'cancelled') {
     throw new Error('This required setup choice cannot be cancelled.');
   }
@@ -828,11 +1150,35 @@ export async function submitFastSessionUserInputCommand(
     submitted,
     resolution,
   );
-  if (validationError) {
+  if (validationError && !skippedOptionalStarterTasks) {
     throw new Error(validationError);
   }
+  if (requestPayload.preset && existingResponse) {
+    if (setupContext) await reconcileSetupPlatformEvents(auth);
+    return { success: true };
+  }
+  const savedResponse = existingResponse
+    ? parseAcpRequestUserInputResponsePayload(existingResponse.payload)
+    : null;
+  if (existingResponse && !savedResponse) {
+    throw new Error('This input response is no longer valid.');
+  }
+  let responseAnswers = savedResponse?.answers ?? submitted;
+  let responseResolution = savedResponse?.resolution ?? resolution;
 
-  const scheduleResponseTurn = (answers: AcpRequestUserInputAnswers) => {
+  const scheduleResponseTurn = async (
+    answers: AcpRequestUserInputAnswers,
+    responseResolution: 'submitted' | 'cancelled',
+  ) => {
+    const freshSetupContext = setupContext
+      ? await resolveSetupSessionTurnContext(auth, session.id)
+      : null;
+    const skippedDiscovery =
+      freshSetupContext &&
+      requestPayload.questions.some((question) =>
+        isSetupIntegrationDiscoveryQuestionId(question.id),
+      );
+    if (responseResolution === 'cancelled' && !skippedDiscovery) return;
     const responseTurnId = `input-response:${input.requestId}`;
     const conversation =
       session.surface === 'automation'
@@ -861,6 +1207,9 @@ export async function submitFastSessionUserInputCommand(
       question: `<structured_input_response>${JSON.stringify({
         requestId: input.requestId,
         answers,
+        ...(responseResolution === 'cancelled'
+          ? { resolution: responseResolution }
+          : {}),
       })}</structured_input_response>`,
       turnSource: 'platform_event',
       platformEventKind: 'input_response',
@@ -877,25 +1226,17 @@ export async function submitFastSessionUserInputCommand(
       ...(options.setupSnapshot
         ? { setupSnapshot: options.setupSnapshot }
         : {}),
+      ...(options.setupContext ? { setupContext: options.setupContext } : {}),
       setupSession: options.setupSession ?? false,
+      ...freshSetupContext,
     });
   };
 
-  if (existingResponse) {
-    const persistedResponse = parseAcpRequestUserInputResponsePayload(
-      existingResponse.payload,
-    );
-    if (
-      !requestPayload.preset &&
-      persistedResponse?.resolution === 'submitted'
-    ) {
-      scheduleResponseTurn(persistedResponse.answers);
-    }
-    return { success: true };
-  }
-
   const responseEventId = `${request.eventId}:response`;
   if (requestPayload.preset) {
+    if (setupContext && !options.persistSetupPresetResponse) {
+      return submitSetupSessionUserInputCommand(auth, input);
+    }
     if (!options.persistSetupPresetResponse || resolution !== 'submitted') {
       throw new Error('This trusted setup response cannot be handled here.');
     }
@@ -910,39 +1251,71 @@ export async function submitFastSessionUserInputCommand(
     });
     return { success: true };
   }
-  await upsertFastAgentMessage({
-    sessionId: session.id,
-    message: {
-      eventId: responseEventId,
-      turnId: request.turnId,
-      turnSeq: 2_000_000_000,
-      ts: Date.now(),
-      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
-      role: 'user',
-      contentBlocks: [
-        {
-          type: 'text' as const,
-          text: formatRequestUserInputResponseText(requestPayload, {
-            answers: submitted,
-            resolution,
-          }),
-        },
-      ],
-      metadata: { visibleInTranscript: true },
-      payload: {
-        requestId: input.requestId,
-        sessionId: session.id,
+  if (!existingResponse) {
+    const responseClaim = await upsertFastAgentMessage({
+      sessionId: session.id,
+      insertOnly: true,
+      message: {
+        eventId: responseEventId,
         turnId: request.turnId,
-        callId: input.requestId,
-        answers: submitted,
-        resolution,
+        turnSeq: 2_000_000_000,
+        ts: Date.now(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+        role: 'user',
+        contentBlocks: [
+          {
+            type: 'text' as const,
+            text: formatRequestUserInputResponseText(requestPayload, {
+              answers: responseAnswers,
+              resolution: responseResolution,
+            }),
+          },
+        ],
+        metadata: {
+          visibleInTranscript: true,
+          userId: auth.userId,
+          ...(auth.name ? { userName: auth.name } : {}),
+          ...(auth.primaryEmail ? { userEmail: auth.primaryEmail } : {}),
+          ...(auth.resource?.imageUrl
+            ? { userImageUrl: auth.resource.imageUrl }
+            : {}),
+        },
+        payload: {
+          requestId: input.requestId,
+          sessionId: session.id,
+          turnId: request.turnId,
+          callId: input.requestId,
+          answers: responseAnswers,
+          resolution: responseResolution,
+        },
+        source: 'web',
       },
-      source: 'web',
-    },
-  });
-
-  if (resolution === 'cancelled') return { success: true };
-  scheduleResponseTurn(submitted);
+    });
+    if (responseClaim?.inserted === false) {
+      const [winningResponse] = await db
+        .select({ payload: fastAgentMessages.payload })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(fastAgentMessages.conversationId, session.id),
+            eq(fastAgentMessages.eventId, responseEventId),
+          ),
+        )
+        .limit(1);
+      const winningPayload = parseAcpRequestUserInputResponsePayload(
+        winningResponse?.payload ?? null,
+      );
+      if (!winningPayload) {
+        throw new Error('This input response is no longer valid.');
+      }
+      responseAnswers = winningPayload.answers;
+      responseResolution = winningPayload.resolution;
+    }
+  }
+  // A retry may be the first process that survives long enough to register
+  // `after()`. Re-admit the deterministic turn on every accepted submission;
+  // the durable event key and terminal-output check collapse contenders.
+  await scheduleResponseTurn(responseAnswers, responseResolution);
 
   return { success: true };
 }

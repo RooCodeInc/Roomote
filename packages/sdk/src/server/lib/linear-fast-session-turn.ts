@@ -135,6 +135,7 @@ export async function startLinearFastSessionTurn(input: {
   const fastSession = await getOrCreateFastAgentSession({
     userId,
     conversation,
+    userInitiated: { surface: 'linear', trigger: 'message' },
   });
 
   if (fastSession.created) {

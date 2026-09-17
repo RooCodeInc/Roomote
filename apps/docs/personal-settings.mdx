@@ -1,5 +1,5 @@
 ---
-title: Personal Settings
+title: Personal settings
 icon: user-cog
 description: Manage your profile, linked accounts, theme, and personal app preferences.
 ---
@@ -41,6 +41,22 @@ You may see rows for:
 If an integration is not listed, it usually means an admin has not enabled it
 for the deployment yet, or the integration does not require personal linking.
 
+## Manage personal integrations
+
+Use **Personal integrations** to add, edit, or revoke API-key integrations that
+only your Sessions and coding tasks can use. Roomote keeps the key server-side;
+agents receive an opaque reference or a task-scoped substitute rather than the
+key itself.
+
+An integration-key approval created from a Session also appears here when you
+choose **Only me**. Deployment-wide integration keys instead appear under the
+administrator's **Settings → Integrations** page. If an administrator changes a
+shared integration to owner-only access, Roomote moves it to that owner's
+Personal integrations card.
+
+See [Integration keys](/integration-keys) for approval methods, security
+boundaries, task behavior, and self-hosting options.
+
 ## Why personal linking matters
 
 Personal linked accounts help Roomote act with the right context. Depending on
@@ -64,17 +80,82 @@ Personal Settings also include app preferences such as:
 - **Mind Reader Mode** to expand LLM thoughts by default in task conversations;
   you can still collapse or expand individual thought messages
 - **Narration Mode** for a more streamlined task conversation view
-- **Therapist Mode** to explain which remembered fact informed a Session or task
+- **How to work with me** for private personal instructions and conversational
+  learning
 
 Most teammates only need profile, linked accounts, and theme settings.
 
-### Understand Therapist Mode
+### Try personalized Home suggestions
 
-Therapist Mode is an opt-in disclosure setting. When a specific fact returned
-by [Memory](/memory) materially informs Roomote's answer or work, Roomote names
-that remembered fact in human terms and explains how it was used. It does not
-narrate unrelated retrievals or expose internal memory identifiers, storage
-paths, metadata, or provenance fields.
+**Home suggestions** is a deployment-wide experiment. When an admin enables it
+under **Settings > Experimental**, Roomote uses up to
+five of your recent successfully completed and ingested task memories to prepare
+short ideas for what to do next in the Home composer. Suggestions are prepared
+in the background when possible and rotate until you focus the composer; press
+Tab to accept the current suggestion.
+
+Only your visible, manually initiated work is eligible. Roomote excludes other
+members' work, automations, system tasks, hidden or deleted tasks, incomplete
+runs, and memories that have not finished ingesting. If Memory or helper-model
+generation is unavailable, Home keeps the standard non-personalized suggestions.
+An admin can turn the experiment off to stop personalized suggestion requests
+for every member.
+
+### Continue peer conversations
+
+**Peer conversations** is a deployment-wide experiment controlled by admins
+under **Settings > Experimental**. When enabled, eligible human replies in
+established Slack or Discord Fast threads can continue reaching Fast after
+someone mentions another participant. Fast is instructed to stay quiet around
+peer discussion unless Roomote is addressed directly or the context clearly
+calls for its response. Direct Roomote mentions work normally with the experiment
+on or off.
+
+The experiment does not monitor whole channels. Discord supplies messages from
+the established thread and resolved user mentions. Telegram is not included:
+bot privacy settings can prevent ambient group messages from reaching Roomote,
+and Telegram Fast conversations are isolated per linked sender. Microsoft Teams
+is also not included because its channel Fast conversations are isolated per
+linked sender; webhook delivery and delegated Graph history are not a single
+shared, owner-bound Fast conversation signal.
+
+## Personalize how Roomote works with you
+
+Use **How to work with me** for durable context and preferences that can help
+Roomote work with you in the future. This can include recurring
+responsibilities, workflows, tools, constraints, and collaboration patterns,
+along with your preferred name, language, formality, answer length, use of
+examples, directness, update frequency, or accessibility and presentation
+preferences you choose to share. These instructions apply to conversations
+with you; they do not silently rewrite code or customer-facing deliverables.
+
+**Learn from conversations** is on by default. Roomote may save durable work
+context or a preference you state explicitly and may form modest, revisable
+style preferences from repeated behavior. It does not save one-off task
+details or facts about other people as personal context. Turning learning off
+stops new automatic updates but keeps the instructions already shown in the
+text box active. **Reset** clears both edited and learned instructions. A reset
+does not rebuild them from older conversation history.
+
+Fast captures each participant's personalization when they first speak in a
+conversation and keeps that private snapshot for their later turns in the same
+conversation. New preferences stated in a message still guide that request and
+are saved for future conversations, but they do not rewrite the current
+conversation's snapshot. Edits and resets in Personal Settings likewise apply
+to new conversations, or to a participant who has not spoken in the current
+conversation yet.
+
+Personalization follows the trusted account associated with the current
+speaker on supported chat surfaces and with the person who requested a task.
+In a shared thread, Roomote adapts its conversation to the current speaker
+while preserving the original requester's task requirements when they conflict.
+
+Personalization is encrypted at rest and is not available to other members or
+admins through Roomote's normal UI or API. It is excluded from shared task
+transcripts, summaries, memory, and ordinary tool output. It remains subject to
+the deployment operator's infrastructure access, backups, and retention
+policies. Roomote does not use public-web or LinkedIn enrichment for this
+feature.
 
 ## Common issues
 

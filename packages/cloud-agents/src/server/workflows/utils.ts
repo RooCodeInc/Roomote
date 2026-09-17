@@ -298,8 +298,51 @@ function buildPrBodyAttributionLine({
 export function getWorkspaceInstructions(
   repoFullNames?: string[],
   _conflictResolverLabel?: string,
+  options: {
+    /**
+     * All-repositories workspaces index the deployment's repositories in
+     * `REPOSITORIES.md` at the workspace root and check them out through
+     * the `clone_repository` tool instead of cloning every one at setup.
+     */
+    repositoriesOnDemand?: boolean;
+    /** Scoped workspaces prepare selected repositories first but can check out
+     * other authorized repositories without provisioning another environment. */
+    additionalRepositoriesOnDemand?: boolean;
+    /**
+     * Blank slate workspaces start with nothing checked out. When the
+     * deployment has source control connected they carry the same
+     * `REPOSITORIES.md` index and `clone_repository` tool as an
+     * all-repositories workspace; otherwise the sandbox has no
+     * source-control credentials at all.
+     */
+    blankSlate?: boolean;
+  } = {},
 ): string {
-  let instructions = `
+  if (options.blankSlate) {
+    return `
+Note: This workspace starts with no repositories checked out (Blank slate).
+- If \`REPOSITORIES.md\` exists at the workspace root, this deployment's source control is connected: the file lists every active repository with its default branch and description, and the \`clone_repository\` tool checks one out into \`<workspace root>/<owner>/<repo>\` and returns the path. Use it before reading, searching, or changing any of those repositories, and never run \`git clone\` for them yourself
+- If there is no \`REPOSITORIES.md\`, the sandbox has no source-control credentials: complete the task without repository changes and do not attempt to commit, push, or open pull requests
+- A public repository outside the deployment may be cloned with git for read-only reference, but commits, pushes, and pull requests only work for repositories checked out through \`clone_repository\`
+- Check out only the repositories the task needs, and be explicit about which repository you're working in
+`;
+  }
+
+  let instructions = options.repositoriesOnDemand
+    ? `
+Note: This workspace gives you every active repository in the deployment, checked out on demand. Repositories are NOT cloned up front:
+- \`REPOSITORIES.md\` at the workspace root lists each repository with its default branch and description; read it to choose the right one
+- Before reading, searching, or changing a repository that has no directory yet, call the \`clone_repository\` tool with its full name (owner/repo); it clones the repository into \`<workspace root>/<owner>/<repo>\` and returns the path
+- Check out only the repositories the task needs, and never run \`git clone\` yourself
+- A missing directory does not mean the repository is unavailable; check \`REPOSITORIES.md\`
+
+When working with multiple repositories:
+- Be explicit about which repository you're working in
+- Use relative paths from the workspace root
+- Consider the impact of changes across repositories
+- Create multiple PRs in different repositories as necessary to complete your task
+`
+    : `
 Note: You have access to every repository prepared in the workspace. You can:
 - Navigate between different repositories using relative paths
 - Make changes across multiple repositories
@@ -314,8 +357,21 @@ When working with multiple repositories:
 - Create multiple PRs in different repositories as necessary to complete your task
 `;
 
-  if (repoFullNames && repoFullNames.length > 0) {
+  if (options.additionalRepositoriesOnDemand) {
     instructions += `
+- \`REPOSITORIES.md\` at the workspace root lists the active repositories authorized for this task and their current checkout state
+- Before reading, searching, or changing a repository that is not checked out, call the \`clone_repository\` tool with its full name (owner/repo); never run \`git clone\` for those repositories yourself
+- Workspace selection controls the initial checkout and tooling. Checking out another repository does not run another environment's setup commands or provision its services
+`;
+  }
+
+  if (repoFullNames && repoFullNames.length > 0) {
+    instructions += options.repositoriesOnDemand
+      ? `
+
+Available repositories (check out with \`clone_repository\` before use):
+`
+      : `
 
 Available repositories:
 `;

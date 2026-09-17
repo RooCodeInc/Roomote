@@ -71,7 +71,6 @@ export const PROVIDER_IDENTIFIER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'GITEA_CLIENT_ID',
   'SLACK_APP_ID',
   'R_AGENTMAIL_INBOX_ID',
-  'R_AGENTMAIL_POD_ID',
   'ADO_CLIENT_ID',
   'ADO_TENANT_ID',
   'ADO_AUTH_MODE',
@@ -115,6 +114,16 @@ export const INSTANCE_SECRET_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
 export const MEDIA_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'R_ELEVENLABS_API_KEY',
   'R_ELEVENLABS_VOICE_ID',
+  'R_VOICE_OPENAI_API_KEY',
+]);
+
+/**
+ * Judgment-model credentials and selection. Only control-plane routing
+ * judgments call the provider; a task never needs either value.
+ */
+const JUDGMENT_MODEL_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
+  'R_TYPESAFE_API_KEY',
+  'R_JUDGMENT_MODEL',
 ]);
 
 /**
@@ -153,6 +162,7 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     ...PROVIDER_IDENTIFIER_ENV_VAR_NAMES,
     ...INSTANCE_SECRET_ENV_VAR_NAMES,
     ...MEDIA_PROVIDER_ENV_VAR_NAMES,
+    ...JUDGMENT_MODEL_ENV_VAR_NAMES,
     ...DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES,
     ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
     // Hosting-managed Roomote inference is served only through the inference

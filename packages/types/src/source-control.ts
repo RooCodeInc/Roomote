@@ -43,6 +43,8 @@ export type SourceControlGitCredential = {
 
 export type SourceControlProxyCredential = SourceControlGitCredential & {
   provider: SourceControlProvider;
+  /** Reject Git receive-pack while preserving clone/fetch. */
+  readOnly?: boolean;
 };
 
 export type SourceControlTokenMetadata = {
@@ -206,6 +208,23 @@ export function filterRepositoryNamesForSourceControlProvider(
         (repositoryName) => repositoryProviders[repositoryName] === provider,
       )
     : repositoryNames;
+}
+
+/**
+ * Returns the repositories explicitly stamped for a provider, or undefined
+ * for legacy payloads without an authoritative repository map.
+ */
+export function resolveRepositoryNamesForSourceControlProviderFromPayload(
+  payload: { repositoryProviders?: unknown },
+  provider: SourceControlProvider,
+): string[] | undefined {
+  const repositoryProviders = resolveRepositoryProvidersFromPayload(payload);
+
+  return repositoryProviders
+    ? Object.entries(repositoryProviders)
+        .filter(([, repositoryProvider]) => repositoryProvider === provider)
+        .map(([repositoryName]) => repositoryName)
+    : undefined;
 }
 
 /**

@@ -53,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   markThreadHistoryDelivered: vi.fn(),
   fetchThreadHistory: vi.fn(),
   shouldRouteUnmentioned: vi.fn(),
+  mentionsPeer: vi.fn(),
   enqueueGatewayEvent: vi.fn(),
   callViaEmojiConfig: vi.fn(),
   appendAccountLinkHelpText: vi.fn(async (message: string) => message),
@@ -60,6 +61,8 @@ const mocks = vi.hoisted(() => ({
   acquireFastTurnLock: vi.fn(),
   answerFast: vi.fn(),
   hasFastSession: vi.fn(),
+  getFastSessionOwner: vi.fn(),
+  peerConversationsEnabled: vi.fn(),
   findFastMessageSession: vi.fn(),
   findFastReplySession: vi.fn(),
   isFastProviderMessage: vi.fn(),
@@ -104,6 +107,10 @@ vi.mock('../provider.js', () => {
 });
 
 vi.mock('@roomote/sdk/server', () => ({
+  findSessionAttentionNotificationReply: vi.fn(async () => ({
+    status: 'none',
+  })),
+  resolveSessionAttentionFastConversation: vi.fn(async () => null),
   findDiscordMappedUserId: mocks.findMappedUserId,
   findDiscordInstallationByGuildId: mocks.findInstallation,
   consumeDiscordLinkCode: mocks.consumeLinkCode,
@@ -117,10 +124,14 @@ vi.mock('@roomote/sdk/server', () => ({
   isFastAgentProviderMessage: mocks.isFastProviderMessage,
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
   queueFastAgentSurfaceReply: mocks.queueFastSurfaceReply,
+  startFastSessionGoal: mocks.startGoal,
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   persistFastAgentInlineHumanTurn: vi.fn(async () => null),
   wakeFastAgentParentEventNow: vi.fn(async () => undefined),
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
+}));
+vi.mock('../../tasks/continue-session-attention-reply', () => ({
+  continueSessionAttentionReply: vi.fn(async () => false),
 }));
 
 vi.mock('@roomote/sdk/server/communication', () => ({
@@ -166,6 +177,7 @@ vi.mock('../thread-context.js', () => ({
 }));
 
 vi.mock('../unmentioned-thread-reply.js', () => ({
+  mentionsDiscordUserOtherThanBotOrUser: mocks.mentionsPeer,
   shouldRouteUnmentionedDiscordThreadReplyToAgent: mocks.shouldRouteUnmentioned,
 }));
 
@@ -175,10 +187,6 @@ vi.mock('../../call-roomote-via-emoji.js', () => ({
 
 vi.mock('../task-orchestration.js', () => ({
   startNewDiscordTask: mocks.startNewTask,
-}));
-
-vi.mock('../goal-command.js', () => ({
-  startDiscordTaskGoal: mocks.startGoal,
 }));
 
 vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
@@ -198,9 +206,15 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   resolveApiBaseUrl: () => 'https://roomote.example.com',
   getTaskUrl: mocks.getTaskUrl,
   hasFastAgentSession: mocks.hasFastSession,
+  getFastAgentSessionOwner: mocks.getFastSessionOwner,
   getOrCreateFastAgentSession: vi
     .fn()
     .mockResolvedValue({ id: 'fast-session-1' }),
+}));
+
+vi.mock('@roomote/db/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/db/server')>()),
+  isDeploymentExperimentEnabled: mocks.peerConversationsEnabled,
 }));
 
 import { discord, discordGatewayEventProcessingTimeout } from '../index.js';
@@ -331,7 +345,7 @@ describe('Discord Gateway event handler', () => {
       status: 'started',
       launchResult: { id: 17, taskId: 'task-17' },
     });
-    mocks.startGoal.mockResolvedValue({ success: true });
+    mocks.startGoal.mockResolvedValue({ success: true, goal: {} });
     mocks.acquireFastTurnLock.mockResolvedValue(
       vi.fn().mockResolvedValue(undefined),
     );
@@ -341,6 +355,9 @@ describe('Discord Gateway event handler', () => {
     });
     mocks.answerFast.mockResolvedValue('A quick answer');
     mocks.hasFastSession.mockResolvedValue(false);
+    mocks.getFastSessionOwner.mockResolvedValue(null);
+    mocks.peerConversationsEnabled.mockResolvedValue(false);
+    mocks.mentionsPeer.mockReturnValue(false);
     mocks.findFastMessageSession.mockResolvedValue(null);
     mocks.findFastReplySession.mockResolvedValue(null);
     mocks.isFastProviderMessage.mockResolvedValue(false);
@@ -1463,6 +1480,88 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
+  it('uses the deployment experiment for an owner-bound Discord Fast thread', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'fast-thread',
+      type: 11,
+    });
+    mocks.findMappedUserId.mockResolvedValue('roomote-user-peer');
+    mocks.hasFastSession.mockResolvedValue(true);
+    mocks.getFastSessionOwner.mockResolvedValue({
+      kind: 'user',
+      userId: 'roomote-user-owner',
+    });
+    mocks.peerConversationsEnabled.mockResolvedValue(true);
+    mocks.mentionsPeer.mockReturnValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue(true);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: '<@discord-user-grace> what do you think?',
+          author: { id: 'discord-user-peer', username: 'matt' },
+          mentions: [{ id: 'discord-user-grace', username: 'grace' }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.peerConversationsEnabled).toHaveBeenCalledWith(
+      'slackPeerConversations',
+    );
+    expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
+      expect.objectContaining({ peerConversationsExperimentEnabled: true }),
+    );
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowSilentAmbientReply: true,
+        currentMessageAgentContext: expect.stringContaining(
+          'This message mentions another person and might not be for you',
+        ),
+      }),
+    );
+  });
+
+  it('does not enable peer conversations without an owner-bound Discord Fast thread', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'fast-thread',
+      type: 11,
+    });
+    mocks.findMappedUserId.mockResolvedValue('roomote-user-peer');
+    mocks.hasFastSession.mockResolvedValue(true);
+    mocks.getFastSessionOwner.mockResolvedValue(null);
+    mocks.peerConversationsEnabled.mockResolvedValue(true);
+    mocks.mentionsPeer.mockReturnValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: '<@discord-user-grace> what do you think?',
+          author: { id: 'discord-user-peer', username: 'matt' },
+          mentions: [{ id: 'discord-user-grace', username: 'grace' }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.peerConversationsEnabled).not.toHaveBeenCalled();
+    expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
+      expect.objectContaining({ peerConversationsExperimentEnabled: false }),
+    );
+    expect(mocks.answerFast).not.toHaveBeenCalled();
+  });
+
   it('continues an existing fast-agent DM without Fast mode being the default', async () => {
     mocks.hasFastSession.mockResolvedValue(true);
 
@@ -1527,6 +1626,7 @@ describe('Discord Gateway event handler', () => {
       workspaceId: 'dm',
       channelId: 'dm-1',
       replyToMessageId: 'fast-report-1',
+      userId: 'roomote-user-1',
     });
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2225,7 +2325,7 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining(
-          'keep working toward an objective across multiple turns',
+          'keep this Session working toward an objective across multiple turns',
         ),
       }),
     );
@@ -2355,7 +2455,7 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
-  it('uses /goal to enable Goal Mode on the active task', async () => {
+  it('uses /goal to start a Fast Session goal', async () => {
     mocks.findActiveRun.mockResolvedValue({
       id: 23,
       taskId: 'task-23',
@@ -2381,21 +2481,22 @@ describe('Discord Gateway event handler', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.startGoal).toHaveBeenCalledWith({
-      taskId: 'task-23',
+      sessionId: 'fast-session-1',
       userId: 'roomote-user-1',
+      senderDisplayName: 'matt',
       objective: 'Ship the release',
-      clientMessageId: 'interaction-goal',
+      currentMessageId: 'interaction-goal',
     });
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         interaction: { interaction, interactionDeferred: true },
-        text: 'Goal Mode enabled.',
+        text: 'Pursuing goal: Ship the release',
         ephemeral: true,
       }),
     );
   });
 
-  it('does not create a task when /goal has no active task', async () => {
+  it('starts a Session goal without requiring an active child task', async () => {
     const interaction = {
       id: 'interaction-goal',
       application_id: 'app-1',
@@ -2415,10 +2516,12 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.startGoal).not.toHaveBeenCalled();
+    expect(mocks.startGoal).toHaveBeenCalledWith(
+      expect.objectContaining({ objective: 'Ship the release' }),
+    );
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: expect.stringContaining('active Roomote task'),
+        text: 'Pursuing goal: Ship the release',
         ephemeral: true,
       }),
     );

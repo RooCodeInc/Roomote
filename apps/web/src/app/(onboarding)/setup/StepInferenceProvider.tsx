@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -110,6 +111,7 @@ export function StepInferenceProvider({
     [onSelectedProviderChange],
   );
   const [apiKey, setApiKey] = useState('');
+  const credentialRef = useRef<HTMLInputElement>(null);
   const [connectionName, setConnectionName] = useState('');
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
     Record<string, string>
@@ -362,6 +364,7 @@ export function StepInferenceProvider({
         <InferenceProviderRow>
           <Select
             value={selectedProvider ?? undefined}
+            handoffTargetOnSelect={credentialRef}
             onValueChange={(value) =>
               selectProvider(value as SetupModelProviderId)
             }
@@ -383,6 +386,7 @@ export function StepInferenceProvider({
 
           {selectedProvider && !isOAuthProvider ? (
             <Input
+              ref={credentialRef}
               type={isEndpointProvider ? 'url' : undefined}
               inputMode={isEndpointProvider ? 'url' : undefined}
               autoComplete={isEndpointProvider ? 'url' : undefined}

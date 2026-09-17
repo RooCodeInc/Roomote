@@ -147,7 +147,7 @@ describe('durable PR review notification ownership', () => {
     mockRedisLrange.mockResolvedValue([]);
     mockFindManySlackInstallations.mockResolvedValue([{ teamId: 'T123' }]);
     mockRedisGet.mockResolvedValue(null);
-    mockQueueAdd.mockResolvedValue(undefined);
+    mockQueueAdd.mockResolvedValue({ id: 'job-1' });
   });
 
   afterEach(() => {
@@ -324,6 +324,35 @@ describe('durable PR review notification ownership', () => {
 
     await expect(dispatchDuePrReviewNotifications()).resolves.toBe(0);
     expect(mockReleasePrReviewDeliveries).toHaveBeenCalledWith(claim);
+  });
+
+  it('preserves source delivery correlation in the queued handoff', async () => {
+    mockClaimDuePrReviewDeliveries.mockResolvedValue([
+      {
+        ...claim,
+        events: [
+          {
+            ...baseInput.event,
+            sourceDeliveryId: 'github-delivery-1',
+          },
+        ],
+      },
+    ]);
+
+    await expect(dispatchDuePrReviewNotifications()).resolves.toBe(1);
+
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      'notify-pr-review-activity',
+      expect.objectContaining({
+        taskId: 'task-1',
+        events: [
+          expect.objectContaining({
+            providerEventId: 'github-review:123',
+            sourceDeliveryId: 'github-delivery-1',
+          }),
+        ],
+      }),
+    );
   });
 
   it('records an explicit Roomote review cycle in Postgres', async () => {

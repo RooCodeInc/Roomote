@@ -82,7 +82,21 @@ type SlackAuthTestResponse = {
   user_id?: string;
   bot_id?: string;
   team_id?: string;
+  url?: string;
 };
+
+function getSlackWorkspaceDomain(rawUrl: string | undefined): string | null {
+  if (!rawUrl) return null;
+
+  try {
+    const host = new URL(rawUrl).hostname.toLowerCase();
+    if (!host.endsWith('.slack.com')) return null;
+    const domain = host.slice(0, -'.slack.com'.length);
+    return domain && domain !== 'app' ? domain : null;
+  } catch {
+    return null;
+  }
+}
 
 type SlackUsersListResponse = {
   ok: boolean;
@@ -143,6 +157,11 @@ const SLACK_UPDATE_TRANSIENT_ERRORS = new Set([
 const SUGGESTION_REACTION_START_NOTICE_REGEX =
   /\n\n(?:Started by <@[^>\s]+>(?: via :thumbsup:)?\.|Accepted by <@[^>\s]+>)\s*$/;
 const MAX_OLDEST_BOUNDED_CHANNEL_HISTORY_PAGES = 25;
+// Slack only returns thread roots whose own timestamp falls inside the
+// requested window, so replies posted inside the window on older threads would
+// otherwise be missed. Scan this many pages of history before `oldest` for
+// roots whose latest reply lands in the window.
+const MAX_STALE_THREAD_ROOT_LOOKBACK_PAGES = 5;
 
 function stripSuggestionReactionStartNotice(text: string): string {
   return text.replace(SUGGESTION_REACTION_START_NOTICE_REGEX, '');
@@ -353,6 +372,7 @@ export class SlackNotifier {
     userId?: string;
     botId?: string;
     teamId?: string;
+    teamDomain?: string;
   } | null> {
     if (!this.ownBotIdentityPromise) {
       this.ownBotIdentityPromise = (async () => {
@@ -389,6 +409,7 @@ export class SlackNotifier {
             userId: result.user_id,
             botId: result.bot_id,
             teamId: result.team_id,
+            teamDomain: getSlackWorkspaceDomain(result.url) ?? undefined,
           };
         } catch (error) {
           console.error(
@@ -411,6 +432,17 @@ export class SlackNotifier {
   /** Non-secret routing identity for durable, control-plane message refresh. */
   async getWorkspaceId(): Promise<string | null> {
     return (await this.getOwnBotIdentity())?.teamId ?? null;
+  }
+
+  /** Authenticated workspace identity for resolving links without stored domain metadata. */
+  async getWorkspaceIdentity(): Promise<{
+    teamId: string;
+    teamDomain: string;
+  } | null> {
+    const identity = await this.getOwnBotIdentity();
+    return identity?.teamId && identity.teamDomain
+      ? { teamId: identity.teamId, teamDomain: identity.teamDomain }
+      : null;
   }
 
   private async normalizeFetchedMessages(
@@ -2318,6 +2350,58 @@ export class SlackNotifier {
     }
   }
 
+  private async fetchChannelHistoryPage(params: {
+    channel: string;
+    oldest?: string;
+    latest?: string;
+    cursor?: string;
+  }): Promise<SlackApiThreadResponse> {
+    const query = new URLSearchParams({
+      channel: params.channel,
+      limit: '200',
+      inclusive: 'true',
+    });
+
+    if (params.oldest) {
+      query.set('oldest', params.oldest);
+    }
+
+    if (params.latest) {
+      query.set('latest', params.latest);
+    }
+
+    if (params.cursor) {
+      query.set('cursor', params.cursor);
+    }
+
+    const response = await slackFetch(
+      `${buildSlackApiUrl('conversations.history')}?${query.toString()}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Slack conversations.history failed: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const result = (await response.json()) as SlackApiThreadResponse;
+
+    if (!result.ok) {
+      throw new Error(
+        `Slack conversations.history error: ${result.error || 'Unknown error'}`,
+      );
+    }
+
+    return result;
+  }
+
   /**
    * Fetches every message visible in a Slack channel, optionally narrowed to a
    * time window. Thread replies are expanded and included alongside top-level
@@ -2343,44 +2427,12 @@ export class SlackNotifier {
       do {
         historyPageCount += 1;
 
-        const params = new URLSearchParams({
+        const result = await this.fetchChannelHistoryPage({
           channel,
-          limit: '200',
-          inclusive: 'true',
+          ...(oldest ? { oldest } : {}),
+          ...(latest ? { latest } : {}),
+          ...(cursor ? { cursor } : {}),
         });
-
-        if (latest) {
-          params.set('latest', latest);
-        }
-
-        if (cursor) {
-          params.set('cursor', cursor);
-        }
-
-        const response = await slackFetch(
-          `${buildSlackApiUrl('conversations.history')}?${params.toString()}`,
-          {
-            method: 'GET',
-            headers: {
-              Authorization: `Bearer ${this.token}`,
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-          },
-        );
-
-        if (!response.ok) {
-          throw new Error(
-            `Slack conversations.history failed: ${response.status} ${response.statusText}`,
-          );
-        }
-
-        const result = (await response.json()) as SlackApiThreadResponse;
-
-        if (!result.ok) {
-          throw new Error(
-            `Slack conversations.history error: ${result.error || 'Unknown error'}`,
-          );
-        }
 
         historyMessages.push(...result.messages);
         for (const message of result.messages) {
@@ -2401,6 +2453,41 @@ export class SlackNotifier {
           );
         }
       } while (cursor);
+
+      if (oldest && oldestTs !== null) {
+        // Best effort: the bounded read above is the primary result. Some
+        // Slack tiers only allow one history request per minute, so a failed
+        // lookback must not turn an otherwise successful read into an error.
+        try {
+          let lookbackCursor: string | undefined;
+          let lookbackPageCount = 0;
+
+          do {
+            lookbackPageCount += 1;
+
+            const result = await this.fetchChannelHistoryPage({
+              channel,
+              latest: oldest,
+              ...(lookbackCursor ? { cursor: lookbackCursor } : {}),
+            });
+
+            for (const message of result.messages) {
+              if (shouldExpandThreadRoot({ message, oldestTs })) {
+                threadRootTimestamps.add(message.ts);
+              }
+            }
+
+            lookbackCursor = result.response_metadata?.next_cursor || undefined;
+          } while (
+            lookbackCursor &&
+            lookbackPageCount < MAX_STALE_THREAD_ROOT_LOOKBACK_PAGES
+          );
+        } catch (error) {
+          console.warn(
+            `[fetchChannelMessages] Skipping stale thread root lookback: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
 
       const rootMessages = await this.normalizeFetchedMessages(historyMessages);
       const messagesByTs = new Map(

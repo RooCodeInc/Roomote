@@ -41,4 +41,22 @@ describe('getVisiblePrimaryNavItems', () => {
       requiresSetup: true,
     });
   });
+
+  it('places opted-in Results immediately after Automations for every user', () => {
+    const items = getVisiblePrimaryNavItems({
+      isAdmin: false,
+      resultsEnabled: true,
+    });
+
+    expect(items.map((item) => item.href)).toEqual([
+      '/',
+      '/sessions',
+      '/automations',
+      '/results',
+    ]);
+    expect(items.find((item) => item.href === '/results')).toMatchObject({
+      label: 'Results',
+      requiresSetup: true,
+    });
+  });
 });

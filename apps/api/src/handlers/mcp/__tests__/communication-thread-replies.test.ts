@@ -15,13 +15,15 @@ const {
   getTaskAutomationInitiatorKeyMock,
   getLatestInboundMessageIdMock,
   getLatestUserMessageForReplyQuoteMock,
+  getThreadReplyFooterRecordMock,
   postMessageMock,
+  redisStore,
   sendChatActionMock,
+  setThreadReplyFooterRecordMock,
   resolveTelegramRuntimeCredentialsMock,
   resolveDiscordRuntimeCredentialsMock,
   sqlMock,
   upsertBackgroundAutomationSlackThreadMock,
-  withThreadReplyFooterLockMock,
 } = vi.hoisted(() => ({
   agentmailPostMessageMock: vi.fn(),
   resolveAgentMailAdapterMock: vi.fn(),
@@ -36,13 +38,36 @@ const {
   getTaskAutomationInitiatorKeyMock: vi.fn(),
   getLatestInboundMessageIdMock: vi.fn(),
   getLatestUserMessageForReplyQuoteMock: vi.fn(),
+  getThreadReplyFooterRecordMock: vi.fn(),
   postMessageMock: vi.fn(),
+  redisStore: new Map<string, string>(),
   sendChatActionMock: vi.fn(),
+  setThreadReplyFooterRecordMock: vi.fn().mockResolvedValue(true),
   resolveTelegramRuntimeCredentialsMock: vi.fn(),
   resolveDiscordRuntimeCredentialsMock: vi.fn(),
   sqlMock: vi.fn(),
   upsertBackgroundAutomationSlackThreadMock: vi.fn(),
-  withThreadReplyFooterLockMock: vi.fn(),
+}));
+
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({
+    get: async (key: string) => redisStore.get(key) ?? null,
+    set: async (key: string, value: string, ...args: unknown[]) => {
+      if (args.includes('NX') && redisStore.has(key)) return null;
+      redisStore.set(key, value);
+      return 'OK';
+    },
+    eval: async (
+      script: string,
+      _count: number,
+      key: string,
+      owner: string,
+    ) => {
+      if (redisStore.get(key) !== owner) return 0;
+      if (script.includes("'del'")) redisStore.delete(key);
+      return 1;
+    },
+  }),
 }));
 
 vi.mock('@roomote/env', () => ({ Env: envMock }));
@@ -63,7 +88,7 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('@roomote/communication', () => ({
   buildThreadReplyFooterText: vi.fn().mockReturnValue(null),
   formatMarkdownLink: vi.fn(),
-  getThreadReplyFooterRecord: vi.fn(),
+  getThreadReplyFooterRecord: getThreadReplyFooterRecordMock,
   TelegramCommunicationProvider: vi.fn().mockImplementation(function () {
     return { postMessage: postMessageMock, sendChatAction: sendChatActionMock };
   }),
@@ -87,7 +112,7 @@ vi.mock('@roomote/communication', () => ({
     linkedPrs: [],
     livePreviewUrl: null,
   }),
-  setThreadReplyFooterRecord: vi.fn().mockResolvedValue(true),
+  setThreadReplyFooterRecord: setThreadReplyFooterRecordMock,
   postTextThreadReplyWithFooter: async ({
     input,
     footerText,
@@ -107,8 +132,8 @@ vi.mock('@roomote/communication/chat-messages', () => ({
 }));
 
 vi.mock('@roomote/communication/thread-reply-footer-state', () => ({
-  getThreadReplyFooterRecord: vi.fn(),
-  setThreadReplyFooterRecord: vi.fn(),
+  getThreadReplyFooterRecord: getThreadReplyFooterRecordMock,
+  setThreadReplyFooterRecord: setThreadReplyFooterRecordMock,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -148,7 +173,6 @@ vi.mock('../chat-reply-helpers.js', () => ({
   buildThreadReplyImages: buildThreadReplyImagesMock,
   errorResponseForThreadReplyImageError: vi.fn(),
   THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE: 'busy',
-  withThreadReplyFooterLock: withThreadReplyFooterLockMock,
 }));
 
 import {
@@ -354,11 +378,9 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
       messageId: 'reply-1',
     });
     discordEditMessageMock.mockResolvedValue(undefined);
+    setThreadReplyFooterRecordMock.mockResolvedValue(true);
     vi.mocked(buildThreadReplyFooterText).mockReturnValue(null as never);
     vi.mocked(getThreadReplyFooterRecord).mockResolvedValue(null);
-    withThreadReplyFooterLockMock.mockImplementation(async ({ fn, lockKey }) =>
-      fn(async () => {}, { key: lockKey, ownerId: 'owner' }),
-    );
     discordAddReactionMock.mockResolvedValue({
       channelId: 'thread-1',
       messageId: 'message-2',
@@ -616,7 +638,7 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
       {
         lock: {
           key: 'discord:thread_reply_footer_lock:channel-1:thread-1',
-          ownerId: 'owner',
+          ownerId: expect.any(String),
         },
       },
     );
@@ -646,7 +668,7 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
       {
         lock: {
           key: 'discord:thread_reply_footer_lock:channel-1:thread-1',
-          ownerId: 'owner',
+          ownerId: expect.any(String),
         },
       },
     );
@@ -685,9 +707,6 @@ describe('maybeSendCommunicationThreadReply (Teams)', () => {
     // Tests force no managed-footer path unless they override this.
     vi.mocked(buildThreadReplyFooterText).mockReturnValue(null as never);
     vi.mocked(getThreadReplyFooterRecord).mockResolvedValue(null);
-    withThreadReplyFooterLockMock.mockImplementation(async ({ fn, lockKey }) =>
-      fn(async () => {}, { key: lockKey, ownerId: 'owner' }),
-    );
     vi.mocked(
       createTeamsCommunicationProviderFromRuntimeCredentials,
     ).mockResolvedValue({
@@ -793,7 +812,7 @@ describe('maybeSendCommunicationThreadReply (Teams)', () => {
       {
         lock: {
           key: 'teams:thread_reply_footer_lock:19:conversation@thread.v2:activity-root',
-          ownerId: 'owner',
+          ownerId: expect.any(String),
         },
       },
     );
@@ -806,6 +825,8 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
     resolveTelegramRuntimeCredentialsMock.mockResolvedValue({ botToken: 't' });
     buildThreadReplyImagesMock.mockResolvedValue([]);
     getLatestInboundMessageIdMock.mockResolvedValue(null);
+    getLatestUserMessageForReplyQuoteMock.mockResolvedValue(null);
+    clearLatestUserMessageForReplyQuoteIfIdMock.mockResolvedValue(true);
     postMessageMock.mockResolvedValue({ messageId: '999' });
     sendChatActionMock.mockResolvedValue(undefined);
     vi.mocked(buildThreadReplyFooterText).mockReturnValue(
@@ -828,6 +849,91 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
         replyToMessageId: '200',
       }),
     );
+  });
+
+  it('prepends a pending web-reply quote and clears it after a successful post', async () => {
+    getLatestUserMessageForReplyQuoteMock.mockResolvedValue({
+      id: 'telegram-quote-1',
+      text: "It's already enabled",
+      userName: 'Daniel Riccio',
+    });
+
+    await maybeSendCommunicationThreadReply({
+      taskRun: {
+        ...telegramTaskRun,
+        payload: {
+          ...telegramTaskRun.payload,
+          communicationThreadId: '77',
+        },
+      },
+      parsedBody: {
+        text: "I'll check the connection status and generate the link.",
+        images: [],
+      },
+    });
+
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '222',
+        threadId: '77',
+        text: [
+          "> **Daniel Riccio:** It's already enabled",
+          '',
+          "I'll check the connection status and generate the link.",
+          '',
+          'Current task footer',
+        ].join('\n'),
+      }),
+    );
+    expect(clearLatestUserMessageForReplyQuoteIfIdMock).toHaveBeenCalledWith(
+      'telegram',
+      42,
+      'telegram-quote-1',
+    );
+  });
+
+  it('renders and clears a pending web-reply quote on image-only replies', async () => {
+    getLatestUserMessageForReplyQuoteMock.mockResolvedValue({
+      id: 'telegram-image-quote',
+      text: 'Show me the result',
+      userName: 'Test User',
+    });
+    buildThreadReplyImagesMock.mockResolvedValue([
+      { url: 'https://example.com/result.png', altText: 'Result' },
+    ]);
+
+    await maybeSendCommunicationThreadReply({
+      taskRun: telegramTaskRun,
+      parsedBody: { images: [{ artifactId: 'artifact-1' }] },
+    });
+
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: '> **Test User:** Show me the result\n\nCurrent task footer',
+        images: [{ url: 'https://example.com/result.png', altText: 'Result' }],
+      }),
+    );
+    expect(clearLatestUserMessageForReplyQuoteIfIdMock).toHaveBeenCalledWith(
+      'telegram',
+      42,
+      'telegram-image-quote',
+    );
+  });
+
+  it('keeps ordinary Telegram replies unquoted', async () => {
+    await maybeSendCommunicationThreadReply({
+      taskRun: telegramTaskRun,
+      parsedBody: { text: 'done', images: [] },
+    });
+
+    expect(getLatestUserMessageForReplyQuoteMock).toHaveBeenCalledWith(
+      'telegram',
+      42,
+    );
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'done\n\nCurrent task footer' }),
+    );
+    expect(clearLatestUserMessageForReplyQuoteIfIdMock).not.toHaveBeenCalled();
   });
 
   it('falls back to the launch communicationMessageId when no follow-up is recorded', async () => {

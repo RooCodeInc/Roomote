@@ -13,6 +13,8 @@ const {
   mockResolveSandboxModelRuntimeEnv,
   mockTaskRunsFindFirst,
   mockNotifySourceRunOnSettle,
+  mockNotifyWebTaskInitiatorOnSettle,
+  mockEnqueueWebTaskInitiatorSettleNotification,
   mockCaptureTaskSettled,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
@@ -26,6 +28,8 @@ const {
   mockResolveSandboxModelRuntimeEnv: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
   mockNotifySourceRunOnSettle: vi.fn(),
+  mockNotifyWebTaskInitiatorOnSettle: vi.fn(),
+  mockEnqueueWebTaskInitiatorSettleNotification: vi.fn(),
   mockCaptureTaskSettled: vi.fn(),
 }));
 
@@ -112,6 +116,16 @@ vi.mock('../notify-source-run-on-settle', () => ({
 
 vi.mock('../notify-fast-agent-parent-on-settle', () => ({
   notifyFastAgentParentOnSettle: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../notify-web-task-initiator-on-settle', () => ({
+  notifyWebTaskInitiatorOnSettle: (...args: unknown[]) =>
+    mockNotifyWebTaskInitiatorOnSettle(...args),
+}));
+
+vi.mock('../enqueue-web-task-initiator-settle-notification', () => ({
+  enqueueWebTaskInitiatorSettleNotification: (...args: unknown[]) =>
+    mockEnqueueWebTaskInitiatorSettleNotification(...args),
 }));
 
 import { resolveWorkspaceSourceControlProvider } from '@roomote/db/server';
@@ -227,6 +241,16 @@ describe('createSourceControlTokenForTaskRun', () => {
     );
   });
 
+  it('fails closed when a private task would receive a raw source-control token', async () => {
+    await expect(
+      createSourceControlTokenForTaskRun(
+        makeTaskRun({ repo: 'owner/repo', description: 'Private task' }),
+        '[test]',
+        { maxRetries: 1, readOnly: true },
+      ),
+    ).rejects.toThrow('cannot supply read-only credentials');
+  });
+
   it('does not require or mint source-control credentials for Blank slate', async () => {
     const result = await createSourceControlTokenForTaskRun(
       makeTaskRun({
@@ -251,6 +275,29 @@ describe('createSourceControlTokenForTaskRun', () => {
     expect(mockCreateTaskRunGiteaCredentials).not.toHaveBeenCalled();
     expect(mockCreateTaskRunAdoCredentials).not.toHaveBeenCalled();
     expect(mockCreateTaskRunBitbucketCredentials).not.toHaveBeenCalled();
+  });
+
+  it('mints credentials for a Blank slate stamped with the deployment repositories', async () => {
+    const taskRun = makeTaskRun({
+      repo: NO_REPOSITORIES,
+      description: 'Investigate and open a PR if needed',
+      sourceControlProvider: 'github',
+      repositoryProviders: { 'acme/api': 'github', 'acme/web': 'github' },
+    });
+
+    const result = await createSourceControlTokenForTaskRun(taskRun, '[test]', {
+      maxRetries: 1,
+    });
+
+    expect(result).toMatchObject({
+      provider: 'github',
+      token: 'ghs_app_token',
+      envVars: { GH_TOKEN: 'ghs_app_token' },
+      source: 'app',
+    });
+    expect(mockCreateTaskRunWorkerGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      taskRun,
+    );
   });
 
   it('creates GitLab token metadata from repo-scoped credentials', async () => {
@@ -343,6 +390,35 @@ describe('createSourceControlTokenForTaskRun', () => {
         },
       ],
     });
+  });
+
+  it('marks proxy-only credentials read-only for private tasks', async () => {
+    mockCreateTaskRunScopedGitLabTokens.mockResolvedValue({
+      credentials: [],
+      proxyCredentials: [
+        {
+          host: 'gitlab.com',
+          repositoryFullName: 'group/project',
+          username: 'oauth2',
+          token: 'oauth_access_token',
+        },
+      ],
+      artifactsPatch: { gitlabScopedProjectTokens: [] },
+      expiresAt: null,
+    });
+
+    const result = await createSourceControlTokenForTaskRun(
+      makeTaskRun({
+        repo: 'group/project',
+        description: 'Private task',
+        sourceControlProvider: 'gitlab',
+      }),
+      '[test]',
+      { maxRetries: 1, readOnly: true },
+    );
+    expect(result?.gitProxyCredentials).toEqual([
+      expect.objectContaining({ readOnly: true }),
+    ]);
   });
 
   it('threads GitLab OAuth access-token expiry into runtime token metadata', async () => {
@@ -849,6 +925,7 @@ describe('notifyCanceledTaskRunOnSettle', () => {
     mockTaskRunsFindFirst.mockResolvedValueOnce({
       error: 'Failed to create source control token.',
     });
+    mockNotifyWebTaskInitiatorOnSettle.mockResolvedValueOnce('delivered');
 
     await notifyCanceledTaskRunOnSettle(taskRun);
 
@@ -864,6 +941,24 @@ describe('notifyCanceledTaskRunOnSettle', () => {
       taskRun.id,
       RunStatus.Canceled,
     );
+    expect(mockNotifyWebTaskInitiatorOnSettle).toHaveBeenCalledWith(
+      taskRun,
+      RunStatus.Canceled,
+    );
+  });
+
+  it('queues a durable retry when canceled-run personal delivery fails', async () => {
+    const taskRun = makeTaskRun({ repo: 'owner/repo', description: 'Task' });
+    mockTaskRunsFindFirst.mockResolvedValueOnce({ error: 'Canceled.' });
+    mockNotifyWebTaskInitiatorOnSettle.mockResolvedValueOnce('failed');
+
+    await notifyCanceledTaskRunOnSettle(taskRun);
+
+    expect(mockEnqueueWebTaskInitiatorSettleNotification).toHaveBeenCalledWith({
+      runId: taskRun.id,
+      taskId: taskRun.taskId,
+      status: RunStatus.Canceled,
+    });
   });
 });
 

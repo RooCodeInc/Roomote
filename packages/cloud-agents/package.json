@@ -6,6 +6,7 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
+    "./http-integrations": "./src/http-integrations.ts",
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts",
@@ -20,6 +21,11 @@
       "types": "./src/server/non-task-provider-usage.ts",
       "import": "./src/server/non-task-provider-usage.ts",
       "require": "./src/server/non-task-provider-usage.ts"
+    },
+    "./server/typesafe-judgment": {
+      "types": "./src/server/typesafe-judgment.ts",
+      "import": "./src/server/typesafe-judgment.ts",
+      "require": "./src/server/typesafe-judgment.ts"
     },
     "./show-widget": {
       "types": "./src/server/show-widget.ts",
@@ -76,6 +82,7 @@
     "@roomote/gitea": "workspace:^",
     "@roomote/gitlab": "workspace:^",
     "@roomote/redis": "workspace:^",
+    "@roomote/sdk": "workspace:^",
     "@roomote/telemetry": "workspace:^",
     "@roomote/types": "workspace:^",
     "ai": "^6.0.116",

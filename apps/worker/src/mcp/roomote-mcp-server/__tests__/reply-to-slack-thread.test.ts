@@ -8,6 +8,7 @@ vi.mock('../chat-api-client.js', () => ({
 }));
 
 vi.mock('../tasks-api-client.js', () => ({
+  recordAutomationResult: vi.fn(),
   submitTaskSuggestions: vi.fn(),
 }));
 
@@ -18,7 +19,10 @@ import {
 import { replyToChatThread } from '../chat-api-client.js';
 import { ChatDeliveryError } from '../chat-delivery-error.js';
 import { handleSendChatReply } from '../send-chat-reply.js';
-import { submitTaskSuggestions } from '../tasks-api-client.js';
+import {
+  recordAutomationResult,
+  submitTaskSuggestions,
+} from '../tasks-api-client.js';
 import type { ArtifactConfig, RoomoteConfig } from '../types.js';
 
 const artifactConfig: ArtifactConfig = {
@@ -78,6 +82,31 @@ describe('handleReplyToSlackThread', () => {
       messageTs: '111.222',
       summary,
     });
+  });
+
+  it('records terminal automation output before chat delivery', async () => {
+    vi.mocked(replyToChatThread).mockResolvedValue({ messageTs: '111.222' });
+    vi.mocked(recordAutomationResult).mockResolvedValue({ recorded: true });
+
+    await handleSendChatReply(
+      {
+        taskId: 'task-1',
+        summary: 'Final report',
+        purpose: 'closeout',
+        recordAutomationOutput: true,
+      },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(recordAutomationResult).toHaveBeenCalledWith(
+      roomoteConfig,
+      'task-1',
+      expect.objectContaining({
+        content: 'Final report',
+        dedupeKey: expect.stringMatching(/^task:task-1:/),
+      }),
+    );
   });
 
   it('posts validated charts after the visible Markdown body', async () => {

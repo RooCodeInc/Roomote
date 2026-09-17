@@ -1687,6 +1687,67 @@ describe('updateBackgroundAgentSettingsCommand Discord channel auto-start', () =
     expect(result.settings.channelAutoStartEnabled).toBe(true);
   }, 15_000);
 
+  it('preserves disabled auto-respond state and channels for legacy updates', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'bugs',
+    });
+    const channels = [
+      {
+        channelId: 'D111',
+        instructions: 'Keep the existing routing.',
+        launchMode: 'always_start' as const,
+        launchCriteria: null,
+      },
+    ];
+
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'channelAutoStart',
+        channelAutoStartSlackChannels: [],
+        channelAutoStartDiscordChannels: channels,
+      }),
+    );
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'channelAutoStart',
+        channelAutoStartEnabled: false,
+        channelAutoStartSlackChannels: [],
+        channelAutoStartDiscordChannels: channels,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('unreachable');
+    expect(result.settings.channelAutoStartEnabled).toBe(false);
+    expect(result.settings.channelAutoStartDiscordChannels).toEqual(channels);
+
+    const legacyResult = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'channelAutoStart',
+        channelAutoStartSlackChannels: [],
+        channelAutoStartDiscordChannels: channels,
+      }),
+    );
+    expect(legacyResult.success).toBe(true);
+    if (!legacyResult.success) throw new Error('unreachable');
+    expect(legacyResult.settings.channelAutoStartEnabled).toBe(false);
+    expect(legacyResult.settings.channelAutoStartDiscordChannels).toEqual(
+      channels,
+    );
+    expect(await getAutomationTargets('slack_channel_auto_start')).toEqual([
+      {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D111',
+      },
+    ]);
+  }, 15_000);
+
   it('supports discord-only auto-respond without a Slack installation', async () => {
     await insertAvailableDiscordChannel({
       guildId: 'guild-1',

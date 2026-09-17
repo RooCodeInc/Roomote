@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { useTRPC } from '@/trpc/client';
+import { invalidateMcpIntegrationStatusQueries } from './invalidateMcpIntegrationStatusQueries';
 
 export function useDisconnectMcp() {
   const trpc = useTRPC();
@@ -11,12 +12,7 @@ export function useDisconnectMcp() {
   return useMutation(
     trpc.mcpConnections.disconnect.mutationOptions({
       onSuccess: () => {
-        queryClient.invalidateQueries({
-          queryKey: trpc.mcpConnections.deploymentEnablements.queryKey(),
-        });
-        queryClient.invalidateQueries({
-          queryKey: trpc.mcpConnections.userConnections.queryKey(),
-        });
+        void invalidateMcpIntegrationStatusQueries(queryClient, trpc);
         queryClient.invalidateQueries({
           queryKey: trpc.mcpConnections.snowflakeConnection.queryKey(),
         });

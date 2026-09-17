@@ -11,7 +11,7 @@ const mockDbUpdate = vi.fn().mockReturnValue({
 const mockRefreshTaskRunThreadFooter = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../../thread-footer-refresh', () => ({
-  refreshTaskRunThreadFooter: (...args: unknown[]) =>
+  notifyTaskRunThreadFooterRefresh: (...args: unknown[]) =>
     mockRefreshTaskRunThreadFooter(...args),
 }));
 

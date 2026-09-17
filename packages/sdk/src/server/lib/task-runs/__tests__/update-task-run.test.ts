@@ -16,7 +16,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('../../thread-footer-refresh', () => ({
-  refreshTaskRunThreadFooter: (...args: unknown[]) =>
+  notifyTaskRunThreadFooterRefresh: (...args: unknown[]) =>
     mocks.refreshFooter(...args),
 }));
 

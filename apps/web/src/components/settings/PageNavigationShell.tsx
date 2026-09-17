@@ -29,6 +29,7 @@ type PageNavigationShellProps<T extends string = string> = {
   mobileLabel: string;
   headerAction?: ReactNode;
   showHeaderActionOnMobile?: boolean;
+  boundedContentOnDesktop?: boolean;
   onItemSelect: (id: T) => void;
   children: ReactNode;
 };
@@ -41,11 +42,17 @@ export function PageNavigationShell<T extends string = string>({
   mobileLabel,
   headerAction,
   showHeaderActionOnMobile = false,
+  boundedContentOnDesktop = false,
   onItemSelect,
   children,
 }: PageNavigationShellProps<T>) {
   return (
-    <div className="flex h-full min-h-0 w-full flex-1 flex-col gap-6 overflow-x-hidden overflow-y-auto px-4 py-6 md:py-8 lg:flex-row lg:items-start">
+    <div
+      className={cn(
+        'flex h-full min-h-0 w-full flex-1 flex-col gap-6 overflow-x-hidden overflow-y-auto px-4 py-6 md:py-8 lg:flex-row lg:items-start',
+        boundedContentOnDesktop && 'md:overflow-y-hidden',
+      )}
+    >
       <aside className="hidden lg:block lg:w-60 lg:shrink-0 lg:absolute">
         <nav className="space-y-1 pl-3">
           {items.map((item) => {
@@ -83,7 +90,13 @@ export function PageNavigationShell<T extends string = string>({
         </nav>
       </aside>
 
-      <div className="min-w-0 flex-1 space-y-6 lg:ml-68 max-w-6xl">
+      <div
+        className={cn(
+          'min-w-0 flex-1 space-y-6 lg:ml-68 max-w-6xl',
+          boundedContentOnDesktop &&
+            'md:flex md:h-full md:min-h-0 md:flex-col md:gap-6 md:space-y-0',
+        )}
+      >
         <div className="space-y-4 lg:hidden">
           <Select
             value={activeItemId}
@@ -141,7 +154,15 @@ export function PageNavigationShell<T extends string = string>({
           ) : null}
         </header>
 
-        <div className="space-y-6">{children}</div>
+        <div
+          className={cn(
+            'space-y-6',
+            boundedContentOnDesktop &&
+              'md:flex md:min-h-0 md:flex-1 md:flex-col md:space-y-0',
+          )}
+        >
+          {children}
+        </div>
       </div>
     </div>
   );

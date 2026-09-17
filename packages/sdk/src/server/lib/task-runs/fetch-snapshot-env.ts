@@ -30,6 +30,7 @@ export async function fetchSnapshotEnv(
 
   const taskRun = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, runId),
+    with: { task: { columns: { privacy: true } } },
   });
 
   if (!taskRun) {
@@ -50,6 +51,7 @@ export async function fetchSnapshotEnv(
   const sourceControlToken = await createSourceControlTokenForTaskRun(
     taskRun,
     tag,
+    { readOnly: taskRun.task?.privacy === 'private' },
   );
 
   if (!sourceControlToken) {

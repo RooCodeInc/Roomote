@@ -11,7 +11,6 @@ import {
   type RunLaunchClass,
   type SourceControlProvider,
   type TaskInitiator,
-  type TaskGoalInput,
   type TaskSurface,
   type TaskTrigger,
   type TaskVisibility,
@@ -42,6 +41,7 @@ import {
   isManagedDeploymentReadOnly,
   isRoomoteDeploymentDisabled,
 } from '@roomote/types';
+import { captureUserStartedSessionCreated } from './session-telemetry';
 import { Env, isRoomoteCloudEnabled } from '@roomote/env';
 import {
   type TaskRun,
@@ -51,9 +51,12 @@ import {
   ensureAutomationRowsOnce,
   ensureSessionForTask,
   isChatGptSubscriptionConnected,
+  createChatInitiationOrder,
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
   projectPendingPrReviewEventsForAssociation,
+  isChatInitiationProvider,
+  recordUserChatInitiationProvider,
   recordTaskStartParallelCount,
   syncTaskStateFromRuns,
   taskPullRequests,
@@ -68,6 +71,7 @@ import {
   desc,
   eq,
   inArray,
+  isNotNull,
   isNull,
   lt,
   recordSnapshotResumeEvent,
@@ -1004,7 +1008,6 @@ export type FreshTaskLaunch = {
   task: FreshTask;
   /** Reuse the durable task identity for a later PR review run. */
   existingTaskId?: string;
-  goal?: TaskGoalInput;
   /** Explicit user-facing title. Locked against all LLM title generation. */
   title?: string;
   initiator: TaskInitiator;
@@ -1012,6 +1015,7 @@ export type FreshTaskLaunch = {
   surface: TaskSurface;
   trigger: TaskTrigger;
   visibility?: TaskVisibility;
+  privacy?: 'shared' | 'private';
   channels?: TaskChannelBindings;
   /** Required when workflow is 'pr_review' or 'pr_conflict_resolve'. */
   prLinkage?: TaskPrLinkage;
@@ -1353,13 +1357,18 @@ export async function enqueueTask(
   input: EnqueueTaskInput,
   options: EnqueueTaskOptions = {},
 ): Promise<TaskRun> {
+  const chatInitiationOrder = createChatInitiationOrder();
   await assertDeploymentIsActive();
 
   if (input.task.type === TaskPayloadKind.SnapshotResume) {
     return enqueueSnapshotResume(input as ResumeTaskLaunch, options);
   }
 
-  return enqueueFreshLaunch(input as FreshTaskLaunch, options);
+  return enqueueFreshLaunch(
+    input as FreshTaskLaunch,
+    options,
+    chatInitiationOrder,
+  );
 }
 
 async function inheritSourceCommunicationMetadata(
@@ -1406,11 +1415,16 @@ async function inheritSourceCommunicationMetadata(
 async function enqueueFreshLaunch(
   input: FreshTaskLaunch,
   options: EnqueueTaskOptions,
+  chatInitiationOrder: ReturnType<typeof createChatInitiationOrder>,
 ): Promise<TaskRun> {
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
+  const privacy = input.privacy ?? 'shared';
   const linkedUserId = getTaskInitiatorLinkedUserId(initiator);
   await assertUserIsNotDeleted(linkedUserId);
+  if (privacy === 'private' && (!linkedUserId || surface !== 'web')) {
+    throw new Error('Private tasks require a linked user on the web surface.');
+  }
 
   const requestedExistingTask = input.existingTaskId
     ? await db.query.tasks.findFirst({
@@ -1553,9 +1567,6 @@ async function enqueueFreshLaunch(
   }
 
   const initialPrompt = getInitialTaskPrompt(task) ?? null;
-  const initialGoalGeneration = input.goal
-    ? `goal-generation:${randomUUID()}`
-    : null;
   const externalGithubIdentity = {
     githubLogin: 'githubLogin' in task ? task.githubLogin : null,
     githubUserId: 'githubUserId' in task ? task.githubUserId : null,
@@ -1575,6 +1586,7 @@ async function enqueueFreshLaunch(
   // durable task they continue.
   const runPersistTransaction = () =>
     db.transaction(async (tx) => {
+      let replayedCanceledLaunch = false;
       if (fastAgentSessionId) {
         // Parallel launch_task calls from one Fast turn write the same
         // session and conversation rows; serializing per parent conversation
@@ -1638,8 +1650,22 @@ async function enqueueFreshLaunch(
             taskRun: existingRun,
             createdRun: false,
             reusedTask: true,
+            replayedCanceledLaunch: false,
           };
         }
+        const [canceledRun] = await tx
+          .select({ id: taskRuns.id })
+          .from(taskRuns)
+          .where(
+            and(
+              sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
+              isNotNull(taskRuns.canceledAt),
+            ),
+          )
+          .orderBy(desc(taskRuns.id))
+          .limit(1)
+          .for('update');
+        replayedCanceledLaunch = Boolean(canceledRun);
       }
       const chatgptConnected = effectiveTaskModel.startsWith('openai/')
         ? await isChatGptSubscriptionConnected(tx)
@@ -1745,7 +1771,12 @@ async function enqueueFreshLaunch(
             origin: 'follow_up',
             existingTaskReused: true,
           });
-          return { taskRun: activeRun, createdRun: false, reusedTask: true };
+          return {
+            taskRun: activeRun,
+            createdRun: false,
+            reusedTask: true,
+            replayedCanceledLaunch: false,
+          };
         }
 
         taskId = existingTask.id;
@@ -1756,6 +1787,8 @@ async function enqueueFreshLaunch(
             surface,
             trigger,
             visibility,
+            privacy,
+            privateOwnerUserId: privacy === 'private' ? linkedUserId : null,
             state: 'active',
             ...initiatorColumns,
             ...commitAuthor,
@@ -1772,13 +1805,6 @@ async function enqueueFreshLaunch(
               ? { llmTitleCheckpoint: LLM_TITLE_LOCKED_CHECKPOINT }
               : {}),
             prompt: initialPrompt,
-            goalObjective: input.goal?.objective ?? null,
-            goalStatus: input.goal ? 'active' : null,
-            goalMaxContinuations: input.goal?.maxContinuations ?? null,
-            goalLastContinuationId: initialGoalGeneration,
-            goalGenerationIds: initialGoalGeneration
-              ? [initialGoalGeneration]
-              : [],
             requestedWorkKind: requestedWorkKindDecision.kind,
             requestedWorkKindSource: requestedWorkKindDecision.source,
             requestedWorkKindConfidence: requestedWorkKindDecision.confidence,
@@ -1791,6 +1817,18 @@ async function enqueueFreshLaunch(
           },
           { db: tx },
         );
+        if (
+          initiator.kind === 'user' &&
+          linkedUserId &&
+          isChatInitiationProvider(surface)
+        ) {
+          await recordUserChatInitiationProvider(
+            linkedUserId,
+            surface,
+            chatInitiationOrder,
+            tx,
+          );
+        }
         taskId = createdTask.id;
       }
 
@@ -1913,6 +1951,7 @@ async function enqueueFreshLaunch(
         taskRun: insertedRun,
         createdRun: true,
         reusedTask: Boolean(existingTask),
+        replayedCanceledLaunch,
       };
     });
 
@@ -1932,17 +1971,36 @@ async function enqueueFreshLaunch(
     );
     persisted = await runPersistTransaction();
   }
-  const { taskRun, createdRun, reusedTask } = persisted;
+  const { taskRun, createdRun, reusedTask, replayedCanceledLaunch } = persisted;
 
   if (!createdRun) {
     return taskRun;
   }
 
   const delegated = Boolean(reusedTask || fastAgentSessionId);
-  void captureEvent(delegated ? 'session_task_delegated' : 'session_created', {
-    ...(linkedUserId ? { userId: linkedUserId } : {}),
-    properties: { surface, outcome: 'created' },
-  });
+  const userStartedSession =
+    !delegated &&
+    !replayedCanceledLaunch &&
+    initiator.kind === 'user' &&
+    linkedUserId !== null &&
+    resolvedTaskPolicy.launchClass !== 'automation' &&
+    taskRun.payloadKind !== TaskPayloadKind.SnapshotEnvironment &&
+    visibility === 'visible' &&
+    taskWithHarnessOverrides.sourceRunId == null &&
+    taskWithHarnessOverrides.payload.environmentDefinitionId == null &&
+    taskWithHarnessOverrides.payload.verifiesEnvironmentId == null;
+  if (userStartedSession) {
+    captureUserStartedSessionCreated({
+      userId: linkedUserId,
+      surface,
+      trigger,
+    });
+  } else if (delegated) {
+    void captureEvent('session_task_delegated', {
+      ...(linkedUserId ? { userId: linkedUserId } : {}),
+      properties: { surface, outcome: 'created' },
+    });
+  }
 
   if (shouldCaptureTaskCreatedEvent(taskRun.payloadKind)) {
     // Anonymous analytics (no-op unless enabled): task creation with
@@ -2114,16 +2172,46 @@ const RELAUNCHABLE_FAILED_START_PAYLOAD_KINDS: ReadonlySet<TaskPayloadKind> =
  * before provisioning and must not block restart after a failed start;
  * anything else means the run did work a relaunch would redo.
  */
-async function hasNonKickoffTaskMessages(runId: number): Promise<boolean> {
-  const priorHarnessMessage = await db.query.taskMessages.findFirst({
-    where: and(
-      eq(taskMessages.runId, runId),
-      sql`coalesce(${taskMessages.metadata}->>'source', '') <> ${TASK_KICKOFF_MESSAGE_SOURCE}`,
-    ),
-    columns: { id: true },
-  });
+type FailedStartRunCandidate = Pick<
+  TaskRun,
+  'id' | 'status' | 'payloadKind' | 'payload'
+>;
 
-  return Boolean(priorHarnessMessage);
+/**
+ * Resolve failed-start retry eligibility in one query for task summary lists.
+ */
+export async function getRetryableFailedStartRunIds(
+  sourceRuns: FailedStartRunCandidate[],
+): Promise<Set<number>> {
+  const candidates = sourceRuns.filter(
+    (sourceRun) =>
+      sourceRun.status === RunStatus.Failed &&
+      isRelaunchableFailedStartPayloadKind(sourceRun.payloadKind) &&
+      Boolean(sourceRun.payload?.repo || sourceRun.payload?.environmentId),
+  );
+  if (candidates.length === 0) return new Set();
+
+  const priorHarnessMessages = await db
+    .selectDistinct({ runId: taskMessages.runId })
+    .from(taskMessages)
+    .where(
+      and(
+        inArray(
+          taskMessages.runId,
+          candidates.map((run) => run.id),
+        ),
+        sql`coalesce(${taskMessages.metadata}->>'source', '') <> ${TASK_KICKOFF_MESSAGE_SOURCE}`,
+      ),
+    );
+  const runsWithHarnessMessages = new Set(
+    priorHarnessMessages.map(({ runId }) => runId),
+  );
+
+  return new Set(
+    candidates
+      .filter((run) => !runsWithHarnessMessages.has(run.id))
+      .map((run) => run.id),
+  );
 }
 
 /**
@@ -2133,25 +2221,10 @@ async function hasNonKickoffTaskMessages(runId: number): Promise<boolean> {
  * command from disagreeing — a client-side approximation previously either
  * offered a retry that always errored, or hid one that would have worked.
  */
-export async function canRetryFailedStart(sourceRun: {
-  id: number;
-  status: TaskRun['status'];
-  payloadKind: TaskRun['payloadKind'];
-  payload: TaskRun['payload'];
-}): Promise<boolean> {
-  if (sourceRun.status !== RunStatus.Failed) {
-    return false;
-  }
-
-  if (!isRelaunchableFailedStartPayloadKind(sourceRun.payloadKind)) {
-    return false;
-  }
-
-  if (!sourceRun.payload?.repo && !sourceRun.payload?.environmentId) {
-    return false;
-  }
-
-  return !(await hasNonKickoffTaskMessages(sourceRun.id));
+export async function canRetryFailedStart(
+  sourceRun: FailedStartRunCandidate,
+): Promise<boolean> {
+  return (await getRetryableFailedStartRunIds([sourceRun])).has(sourceRun.id);
 }
 
 export function isRelaunchableFailedStartPayloadKind(
@@ -2184,43 +2257,61 @@ async function stampWorkspaceSourceControlProviders(
   payload: FreshTask['payload'],
   workspace: ReturnType<typeof resolveTaskWorkspace>,
 ): Promise<void> {
-  if (workspace.type === 'no_repositories') {
+  // Workspace selection controls initial checkout and tooling. The provider
+  // map instead records every active deployment repository the run may check
+  // out later through its normally authorized source-control credentials.
+  const initialScopeWorkspace =
+    workspace.type === 'no_repositories'
+      ? ({ type: 'all_repositories' } as const)
+      : workspace;
+  const [initialRepositoryProviders, workspaceHost, repositoryProviders] =
+    await Promise.all([
+      resolveWorkspaceRepositoryProviders(db, initialScopeWorkspace),
+      resolveWorkspaceSourceControlHost(db, initialScopeWorkspace),
+      resolveWorkspaceRepositoryProviders(db, { type: 'all_repositories' }),
+    ]);
+
+  if (
+    workspace.type === 'no_repositories' &&
+    Object.keys(repositoryProviders).length === 0
+  ) {
     payload.repositoryProviders = undefined;
     payload.sourceControlProvider = undefined;
     payload.sourceControlHost = undefined;
     return;
   }
 
-  const [repositoryProviders, workspaceHost] = await Promise.all([
-    resolveWorkspaceRepositoryProviders(db, workspace),
-    resolveWorkspaceSourceControlHost(db, workspace),
-  ]);
   const isAggregateWorkspace =
-    workspace.type === 'repository_set' ||
-    workspace.type === 'all_repositories';
+    initialScopeWorkspace.type === 'repository_set' ||
+    initialScopeWorkspace.type === 'all_repositories';
   const requiresCompleteCoverage =
-    isAggregateWorkspace || workspace.type === 'environment';
+    isAggregateWorkspace || initialScopeWorkspace.type === 'environment';
   const expectedRepositoryCount =
-    workspace.type === 'repository_set'
-      ? new Set(workspace.repositories).size
+    initialScopeWorkspace.type === 'repository_set'
+      ? new Set(initialScopeWorkspace.repositories).size
       : undefined;
 
+  // Preserve the existing fail-closed validation for the repositories that
+  // setup must prepare before widening the map to optional checkouts.
   if (requiresCompleteCoverage) {
-    payload.repositoryProviders = repositoryProviders;
+    payload.repositoryProviders = initialRepositoryProviders;
   }
 
   if (
     requiresCompleteCoverage &&
-    (Object.keys(repositoryProviders).length === 0 ||
+    (Object.keys(initialRepositoryProviders).length === 0 ||
       (expectedRepositoryCount !== undefined &&
-        Object.keys(repositoryProviders).length !== expectedRepositoryCount))
+        Object.keys(initialRepositoryProviders).length !==
+          expectedRepositoryCount))
   ) {
     payload.sourceControlProvider = undefined;
     payload.sourceControlHost = undefined;
     return;
   }
 
-  const providers = Object.values(repositoryProviders);
+  payload.repositoryProviders = repositoryProviders;
+
+  const providers = Object.values(initialRepositoryProviders);
   const spansProviders = new Set(providers).size > 1;
 
   if (requiresCompleteCoverage && !spansProviders) {
@@ -2228,7 +2319,7 @@ async function stampWorkspaceSourceControlProviders(
   }
 
   if (spansProviders && !requiresCompleteCoverage) {
-    payload.repositoryProviders = repositoryProviders;
+    payload.sourceControlHost = undefined;
   }
 
   const primaryProvider = providers[0];
@@ -2301,7 +2392,7 @@ export async function enqueueTaskRelaunch(
     );
   }
 
-  if (await hasNonKickoffTaskMessages(sourceRun.id)) {
+  if (!(await getRetryableFailedStartRunIds([sourceRun])).has(sourceRun.id)) {
     throw new Error(
       'Only failed environment starts can be restarted. This run already has task messages.',
     );
@@ -2550,7 +2641,7 @@ function inheritSnapshotResumeCommunicationContext(
     !Array.isArray(sourcePayload) &&
     (sourcePayload as Record<string, unknown>).liveTaskStream === true
   ) {
-    // The card in the Slack thread belongs to the task; every resumed run
+    // The provider-native live message belongs to the task; every resumed run
     // must keep updating it.
     payload.liveTaskStream = true;
   }

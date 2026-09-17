@@ -9,6 +9,7 @@ import {
 import {
   and,
   asc,
+  count,
   db,
   eq,
   fastAgentParentEvents,
@@ -27,6 +28,7 @@ import {
   RunStatus,
   exitedRunStatuses,
   type FastAgentParent,
+  type FastAgentHumanFollowUpEvent,
 } from '@roomote/types';
 
 import {
@@ -43,6 +45,46 @@ export type FastAgentParentEventQueueRequest = {
   conversationId: string;
   eventKey: string;
 };
+
+function buildSetupDiscoveryCompletedEvent(
+  event: FastAgentHumanFollowUpEvent,
+): FastAgentHumanFollowUpEvent | null {
+  if (!event.setupContext) return null;
+  const snapshot = JSON.parse(event.setupContext.setupSnapshot) as Record<
+    string,
+    unknown
+  >;
+  const discovery =
+    snapshot.integrationDiscovery &&
+    typeof snapshot.integrationDiscovery === 'object' &&
+    !Array.isArray(snapshot.integrationDiscovery)
+      ? (snapshot.integrationDiscovery as Record<string, unknown>)
+      : {};
+  const nextSnapshot = {
+    ...snapshot,
+    integrationDiscovery: { ...discovery, completed: true },
+  };
+  const eventId = `${event.eventId}:integration-discovery-completed`;
+  return {
+    type: 'human_follow_up',
+    eventId,
+    currentMessageId: eventId,
+    userId: event.userId,
+    question: `<platform_event>${JSON.stringify({
+      type: 'setup_state_changed',
+      snapshot: nextSnapshot,
+      changes: [{ type: 'integration_discovery_completed' }],
+    })}</platform_event>`,
+    turnSource: 'platform_event',
+    platformEventKind: 'setup',
+    platformEventVisibility: 'required',
+    setupSession: true,
+    setupContext: {
+      ...event.setupContext,
+      setupSnapshot: JSON.stringify(nextSnapshot),
+    },
+  };
+}
 type FastAgentPullRequestOpenedEvent = Extract<
   FastAgentParentEvent,
   { type: 'pull_request_opened' }
@@ -391,6 +433,10 @@ export async function drainFastAgentParentEvents(
           conversationId: request.conversationId,
           eventKey: row.eventKey,
         };
+        const durableSetupEvent =
+          row.event.type === 'human_follow_up' && row.event.setupContext
+            ? row.event
+            : null;
         if (row.admission === 'inline') {
           // Bind the row to the lock the way the inline surfaces do, so a
           // process shutdown that aborts this turn before it reaches its own
@@ -428,6 +474,19 @@ export async function drainFastAgentParentEvents(
                     wakeFastAgentParentEventNow(wakeRequest),
                   requestDurableRetry: (retryAt: Date) =>
                     wakeFastAgentParentEventAt(wakeRequest, retryAt),
+                }
+              : {}),
+            ...(durableSetupEvent
+              ? {
+                  onSetupIntegrationDiscoveryCompleted: async () => {
+                    const continuation =
+                      buildSetupDiscoveryCompletedEvent(durableSetupEvent);
+                    if (!continuation) return;
+                    await enqueueFastAgentParentEvent({
+                      parent: row.parent,
+                      event: continuation,
+                    });
+                  },
                 }
               : {}),
           },
@@ -494,6 +553,44 @@ export async function drainFastAgentParentEvents(
   } finally {
     await turnLock().catch(() => {});
   }
+}
+
+/**
+ * When the queue worker became responsible for a pending row. A row queued
+ * at creation has waited since then; an inline-admitted row only since its
+ * owner released the claim (`updated_at`, which the release stamps) or let
+ * it expire (`claimed_until`); a durably scheduled retry only since its due
+ * time. Any later bookkeeping write (`updated_at`) also restarts the clock,
+ * since it proves something is still working the row.
+ */
+const queueEligibleSince = () => sql`GREATEST(
+  ${fastAgentParentEvents.createdAt},
+  ${fastAgentParentEvents.updatedAt},
+  COALESCE(${fastAgentParentEvents.claimedUntil}, ${fastAgentParentEvents.createdAt}),
+  COALESCE(${fastAgentParentEvents.retryAt}, ${fastAgentParentEvents.createdAt})
+)`;
+
+/**
+ * Pending events the queue worker has owed a delivery since before
+ * `olderThan`: undelivered, undiscarded, not waiting on a scheduled retry,
+ * and without a live inline claim, measured from the moment the queue became
+ * responsible rather than from creation. A non-zero count means the queue
+ * worker is not draining, which is what `/health/bullmq` reports.
+ */
+export async function countOverdueQueuedFastAgentParentEvents(
+  olderThan: Date,
+): Promise<number> {
+  // A Date inside a raw fragment binds as Date#toString, which Postgres
+  // rejects; the drizzle column serializer only runs for column-typed
+  // comparisons. Bind the ISO text and cast to the columns' own type.
+  const olderThanParam = sql`${olderThan.toISOString()}::timestamp`;
+  const [row] = await db
+    .select({ count: count() })
+    .from(fastAgentParentEvents)
+    .where(
+      and(pendingPredicate(), sql`${queueEligibleSince()} < ${olderThanParam}`),
+    );
+  return row?.count ?? 0;
 }
 
 /** Recreate BullMQ wakeups for durable rows after restarts or Redis outages. */

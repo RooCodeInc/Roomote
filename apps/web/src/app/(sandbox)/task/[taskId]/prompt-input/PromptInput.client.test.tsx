@@ -7,6 +7,7 @@ import {
 import {
   act,
   cleanup,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -26,7 +27,6 @@ const {
   removeOptimisticMessageMock,
   removeOptimisticQueuedMessageMock,
   sandboxSendPromptMutateMock,
-  taskRunStartGoalMutateMock,
   taskRunCancelMutateMock,
   toastErrorMock,
   toastSuccessMock,
@@ -65,7 +65,6 @@ const {
   removeOptimisticMessageMock: vi.fn(),
   removeOptimisticQueuedMessageMock: vi.fn(),
   sandboxSendPromptMutateMock: vi.fn(),
-  taskRunStartGoalMutateMock: vi.fn(),
   taskRunCancelMutateMock: vi.fn(),
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
@@ -151,10 +150,12 @@ vi.mock('@/components/ai-elements', () => {
   return {
     PromptInput: ({
       children,
+      keepFocusOnSubmit: _keepFocusOnSubmit,
       onSubmit,
       ...props
     }: Omit<ComponentPropsWithoutRef<'form'>, 'onSubmit'> & {
       children: ReactNode;
+      keepFocusOnSubmit?: boolean;
       onSubmit?: (message: {
         text: string;
         files?: Array<{
@@ -162,17 +163,18 @@ vi.mock('@/components/ai-elements', () => {
           filename?: string;
           mediaType?: string;
         }>;
-      }) => void;
+      }) => void | Promise<void>;
     }) => (
       <form
         {...props}
         onSubmit={(event) => {
           event.preventDefault();
           const textarea = event.currentTarget.querySelector('textarea');
-          onSubmit?.({
+          const result = onSubmit?.({
             text: textarea?.value ?? '',
             files: submittedFilesRef.current,
           });
+          if (result instanceof Promise) void result.catch(() => undefined);
         }}
       >
         {children}
@@ -360,7 +362,6 @@ describe('PromptInput', () => {
       },
     });
     sandboxSendPromptMutateMock.mockResolvedValue({ success: true });
-    taskRunStartGoalMutateMock.mockResolvedValue({ success: true });
     taskRunCancelMutateMock.mockResolvedValue({ success: true });
     preparePromptAttachmentsMock.mockImplementation(async (input) => ({
       text: input.text,
@@ -372,9 +373,6 @@ describe('PromptInput', () => {
         },
       },
       taskRuns: {
-        startGoal: {
-          mutate: taskRunStartGoalMutateMock,
-        },
         cancel: {
           mutate: taskRunCancelMutateMock,
         },
@@ -530,8 +528,10 @@ describe('PromptInput', () => {
       expect(taskRunCancelMutateMock).toHaveBeenCalledWith({
         taskId: 'task-disconnected',
         runId: 42,
+        terminate: false,
       });
     });
+    expect(toastErrorMock).not.toHaveBeenCalled();
   });
 
   it('falls back to the web API when sandbox cancellation fails', async () => {
@@ -568,8 +568,10 @@ describe('PromptInput', () => {
       expect(taskRunCancelMutateMock).toHaveBeenCalledWith({
         taskId: 'task-fallback',
         runId: 43,
+        terminate: false,
       });
     });
+    expect(toastErrorMock).not.toHaveBeenCalled();
   });
 
   it('falls back to the web API when sandbox cancellation hangs', async () => {
@@ -612,7 +614,9 @@ describe('PromptInput', () => {
       expect(taskRunCancelMutateMock).toHaveBeenCalledWith({
         taskId: 'task-hung',
         runId: 45,
+        terminate: false,
       });
+      expect(toastErrorMock).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -649,6 +653,114 @@ describe('PromptInput', () => {
       expect(sandboxCancelMutateMock).toHaveBeenCalledTimes(1);
     });
     expect(taskRunCancelMutateMock).not.toHaveBeenCalled();
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('shows the web API error and allows retrying after cancellation fails', async () => {
+    useSandboxTaskPhaseMock.mockReturnValue('running');
+    taskRunCancelMutateMock.mockResolvedValueOnce({
+      success: false,
+      error: 'This task cannot be stopped.',
+    });
+
+    render(
+      <PromptInput
+        taskRun={createTaskRun(46, { taskId: 'task-result-error' })}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    const stopButton = screen.getByRole('button', { name: 'Stop' });
+    fireEvent.click(stopButton);
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'This task cannot be stopped.',
+      );
+    });
+
+    fireEvent.click(stopButton);
+
+    await waitFor(() => {
+      expect(taskRunCancelMutateMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('shows safe fallback copy when the final cancellation path throws', async () => {
+    const sandboxCancelMutateMock = vi
+      .fn()
+      .mockRejectedValue(new Error('WebSocket disconnected'));
+
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    useSandboxTaskPhaseMock.mockReturnValue('running');
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        cancelTask: { mutate: sandboxCancelMutateMock },
+        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+      },
+    });
+    taskRunCancelMutateMock.mockRejectedValueOnce(
+      new Error('Sensitive upstream failure'),
+    );
+
+    render(
+      <PromptInput
+        taskRun={createTaskRun(47, { taskId: 'task-thrown-error' })}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Failed to stop task. Please try again.',
+      );
+    });
+    expect(toastErrorMock).not.toHaveBeenCalledWith(
+      'Sensitive upstream failure',
+    );
+  });
+
+  it('fences repeated stop clicks only while cancellation is pending', async () => {
+    let resolveCancellation!: (result: { success: true }) => void;
+    taskRunCancelMutateMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCancellation = resolve;
+        }),
+    );
+    useSandboxTaskPhaseMock.mockReturnValue('running');
+
+    render(
+      <PromptInput
+        taskRun={createTaskRun(48, { taskId: 'task-click-fence' })}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    const stopButton = screen.getByRole('button', { name: 'Stop' });
+    fireEvent.click(stopButton);
+    fireEvent.click(stopButton);
+
+    expect(taskRunCancelMutateMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveCancellation({ success: true });
+    });
+    fireEvent.click(stopButton);
+
+    await waitFor(() => {
+      expect(taskRunCancelMutateMock).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('hides the connecting status when the transport already failed', () => {
@@ -912,55 +1024,7 @@ describe('PromptInput', () => {
     expect(directSandboxSendPromptMock).not.toHaveBeenCalled();
   });
 
-  it('queues Goal Mode optimistically during an active turn', async () => {
-    useSandboxConnectedMock.mockReturnValue(true);
-    useSandboxConnectionStatusMock.mockReturnValue({
-      connected: true,
-      connectionError: false,
-      reconnect: vi.fn(),
-    });
-    useSandboxTaskPhaseMock.mockReturnValue('running');
-    useSandboxClientMock.mockReturnValue({
-      commands: {
-        sendPrompt: { mutate: vi.fn() },
-        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
-      },
-    });
-
-    render(
-      <PromptInput
-        taskRun={createTaskRun(43, { taskId: 'task-goal' })}
-        onFileSearchOpen={() => {}}
-        onCommandSearchOpen={() => {}}
-      />,
-    );
-
-    const textarea = screen.getByPlaceholderText(/Message agent/i);
-    fireEvent.change(textarea, {
-      target: { value: '/goal ship the release' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-
-    await waitFor(() => {
-      expect(taskRunStartGoalMutateMock).toHaveBeenCalledWith({
-        taskId: 'task-goal',
-        goal: { objective: 'ship the release' },
-        clientMessageId: expect.any(String),
-        userImageUrl: undefined,
-      });
-    });
-    expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
-    expect(appendOptimisticQueuedMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: 'ship the release',
-        optimistic: true,
-      }),
-    );
-    expect(appendOptimisticAcpEventMock).not.toHaveBeenCalled();
-    expect(toastSuccessMock).toHaveBeenCalledWith('Goal Mode enabled');
-  });
-
-  it('requires an objective for the Goal Mode command', () => {
+  it('directs /goal users to the owning Session instead of the task', () => {
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: true,
@@ -983,14 +1047,13 @@ describe('PromptInput', () => {
     );
 
     fireEvent.change(screen.getByPlaceholderText(/Message agent/i), {
-      target: { value: '/goal' },
+      target: { value: '/goal ship the release' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     expect(toastErrorMock).toHaveBeenCalledWith(
-      'Describe the goal after /goal.',
+      'Start Goal Mode from the Session conversation.',
     );
-    expect(taskRunStartGoalMutateMock).not.toHaveBeenCalled();
     expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
   });
 
@@ -1051,6 +1114,63 @@ describe('PromptInput', () => {
       }),
     );
     expect(queryClientSetQueryDataMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the prompt and attachment when attachment preparation fails', async () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        sendPrompt: { mutate: vi.fn() },
+        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+      },
+    });
+    submittedFilesRef.current = [
+      {
+        url: 'https://attachments.example/report.txt',
+        filename: 'report.txt',
+        mediaType: 'text/plain',
+      },
+    ];
+    preparePromptAttachmentsMock
+      .mockRejectedValueOnce(
+        new Error('Failed to download "report.txt" (HTTP 403).'),
+      )
+      .mockResolvedValueOnce({ text: 'Analyze report' });
+
+    render(
+      <PromptInput
+        taskRun={createTaskRun(42, { taskId: 'task-web-send' })}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText(/Message agent/i);
+    fireEvent.change(textarea, { target: { value: 'Analyze report' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Failed to download "report.txt" (HTTP 403).',
+      );
+    });
+    expect(textarea).toHaveValue('Analyze report');
+    expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(preparePromptAttachmentsMock).toHaveBeenLastCalledWith({
+        text: 'Analyze report',
+        attachments: submittedFilesRef.current,
+      });
+      expect(sandboxSendPromptMutateMock).toHaveBeenCalledOnce();
+    });
   });
 
   it.each(['running', 'waiting_for_user_input'] as const)(
@@ -1368,11 +1488,13 @@ describe('PromptInput ghost suggestion', () => {
         name: 'Insert suggested message',
       });
 
-      expect(
-        fireEvent.pointerDown(hint, { pointerType, cancelable: true }),
-      ).toBe(false);
+      const pointerDown = createEvent.pointerDown(hint, { cancelable: true });
+      Object.defineProperty(pointerDown, 'pointerType', { value: pointerType });
+      expect(fireEvent(hint, pointerDown)).toBe(false);
       expect(textarea).toHaveFocus();
-      fireEvent.click(hint);
+      if (pointerType === 'mouse') {
+        fireEvent.click(hint);
+      }
 
       expect(textarea).toHaveValue(suggestion);
       expect(textarea).toHaveFocus();
@@ -1475,14 +1597,17 @@ describe('PromptInput ghost suggestion', () => {
       {
         eventType: 'roomote_runtime.user_prompt',
         text: 'Fix the login redirect',
+        ts: 100,
       },
       {
         eventType: 'roomote_runtime.assistant_message',
         text: 'The redirect is fixed',
+        ts: 200,
       },
       {
         eventType: 'roomote_runtime.tool_call',
         text: 'This UI-only event must not advance the cache',
+        ts: 300,
       },
     ];
     useTaskMessageEnvelopesMock.mockImplementation(() => ({ data: history }));
@@ -1495,7 +1620,7 @@ describe('PromptInput ghost suggestion', () => {
     const { rerender } = render(<PromptInput {...props} />);
 
     expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
-      input: { historyRevision: 1 },
+      input: { historyRevision: 200 },
     });
 
     // A user message alone must not advance the revision: only a completed
@@ -1505,12 +1630,13 @@ describe('PromptInput ghost suggestion', () => {
       {
         eventType: 'roomote_runtime.user_prompt',
         text: 'Please add a regression test',
+        ts: 400,
       },
     ];
     rerender(<PromptInput {...props} />);
 
     expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
-      input: { historyRevision: 1 },
+      input: { historyRevision: 200 },
     });
 
     history = [
@@ -1518,12 +1644,13 @@ describe('PromptInput ghost suggestion', () => {
       {
         eventType: 'roomote_runtime.assistant_message',
         text: 'The regression test now passes',
+        ts: 500,
       },
     ];
     rerender(<PromptInput {...props} />);
 
     expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
-      input: { historyRevision: 2 },
+      input: { historyRevision: 500 },
     });
   });
 

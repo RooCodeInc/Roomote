@@ -4,6 +4,8 @@ import {
   extractAutomationTriggeredPromptText,
   extractAcpMessageText,
   getTextFromContentBlocks,
+  hasLeadingIntegrationSavedBlock,
+  stripLeadingIntegrationSavedBlock,
   parsePrReviewActionOffer,
   type PrReviewActionOfferStatus,
   sanitizeEnvelopeFields,
@@ -20,6 +22,7 @@ import {
   inArray,
   isNull,
   or,
+  privateFastSessionAccess,
   sessions,
   sql,
   taskArtifacts,
@@ -28,6 +31,7 @@ import {
   users,
 } from '@roomote/db/server';
 import type { FastAgentMessage } from '@roomote/db';
+import { getRetryableFailedStartRunIds } from '@roomote/cloud-agents/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { getTaskMessageReference } from '@/lib/task-message-reference';
@@ -59,6 +63,7 @@ type FastSessionTaskSummary = {
   latestRun: {
     status: (typeof taskRuns.$inferSelect)['status'];
     taskPhase: (typeof taskRuns.$inferSelect)['taskPhase'];
+    canRetryFailedStart: boolean;
   };
 };
 
@@ -313,6 +318,7 @@ const fastSessionSelection = {
   ownerName: users.name,
   ownerEmail: users.email,
   ownerImageUrl: users.imageUrl,
+  privacy: fastAgentConversations.privacy,
   title: fastAgentConversations.title,
   model: fastAgentConversations.model,
   reasoningEffort: fastAgentConversations.reasoningEffort,
@@ -345,13 +351,13 @@ export async function findAccessibleFastSession(
   return findFastSession(sessionId, fastSessionScope(auth));
 }
 
-/** Direct-link reads for authenticated deployment members, not action authorization. */
+/** Shared direct links stay collaborative; private reads require the owner. */
 export async function findReadableFastSession(
   auth: FastSessionAuth,
   sessionId: string,
 ) {
   if (!auth.userId) return null;
-  return findFastSession(sessionId);
+  return findFastSession(sessionId, privateFastSessionAccess(auth));
 }
 
 async function findFastSession(
@@ -431,6 +437,8 @@ export async function getFastSessionTasks(
         latestRunId: taskRuns.id,
         status: taskRuns.status,
         taskPhase: taskRuns.taskPhase,
+        payloadKind: taskRuns.payloadKind,
+        payload: taskRuns.payload,
         machineDomain: taskRuns.machineDomain,
         machineDomains: taskRuns.machineDomains,
         initialPaths: taskRuns.initialPaths,
@@ -460,6 +468,8 @@ export async function getFastSessionTasks(
       latestRunId: latestRunPerTask.latestRunId,
       status: latestRunPerTask.status,
       taskPhase: latestRunPerTask.taskPhase,
+      payloadKind: latestRunPerTask.payloadKind,
+      payload: latestRunPerTask.payload,
       machineDomain: latestRunPerTask.machineDomain,
       machineDomains: latestRunPerTask.machineDomains,
       initialPaths: latestRunPerTask.initialPaths,
@@ -482,6 +492,8 @@ export async function getFastSessionTasks(
       latestRunPerTask.latestRunId,
       latestRunPerTask.status,
       latestRunPerTask.taskPhase,
+      latestRunPerTask.payloadKind,
+      latestRunPerTask.payload,
       latestRunPerTask.machineDomain,
       latestRunPerTask.machineDomains,
       latestRunPerTask.initialPaths,
@@ -494,6 +506,14 @@ export async function getFastSessionTasks(
     )
     .orderBy(desc(latestRunPerTask.latestRunId));
 
+  const retryableFailedStartRunIds = await getRetryableFailedStartRunIds(
+    rows.map((row) => ({
+      id: row.latestRunId,
+      status: row.status,
+      payloadKind: row.payloadKind,
+      payload: row.payload,
+    })),
+  );
   const taskIds = rows.map((row) => row.taskId);
   const previewConfig = taskIds.length
     ? await getSessionPreviewProxyConfig()
@@ -537,6 +557,7 @@ export async function getFastSessionTasks(
     latestRun: {
       status: row.status,
       taskPhase: row.taskPhase,
+      canRetryFailedStart: retryableFailedStartRunIds.has(row.latestRunId),
     },
   }));
 }
@@ -582,6 +603,28 @@ function prepareFastSessionMessageRow<
     (row.payload as Record<string, unknown> | null) ?? null,
     { maxOutputChars: ACP_UI_TOOL_OUTPUT_MAX_CHARS },
   );
+
+  if (
+    row.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
+    sanitized.metadata?.visibleInTranscript !== false
+  ) {
+    // The turn Roomote sends after the owner saves an integration key starts
+    // with one `<integration_saved>` block; the transcript shows only the text
+    // after it. Only that exact leading envelope is recognized, so a block
+    // quoted or pasted anywhere else in a human message stays as written.
+    const text = getTextFromContentBlocks(sanitized.contentBlocks) ?? '';
+    if (hasLeadingIntegrationSavedBlock(text)) {
+      return {
+        ...row,
+        contentBlocks: [
+          { type: 'text', text: stripLeadingIntegrationSavedBlock(text) },
+          ...sanitized.contentBlocks.filter((block) => block.type !== 'text'),
+        ],
+        metadata: sanitized.metadata,
+        payload: sanitized.payload ?? {},
+      };
+    }
+  }
 
   if (sanitized.metadata?.visibleInTranscript === false) {
     if (
@@ -768,11 +811,12 @@ export async function getFastSessionSuggestableMessages(
     id: row.id,
     eventType: row.eventType,
     role: row.role,
-    text:
+    text: visibleSuggestableText(
       extractAcpMessageText(
         row.contentBlocks,
         (row.payload as Record<string, unknown> | null) ?? null,
       ) ?? null,
+    ),
   }));
 }
 
@@ -785,7 +829,12 @@ export async function getFastSessionById(
     .select(fastSessionSelection)
     .from(fastAgentConversations)
     .leftJoin(users, eq(fastAgentConversations.userId, users.id))
-    .where(eq(fastAgentConversations.id, sessionId))
+    .where(
+      and(
+        eq(fastAgentConversations.id, sessionId),
+        privateFastSessionAccess(auth),
+      ),
+    )
     .limit(1);
 
   if (!session) {
@@ -884,4 +933,10 @@ export async function getFastSessionById(
     directInferenceCostMicroUsd,
     inferenceCostMicroUsd: directInferenceCostMicroUsd,
   };
+}
+
+function visibleSuggestableText(text: string | null): string | null {
+  return text && hasLeadingIntegrationSavedBlock(text)
+    ? stripLeadingIntegrationSavedBlock(text)
+    : text;
 }

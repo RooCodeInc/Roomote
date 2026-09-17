@@ -353,6 +353,7 @@ async function handleSuggestionLaunchCallback(params: {
               originSessionId,
               conversation,
             }),
+            userInitiated: { surface: 'telegram', trigger: 'message' },
           });
           // Resolve on admission, not on turn completion: the claim is
           // finalized as soon as the Fast session accepts the follow-up, and

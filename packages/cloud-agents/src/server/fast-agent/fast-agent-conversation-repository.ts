@@ -42,6 +42,8 @@ export type FastAgentConversationRecord = {
   id: string;
   userId: string | null;
   owner: FastAgentConversationOwner;
+  privacy?: 'shared' | 'private';
+  privateOwnerUserId?: string | null;
   title: string | null;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
@@ -67,6 +69,8 @@ export type FastAgentMessageWrite = Omit<
 
 export type FastAgentMessageUpsertResult = {
   initialHumanTurn: boolean;
+  /** True only for the transaction that created this canonical event row. */
+  inserted?: boolean;
 };
 
 export const INTERRUPTED_INFERENCE_RETRY_MESSAGE =
@@ -824,6 +828,8 @@ export interface FastAgentConversationRepository {
     sessionId?: string;
     /** Title to seed only when this call creates the conversation. */
     initialTitle?: string;
+    /** Creation value or explicit assertion; omission preserves an existing mode. */
+    privacy?: 'shared' | 'private';
     initialModel?: string;
     initialReasoningEffort?: ReasoningEffort;
   }): Promise<FastAgentConversationGetOrCreateResult>;
@@ -831,6 +837,9 @@ export interface FastAgentConversationRepository {
     id: string;
     fallbackConversation?: FastAgentConversation;
   }): Promise<FastAgentConversationRecord | null>;
+  findByConversation(
+    conversation: FastAgentConversation,
+  ): Promise<FastAgentConversationRecord | null>;
   getLookupIds(id: string): Promise<string[]>;
   exists(conversation: FastAgentConversation): Promise<boolean>;
   appendVisibleMessages(input: {
@@ -840,6 +849,7 @@ export interface FastAgentConversationRepository {
   upsertMessage(input: {
     conversationId: string;
     message: FastAgentMessageWrite;
+    insertOnly?: boolean;
   }): Promise<FastAgentMessageUpsertResult>;
   /** `null` forgets the native session so the next turn rebuilds it. */
   setOpenCodeSession(input: {
@@ -965,6 +975,8 @@ async function loadConversationRecord(
     id: record.id,
     userId: record.userId,
     owner,
+    privacy: record.privacy,
+    privateOwnerUserId: record.privateOwnerUserId,
     title: record.title,
     model: record.model,
     reasoningEffort: record.reasoningEffort,
@@ -982,6 +994,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
       conversation,
       sessionId,
       initialTitle,
+      privacy,
       initialModel,
       initialReasoningEffort,
     }) {
@@ -989,6 +1002,14 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         owner ?? (userId ? { kind: 'user' as const, userId } : null);
       if (!resolvedOwner) {
         throw new Error('Fast conversation owner is required.');
+      }
+      if (
+        privacy === 'private' &&
+        (resolvedOwner.kind !== 'user' || conversation.surface !== 'web')
+      ) {
+        throw new Error(
+          'Private Sessions require a user-owned web conversation.',
+        );
       }
       if (resolvedOwner.kind === 'automation') {
         await ensureAutomationRowsOnce();
@@ -1018,10 +1039,35 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-session-binding:${sessionId}`}, 0))`,
           );
           const [bound] = await tx
-            .select({ fastConversationId: sessions.fastConversationId })
+            .select({
+              fastConversationId: sessions.fastConversationId,
+              privacy: sessions.privacy,
+              privateOwnerUserId: sessions.privateOwnerUserId,
+            })
             .from(sessions)
             .where(eq(sessions.id, sessionId))
             .limit(1);
+          const requestedPrivateOwner =
+            privacy === 'private' && resolvedOwner.kind === 'user'
+              ? resolvedOwner.userId
+              : null;
+          if (
+            bound &&
+            privacy !== undefined &&
+            (bound.privacy !== privacy ||
+              bound.privateOwnerUserId !== requestedPrivateOwner)
+          ) {
+            throw new Error('Session privacy does not match the conversation.');
+          }
+          if (
+            bound?.privacy === 'private' &&
+            (resolvedOwner.kind !== 'user' ||
+              bound.privateOwnerUserId !== resolvedOwner.userId)
+          ) {
+            throw new Error(
+              'Fast conversation private owner does not match the caller.',
+            );
+          }
           if (bound?.fastConversationId) {
             return {
               ...(await loadConversationRecord(tx, bound.fastConversationId)),
@@ -1039,6 +1085,11 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               ownerAutomation:
                 resolvedOwner.kind === 'automation'
                   ? resolvedOwner.automationKey
+                  : null,
+              privacy: privacy ?? 'shared',
+              privateOwnerUserId:
+                privacy === 'private' && resolvedOwner.kind === 'user'
+                  ? resolvedOwner.userId
                   : null,
               title: initialTitle?.trim() || null,
               model: initialModel,
@@ -1069,6 +1120,20 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         }
         if (!record) {
           throw new Error('Failed to create or load Fast conversation.');
+        }
+        if (privacy !== undefined && record.privacy !== privacy) {
+          throw new Error(
+            'Fast conversation privacy does not match the caller.',
+          );
+        }
+        if (
+          record.privacy === 'private' &&
+          (resolvedOwner.kind !== 'user' ||
+            record.privateOwnerUserId !== resolvedOwner.userId)
+        ) {
+          throw new Error(
+            'Fast conversation private owner does not match the caller.',
+          );
         }
         // Only an explicit owner asserts who the conversation belongs to. A
         // bare userId is the acting sender: it becomes the owner when this
@@ -1171,6 +1236,27 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
       return loadConversationRecord(db, record.id);
     },
 
+    async findByConversation(conversation) {
+      const exact = await db.query.fastAgentConversations.findFirst({
+        where: buildIdentityWhere(conversation),
+        columns: { id: true },
+      });
+      if (exact) {
+        return loadConversationRecord(db, exact.id);
+      }
+
+      const replyTargetWhere = buildReplyTargetWhere(conversation);
+      if (!replyTargetWhere) {
+        return null;
+      }
+
+      const routed = await db.query.fastAgentConversations.findFirst({
+        where: replyTargetWhere,
+        columns: { id: true },
+      });
+      return routed ? loadConversationRecord(db, routed.id) : null;
+    },
+
     async getLookupIds(id) {
       const conversationId = await resolveCanonicalId(db, id);
       const record = await db.query.fastAgentConversations.findFirst({
@@ -1183,24 +1269,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
     },
 
     async exists(conversation) {
-      const exact = await db.query.fastAgentConversations.findFirst({
-        where: buildIdentityWhere(conversation),
-        columns: { id: true },
-      });
-      if (exact) {
-        return true;
-      }
-
-      const replyTargetWhere = buildReplyTargetWhere(conversation);
-      if (!replyTargetWhere) {
-        return false;
-      }
-
-      const routed = await db.query.fastAgentConversations.findFirst({
-        where: replyTargetWhere,
-        columns: { id: true },
-      });
-      return Boolean(routed);
+      return Boolean(await this.findByConversation(conversation));
     },
 
     async appendVisibleMessages({ conversationId: requestedId, messages }) {
@@ -1236,7 +1305,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
       });
     },
 
-    async upsertMessage({ conversationId: requestedId, message }) {
+    async upsertMessage({ conversationId: requestedId, message, insertOnly }) {
       return db.transaction(async (tx) => {
         const conversationId = await resolveCanonicalId(tx, requestedId);
         await tx.execute(
@@ -1253,6 +1322,17 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         if (!conversation) {
           throw new Error('Fast conversation was not found.');
         }
+
+        const [existingEvent] = await tx
+          .select({ id: fastAgentMessages.id })
+          .from(fastAgentMessages)
+          .where(
+            and(
+              eq(fastAgentMessages.conversationId, conversationId),
+              eq(fastAgentMessages.eventId, message.eventId),
+            ),
+          )
+          .limit(1);
 
         const isSubstantiveHumanPrompt =
           message.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
@@ -1307,10 +1387,18 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
             (Boolean(currentHumanPrompt) || !hasCompatibilityHumanPrompt);
         }
 
-        await tx
+        const insert = tx
           .insert(fastAgentMessages)
-          .values({ conversationId, ...message })
-          .onConflictDoUpdate({
+          .values({ conversationId, ...message });
+        if (insertOnly) {
+          await insert.onConflictDoNothing({
+            target: [
+              fastAgentMessages.conversationId,
+              fastAgentMessages.eventId,
+            ],
+          });
+        } else {
+          await insert.onConflictDoUpdate({
             target: [
               fastAgentMessages.conversationId,
               fastAgentMessages.eventId,
@@ -1330,6 +1418,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               updatedAt: sql`now()`,
             },
           });
+        }
         await tx
           .update(fastAgentConversations)
           .set({ updatedAt: sql`now()` })
@@ -1371,7 +1460,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           }
         }
 
-        return { initialHumanTurn };
+        return { initialHumanTurn, inserted: !existingEvent };
       });
     },
 

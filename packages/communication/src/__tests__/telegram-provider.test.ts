@@ -16,7 +16,7 @@ describe('TelegramCommunicationProvider', () => {
   it('registers the supported slash commands', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+      .mockImplementation(async () => jsonResponse({ ok: true, result: true }));
     const provider = new TelegramCommunicationProvider({
       botToken: 'bot-token',
       apiBaseUrl: 'https://telegram.example.test',
@@ -25,12 +25,32 @@ describe('TelegramCommunicationProvider', () => {
 
     await provider.registerCommands();
 
-    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
-      commands: [
-        { command: 'start', description: 'Show welcome and command help' },
-        { command: 'new', description: 'Start a fresh task' },
-      ],
-    });
+    expect(
+      fetchMock.mock.calls.map(([, init]) => JSON.parse(init!.body as string)),
+    ).toEqual([
+      {
+        commands: [
+          { command: 'new', description: 'Start a fresh task' },
+          {
+            command: 'goal',
+            description: 'Keep working toward an objective',
+          },
+        ],
+        scope: { type: 'all_group_chats' },
+      },
+      {
+        commands: [
+          { command: 'start', description: 'Show welcome and command help' },
+          { command: 'help', description: 'Show command help' },
+          { command: 'new', description: 'Start a fresh task' },
+          {
+            command: 'goal',
+            description: 'Keep working toward an objective',
+          },
+        ],
+        scope: { type: 'all_private_chats' },
+      },
+    ]);
   });
 
   it('retries transient idempotent Bot API failures', async () => {
@@ -53,6 +73,159 @@ describe('TelegramCommunicationProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('shows native Thinking in a private chat topic with a stable draft id', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.sendThinkingDraft({
+      channelId: '123',
+      threadId: '77',
+      draftId: 42,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://telegram.example.test/botbot-token/sendRichMessageDraft',
+      expect.objectContaining({
+        body: JSON.stringify({
+          chat_id: 123,
+          draft_id: 42,
+          rich_message: {
+            markdown: '<tg-thinking>Roomote is working...</tg-thinking>',
+          },
+          message_thread_id: 77,
+        }),
+      }),
+    );
+  });
+
+  it('streams text through the same native Telegram draft', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.sendRichMessageDraft({
+      channelId: '123',
+      draftId: 42,
+      text: '**Highlights**\n\n- First\n- Second',
+      textFormat: 'markdown',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
+      chat_id: 123,
+      draft_id: 42,
+      rich_message: {
+        markdown: '**Highlights**\n\n- First\n- Second',
+      },
+    });
+  });
+
+  it('streams literal plain text through escaped Rich Markdown', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.sendRichMessageDraft({
+      channelId: '123',
+      draftId: 42,
+      text: '**literal** <b>not bold</b>',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
+      chat_id: 123,
+      draft_id: 42,
+      rich_message: {
+        markdown: '<p>**literal** &lt;b&gt;not bold&lt;/b&gt;</p>',
+      },
+    });
+  });
+
+  it('rejects an invalid native Thinking draft id before calling Telegram', async () => {
+    const fetchMock = vi.fn();
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.sendThinkingDraft({ channelId: '123', draftId: 0 }),
+    ).rejects.toThrow('requires a non-zero draft id');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a rich live draft above the ordinary text limit in one update', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.sendRichMessageDraft({
+        channelId: '123',
+        draftId: 42,
+        text: 'x'.repeat(4_097),
+      }),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the latest chunk visible in an oversized rich draft', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+    const text = `early ${'a'.repeat(40_000)} latest`;
+
+    await provider.sendRichMessageDraft({
+      channelId: '123',
+      draftId: 42,
+      text,
+      textFormat: 'markdown',
+    });
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
+    ) as { rich_message: { markdown: string } };
+    expect(body.rich_message.markdown).toContain('latest');
+    expect(body.rich_message.markdown).not.toContain('early');
+    expect(body.rich_message.markdown.length).toBeLessThanOrEqual(32_768);
+  });
+
+  it('rejects live drafts outside a numeric private chat', async () => {
+    const fetchMock = vi.fn();
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.sendThinkingDraft({ channelId: '-100123', draftId: 42 }),
+    ).rejects.toThrow('requires a private-chat id');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('does not retry an ambiguous server error for message delivery', async () => {
     const fetchMock = vi
       .fn()
@@ -68,7 +241,7 @@ describe('TelegramCommunicationProvider', () => {
 
     await expect(
       provider.postMessage({ channelId: '123', text: 'hello' }),
-    ).rejects.toThrow('Telegram sendMessage failed (500)');
+    ).rejects.toThrow('Telegram sendRichMessage failed (500)');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
   it('reads the private-chat topics capability from getMe', async () => {
@@ -162,7 +335,72 @@ describe('TelegramCommunicationProvider', () => {
     );
   });
 
-  it('honors an explicit reply target on the first topic message', async () => {
+  it('resolves and applies a Telegram-supported topic icon', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          ok: true,
+          result: [
+            { emoji: '💡', custom_emoji_id: 'idea-icon' },
+            { emoji: '🦠', custom_emoji_id: 'bug-icon' },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    const iconCustomEmojiId = await provider.resolveForumTopicIconCustomEmojiId(
+      ['🦠', '💡'],
+    );
+    await provider.editForumTopic({
+      channelId: '123',
+      threadId: '77',
+      name: 'Fix flaky login tests',
+      iconCustomEmojiId,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://telegram.example.test/botbot-token/getForumTopicIconStickers',
+      expect.objectContaining({ body: '{}' }),
+    );
+    expect(JSON.parse(fetchMock.mock.calls[1]![1]!.body as string)).toEqual({
+      chat_id: '123',
+      message_thread_id: 77,
+      name: 'Fix flaky login tests',
+      icon_custom_emoji_id: 'bug-icon',
+    });
+  });
+
+  it('updates a forum topic icon without resending an unchanged name', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock,
+    });
+
+    await provider.editForumTopic({
+      channelId: '123',
+      threadId: '77',
+      iconCustomEmojiId: 'idea-icon',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
+      chat_id: '123',
+      message_thread_id: 77,
+      icon_custom_emoji_id: 'idea-icon',
+    });
+  });
+
+  it('omits an explicit reply target while preserving topic routing', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({
         ok: true,
@@ -194,21 +432,14 @@ describe('TelegramCommunicationProvider', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://telegram.example.test/botbot-token/sendMessage',
+      'https://telegram.example.test/botbot-token/sendRichMessage',
       expect.objectContaining({
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           chat_id: '-100456',
-          text: 'hello from Roomote',
-          link_preview_options: {
-            is_disabled: true,
-          },
+          rich_message: { markdown: '<p>hello from Roomote</p>' },
           message_thread_id: 7,
-          reply_parameters: {
-            message_id: 42,
-            allow_sending_without_reply: true,
-          },
         }),
       }),
     );
@@ -243,7 +474,7 @@ describe('TelegramCommunicationProvider', () => {
     expect(body.reply_parameters).toBeUndefined();
   });
 
-  it('sends markdown text as Telegram HTML when textFormat is markdown', async () => {
+  it('sends markdown text through Telegram native Rich Markdown', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({
         ok: true,
@@ -264,66 +495,165 @@ describe('TelegramCommunicationProvider', () => {
 
     const body = JSON.parse(
       (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
-    ) as { text: string; parse_mode?: string };
+    ) as { rich_message: { markdown: string } };
 
-    expect(body.parse_mode).toBe('HTML');
-    expect(body.text).toBe(
-      '<b>done</b> see <a href="https://example.test/t/1">task</a>',
+    expect(body.rich_message.markdown).toBe(
+      '**done** see [task](https://example.test/t/1)',
     );
   });
 
-  it('falls back to plain text when Telegram rejects HTML entities', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse(
-          {
-            ok: false,
-            error_code: 400,
-            description:
-              "Bad Request: can't parse entities: unexpected end tag",
-          },
-          400,
-        ),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          ok: true,
-          result: { message_id: 101 },
-        }),
-      );
+  it('preserves paragraph and list Markdown for Telegram to render', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        result: { message_id: 101 },
+      }),
+    );
     const provider = new TelegramCommunicationProvider({
       botToken: 'bot-token',
       apiBaseUrl: 'https://telegram.example.test',
       fetch: fetchMock as typeof fetch,
     });
 
-    const result = await provider.postMessage({
+    await provider.postMessage({
       channelId: '123',
-      text: '**broken markdown',
+      text: '**Highlights**\n\n- **First.** Details\n- **Second.** More',
       textFormat: 'markdown',
     });
 
-    expect(result.messageId).toBe('101');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-
-    const secondBody = JSON.parse(
-      (fetchMock.mock.calls[1]?.[1] as RequestInit).body as string,
-    ) as { text: string; parse_mode?: string };
-
-    expect(secondBody.parse_mode).toBeUndefined();
-    expect(secondBody.text).toBe('**broken markdown');
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
+    ) as { rich_message: { markdown: string } };
+    expect(body.rich_message.markdown).toBe(
+      '**Highlights**\n\n- **First.** Details\n- **Second.** More',
+    );
   });
 
-  it('splits long messages into multiple sends and anchors the reply on the first', async () => {
+  it('does not fall back when Telegram rejects a rich message', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        {
+          ok: false,
+          error_code: 400,
+          description: "Bad Request: can't parse entities: unexpected end tag",
+        },
+        400,
+      ),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.postMessage({
+        channelId: '123',
+        text: '**broken markdown',
+        textFormat: 'markdown',
+      }),
+    ).rejects.toThrow('Telegram sendRichMessage failed (400)');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('posts provider-native expandable HTML without compatibility fallback', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        {
+          ok: false,
+          error_code: 400,
+          description: 'Bad Request: unsupported expandable blockquote',
+        },
+        400,
+      ),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.postMessage({
+        channelId: '123',
+        text: 'Starting task…',
+        htmlText: '<blockquote expandable>Starting task…</blockquote>',
+      }),
+    ).rejects.toThrow('Telegram sendRichMessage failed (400)');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('posts a native rich footer while preserving topic and keyboard fields', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        result: { message_id: 103, message_thread_id: 7 },
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '-100456',
+      threadId: '7',
+      replyToMessageId: '42',
+      text: '**Complete.**',
+      textFormat: 'markdown',
+      footerText: 'Reply anytime · [Open in Roomote](https://roomote.test/s/1)',
+      buttons: [[{ text: 'Open', url: 'https://roomote.test/s/1' }]],
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://telegram.example.test/botbot-token/sendRichMessage',
+    );
+    expect(
+      JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
+    ).toEqual({
+      chat_id: '-100456',
+      rich_message: {
+        markdown: [
+          '**Complete.**',
+          '',
+          '<footer>Reply anytime · <a href="https://roomote.test/s/1">Open in Roomote</a></footer>',
+        ].join('\n'),
+      },
+      message_thread_id: 7,
+      reply_markup: {
+        inline_keyboard: [[{ text: 'Open', url: 'https://roomote.test/s/1' }]],
+      },
+    });
+  });
+
+  it('does not fall back after an ambiguous rich-message server failure', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(
-        jsonResponse({ ok: true, result: { message_id: 200 } }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({ ok: true, result: { message_id: 201 } }),
-      );
+      .mockResolvedValueOnce(jsonResponse({ ok: false }, 500));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.postMessage({
+        channelId: '123',
+        text: 'Completed.',
+        footerText: 'Open in Roomote: https://roomote.test/s/1',
+      }),
+    ).rejects.toThrow('Telegram sendRichMessage failed (500)');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('keeps topic targeting and omits reply metadata on every long-message chunk', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      jsonResponse({
+        ok: true,
+        result: { message_id: fetchMock.mock.calls.length + 199 },
+      }),
+    );
     const provider = new TelegramCommunicationProvider({
       botToken: 'bot-token',
       apiBaseUrl: 'https://telegram.example.test',
@@ -331,31 +661,191 @@ describe('TelegramCommunicationProvider', () => {
     });
 
     const longText = Array.from(
-      { length: 200 },
+      { length: 2_000 },
       (_, i) => `line ${i} ${'x'.repeat(30)}`,
     ).join('\n');
     const result = await provider.postMessage({
-      channelId: '123',
+      channelId: '-100456',
+      threadId: '7',
       replyToMessageId: '42',
       text: longText,
     });
 
     expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
     expect(result.messageId).toBe('200');
-    expect(result.lastTextMessageId).toBe('201');
+    expect(result.lastTextMessageId).toBe(
+      String(fetchMock.mock.calls.length + 199),
+    );
 
     const firstBody = JSON.parse(
       (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
-    ) as { reply_parameters?: unknown };
-    const secondBody = JSON.parse(
-      (fetchMock.mock.calls[1]?.[1] as RequestInit).body as string,
-    ) as { reply_parameters?: unknown };
+    ) as { message_thread_id?: number; reply_parameters?: unknown };
+    const lastBody = JSON.parse(
+      (fetchMock.mock.calls.at(-1)?.[1] as RequestInit).body as string,
+    ) as { message_thread_id?: number; reply_parameters?: unknown };
 
-    expect(firstBody.reply_parameters).toEqual({
-      message_id: 42,
-      allow_sending_without_reply: true,
+    expect(firstBody.message_thread_id).toBe(7);
+    expect(lastBody.message_thread_id).toBe(7);
+    expect(firstBody.reply_parameters).toBeUndefined();
+    expect(lastBody.reply_parameters).toBeUndefined();
+  });
+
+  it('uses a rich footer only on the final chunk of a split reply', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      jsonResponse({
+        ok: true,
+        result: { message_id: fetchMock.mock.calls.length + 200 },
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
     });
-    expect(secondBody.reply_parameters).toBeUndefined();
+
+    await provider.postMessage({
+      channelId: '123',
+      text: 'Long narrative. '.repeat(3_000),
+      textFormat: 'markdown',
+      footerText: 'Reply anytime · [Open in Roomote](https://roomote.test/s/1)',
+    });
+
+    const methods = fetchMock.mock.calls.map((call) =>
+      String(call[0]).split('/').at(-1),
+    );
+    expect(methods.length).toBeGreaterThan(1);
+    expect(methods.every((method) => method === 'sendRichMessage')).toBe(true);
+    const bodies = fetchMock.mock.calls.map(
+      (call) =>
+        JSON.parse((call[1] as RequestInit).body as string) as {
+          rich_message: { markdown: string };
+        },
+    );
+    expect(
+      bodies
+        .slice(0, -1)
+        .every((body) => !body.rich_message.markdown.includes('<footer>')),
+    ).toBe(true);
+    expect(bodies.at(-1)?.rich_message.markdown).toContain('<footer>');
+    expect(
+      bodies.every((body) => body.rich_message.markdown.length <= 32_768),
+    ).toBe(true);
+  });
+
+  it('delivers exact-limit text unchanged in one message', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 202 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+    const text = 'x'.repeat(4_096);
+
+    await provider.postMessage({ channelId: '123', text });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(
+      JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
+    ).toMatchObject({ rich_message: { markdown: `<p>${text}</p>` } });
+  });
+
+  it('preserves leading and trailing whitespace in delivered text', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 203 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+    const text = '\n  complete response  \n';
+
+    await provider.postMessage({ channelId: '123', text });
+
+    expect(
+      JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
+    ).toMatchObject({
+      rich_message: {
+        markdown: '<p><br>  complete response  <br></p>',
+      },
+    });
+  });
+
+  it('keeps payloads above 4096 together below the rich-message limit', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      jsonResponse({
+        ok: true,
+        result: { message_id: fetchMock.mock.calls.length + 202 },
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+    const text = `${'first '.repeat(800)}\n\n${'safe '.repeat(1_000)}`;
+
+    await provider.postMessage({ channelId: '123', text });
+
+    expect(text.length).toBeGreaterThan(4_096);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(
+      JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
+    ).toMatchObject({
+      rich_message: {
+        markdown: `<p>${'first '.repeat(800)}<br><br>${'safe '.repeat(1_000)}</p>`,
+      },
+    });
+  });
+
+  it('keeps embedded native HTML above 4096 with topic routing', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      jsonResponse({
+        ok: true,
+        result: {
+          message_id: fetchMock.mock.calls.length + 210,
+          message_thread_id: 7,
+        },
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+    const text = Array.from(
+      { length: 180 },
+      (_, index) => `**section ${index}** ${'body '.repeat(8)}`,
+    ).join('\n');
+
+    const result = await provider.postMessage({
+      channelId: '-100456',
+      threadId: '7',
+      replyToMessageId: '42',
+      text,
+      htmlText: `<b>${'oversized'.repeat(600)}</b>`,
+      textFormat: 'markdown',
+    });
+
+    const bodies = fetchMock.mock.calls.map(
+      (call) =>
+        JSON.parse((call[1] as RequestInit).body as string) as {
+          rich_message: { markdown: string };
+          message_thread_id?: number;
+          reply_parameters?: { message_id: number };
+        },
+    );
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]?.rich_message.markdown.length).toBeGreaterThan(4_096);
+    expect(bodies.every((body) => body.message_thread_id === 7)).toBe(true);
+    expect(bodies[0]?.reply_parameters).toBeUndefined();
+    expect(result.lastTextMessageId).toBe('211');
   });
 
   it('requires text or images for outbound Telegram messages', async () => {
@@ -370,6 +860,123 @@ describe('TelegramCommunicationProvider', () => {
         text: '   ',
       }),
     ).rejects.toThrow('Telegram postMessage requires text or images');
+  });
+
+  it('treats an unchanged edit as an idempotent success', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          ok: false,
+          error_code: 400,
+          description: 'Bad Request: message is not modified',
+        },
+        400,
+      ),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.editMessageText({
+        channelId: '123',
+        messageId: '42',
+        text: 'Still running',
+      }),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('edits markdown through the same native Rich Markdown payload', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.editMessageText({
+      channelId: '123',
+      messageId: '42',
+      text: '# Status\n\n- [x] Complete',
+      textFormat: 'markdown',
+    });
+
+    expect(
+      JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
+    ).toMatchObject({
+      rich_message: { markdown: '# Status\n\n- [x] Complete' },
+    });
+  });
+
+  it('does not fall back when a rich edit is rejected', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        {
+          ok: false,
+          error_code: 400,
+          description: 'Bad Request: unsupported expandable blockquote',
+        },
+        400,
+      ),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.editMessageText({
+        channelId: '123',
+        messageId: '42',
+        text: 'Roomote task\nRunning\n\nProgress\nWorking',
+        htmlText:
+          '<b>Roomote task</b>\nRunning\n\n<blockquote expandable>Working</blockquote>',
+      }),
+    ).rejects.toThrow('Telegram editMessageText failed (400)');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('edits native rich-message footers with the existing keyboard contract', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.editMessageText({
+      channelId: '123',
+      messageId: '42',
+      text: 'Completed.',
+      footerText: 'Reply anytime · [Open in Roomote](https://roomote.test/s/1)',
+      buttons: [[{ text: 'Open', url: 'https://roomote.test/s/1' }]],
+    });
+
+    expect(
+      JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string),
+    ).toEqual({
+      chat_id: '123',
+      message_id: 42,
+      rich_message: {
+        markdown: [
+          '<p>Completed.</p>',
+          '',
+          '<footer>Reply anytime · <a href="https://roomote.test/s/1">Open in Roomote</a></footer>',
+        ].join('\n'),
+      },
+      link_preview_options: { is_disabled: true },
+      reply_markup: {
+        inline_keyboard: [[{ text: 'Open', url: 'https://roomote.test/s/1' }]],
+      },
+    });
   });
 
   it('sends images as native photos with captions', async () => {
@@ -406,7 +1013,7 @@ describe('TelegramCommunicationProvider', () => {
     expect(photoBody.caption).toBe('the shot');
   });
 
-  it('anchors the reply on the photo for image-only messages', async () => {
+  it('omits the reply target on a private-chat image-only message', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -430,10 +1037,31 @@ describe('TelegramCommunicationProvider', () => {
       (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
     ) as { reply_parameters?: { message_id: number } };
 
-    expect(photoBody.reply_parameters).toEqual({
-      message_id: 42,
-      allow_sending_without_reply: true,
+    expect(photoBody.reply_parameters).toBeUndefined();
+  });
+
+  it('treats whitespace-only text with an image as image-only', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 311 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
     });
+
+    await provider.postMessage({
+      channelId: '123',
+      text: '\n',
+      images: [{ url: 'https://example.test/shot.png', altText: 'the shot' }],
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://telegram.example.test/botbot-token/sendPhoto',
+    );
   });
 
   it('falls back to a link message when sendPhoto fails', async () => {
@@ -466,14 +1094,16 @@ describe('TelegramCommunicationProvider', () => {
 
     expect(result.messageId).toBe('320');
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
-      'https://telegram.example.test/botbot-token/sendMessage',
+      'https://telegram.example.test/botbot-token/sendRichMessage',
     );
 
     const fallbackBody = JSON.parse(
       (fetchMock.mock.calls[1]?.[1] as RequestInit).body as string,
-    ) as { text: string };
+    ) as { rich_message: { markdown: string } };
 
-    expect(fallbackBody.text).toBe('the shot: https://example.test/shot.png');
+    expect(fallbackBody.rich_message.markdown).toBe(
+      '<p>the shot: https://example.test/shot.png</p>',
+    );
   });
 
   it('attaches inline keyboard buttons to the last message sent', async () => {

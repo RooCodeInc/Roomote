@@ -1,4 +1,9 @@
-import { DEPLOYMENT_METADATA_BOOLEAN_CONFIG } from './config';
+import {
+  DEPLOYMENT_EXPERIMENT_IDS,
+  DEPLOYMENT_EXPERIMENT_METADATA_KEYS,
+  DEPLOYMENT_METADATA_BOOLEAN_CONFIG,
+  type DeploymentExperimentValues,
+} from './config';
 import { normalizeMetadataRecord } from './deployment-previews';
 import type { MetadataBooleanDescriptor } from './types';
 
@@ -7,7 +12,13 @@ export type {
   MetadataBooleanKind,
   MetadataRecord,
 } from './types';
-export { DEPLOYMENT_METADATA_BOOLEAN_CONFIG } from './config';
+export {
+  DEPLOYMENT_EXPERIMENT_IDS,
+  DEPLOYMENT_EXPERIMENT_METADATA_KEYS,
+  DEPLOYMENT_METADATA_BOOLEAN_CONFIG,
+  type DeploymentExperimentId,
+  type DeploymentExperimentValues,
+} from './config';
 export { normalizeMetadataRecord } from './deployment-previews';
 
 export function coerceToBoolean(value: unknown): boolean {
@@ -29,10 +40,21 @@ export function getBooleanMetadataDescriptorByKey(
   );
 }
 
+export function getDeploymentExperimentValues(
+  metadata: unknown,
+): DeploymentExperimentValues {
+  const normalizedMetadata = normalizeMetadataRecord(metadata);
+
+  return Object.fromEntries(
+    DEPLOYMENT_EXPERIMENT_IDS.map((id) => [
+      id,
+      normalizedMetadata[DEPLOYMENT_EXPERIMENT_METADATA_KEYS[id]] === true,
+    ]),
+  ) as DeploymentExperimentValues;
+}
+
 export const ANONYMOUS_ANALYTICS_METADATA_KEY =
   'anonymous_analytics_enabled' as const;
-
-export const OPENCODE_CODE_MODE_METADATA_KEY = 'opencode_code_mode' as const;
 
 export function isAnonymousAnalyticsEnabledFromMetadata(
   metadata: unknown,
@@ -44,11 +66,4 @@ export function isAnonymousAnalyticsEnabledFromMetadata(
   if (!(ANONYMOUS_ANALYTICS_METADATA_KEY in normalizedMetadata)) return true;
 
   return coerceToBoolean(normalizedMetadata[ANONYMOUS_ANALYTICS_METADATA_KEY]);
-}
-
-export function isOpenCodeCodeModeEnabledFromMetadata(
-  metadata: unknown,
-): boolean {
-  const normalizedMetadata = normalizeMetadataRecord(metadata);
-  return coerceToBoolean(normalizedMetadata[OPENCODE_CODE_MODE_METADATA_KEY]);
 }

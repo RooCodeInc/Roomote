@@ -82,7 +82,6 @@ export const ToolHeader = ({
     (deletions !== undefined && deletions > 0);
   const hasSecondaryLabel = Boolean(object || suffix);
   const statusLabel = TOOL_STATE_LABELS[state];
-  const showStatus = state === 'output-error';
   const isRunning = state === 'input-streaming' || state === 'input-available';
 
   const customIcon = iconElement ? (
@@ -137,13 +136,7 @@ export const ToolHeader = ({
           )}
         </span>
       )}
-      <span
-        aria-live="polite"
-        className={cn(
-          showStatus ? 'shrink-0 text-xs' : 'sr-only',
-          state === 'output-error' && 'text-destructive',
-        )}
-      >
+      <span aria-live="polite" className="sr-only">
         {statusLabel}
       </span>
     </>
@@ -159,7 +152,7 @@ export const ToolHeader = ({
         (isRunning ? (
           <Spinner size="sm" className="shrink-0" />
         ) : collapsible ? (
-          <CollapsibleIconTrigger icon={ActionIcon} />
+          <CollapsibleIconTrigger icon={ActionIcon} scopeToTrigger />
         ) : (
           <ActionIcon className="size-3 shrink-0" />
         ))}
@@ -204,7 +197,7 @@ export const ToolHeader = ({
   return (
     <CollapsibleTrigger
       className={cn(
-        'flex w-full items-center justify-between cursor-pointer transition-opacity hover:opacity-50 text-muted-foreground',
+        'group/collapsible-icon-trigger flex w-full items-center justify-between cursor-pointer transition-opacity hover:opacity-50 text-muted-foreground',
         className,
       )}
       {...props}

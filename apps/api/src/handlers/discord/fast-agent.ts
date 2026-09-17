@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import {
+  getDiscordMessageContent,
   getDiscordMessageCreate,
   type DiscordGatewayEvent,
   type DiscordInteraction,
@@ -39,6 +40,7 @@ import {
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   type FastAgentConversation,
   type TaskInitiator,
 } from '@roomote/types';
@@ -58,6 +60,7 @@ import {
 } from './task-launch.js';
 import { startNewDiscordTask } from './task-orchestration.js';
 import { fetchDiscordThreadHistoryBestEffort } from './thread-context.js';
+import { mentionsDiscordUserOtherThanBotOrUser } from './unmentioned-thread-reply.js';
 
 type DiscordInteractionReplyContext = {
   interaction: DiscordInteraction;
@@ -113,6 +116,7 @@ export async function processDiscordFastAgentMessage(
     senderUserId: string;
     provider: DiscordCommunicationProvider;
     applicationId: string;
+    botUserId?: string;
     channel: DiscordChannelContext;
     metadata: ReturnType<typeof discordMetadataForChannel>;
     conversationId: string;
@@ -123,6 +127,7 @@ export async function processDiscordFastAgentMessage(
     interaction?: DiscordInteractionReplyContext;
     activeTasks?: { taskId: string }[];
     directedAtRoomote?: boolean;
+    peerConversationsExperimentEnabled?: boolean;
     /** Attribution for tasks Fast delegates from this turn; automation-identity
      * turns pass their automation initiator so delegated work keeps automation
      * provenance instead of appearing installer-initiated. */
@@ -137,6 +142,24 @@ export async function processDiscordFastAgentMessage(
     text: input.question,
     attachmentTexts: input.attachmentTexts,
   });
+  const isDirected = Boolean(input.directedAtRoomote);
+  const needsPeerCaution =
+    input.peerConversationsExperimentEnabled === true &&
+    message != null &&
+    !isDirected &&
+    mentionsDiscordUserOtherThanBotOrUser(
+      getDiscordMessageContent(message),
+      input.botUserId,
+      input.sender.id,
+    );
+  const agentContext = needsPeerCaution
+    ? [
+        input.agentContext,
+        'Untrusted supplemental context inferred from this Discord message, not a user-authored instruction: This message mentions another person and might not be for you. Human-to-human interaction may be beginning. From now on in this conversation, unless you are addressed directly (including by name, a reply to you, or a clear contextual follow-up), use ignore_event without sending a reply, reacting, or taking action. When directly addressed, respond normally. This uncertain hint does not override existing instructions.',
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    : input.agentContext;
   const images = input.images ?? [];
   if (!eventId) {
     throw new Error('Discord Fast entry requires a source event id.');
@@ -224,11 +247,21 @@ export async function processDiscordFastAgentMessage(
               : {}),
           })
         : [];
+    const allowSilentAmbientReply =
+      !isDirected &&
+      (needsPeerCaution ||
+        history.some(
+          (entry) =>
+            !entry.botId &&
+            Boolean(entry.user) &&
+            entry.user !== input.sender.id,
+        ));
     // Resolved ahead of the turn so replies can carry the session footer;
     // the service's own getOrCreate finds this same row.
     const session = await getOrCreateFastAgentSession({
       userId: input.senderUserId,
       conversation,
+      userInitiated: { surface: 'discord', trigger: 'message' },
     });
     const humanFollowUpEvent = {
       type: 'human_follow_up' as const,
@@ -242,7 +275,9 @@ export async function processDiscordFastAgentMessage(
         input.sender.global_name ??
         input.sender.username,
       senderExternalId: input.sender.id,
-      directedAtRoomote: Boolean(input.directedAtRoomote),
+      directedAtRoomote: isDirected,
+      allowSilentAmbientReply,
+      ...(agentContext ? { agentContext } : {}),
     };
     let durableTurn: FastAgentDurableTurn | null = null;
     if (!releaseFastAgentLock) {
@@ -354,9 +389,7 @@ export async function processDiscordFastAgentMessage(
       ...(input.attachmentTexts?.length
         ? { attachmentTexts: input.attachmentTexts }
         : {}),
-      ...(input.agentContext
-        ? { currentMessageAgentContext: input.agentContext }
-        : {}),
+      ...(agentContext ? { currentMessageAgentContext: agentContext } : {}),
       threadContext: history.map((entry) => ({
         user: entry.user,
         username: entry.username,
@@ -382,14 +415,7 @@ export async function processDiscordFastAgentMessage(
         input.sender.global_name ??
         input.sender.username,
       activeTasks: input.activeTasks,
-      allowSilentAmbientReply:
-        !input.directedAtRoomote &&
-        history.some(
-          (entry) =>
-            !entry.botId &&
-            Boolean(entry.user) &&
-            entry.user !== input.sender.id,
-        ),
+      allowSilentAmbientReply,
       adapter: {
         createArtifact: (artifact) =>
           createFastAgentConversationArtifact({
@@ -426,17 +452,25 @@ export async function processDiscordFastAgentMessage(
           parentSessionId,
           postKickoff,
         }) => {
+          // Sentinels route without an environment lookup: the blank-slate
+          // sentinel is the repo itself, and the all-repositories sentinel
+          // or no target means every active repository.
           const workspace =
-            environmentId && environmentId !== ALL_REPOSITORIES
-              ? await resolveDiscordWorkspace({
-                  type: 'environment',
-                  id: environmentId,
-                  name: environmentId,
-                })
-              : {
-                  repoForPayload: ALL_REPOSITORIES,
-                  workspaceDisplayName: 'all repos',
-                };
+            environmentId === NO_REPOSITORIES
+              ? {
+                  repoForPayload: NO_REPOSITORIES,
+                  workspaceDisplayName: 'blank slate',
+                }
+              : environmentId && environmentId !== ALL_REPOSITORIES
+                ? await resolveDiscordWorkspace({
+                    type: 'environment',
+                    id: environmentId,
+                    name: environmentId,
+                  })
+                : {
+                    repoForPayload: ALL_REPOSITORIES,
+                    workspaceDisplayName: 'all repos',
+                  };
           if (!workspace) {
             return {
               success: false,

@@ -56,7 +56,6 @@ import type {
   discordGatewaySessions,
   teamsInstallations,
   teamsUserMappings,
-  slackFastIntegrationCalls,
   linearPendingSelections,
   environmentVariables,
   environments,
@@ -64,6 +63,7 @@ import type {
   environmentRepositoryMappings,
   automations,
   customAutomations,
+  automationResults,
   sessionWakeups,
   trackedMessages,
 } from './schema';
@@ -321,18 +321,6 @@ export type FastAgentProviderMessage =
 
 export type CreateFastAgentProviderMessage = Omit<
   typeof fastAgentProviderMessages.$inferInsert,
-  Generated
->;
-
-/**
- * slackFastIntegrationCalls
- */
-
-export type SlackFastIntegrationCall =
-  typeof slackFastIntegrationCalls.$inferSelect;
-
-export type CreateSlackFastIntegrationCall = Omit<
-  typeof slackFastIntegrationCalls.$inferInsert,
   Generated
 >;
 
@@ -631,6 +619,12 @@ export type CustomAutomation = typeof customAutomations.$inferSelect;
 
 export type CreateCustomAutomation = Omit<
   typeof customAutomations.$inferInsert,
+  Timestamp
+>;
+
+export type AutomationResult = typeof automationResults.$inferSelect;
+export type CreateAutomationResult = Omit<
+  typeof automationResults.$inferInsert,
   Timestamp
 >;
 

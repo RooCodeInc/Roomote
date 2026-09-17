@@ -10,6 +10,8 @@ import {
   fastAgentParentEvents,
   inArray,
   llmUsageEvents,
+  repositories,
+  repositoryFactory,
   runFactory,
   sessionFactory,
   sessionParticipants,
@@ -204,9 +206,12 @@ describe('unified Session queries', () => {
     const ownerAuth = { userId: owner.id, isAdmin: false };
     const otherAuth = { userId: other.id, isAdmin: false };
     expect(
-      (await getSessions(ownerAuth, { ids: [session.id] })).sessions.map(
-        (row) => row.id,
-      ),
+      (
+        await getSessions(ownerAuth, {
+          ids: [session.id],
+          ownedOnly: true,
+        })
+      ).sessions.map((row) => row.id),
     ).toEqual([session.id]);
     expect(
       (await getSessions(otherAuth, { ids: [session.id] })).sessions,
@@ -218,7 +223,12 @@ describe('unified Session queries', () => {
       .delete(customAutomations)
       .where(eq(customAutomations.id, automation!.id));
     expect(
-      (await getSessions(ownerAuth, { ids: [session.id] })).sessions,
+      (
+        await getSessions(ownerAuth, {
+          ids: [session.id],
+          ownedOnly: true,
+        })
+      ).sessions,
     ).toEqual([]);
     await expect(getSessionById(ownerAuth, session.id)).resolves.toMatchObject({
       id: session.id,
@@ -389,6 +399,35 @@ describe('unified Session queries', () => {
     }
   });
 
+  it('keeps private Session reads owner-only, including for admins', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      title: 'Owner-only Session',
+    });
+
+    await expect(
+      findReadableSession({ userId: owner.id, isAdmin: false }, session.id),
+    ).resolves.toMatchObject({ id: session.id, privacy: 'private' });
+
+    for (const auth of [
+      { userId: other.id, isAdmin: false },
+      { userId: other.id, isAdmin: true },
+    ]) {
+      await expect(findReadableSession(auth, session.id)).resolves.toBeNull();
+      await expect(findAccessibleSession(auth, session.id)).resolves.toBeNull();
+      await expect(getSessionById(auth, session.id)).resolves.toBeNull();
+      await expect(getSessionTimeline(auth, session.id)).resolves.toBeNull();
+      expect((await getSessions(auth, { ids: [session.id] })).sessions).toEqual(
+        [],
+      );
+    }
+  });
+
   beforeEach(() => {
     syncFastSlackTitle.mockReset();
     syncFastSlackTitle.mockResolvedValue(undefined);
@@ -482,6 +521,93 @@ describe('unified Session queries', () => {
     expect(result.sessions.map((session) => session.id)).toEqual([included.id]);
   });
 
+  it('treats null Session statuses as ready across search and pagination', async () => {
+    const nullReady = await sessionFactory.create({
+      title: 'Ready filter match null',
+      activityAt: 400,
+      cachedStatus: null,
+    });
+    const explicitReady = await sessionFactory.create({
+      title: 'Ready filter match explicit',
+      activityAt: 300,
+      cachedStatus: 'ready',
+    });
+    const active = await sessionFactory.create({
+      title: 'Ready filter match active',
+      activityAt: 200,
+      cachedStatus: 'active',
+    });
+    const ids = [nullReady.id, explicitReady.id, active.id];
+    const auth = { userId: crypto.randomUUID(), isAdmin: true };
+
+    const firstPage = await getSessions(auth, {
+      ids,
+      status: 'ready',
+      q: 'Ready filter match',
+      limit: 1,
+    });
+    expect(firstPage.sessions.map((session) => session.id)).toEqual([
+      nullReady.id,
+    ]);
+    expect(firstPage.nextCursor).not.toBeNull();
+
+    const secondPage = await getSessions(auth, {
+      ids,
+      status: 'ready',
+      q: 'Ready filter match',
+      limit: 1,
+      before: firstPage.nextCursor,
+    });
+    expect(secondPage.sessions.map((session) => session.id)).toEqual([
+      explicitReady.id,
+    ]);
+    expect(secondPage.nextCursor).toBeNull();
+
+    await expect(
+      getSessions(auth, { ids, status: 'active', q: 'Ready filter match' }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: active.id })],
+    });
+  });
+
+  it('lists only owned Sessions in descending activity order', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const olderOwned = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 100,
+    });
+    const newerOwned = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 300,
+    });
+    const participated = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: other.id,
+      activityAt: 400,
+    });
+    await db.insert(sessionParticipants).values({
+      sessionId: participated.id,
+      userId: owner.id,
+      role: 'member',
+    });
+
+    const result = await getSessions(
+      { userId: owner.id, isAdmin: true },
+      {
+        ids: [olderOwned.id, newerOwned.id, participated.id],
+        ownedOnly: true,
+      },
+    );
+
+    expect(result.sessions.map((session) => session.id)).toEqual([
+      newerOwned.id,
+      olderOwned.id,
+    ]);
+  });
+
   it('filters Session owners by automation creator values', async () => {
     const user = await userFactory.create();
     await db
@@ -555,6 +681,211 @@ describe('unified Session queries', () => {
         url: 'https://github.com/RooCodeInc/Roomote/pull/1939',
       },
     ]);
+  });
+
+  it('filters Sessions by pull requests from their linked tasks', async () => {
+    const owner = await userFactory.create();
+    const matchingSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 400,
+    });
+    const otherRepositorySession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 300,
+    });
+    const otherProviderSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 200,
+    });
+    const linkedSameHostSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 175,
+    });
+    const unstampedSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 160,
+    });
+    const otherHostSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 150,
+    });
+    const deletedTaskSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 100,
+    });
+    const candidateSessions = [
+      matchingSession,
+      otherRepositorySession,
+      otherProviderSession,
+      linkedSameHostSession,
+      unstampedSession,
+      otherHostSession,
+      deletedTaskSession,
+    ];
+    const tasksBySession = await Promise.all(
+      candidateSessions.map((session) =>
+        taskFactory.create({
+          initiatorUserId: owner.id,
+          repositoryName: 'RooCodeInc/Roomote',
+          deletedAt:
+            session.id === deletedTaskSession.id ? new Date() : undefined,
+        }),
+      ),
+    );
+    const matchingPrTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      repositoryName: 'RooCodeInc/Other',
+    });
+    const linkedRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitlab',
+      fullName: 'RooCodeInc/Roomote',
+      linkedByUserId: owner.id,
+    });
+    await db
+      .update(repositories)
+      .set({ host: null })
+      .where(eq(repositories.id, linkedRepository.id));
+    await db.insert(sessionTasks).values([
+      ...tasksBySession.map((task, index) => ({
+        sessionId: candidateSessions[index]!.id,
+        taskId: task.id,
+        origin: 'direct_launch' as const,
+      })),
+      {
+        sessionId: matchingSession.id,
+        taskId: matchingPrTask.id,
+        origin: 'fast_delegation',
+      },
+    ]);
+    await db.insert(taskPullRequests).values([
+      {
+        taskId: matchingPrTask.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl: 'https://github.com/RooCodeInc/Roomote/pull/123',
+        sourceControlProvider: 'github',
+        host: 'github.com',
+      },
+      {
+        taskId: tasksBySession[1]!.id,
+        repository: 'RooCodeInc/Other',
+        prNumber: 123,
+        prUrl: 'https://github.com/RooCodeInc/Other/pull/123',
+        sourceControlProvider: 'github',
+        host: 'github.com',
+      },
+      {
+        taskId: tasksBySession[2]!.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl: 'https://gitlab.com/RooCodeInc/Roomote/-/merge_requests/123',
+        sourceControlProvider: 'gitlab',
+        host: 'gitlab.com',
+      },
+      {
+        taskId: tasksBySession[3]!.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl:
+          'https://gitlab.com/RooCodeInc/Roomote/-/merge_requests/123?linked=1',
+        sourceControlProvider: 'gitlab',
+        repositoryId: linkedRepository.id,
+      },
+      {
+        taskId: tasksBySession[4]!.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl:
+          'https://gitlab.com/RooCodeInc/Roomote/-/merge_requests/123?legacy=1',
+        sourceControlProvider: 'gitlab',
+      },
+      {
+        taskId: tasksBySession[5]!.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl:
+          'https://gitlab.internal/RooCodeInc/Roomote/-/merge_requests/123',
+        sourceControlProvider: 'gitlab',
+        host: 'gitlab.internal',
+      },
+      {
+        taskId: tasksBySession[6]!.id,
+        repository: 'RooCodeInc/Roomote',
+        prNumber: 123,
+        prUrl: 'https://github.com/RooCodeInc/Roomote/pull/123',
+        sourceControlProvider: 'github',
+        host: 'github.com',
+      },
+    ]);
+    const auth = { userId: owner.id, isAdmin: false };
+    const ids = candidateSessions.map((session) => session.id);
+
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: 'github:RooCodeInc/Roomote#123|host:github.com',
+      }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: matchingSession.id })],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: 'github:RooCodeInc/Other#123|host:github.com',
+      }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: otherRepositorySession.id })],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: 'gitlab:RooCodeInc/Roomote#123|host:gitlab.com',
+      }),
+    ).resolves.toMatchObject({
+      sessions: [
+        expect.objectContaining({ id: otherProviderSession.id }),
+        expect.objectContaining({ id: unstampedSession.id }),
+      ],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: `gitlab:RooCodeInc/Roomote#123|repositoryId:${linkedRepository.id}`,
+      }),
+    ).resolves.toMatchObject({
+      sessions: [
+        expect.objectContaining({ id: linkedSameHostSession.id }),
+        expect.objectContaining({ id: unstampedSession.id }),
+      ],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        pullRequest: 'gitlab:RooCodeInc/Roomote#123|host:gitlab.internal',
+      }),
+    ).resolves.toMatchObject({
+      sessions: [
+        expect.objectContaining({ id: unstampedSession.id }),
+        expect.objectContaining({ id: otherHostSession.id }),
+      ],
+    });
+    await expect(
+      getSessions(auth, {
+        ids,
+        repository: 'RooCodeInc/Roomote',
+        pullRequest: 'github:RooCodeInc/Roomote#123|host:github.com',
+      }),
+    ).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ id: matchingSession.id })],
+    });
+    expect((await getSessions(auth, { ids })).sessions).toHaveLength(7);
   });
 
   it('lists only distinct visible sources within the list scope', async () => {
@@ -1433,6 +1764,76 @@ describe('unified Session queries', () => {
         }),
       ]),
     );
+  });
+
+  it('classifies failed starts separately from failures after task output', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Failed task session',
+    });
+    const failedStartTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      title: 'Failed start',
+    });
+    const failedAfterOutputTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      title: 'Failed after output',
+    });
+    await db.insert(sessionTasks).values([
+      {
+        sessionId: session.id,
+        taskId: failedStartTask.id,
+        origin: 'fast_delegation',
+      },
+      {
+        sessionId: session.id,
+        taskId: failedAfterOutputTask.id,
+        origin: 'fast_delegation',
+      },
+    ]);
+    const failedStartRun = await runFactory.create({
+      taskId: failedStartTask.id,
+      status: RunStatus.Failed,
+      payload: { repo: 'acme/widgets', description: 'Failed to start' },
+    });
+    const failedAfterOutputRun = await runFactory.create({
+      taskId: failedAfterOutputTask.id,
+      status: RunStatus.Failed,
+      payload: { repo: 'acme/widgets', description: 'Ran and failed' },
+    });
+    await db.insert(taskMessages).values({
+      runId: failedAfterOutputRun.id,
+      taskId: failedAfterOutputTask.id,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [{ type: 'text', text: 'Meaningful task output' }],
+      metadata: {},
+      payload: { text: 'Meaningful task output' },
+    });
+
+    const detail = await getSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(
+      detail?.tasks.find((task) => task.taskId === failedStartTask.id)
+        ?.latestRun,
+    ).toMatchObject({
+      id: failedStartRun.id,
+      canRetryFailedStart: true,
+    });
+    expect(
+      detail?.tasks.find((task) => task.taskId === failedAfterOutputTask.id)
+        ?.latestRun,
+    ).toMatchObject({
+      id: failedAfterOutputRun.id,
+      canRetryFailedStart: false,
+    });
   });
 
   it('returns uploaded Session-owned artifacts without creating a task', async () => {

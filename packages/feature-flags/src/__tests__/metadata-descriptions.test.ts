@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { getBooleanMetadataDescriptorByKey } from '../index';
+import {
+  getBooleanMetadataDescriptorByKey,
+  getDeploymentExperimentValues,
+} from '../index';
 
 describe('metadata descriptions', () => {
   it.each([
@@ -11,21 +14,13 @@ describe('metadata descriptions', () => {
     'visual_proof_auto_screencast',
     'background_subagents',
     'opencode_background_subagents',
+    'opencode_code_mode',
     'composerSuggestions',
   ])('classifies removed experiment metadata %s as legacy', (key) => {
     expect(getBooleanMetadataDescriptorByKey(key)).toEqual({
       kind: 'legacy',
       description: null,
       group: null,
-    });
-  });
-
-  it('classifies Code Mode as an active experiment', () => {
-    expect(getBooleanMetadataDescriptorByKey('opencode_code_mode')).toEqual({
-      kind: 'experimental',
-      description:
-        'Defer eligible tools and discover them when needed, reducing the tool definitions sent with each request.',
-      group: 'Code Mode',
     });
   });
 
@@ -36,5 +31,26 @@ describe('metadata descriptions', () => {
     expect(
       getBooleanMetadataDescriptorByKey('anonymous_analytics_enabled').kind,
     ).toBe('deployment-control');
+    expect(getBooleanMetadataDescriptorByKey('results_page_enabled').kind).toBe(
+      'deployment-control',
+    );
+    expect(
+      getBooleanMetadataDescriptorByKey('integration_keys_enabled').kind,
+    ).toBe('deployment-control');
+  });
+
+  it('enables deployment experiments only from explicit true metadata', () => {
+    expect(
+      getDeploymentExperimentValues({
+        results_page_enabled: true,
+        integration_keys_enabled: 'true',
+      }),
+    ).toEqual({
+      results: true,
+      slackPeerConversations: false,
+      homeComposerSuggestions: false,
+      serviceCredentialTools: false,
+      privateSessions: false,
+    });
   });
 });

@@ -15,13 +15,13 @@ describe('doctor guidance', () => {
     const skillContent = readSkillContent();
 
     expect(skillContent).toContain(
-      "Use Roomote's existing task runtime as the end-to-end health check",
+      "Use Fast's native task launcher as the end-to-end health check",
     );
     expect(skillContent).toContain(
       'call `mcp__roomote__manage_tasks` with `action: "list_environments"`',
     );
     expect(skillContent).toContain(
-      'Call `mcp__roomote__manage_tasks` with `action: "launch"`, that `environmentId`, and `notifyOnSettle: true`.',
+      "Call Fast's native `launch_task` tool with that `environmentId`.",
     );
     expect(skillContent).toContain(
       'call `mcp__roomote__manage_tasks` with `action: "get_summary"` every 10-15 seconds',
@@ -57,6 +57,20 @@ describe('doctor guidance', () => {
     );
     expect(skillContent).toContain(
       'Do not call `report_platform_issue`, create an issue, or claim that a report was filed unless the user explicitly requested that write.',
+    );
+  });
+
+  it('requires Fast ownership of launches and forbids sandbox fallback', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'If the native `launch_task` tool is unavailable, stop and explain that Doctor must run from Fast',
+    );
+    expect(skillContent).toContain(
+      'Never use `manage_tasks` to launch from a sandbox task.',
+    );
+    expect(skillContent).not.toContain(
+      '`mcp__roomote__manage_tasks` with `action: "launch"`',
     );
   });
 
@@ -198,7 +212,7 @@ describe('doctor guidance', () => {
     const skillContent = readSkillContent();
 
     expect(skillContent).toContain(
-      'After an authorized repair, require another task launched against the newly persisted environment and repeat the original goal.',
+      "After an authorized repair, use Fast's native `launch_task` tool to launch another task against the newly persisted environment and repeat the original goal.",
     );
     expect(skillContent).toContain(
       "Never use the pre-repair task, the repair workflow's successful return, or the current sandbox as proof.",

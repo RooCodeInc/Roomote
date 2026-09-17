@@ -40,6 +40,10 @@ import {
   buildDequeuedTaskContext,
 } from './dequeue-task-run';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
+import {
+  appendPrivateTaskPersonalization,
+  getPrivateTaskPersonalizationInstructions,
+} from './task-personalization';
 
 type DequeueResumeTaskRunResult =
   | undefined
@@ -388,10 +392,36 @@ export const dequeueResumeTaskRun = async (
     const sourceControlProvider = resolveSourceControlProviderFromPayload(
       result.taskRun.payload,
     );
-    const sourceControlToken = await createSourceControlTokenForTaskRun(
-      result.taskRun,
-      tag,
-    );
+    let sourceControlToken;
+    try {
+      sourceControlToken = await createSourceControlTokenForTaskRun(
+        result.taskRun,
+        tag,
+        { readOnly: result.task.privacy === 'private' },
+      );
+    } catch (error) {
+      await recordSnapshotResumeBootstrapEvent({
+        runId: result.taskRun.id,
+        taskId: result.taskRun.taskId,
+        eventType: 'failed',
+        message:
+          'Snapshot resume bootstrap failed because the source control token could not be created.',
+        details: {
+          stage: 'bootstrap',
+          reason: 'source_control_token_creation_failed',
+          provider: sourceControlProvider,
+          error: error instanceof Error ? error.message : String(error),
+          sourceRunId: result.taskRun.sourceRunId ?? null,
+          sourceSnapshotId: result.taskRun.sourceSnapshotId ?? null,
+        },
+      });
+      await cancelAndReleaseTaskRun(
+        result.taskRun,
+        'Failed to create source control token.',
+        tag,
+      );
+      return undefined;
+    }
 
     if (!sourceControlToken) {
       await recordSnapshotResumeBootstrapEvent({
@@ -509,6 +539,13 @@ export const dequeueResumeTaskRun = async (
       });
     }
 
+    const privateInstructions = await getPrivateTaskPersonalizationInstructions(
+      {
+        actingUserId: result.taskRun.actingUserId,
+        initiatorKind: result.task.initiatorKind,
+        payloadKind: result.taskRun.payloadKind,
+      },
+    );
     const { error: _, task, ...rest } = result;
     return {
       ...rest,
@@ -519,7 +556,10 @@ export const dequeueResumeTaskRun = async (
       orgAgentInstructions: result.orgAgentInstructions,
       setupOnboardingTask:
         slackTaskRunRouting.route.kind === 'setup-onboarding',
-      harnessInstructions: task.harnessInstructions ?? undefined,
+      harnessInstructions: appendPrivateTaskPersonalization(
+        task.harnessInstructions ?? undefined,
+        privateInstructions,
+      ),
     };
   } catch (error) {
     console.error(

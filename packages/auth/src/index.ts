@@ -48,6 +48,11 @@ export {
 } from './github-token';
 
 export {
+  GitHubUserTokenError,
+  resolveGitHubUserAccessToken,
+} from './github-user-token';
+
+export {
   type CreatePreviewTokenOptions,
   createPreviewTokenOptionsSchema,
   createPreviewToken,
@@ -81,3 +86,5 @@ export {
 } from './decode-es256-key';
 
 export { validateToken } from './validate-token';
+export * from './session-broker-token';
+export * from './credential-egress-token';

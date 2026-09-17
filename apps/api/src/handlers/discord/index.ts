@@ -22,9 +22,12 @@ import {
 import { reactionEmojiMatches } from '@roomote/communication/reaction-emoji';
 import {
   buildFastAgentReactionExternalInputQuestion,
+  getFastAgentSessionOwner,
+  getOrCreateFastAgentSession,
   hasFastAgentSession,
   type FastAgentReactionExternalInput,
 } from '@roomote/cloud-agents/server';
+import { isDeploymentExperimentEnabled } from '@roomote/db/server';
 import {
   RunStatus,
   activeRunStatuses,
@@ -36,15 +39,18 @@ import {
   findDiscordMappedUserId,
   findFastAgentSessionForProviderMessage,
   findFastAgentSessionForProviderReply,
+  findSessionAttentionNotificationReply,
   isFastAgentProviderMessage,
   queueFastAgentSurfaceReply,
   restoreDiscordLinkCode,
+  startFastSessionGoal,
   upsertDiscordInstallation,
   upsertDiscordUserMapping,
   enqueueDiscordGatewayEvent,
 } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
+import { continueSessionAttentionReply } from '../tasks/continue-session-attention-reply.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
 import {
@@ -87,7 +93,6 @@ import {
   discordMetadataForChannel,
   resolveDiscordChannelContext,
 } from './task-launch.js';
-import { startDiscordTaskGoal } from './goal-command.js';
 import {
   fetchDiscordRepliedToMessageBestEffort,
   fetchDiscordThreadHistoryBestEffort,
@@ -147,7 +152,7 @@ const DISCORD_HELP_MESSAGE = [
   '',
   '**Available commands**',
   '`/new request:<request>` — start a fresh task.',
-  '`/goal objective:<objective>` — keep working toward an objective across multiple turns.',
+  '`/goal objective:<objective>` — keep this Session working toward an objective across multiple turns.',
   '`/link code:<code>` — link this Discord account in a DM with me.',
   '`/help` — show this message.',
   '',
@@ -602,6 +607,20 @@ async function processDiscordGatewayEvent(
       : {}),
   };
   const forceNewTask = command?.name === 'new';
+  const attentionResolution =
+    !forceNewTask && senderUserId && message?.message_reference?.message_id
+      ? await findSessionAttentionNotificationReply({
+          provider: 'discord',
+          workspaceId: channel.guildId ?? 'dm',
+          channelId: metadata.communicationChannelId,
+          userId: senderUserId,
+          replyToMessageId: message.message_reference.message_id,
+        })
+      : ({ status: 'none' } as const);
+  const attentionReply =
+    attentionResolution.status === 'owned'
+      ? attentionResolution.attention
+      : null;
   const repliedFastSession =
     !forceNewTask && message?.message_reference?.message_id
       ? await findFastAgentSessionForProviderReply({
@@ -612,8 +631,17 @@ async function processDiscordGatewayEvent(
             ? { threadId: metadata.communicationThreadId }
             : {}),
           replyToMessageId: message.message_reference.message_id,
+          ...(channel.isDirectMessage && senderUserId
+            ? { userId: senderUserId }
+            : {}),
         })
       : null;
+  if (attentionResolution.status === 'foreign') {
+    return {
+      ok: true,
+      ignored: 'discord_attention_notification_user_mismatch',
+    };
+  }
   if (
     !forceNewTask &&
     !repliedFastSession &&
@@ -632,6 +660,10 @@ async function processDiscordGatewayEvent(
   ) {
     return { ok: true, ignored: 'discord_fast_session_user_mismatch' };
   }
+  const crossSurfaceReply =
+    repliedFastSession?.conversation.surface === 'web'
+      ? repliedFastSession
+      : null;
   // Message-backed Discord threads share the immutable report root's ID;
   // a reply reference inside the thread may point to any later message.
   const automationReportRootMessageId = message
@@ -669,6 +701,7 @@ async function processDiscordGatewayEvent(
           : null
         : await findCompletedCommunicationTaskRunWithSnapshot(conversation);
   const isFastAgentConversation = Boolean(
+    attentionReply ??
     repliedFastSession ??
     (channel.isThread || channel.isDirectMessage
       ? await hasFastAgentSession({
@@ -688,6 +721,7 @@ async function processDiscordGatewayEvent(
     repliedToAutomationReport ||
     isFastAgentConversation,
   );
+  let peerConversationsExperimentEnabled = false;
   const isTaskEntry = isDiscordTaskEntryEvent(event, {
     botUserId: resolved.botUserId,
     isTaskThread: isRoomoteThread,
@@ -755,6 +789,20 @@ async function processDiscordGatewayEvent(
     !repliedFastSession &&
     isRoomoteThread
   ) {
+    const fastSessionOwner = isFastAgentConversation
+      ? await getFastAgentSessionOwner({
+          surface: 'discord',
+          workspaceId: channel.guildId ?? 'dm',
+          conversationId: channel.channelId,
+          replyTarget: {
+            channelId: metadata.communicationChannelId,
+            ...(channel.isThread ? { threadId: channel.channelId } : {}),
+          },
+        })
+      : null;
+    peerConversationsExperimentEnabled =
+      fastSessionOwner?.kind === 'user' &&
+      (await isDeploymentExperimentEnabled('slackPeerConversations'));
     const shouldRouteUnmentioned =
       await shouldRouteUnmentionedDiscordThreadReplyToAgent({
         message,
@@ -768,6 +816,7 @@ async function processDiscordGatewayEvent(
           null,
         isAutomationReportThread: Boolean(repliedToAutomationReport),
         isOpenConversationThread: isFastAgentConversation,
+        peerConversationsExperimentEnabled,
         fetchThreadMessages: async () => {
           const history = await fetchDiscordThreadHistoryBestEffort({
             provider: resolved.provider,
@@ -817,33 +866,43 @@ async function processDiscordGatewayEvent(
       });
       return { ok: true, goalStarted: false, reason: 'missing_objective' };
     }
-    if (!activeRun) {
-      await replyToDiscordEvent({
-        provider: resolved.provider,
-        applicationId: resolved.applicationId,
+    const fastConversation = {
+      surface: 'discord' as const,
+      workspaceId: channel.guildId ?? 'dm',
+      conversationId: getDiscordFastConversationId(
         channel,
-        interaction: interactionReplyContext(event),
-        text: 'Use `/goal` in an active Roomote task thread or DM. Start a task with `/new` or mention me first.',
-        ephemeral: true,
-      });
-      return { ok: true, goalStarted: false, reason: 'no_active_task' };
-    }
-
-    const result = await startDiscordTaskGoal({
-      taskId: activeRun.taskId,
+        interaction?.id ?? event.eventId,
+      ),
+      replyTarget: {
+        channelId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
+      },
+    };
+    const session = await getOrCreateFastAgentSession({
       userId: senderUserId,
+      conversation: fastConversation,
+      userInitiated: { surface: 'discord', trigger: 'message' },
+    });
+    const result = await startFastSessionGoal({
+      sessionId: session.id,
+      userId: senderUserId,
+      senderDisplayName: sender.global_name ?? sender.username,
       objective: command.objective,
-      clientMessageId: interaction?.id ?? event.eventId,
+      currentMessageId: interaction?.id ?? event.eventId,
     });
     await replyToDiscordEvent({
       provider: resolved.provider,
       applicationId: resolved.applicationId,
       channel,
       interaction: interactionReplyContext(event),
-      text: result.success ? 'Goal Mode enabled.' : result.error,
+      text: result.success
+        ? `Pursuing goal: ${command.objective}`
+        : result.error,
       ephemeral: true,
     });
-    return { ok: true, goalStarted: result.success, runId: activeRun.id };
+    return { ok: true, goalStarted: result.success, sessionId: session.id };
   }
 
   const messageAttachments = message
@@ -878,6 +937,49 @@ async function processDiscordGatewayEvent(
   const fastAttachments = processedAttachments.images.length
     ? { images: processedAttachments.images }
     : {};
+
+  if ((attentionReply || crossSurfaceReply) && message) {
+    const replyToMessageId = message.message_reference?.message_id;
+    const deliveryConversation = {
+      surface: 'discord' as const,
+      workspaceId: channel.guildId ?? 'dm',
+      conversationId: `notification:${replyToMessageId}:user:${senderUserId}`,
+      replyTarget: {
+        channelId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
+      },
+    };
+    const continued = attentionReply
+      ? await continueSessionAttentionReply({
+          attention: attentionReply,
+          userId: senderUserId,
+          senderDisplayName: sender.global_name ?? sender.username,
+          question: fastEntryText,
+          currentMessageId: message.id,
+          deliveryConversation,
+          ...fastAttachments,
+          ...(processedAttachments.attachmentTexts.length
+            ? { attachmentTexts: processedAttachments.attachmentTexts }
+            : {}),
+        })
+      : await queueFastAgentSurfaceReply({
+          sessionId: crossSurfaceReply!.id,
+          userId: senderUserId,
+          senderDisplayName: sender.global_name ?? sender.username,
+          question: fastEntryText,
+          currentMessageId: message.id,
+          deliveryConversation,
+          ...fastAttachments,
+          ...(processedAttachments.attachmentTexts.length
+            ? { attachmentTexts: processedAttachments.attachmentTexts }
+            : {}),
+        });
+    return continued
+      ? { ok: true, fastAnswered: true, fastContinued: true }
+      : { ok: true, ignored: 'discord_fast_session_route_unavailable' };
+  }
 
   if (command?.name === 'new' && command.request && interaction) {
     // `/new` opens a fresh conversation. In a server it gets its own thread
@@ -951,6 +1053,7 @@ async function processDiscordGatewayEvent(
         senderUserId,
         provider: resolved.provider,
         applicationId: resolved.applicationId,
+        botUserId: resolved.botUserId,
         channel,
         metadata,
         conversationId:
@@ -966,6 +1069,7 @@ async function processDiscordGatewayEvent(
           channel.isDirectMessage ||
           Boolean(repliedFastSession) ||
           isDiscordBotMentioned(message, resolved.botUserId),
+        peerConversationsExperimentEnabled,
       });
       return { ok: true, fastAnswered: true, fastContinued: true };
     }

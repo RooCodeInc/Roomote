@@ -92,6 +92,23 @@ describe('AuthForm', () => {
     });
   });
 
+  it('falls back to setup for a sign-in redirect loop', async () => {
+    searchParams = new URLSearchParams('redirect_url=/sign-in?invited=1');
+
+    render(<AuthForm />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with Microsoft Teams' }),
+    );
+
+    await waitFor(() => {
+      expect(signInOauth2Mock).toHaveBeenCalledWith({
+        providerId: 'microsoft-entra-id',
+        callbackURL: '/setup',
+      });
+    });
+  });
+
   it('starts Microsoft Teams sign-in through generic OAuth with the requested redirect path', async () => {
     searchParams = new URLSearchParams('redirect_url=/settings');
 
@@ -252,6 +269,45 @@ describe('AuthForm', () => {
     ).toBeVisible();
     expect(screen.getByText(/Ask your admin\./)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Talk to us' })).toBeVisible();
+  });
+
+  it('requests a password reset without exposing account state', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 202 }));
+    render(<AuthForm enabledProviders={[]} passwordResetAvailable />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset it' }));
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: ' Ada@Example.com ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send reset link' }));
+
+    expect(
+      await screen.findByText(/If an active email\/password account exists/),
+    ).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledWith('/api/password-reset/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'Ada@Example.com' }),
+    });
+    expect(
+      screen.getByRole('button', { name: 'Back to sign in' }),
+    ).toBeVisible();
+
+    fetchMock.mockRestore();
+  });
+
+  it('keeps the admin-assisted fallback when self-service reset is unavailable', () => {
+    render(<AuthForm enabledProviders={[]} />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Reset it' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Need an account\? Forgot your password\?/),
+    ).toBeVisible();
+    expect(screen.getByText(/Ask your admin\./)).toBeVisible();
   });
 
   it('can hide the account and password help copy for bootstrap sign-up', () => {

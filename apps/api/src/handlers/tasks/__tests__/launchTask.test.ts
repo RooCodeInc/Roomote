@@ -359,14 +359,7 @@ describe('launchTask', () => {
     expect(enqueuedTask.task.payload.reasoningEffort).toBe('low');
   });
 
-  it('stamps the launching run and settle opt-in for run-token launches with notifyOnSettle', async () => {
-    mockLaunchPinned.mockResolvedValue({
-      sessionId: 'session-1',
-      fastConversationId: 'fast-1',
-      runId: 102,
-      taskId: 'task-child',
-    });
-
+  it('rejects user-principal task-originated launches before resolving an actor', async () => {
     const runAuth = {
       runId: 555,
       userId: 'user-1',
@@ -388,66 +381,15 @@ describe('launchTask', () => {
       }),
     );
 
-    expect(response.status).toBe(200);
-    const enqueuedTask = mockLaunchPinned.mock.calls[0]?.[0] as {
-      task: {
-        sourceRunId?: number;
-        payload: { notifySourceRunOnSettle?: boolean };
-      };
-    };
-    expect(enqueuedTask.task.sourceRunId).toBe(555);
-    expect(enqueuedTask.task.payload.notifySourceRunOnSettle).toBe(true);
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Task-originated task launches are not allowed',
+    });
+    expect(mockTaskRunsFindFirst).not.toHaveBeenCalled();
+    expect(mockLaunchPinned).not.toHaveBeenCalled();
   });
 
-  it('prefers the current acting user over the run token mint-time user', async () => {
-    mockLaunchPinned.mockResolvedValue({
-      sessionId: 'session-1',
-      fastConversationId: 'fast-1',
-      runId: 102,
-      taskId: 'task-child',
-    });
-    mockTaskRunsFindFirst.mockResolvedValue({
-      actingUserId: 'user-current',
-      taskId: 'task-parent',
-      vendor: null,
-    });
-    const runAuth = {
-      runId: 555,
-      userId: 'user-original',
-      principal: 'user',
-      tokenType: 'run',
-      version: 1,
-    } as RunTokenContext;
-
-    const response = await createApp(runAuth).request(
-      new Request('http://localhost/tasks', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: 'Continue the implementation' }),
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mockLaunchPinned).toHaveBeenCalledWith(
-      expect.objectContaining({
-        initiator: { kind: 'user', userId: 'user-current' },
-      }),
-    );
-  });
-
-  it('launches as the durable Session owner when an automation run has no acting user', async () => {
-    mockLaunchPinned.mockResolvedValue({
-      sessionId: 'session-1',
-      fastConversationId: 'fast-1',
-      runId: 102,
-      taskId: 'task-child',
-    });
-    mockTaskRunsFindFirst
-      .mockResolvedValueOnce({
-        actingUserId: null,
-        taskId: 'task-bot-parent',
-      })
-      .mockResolvedValueOnce({ vendor: 'modal' });
+  it('rejects deployment-principal task-originated launches even when the task has an owner', async () => {
     mockGetTaskHumanOwnerUserIds.mockResolvedValue(['user-owner']);
     const runAuth = {
       runId: 555,
@@ -465,116 +407,13 @@ describe('launchTask', () => {
       }),
     );
 
-    expect(response.status).toBe(200);
-    expect(mockLaunchPinned).toHaveBeenCalledWith(
-      expect.objectContaining({
-        initiator: { kind: 'user', userId: 'user-owner' },
-      }),
-    );
-  });
-
-  it('rejects an ownerless automation run instead of inventing user context', async () => {
-    mockTaskRunsFindFirst.mockResolvedValue({
-      actingUserId: null,
-      taskId: 'task-ownerless-automation',
-    });
-    mockGetTaskHumanOwnerUserIds.mockResolvedValue([]);
-    const runAuth = {
-      runId: 555,
-      userId: null,
-      principal: 'deployment',
-      tokenType: 'run',
-      version: 1,
-    } as RunTokenContext;
-
-    const response = await createApp(runAuth).request(
-      new Request('http://localhost/tasks', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: 'Implement the discovered fix' }),
-      }),
-    );
-
     expect(response.status).toBe(403);
-    expect(mockLaunchPinned).not.toHaveBeenCalled();
-  });
-
-  it.each(['docker', 'modal'] as const)(
-    'inherits the %s source run compute provider for run-token child launches',
-    async (provider) => {
-      mockLaunchPinned.mockResolvedValue({
-        sessionId: 'session-1',
-        fastConversationId: 'fast-1',
-        runId: 103,
-        taskId: 'task-child',
-      });
-      mockTaskRunsFindFirst.mockResolvedValue({
-        actingUserId: 'user-1',
-        taskId: 'task-parent',
-        vendor: provider,
-      });
-
-      const runAuth = {
-        runId: 555,
-        userId: 'user-1',
-        principal: 'user',
-        tokenType: 'run',
-        version: 1,
-      } as RunTokenContext;
-
-      const app = createApp(runAuth);
-      const response = await app.request(
-        new Request('http://localhost/tasks', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ prompt: 'Verify the environment' }),
-        }),
-      );
-
-      expect(response.status).toBe(200);
-      const enqueuedTask = mockLaunchPinned.mock.calls[0]?.[0] as {
-        task: { computeProvider?: string };
-      };
-      expect(enqueuedTask.task.computeProvider).toBe(provider);
-    },
-  );
-
-  it('preserves an explicit compute provider on run-token child launches', async () => {
-    mockLaunchPinned.mockResolvedValue({
-      sessionId: 'session-1',
-      fastConversationId: 'fast-1',
-      runId: 104,
-      taskId: 'task-child',
+    await expect(response.json()).resolves.toEqual({
+      error: 'Task-originated task launches are not allowed',
     });
-
-    const runAuth = {
-      runId: 556,
-      userId: 'user-1',
-      principal: 'user',
-      tokenType: 'run',
-      version: 1,
-    } as RunTokenContext;
-
-    const app = createApp(runAuth);
-    const response = await app.request(
-      new Request('http://localhost/tasks', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          prompt: 'Verify the environment',
-          computeProvider: 'modal',
-        }),
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    const enqueuedTask = mockLaunchPinned.mock.calls[0]?.[0] as {
-      task: { computeProvider?: string };
-    };
-    expect(enqueuedTask.task.computeProvider).toBe('modal');
-    // Acting-user resolution plus the parent Fast Session lookup; no vendor
-    // lookup when the provider is explicit.
-    expect(mockTaskRunsFindFirst).toHaveBeenCalledTimes(2);
+    expect(mockTaskRunsFindFirst).not.toHaveBeenCalled();
+    expect(mockGetTaskHumanOwnerUserIds).not.toHaveBeenCalled();
+    expect(mockLaunchPinned).not.toHaveBeenCalled();
   });
 
   it('ignores notifyOnSettle for user-token launches', async () => {
@@ -605,44 +444,6 @@ describe('launchTask', () => {
       };
     };
     expect(enqueuedTask.task.sourceRunId).toBeUndefined();
-    expect(enqueuedTask.task.payload.notifySourceRunOnSettle).toBeUndefined();
-  });
-
-  it('carries the parent pointer for context inheritance without stamping sourceRunId', async () => {
-    mockLaunchPinned.mockResolvedValue({
-      sessionId: 'session-1',
-      fastConversationId: 'fast-1',
-      runId: 104,
-      taskId: 'task-plain-child',
-    });
-
-    const runAuth = {
-      runId: 556,
-      userId: 'user-1',
-      principal: 'user',
-      tokenType: 'run',
-      version: 1,
-    } as RunTokenContext;
-
-    const app = createApp(runAuth);
-    const response = await app.request(
-      new Request('http://localhost/tasks', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: 'Investigate this' }),
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    const enqueuedTask = mockLaunchPinned.mock.calls[0]?.[0] as {
-      task: {
-        sourceRunId?: number;
-        communicationContextSourceRunId?: number;
-        payload: { notifySourceRunOnSettle?: boolean };
-      };
-    };
-    expect(enqueuedTask.task.sourceRunId).toBeUndefined();
-    expect(enqueuedTask.task.communicationContextSourceRunId).toBe(556);
     expect(enqueuedTask.task.payload.notifySourceRunOnSettle).toBeUndefined();
   });
 
@@ -755,66 +556,5 @@ describe('launchTask', () => {
 
     expect(response.status).toBe(200);
     expect(mockLaunchPinned).toHaveBeenCalledTimes(1);
-  });
-
-  it("launches a run-token child inside the calling task's Fast Session", async () => {
-    mockLaunchPinned.mockResolvedValue({
-      sessionId: 'session-parent',
-      fastConversationId: '55555555-5555-4555-8555-555555555555',
-      runId: 106,
-      taskId: 'task-sibling',
-    });
-    mockTaskRunsFindFirst
-      .mockResolvedValueOnce({ actingUserId: 'user-1', taskId: 'task-parent' })
-      .mockResolvedValueOnce({ vendor: null })
-      .mockResolvedValueOnce({
-        payload: {
-          fastAgentParent: {
-            sessionId: '55555555-5555-4555-8555-555555555555',
-            conversation: {
-              surface: 'web',
-              workspaceId: 'user-1',
-              conversationId: 'conv-1',
-            },
-          },
-        },
-      });
-    const runAuth = {
-      runId: 555,
-      userId: 'user-1',
-      principal: 'user',
-      tokenType: 'run',
-      version: 1,
-    } as RunTokenContext;
-
-    const response = await createApp(runAuth).request(
-      new Request('http://localhost/tasks', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          prompt: 'Add the migration',
-          launchId: '44444444-4444-4444-8444-444444444444',
-        }),
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      success: true,
-      runId: 106,
-      taskId: 'task-sibling',
-      sessionId: 'session-parent',
-    });
-    expect(mockLaunchPinned).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: 'user-1',
-        fastConversationId: '55555555-5555-4555-8555-555555555555',
-        launchId: '44444444-4444-4444-8444-444444444444',
-        prompt: 'Add the migration',
-        surface: 'api',
-        initiator: { kind: 'user', userId: 'user-1' },
-        kickoffMessage: 'Started a task.',
-      }),
-    );
   });
 });

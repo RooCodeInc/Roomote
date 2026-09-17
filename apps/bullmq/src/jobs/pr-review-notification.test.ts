@@ -4,6 +4,7 @@ const {
   mockFindFirstTaskRun,
   mockFindFirstTaskPullRequest,
   mockFindFirstSlackInstallation,
+  mockGetSessionForFastConversation,
   mockConsumePending,
   mockRequeuePending,
   mockRetrySupersededPrReviewAction,
@@ -14,6 +15,8 @@ const {
   mockBeginCanonicalWebPrompt,
   mockBeginCanonicalWebAutoDispatch,
   mockDispatchCanonicalAutoFollowUp,
+  mockReadLivePullRequestState,
+  mockDbUpdate,
   mockReleaseCanonicalWebAutoDispatch,
   mockBeginCanonicalAutoDispatch,
   mockCompleteCanonicalAutoDispatch,
@@ -42,6 +45,7 @@ const {
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
   mockFindFirstSlackInstallation: vi.fn(),
+  mockGetSessionForFastConversation: vi.fn(),
   mockConsumePending: vi.fn(),
   mockRequeuePending: vi.fn(),
   mockRetrySupersededPrReviewAction: vi.fn(),
@@ -52,6 +56,10 @@ const {
   mockBeginCanonicalWebPrompt: vi.fn(),
   mockBeginCanonicalWebAutoDispatch: vi.fn(),
   mockDispatchCanonicalAutoFollowUp: vi.fn(),
+  mockReadLivePullRequestState: vi.fn(),
+  mockDbUpdate: vi.fn(() => ({
+    set: () => ({ where: () => Promise.resolve([]) }),
+  })),
   mockReleaseCanonicalWebAutoDispatch: vi.fn(),
   mockBeginCanonicalAutoDispatch: vi.fn(),
   mockCompleteCanonicalAutoDispatch: vi.fn(),
@@ -84,6 +92,7 @@ const {
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    update: () => mockDbUpdate(),
     query: {
       taskRuns: {
         findFirst: (...args: unknown[]) => mockFindFirstTaskRun(...args),
@@ -91,6 +100,12 @@ vi.mock('@roomote/db/server', () => ({
       taskPullRequests: {
         findFirst: (...args: unknown[]) =>
           mockFindFirstTaskPullRequest(...args),
+        // The job lists links and picks the instance itself; tests keep
+        // describing one link (or an explicit list) through the same mock.
+        findMany: async (...args: unknown[]) => {
+          const links = await mockFindFirstTaskPullRequest(...args);
+          return Array.isArray(links) ? links : links ? [links] : [];
+        },
       },
       slackInstallations: {
         findFirst: (...args: unknown[]) =>
@@ -103,8 +118,15 @@ vi.mock('@roomote/db/server', () => ({
   desc: vi.fn(() => 'desc-order'),
   getCanonicalPrReviewAction: (...args: unknown[]) =>
     mockGetCanonicalPrReviewAction(...args),
+  getSessionForFastConversation: (...args: unknown[]) =>
+    mockGetSessionForFastConversation(...args),
+  isSessionConversationResponding: (session: {
+    respondingUntil: Date | null;
+  }) =>
+    session.respondingUntil !== null && session.respondingUntil > new Date(),
   taskRuns: { taskId: 'taskId', createdAt: 'createdAt' },
   taskPullRequests: {
+    id: 'id',
     taskId: 'taskId',
     repository: 'repository',
     prNumber: 'prNumber',
@@ -170,6 +192,7 @@ vi.mock('@roomote/sdk/server', () => ({
     eventsTriaged: 0,
     triageInvoked: false,
     triageCacheHit: false,
+    triageJudgmentSkipped: false,
     triageInputChars: 0,
     triageInputTokenEstimate: 0,
   }),
@@ -208,6 +231,8 @@ vi.mock('@roomote/sdk/server', () => ({
   beginCanonicalPrReviewWebAutoDispatch: mockBeginCanonicalWebAutoDispatch,
   dispatchCanonicalPrReviewAutoFollowUp: mockDispatchCanonicalAutoFollowUp,
   releaseCanonicalPrReviewWebAutoDispatch: mockReleaseCanonicalWebAutoDispatch,
+  readLivePullRequestStateForNotification: (...args: unknown[]) =>
+    mockReadLivePullRequestState(...args),
   beginCanonicalPrReviewAutoDispatch: mockBeginCanonicalAutoDispatch,
   completeCanonicalPrReviewAutoDispatch: mockCompleteCanonicalAutoDispatch,
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
@@ -299,6 +324,7 @@ describe('prReviewNotificationJob', () => {
       status: 'open',
       autoHandleFeedbackByUserId: null,
     });
+    mockGetSessionForFastConversation.mockResolvedValue(null);
     mockFindFirstSlackInstallation.mockResolvedValue({
       botAccessToken: 'xoxb-token',
     });
@@ -472,7 +498,30 @@ describe('prReviewNotificationJob', () => {
     expect(mockSchedule).not.toHaveBeenCalled();
   });
 
+  it('logs a finalized missing provider message id as non-retryable', async () => {
+    const error = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    mockStickyFooterPost.mockResolvedValue(null);
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    const deliveryEvents = error.mock.calls
+      .map(([message]) => JSON.parse(String(message)))
+      .filter((entry) => entry.event === 'source_control_review_delivery');
+    expect(deliveryEvents).toContainEqual(
+      expect.objectContaining({
+        outcome: 'failed',
+        reason: 'provider_message_id_missing',
+        retryable: false,
+      }),
+    );
+    expect(mockFinalize).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
   it('passes triaged feedback to the Fast parent event path', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       taskId: 'task-1',
@@ -554,6 +603,23 @@ describe('prReviewNotificationJob', () => {
       route: null,
       text: 'Alice requested changes on owner/repo#42.',
     });
+    const deliveryEvents = log.mock.calls
+      .map(([message]) => {
+        try {
+          return JSON.parse(String(message));
+        } catch {
+          return null;
+        }
+      })
+      .filter((entry) => entry?.event === 'source_control_review_delivery');
+    expect(deliveryEvents).toContainEqual(
+      expect.objectContaining({
+        outcome: 'delivered',
+        reason: 'fast_parent_notified',
+        retryable: false,
+      }),
+    );
+    log.mockRestore();
   });
 
   it('notifies the Fast parent before auto-dispatching opted-in feedback', async () => {
@@ -618,6 +684,60 @@ describe('prReviewNotificationJob', () => {
     );
     expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
     expect(mockStickyFooterPost).not.toHaveBeenCalled();
+  });
+
+  it('auto-dispatches opted-in feedback through a Telegram Fast parent', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      taskId: 'task-1',
+      payload: {
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'telegram',
+            workspaceId: '12345',
+            conversationId: '12345:77',
+            replyTarget: { channelId: '12345', threadId: '77' },
+          },
+        },
+      },
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
+    });
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      sourceControlProvider: 'github',
+      host: 'github.com',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prTitle: 'PR title',
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      status: 'open',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: null,
+      text: 'Alice requested changes on owner/repo#42.',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+    mockNotifyFastAgentParent.mockResolvedValue(true);
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockNotifyFastAgentParent.mock.calls[0]?.[0]).not.toHaveProperty(
+      'suggestedActionPrompt',
+    );
+    expect(mockDispatchFollowUp).toHaveBeenCalledWith({
+      provider: 'telegram',
+      taskId: 'task-1',
+      channelId: '12345',
+      threadId: '77',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+      actingUserId: 'user-9',
+    });
   });
 
   it('does not auto-dispatch when Fast-parent delivery fails', async () => {
@@ -977,6 +1097,8 @@ describe('prReviewNotificationJob', () => {
               text: 'Resolve these issues',
               callbackData: `prr:y:${storedNonce}`,
             }),
+          ],
+          [
             expect.objectContaining({
               text: 'Auto-resolve on this PR',
               callbackData: `prr:a:${storedNonce}`,
@@ -1109,6 +1231,108 @@ describe('prReviewNotificationJob', () => {
         text: expect.stringContaining("New review feedback — I'm on it"),
       }),
     );
+  });
+
+  it('suppresses stale feedback instead of auto-dispatching when the provider says the PR is merged', async () => {
+    // The persisted link still says open (the merge webhook was missed), but
+    // the provider says merged. Nothing is posted and nothing is resumed.
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      id: 'link-1',
+      status: 'open',
+      host: 'github.com',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockReadLivePullRequestState.mockResolvedValue('merged');
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockReadLivePullRequestState).toHaveBeenCalledWith({
+      provider: 'github',
+      host: 'github.com',
+      repository: 'owner/repo',
+      prNumber: 42,
+    });
+    expect(mockDispatchFollowUp).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockNotifyFastAgentParent).not.toHaveBeenCalled();
+    // Only the resolved link row is corrected, never every link that shares
+    // the task/provider/repository/number across hosts.
+    expect(mockDbUpdate).toHaveBeenCalledTimes(1);
+    expect(mockEq).toHaveBeenCalledWith('id', 'link-1');
+    expect(mockFinalize).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 'task-1' }),
+      'suppressed',
+    );
+  });
+
+  it('checks the link for the host the notification names, not a same-name PR elsewhere', async () => {
+    mockFindFirstTaskPullRequest.mockResolvedValue([
+      {
+        id: 'link-github',
+        status: 'merged',
+        host: 'github.com',
+        repositoryId: 'repo-github',
+        autoHandleFeedbackByUserId: 'user-9',
+      },
+      {
+        id: 'link-gitea',
+        status: 'open',
+        host: 'gitea.example.com',
+        repositoryId: 'repo-gitea',
+        autoHandleFeedbackByUserId: 'user-9',
+      },
+    ]);
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockReadLivePullRequestState.mockResolvedValue('open');
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+
+    await prReviewNotificationJob(
+      makeJob({
+        sourceControlProvider: 'gitea',
+        host: 'gitea.example.com',
+        repositoryId: 'repo-gitea',
+      }) as never,
+    );
+
+    // The merged GitHub link did not suppress the Gitea delivery, and the
+    // live read was scoped to the Gitea host.
+    expect(mockReadLivePullRequestState).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'gitea', host: 'gitea.example.com' }),
+    );
+    expect(mockDispatchFollowUp).toHaveBeenCalled();
+  });
+
+  it('auto-dispatches when the live PR state cannot be read', async () => {
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      status: 'open',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockReadLivePullRequestState.mockResolvedValue(null);
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockDispatchFollowUp).toHaveBeenCalled();
   });
 
   it('fences a reclaimed automatic dispatch before remediation starts', async () => {
@@ -1551,6 +1775,68 @@ describe('prReviewNotificationJob', () => {
     expect(mockPostMessage).not.toHaveBeenCalled();
   });
 
+  it('posts Fast feedback while the child task runs and its parent Session is idle', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      payload: {
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'slack',
+            workspaceId: 'T123',
+            conversationId: 'C123:111.222',
+            replyTarget: { channelId: 'C123', threadId: '111.222' },
+          },
+        },
+      },
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      workerHeartbeatAt: new Date(),
+    });
+    mockGetSessionForFastConversation.mockResolvedValue({
+      respondingUntil: null,
+    });
+    mockNotifyFastAgentParent.mockResolvedValue(true);
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockSchedule).not.toHaveBeenCalled();
+    expect(mockConsumePending).toHaveBeenCalled();
+    expect(mockNotifyFastAgentParent).toHaveBeenCalled();
+  });
+
+  it('defers Fast feedback while its parent Session is responding', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      payload: {
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'slack',
+            workspaceId: 'T123',
+            conversationId: 'C123:111.222',
+            replyTarget: { channelId: 'C123', threadId: '111.222' },
+          },
+        },
+      },
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
+    });
+    mockGetSessionForFastConversation.mockResolvedValue({
+      respondingUntil: new Date(Date.now() + 60_000),
+    });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockSchedule).toHaveBeenCalledWith({
+      request: expect.objectContaining({ deferrals: 1 }),
+      delayMs: 5000,
+    });
+    expect(mockConsumePending).not.toHaveBeenCalled();
+    expect(mockNotifyFastAgentParent).not.toHaveBeenCalled();
+  });
+
   it('defers during follow-up turns on a live sandbox before the cap', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
@@ -1705,13 +1991,25 @@ describe('prReviewNotificationJob', () => {
   });
 
   it('records review feedback to task history when the task has no conversation routing', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     mockPrepareDelivery.mockResolvedValue({
       post: true,
       route: null,
       text: 'I reviewed owner/repo#42 on GitHub and found no issues.',
     });
 
-    await prReviewNotificationJob(makeJob() as never);
+    await prReviewNotificationJob(
+      makeJob({
+        events: [
+          {
+            kind: 'review',
+            authorLogin: 'alice',
+            providerEventId: 'github-review:5212618392',
+            sourceDeliveryId: 'github-delivery-3',
+          },
+        ],
+      }) as never,
+    );
 
     expect(mockPostMessage).not.toHaveBeenCalled();
     expect(mockRecordDelivery).toHaveBeenCalledWith({
@@ -1720,6 +2018,27 @@ describe('prReviewNotificationJob', () => {
       route: null,
       text: 'I reviewed owner/repo#42 on GitHub and found no issues.',
     });
+    const operationalEvents = log.mock.calls
+      .map(([message]) => {
+        try {
+          return JSON.parse(String(message));
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    expect(operationalEvents).toContainEqual(
+      expect.objectContaining({
+        event: 'source_control_review_routing',
+        deliveryId: 'github-delivery-3',
+        externalEventId: 'github-review:5212618392',
+        reviewId: 5212618392,
+        taskId: 'task-1',
+        outcome: 'no_route',
+        reason: 'task_history_only',
+      }),
+    );
+    log.mockRestore();
   });
 
   it('publishes an actionable canonical offer for a web-only standard task', async () => {

@@ -10,6 +10,7 @@ import {
   isNull,
   lte,
   ne,
+  or,
   sql,
 } from 'drizzle-orm';
 
@@ -37,6 +38,28 @@ import {
 
 const CLAIM_LIMIT = 100;
 const DELIVERY_LEASE_MS = 10 * 60 * 1000;
+/**
+ * Claims a delivery may burn without finishing before it is retired. A
+ * deferral reclaims the delivery on purpose and is not counted; what is
+ * counted is a lease that expired or was superseded with nothing to show for
+ * it. A delivery that keeps doing that is stuck, not slow, and every fresh
+ * lease is another chance for it to fire days late.
+ */
+const DELIVERY_MAX_WASTED_CLAIMS = 12;
+/**
+ * A delivery this far past both its creation and its due time is stale
+ * however it got here. Deferrals move the due time forward, so a
+ * deliberately patient delivery is not retired; a due time set in the past
+ * to mean "immediately" is covered by the creation time.
+ */
+const DELIVERY_MAX_OVERDUE_MS = 72 * 60 * 60 * 1000;
+const LIVE_DELIVERY_STATES: CanonicalPrReviewDeliveryState[] = [
+  'pending',
+  'claimed',
+  'prepared',
+  'prompt_posting',
+  'auto_dispatch_pending',
+];
 const ROOMOTE_CI_COALESCE_WINDOW_MS = 15 * 60 * 1000;
 
 export type CanonicalPrReviewDeliveryState =
@@ -703,6 +726,7 @@ export async function claimDueCanonicalPrReviewDeliveries(
   return db.transaction(async (tx) => {
     const leaseToken = randomUUID();
     const leaseExpiresAt = new Date(now.getTime() + DELIVERY_LEASE_MS);
+    await retireStaleCanonicalPrReviewDeliveries(tx, now, scope);
     const rows = await tx.execute<{
       delivery_id: string;
       notification_unit_id: string;
@@ -897,6 +921,66 @@ export async function claimDueCanonicalPrReviewDeliveries(
   });
 }
 
+/**
+ * Suppresses live deliveries that have outlived their usefulness before the
+ * claim looks for candidates: either they burned through their claims
+ * without completing, or they have been due for days. One such
+ * delivery, a CI failure from a week earlier, kept being re-leased on every
+ * restart until it resumed a finished task against an already merged pull
+ * request. Only unleased rows are touched so an in-flight worker keeps its
+ * claim.
+ */
+async function retireStaleCanonicalPrReviewDeliveries(
+  tx: DatabaseOrTransaction,
+  now: Date,
+  scope: { repository?: string },
+): Promise<void> {
+  const retired = await tx
+    .update(prReviewNotificationDeliveries)
+    .set({
+      status: 'suppressed',
+      leaseToken: null,
+      leaseExpiresAt: null,
+      completedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        inArray(prReviewNotificationDeliveries.status, LIVE_DELIVERY_STATES),
+        or(
+          isNull(prReviewNotificationDeliveries.leaseExpiresAt),
+          lte(prReviewNotificationDeliveries.leaseExpiresAt, now),
+        ),
+        or(
+          sql`${prReviewNotificationDeliveries.attempt} - ${prReviewNotificationDeliveries.deferrals} >= ${DELIVERY_MAX_WASTED_CLAIMS}`,
+          sql`greatest(${prReviewNotificationDeliveries.dueAt}, ${prReviewNotificationDeliveries.createdAt}) <= ${new Date(now.getTime() - DELIVERY_MAX_OVERDUE_MS).toISOString()}::timestamp`,
+        ),
+        scope.repository
+          ? inArray(
+              prReviewNotificationDeliveries.notificationUnitId,
+              tx
+                .select({ id: prReviewNotificationUnits.id })
+                .from(prReviewNotificationUnits)
+                .where(
+                  eq(prReviewNotificationUnits.repository, scope.repository),
+                ),
+            )
+          : undefined,
+      ),
+    )
+    .returning({
+      id: prReviewNotificationDeliveries.id,
+      attempt: prReviewNotificationDeliveries.attempt,
+      deferrals: prReviewNotificationDeliveries.deferrals,
+      dueAt: prReviewNotificationDeliveries.dueAt,
+    });
+  for (const row of retired) {
+    console.warn(
+      `[PrReviewNotification] Retired stale delivery ${row.id} (attempt ${row.attempt}, deferrals ${row.deferrals}, due ${row.dueAt.toISOString()})`,
+    );
+  }
+}
+
 function canonicalClaimWhere(input: {
   deliveryId: string;
   leaseToken: string;
@@ -966,13 +1050,25 @@ export async function transitionCanonicalPrReviewDelivery(input: {
 }
 
 /**
- * Serializes an automatic follow-up enqueue with old-head retirement.
+ * Claims a delivery for automatic dispatch, then runs the enqueue.
  *
- * The delivery row stays locked until `dispatch` settles. A concurrent
- * synchronize transaction must therefore either fence the delivery before
- * this transaction reads it, or wait until the follow-up has been enqueued.
- * This closes the gap between a standalone state transition and the external
- * enqueue that follows it.
+ * The claim is its own short transaction: the delivery row is locked only
+ * long enough to check the old-head fence and mark it
+ * `auto_dispatch_pending`. `dispatch` runs after that commits. It must not
+ * run inside the transaction: the dispatch launches or resumes a task run,
+ * which opens its own transaction and locks the target task row, while the
+ * claim's `target_task_id` foreign key already holds a key-share lock on
+ * that same row. Held together on one pool, the two connections wait on
+ * each other forever, and once every pooled connection is parked that way
+ * the whole bullmq process falls silent (the managed-tenant outages of
+ * 2026-09-15).
+ *
+ * Old-head retirement is fenced by state rather than by the row lock: a
+ * retirement that lands before the claim sees `action_claimed_at` set and the
+ * claim is refused; one that lands after the claim marks the row and the
+ * already-claimed dispatch proceeds, exactly as it did when the lock made
+ * retirement wait for it. If `dispatch` throws, the claim is handed back so
+ * the next lease holder can retry.
  */
 export async function withCanonicalPrReviewAutoDispatchFence<T>(
   input: {
@@ -988,11 +1084,19 @@ export async function withCanonicalPrReviewAutoDispatchFence<T>(
   },
   dispatch: () => Promise<T>,
 ): Promise<{ acquired: false } | { acquired: true; result: T }> {
-  return db.transaction(async (tx) => {
+  const previous = await db.transaction(async (tx) => {
     const [delivery] = await tx
       .select({
         id: prReviewNotificationDeliveries.id,
         actionClaimedAt: prReviewNotificationDeliveries.actionClaimedAt,
+        status: prReviewNotificationDeliveries.status,
+        followUpPrompt: prReviewNotificationDeliveries.followUpPrompt,
+        targetTaskId: prReviewNotificationDeliveries.targetTaskId,
+        actingUserId: prReviewNotificationDeliveries.actingUserId,
+        routeProvider: prReviewNotificationDeliveries.routeProvider,
+        routeWorkspaceId: prReviewNotificationDeliveries.routeWorkspaceId,
+        routeChannelId: prReviewNotificationDeliveries.routeChannelId,
+        routeThreadId: prReviewNotificationDeliveries.routeThreadId,
       })
       .from(prReviewNotificationDeliveries)
       .where(
@@ -1007,7 +1111,7 @@ export async function withCanonicalPrReviewAutoDispatchFence<T>(
       .for('update');
 
     if (!delivery || delivery.actionClaimedAt !== null) {
-      return { acquired: false };
+      return null;
     }
 
     await tx
@@ -1025,8 +1129,45 @@ export async function withCanonicalPrReviewAutoDispatchFence<T>(
       })
       .where(eq(prReviewNotificationDeliveries.id, delivery.id));
 
-    return { acquired: true, result: await dispatch() };
+    return delivery;
   });
+
+  if (!previous) {
+    return { acquired: false };
+  }
+
+  try {
+    return { acquired: true, result: await dispatch() };
+  } catch (error) {
+    // Put the row back the way the claim found it so a later lease holder
+    // can retry. A retirement that fenced the row meanwhile keeps its mark.
+    await db
+      .update(prReviewNotificationDeliveries)
+      .set({
+        status: previous.status,
+        followUpPrompt: previous.followUpPrompt,
+        targetTaskId: previous.targetTaskId,
+        actingUserId: previous.actingUserId,
+        routeProvider: previous.routeProvider,
+        routeWorkspaceId: previous.routeWorkspaceId,
+        routeChannelId: previous.routeChannelId,
+        routeThreadId: previous.routeThreadId,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          canonicalClaimWhere(input),
+          eq(prReviewNotificationDeliveries.status, 'auto_dispatch_pending'),
+          isNull(prReviewNotificationDeliveries.dispatchedRunId),
+        ),
+      )
+      .catch((restoreError: unknown) => {
+        console.error(
+          `[pr-review-notification-units] Failed to hand back delivery ${input.deliveryId} after a dispatch failure: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+        );
+      });
+    throw error;
+  }
 }
 
 export async function deferCanonicalPrReviewDelivery(input: {
@@ -1067,11 +1208,13 @@ export async function releaseCanonicalPrReviewDelivery(input: {
     .where(canonicalClaimWhere(input));
 }
 
-export async function releaseSupersededCanonicalPrReviewAction(input: {
-  deliveryId: string;
-  leaseToken: string;
-}): Promise<boolean> {
-  const now = new Date();
+export async function releaseSupersededCanonicalPrReviewAction(
+  input: {
+    deliveryId: string;
+    leaseToken: string;
+  },
+  now: Date = new Date(),
+): Promise<boolean> {
   const rows = await db
     .update(prReviewNotificationDeliveries)
     .set({

@@ -1,13 +1,12 @@
 import { db, eq, customMcpServers } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
-import { Env } from '@roomote/env';
 import {
   customMcpServerIdFromConnectionId,
   type OAuthClientInformation,
   type OAuthServerMetadata,
 } from '@roomote/types';
 
-import { createGuardedFetch } from '../safe-fetch';
+import { createBoundedCustomMcpFetch } from './custom-fetch';
 import {
   discoverOAuthEndpoints,
   OAuthTokenRequestError,
@@ -73,7 +72,7 @@ export async function resolveCustomMcpAuthTarget(
         }
       : null,
     oauthOptions: {
-      fetchImpl: createGuardedFetch(Env.R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS),
+      fetchImpl: createBoundedCustomMcpFetch(),
       ...(server.oauthResourceIndicatorDisabled
         ? {}
         : { resource: server.url }),

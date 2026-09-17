@@ -10,11 +10,15 @@ const MAX_SLACK_REPLY_BODY_BLOCKS = 49;
 
 export function buildFastAgentSlackReplyBodyBlocks(params: {
   message: string;
+  leadingText?: string | null;
   quote?: string | null;
   charts?: DataVisualizationInput[];
   images?: Array<{ url: string; altText: string }>;
 }): SlackBlock[] {
   const leadingBlocks = [
+    ...(params.leadingText
+      ? [{ type: 'markdown' as const, text: params.leadingText }]
+      : []),
     ...(params.quote
       ? [
           {

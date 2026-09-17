@@ -59,6 +59,7 @@ export function SetupStarterTasksCard({
         request={request}
         submission="setup"
         cancellable={false}
+        emptySubmissionLabel="I'll type it myself"
       />
     </SetupSessionActionCard>
   );

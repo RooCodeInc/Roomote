@@ -21,6 +21,31 @@ export {
   maybeEnqueueBrainMemoryForCompletedRun,
 } from './lib/task-runs/finish-run';
 export {
+  WEB_TASK_INITIATOR_SETTLE_NOTIFICATION_JOB,
+  enqueueWebTaskInitiatorSettleNotification,
+  type WebTaskInitiatorSettleNotificationJob,
+} from './lib/task-runs/enqueue-web-task-initiator-settle-notification';
+export {
+  notifyWebTaskInitiatorOnSettle,
+  type WebTaskInitiatorSettleNotificationResult,
+} from './lib/task-runs/notify-web-task-initiator-on-settle';
+export { continueDirectTaskAttentionReply } from './lib/task-runs/continue-direct-task-attention-reply';
+export {
+  findSessionAttentionNotificationReply,
+  hasTaskRunAttentionNotification,
+  notifyDirectWebTaskAttention,
+  notifyFastWebSessionAttention,
+  processSessionAttentionNotificationJob,
+  resolveSessionAttentionFastConversation,
+  type SessionAttentionKind,
+  type SessionAttentionNotificationResult,
+} from './lib/session-attention-notification';
+export {
+  SESSION_ATTENTION_NOTIFICATION_JOB,
+  enqueueSessionAttentionNotification,
+  type SessionAttentionNotificationJob,
+} from './lib/enqueue-session-attention-notification';
+export {
   AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
   AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
   AUTOMATION_RECOMMENDATION_REPOSITORY_CAP,
@@ -40,11 +65,17 @@ export {
   type AutomationSignalPrefetchJob,
 } from './lib/automation-recommendations';
 export {
+  CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+  resolveDefaultAutomationTarget,
+  type AutomationDestinationCapabilities,
+} from './lib/default-automation-destination';
+export {
   recordLlmUsage,
   type RecordLlmUsageInput,
 } from './lib/task-runs/record-task-inference-usage';
 export { findTaskRunByRunTokenClaims } from './lib/task-runs/find-task-run';
 export { stopTaskRun } from './lib/task-runs/stop-task-run';
+export { settleLiveTaskMessageOnExit } from './lib/task-runs/settle-live-task-message-on-exit';
 export { createSnapshot } from './lib/task-runs/enqueue-snapshot';
 export {
   enqueueTaskSleep,
@@ -112,7 +143,10 @@ export {
   signArtifactIdWithKey,
   verifyArtifactSignatureWithKeys,
 } from './lib/artifacts/raw-url';
-export { createTaskArtifactRecord } from './lib/artifacts/create-record';
+export {
+  authorizeTaskArtifactUpload,
+  createTaskArtifactRecord,
+} from './lib/artifacts/create-record';
 export {
   createFastAgentConversationArtifact,
   createFastAgentSessionArtifact,
@@ -212,6 +246,7 @@ export { refreshCurrentThreadFooters } from './lib/thread-footer-refresh';
 export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/teams-communication';
 
 export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib/telegram-communication';
+export { retireTelegramRequestUserInputPromptBestEffort } from './lib/communication-request-user-input';
 
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
 export { syncFastAgentSlackTitleBestEffort } from './lib/fast-agent-slack-title-sync';
@@ -220,6 +255,7 @@ export { requireFastSuggestionOriginSessionId } from './lib/fast-automation-sugg
 export {
   buildFastAgentParentEventKey,
   drainFastAgentParentEvents,
+  countOverdueQueuedFastAgentParentEvents,
   enqueueFastAgentParentEvent,
   FastAgentParentBusyError,
   FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
@@ -276,23 +312,27 @@ export {
 } from './lib/agentmail/rui-answer-links';
 
 export {
-  buildAgentMailEmailLinkToken,
-  buildAgentMailEmailLinkUrl,
   buildAgentMailUnsubscribeToken,
   buildAgentMailUnsubscribeUrl,
-  verifyAgentMailEmailLinkToken,
   verifyAgentMailUnsubscribeToken,
-} from './lib/agentmail/email-link-tokens';
+} from './lib/agentmail/unsubscribe-tokens';
 
 export {
+  AgentMailRecipientUnavailableError,
   canStartAgentMailConversationWithUser,
   isAgentMailAddressSuppressed,
+  listAgentMailOutboundIdentities,
+  listAvailableAgentMailOutboundIdentities,
   resolveAgentMailOutboundAddress,
+  resolveAgentMailOutboundIdentity,
   sendAgentMailSystemEmail,
   startAgentMailConversation,
+  startAgentMailConversationWithResult,
   suppressAgentMailAddress,
   type AgentMailOutboundAddressResolution,
+  type AgentMailOutboundIdentity,
   type AgentMailSystemEmailResult,
+  type StartAgentMailConversationResult,
   type AgentMailSuppressionReason,
 } from './lib/agentmail/outbound';
 
@@ -303,7 +343,6 @@ export {
   processAgentMailWebhookEvent,
   recordAgentMailWebhookEvent,
   recoverPendingAgentMailWork,
-  redispatchAgentMailEventsForSender,
   type AgentMailWebhookEventJob,
 } from './lib/agentmail/inbound';
 
@@ -321,10 +360,13 @@ export {
   findSlackUserDirectMessageDestination,
   findUserDirectMessageDestination,
   hasUserDirectMessageIdentity,
+  hasAnyUserDirectMessageIdentity,
   sendUserDirectMessage,
   sendUserDirectMessageBestEffort,
+  sendUserDirectMessageBestEffortWithReceipts,
   type UserDirectMessageDestination,
   type UserDirectMessageProvider,
+  type UserDirectMessageReceipt,
 } from './lib/user-direct-message';
 
 export {
@@ -461,6 +503,10 @@ export {
   type SourceControlPullRequestSummary,
 } from './lib/pull-requests/source-control-pull-request-reads';
 export {
+  readLivePullRequestStateForNotification,
+  type LivePullRequestState,
+} from './lib/task-runs/pr-review-notification-pr-state';
+export {
   writeSourceControlPullRequestForTaskRun,
   sourceControlPullRequestWriteInputSchema,
   SourceControlWriteError,
@@ -529,6 +575,12 @@ export {
 } from './lib/mcp/custom-auth-target';
 
 export {
+  addRemoteCustomMcpForFast,
+  prepareDeploymentCustomMcpOAuthConnection,
+  type AddRemoteCustomMcpResult,
+} from './lib/mcp/add-remote-custom-mcp';
+
+export {
   LINEAR_ORG_CONNECTION_ROLE,
   LINEAR_USER_CONNECTION_ROLE,
   findLinearDeploymentMcpConnection,
@@ -552,3 +604,8 @@ export * from './lib/brain-github';
 export * from './lib/brain-linear';
 export * from './lib/brain-inference';
 export * from './lib/brain-source-availability';
+export * from './lib/home-composer-recommendations';
+export {
+  publishCredentialEgressDelivery,
+  isCredentialEgressBootstrapReady,
+} from './lib/credential-egress-delivery';

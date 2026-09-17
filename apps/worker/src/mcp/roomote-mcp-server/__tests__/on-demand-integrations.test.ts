@@ -46,6 +46,8 @@ function parse(result: { content: Array<{ text?: string }> }) {
 }
 
 describe('on-demand integration tools', () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it('registers only when the worker wrote a catalog', () => {
     expect(shouldRegisterOnDemandIntegrationTools({})).toBe(false);
     expect(
@@ -114,6 +116,7 @@ describe('on-demand integration tools', () => {
   });
 
   it('keeps searching when one server cannot list its tools', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const flaky = vi.fn(async (server: { name: string }) => {
       if (server.name === 'linear') throw new Error('upstream down');
       return listTools(server);
@@ -125,6 +128,58 @@ describe('on-demand integration tools', () => {
       expect.objectContaining({ integrationId: 'github', name: 'list_issues' }),
     ]);
     expect(result.unavailableIntegrations).toEqual(['linear']);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('integrationId="linear" error="upstream down"'),
+    );
+  });
+
+  it('treats an empty result as inconclusive when another scoped listing failed', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const flaky = vi.fn(async (server: { name: string }) => {
+      if (server.name === 'linear') throw new Error('upstream down');
+      return listTools(server);
+    });
+    const result = parse(
+      await findOnDemandIntegrationTools(
+        catalog,
+        { query: 'incidents' },
+        flaky,
+      ),
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      tools: [],
+      availableToolCount: 2,
+      emptyReason: 'partial_integration_unavailable',
+      unavailableIntegrations: ['linear'],
+      guidance: expect.stringContaining('inconclusive'),
+    });
+  });
+
+  it('explains an empty filtered result without logging query content', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const result = parse(
+      await findOnDemandIntegrationTools(
+        catalog,
+        { integrationId: 'github', query: 'private customer database' },
+        listTools,
+      ),
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      tools: [],
+      availableToolCount: 2,
+      emptyReason: 'no_filter_match',
+      guidance: expect.stringContaining('only integrationId'),
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'integrationId="github" queryTermCount=3 catalogIntegrationCount=2 scopedIntegrationCount=1 availableToolCount=2 emptyReason="no_filter_match"',
+      ),
+    );
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('customer');
   });
 
   it('lists every scoped server at once so one slow server does not serialize the lookup', async () => {
@@ -188,5 +243,30 @@ describe('on-demand integration tools', () => {
     );
     expect(missing.success).toBe(false);
     expect(callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves an upstream MCP error result unchanged', async () => {
+    const upstreamResult = {
+      isError: true,
+      structuredContent: { id: '', external_id: 0 },
+      content: [
+        {
+          type: 'text' as const,
+          text: 'missing_required_fields: severity_id is required',
+        },
+      ],
+    };
+
+    await expect(
+      callOnDemandIntegrationTool(
+        catalog,
+        {
+          integrationId: 'linear',
+          toolName: 'incident_create',
+          args: { name: 'Database unavailable' },
+        },
+        vi.fn(async () => upstreamResult),
+      ),
+    ).resolves.toEqual(upstreamResult);
   });
 });

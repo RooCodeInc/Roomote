@@ -55,6 +55,7 @@ export function ArtifactDetail({
   taskId,
 }: ArtifactDetailProps) {
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
+  const [firstRowIsHeader, setFirstRowIsHeader] = useState(false);
 
   const trpc = useTRPC();
   const {
@@ -78,6 +79,10 @@ export function ArtifactDetail({
   });
 
   const hasMultipleVersions = versions.length > 1;
+
+  useEffect(() => {
+    setFirstRowIsHeader(false);
+  }, [artifact?.path, artifact?.version]);
 
   useEffect(() => {
     if (!isFullscreenOpen) {
@@ -179,7 +184,7 @@ export function ArtifactDetail({
           </>
         }
       />
-      <div className="min-h-0 flex-1 bg-zinc-800">
+      <div className="min-h-0 flex-1 bg-background">
         {!isFullscreenOpen ? (
           <ArtifactViewerContent
             artifact={artifact}
@@ -187,6 +192,8 @@ export function ArtifactDetail({
             onVersionChange={setArtifactVersion}
             className="h-full border-0"
             isLoading={isLoading}
+            firstRowIsHeader={firstRowIsHeader}
+            onFirstRowIsHeaderChange={setFirstRowIsHeader}
           />
         ) : null}
       </div>
@@ -206,6 +213,7 @@ export function ArtifactDetail({
               owner={{ taskId }}
               onVersionChange={setArtifactVersion}
               className="h-full border-0"
+              firstRowIsHeader={firstRowIsHeader}
               showToolbar={false}
             />
           </div>

@@ -167,6 +167,7 @@ describe('GitHub App manifest commands', () => {
         checks: 'write',
         contents: 'write',
         deployments: 'read',
+        gists: 'write',
         issues: 'write',
         merge_queues: 'read',
         metadata: 'read',
@@ -616,7 +617,7 @@ describe('startAuthenticateGitHubAccountCommand', () => {
       'https://github.com/login/oauth/authorize',
     );
     expect(url.searchParams.get('client_id')).toBe('Iv1.resolved-client');
-    expect(url.searchParams.get('scope')).toBe('read:user');
+    expect(url.searchParams.has('scope')).toBe(false);
     expect(url.searchParams.get('redirect_uri')).toBe(
       'https://roomote.example.com/github/callback',
     );

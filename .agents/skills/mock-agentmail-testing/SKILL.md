@@ -32,9 +32,9 @@ R_AGENTMAIL_API_KEY=mock-agentmail-api-key            # any value; the harness a
 AGENTMAIL_API_BASE_URL=http://127.0.0.1:3015          # reroutes ALL outbound AgentMail API calls to the harness
 ```
 
-Pods are supported: `POST /v0/pods` (idempotent per `client_id`) creates one, and the pod-scoped management routes (`/v0/pods/{pod_id}/inboxes...`, `/v0/pods/{pod_id}/webhooks...`) only see resources inside that pod, while the organization-level routes see everything. To exercise a pod-scoped setup, seed a pod in the scenario file (`pods: [{ pod_id: 'pod_acme' }]`) and set `R_AGENTMAIL_POD_ID=pod_acme` for the app. Webhook updates follow the real API: `add_inbox_ids` / `remove_inbox_ids` (and `add_pod_ids` / `remove_pod_ids` at organization level), a non-empty `event_types` list replaces the subscription, and the `url` is immutable.
+The app registers its webhook through the inbox-scoped routes (`/v0/inboxes/{inbox_id}/webhooks...`), which is what an inbox-scoped API key can reach; the harness serves those alongside the organization-level and pod-scoped (`/v0/pods/{pod_id}/...`) routes, and the app resolves its inbox from `GET /v0/inboxes`, so seed exactly one inbox unless you are testing the "key sees several inboxes" refusal. Webhook updates follow the real API: `add_inbox_ids` / `remove_inbox_ids` (and `add_pod_ids` / `remove_pod_ids` at organization level), an inbox-scoped webhook only changes `event_types`, a non-empty `event_types` list replaces the subscription, and the `url` is immutable.
 
-Webhook secrets need no manual wiring: when the app registers its webhook through `POST /v0/webhooks`, the harness mints the `whsec_...` secret and returns it, exactly like real AgentMail. If the app relies on a pre-provisioned secret (`R_AGENTMAIL_WEBHOOK_SECRET`), seed a webhook with that secret in the scenario file instead — deliveries are signed with whatever secret the registration holds.
+Webhook secrets need no manual wiring: when the app registers its webhook through `POST /v0/inboxes/{inbox_id}/webhooks`, the harness mints the `whsec_...` secret and returns it, exactly like real AgentMail. If the app relies on a pre-provisioned secret (`R_AGENTMAIL_WEBHOOK_SECRET`), seed a webhook with that secret in the scenario file instead — deliveries are signed with whatever secret the registration holds.
 
 ## Step 2: Create a scenario file
 
@@ -159,8 +159,8 @@ To reset between scenarios, `POST /mock/state` with a fresh state object (it rep
 - **`duplicate-delivery`** — `duplicate: true` → same svix-id twice → exactly-once handling
 - **`oversize-payload`** — `oversize: true` → app must re-fetch the message body by id before acting
 - **`auto-submitted-loop-guard`** — `autoSubmitted: true` → automated senders must not trigger reply loops
-- **`webhook-registration`** — app boots, registers its webhook via `POST /v0/webhooks` (idempotent per `client_id`), and the secret round-trips into signature verification
-- **`pod-scoped-setup`** — with `R_AGENTMAIL_POD_ID` set and a seeded pod, the app provisions its inbox and webhook under `/v0/pods/{pod_id}/...` and deliveries for inboxes outside the pod never reach it
+- **`webhook-registration`** — app boots, registers its webhook via `POST /v0/inboxes/{inbox_id}/webhooks` (idempotent per `client_id`), and the secret round-trips into signature verification
+- **`inbox-scoped-setup`** — with one seeded inbox, the app resolves it from the key and registers its webhook under `/v0/inboxes/{inbox_id}/webhooks`; with two seeded inboxes the save is refused and names both
 - **`reply-idempotency`** — app retries a reply with the same `Idempotency-Key` → exactly one outbound message in `/mock/state`
 - **`bounce-suppression`** — `kind: 'bounce'` (Permanent) / `kind: 'complaint'` → the recipient lands in `agentmail_suppressions` and outbound-initiated email to them is refused; `bounceType: 'Transient'` must NOT suppress
 

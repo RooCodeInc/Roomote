@@ -5,12 +5,14 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { and, db, eq, isNull, repositories, users } from '@roomote/db/server';
 import {
   bitbucketCommitHashSchema,
+  BitbucketApiError,
   createBitbucketRepositoryClient,
   getBitbucketOAuthConnection,
   resolveBitbucketInstanceHost,
   resolveBitbucketOAuthAccessToken,
   stripUuidBraces,
   type BitbucketRepositoryClient,
+  type BitbucketPullRequestDetails,
 } from '@roomote/bitbucket';
 import type { Variables } from '../../types';
 import { McpProxyError, toMcpToolResult } from './proxy-utils';
@@ -49,7 +51,7 @@ async function authorize(auth: Variables['authContext'], fullName?: string) {
       eq(repositories.isActive, true),
       fullName === undefined ? undefined : eq(repositories.fullName, fullName),
     ),
-    columns: { fullName: true, externalRepoId: true },
+    columns: { id: true, fullName: true, externalRepoId: true },
   });
   if (!connected?.externalRepoId) {
     throw new McpProxyError(
@@ -66,7 +68,11 @@ async function authorize(auth: Variables['authContext'], fullName?: string) {
 
 function assertRepository(
   value: unknown,
-  connected: { fullName: string; externalRepoId: string | null },
+  connected: {
+    id: string;
+    fullName: string;
+    externalRepoId: string | null;
+  },
 ) {
   const identity = z
     .object({ uuid: z.string().min(1), full_name: z.string() })
@@ -95,6 +101,8 @@ function createServer(auth: Variables['authContext']) {
       input: z.infer<z.ZodObject<S>>,
       client: BitbucketRepositoryClient,
       checkRepository: (value: unknown) => void,
+      pullRequest?: BitbucketPullRequestDetails,
+      connected?: Awaited<ReturnType<typeof authorize>>,
     ) => Promise<unknown>,
   ) {
     server.registerTool(
@@ -123,14 +131,22 @@ function createServer(auth: Variables['authContext']) {
           const checkRepository = (value: unknown) =>
             assertRepository(value, connected);
           checkRepository(await client.getRepository());
+          let pullRequest: BitbucketPullRequestDetails | undefined;
           if ('pullRequestNumber' in input && name !== 'get_pull_request') {
             const requestedNumber = number.parse(input.pullRequestNumber);
             const details = await client.getPullRequest(requestedNumber);
             if (details.id !== requestedNumber)
               throw new McpProxyError(403, 'Pull request identity mismatch');
             checkRepository(details.destination?.repository);
+            pullRequest = details;
           }
-          const result = await execute(input, client, checkRepository);
+          const result = await execute(
+            input,
+            client,
+            checkRepository,
+            pullRequest,
+            connected,
+          );
           // Do not reflect provider errors (which may contain credentials or payloads).
           return toMcpToolResult({ result });
         } catch (error) {
@@ -252,6 +268,88 @@ function createServer(auth: Variables['authContext']) {
       const result = await client.declinePullRequest(input.pullRequestNumber);
       check(result.destination?.repository);
       return result;
+    },
+  );
+  register(
+    'merge_pull_request',
+    'Merge an open pull request at the expected source commit. Provider branch restrictions and merge permissions apply.',
+    {
+      ...pr,
+      expectedHeadSha: z.string().regex(/^[a-fA-F0-9]{40}$/),
+      mergeStrategy: z
+        .enum(['merge_commit', 'squash', 'fast_forward'])
+        .optional(),
+    },
+    false,
+    async (input, client, check, _pullRequest, connected) => {
+      const pullRequest = await client.getPullRequest(input.pullRequestNumber);
+      if (pullRequest.id !== input.pullRequestNumber)
+        throw new McpProxyError(403, 'Pull request identity mismatch');
+      check(pullRequest.destination?.repository);
+      if (pullRequest.state !== 'OPEN' || !pullRequest.source?.commit?.hash)
+        throw new McpProxyError(
+          409,
+          'Pull request is not open at the expected head SHA. Read it again before merging.',
+        );
+      const resolvedHead = await client.getCommit(
+        pullRequest.source.commit.hash,
+      );
+      check(resolvedHead.repository);
+      if (
+        resolvedHead.hash.toLowerCase() !== input.expectedHeadSha.toLowerCase()
+      )
+        throw new McpProxyError(
+          409,
+          'Pull request head changed. Read it again before merging.',
+        );
+      console.info(
+        JSON.stringify({
+          event: 'source_control_mcp_merge_authorized',
+          provider: 'bitbucket',
+          userId: auth?.userId,
+          repositoryId: connected?.id,
+          repositoryFullName: connected?.fullName,
+          targetNumber: input.pullRequestNumber,
+        }),
+      );
+      let mergeError: unknown;
+      try {
+        await client.mergePullRequest(input.pullRequestNumber, {
+          mergeStrategy: input.mergeStrategy,
+        });
+      } catch (error) {
+        mergeError = error;
+      }
+      const verified = await client.getPullRequest(input.pullRequestNumber);
+      check(verified.destination?.repository);
+      if (
+        verified.id !== input.pullRequestNumber ||
+        verified.state !== 'MERGED'
+      ) {
+        if (mergeError instanceof BitbucketApiError) {
+          if (mergeError.status === 202)
+            throw new McpProxyError(
+              409,
+              'Bitbucket accepted the merge and it is still in progress. Read the pull request again before retrying.',
+            );
+          if ([401, 403].includes(mergeError.status))
+            throw new McpProxyError(
+              403,
+              'Bitbucket denied the merge with the current provider permissions.',
+            );
+          if ([400, 405, 409, 422].includes(mergeError.status))
+            throw new McpProxyError(
+              409,
+              'Bitbucket rejected the merge because its requirements, restrictions, or expected state were not satisfied.',
+            );
+        }
+        if (mergeError) throw mergeError;
+        throw new McpProxyError(
+          409,
+          'Bitbucket did not confirm the merge. Inspect the pull request before retrying.',
+        );
+      }
+      return verified;
     },
   );
   register(

@@ -451,6 +451,29 @@ commands:
 });
 
 describe('environmentConfigSchema', () => {
+  it('accepts a repository-free environment', () => {
+    expect(
+      environmentConfigSchema.parse({
+        name: 'Service workspace',
+        repositories: [],
+        services: ['postgres16'],
+      }),
+    ).toEqual({
+      name: 'Service workspace',
+      repositories: [],
+      services: ['postgres16'],
+    });
+  });
+
+  it('defaults omitted repositories to an empty array', () => {
+    expect(
+      environmentConfigSchema.parse({ name: 'Repository-free workspace' }),
+    ).toEqual({
+      name: 'Repository-free workspace',
+      repositories: [],
+    });
+  });
+
   it.each([
     {
       label: 'top-level env',
@@ -683,6 +706,31 @@ repositories:
   });
 
   describe('mcpServers', () => {
+    it.each([
+      {
+        url: 'https://mcp.example.com',
+        headers: { Authorization: '${MCP_TOKEN}' },
+      },
+      {
+        command: 'npx',
+        args: ['operator-mcp'],
+        env: { TOKEN: '${MCP_TOKEN}' },
+      },
+    ])(
+      'preserves existing environment servers named _roomote_http_integrations: %j',
+      (config) => {
+        const result = environmentConfigSchema.parse({
+          name: 'Env',
+          repositories: [{ repository: 'owner/repo' }],
+          mcpServers: { _roomote_http_integrations: config },
+        });
+
+        expect(result.mcpServers).toEqual({
+          _roomote_http_integrations: config,
+        });
+      },
+    );
+
     it('should accept streamable-http and stdio MCP server configs', () => {
       const result = environmentConfigSchema.safeParse({
         name: 'Env',

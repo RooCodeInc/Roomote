@@ -14,10 +14,33 @@
 export const AGENTMAIL_MAX_TEXT_LENGTH = 100_000;
 
 const TRUNCATION_SUFFIX = '\n\n[message truncated]';
+const AGENTMAIL_FOOTER_PREFIX = ':::roomote-footer ';
+
+export function formatAgentMailFooterMarkdown(text: string): string {
+  return `${AGENTMAIL_FOOTER_PREFIX}${text}`;
+}
 
 function truncateAgentMailMarkdown(markdown: string): string {
   if (markdown.length <= AGENTMAIL_MAX_TEXT_LENGTH) {
     return markdown;
+  }
+
+  const finalLineStart = markdown.lastIndexOf('\n') + 1;
+  const footer = markdown.slice(finalLineStart);
+
+  if (footer.startsWith(AGENTMAIL_FOOTER_PREFIX)) {
+    const separator = '\n\n';
+    const bodyLength =
+      AGENTMAIL_MAX_TEXT_LENGTH -
+      TRUNCATION_SUFFIX.length -
+      separator.length -
+      footer.length;
+
+    if (bodyLength >= 0) {
+      return (
+        markdown.slice(0, bodyLength) + TRUNCATION_SUFFIX + separator + footer
+      );
+    }
   }
 
   return (
@@ -40,17 +63,86 @@ export function escapeAgentMailHtml(text: string): string {
  */
 const SAFE_LINK_PATTERN = /^(https?:\/\/|mailto:)/i;
 
+function replaceMarkdownLinks(
+  text: string,
+  render: (label: string, url: string, source: string) => string,
+): string {
+  const parts: string[] = [];
+  let labelStart = -1;
+  let unchangedStart = 0;
+  let index = 0;
+
+  while (index < text.length) {
+    const character = text[index];
+
+    if (character === '\n') {
+      labelStart = -1;
+    } else if (character === '[' && labelStart === -1) {
+      labelStart = index;
+    } else if (character === ']') {
+      if (
+        labelStart !== -1 &&
+        index > labelStart + 1 &&
+        text[index + 1] === '('
+      ) {
+        const urlStart = index + 2;
+        let urlEnd = urlStart;
+
+        while (
+          urlEnd < text.length &&
+          text[urlEnd] !== ')' &&
+          !/\s/.test(text[urlEnd] ?? '')
+        ) {
+          urlEnd += 1;
+        }
+
+        if (urlEnd > urlStart && text[urlEnd] === ')') {
+          const source = text.slice(labelStart, urlEnd + 1);
+          parts.push(
+            text.slice(unchangedStart, labelStart),
+            render(
+              text.slice(labelStart + 1, index),
+              text.slice(urlStart, urlEnd),
+              source,
+            ),
+          );
+          index = urlEnd + 1;
+          unchangedStart = index;
+          labelStart = -1;
+          continue;
+        }
+
+        if (urlEnd === text.length) {
+          break;
+        }
+
+        index = urlEnd;
+        labelStart = -1;
+        continue;
+      }
+
+      labelStart = -1;
+    }
+
+    index += 1;
+  }
+
+  if (parts.length === 0) {
+    return text;
+  }
+
+  parts.push(text.slice(unchangedStart));
+  return parts.join('');
+}
+
 function convertInlineMarkdown(escaped: string): string {
   return (
-    escaped
+    replaceMarkdownLinks(escaped, (label, url, source) =>
+      SAFE_LINK_PATTERN.test(url) ? `<a href="${url}">${label}</a>` : source,
+    )
       // Links first so their URLs are not touched by emphasis rules. The
       // text was already escaped, so `&` inside URLs appears as `&amp;`,
       // which is the correct encoding for an href attribute.
-      .replace(
-        /\[([^\]\n]+)\]\(([^\s)]+)\)/g,
-        (match, label: string, url: string) =>
-          SAFE_LINK_PATTERN.test(url) ? `<a href="${url}">${label}</a>` : match,
-      )
       .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
       .replace(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/g, '<em>$1</em>')
       // Underscore italics only when they wrap a whole line, so snake_case
@@ -112,16 +204,29 @@ type MarkdownBlock =
   | { kind: 'blockquote'; lines: string[] }
   | { kind: 'unordered-list'; items: string[] }
   | { kind: 'ordered-list'; items: string[] }
+  | { kind: 'footer'; text: string }
   | { kind: 'paragraph'; lines: string[] };
 
-const HEADING_PATTERN = /^(#{1,6})\s+(.*)$/;
 const UNORDERED_ITEM_PATTERN = /^[-*+]\s+(.*)$/;
 const ORDERED_ITEM_PATTERN = /^\d+[.)]\s+(.*)$/;
 const BLOCKQUOTE_PATTERN = /^>\s?(.*)$/;
 
-function splitBlocks(text: string): MarkdownBlock[] {
+function parseHeading(line: string): { level: number; text: string } | null {
+  let level = 0;
+  while (level < 6 && line[level] === '#') level += 1;
+  if (level === 0 || (line[level] !== ' ' && line[level] !== '\t')) return null;
+  let textStart = level;
+  while (line[textStart] === ' ' || line[textStart] === '\t') textStart += 1;
+  return { level, text: line.slice(textStart) };
+}
+
+function splitBlocks(
+  text: string,
+  recognizeFinalFooter = false,
+): MarkdownBlock[] {
   const blocks: MarkdownBlock[] = [];
   let current: MarkdownBlock | null = null;
+  const lines = text.split('\n');
 
   const flush = () => {
     if (current) {
@@ -130,20 +235,33 @@ function splitBlocks(text: string): MarkdownBlock[] {
     }
   };
 
-  for (const line of text.split('\n')) {
+  for (const [index, line] of lines.entries()) {
     if (!line.trim()) {
       flush();
       continue;
     }
 
-    const heading = HEADING_PATTERN.exec(line);
+    const heading = parseHeading(line);
 
-    if (heading?.[1] && heading[2] !== undefined) {
+    if (
+      recognizeFinalFooter &&
+      index === lines.length - 1 &&
+      line.startsWith(AGENTMAIL_FOOTER_PREFIX)
+    ) {
+      flush();
+      blocks.push({
+        kind: 'footer',
+        text: line.slice(AGENTMAIL_FOOTER_PREFIX.length),
+      });
+      continue;
+    }
+
+    if (heading) {
       flush();
       blocks.push({
         kind: 'heading',
-        level: heading[1].length,
-        text: heading[2],
+        level: heading.level,
+        text: heading.text,
       });
       continue;
     }
@@ -221,6 +339,8 @@ function renderBlock(block: MarkdownBlock): string {
       return `<ol>${block.items
         .map((item) => `<li>${convertInlineText(item)}</li>`)
         .join('')}</ol>`;
+    case 'footer':
+      return `<p style="font-size:0.875em">${convertInlineText(block.text)}</p>`;
     case 'paragraph':
       return `<p>${block.lines
         .map((line) => convertInlineText(line))
@@ -236,8 +356,10 @@ function renderBlock(block: MarkdownBlock): string {
  * escaped text.
  */
 export function renderAgentMailHtml(markdown: string): string {
-  return splitCodeFences(truncateAgentMailMarkdown(markdown))
-    .map((segment) => {
+  const segments = splitCodeFences(truncateAgentMailMarkdown(markdown));
+
+  return segments
+    .map((segment, index) => {
       if (segment.kind === 'code') {
         const escaped = escapeAgentMailHtml(segment.content.replace(/\n$/, ''));
 
@@ -246,14 +368,15 @@ export function renderAgentMailHtml(markdown: string): string {
           : `<pre><code>${escaped}</code></pre>`;
       }
 
-      return splitBlocks(segment.content).map(renderBlock).join('');
+      return splitBlocks(segment.content, index === segments.length - 1)
+        .map(renderBlock)
+        .join('');
     })
     .join('');
 }
 
 function stripInlineMarkdown(text: string): string {
-  return text
-    .replace(/\[([^\]\n]+)\]\(([^\s)]+)\)/g, '$1 ($2)')
+  return replaceMarkdownLinks(text, (label, url) => `${label} (${url})`)
     .replace(/\*\*([^*\n]+)\*\*/g, '$1')
     .replace(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/g, '$1')
     .replace(/^_([^_\n](?:[^\n]*[^_\n])?)_$/gm, '$1')
@@ -267,18 +390,28 @@ function stripInlineMarkdown(text: string): string {
  * text stay readable as-is.
  */
 export function renderAgentMailPlainText(markdown: string): string {
-  return splitCodeFences(truncateAgentMailMarkdown(markdown))
-    .map((segment) => {
+  const segments = splitCodeFences(truncateAgentMailMarkdown(markdown));
+
+  return segments
+    .map((segment, index) => {
       if (segment.kind === 'code') {
         return segment.content.replace(/\n$/, '');
       }
 
       return segment.content
         .split('\n')
-        .map((line) => {
-          const heading = HEADING_PATTERN.exec(line);
+        .map((line, lineIndex, lines) => {
+          if (
+            index === segments.length - 1 &&
+            lineIndex === lines.length - 1 &&
+            line.startsWith(AGENTMAIL_FOOTER_PREFIX)
+          ) {
+            return `--\n${stripInlineMarkdown(line.slice(AGENTMAIL_FOOTER_PREFIX.length))}`;
+          }
+
+          const heading = parseHeading(line);
           const blockquote = BLOCKQUOTE_PATTERN.exec(line);
-          const source = heading?.[2] ?? blockquote?.[1] ?? line;
+          const source = heading?.text ?? blockquote?.[1] ?? line;
 
           return stripInlineMarkdown(source);
         })

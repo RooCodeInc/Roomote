@@ -375,9 +375,9 @@ RUN apt -qq update && \
   apt -qq install -y git && \
   ARCH="$(dpkg --print-architecture)" && \
   if [ "$ARCH" = "amd64" ]; then \
-    GH_CLI_URL="https://github.com/cli/cli/releases/download/v2.81.0/gh_2.81.0_linux_amd64.deb"; \
+    GH_CLI_URL="https://github.com/cli/cli/releases/download/v2.101.0/gh_2.101.0_linux_amd64.deb"; \
   elif [ "$ARCH" = "arm64" ]; then \
-    GH_CLI_URL="https://github.com/cli/cli/releases/download/v2.81.0/gh_2.81.0_linux_arm64.deb"; \
+    GH_CLI_URL="https://github.com/cli/cli/releases/download/v2.101.0/gh_2.101.0_linux_arm64.deb"; \
   else \
     echo "Unsupported architecture: $ARCH" && exit 1; \
   fi && \
@@ -433,6 +433,7 @@ COPY --from=build-preview-proxy /runtime-deps/node_modules ./apps/preview-proxy/
 COPY --from=github-cli /usr/bin/gh /usr/local/bin/gh
 RUN command -v git >/dev/null && command -v gh >/dev/null && \
   command -v opencode >/dev/null && \
+  test -f /roomote/apps/bullmq/dist/xhr-sync-worker.js && \
   cd /roomote/apps/bullmq && node -e "require.resolve('zod/package.json')" && \
   ls -d /roomote/node_modules/.pnpm/zod@*/node_modules/zod >/dev/null
 

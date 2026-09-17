@@ -1,6 +1,8 @@
 import {
   db,
   fastAgentConversations,
+  getSessionGoal,
+  replaceSessionGoal,
   sessionFactory,
   userFactory,
 } from '@roomote/db/server';
@@ -87,6 +89,11 @@ describe('archiveSessionCommand turn serialization', () => {
 
   it('cannot commit archive while reply is in flight, then archives after the turn releases', async () => {
     const { auth, session, record } = await fixture();
+    await replaceSessionGoal({
+      sessionId: session.id,
+      userId: auth.userId,
+      goal: { objective: 'Finish before archive', maxContinuations: 5 },
+    });
     const conversation = await fastAgentConversationRepository.findById({
       id: record!.id,
     });
@@ -117,6 +124,9 @@ describe('archiveSessionCommand turn serialization', () => {
         ?.archivedAt,
     ).toBeInstanceOf(Date);
     expect(mocks.cancelWakeups).toHaveBeenCalledWith(record!.id);
+    await expect(getSessionGoal(session.id)).resolves.toMatchObject({
+      status: 'canceled',
+    });
   });
 
   it('fails retryably without archival when the turn stays busy', async () => {

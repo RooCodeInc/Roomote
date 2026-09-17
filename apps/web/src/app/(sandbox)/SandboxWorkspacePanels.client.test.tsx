@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
 import { act, fireEvent, render } from '@testing-library/react';
 
 const useMediaQueryMock = vi.hoisted(() => vi.fn(() => false));
@@ -36,7 +36,7 @@ describe('ResponsiveWorkspacePanels', () => {
   });
 
   it('uses an SSR-stable initial media query value', () => {
-    const { getByText, queryByText } = render(
+    const { getByText } = render(
       <ResponsiveWorkspacePanels
         isPanelOpen
         main={<div>Main</div>}
@@ -48,8 +48,72 @@ describe('ResponsiveWorkspacePanels', () => {
       initializeWithValue: false,
     });
     expect(getByText('Panel')).toBeTruthy();
-    expect(queryByText('Main')).toBeNull();
+    expect(
+      getByText('Main').closest('[data-slot=resizable-panel]'),
+    ).toHaveClass('max-md:hidden');
   });
+
+  it.each([
+    ['mobile', false, true],
+    ['desktop', true, false],
+  ])(
+    'preserves one coherent main lifecycle when resizing from %s across the breakpoint',
+    (_layout, initialMatch, nextMatch) => {
+      useMediaQueryMock.mockReturnValue(initialMatch);
+      const initialized = vi.fn();
+      const unmounted = vi.fn();
+      const callback = vi.fn();
+
+      function StatefulMain() {
+        const [callbackCount, setCallbackCount] = useState(0);
+        useEffect(() => {
+          initialized();
+          const handleVoiceEvent = () => {
+            callback();
+            setCallbackCount((count) => count + 1);
+          };
+          window.addEventListener('voice-session-event', handleVoiceEvent);
+          return () => {
+            window.removeEventListener('voice-session-event', handleVoiceEvent);
+            unmounted();
+          };
+        }, []);
+        return (
+          <output aria-label="Voice session callback count">
+            {callbackCount}
+          </output>
+        );
+      }
+
+      const view = render(
+        <ResponsiveWorkspacePanels
+          isPanelOpen
+          main={<StatefulMain />}
+          panel={<div>Panel</div>}
+        />,
+      );
+      const main = view.getByLabelText('Voice session callback count');
+      fireEvent(window, new Event('voice-session-event'));
+      expect(main).toHaveTextContent('1');
+
+      useMediaQueryMock.mockReturnValue(nextMatch);
+      view.rerender(
+        <ResponsiveWorkspacePanels
+          isPanelOpen
+          main={<StatefulMain />}
+          panel={<div>Panel</div>}
+        />,
+      );
+
+      fireEvent(window, new Event('voice-session-event'));
+
+      expect(view.getByLabelText('Voice session callback count')).toBe(main);
+      expect(main).toHaveTextContent('2');
+      expect(initialized).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledTimes(2);
+      expect(unmounted).not.toHaveBeenCalled();
+    },
+  );
 
   it('adds every supplied side panel on wide layouts', () => {
     useMediaQueryMock.mockReturnValue(true);
@@ -451,7 +515,9 @@ describe('ResponsiveWorkspacePanels', () => {
       expect(view.queryByLabelText('Side input')).toBeNull();
       useMediaQueryMock.mockReturnValue(false);
       view.rerender(workspace(true));
-      expect(view.queryByLabelText('Prompt')).toBeNull();
+      expect(
+        view.getByLabelText('Prompt').closest('[data-slot=resizable-panel]'),
+      ).toHaveClass('max-md:hidden');
       useMediaQueryMock.mockReturnValue(true);
       view.rerender(workspace(true));
       expect(animate).not.toHaveBeenCalled();

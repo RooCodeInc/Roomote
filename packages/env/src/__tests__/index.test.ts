@@ -16,6 +16,7 @@ import {
   isRoomoteCloudEnabled,
   rehydrateEnv,
   resolveAppEnv,
+  resolveTrustedClientAddress,
   shouldAutoGenerateAuthKeypairs,
 } from '../index';
 
@@ -49,6 +50,39 @@ const productionCoreEnv: NodeJS.ProcessEnv = {
 };
 
 describe('Env', () => {
+  it('resolves client addresses only from the configured trusted proxy header', () => {
+    const first = new Headers({
+      'fly-client-ip': '203.0.113.10',
+      'x-forwarded-for': '198.51.100.1',
+    });
+    const second = new Headers({
+      'fly-client-ip': '203.0.113.10',
+      'x-forwarded-for': '198.51.100.2',
+    });
+
+    expect(resolveTrustedClientAddress(first, 'fly-client-ip')).toBe(
+      '203.0.113.10',
+    );
+    expect(resolveTrustedClientAddress(second, 'fly-client-ip')).toBe(
+      '203.0.113.10',
+    );
+    expect(resolveTrustedClientAddress(first, undefined)).toBeNull();
+  });
+
+  it('defaults HTTP integrations off and parses explicit opt-in values', () => {
+    expect(
+      createRoomoteEnv(productionCoreEnv).R_HTTP_INTEGRATIONS_ENABLED,
+    ).toBe(false);
+    for (const value of ['true', '1', 'false', '0']) {
+      expect(
+        createRoomoteEnv({
+          ...productionCoreEnv,
+          R_HTTP_INTEGRATIONS_ENABLED: value,
+        }).R_HTTP_INTEGRATIONS_ENABLED,
+      ).toBe(value === 'true' || value === '1');
+    }
+  });
+
   it('loads critical runtime settings with expected types and constraints', () => {
     expect(['test', 'development', 'production']).toContain(Env.NODE_ENV);
 
@@ -207,6 +241,9 @@ describe('Env', () => {
       createRoomoteEnv({ ...runtimeEnv, WEBHOOK_RETENTION_DAYS: '7' })
         .WEBHOOK_RETENTION_DAYS,
     ).toBe(7);
+    expect(() =>
+      createRoomoteEnv({ ...runtimeEnv, WEBHOOK_RETENTION_DAYS: 'invalid' }),
+    ).toThrow('Invalid environment variables');
   });
 
   it('parses Roomote Cloud analytics configuration', () => {

@@ -14,6 +14,8 @@ import {
   resolveAppEnv,
 } from './app-env';
 
+export const DEFAULT_WEBHOOK_RETENTION_DAYS = 3;
+
 const sharedSchema = {
   NODE_ENV: z.enum(['test', 'development', 'production']),
 };
@@ -59,6 +61,29 @@ function optInBoolean() {
     .enum(['true', 'false', '1', '0'])
     .default('false')
     .transform((value) => value === 'true' || value === '1');
+}
+
+export const TRUSTED_PROXY_CLIENT_IP_HEADERS = [
+  'fly-client-ip',
+  'x-forwarded-for',
+  'x-real-ip',
+] as const;
+
+export type TrustedProxyClientIpHeader =
+  (typeof TRUSTED_PROXY_CLIENT_IP_HEADERS)[number];
+
+export function resolveTrustedClientAddress(
+  headers: Pick<Headers, 'get'>,
+  trustedHeader: TrustedProxyClientIpHeader | undefined,
+): string | null {
+  if (!trustedHeader) return null;
+
+  const value = headers.get(trustedHeader)?.trim();
+  if (!value) return null;
+
+  return trustedHeader === 'x-forwarded-for'
+    ? (value.split(',')[0]?.trim() ?? null)
+    : value;
 }
 
 const serverSchema = {
@@ -111,6 +136,11 @@ const serverSchema = {
   BOX_STANDBY_MAX_AGE_HOURS: z.coerce.number().positive().optional(),
   R_PUBLIC_URL: z.string().url().optional(),
   R_APP_URL: z.string().min(1),
+  // Set only when the deployment ingress overwrites this header rather than
+  // passing through a caller-supplied value.
+  R_TRUSTED_PROXY_CLIENT_IP_HEADER: z
+    .enum(TRUSTED_PROXY_CLIENT_IP_HEADERS)
+    .optional(),
   // Anonymous telemetry + version checks (Ping service).
   R_PING_BASE_URL: z.string().url().default('https://ping.roomote.dev'),
   R_INSTANCE_ID: z
@@ -136,6 +166,8 @@ const serverSchema = {
   // independent of R_CURATED_INTEGRATIONS_DISABLED: operators who disable the
   // curated catalog are the primary custom-server audience.
   R_CUSTOM_MCP_DISABLED: optInBoolean(),
+  // Opt-in deployment credential mediation; transport configuration is API-only.
+  R_HTTP_INTEGRATIONS_ENABLED: optInBoolean(),
   // Comma-separated CIDR ranges the custom-MCP egress guard may connect to in
   // addition to public addresses. Self-host escape hatch for MCP servers on
   // private networks; a CIDR list rather than a boolean so opening one
@@ -147,6 +179,20 @@ const serverSchema = {
   // feature is off and the endpoint 404s.
   R_ELEVENLABS_API_KEY: z.string().min(1).optional(),
   R_ELEVENLABS_VOICE_ID: z.string().min(1).optional(),
+  // OpenAI key for the live voice conversation feature (realtime
+  // transcription + spoken replies in the web app). Falls back to the
+  // deployment's general OPENAI_API_KEY when unset. The key stays on the
+  // control plane: the browser only ever receives short-lived ephemeral
+  // realtime tokens and synthesized audio, never the key itself.
+  R_VOICE_OPENAI_API_KEY: z.string().min(1).optional(),
+  // TypeSafe key for the optional judgment model (Jev). Bounded routing and
+  // triage judgments try one fast typed call first and keep their existing
+  // behavior when it is unsure or fails. The key stays on the control plane.
+  R_TYPESAFE_API_KEY: z.string().min(1).optional(),
+  // Selects the judgment model backend (`off`, `typesafe`, or `vercel` for
+  // Jev through Vercel AI Gateway). Overrides the Settings > Models choice.
+  // Unset defers to Settings, where a TypeSafe key alone selects `typesafe`.
+  R_JUDGMENT_MODEL: z.enum(['off', 'typesafe', 'vercel']).optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -227,7 +273,6 @@ const serverSchema = {
   R_AGENTMAIL_API_KEY: z.string().min(1).optional(),
   R_AGENTMAIL_WEBHOOK_SECRET: z.string().min(1).optional(),
   R_AGENTMAIL_INBOX_ID: z.string().min(1).optional(),
-  R_AGENTMAIL_POD_ID: z.string().min(1).optional(),
   AGENTMAIL_API_BASE_URL: z.string().url().default('https://api.agentmail.to'),
   R_DISCORD_BOT_TOKEN: z.string().min(1).optional(),
   R_DISCORD_GATEWAY_SECRET: z.string().min(1).optional(),
@@ -344,7 +389,11 @@ const serverSchema = {
   SLACK_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   // How long recorded webhook payloads are kept before the WebhookCleanup
   // scheduled job (apps/bullmq) deletes them.
-  WEBHOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(3),
+  WEBHOOK_RETENTION_DAYS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_WEBHOOK_RETENTION_DAYS),
   // Internal base URL of the deployment-hosted gbrain (Brain)
   // service. Unset means the feature is unavailable regardless of the
   // brain_settings row; the proxy and outbox drainer both no-op.
@@ -414,6 +463,21 @@ const serverSchema = {
   // a stack brought up by hand needs no shared secret in the repo and no
   // second value for an operator to remember.
   R_BRAIN_GATEWAY_TOKEN_FILE: z.string().min(1).optional(),
+  // Shared secret the credential-substituting egress gateway presents to
+  // Optional dedicated hostname for the API-side credential egress proxy. When a
+  // request arrives for this host, the API serves `/api/credential-egress` at the
+  // root, so SDK clients that allow only a host override (no path prefix) can
+  // use it. Same route and checks; only the address differs. Point DNS for the
+  // name at the API service; the path form keeps working on the API host. Set
+  // the same value on the controller: it delivers the base URL to sandboxes.
+  R_CREDENTIAL_EGRESS_PROXY_HOST: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(
+      /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/,
+    )
+    .optional(),
   // Which models the Brain runs, in the configured provider's own naming
   // (`openai/gpt-5.6-luna` on OpenRouter, `gpt-5.6-luna` on OpenAI). Both are
   // substituted by the gateway, so changing the synthesis model is a restart
@@ -561,7 +625,6 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_AGENTMAIL_API_KEY',
   'R_AGENTMAIL_WEBHOOK_SECRET',
   'R_AGENTMAIL_INBOX_ID',
-  'R_AGENTMAIL_POD_ID',
   'SANDBOX_OPENROUTER_API_KEY',
   'R_BRAIN_EMBEDDINGS_UPSTREAM_URL',
   'R_BRAIN_INFERENCE_UPSTREAM_API_KEY',
@@ -572,6 +635,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_BRAIN_EMBEDDING_DIMENSIONS',
   'R_APP_ENV',
   'R_PUBLIC_URL',
+  'R_TRUSTED_PROXY_CLIENT_IP_HEADER',
   'R_APP_URL',
   'R_AUTO_GENERATE_KEYS',
   'S3_AUTO_CREATE_BUCKET',
@@ -589,6 +653,9 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS',
   'R_ELEVENLABS_API_KEY',
   'R_ELEVENLABS_VOICE_ID',
+  'R_VOICE_OPENAI_API_KEY',
+  'R_TYPESAFE_API_KEY',
+  'R_JUDGMENT_MODEL',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',
@@ -604,7 +671,6 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_AGENTMAIL_API_KEY',
   'R_AGENTMAIL_WEBHOOK_SECRET',
   'R_AGENTMAIL_INBOX_ID',
-  'R_AGENTMAIL_POD_ID',
   'R_DISCORD_BOT_TOKEN',
   'R_DISCORD_GATEWAY_SECRET',
   'DISCORD_API_BASE_URL',

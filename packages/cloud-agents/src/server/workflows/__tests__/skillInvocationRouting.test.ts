@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {
+  PACKAGED_SKILL_INVOCATIONS,
+  PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS,
+} from '../../../packaged-skill-invocations';
 import { isRecognizedInitialSkillInvocation } from '../skillInvocationRouting';
 
 describe('packaged skill invocation routing', () => {
@@ -125,9 +129,40 @@ describe('packaged skill invocation routing', () => {
     expect(generalSkill).not.toContain('read the applicable repo-local');
   });
 
-  it('recognizes Doctor as a first-class packaged workflow', () => {
+  it('ships delegation discovery with an explicit execution boundary', () => {
+    expect(
+      isRecognizedInitialSkillInvocation({
+        skillName: 'explore-delegation',
+      }),
+    ).toBe(true);
+
+    const skill = readPackagedSkill('explore-delegation');
+    expect(skill).toContain('name: explore-delegation');
+    expect(skill).toContain('# Find Work To Delegate');
+    expect(skill).toContain('Ask one question at a time');
+    expect(skill).toContain(
+      'Describing pain, supplying an example, or saying an idea sounds useful is exploration, not authorization to execute work',
+    );
+    expect(skill).toContain(
+      'When the user explicitly requests execution, stop the interview',
+    );
+    expect(skill).toContain(
+      'do not make integration or repository setup a prerequisite for this interview',
+    );
+    expect(skill).toContain(
+      'Learning durable context about how the user works is part of this conversation',
+    );
+    expect(skill).toContain(
+      'durable personal work context or a durable preference that would improve future help',
+    );
+    expect(skill).toContain('Do not copy it into shared memory');
+  });
+
+  it('keeps Doctor packaged for Fast without routing it into sandbox tasks', () => {
+    expect(PACKAGED_SKILL_INVOCATIONS).toContain('doctor');
+    expect(PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS).not.toContain('doctor');
     expect(isRecognizedInitialSkillInvocation({ skillName: 'doctor' })).toBe(
-      true,
+      false,
     );
     expect(readPackagedSkill('doctor')).toContain('name: doctor');
   });

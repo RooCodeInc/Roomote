@@ -1,9 +1,12 @@
 import type {
   DataVisualizationInput,
+  FastAgentCapabilityOfferInput,
   FastAgentConversation,
   FastAgentReactionExternalInput as SharedFastAgentReactionExternalInput,
   ReasoningEffort,
 } from '@roomote/types';
+
+import type { TelegramTopicIconEmoji } from '../llm-task-title';
 
 export {
   isFastAgentCommunicationConversation,
@@ -155,13 +158,21 @@ export type FastAgentTurnActivity = {
   settle: (options?: { keepProcessing?: boolean }) => Promise<void>;
   /** Synchronously cancel delayed starts and fence new status writes, then drain issued writes. */
   dispose: () => Promise<void>;
-  updateTitle?: (title: string | null) => void;
+  updateTitle?: (
+    title: string | null,
+    metadata?: {
+      iconEmoji?: TelegramTopicIconEmoji | null;
+      titleChanged?: boolean;
+    },
+  ) => void;
 };
 
 export type FastAgentMcpServerConfig = {
   url: string;
   headers: Record<string, string>;
   disabledTools?: string[];
+  /** Opaque, non-secret revision used to invalidate process-local tool catalogs. */
+  cacheRevision?: string;
 };
 
 /** Structured input request issued with the Fast-native request_user_input tool. */
@@ -174,12 +185,15 @@ export type FastAgentInputRequest = {
     question: string;
     isOther: boolean;
     isSecret: boolean;
-    options?: Array<{ label: string; description: string }>;
+    options?: Array<{ id?: string; label: string; description: string }>;
     multiple?: boolean;
   }>;
 };
 
-export type FastAgentInputPreset = 'setup_starter_tasks';
+export type FastAgentInputPreset =
+  | 'setup_source_control'
+  | 'setup_starter_tasks'
+  | 'setup_integrations';
 
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
@@ -194,6 +208,8 @@ export type FastAgentTurnAdapter = {
   postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
   /** Surfaces with a streaming API render the reply as it is written. */
   createReplyStream?: () => FastAgentReplyStream;
+  /** Override the default delay before an incomplete reply opens a stream. */
+  replyStreamStartDelayMs?: number;
   replaceReply?: (
     handle: FastAgentReplyHandle,
     reply: FastAgentReply,
@@ -207,10 +223,26 @@ export type FastAgentTurnAdapter = {
   /** Called when the turn ends waiting on structured user input. The caller
    * persists the pending request and marks the session needs_input. */
   requestUserInput?: (request: FastAgentInputRequest) => Promise<void>;
+  /** Called after a durable visible turn settles and requires user attention. */
+  notifyUserAttention?: (attention: {
+    kind: 'result_ready' | 'input_needed';
+    eventId: string;
+    message?: string;
+    manual: boolean;
+  }) => Promise<void>;
   /** Resolve a trusted preset without accepting model-supplied options. */
   resolveUserInputPreset?: (
     preset: FastAgentInputPreset,
+    setupIntegrationAnswers?: Record<string, { answers: string[] }>,
   ) => Promise<FastAgentInputRequest['questions']>;
+  /** Validate and normalize a trusted capability offer for this surface. */
+  offerCapability?: (
+    input: FastAgentCapabilityOfferInput,
+  ) => Promise<FastAgentCapabilityOfferInput>;
+  /** Let a scheduled wakeup deliver its final closeout after cancelling itself. */
+  onWakeupCancelled?: (wakeupId: string) => void;
+  /** Surface lifecycle callback used for server-owned post-turn reconciliation. */
+  onTurnSettled?: () => Promise<void>;
   /**
    * Called when an interrupted turn is still safe to replay and has handed
    * itself back to the durable queue; wakes the queue so recovery does not

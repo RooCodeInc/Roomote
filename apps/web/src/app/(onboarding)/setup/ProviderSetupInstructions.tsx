@@ -185,13 +185,14 @@ export function ProviderSetupInstructions({
   if (providerId === 'agentmail') {
     return (
       <div className={cn('space-y-3 max-w-xl', className)}>
-        <InstructionText heading="API key">
-          In the AgentMail console, create an API key and paste it below.
+        <InstructionText heading="Inbox">
+          In the AgentMail console, create the inbox Roomote should receive mail
+          at (or pick an existing one).
         </InstructionText>
-        <InstructionText heading="Inbox email address">
-          Leave the address blank and Roomote provisions an inbox for this
-          deployment automatically, or enter an existing AgentMail inbox address
-          to use it instead.
+        <InstructionText heading="API key">
+          Open that inbox and create an API key from inside it, so the key is
+          scoped to the inbox. Paste it below; Roomote uses the inbox the key is
+          for.
         </InstructionText>
         <InstructionText heading="Webhook">
           Roomote registers the AgentMail webhook for incoming mail

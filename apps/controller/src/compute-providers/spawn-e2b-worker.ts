@@ -7,8 +7,6 @@ import {
   type TaskRun,
   createComputeProviderMutationEventRecorder,
   db,
-  taskRuns,
-  eq,
 } from '@roomote/db/server';
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
@@ -27,6 +25,10 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
+import {
+  prepareHostedWorkerLaunch,
+  type CredentialEgressLifecycle,
+} from '../credential-egress';
 import {
   COMPUTE_BOOTSTRAP_TIMEOUT_MS,
   COMPUTE_CREATE_INSTANCE_TIMEOUT_MS,
@@ -117,6 +119,8 @@ export async function spawnE2bWorker(
     localTarballPath?: string;
     deploymentSlug?: string;
     e2bTags?: Record<string, string>;
+    /** Session-egress admission; omitted in unit paths that do not exercise it. */
+    credentialEgress?: CredentialEgressLifecycle;
   },
 ): Promise<{
   machineId: string;
@@ -130,6 +134,7 @@ export async function spawnE2bWorker(
     localTarballPath,
     deploymentSlug,
     e2bTags,
+    credentialEgress,
   } = config;
 
   const environmentId = taskRun.payload.environmentId;
@@ -245,6 +250,12 @@ export async function spawnE2bWorker(
     );
   });
 
+  const launchHostedWorker = await prepareHostedWorkerLaunch({
+    credentialEgress,
+    taskRun,
+    provider: 'e2b',
+  });
+
   const machine = await createE2bMachine({
     e2bApiKey,
     e2bDomain,
@@ -324,11 +335,8 @@ export async function spawnE2bWorker(
       }),
     });
 
-    const result = await computeClient.runCommand({
-      instanceId: machine.machineId,
-      cmd: 'worker',
-      args,
-      env: buildE2bWorkerEnv({
+    const result = await launchHostedWorker(
+      buildE2bWorkerEnv({
         authToken,
         sandboxExpiresAtMs: Date.now() + e2bTimeoutMs,
         deploymentSlug,
@@ -338,36 +346,39 @@ export async function spawnE2bWorker(
           SANDBOX_TIMEOUT_MS: String(e2bTimeoutMs),
         },
       }),
-      detached: true,
-      signal: AbortSignal.timeout(60_000),
-    });
+      async (env) => {
+        const launchResult = await computeClient.runCommand({
+          instanceId: machine.machineId,
+          cmd: 'worker',
+          args,
+          env,
+          detached: true,
+          signal: AbortSignal.timeout(60_000),
+        });
 
-    if (result.exitCode !== null && result.exitCode !== 0) {
-      throw buildDetachedWorkerExitError(command, result);
-    }
+        if (launchResult.exitCode !== null && launchResult.exitCode !== 0) {
+          throw buildDetachedWorkerExitError(command, launchResult);
+        }
 
-    await recordMutation({
-      provider: 'e2b',
-      operation: 'run_command',
-      eventType: 'completed',
-      instanceId: machine.machineId,
-      message: `runCommand launched detached worker ${command} for E2B instance ${machine.machineId}.`,
-      details: buildComputeProviderMutationDetails(mutationContext, {
-        command: 'worker',
-        args,
-        detached: true,
-        phase: 'launch_worker',
-        commandId: result.commandId ?? null,
-        exitCode: result.exitCode,
-      }),
-    });
+        await recordMutation({
+          provider: 'e2b',
+          operation: 'run_command',
+          eventType: 'completed',
+          instanceId: machine.machineId,
+          message: `runCommand launched detached worker ${command} for E2B instance ${machine.machineId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            command: 'worker',
+            args,
+            detached: true,
+            phase: 'launch_worker',
+            commandId: launchResult.commandId ?? null,
+            exitCode: launchResult.exitCode,
+          }),
+        });
 
-    if (result.commandId) {
-      await db
-        .update(taskRuns)
-        .set({ sandboxCmdId: result.commandId })
-        .where(eq(taskRuns.id, taskRun.id));
-    }
+        return launchResult;
+      },
+    );
 
     return {
       machineId: machine.machineId,

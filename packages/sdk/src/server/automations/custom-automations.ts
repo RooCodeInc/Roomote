@@ -6,6 +6,7 @@ import {
   discordInstallationChannels,
   environments,
   eq,
+  fastAgentConversations,
   getCustomAutomationById,
   getCustomAutomationFrequency,
   CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS,
@@ -19,11 +20,12 @@ import {
 import {
   ALL_REPOSITORIES,
   NO_REPOSITORIES,
+  getAutomationTargetEmailIdentityId,
+  isAutomationDestinationTarget,
   isConfiguredAutomationTarget,
   isBackgroundAutomationUserTargetKind,
-  isCommunicationAutomationTarget,
   type AutomationTarget,
-  type CommunicationProvider,
+  type BackgroundAutomationProvider,
   type FastAgentConversation,
 } from '@roomote/types';
 
@@ -46,14 +48,23 @@ import {
   type AutomationRunOpts,
 } from './types';
 import { SlackNotifier } from '@roomote/slack';
+import { buildCommunicationTaskThreadName } from '@roomote/communication/task-thread-title';
 
 import { findUserDirectMessageDestination } from '../lib/user-direct-message';
+import { createAgentMailCommunicationProviderFromRuntimeCredentials } from '../lib/agentmail-communication';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../lib/discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../lib/teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../lib/telegram-communication';
 import type { FastAgentParentEvent } from '../lib/fast-agent-parent-event';
 import { enqueueFastAgentParentEvent } from '../lib/fast-agent-parent-event-queue';
-import { recordFastAgentConversationMessage } from '../lib/fast-agent-provider-message';
+import {
+  isFastAgentManagedTelegramTopic,
+  recordFastAgentConversationMessage,
+} from '../lib/fast-agent-provider-message';
+import {
+  canStartAgentMailConversationWithUser,
+  prepareAgentMailConversation,
+} from '../lib/agentmail/outbound';
 
 const LOG_PREFIX = '[custom-automations]';
 
@@ -64,17 +75,25 @@ class CustomAutomationClaimSettlementError extends Error {
   }
 }
 
-// Email (agentmail) is inbound-initiated only and never an automation
-// destination, so it is deliberately absent here.
 const PROVIDER_LABELS: Record<
-  Exclude<CommunicationProvider, 'agentmail'>,
+  Exclude<BackgroundAutomationProvider, 'sentry'>,
   string
 > = {
   discord: 'Discord',
+  email: 'Email',
   slack: 'Slack',
   teams: 'Teams',
   telegram: 'Telegram',
 };
+
+type CustomAutomationDestination =
+  | ResolvedAutomationDestination
+  | {
+      provider: 'email';
+      userId: string;
+      identityId: string;
+      source: 'automation_target';
+    };
 
 const WINDOW_DAYS: Record<string, number> = {
   every_hour: 1 / 24,
@@ -95,12 +114,27 @@ function scheduleHourLocalForFrequency(frequency: string): number {
 
 async function resolveDestination(
   target: AutomationTarget,
-): Promise<ResolvedAutomationDestination | null> {
+  ownerUserId: string,
+): Promise<CustomAutomationDestination | null> {
   if (!target.provider || !target.externalRef) {
     return null;
   }
 
-  const provider = target.provider as CommunicationProvider;
+  if (target.provider === 'email') {
+    const identityId = getAutomationTargetEmailIdentityId(target);
+    return target.targetKind === 'email_user' &&
+      identityId &&
+      (await canStartAgentMailConversationWithUser(ownerUserId, identityId))
+      ? {
+          provider: 'email',
+          userId: ownerUserId,
+          identityId,
+          source: 'automation_target',
+        }
+      : null;
+  }
+
+  const provider = target.provider;
   if (
     provider !== 'slack' &&
     provider !== 'discord' &&
@@ -121,20 +155,70 @@ async function resolveDestination(
   }
 
   if (provider === 'slack') {
-    const channel = await db.query.slackInstallationChannels.findFirst({
+    const expectedTeamId =
+      typeof target.metadata?.slackTeamId === 'string'
+        ? target.metadata.slackTeamId
+        : null;
+    const channels = await db.query.slackInstallationChannels.findMany({
       where: eq(slackInstallationChannels.channelId, target.externalRef),
       columns: { id: true },
       with: {
         slackInstallation: {
-          columns: { isActive: true, teamId: true },
+          columns: { botAccessToken: true, isActive: true, teamId: true },
         },
       },
+      limit: 2,
     });
-    return channel?.slackInstallation.isActive
+    if (channels.length > 1) return null;
+    const channel = channels[0];
+    if (channel) {
+      const installation = channel.slackInstallation;
+      return installation.isActive &&
+        (!expectedTeamId || installation.teamId === expectedTeamId) &&
+        (await new SlackNotifier(installation.botAccessToken).isAppInChannel(
+          target.externalRef,
+        )) === true
+        ? {
+            provider,
+            channelId: target.externalRef,
+            teamId: installation.teamId,
+            source: 'automation_target',
+          }
+        : null;
+    }
+
+    // Native channel discovery reads Slack live and does not populate the
+    // joined-channel cache. Resolve legacy and API-created targets the same
+    // way when no cached owner exists, while still failing closed on an
+    // ambiguous or indeterminate workspace match.
+    const installations = (
+      await db.query.slackInstallations.findMany({
+        where: eq(slackInstallations.isActive, true),
+        columns: { botAccessToken: true, teamId: true },
+      })
+    ).filter(
+      (installation) =>
+        !expectedTeamId || installation.teamId === expectedTeamId,
+    );
+    const candidates = await Promise.all(
+      installations.map(async (installation) => ({
+        installation,
+        membership: await new SlackNotifier(
+          installation.botAccessToken,
+        ).isAppInChannel(target.externalRef),
+      })),
+    );
+    if (candidates.some((candidate) => candidate.membership === null)) {
+      return null;
+    }
+    const matches = candidates.filter(
+      (candidate) => candidate.membership === true,
+    );
+    return matches.length === 1
       ? {
           provider,
           channelId: target.externalRef,
-          teamId: channel.slackInstallation.teamId,
+          teamId: matches[0]!.installation.teamId,
           source: 'automation_target',
         }
       : null;
@@ -166,7 +250,7 @@ async function resolveDestination(
 }
 
 function isFastDeliveryTarget(target: AutomationTarget): boolean {
-  return isCommunicationAutomationTarget(target);
+  return isAutomationDestinationTarget(target);
 }
 
 function buildAutomationConversation(
@@ -180,10 +264,40 @@ function buildAutomationConversation(
   };
 }
 
+async function findManagedTelegramAutomationTopic(input: {
+  channelId: string;
+  eventId: string;
+  userId: string;
+}): Promise<string | null> {
+  const existing = await db.query.fastAgentConversations.findFirst({
+    where: and(
+      eq(fastAgentConversations.surface, 'telegram'),
+      eq(fastAgentConversations.workspaceId, input.channelId),
+      eq(fastAgentConversations.conversationId, input.eventId),
+      eq(fastAgentConversations.currentReplyChannelId, input.channelId),
+      eq(fastAgentConversations.userId, input.userId),
+    ),
+    columns: { id: true, currentReplyThreadId: true },
+  });
+  const threadId = existing?.currentReplyThreadId;
+  if (!threadId) {
+    return null;
+  }
+
+  return (await isFastAgentManagedTelegramTopic({
+    sessionId: existing.id,
+    workspaceId: input.channelId,
+    channelId: input.channelId,
+    threadId,
+  }))
+    ? threadId
+    : null;
+}
+
 async function buildFastAutomationConversation(params: {
   automation: CustomAutomation;
   eventId: string;
-  destination: ResolvedAutomationDestination | null;
+  destination: CustomAutomationDestination | null;
   target: AutomationTarget | null;
 }): Promise<{
   conversation: FastAgentConversation;
@@ -192,6 +306,30 @@ async function buildFastAutomationConversation(params: {
   const { automation, destination, eventId, target } = params;
   if (!destination) {
     return { conversation: buildAutomationConversation(automation, eventId) };
+  }
+
+  if (destination.provider === 'email') {
+    // Some inboxes group unrelated messages by subject even without reply
+    // headers, so give every run a distinct root subject.
+    const prepared = await prepareAgentMailConversation({
+      userId: destination.userId,
+      subject: `${automation.name} - ${eventId.slice(automation.id.length + 1)}`,
+      conversationKey: `custom-automation:${eventId}`,
+      identityId: destination.identityId,
+    });
+    if (!prepared) {
+      throw new Error(
+        'Email is no longer available for this automation owner.',
+      );
+    }
+    return {
+      conversation: {
+        surface: 'agentmail',
+        workspaceId: prepared.inboxId,
+        conversationId: prepared.conversationId,
+        replyTarget: { channelId: prepared.inboxId },
+      },
+    };
   }
 
   if (destination.provider === 'slack') {
@@ -310,12 +448,30 @@ async function buildFastAutomationConversation(params: {
     if (!provider) {
       throw new Error('Telegram is not connected.');
     }
+    const managedThreadId =
+      target?.targetKind === 'telegram_user'
+        ? ((await findManagedTelegramAutomationTopic({
+            channelId: destination.channelId,
+            eventId,
+            userId: automation.createdByUserId!,
+          })) ??
+          (
+            await provider.createForumTopic({
+              channelId: destination.channelId,
+              name: buildCommunicationTaskThreadName(automation.name),
+            })
+          ).messageThreadId)
+        : null;
     return {
+      ...(managedThreadId ? { rootMessageId: managedThreadId } : {}),
       conversation: {
         surface: 'telegram',
         workspaceId: destination.channelId,
         conversationId: eventId,
-        replyTarget: { channelId: destination.channelId },
+        replyTarget: {
+          channelId: destination.channelId,
+          ...(managedThreadId ? { threadId: managedThreadId } : {}),
+        },
       },
     };
   }
@@ -325,7 +481,7 @@ async function buildFastAutomationConversation(params: {
 
 async function runFastCustomAutomation(params: {
   automation: CustomAutomation;
-  destination: ResolvedAutomationDestination | null;
+  destination: CustomAutomationDestination | null;
   eventClaimedAt: Date;
   launchClaimedAt: Date;
   trigger: 'schedule' | 'manual';
@@ -456,8 +612,21 @@ async function reportFastAutomationStartupFailure(params: {
         await createTelegramCommunicationProviderFromRuntimeCredentials();
       await provider?.postMessage({
         channelId: conversation.replyTarget.channelId,
+        ...(conversation.replyTarget.threadId
+          ? { threadId: conversation.replyTarget.threadId }
+          : {}),
         text: message,
         textFormat: 'markdown',
+      });
+    } else if (conversation.surface === 'agentmail') {
+      const provider =
+        await createAgentMailCommunicationProviderFromRuntimeCredentials();
+      await provider?.postMessage({
+        channelId: conversation.replyTarget.channelId,
+        threadId: conversation.conversationId,
+        text: message,
+        textFormat: 'markdown',
+        idempotencyKey: `agentmail:${conversation.conversationId}:fast-automation-startup-failure`,
       });
     }
   } catch (updateError) {
@@ -561,10 +730,10 @@ async function launchCustomAutomationRow(
           )?.id ?? null)
         : null;
 
-  let destination: ResolvedAutomationDestination | null = null;
+  let destination: CustomAutomationDestination | null = null;
   if (isConfiguredAutomationTarget(automation.target)) {
     if (!isFastDeliveryTarget(automation.target)) {
-      const message = `${PROVIDER_LABELS[automation.target.provider as Exclude<CommunicationProvider, 'agentmail'>]} report destinations of this type are not supported.`;
+      const message = `${PROVIDER_LABELS[automation.target.provider as Exclude<BackgroundAutomationProvider, 'sentry'>]} report destinations of this type are not supported.`;
       result.skippedReason = message;
       result.errors.push(message);
       await recordCustomAutomationRunOutcome(db, {
@@ -575,12 +744,29 @@ async function launchCustomAutomationRow(
       return result;
     }
 
-    destination = await resolveDestination(automation.target);
+    if (!automation.createdByUserId) {
+      const message = 'Automation owner is not configured.';
+      result.skippedReason = message;
+      result.errors.push(message);
+      await recordCustomAutomationRunOutcome(db, {
+        id: automation.id,
+        status: 'failed',
+        error: message,
+      });
+      return result;
+    }
+
+    destination = await resolveDestination(
+      automation.target,
+      automation.createdByUserId,
+    );
     if (!destination) {
       const message = isBackgroundAutomationUserTargetKind(
         automation.target.targetKind,
       )
-        ? `The automation owner does not have a linked ${PROVIDER_LABELS[automation.target.provider as Exclude<CommunicationProvider, 'agentmail'>]} account that can receive direct messages.`
+        ? automation.target.provider === 'email'
+          ? 'The automation owner no longer has an active Email destination.'
+          : `The automation owner does not have a linked ${PROVIDER_LABELS[automation.target.provider as Exclude<BackgroundAutomationProvider, 'sentry'>]} account that can receive direct messages.`
         : automation.target.provider === 'teams'
           ? 'Teams report destination is missing a resolvable service URL.'
           : 'Report destination could not be resolved.';
@@ -594,8 +780,14 @@ async function launchCustomAutomationRow(
       return result;
     }
 
-    const connected = await listConnectedCommunicationProviders();
-    if (!connected.includes(destination.provider)) {
+    // Email eligibility was just checked against the pinned identity; the
+    // chat-provider catalog is only consulted for chat destinations.
+    if (
+      destination.provider !== 'email' &&
+      !(await listConnectedCommunicationProviders()).includes(
+        destination.provider,
+      )
+    ) {
       const message = `${destination.provider} is not connected.`;
       result.skippedReason = message;
       result.errors.push(message);

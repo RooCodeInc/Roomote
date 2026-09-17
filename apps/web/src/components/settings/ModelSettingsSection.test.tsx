@@ -93,6 +93,29 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
+// The judgment model row renders inside Model mapping with its own query and
+// mutation; JudgmentModelRow.test.tsx covers its behavior.
+vi.mock('@/hooks/task-models/useJudgmentModelSettings', () => ({
+  useJudgmentModelSettings: () => ({
+    data: {
+      typeSafe: { connected: false, source: null },
+      vercelGatewayConnected: false,
+      storedSelection: null,
+      envSelection: null,
+      effectiveSelection: 'off',
+      effectiveSelectionUsable: true,
+    },
+    isPending: false,
+  }),
+}));
+
+vi.mock('@/hooks/task-models/useSetJudgmentModelSelection', () => ({
+  useSetJudgmentModelSelection: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+}));
+
 vi.mock('@/components/settings', () => ({
   Section: ({
     children,
@@ -429,8 +452,9 @@ describe('ModelSettingsSection', () => {
         '[data-slot="select-trigger"]',
       ),
     );
-    // 7 model selects + 7 reasoning selects + the add-model provider select.
-    expect(triggers).toHaveLength(15);
+    // 7 model selects + 7 reasoning selects + the judgment model select + the
+    // add-model provider select.
+    expect(triggers).toHaveLength(16);
     expect(triggers[0]).toBeDisabled();
     expect(triggers[2]).toBeDisabled();
     expect(triggers[4]).toBeDisabled();
@@ -446,9 +470,10 @@ describe('ModelSettingsSection', () => {
     expect(triggers[9]).not.toBeDisabled();
     expect(triggers[11]).not.toBeDisabled();
     expect(triggers[13]).not.toBeDisabled();
-    // The add-model provider select stays enabled regardless of env-managed
-    // runtime models.
+    // The judgment model and add-model provider selects stay enabled
+    // regardless of env-managed runtime models.
     expect(triggers[14]).not.toBeDisabled();
+    expect(triggers[15]).not.toBeDisabled();
 
     expect(screen.queryByText('Make default')).toBeNull();
     expect(screen.queryByText('Env-managed')).toBeNull();
@@ -475,7 +500,7 @@ describe('ModelSettingsSection', () => {
       ),
     );
 
-    expect(triggers).toHaveLength(15);
+    expect(triggers).toHaveLength(16);
     expect(triggers[0]).not.toBeDisabled();
     expect(triggers[1]).toBeDisabled();
     expect(triggers[12]).not.toBeDisabled();
@@ -553,7 +578,7 @@ describe('ModelSettingsSection', () => {
     const { container } = renderModelSettingsSection();
 
     const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    expect(triggers).toHaveLength(15);
+    expect(triggers).toHaveLength(16);
     for (const trigger of Array.from(triggers)) {
       expect(trigger).not.toBeDisabled();
     }
@@ -605,8 +630,9 @@ describe('ModelSettingsSection', () => {
     const { container } = renderModelSettingsSection();
 
     const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    // 7 model selects + the add-model provider select; no reasoning selectors.
-    expect(triggers).toHaveLength(8);
+    // 7 model selects + the judgment model select + the add-model provider
+    // select; no reasoning selectors.
+    expect(triggers).toHaveLength(9);
   });
 
   it('clears orchestration reasoning when switching to a non-reasoning model', async () => {
@@ -689,6 +715,60 @@ describe('ModelSettingsSection', () => {
     expect(availableSection).toHaveTextContent('1.1M');
     expect(availableSection).toHaveTextContent('$2.50 / $15.00');
     expect(availableSection).toHaveTextContent('just now');
+  });
+
+  it('labels model metadata and exposes tooltip details to keyboard users', async () => {
+    settingsData.current = buildSettingsData();
+
+    renderModelSettingsSection();
+
+    const metadata = screen.getByLabelText('GPT 5.4 metadata');
+    expect(within(metadata).getByText('Context')).toBeInTheDocument();
+    expect(within(metadata).getByText('Inputs')).toBeInTheDocument();
+    expect(within(metadata).getByText('Price')).toBeInTheDocument();
+    expect(within(metadata).getByText('Updated')).toBeInTheDocument();
+
+    const context = within(metadata).getByLabelText(
+      /Context window: 1,050,000 tokens/,
+    );
+    expect(context).toHaveAttribute('tabindex', '0');
+
+    fireEvent.focus(context);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'This is the maximum amount of prompt, file, image, and conversation context the model can consider at once.',
+    );
+  });
+
+  it('gives missing metadata values meaningful accessible labels', () => {
+    const data = buildSettingsData();
+    settingsData.current = {
+      ...data,
+      models: data.models.map((model, index) =>
+        index === 0 ? { ...model, metadata: null } : model,
+      ),
+    };
+
+    renderModelSettingsSection();
+
+    const metadata = screen.getByLabelText('GPT 5.4 metadata');
+    expect(
+      within(metadata).getByLabelText(
+        'Context window is unavailable for this model.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(metadata).getByLabelText(
+        'Supported input types are unavailable for this model.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(metadata).getByLabelText(
+        'Input and output pricing are unavailable for this model.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(metadata).getByLabelText('Metadata has not been refreshed yet.'),
+    ).toBeInTheDocument();
   });
 
   it('preselects a connected provider in the add-model flow', () => {

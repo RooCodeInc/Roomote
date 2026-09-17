@@ -34,6 +34,7 @@ import {
   mcpConnections,
   pullRequestFacts,
   repositories,
+  sessions,
   slackInstallations,
   llmUsageEvents,
   taskPullRequests,
@@ -165,6 +166,22 @@ export type InstanceReportStats = {
     completed: number;
     byHarness: Record<string, number>;
     byModel: InstanceReportModelUsage[];
+    tokens: {
+      input: number;
+      output: number;
+      total: number;
+      costMicroUsd: number;
+    };
+  };
+  /** Session rows created in the same inclusive trailing window as tasks24h. */
+  sessions24h: {
+    /** Sessions themselves, never their linked or delegated tasks. */
+    created: number;
+    /** Creation-cohort breakdowns from immutable session dimensions. */
+    bySourceSurface: Record<string, number>;
+    bySourceTrigger: Record<string, number>;
+    byOwnerKind: Record<string, number>;
+    /** Session-attributed usage events in the trailing window. */
     tokens: {
       input: number;
       output: number;
@@ -674,6 +691,11 @@ export async function collectInstanceReportStats(
     environmentTotals,
     repositoriesByProvider,
     tasksCreated,
+    sessionsCreated,
+    sessionsBySourceSurface,
+    sessionsBySourceTrigger,
+    sessionsByOwnerKind,
+    sessionTokenTotals,
     jobsCompleted,
     tasksByHarness,
     tasksByModel,
@@ -731,6 +753,44 @@ export async function collectInstanceReportStats(
         and(
           gte(tasks.createdAt, since),
           notInArray(tasks.workflow, ['env_snapshot']),
+        ),
+      ),
+    db
+      .select({ total: count() })
+      .from(sessions)
+      .where(gte(sessions.createdAt, since)),
+    db
+      .select({ sourceSurface: sessions.sourceSurface, total: count() })
+      .from(sessions)
+      .where(gte(sessions.createdAt, since))
+      .groupBy(sessions.sourceSurface),
+    db
+      .select({ sourceTrigger: sessions.sourceTrigger, total: count() })
+      .from(sessions)
+      .where(gte(sessions.createdAt, since))
+      .groupBy(sessions.sourceTrigger),
+    db
+      .select({ ownerKind: sessions.ownerKind, total: count() })
+      .from(sessions)
+      .where(gte(sessions.createdAt, since))
+      .groupBy(sessions.ownerKind),
+    db
+      .select({
+        input: sum(llmUsageEvents.inputTokens),
+        output: sum(llmUsageEvents.outputTokens),
+        total: sum(llmUsageEvents.totalTokens),
+        costMicroUsd: sum(llmUsageEvents.costMicroUsd),
+      })
+      .from(llmUsageEvents)
+      .leftJoin(tasks, eq(tasks.id, llmUsageEvents.taskId))
+      .where(
+        and(
+          gte(llmUsageEvents.createdAt, since),
+          isNotNull(llmUsageEvents.sessionId),
+          or(
+            isNull(llmUsageEvents.taskId),
+            notInArray(tasks.workflow, ['env_snapshot']),
+          ),
         ),
       ),
     db
@@ -842,6 +902,22 @@ export async function collectInstanceReportStats(
     byHarness[row.harness ?? 'unknown'] = toNumber(row.total);
   }
 
+  const sessionsBySourceSurfaceRecord = Object.fromEntries(
+    sessionsBySourceSurface.map((row) => [
+      row.sourceSurface,
+      toNumber(row.total),
+    ]),
+  );
+  const sessionsBySourceTriggerRecord = Object.fromEntries(
+    sessionsBySourceTrigger.map((row) => [
+      row.sourceTrigger,
+      toNumber(row.total),
+    ]),
+  );
+  const sessionsByOwnerKindRecord = Object.fromEntries(
+    sessionsByOwnerKind.map((row) => [row.ownerKind, toNumber(row.total)]),
+  );
+
   // Only ship catalog MCP ids; anything unrecognized (defensive: custom or
   // future ids) is reported as 'custom' so no user-authored name can leak.
   const mcpEnabled = [
@@ -883,6 +959,18 @@ export async function collectInstanceReportStats(
         output: toNumber(tokenTotals[0]?.output),
         total: toNumber(tokenTotals[0]?.total),
         costMicroUsd: toNumber(tokenTotals[0]?.costMicroUsd),
+      },
+    },
+    sessions24h: {
+      created: toNumber(sessionsCreated[0]?.total),
+      bySourceSurface: sessionsBySourceSurfaceRecord,
+      bySourceTrigger: sessionsBySourceTriggerRecord,
+      byOwnerKind: sessionsByOwnerKindRecord,
+      tokens: {
+        input: toNumber(sessionTokenTotals[0]?.input),
+        output: toNumber(sessionTokenTotals[0]?.output),
+        total: toNumber(sessionTokenTotals[0]?.total),
+        costMicroUsd: toNumber(sessionTokenTotals[0]?.costMicroUsd),
       },
     },
     pullRequests7d,

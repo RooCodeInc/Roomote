@@ -40,12 +40,24 @@ describe('Capture visual proof skill', () => {
     expect(skillContent).not.toContain('proof brief');
   });
 
-  it('keeps browser output out of the transcript and leaves image review to the judge', () => {
+  it('visually verifies the exact final evidence before upload or sharing', () => {
     expect(skillContent).toContain(
-      'Write screenshots, recordings, and keyframes to files under `/tmp/capture-visual-proof/`, never print image bytes',
+      'Write screenshots, recordings, and keyframes under `/tmp/capture-visual-proof/` and never print image bytes',
     );
     expect(skillContent).toContain(
-      'Do not read the captured images back yourself; the judge does that.',
+      'open every exact final screenshot and every retained keyframe from the exact final clip with an image-capable tool',
+    );
+    expect(skillContent).toContain(
+      'compare what is visible with its checklist item and planned `Proves` claim',
+    );
+    expect(skillContent).toContain(
+      'Browser assertions, snapshots, filenames, intended UI state, capture or upload success, and `ffprobe` are not visual verification.',
+    );
+    expect(skillContent).toContain(
+      'The later judge independently reopens the evidence; it does not replace this inspection.',
+    );
+    expect(skillContent).not.toContain(
+      'Do not read the captured images back yourself',
     );
   });
 
@@ -103,12 +115,18 @@ describe('Capture visual proof skill', () => {
     );
   });
 
-  it('prefers real state but allows disclosed simulation without permitting fabricated evidence', () => {
+  it('requires genuine state followed by disclosed simulation before blocking proof', () => {
     expect(skillContent).toContain(
-      'Prefer genuine application, database, authentication, feature-flag, fixture, test-record, or form-submission state when it is practical to establish',
+      'Follow this state-establishment sequence: (1) attempt genuine application, database, authentication, feature-flag, fixture, test-record, or form-submission state when practical',
     );
     expect(skillContent).toContain(
-      'transparent simulation may modify application source, hardcode a condition, role, feature state, or network response, mock UI or network responses, or arrange DOM or rendered component state',
+      '(2) if that fails, produce disclosed simulated proof on the actual UI',
+    );
+    expect(skillContent).toContain(
+      '(3) declare proof blocked only when neither genuine nor representative simulated/rendered proof is possible',
+    );
+    expect(skillContent).toContain(
+      'mark it unproved only when neither genuine nor representative simulated/rendered proof is possible',
     );
     expect(skillContent).toContain(
       "Every simulation, mock, source modification, or hardcoded state must be disclosed explicitly in each affected artifact's proof metadata and in the final proof report",
@@ -121,12 +139,33 @@ describe('Capture visual proof skill', () => {
     );
   });
 
-  it('allows exactly one recapture and stops on unreachable surfaces', () => {
+  it('keeps degraded infrastructure reporting separate from fallback proof work', () => {
     expect(skillContent).toContain(
-      'Recapture an artifact once when the first honest capture is obviously blank, clipped, or misses the required visible state. That is the only retry this skill allows.',
+      'An infrastructure defect may be reported as degraded capability when independently useful',
     );
     expect(skillContent).toContain(
-      'inspect the port or current HTTP response once, then return blocked with blocker type `browser surface unavailable`',
+      'not as blocking UI proof while fallback remains',
+    );
+    expect(skillContent).toContain(
+      'Reporting a platform issue never terminates or replaces fallback proof work',
+    );
+    expect(skillContent).toContain(
+      'An infrastructure report alone is not a blocked proof result',
+    );
+  });
+
+  it('allows exactly one recapture and blocks only when the actual UI is unreachable', () => {
+    expect(skillContent).toContain(
+      'Reject any final inspection that is blank, loading, errored, on the wrong page, stale, misleading, clipped, or missing the claimed state.',
+    );
+    expect(skillContent).toContain(
+      'Recapture once within the existing deadline; if it still fails, omit the invalid evidence, mark its checklist item missing, and plainly report the limitation without making that proof claim.',
+    );
+    expect(skillContent).toContain(
+      'If no UI responds, return `browser surface unavailable`',
+    );
+    expect(skillContent).toContain(
+      'If it responds, try disclosed simulated/rendered proof before returning `browser surface broken`',
     );
     expect(skillContent).toContain(
       'Do not loop on retries or improvise a different surface.',
@@ -212,7 +251,10 @@ describe('Capture visual proof skill', () => {
       'Treat the `artifactId`, `viewUrl`, and `rawUrl` values returned by each upload tool result as the only canonical artifact references. Never invent, guess, or reconstruct artifact IDs or URLs.',
     );
     expect(skillContent).toContain(
-      'using the `upload` action and `type` set to `visual-proof`',
+      'Upload only screenshots, screencasts, and keyframes that passed the final inspection',
+    );
+    expect(skillContent).toContain(
+      'with the `upload` action and `type` set to `visual-proof`',
     );
   });
 
@@ -231,7 +273,7 @@ describe('Capture visual proof skill', () => {
       expect(skillContent).toContain(section);
     }
     expect(skillContent).toContain(
-      'For each uploaded screenshot include its local path, `artifactId`, `viewUrl`, `rawUrl`, state provenance, and short `Proves` and `Does not prove` statements.',
+      'short `Proves` and `Does not prove` statements grounded only in what the final inspection showed.',
     );
     expect(skillContent).toContain(
       "every retained keyframe's local path, `artifactId`, `viewUrl`, and `rawUrl`",
@@ -243,13 +285,16 @@ describe('Capture visual proof skill', () => {
       'Include screenshot IDs via `report_to_parent_session` when available',
     );
     expect(skillContent).toContain(
+      'Captions, the sharing note, and parent closeout claims must not exceed the inspected evidence.',
+    );
+    expect(skillContent).toContain(
       'Choose `Blocker type` from: `proof capture timed out`, `proof runtime unavailable`, `browser surface unavailable`, `browser surface broken`, `claim not visually provable`, `state not reachable on current browser surface`, `fixture missing on current browser surface`, `external side effect risk`, or `upload failed`.',
     );
   });
 
   it('stays small enough to read as a capture recipe', () => {
     // Down from ~38 KB when the skill orchestrated a delegated runner.
-    expect(skillContent.length).toBeLessThan(16_000);
+    expect(skillContent.length).toBeLessThan(17_000);
     expect(skillContent.match(/<rule>/g)?.length ?? 0).toBeLessThanOrEqual(16);
   });
 

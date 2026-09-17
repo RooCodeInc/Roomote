@@ -15,6 +15,8 @@ import {
   tasks,
   taskRuns,
   taskFactory,
+  userFactory,
+  automations,
   brainMemoryEvents,
   brainCollectorItems,
   brainSyncState,
@@ -27,6 +29,7 @@ import {
   maybeEnqueueBrainMemoryEvent,
   saveBrainAgentSummary,
   requeueBrainMemoryEventsForTasks,
+  requeueFailedBrainMemoryEvents,
   resetBrainIngestionState,
   canonicalizeBrainCollectorItemSlugs,
   deleteBrainCollectorItems,
@@ -37,6 +40,11 @@ import {
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
   listBrainCollectorItemsBySlugPrefix,
+  listRecentUserTaskMemoryRuns,
+  listEligibleUserTaskMemoryRuns,
+  findHomeComposerPrecomputeUserForRun,
+  isHomeComposerSuggestionsEnabled,
+  setDeploymentExperimentEnabled,
   seedBrainCollectorItems,
   upsertBrainCollectorItems,
   upsertBrainSyncState,
@@ -47,8 +55,11 @@ import { runMemoryOutboxLifecycleContract } from './memory-outbox-lifecycle.cont
 
 const createdTaskIds: string[] = [];
 
-async function makeCompletedRun(completedAt?: Date) {
-  const task = await taskFactory.create({ state: 'active' });
+async function makeCompletedRun(
+  completedAt?: Date,
+  taskParams: Parameters<typeof taskFactory.create>[0] = {},
+) {
+  const task = await taskFactory.create({ state: 'active', ...taskParams });
   createdTaskIds.push(task.id);
 
   const [run] = await db
@@ -119,6 +130,176 @@ describe('resetBrainIngestionState', () => {
       lastError: null,
       processedAt: null,
     });
+  });
+});
+
+describe('private task memory exclusion', () => {
+  it('keeps automatic, explicit, requeue, and backfill paths terminally skipped', async () => {
+    const owner = await userFactory.create();
+    const run = await makeCompletedRun(undefined, {
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+
+    await maybeEnqueueBrainMemoryEvent(db, run.id);
+    await saveBrainAgentSummary(db, run.id, 'private canary summary');
+    expect(await requeueBrainMemoryEventsForTasks(db, [run.taskId])).toBe(0);
+    expect(await backfillBrainMemoryEvents(db)).toBe(0);
+
+    const [event] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.runId, run.id));
+    expect(event).toMatchObject({
+      status: 'skipped',
+      agentSummary: null,
+      lastError: 'private task',
+    });
+    await db
+      .update(brainMemoryEvents)
+      .set({ status: 'failed' })
+      .where(eq(brainMemoryEvents.runId, run.id));
+    expect(await requeueFailedBrainMemoryEvents(db)).toBe(0);
+    await expect(
+      db.query.brainMemoryEvents.findFirst({
+        where: eq(brainMemoryEvents.runId, run.id),
+      }),
+    ).resolves.toMatchObject({ status: 'failed' });
+    expect(await claimPendingBrainMemoryEvents(db, 10)).toEqual([]);
+  });
+});
+
+describe('listRecentUserTaskMemoryRuns', () => {
+  it('returns only landed user-initiated memories owned by the requested user', async () => {
+    const owner = await userFactory.create({
+      metadata: { home_composer_suggestions_enabled: true },
+    });
+    const otherUser = await userFactory.create();
+    await db
+      .insert(automations)
+      .values({ key: 'issue_fixer' })
+      .onConflictDoNothing();
+    const olderOwned = await makeCompletedRun(
+      new Date('2026-09-10T12:00:00Z'),
+      { initiatorUserId: owner.id },
+    );
+    const newerOwned = await makeCompletedRun(
+      new Date('2026-09-12T12:00:00Z'),
+      { initiatorUserId: owner.id },
+    );
+    const otherOwned = await makeCompletedRun(
+      new Date('2026-09-13T12:00:00Z'),
+      { initiatorUserId: otherUser.id },
+    );
+    const automation = await makeCompletedRun(
+      new Date('2026-09-14T12:00:00Z'),
+      {
+        initiatorKind: 'automation',
+        initiatorUserId: null,
+        initiatorAutomation: 'issue_fixer',
+        actorExternalId: null,
+      },
+    );
+    await db
+      .update(taskRuns)
+      .set({ actingUserId: owner.id })
+      .where(eq(taskRuns.id, automation.id));
+    const ownerAttributedSystem = await makeCompletedRun(
+      new Date('2026-09-15T12:00:00Z'),
+      {
+        surface: 'system',
+        initiatorKind: 'user',
+        initiatorUserId: owner.id,
+      },
+    );
+    const hiddenOwned = await makeCompletedRun(
+      new Date('2026-09-15T13:00:00Z'),
+      { initiatorUserId: owner.id, visibility: 'hidden' },
+    );
+    const deletedOwned = await makeCompletedRun(
+      new Date('2026-09-15T14:00:00Z'),
+      { initiatorUserId: owner.id, deletedAt: new Date() },
+    );
+    const pendingOwned = await makeCompletedRun(
+      new Date('2026-09-16T12:00:00Z'),
+      { initiatorUserId: owner.id },
+    );
+
+    await db.insert(brainMemoryEvents).values([
+      { runId: olderOwned.id, status: 'done' },
+      { runId: newerOwned.id, status: 'done' },
+      { runId: otherOwned.id, status: 'done' },
+      { runId: automation.id, status: 'done' },
+      { runId: ownerAttributedSystem.id, status: 'done' },
+      { runId: hiddenOwned.id, status: 'done' },
+      { runId: deletedOwned.id, status: 'done' },
+      { runId: pendingOwned.id, status: 'pending' },
+    ]);
+
+    await expect(
+      listRecentUserTaskMemoryRuns(db, { userId: owner.id, limit: 5 }),
+    ).resolves.toEqual([
+      {
+        taskId: newerOwned.taskId,
+        runId: newerOwned.id,
+        completedAt: new Date('2026-09-12T12:00:00Z'),
+        memoryRevision: 0,
+      },
+      {
+        taskId: olderOwned.taskId,
+        runId: olderOwned.id,
+        completedAt: new Date('2026-09-10T12:00:00Z'),
+        memoryRevision: 0,
+      },
+    ]);
+    await expect(
+      listRecentUserTaskMemoryRuns(db, { userId: owner.id, limit: 1 }),
+    ).resolves.toHaveLength(1);
+
+    await expect(
+      listEligibleUserTaskMemoryRuns(db, {
+        userId: owner.id,
+        runIds: [newerOwned.id, otherOwned.id, hiddenOwned.id],
+      }),
+    ).resolves.toEqual([
+      {
+        taskId: newerOwned.taskId,
+        runId: newerOwned.id,
+        completedAt: new Date('2026-09-12T12:00:00Z'),
+        memoryRevision: 0,
+      },
+    ]);
+
+    expect(await isHomeComposerSuggestionsEnabled(db)).toBe(false);
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, newerOwned.id),
+    ).toBeNull();
+
+    await setDeploymentExperimentEnabled('homeComposerSuggestions', true);
+
+    expect(await isHomeComposerSuggestionsEnabled(db)).toBe(true);
+    expect(await findHomeComposerPrecomputeUserForRun(db, newerOwned.id)).toBe(
+      owner.id,
+    );
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, automation.id),
+    ).toBeNull();
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, ownerAttributedSystem.id),
+    ).toBeNull();
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, hiddenOwned.id),
+    ).toBeNull();
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, deletedOwned.id),
+    ).toBeNull();
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, pendingOwned.id),
+    ).toBeNull();
+    expect(await findHomeComposerPrecomputeUserForRun(db, otherOwned.id)).toBe(
+      otherUser.id,
+    );
   });
 });
 
@@ -723,25 +904,53 @@ describe('backfillBrainMemoryEvents', () => {
     expect(runningEvents).toHaveLength(0);
   });
 
-  it('requeues completed memories for a one-time metadata replay', async () => {
-    const completed = await makeCompletedRun();
-    await saveBrainAgentSummary(db, completed.id, 'Keep this summary.');
-    const claimed = await claimPendingBrainMemoryEvents(db, 10);
-    const event = claimed.find((row) => row.runId === completed.id);
-    await settleBrainMemoryEvent(db, event!.id, event!.revision, 'done');
+  it('requeues only linkable recent memories for a one-time metadata replay', async () => {
+    const user = await userFactory.create();
+    const now = Date.now();
+    const recent = new Date(now - 24 * 60 * 60 * 1000);
+    const stale = new Date(now - 400 * 24 * 60 * 60 * 1000);
+    const linkable = await makeCompletedRun(recent, {
+      initiatorUserId: user.id,
+    });
+    const tooOld = await makeCompletedRun(stale, {
+      initiatorUserId: user.id,
+    });
+    const review = await makeCompletedRun(recent, {
+      initiatorUserId: user.id,
+      workflow: 'pr_review',
+    });
+    const unlinked = await makeCompletedRun(recent);
+    await saveBrainAgentSummary(db, linkable.id, 'Keep this summary.');
+    // Every fixture run reaches the Brain once before the replay is asked for.
+    await backfillBrainMemoryEvents(db);
+    const claimed = await claimPendingBrainMemoryEvents(db, 1_000);
+    for (const event of claimed) {
+      await settleBrainMemoryEvent(db, event.id, event.revision, 'done');
+    }
 
-    await backfillBrainMemoryEvents(db, { requeueCompleted: true });
+    await backfillBrainMemoryEvents(db, {
+      requeueLinkable: {
+        completedAfter: new Date(now - 90 * 24 * 60 * 60 * 1000),
+      },
+    });
 
-    const [requeued] = await db
-      .select()
-      .from(brainMemoryEvents)
-      .where(eq(brainMemoryEvents.runId, completed.id));
-    expect(requeued).toMatchObject({
+    const statusOf = async (runId: number) => {
+      const [row] = await db
+        .select()
+        .from(brainMemoryEvents)
+        .where(eq(brainMemoryEvents.runId, runId));
+      return row;
+    };
+
+    expect(await statusOf(linkable.id)).toMatchObject({
       status: 'pending',
       attempts: 0,
       lastError: null,
       agentSummary: 'Keep this summary.',
     });
+    expect((await statusOf(tooOld.id))?.status).toBe('done');
+    expect((await statusOf(review.id))?.status).toBe('done');
+    expect((await statusOf(unlinked.id))?.status).toBe('done');
   });
 });
 

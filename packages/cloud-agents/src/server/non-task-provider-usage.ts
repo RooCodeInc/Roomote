@@ -54,6 +54,9 @@ export const FAST_AGENT_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
 ).map((permission) => ({
   permission,
   pattern: '*',
+  // `task` is the only OpenCode built-in Fast exposes. In particular,
+  // `webfetch` remains denied here as well as in the generated agent filter:
+  // it would otherwise issue model-selected requests from the control plane.
   action: permission === 'task' ? 'allow' : 'deny',
 }));
 
@@ -127,6 +130,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   slackQuestionChannelSuggestions: 'slack_question_channel_suggestions',
   taskSummaryGeneration: 'task_summary_generation',
   taskTitleGeneration: 'task_title_generation',
+  voiceTranscriptCleanup: 'voice_transcript_cleanup',
 } as const;
 
 const NON_TASK_INFERENCE_VALIDATION_TIMEOUT_MS = 15_000;
@@ -210,6 +214,7 @@ export interface GenerateTrackedNonTaskObjectParams<
   TSchema extends z.ZodTypeAny,
 > extends GenerateTrackedNonTaskBaseParams {
   schema: TSchema;
+  structuredOutputRetryCount?: number;
 }
 
 /**
@@ -776,7 +781,6 @@ function isOpenCodeSessionInvalid(error: unknown): boolean {
 async function resolveNonTaskModelRuntime(
   model?: string,
   modelRole: 'primary' | 'small' | 'orchestration' = 'small',
-  reasoningEffort?: ReasoningEffort,
 ): Promise<{
   model: string;
   resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
@@ -841,15 +845,6 @@ async function resolveNonTaskModelRuntime(
         selectedRuntimeEnv.R_MODEL_REASONING_EFFORT = undefined;
       }
     }
-  }
-
-  if (reasoningEffort) {
-    // The lease cache keys on env, so an explicit effort gets its own server
-    // rather than mutating a shared lease.
-    selectedRuntimeEnv = {
-      ...selectedRuntimeEnv,
-      R_MODEL_REASONING_EFFORT: reasoningEffort,
-    };
   }
 
   return {
@@ -1027,7 +1022,6 @@ export async function resolveNonTaskInputModalityDelivery(params: {
   const runtime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
-    params.reasoningEffort,
   );
   const env = runtime.resolvedModelRuntimeEnv;
   const sessionModel = runtime.model;
@@ -1135,8 +1129,12 @@ async function runNonTaskSdkPrompt(
   const server = await leaseOpenCodeSdkServer({
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
-    preserveReasoning: options.preserveReasoning,
+    preserveReasoning:
+      options.preserveReasoning ?? Boolean(params.reasoningEffort),
     promptOnlySubagents: options.promptOnlySubagents,
+    reasoningOverride: params.reasoningEffort
+      ? { model, effort: params.reasoningEffort }
+      : undefined,
     startTimeoutMs:
       timeoutMs === null
         ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
@@ -1737,7 +1735,6 @@ export async function generateTrackedNonTaskText(
   const runtime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
-    params.reasoningEffort,
   );
   const model = await resolveModelForInputModality(params, runtime);
 
@@ -1789,7 +1786,6 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
   const runtime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
-    params.reasoningEffort,
   );
   // A native session always runs on its own model. Callers decide up front,
   // via resolveNonTaskInputModalityDelivery, whether attached files ride along
@@ -1861,7 +1857,6 @@ async function generateTrackedNonTaskObjectWithSdk<
   const resolvedRuntime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
-    params.reasoningEffort,
   );
 
   const data = await runNonTaskSdkPrompt(
@@ -1871,11 +1866,10 @@ async function generateTrackedNonTaskObjectWithSdk<
       system: params.system,
       format: {
         type: 'json_schema',
-        schema: zodToJsonSchema(params.schema, {
-          $refStrategy: 'none',
-          target: 'jsonSchema7',
-        }) as Record<string, unknown>,
-        retryCount: DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
+        schema: buildNonTaskStructuredOutputJsonSchema(params.schema),
+        retryCount:
+          params.structuredOutputRetryCount ??
+          DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
       },
       parts: [
         {
@@ -1902,6 +1896,15 @@ async function generateTrackedNonTaskObjectWithSdk<
   return { object };
 }
 
+export function buildNonTaskStructuredOutputJsonSchema(
+  schema: z.ZodTypeAny,
+): Record<string, unknown> {
+  return zodToJsonSchema(schema, {
+    $refStrategy: 'none',
+    target: 'jsonSchema7',
+  }) as Record<string, unknown>;
+}
+
 export async function generateTrackedNonTaskObject<
   TSchema extends z.ZodTypeAny,
 >(
@@ -1914,6 +1917,24 @@ function unwrapNonTaskInferenceError(error: unknown): unknown {
   return error instanceof NonTaskOpenCodePromptError
     ? error.providerError
     : error;
+}
+
+function formatNativeErrorCauseDetail(error: unknown): string {
+  const detail: string[] = [];
+  const seen = new Set<object>();
+  let current = error;
+
+  for (let depth = 0; depth <= 4; depth += 1) {
+    if (!current || typeof current !== 'object' || seen.has(current)) break;
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    for (const key of ['message', 'code'] as const) {
+      if (typeof record[key] === 'string') detail.push(record[key]);
+    }
+    current = record.cause;
+  }
+
+  return detail.join(' ');
 }
 
 function findInferenceErrorStatusCode(error: unknown): number | undefined {
@@ -1992,7 +2013,7 @@ export function classifyNonTaskInferenceError(
   const responseBody =
     typeof data?.responseBody === 'string' ? data.responseBody : '';
   const detail =
-    `${formatOpenCodeSdkError(inferenceError)} ${responseBody}`.toLowerCase();
+    `${formatOpenCodeSdkError(inferenceError)} ${formatNativeErrorCauseDetail(inferenceError)} ${responseBody}`.toLowerCase();
   const errorName = typeof record?.name === 'string' ? record.name : '';
   const gatewayBlocked =
     (statusCode === 403 && /^\s*(?:<!doctype|<html)/iu.test(responseBody)) ||

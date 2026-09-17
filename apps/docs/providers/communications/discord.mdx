@@ -119,8 +119,8 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
 - use `/new request:<request>` in a server channel or thread to open a fresh
   conversation in its own thread instead of continuing the current one; in a
   DM, `/new` sends the request into the DM conversation
-- use `/goal objective:<objective>` to keep working toward an objective across
-  multiple turns in an active task thread or DM; this does not create a new task
+- use `/goal objective:<objective>` to make the current Fast Session pursue an
+  objective across multiple turns; it may delegate child tasks as needed
 - Discord DMs, mentions, attachments, and eligible thread replies from your
   linked account always enter a Fast Session, which answers directly or
   delegates repository work into tasks
@@ -129,9 +129,10 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
 - reply naturally inside a task thread, forum post, or DM to continue it
   (same Slack-style rules: after someone else posts or is @mentioned in the
   thread since Roomote's last reply, tag Roomote again to keep going)
-- paste a Discord message link (`https://discord.com/channels/.../.../...`) in a
-  task so the agent can pull that message and nearby channel/thread context
-  (lookups outside the originating task thread require a linked Discord account)
+- paste a Discord message link (`https://discord.com/channels/.../.../...`) in
+  any Fast Session so the agent can pull that message and nearby channel/thread
+  context, including when the Session started on another chat provider (lookups
+  outside the originating Discord conversation require a linked Discord account)
 - use `/help` to see the available commands
 
 Fast can read bounded context from the current Discord thread or channel, use
@@ -147,6 +148,14 @@ all-repositories environment.
 
 Fast automation reports can be delivered to configured Discord channels or the
 automation owner's DM. Replies continue the report's Fast session in Discord.
+
+**Peer conversations** under **Settings > Experimental** is off by default. The
+deployment admin can enable it so linked participants' messages in established
+Fast Discord threads continue reaching Fast after a peer is mentioned. Roomote
+may ignore ambient discussion, while explicit bot mentions, commands, DMs, and
+replies to Roomote continue to receive a response normally. This applies only
+inside the established thread; it does not make Roomote monitor the surrounding
+channel.
 
 Every Fast reply ends with a compact footer: **Reply anytime**, a plain
 running-task count when at least one task is running, links to pull requests the

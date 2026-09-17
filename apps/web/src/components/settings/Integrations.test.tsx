@@ -1,5 +1,6 @@
 import type {
   ButtonHTMLAttributes,
+  ComponentProps,
   HTMLAttributes,
   InputHTMLAttributes,
   LabelHTMLAttributes,
@@ -8,6 +9,7 @@ import type {
 } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { toast } from 'sonner';
+import { MCP_INTEGRATIONS } from '@roomote/types';
 
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 
@@ -44,8 +46,17 @@ const state = vi.hoisted(() => ({
   granolaConnection: null as null | {
     authStatus?: string | null;
   },
+  exaConnection: null as null | {
+    authStatus?: string | null;
+  },
   elevenLabsConnection: null as null | {
     authStatus?: string | null;
+    voiceId?: string;
+  },
+  voiceConnection: null as null | {
+    authStatus?: string | null;
+    source?: 'environment' | 'connection';
+    enabled?: boolean;
     voiceId?: string;
   },
   grafanaConnection: null as null | {
@@ -94,6 +105,7 @@ const state = vi.hoisted(() => ({
     },
   },
   linearRedirectPath: '',
+  pathname: '/settings/integrations',
   searchParams: '',
 }));
 
@@ -109,7 +121,11 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     saveNotionConnection: vi.fn(),
     saveRipplingConnection: vi.fn(),
     saveGranolaConnection: vi.fn(),
+    saveExaConnection: vi.fn(),
+    removeExaApiKey: vi.fn(),
     saveElevenLabsConnection: vi.fn(),
+    saveVoiceConnection: vi.fn(),
+    previewVoice: vi.fn(),
     saveGrafanaConnection: vi.fn(),
     saveSnowflakeConnection: vi.fn(),
     saveVercelConnection: vi.fn(),
@@ -150,7 +166,7 @@ function cloneMcpToolsData() {
 }
 
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/settings/integrations',
+  usePathname: () => state.pathname,
   useSearchParams: () => new URLSearchParams(state.searchParams),
 }));
 
@@ -227,6 +243,34 @@ vi.mock('@/hooks/mcp-connections', () => ({
     data: state.userConnections,
     isPending: false,
   }),
+  useEffectiveMcpIntegrations: () => ({
+    data: MCP_INTEGRATIONS.map((integration) => {
+      const enabled = state.deploymentEnablements.some(
+        (entry) => entry.mcpId === integration.id && entry.enabled,
+      );
+      const connection = state.userConnections.find(
+        (entry) => entry.mcpId === integration.id,
+      );
+      const oauthReadiness =
+        state.oauthReadiness.find((entry) => entry.mcpId === integration.id)
+          ?.status ?? 'not_required';
+      return {
+        id: integration.id,
+        available: state.integrationsEnabled,
+        enabled,
+        authStatus: connection?.authStatus ?? null,
+        oauthReadiness,
+        status: !state.integrationsEnabled
+          ? 'unavailable'
+          : enabled
+            ? connection?.authStatus === 'authenticated'
+              ? 'connected'
+              : 'needs_connection'
+            : 'not_enabled',
+      };
+    }),
+    isPending: false,
+  }),
   useMcpConnectionTools: () => ({
     data: cloneMcpToolsData(),
     isPending: false,
@@ -286,12 +330,36 @@ vi.mock('@/hooks/mcp-connections', () => ({
     data: state.granolaConnection,
     isPending: false,
   }),
+  useSaveExaConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveExaConnection,
+  }),
+  useExaConnection: () => ({
+    data: state.exaConnection,
+    isPending: false,
+  }),
+  useRemoveExaApiKey: () => ({
+    isPending: false,
+    mutate: mutations.removeExaApiKey,
+  }),
   useSaveElevenLabsConnection: () => ({
     isPending: false,
     mutate: mutations.saveElevenLabsConnection,
   }),
   useElevenLabsConnection: () => ({
     data: state.elevenLabsConnection,
+    isPending: false,
+  }),
+  useSaveVoiceConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveVoiceConnection,
+  }),
+  usePreviewVoice: () => ({
+    isPending: false,
+    mutate: mutations.previewVoice,
+  }),
+  useVoiceConnection: () => ({
+    data: state.voiceConnection,
     isPending: false,
   }),
   useSaveGrafanaConnection: () => ({
@@ -338,6 +406,16 @@ vi.mock('./CustomMcpServers', () => ({
   useCustomMcpServers: () => ({
     isEnabled: true,
     items: [],
+    openAddDialog: vi.fn(),
+    dialogs: null,
+  }),
+}));
+
+vi.mock('./YourIntegrations', () => ({
+  useYourIntegrations: () => ({
+    items: [],
+    isLoading: false,
+    error: null,
     openAddDialog: vi.fn(),
     dialogs: null,
   }),
@@ -419,6 +497,7 @@ vi.mock('@/components/system', () => ({
   LinearLogo: () => <svg aria-hidden="true" />,
   Pencil: () => <svg aria-hidden="true" />,
   Plus: () => <svg aria-hidden="true" data-icon="plus" />,
+  Play: () => <svg aria-hidden="true" data-icon="play" />,
   PlugIcon: () => <svg aria-hidden="true" />,
   RefreshCw: ({ className }: { className?: string }) => (
     <svg aria-hidden="true" className={className} data-icon="refresh-cw" />
@@ -468,6 +547,7 @@ vi.mock('@/components/system', () => ({
   Spinner: () => <span>loading</span>,
   Star: () => <svg aria-hidden="true" />,
   Trash: () => <svg aria-hidden="true" />,
+  Trash2: () => <svg aria-hidden="true" data-icon="trash-2" />,
   Switch: ({
     checked,
     disabled,
@@ -495,16 +575,34 @@ vi.mock('@/components/system', () => ({
   ),
   ToggleLeft: () => <svg aria-hidden="true" />,
   ToggleRight: () => <svg aria-hidden="true" />,
+  Wrench: () => <svg aria-hidden="true" data-icon="wrench" />,
   X: () => <svg aria-hidden="true" />,
 }));
 
-import { Integrations, sortIntegrationItems } from './Integrations';
+import {
+  Integrations as ActualIntegrations,
+  sortIntegrationItems,
+} from './Integrations';
 import { splitIntegrationItems } from './integration-card';
+
+function Integrations(props: ComponentProps<typeof ActualIntegrations> = {}) {
+  if (props.integrationIds !== undefined || props.showCatalog === false) {
+    return <ActualIntegrations {...props} />;
+  }
+
+  return (
+    <ActualIntegrations
+      {...props}
+      integrationIds={['linear', ...MCP_INTEGRATIONS.map(({ id }) => id)]}
+    />
+  );
+}
 
 describe('Integrations settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.history.replaceState(null, '', '/settings/integrations');
+    state.voiceConnection = null;
     state.deploymentEnablements = [];
     state.integrationsEnabled = true;
     state.oauthReadiness = [{ mcpId: 'linear', status: 'ready' }];
@@ -515,10 +613,12 @@ describe('Integrations settings', () => {
       linearOrganizationName: 'Roomote',
     };
     state.linearRedirectPath = '';
+    state.pathname = '/settings/integrations';
     state.asanaConnection = null;
     state.notionConnection = null;
     state.ripplingConnection = null;
     state.granolaConnection = null;
+    state.exaConnection = null;
     state.grafanaConnection = null;
     state.vercelConnection = null;
     state.xConnection = null;
@@ -545,11 +645,165 @@ describe('Integrations settings', () => {
   });
 
   it('returns Linear OAuth to a service-specific integrations URL', () => {
-    render(<Integrations />);
+    render(<ActualIntegrations />);
 
     expect(state.linearRedirectPath).toBe(
       '/settings/integrations?service=linear',
     );
+  });
+
+  it('renders only requested integrations in passed order without custom servers or groups', () => {
+    render(<Integrations integrationIds={['notion', 'sentry', 'linear']} />);
+    expect(
+      screen.getAllByRole('heading').map((heading) => heading.textContent),
+    ).toEqual(['Integrations', 'Notion', 'Sentry', 'Linear']);
+    expect(screen.queryByText('Add custom server')).not.toBeInTheDocument();
+  });
+
+  it('does not leak custom servers when filtered integrations are disabled', () => {
+    state.integrationsEnabled = false;
+    render(<Integrations integrationIds={['notion']} />);
+    expect(
+      screen.getByText('Integrations disabled by deployment operator'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Add custom server')).not.toBeInTheDocument();
+  });
+
+  it('preserves the embedded pathname for Linear and MCP OAuth', () => {
+    state.pathname = '/sessions/setup-session';
+    state.linearInstallation = null;
+    render(<Integrations integrationIds={['linear', 'pylon']} />);
+    expect(state.linearRedirectPath).toBe('/sessions/setup-session');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Connect and enable Pylon' }),
+    );
+    expect(mutations.connectMcp).toHaveBeenCalledWith(
+      { mcpId: 'pylon', redirectTo: '/sessions/setup-session' },
+      expect.any(Object),
+    );
+  });
+
+  it('keeps filtered deployment configuration read-only for non-admins', () => {
+    state.isAdmin = false;
+    render(<Integrations integrationIds={['notion']} />);
+    expect(screen.getByRole('heading', { name: 'Notion' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Configure Notion' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('clears an embedded secret on cancellation without saving', () => {
+    render(<Integrations integrationIds={['notion']} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Notion' }));
+    fireEvent.change(screen.getByLabelText('Internal integration secret'), {
+      target: { value: 'test-secret' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(mutations.saveNotionConnection).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Notion' }));
+    expect(screen.getByLabelText('Internal integration secret')).toHaveValue(
+      '',
+    );
+  });
+
+  it('opens requested configuration directly without rendering the catalog or confirmation', async () => {
+    render(
+      <Integrations
+        integrationIds={['notion']}
+        configurationRequest={{ integrationId: 'notion', sequence: 1 }}
+        showCatalog={false}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: 'Connect Notion' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Internal integration secret'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Integrations' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Enable Notion?' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('opens requested Linear setup directly without navigating through integration settings', async () => {
+    state.pathname = '/sessions/setup-session';
+    state.linearInstallation = null;
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
+
+    render(
+      <Integrations
+        integrationIds={['linear']}
+        configurationRequest={{ integrationId: 'linear', sequence: 1 }}
+        showCatalog={false}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: 'Set up Linear' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Create the app' }),
+    ).toBeInTheDocument();
+    expect(state.linearRedirectPath).toBe('/sessions/setup-session');
+    expect(
+      screen.queryByRole('heading', { name: 'Integrations' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Enable Linear?' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('starts requested OAuth configuration from the embedded pathname', async () => {
+    state.pathname = '/sessions/setup-session';
+
+    render(
+      <Integrations
+        integrationIds={['pylon']}
+        configurationRequest={{ integrationId: 'pylon', sequence: 1 }}
+        showCatalog={false}
+      />,
+    );
+
+    expect(mutations.connectMcp).toHaveBeenCalledWith(
+      { mcpId: 'pylon', redirectTo: '/sessions/setup-session' },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(
+      screen.queryByRole('heading', { name: 'Enable Pylon?' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('reconnects an enabled integration that still needs authentication', () => {
+    state.pathname = '/sessions/setup-session';
+    state.deploymentEnablements = [{ mcpId: 'sentry', enabled: true }];
+    state.userConnections = [{ mcpId: 'sentry', authStatus: 'pending' }];
+
+    render(
+      <Integrations
+        integrationIds={['sentry']}
+        configurationRequest={{ integrationId: 'sentry', sequence: 1 }}
+        showCatalog={false}
+      />,
+    );
+
+    expect(mutations.connectMcp).toHaveBeenCalledWith(
+      { mcpId: 'sentry', redirectTo: '/sessions/setup-session' },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(toast.success).not.toHaveBeenCalledWith(
+      'Sentry is already connected.',
+    );
+    expect(mutations.setDeploymentEnabled).not.toHaveBeenCalled();
   });
 
   it('uses the settings action for missing Linear OAuth setup', () => {
@@ -820,26 +1074,16 @@ describe('Integrations settings', () => {
     ]);
   });
 
-  it('shows configured integrations separately and an empty connected state', () => {
+  it('shows only active integrations in one list', () => {
     state.linearInstallation = null;
 
-    render(<Integrations />);
+    render(<ActualIntegrations />);
 
-    const connectedSection = screen
-      .getByRole('heading', { name: 'Connected' })
-      .closest('section');
-    const configuredSection = screen
-      .getByRole('heading', { name: 'Configured' })
-      .closest('section');
-
-    expect(connectedSection).toHaveTextContent(
-      "You haven't connected any integrations yet.",
-    );
     expect(
-      within(configuredSection as HTMLElement).getByRole('heading', {
-        name: 'Linear',
-      }),
-    ).toBeInTheDocument();
+      screen.getByRole('table', { name: 'Integrations' }),
+    ).toHaveTextContent('No active integrations yet.');
+    expect(screen.queryByText('Linear')).not.toBeInTheDocument();
+    expect(screen.queryByText('Available')).not.toBeInTheDocument();
   });
 
   it('highlights a selected integration above alphabetical order', () => {
@@ -859,108 +1103,32 @@ describe('Integrations settings', () => {
     ]);
   });
 
-  it('renders connected and available sections with compact action buttons', () => {
-    render(<Integrations />);
+  it('renders active rows with icon-only actions and keeps inactive integrations in the catalog', () => {
+    const { rerender } = render(<ActualIntegrations />);
 
-    const connectedSection = screen
-      .getByRole('heading', { name: 'Connected' })
-      .closest('section');
-    const availableSection = screen
-      .getByRole('heading', { name: 'Available' })
-      .closest('section');
-    expect(connectedSection).not.toBeNull();
-    expect(availableSection).not.toBeNull();
+    const table = screen.getByRole('table', { name: 'Integrations' });
     expect(
-      screen.queryByRole('heading', { name: 'Configured' }),
+      screen.queryByRole('heading', { name: 'Connected' }),
     ).not.toBeInTheDocument();
+    expect(within(table).getByText('Linear')).toBeInTheDocument();
+    expect(within(table).queryByText('Asana')).not.toBeInTheDocument();
+    expect(
+      within(table).getByRole('button', { name: 'Configure Linear' }),
+    ).toHaveTextContent('');
+    expect(
+      within(table).getByRole('button', { name: 'Remove Linear' }),
+    ).toHaveTextContent('');
 
-    expect(
-      within(connectedSection as HTMLElement)
-        .getAllByRole('heading', { level: 3 })
-        .map((heading) => heading.textContent),
-    ).toEqual(['Linear']);
-    expect(
-      within(availableSection as HTMLElement)
-        .getAllByRole('heading', { level: 3 })
-        .map((heading) => heading.textContent),
-    ).toEqual([
-      'Asana',
-      'Better Stack',
-      'Braintrust',
-      'ElevenLabs',
-      'Grafana',
-      'Granola',
-      'Jira',
-      'monday.com',
-      'Neon',
-      'Notion',
-      'PostHog',
-      'Pylon',
-      'Railway',
-      'Resend',
-      'Rippling',
-      'Sentry',
-      'Snowflake',
-      'Supabase',
-      'Supermemory',
-      'Vercel',
-      'X',
-      'Zero',
-    ]);
-    expect(
-      screen.getAllByText('First-class integration').length,
-    ).toBeGreaterThan(0);
-    expect(screen.getAllByText('MCP-based integration').length).toBeGreaterThan(
-      0,
+    rerender(
+      <ActualIntegrations addRequest={{ type: 'catalog', sequence: 1 }} />,
     );
     expect(
-      screen.queryByText('Connected once for everyone in your workspace.'),
+      screen.getByRole('heading', { name: 'Add from the catalog' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Asana')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Disable Linear' }),
     ).not.toBeInTheDocument();
-
-    expect(
-      screen.getByRole('button', { name: 'Disable Linear' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Better Stack' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable PostHog' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Pylon' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Railway' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Resend' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'Inspect and manage shared email infrastructure through Resend from Roomote tasks.',
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Jira' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Connect and enable Sentry' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Asana' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Grafana' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Granola' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Snowflake' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Configure Vercel' }),
-    ).toBeInTheDocument();
   });
 
   it('shows operator policy instead of integration controls when disabled', () => {
@@ -977,6 +1145,18 @@ describe('Integrations settings', () => {
     expect(
       screen.queryByRole('button', { name: 'Disable Linear' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows the empty state when curated integrations are disabled and only retained built-ins are active', () => {
+    state.integrationsEnabled = false;
+
+    render(<ActualIntegrations />);
+
+    const table = screen.getByRole('table', { name: 'Integrations' });
+    expect(
+      within(table).getByText('No active integrations yet.'),
+    ).toBeInTheDocument();
+    expect(within(table).queryByText('Linear')).not.toBeInTheDocument();
   });
 
   it('connects and enables an org-scoped MCP from the integrations page', () => {
@@ -1083,7 +1263,7 @@ describe('Integrations settings', () => {
     );
   });
 
-  it('keeps the disable toast unchanged for Jira after it is workspace-scoped', () => {
+  it('describes removing Jira after it is workspace-scoped', () => {
     state.deploymentEnablements = [{ mcpId: 'jira', enabled: true }];
     mutations.setDeploymentEnabled.mockImplementation((_variables, options) => {
       options?.onSuccess?.();
@@ -1100,9 +1280,7 @@ describe('Integrations settings', () => {
         onError: expect.any(Function),
       }),
     );
-    expect(toast.success).toHaveBeenCalledWith(
-      'Jira disabled for this deployment.',
-    );
+    expect(toast.success).toHaveBeenCalledWith('Jira removed.');
   });
 
   it('surfaces the highlighted integration from the URL', () => {
@@ -1371,7 +1549,7 @@ describe('Integrations settings', () => {
     );
 
     expect(
-      screen.getByRole('heading', { name: 'Manage Sentry tools' }),
+      screen.getByRole('heading', { name: 'Manage tools for Sentry' }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Disable get_sentry_resource' }),
@@ -1464,6 +1642,69 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
   });
 
+  it('links Snowflake validation errors to each invalid field and clears corrected state', () => {
+    render(<Integrations />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Snowflake' }),
+    );
+    const submitButton = screen.getByRole('button', {
+      name: 'Connect Snowflake',
+    });
+    submitButton.focus();
+    fireEvent.click(submitButton);
+
+    expect(submitButton).toHaveFocus();
+
+    const invalidFields = [
+      ['Account identifier', 'Account identifier is required'],
+      ['Username', 'Username is required'],
+      ['Role', 'Role is required'],
+    ] as const;
+
+    for (const [label, error] of invalidFields) {
+      const field = screen.getByLabelText(label);
+      expect(field).toHaveAttribute('aria-invalid', 'true');
+      expect(field).toHaveAccessibleDescription(error);
+      expect(screen.getByText(error)).toHaveAttribute('role', 'alert');
+    }
+    expect(mutations.saveSnowflakeConnection).not.toHaveBeenCalled();
+
+    const accountInput = screen.getByLabelText('Account identifier');
+    fireEvent.change(accountInput, {
+      target: { value: 'xy12345.us-east-1' },
+    });
+
+    expect(accountInput).not.toHaveAttribute('aria-invalid');
+    expect(accountInput).not.toHaveAttribute('aria-describedby');
+    expect(
+      screen.queryByText('Account identifier is required'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Username')).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+
+    fireEvent.change(screen.getByLabelText('Username'), {
+      target: { value: 'roomote_user' },
+    });
+    fireEvent.change(screen.getByLabelText('Role'), {
+      target: { value: 'ANALYST' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Snowflake' }));
+
+    const privateKeyInput = screen.getByLabelText('Private Key (PEM)');
+    expect(privateKeyInput).toHaveAttribute('aria-invalid', 'true');
+    expect(privateKeyInput).toHaveAccessibleDescription(
+      'Private key is required',
+    );
+    expect(screen.getByText('Private key is required')).toHaveAttribute(
+      'role',
+      'alert',
+    );
+    expect(mutations.saveSnowflakeConnection).not.toHaveBeenCalled();
+  });
+
   it('opens the Asana credential dialog from the integrations page', () => {
     render(<Integrations />);
 
@@ -1545,9 +1786,14 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Connect Notion' }));
 
+    const secretInput = screen.getByLabelText('Internal integration secret');
+    expect(secretInput).toHaveAttribute('aria-invalid', 'true');
+    expect(secretInput).toHaveAccessibleDescription(
+      'Internal integration secret is required',
+    );
     expect(
       screen.getByText('Internal integration secret is required'),
-    ).toBeInTheDocument();
+    ).toHaveAttribute('role', 'alert');
     expect(mutations.saveNotionConnection).not.toHaveBeenCalled();
   });
 
@@ -1589,6 +1835,24 @@ describe('Integrations settings', () => {
         'Store a Granola API key for this deployment. The secret stays encrypted server-side.',
       ),
     ).toBeInTheDocument();
+  });
+
+  it('opens the Exa API-key dialog with secure deployment guidance', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Exa API key' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Add Exa API key' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Exa API Key')).toBeInTheDocument();
+    expect(
+      screen.getByText(/The key stays encrypted server-side/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Exa Agent runs are usage-based/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/free keyless access/)).toBeInTheDocument();
   });
 
   it('submits an Asana token from the dialog', () => {
@@ -1671,6 +1935,160 @@ describe('Integrations settings', () => {
         onError: expect.any(Function),
       }),
     );
+  });
+
+  it.each([
+    {
+      integration: 'Asana',
+      inputLabel: 'Asana Access Token',
+      requiredMessage: 'Access token is required',
+      saveMutation: mutations.saveAsanaConnection,
+    },
+    {
+      integration: 'Notion',
+      inputLabel: 'Internal integration secret',
+      requiredMessage: 'Internal integration secret is required',
+      saveMutation: mutations.saveNotionConnection,
+    },
+    {
+      integration: 'Rippling',
+      inputLabel: 'API token',
+      requiredMessage: 'API token is required',
+      saveMutation: mutations.saveRipplingConnection,
+    },
+    {
+      integration: 'Granola',
+      inputLabel: 'Granola API Key',
+      requiredMessage: 'API key is required',
+      saveMutation: mutations.saveGranolaConnection,
+    },
+    {
+      integration: 'X',
+      inputLabel: 'X App-only Bearer Token',
+      requiredMessage: 'Bearer token is required',
+      saveMutation: mutations.saveXConnection,
+    },
+  ])(
+    'rejects a whitespace-only $integration credential before saving',
+    ({ integration, inputLabel, requiredMessage, saveMutation }) => {
+      render(<Integrations />);
+
+      fireEvent.click(
+        screen.getByRole('button', { name: `Configure ${integration}` }),
+      );
+      fireEvent.change(screen.getByLabelText(inputLabel), {
+        target: { value: '   ' },
+      });
+      fireEvent.click(
+        screen.getByRole('button', { name: `Connect ${integration}` }),
+      );
+
+      expect(screen.getByText(requiredMessage)).toBeInTheDocument();
+      expect(saveMutation).not.toHaveBeenCalled();
+    },
+  );
+
+  it('submits a trimmed Exa API key from the dialog', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Exa API key' }));
+    fireEvent.change(screen.getByLabelText('Exa API Key'), {
+      target: { value: '  exa-secret-key  ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add API key' }));
+
+    expect(mutations.saveExaConnection).toHaveBeenCalledWith(
+      { apiKey: 'exa-secret-key' },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+  });
+
+  it('keeps Exa off by default and enables keyless access explicitly', () => {
+    render(<Integrations />);
+
+    expect(
+      screen.getByText(
+        'Disabled. Enable Exa for free keyless search, or add a deployment API key.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Enable Exa' }));
+
+    expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(
+      { mcpId: 'exa', enabled: true },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(mutations.saveExaConnection).not.toHaveBeenCalled();
+  });
+
+  it('shows authenticated Exa separately and removes only its API key', () => {
+    state.deploymentEnablements = [{ mcpId: 'exa', enabled: true }];
+    state.userConnections = [{ mcpId: 'exa', authStatus: 'authenticated' }];
+    state.exaConnection = { authStatus: 'authenticated' };
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByText(
+        'Enabled with a deployment API key. Exa Agent is available and usage-based.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Exa API key' }));
+    expect(
+      screen.getByText(/continue with free keyless access/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove key' }));
+
+    expect(mutations.removeExaApiKey).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(mutations.setDeploymentEnabled).not.toHaveBeenCalled();
+  });
+
+  it('keeps a disabled Exa API key configurable from the catalog', () => {
+    state.userConnections = [{ mcpId: 'exa', authStatus: 'authenticated' }];
+    state.exaConnection = { authStatus: 'authenticated' };
+
+    render(
+      <ActualIntegrations addRequest={{ type: 'catalog', sequence: 1 }} />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Edit Exa API key' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Remove Exa API key' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Exa API key' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Edit Exa API key' }),
+    ).toBeInTheDocument();
+  });
+
+  it('labels enabled keyless Exa without advertising Exa Agent', () => {
+    state.deploymentEnablements = [{ mcpId: 'exa', enabled: true }];
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByText(
+        'Enabled with free keyless access. Exa rate limits apply, and Exa Agent is unavailable.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Disable Exa' }),
+    ).toBeInTheDocument();
   });
 
   it('shows Asana connected controls and supports editing', () => {
@@ -2175,7 +2593,7 @@ describe('Integrations settings', () => {
     rerender(<Integrations />);
 
     expect(
-      screen.getByRole('heading', { name: 'Manage Sentry tools' }),
+      screen.getByRole('heading', { name: 'Manage tools for Sentry' }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Enable get_sentry_resource' }),
@@ -2183,5 +2601,149 @@ describe('Integrations settings', () => {
     expect(
       screen.getByRole('button', { name: 'Enable search_events' }),
     ).toBeInTheDocument();
+  });
+
+  it('lets an admin store a voice key from the Voice card', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [];
+    state.userConnections = [];
+
+    render(<Integrations />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Configure Voice' }),
+    );
+    const input = await screen.findByLabelText('OpenAI API Key');
+    fireEvent.change(input, { target: { value: '  sk-voice-123  ' } });
+    fireEvent.submit(input.closest('form') as HTMLFormElement);
+
+    expect(mutations.saveVoiceConnection).toHaveBeenCalledWith(
+      { apiKey: 'sk-voice-123', voiceId: 'marin' },
+      expect.anything(),
+    );
+  });
+
+  it('preserves the saved voice and previews another supported option', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [{ mcpId: 'voice', enabled: true }];
+    state.userConnections = [
+      { id: 'voice-1', mcpId: 'voice', authStatus: 'authenticated' },
+    ];
+    state.voiceConnection = {
+      authStatus: 'authenticated',
+      source: 'connection',
+      voiceId: 'cedar',
+    };
+
+    render(<Integrations />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit Voice connection' }),
+    );
+
+    expect(screen.getByRole('button', { name: 'Cedar' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Coral' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Preview Coral voice' }),
+    );
+
+    expect(mutations.previewVoice).toHaveBeenCalledWith(
+      { apiKey: '', voiceId: 'coral' },
+      expect.anything(),
+    );
+  });
+
+  it('shows environment-keyed Voice as connected with a deployment-level off switch', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [];
+    state.userConnections = [];
+    state.voiceConnection = {
+      authStatus: 'authenticated',
+      source: 'environment',
+    };
+    mutations.setDeploymentEnabled.mockImplementation((_variables, options) => {
+      options?.onSuccess?.();
+    });
+
+    render(<ActualIntegrations />);
+
+    expect(await screen.findByText('Voice')).toBeInTheDocument();
+    // The key is not the admin's to edit, and where it came from is not
+    // something the card needs to say.
+    expect(
+      screen.queryByText(/R_VOICE_OPENAI_API_KEY/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Disconnect Voice' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Configure Voice' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Voice' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Remove Voice?' }),
+    ).toBeInTheDocument();
+    expect(mutations.setDeploymentEnabled).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+    expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(
+      { mcpId: 'voice', enabled: false },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(toast.success).toHaveBeenCalledWith('Voice removed.');
+  });
+
+  it('lets an admin turn environment-keyed Voice back on after disabling it', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [{ mcpId: 'voice', enabled: false }];
+    state.userConnections = [];
+    state.voiceConnection = {
+      authStatus: 'authenticated',
+      source: 'environment',
+      enabled: false,
+    };
+
+    render(
+      <ActualIntegrations addRequest={{ type: 'catalog', sequence: 1 }} />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: 'Add from the catalog' }),
+    ).toBeInTheDocument();
+    const voiceCatalogRow = screen.getByText('Voice').parentElement
+      ?.parentElement as HTMLElement;
+
+    fireEvent.click(
+      within(voiceCatalogRow).getByRole('button', { name: 'Add' }),
+    );
+
+    expect(mutations.setDeploymentEnabled).toHaveBeenCalledWith(
+      { mcpId: 'voice', enabled: true },
+      expect.anything(),
+    );
+  });
+
+  it('gives members no switch on environment-keyed Voice', async () => {
+    state.isAdmin = false;
+    state.deploymentEnablements = [];
+    state.userConnections = [];
+    state.voiceConnection = {
+      authStatus: 'authenticated',
+      source: 'environment',
+    };
+
+    render(<Integrations />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Disable Voice' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Enable Voice' }),
+    ).not.toBeInTheDocument();
   });
 });

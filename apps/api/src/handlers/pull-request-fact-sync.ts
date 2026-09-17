@@ -107,3 +107,8 @@ export function toValidIsoString(
 
   return null;
 }
+
+export function toValidDate(value: string | null | undefined): Date | null {
+  const iso = toValidIsoString(value);
+  return iso ? new Date(iso) : null;
+}

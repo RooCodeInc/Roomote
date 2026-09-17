@@ -8,7 +8,10 @@ import { drizzleAdapter } from '@better-auth/drizzle-adapter';
 import { normalizeAdoLinkedAccountKey } from '@roomote/ado';
 // Subpath import on purpose: the SDK barrel drags the whole server graph
 // into auth, which the auth unit tests mock only partially.
-import { sendAgentMailSystemEmail } from '@roomote/sdk/server/agentmail-outbound';
+import {
+  sendAgentMailSystemEmail,
+  type AgentMailSystemEmailResult,
+} from '@roomote/sdk/server/agentmail-outbound';
 import type { SourceControlTokenBackedProvider } from '@roomote/types';
 
 import {
@@ -59,6 +62,10 @@ type RoomoteAuth = {
       headers: Headers;
       query?: { disableRefresh?: boolean };
     }): Promise<AuthSessionResult>;
+    sendVerificationEmail(input: {
+      body: { callbackURL: string; email: string };
+      headers: Headers;
+    }): Promise<unknown>;
     requestPasswordReset(input: {
       body: {
         email: string;
@@ -82,6 +89,10 @@ let authSignature: string | null = null;
 const resetPasswordLinkCapture = new AsyncLocalStorage<{
   url?: string;
 }>();
+const resetPasswordDeliveryCapture = new AsyncLocalStorage<{
+  result?: AgentMailSystemEmailResult;
+}>();
+const verificationEmailDeliveryRequired = new AsyncLocalStorage<boolean>();
 export const PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS = 60 * 60;
 
 export async function capturePasswordResetLink(
@@ -90,6 +101,28 @@ export async function capturePasswordResetLink(
   const capture: { url?: string } = {};
   await resetPasswordLinkCapture.run(capture, callback);
   return capture.url ?? null;
+}
+
+export async function capturePasswordResetDelivery(
+  callback: () => Promise<void>,
+): Promise<AgentMailSystemEmailResult | null> {
+  const capture: { result?: AgentMailSystemEmailResult } = {};
+  await resetPasswordDeliveryCapture.run(capture, callback);
+  return capture.result ?? null;
+}
+
+export async function sendAuthenticatedVerificationEmail(input: {
+  callbackURL: string;
+  email: string;
+  headers: Headers;
+}): Promise<void> {
+  const roomoteAuth = await getAuth();
+  await verificationEmailDeliveryRequired.run(true, () =>
+    roomoteAuth.api.sendVerificationEmail({
+      body: { email: input.email, callbackURL: input.callbackURL },
+      headers: input.headers,
+    }),
+  );
 }
 type MicrosoftAuthAccountHookRow = {
   id?: unknown;
@@ -1077,9 +1110,9 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
     // deployment may have the channel flag on before its sender is
     // configured (or an address may be suppressed after a bounce), and a
     // verification gate would lock those accounts out with no way back in.
-    // Roomote only ever initiates email to an address it has verified, but
-    // that guarantee lives at the sending side (`emailVerified` or an
-    // explicitly linked address), not at sign-in.
+    // Inbound email can act as the account only after verification, but that
+    // authorization requirement lives in the AgentMail inbound path, not at
+    // sign-in. Outbound account and lifecycle email may arrive before then.
     emailAndPassword: {
       enabled: true,
       resetPasswordTokenExpiresIn: PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS,
@@ -1091,19 +1124,23 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
         if (capture) {
           capture.url = url;
         }
-        if (emailChannelEnabled) {
-          await sendAgentMailSystemEmail({
-            to: user.email,
-            subject: 'Reset your Roomote password',
-            text: [
-              'A password reset was requested for your Roomote account.',
-              '',
-              `[Reset your password](${url})`,
-              '',
-              `This link expires in ${Math.round(PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS / 60)} minutes. If you did not request a reset, you can ignore this email.`,
-            ].join('\n'),
-            logContext: 'auth.sendResetPassword',
-          });
+        const deliveryResult: AgentMailSystemEmailResult = emailChannelEnabled
+          ? await sendAgentMailSystemEmail({
+              to: user.email,
+              subject: 'Reset your Roomote password',
+              text: [
+                'A password reset was requested for your Roomote account.',
+                '',
+                `[Reset your password](${url})`,
+                '',
+                `This link expires in ${Math.round(PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS / 60)} minutes. If you did not request a reset, you can ignore this email.`,
+              ].join('\n'),
+              logContext: 'auth.sendResetPassword',
+            })
+          : { sent: false, reason: 'channel_disabled' };
+        const deliveryCapture = resetPasswordDeliveryCapture.getStore();
+        if (deliveryCapture) {
+          deliveryCapture.result = deliveryResult;
         }
       },
     },
@@ -1112,8 +1149,8 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
           // Verification is offered, never required: a new password sign-up
           // gets a verification email so its address can be recognized on
           // the email channel, and signs in right away regardless. Accounts
-          // from before the channel was enabled connect their address through
-          // the email-link flow instead (the refusal email carries the link).
+          // from before the channel was enabled verify from Personal settings
+          // > Linked Accounts (Resend).
           emailVerification: {
             sendOnSignUp: true,
             autoSignInAfterVerification: true,
@@ -1136,6 +1173,11 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
                 console.warn(
                   `[auth] Could not send the verification email to ${user.email} (${result.reason}).`,
                 );
+                if (verificationEmailDeliveryRequired.getStore()) {
+                  throw new Error(
+                    'Verification email could not be delivered. Check the address or ask an admin to check the email configuration.',
+                  );
+                }
               }
             },
           },

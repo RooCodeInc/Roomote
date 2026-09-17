@@ -24,7 +24,14 @@ type ListedServer = {
   enabled: boolean;
 };
 
-const { state, createMock, deleteMock, setEnabledMock } = vi.hoisted(() => ({
+const {
+  state,
+  createMock,
+  deleteMock,
+  setEnabledMock,
+  toastSuccessMock,
+  toastErrorMock,
+} = vi.hoisted(() => ({
   state: {
     availability: { enabled: true },
     servers: [] as ListedServer[],
@@ -37,6 +44,12 @@ const { state, createMock, deleteMock, setEnabledMock } = vi.hoisted(() => ({
   createMock: vi.fn(async () => ({ id: 'new-server' })),
   deleteMock: vi.fn(async () => ({ deleted: true })),
   setEnabledMock: vi.fn(async () => ({ enabled: false })),
+  toastSuccessMock: vi.fn(),
+  toastErrorMock: vi.fn(),
+}));
+
+vi.mock('sonner', () => ({
+  toast: { success: toastSuccessMock, error: toastErrorMock },
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -113,7 +126,7 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
-import type { IntegrationItem } from './integration-card';
+import { IntegrationListRow, type IntegrationItem } from './integration-card';
 import { useCustomMcpServers } from './CustomMcpServers';
 
 function buildServer(overrides: Partial<ListedServer> = {}): ListedServer {
@@ -161,6 +174,7 @@ function Harness() {
             <span data-testid="configured">{String(item.configured)}</span>
             <span data-testid="item-enabled">{String(item.enabled)}</span>
             <span data-testid="item-connected">{String(item.connected)}</span>
+            <IntegrationListRow item={item} />
           </li>
         ))}
       </ul>
@@ -214,7 +228,7 @@ describe('useCustomMcpServers', () => {
     expect(screen.queryAllByTestId('item')).toHaveLength(0);
   });
 
-  it('renders a remote server as a Custom-badged item without leaking secrets', async () => {
+  it('renders a remote server without a type badge or leaking secrets', async () => {
     state.servers = [buildServer()];
 
     renderHarness();
@@ -222,7 +236,7 @@ describe('useCustomMcpServers', () => {
     expect(await screen.findByTestId('name')).toHaveTextContent(
       'internal-tools',
     );
-    expect(screen.getByTestId('badge')).toHaveTextContent('Custom');
+    expect(screen.getByTestId('badge')).toBeEmptyDOMElement();
     expect(screen.getByTestId('description')).toHaveTextContent(
       'https://mcp.example.com/mcp',
     );
@@ -230,6 +244,50 @@ describe('useCustomMcpServers', () => {
     expect(screen.getByTestId('configured')).toHaveTextContent('true');
     expect(screen.getByTestId('utility')).toHaveTextContent('Manage tools');
     expect(screen.getByTestId('secondary')).toHaveTextContent('Edit');
+  });
+
+  it('uses a dialog to confirm removing a custom server', async () => {
+    const server = buildServer();
+    state.servers = [server];
+
+    renderHarness();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Remove internal-tools' }),
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Remove internal-tools?' }),
+    ).toBeInTheDocument();
+    expect(deleteMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() =>
+      expect(deleteMock).toHaveBeenCalledWith(
+        { id: server.id },
+        expect.anything(),
+      ),
+    );
+    expect(toastSuccessMock).toHaveBeenCalledWith('internal-tools removed.');
+  });
+
+  it('names the tools dialog for the selected integration', async () => {
+    state.servers = [buildServer()];
+
+    renderHarness();
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Manage internal-tools tools',
+      }),
+    );
+
+    expect(
+      screen.getByRole('heading', {
+        name: 'Manage tools for internal-tools',
+      }),
+    ).toBeInTheDocument();
   });
 
   it('offers Connect and a status for unauthenticated oauth servers', async () => {
@@ -291,6 +349,43 @@ describe('useCustomMcpServers', () => {
     expect(await screen.findByTestId('item-enabled')).toHaveTextContent(
       'false',
     );
+  });
+
+  it('lets admins manage and re-enable saved disabled servers from the add dialog', async () => {
+    const server = buildServer({ enabled: false });
+    state.servers = [server];
+
+    renderHarness();
+    fireEvent.click(await screen.findByTestId('open-add'));
+
+    expect(screen.getByText('Disabled custom MCP servers')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Re-enable a saved server without re-entering its credentials, or edit its configuration first.',
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
+
+    await waitFor(() =>
+      expect(setEnabledMock).toHaveBeenCalledWith(
+        { id: server.id, enabled: true },
+        expect.anything(),
+      ),
+    );
+  });
+
+  it('opens disabled server configuration from the add dialog', async () => {
+    state.servers = [buildServer({ enabled: false })];
+
+    renderHarness();
+    fireEvent.click(await screen.findByTestId('open-add'));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Edit custom MCP server' }),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('e.g. internal-tools')).toBeDisabled();
   });
 
   it('prefills the add dialog from a pasted JSON snippet', async () => {

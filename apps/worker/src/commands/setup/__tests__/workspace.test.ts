@@ -1,25 +1,48 @@
-import { TaskPayloadKind, type ServiceInfo } from '@roomote/types';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
+import {
+  TaskPayloadKind,
+  type ServiceInfo,
+  type SourceControlProvider,
+} from '@roomote/types';
 
 import { ExecutionError } from '../../../command-executor';
 import type { StartupLogger } from '../../../logging';
 import { WorkspaceManager, type WorkspaceConfig } from '../../../workspace';
 
-const { mockStartServices, mockStartPortProxies, mockListRepositories } =
-  vi.hoisted(() => ({
-    mockStartServices: vi.fn<() => Promise<ServiceInfo[]>>(),
-    mockStartPortProxies: vi
-      .fn<
-        () => Promise<{
-          servers: [];
-          stop: () => Promise<void>;
-        }>
-      >()
-      .mockResolvedValue({
-        servers: [],
-        stop: async () => {},
-      }),
-    mockListRepositories: vi.fn<() => Promise<Array<{ fullName: string }>>>(),
-  }));
+const {
+  mockStartServices,
+  mockStartPortProxies,
+  mockListRepositories,
+  tempWorkspaceRoot,
+} = vi.hoisted(() => ({
+  tempWorkspaceRoot: { current: undefined as string | undefined },
+  mockStartServices: vi.fn<() => Promise<ServiceInfo[]>>(),
+  mockStartPortProxies: vi
+    .fn<
+      () => Promise<{
+        servers: [];
+        stop: () => Promise<void>;
+      }>
+    >()
+    .mockResolvedValue({
+      servers: [],
+      stop: async () => {},
+    }),
+  mockListRepositories: vi.fn<
+    () => Promise<
+      Array<{
+        fullName: string;
+        sourceControlProvider?: SourceControlProvider;
+        defaultBranch?: string;
+        description?: string | null;
+        private?: boolean;
+      }>
+    >
+  >(),
+}));
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
@@ -28,6 +51,34 @@ vi.mock('@roomote/sdk/client', () => ({
     },
   },
 }));
+
+// The on-demand manifest is written to the workspace root, which the real
+// resolver derives from the compute runtime. Point it at a temp dir per test.
+vi.mock('../workspace/shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../workspace/shared')>();
+
+  return {
+    ...actual,
+    createWorkspaceManager: (
+      ...args: Parameters<typeof actual.createWorkspaceManager>
+    ) => {
+      const resolved = actual.createWorkspaceManager(...args);
+
+      return tempWorkspaceRoot.current
+        ? { ...resolved, workspaceRoot: tempWorkspaceRoot.current }
+        : resolved;
+    },
+  };
+});
+
+function createTempWorkspaceRoot(): string {
+  const workspaceRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'on-demand-workspace-'),
+  );
+  tempWorkspaceRoot.current = workspaceRoot;
+
+  return workspaceRoot;
+}
 
 vi.mock('../../../services/service-manager', () => {
   class MockServiceManager {
@@ -79,8 +130,13 @@ function createLogger(): StartupLogger {
 }
 
 describe('initializeRepositories', () => {
+  afterEach(() => {
+    tempWorkspaceRoot.current = undefined;
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    mockListRepositories.mockResolvedValue([]);
   });
 
   it('prepares only the selected repository subset for scoped multi-repo workspaces', async () => {
@@ -140,7 +196,50 @@ describe('initializeRepositories', () => {
     );
   });
 
-  it('creates a shared Blank slate workspace without listing or preparing repositories', async () => {
+  it('indexes additional authorized repositories after preparing a scoped workspace', async () => {
+    const workspaceRoot = createTempWorkspaceRoot();
+    vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
+      undefined,
+    );
+    vi.spyOn(
+      WorkspaceManager.prototype,
+      'prepareRepository',
+    ).mockImplementation(async (repo) => path.join(workspaceRoot, repo));
+    mockListRepositories.mockResolvedValue([
+      { fullName: 'acme/api', sourceControlProvider: 'github' },
+      { fullName: 'acme/web', sourceControlProvider: 'github' },
+    ]);
+
+    const result = await initializeRepositories(createLogger(), {
+      workspace: {
+        type: 'repository_set',
+        repositories: ['acme/api'],
+      },
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+      repositoryProviders: {
+        'acme/api': 'github',
+        'acme/web': 'github',
+      },
+    });
+
+    expect(result.repoPaths).toEqual({
+      'acme/api': path.join(workspaceRoot, 'acme/api'),
+    });
+    expect(
+      result.onDemandRepositories?.map((repository) => repository.fullName),
+    ).toEqual(['acme/api', 'acme/web']);
+    const manifest = fs.readFileSync(
+      path.join(workspaceRoot, 'REPOSITORIES.md'),
+      'utf8',
+    );
+    expect(manifest).toContain(
+      `| \`acme/api\` | yes (\`${path.join(workspaceRoot, 'acme/api')}\`) |`,
+    );
+    expect(manifest).toContain('| `acme/web` | no |');
+  });
+
+  it('configures git for a Blank slate workspace without listing or preparing repositories', async () => {
     const configureSpy = vi
       .spyOn(WorkspaceManager.prototype, 'configure')
       .mockResolvedValue(undefined);
@@ -153,20 +252,67 @@ describe('initializeRepositories', () => {
       workspace: { type: 'no_repositories' },
       envVars: {},
       taskRunType: TaskPayloadKind.StandardTask,
+      gitAuthorName: 'Roomote',
+      gitAuthorEmail: 'roomote@roomote.dev',
     });
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       workspacePath: expect.any(String),
       repoPaths: {},
       repoLocalSkills: [],
       usesSharedWorkspaceRoot: true,
     });
-    expect(configureSpy).not.toHaveBeenCalled();
+    // A hand-cloned repository still needs an author to commit and the
+    // credential helper to push.
+    expect(configureSpy).toHaveBeenCalledWith({
+      gitAuthorName: 'Roomote',
+      gitAuthorEmail: 'roomote@roomote.dev',
+    });
     expect(mockListRepositories).not.toHaveBeenCalled();
     expect(prepareRepositorySpy).not.toHaveBeenCalled();
   });
 
+  it('indexes repositories for on-demand checkout in a Blank slate workspace with a stamped scope', async () => {
+    const workspaceRoot = createTempWorkspaceRoot();
+    vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
+      undefined,
+    );
+    mockListRepositories.mockResolvedValue([
+      { fullName: 'acme/api', sourceControlProvider: 'github' },
+      { fullName: 'acme/web', sourceControlProvider: 'github' },
+    ]);
+    const prepareRepositorySpy = vi.spyOn(
+      WorkspaceManager.prototype,
+      'prepareRepository',
+    );
+    const logger = createLogger();
+
+    const result = await initializeRepositories(logger, {
+      workspace: { type: 'no_repositories' },
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+      sourceControlProvider: 'github',
+      repositoryProviders: { 'acme/api': 'github', 'acme/web': 'github' },
+    });
+
+    expect(prepareRepositorySpy).not.toHaveBeenCalled();
+    expect(result.repoPaths).toEqual({});
+    expect(result.usesSharedWorkspaceRoot).toBe(true);
+    expect(
+      result.onDemandRepositories?.map((repository) => repository.fullName),
+    ).toEqual(['acme/api', 'acme/web']);
+    expect(
+      fs.readFileSync(path.join(workspaceRoot, 'REPOSITORIES.md'), 'utf8'),
+    ).toContain(
+      '2 repositories are available to this task; 0 are checked out.',
+    );
+    expect(logger.userLog.info).toHaveBeenCalledWith(
+      'Indexed 2 repositories for on-demand checkout',
+    );
+  });
+
   it('resolves repository providers from the map before the scalar fallback', async () => {
+    createTempWorkspaceRoot();
     vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
       undefined,
     );
@@ -206,6 +352,7 @@ describe('initializeRepositories', () => {
   });
 
   it('uses a mapped provider for a single-repository workspace', async () => {
+    createTempWorkspaceRoot();
     vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
       undefined,
     );
@@ -213,7 +360,11 @@ describe('initializeRepositories', () => {
       .spyOn(WorkspaceManager.prototype, 'prepareRepository')
       .mockResolvedValue('/tmp/acme/app');
 
-    await initializeRepositories(createLogger(), {
+    mockListRepositories.mockResolvedValue([
+      { fullName: 'acme/app', sourceControlProvider: 'gitlab' },
+    ]);
+
+    const result = await initializeRepositories(createLogger(), {
       workspace: {
         type: 'repository',
         repository: 'acme/app',
@@ -231,6 +382,7 @@ describe('initializeRepositories', () => {
       false,
       { sourceControlProvider: 'gitlab' },
     );
+    expect(result.onDemandRepositories).toHaveLength(1);
   });
 
   it('continues scoped multi-repo workspace setup when at least one selected repository prepares successfully', async () => {
@@ -280,25 +432,26 @@ describe('initializeRepositories', () => {
     );
   });
 
-  it('continues all-repositories workspace setup when at least one repository prepares successfully', async () => {
+  it('indexes all-repositories workspaces for on-demand checkout instead of cloning them', async () => {
     const logger = createLogger();
+    const workspaceRoot = createTempWorkspaceRoot();
     vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
       undefined,
     );
     mockListRepositories.mockResolvedValue([
-      { fullName: 'acme/api' },
+      {
+        fullName: 'acme/api',
+        sourceControlProvider: 'github',
+        defaultBranch: 'develop',
+        description: 'Public REST API',
+        private: true,
+      },
       { fullName: 'acme/web' },
     ]);
-    vi.spyOn(
+    const prepareRepositorySpy = vi.spyOn(
       WorkspaceManager.prototype,
       'prepareRepository',
-    ).mockImplementation(async (repo) => {
-      if (repo === 'acme/api') {
-        throw new Error('Repository not found: acme/api');
-      }
-
-      return `/tmp/${repo}`;
-    });
+    );
 
     const result = await initializeRepositories(logger, {
       workspace: {
@@ -309,36 +462,66 @@ describe('initializeRepositories', () => {
     });
 
     expect(mockListRepositories).toHaveBeenCalledTimes(1);
-    expect(result.workspacePath).toBeTruthy();
-    expect(result.repositoryPreparationOutcome).toEqual({
-      mode: 'continued',
-      workspaceType: 'all_repositories',
-      totalRepositories: 2,
-      preparedRepositoryCount: 1,
-      repositories: [
+    expect(prepareRepositorySpy).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      workspacePath: workspaceRoot,
+      repoPaths: {},
+      repoLocalSkills: [],
+      usesSharedWorkspaceRoot: true,
+      onDemandRepositories: [
         {
-          repository: 'acme/api',
-          reason: 'Repository not found: acme/api',
-          diagnostics: undefined,
+          fullName: 'acme/api',
+          sourceControlProvider: 'github',
+          defaultBranch: 'develop',
+          description: 'Public REST API',
+          private: true,
+        },
+        {
+          fullName: 'acme/web',
+          sourceControlProvider: 'github',
+          defaultBranch: 'main',
+          description: null,
+          private: false,
         },
       ],
     });
-    expect(logger.userLog.warn).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'Skipped 1 repository while preparing the all-repositories workspace and continued with 1 prepared repository: acme/api',
-      ),
+    expect(result.repositoryPreparationOutcome).toBeUndefined();
+
+    const manifest = fs.readFileSync(
+      path.join(workspaceRoot, 'REPOSITORIES.md'),
+      'utf8',
+    );
+    expect(manifest).toContain(
+      '2 repositories are available to this task; 0 are checked out.',
+    );
+    expect(manifest).toContain(
+      '| `acme/api` | no | `develop` | private | Public REST API |',
+    );
+    expect(manifest).toContain('| `acme/web` | no | `main` | public |  |');
+    expect(logger.userLog.info).toHaveBeenCalledWith(
+      'Indexed 2 repositories for on-demand checkout',
     );
   });
 
-  it('applies mapped providers to repositories discovered for all-repositories workspaces', async () => {
+  it('keeps existing checkouts and mapped providers when indexing all-repositories workspaces', async () => {
+    const workspaceRoot = createTempWorkspaceRoot();
+    fs.mkdirSync(path.join(workspaceRoot, 'acme', 'gitlab-app', '.git'), {
+      recursive: true,
+    });
     vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
       undefined,
     );
-    const prepareRepositorySpy = vi
-      .spyOn(WorkspaceManager.prototype, 'prepareRepository')
-      .mockImplementation(async (repo) => `/tmp/${repo}`);
+    mockListRepositories.mockResolvedValue([
+      { fullName: 'acme/github-app', sourceControlProvider: 'github' },
+      { fullName: 'acme/gitlab-app', sourceControlProvider: 'gitlab' },
+      { fullName: 'acme/unselected', sourceControlProvider: 'github' },
+    ]);
+    const prepareRepositorySpy = vi.spyOn(
+      WorkspaceManager.prototype,
+      'prepareRepository',
+    );
 
-    await initializeRepositories(createLogger(), {
+    const result = await initializeRepositories(createLogger(), {
       workspace: { type: 'all_repositories' },
       envVars: {},
       taskRunType: TaskPayloadKind.StandardTask,
@@ -348,45 +531,28 @@ describe('initializeRepositories', () => {
       },
     });
 
-    expect(mockListRepositories).not.toHaveBeenCalled();
-    expect(prepareRepositorySpy).toHaveBeenCalledWith(
-      'acme/github-app',
-      undefined,
-      undefined,
-      false,
-      false,
-      {},
-    );
-    expect(prepareRepositorySpy).toHaveBeenCalledWith(
-      'acme/gitlab-app',
-      undefined,
-      undefined,
-      false,
-      false,
-      { sourceControlProvider: 'gitlab' },
-    );
-  });
+    expect(prepareRepositorySpy).not.toHaveBeenCalled();
+    expect(result.repoPaths).toEqual({
+      'acme/gitlab-app': path.join(workspaceRoot, 'acme', 'gitlab-app'),
+    });
+    expect(
+      result.onDemandRepositories?.map((repository) => [
+        repository.fullName,
+        repository.sourceControlProvider,
+      ]),
+    ).toEqual([
+      ['acme/github-app', 'github'],
+      ['acme/gitlab-app', 'gitlab'],
+    ]);
 
-  it('fails all-repositories workspace setup when no repositories can be prepared', async () => {
-    vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
-      undefined,
+    const manifest = fs.readFileSync(
+      path.join(workspaceRoot, 'REPOSITORIES.md'),
+      'utf8',
     );
-    mockListRepositories.mockResolvedValue([{ fullName: 'acme/api' }]);
-    vi.spyOn(WorkspaceManager.prototype, 'prepareRepository').mockRejectedValue(
-      new Error('Repository not found: acme/api'),
+    expect(manifest).toContain(
+      `| \`acme/gitlab-app\` | yes (\`${path.join(workspaceRoot, 'acme', 'gitlab-app')}\`) |`,
     );
-
-    await expect(
-      initializeRepositories(createLogger(), {
-        workspace: {
-          type: 'all_repositories',
-        },
-        envVars: {},
-        taskRunType: TaskPayloadKind.StandardTask,
-      }),
-    ).rejects.toThrow(
-      'Failed to prepare 1 workspace repository:\n- acme/api: Repository not found: acme/api',
-    );
+    expect(manifest).not.toContain('acme/unselected');
   });
 
   it('fails scoped multi-repo workspace setup when no selected repositories can be prepared', async () => {
@@ -505,6 +671,87 @@ describe('initializeRepositories', () => {
     expect(result.usesSharedWorkspaceRoot).toBe(true);
   });
 
+  it('indexes additional authorized repositories without preparing their environment', async () => {
+    const workspaceRoot = createTempWorkspaceRoot();
+    vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
+      undefined,
+    );
+    const prepareEnvironmentRepositoriesSpy = vi
+      .spyOn(WorkspaceManager.prototype, 'prepareEnvironmentRepositories')
+      .mockResolvedValue({
+        repoPaths: { 'acme/api': path.join(workspaceRoot, 'acme/api') },
+      });
+    vi.spyOn(
+      WorkspaceManager.prototype,
+      'installWorkspaceToolVersions',
+    ).mockResolvedValue(undefined);
+    mockListRepositories.mockResolvedValue([
+      { fullName: 'acme/api', sourceControlProvider: 'github' },
+      { fullName: 'acme/web', sourceControlProvider: 'github' },
+    ]);
+
+    const result = await initializeRepositories(createLogger(), {
+      workspace: {
+        type: 'environment',
+        environmentId: 'env_123',
+        environmentConfig: {
+          name: 'API Environment',
+          repositories: [{ repository: 'acme/api' }],
+        },
+      } as WorkspaceConfig,
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+      repositoryProviders: {
+        'acme/api': 'github',
+        'acme/web': 'github',
+      },
+    });
+
+    expect(prepareEnvironmentRepositoriesSpy).toHaveBeenCalledTimes(1);
+    expect(
+      result.onDemandRepositories?.map((repository) => repository.fullName),
+    ).toEqual(['acme/api', 'acme/web']);
+    expect(
+      fs.readFileSync(path.join(workspaceRoot, 'REPOSITORIES.md'), 'utf8'),
+    ).toContain('| `acme/web` | no |');
+  });
+
+  it('prepares repository-free environments without repository paths', async () => {
+    vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
+      undefined,
+    );
+    const prepareEnvironmentRepositoriesSpy = vi
+      .spyOn(WorkspaceManager.prototype, 'prepareEnvironmentRepositories')
+      .mockResolvedValue({ repoPaths: {} });
+    const installWorkspaceToolVersionsSpy = vi
+      .spyOn(WorkspaceManager.prototype, 'installWorkspaceToolVersions')
+      .mockResolvedValue(undefined);
+
+    const result = await initializeRepositories(createLogger(), {
+      workspace: {
+        type: 'environment',
+        environmentId: 'env_repository_free',
+        environmentConfig: {
+          name: 'Repository-free Environment',
+          repositories: [],
+          tool_versions: { node: '22.14.0' },
+        },
+      } as WorkspaceConfig,
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+    });
+
+    expect(prepareEnvironmentRepositoriesSpy).toHaveBeenCalled();
+    expect(installWorkspaceToolVersionsSpy).toHaveBeenCalledWith({
+      node: '22.14.0',
+    });
+    expect(result).toMatchObject({
+      repoPaths: {},
+      repoLocalSkills: [],
+      usesSharedWorkspaceRoot: true,
+    });
+  });
+
   it('enables legacy-path cleanup only for snapshot environment preparation', async () => {
     vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
       undefined,
@@ -552,6 +799,7 @@ describe('initializeRepositories', () => {
   });
 
   it('passes repository provider overrides to environment preparation', async () => {
+    createTempWorkspaceRoot();
     vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
       undefined,
     );

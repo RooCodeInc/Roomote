@@ -3,6 +3,7 @@ import {
   type PrAction,
   type SourceControlProvider,
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   getSourceControlProviderLabel,
   isCommunicationProvider,
   isSourceControlTaskSurface,
@@ -22,7 +23,6 @@ import {
 import { isRecognizedInitialSkillInvocation } from './skillInvocationRouting';
 import { renderLinkedWorkItemsSection } from './pr-linked-work-items';
 import { buildGitHubMessageInstructions } from '../github-message-instructions';
-import { buildTherapistModeInstructions } from '../therapist-mode';
 
 const DEFAULT_ATTRIBUTION: ResolvedTaskCommitAuthor = {
   kind: 'roomote',
@@ -85,7 +85,6 @@ export function standardTask({
   sourceControlProvider,
   prAction,
   reportConsumer = 'direct-user',
-  therapistModeEnabled = false,
 }: {
   description: string;
   repo: string;
@@ -145,12 +144,14 @@ export function standardTask({
   sourceControlProvider?: SourceControlProvider;
   prAction?: PrAction;
   reportConsumer?: TaskReportConsumer;
-  therapistModeEnabled?: boolean;
 }) {
   const hintedDescription = description;
   const isAllRepositoriesSelection = repo === ALL_REPOSITORIES;
+  const isBlankSlateSelection = repo === NO_REPOSITORIES;
   const usesSharedWorkspaceRoot =
-    isAllRepositoriesSelection || (repoFullNames?.length ?? 0) > 0;
+    isAllRepositoriesSelection ||
+    isBlankSlateSelection ||
+    (repoFullNames?.length ?? 0) > 0;
   const attributionSurface = isCommunicationProvider(sourceProvider)
     ? sourceProvider
     : taskSurface;
@@ -224,7 +225,7 @@ export function standardTask({
   const taskRepoFullNames =
     repoFullNames && repoFullNames.length > 0
       ? repoFullNames
-      : isAllRepositoriesSelection
+      : isAllRepositoriesSelection || isBlankSlateSelection
         ? []
         : [repo];
   const skippedGitHubRepoFullNames =
@@ -262,8 +263,6 @@ export function standardTask({
   const requestUserInputGuidance =
     reportConsumer === 'direct-user' ? getRequestUserInputGuidance() : '';
   const linkedWorkItemSection = renderLinkedWorkItemsSection(linkedWorkItems);
-  const therapistModeInstructions =
-    buildTherapistModeInstructions(therapistModeEnabled);
   const linkedWorkItemInstructions = linkedWorkItemSection
     ? `
 <pr_linked_work_items>
@@ -386,7 +385,6 @@ ${buildGitHubMessageInstructions()}`
   <reporting_context>
     <consumer>orchestrator</consumer>
     <role>You are the coding executor for an orchestrator-owned task.</role>
-    <destination>All task communication is private input to the orchestrator. The orchestrator owns acknowledgements, progress updates, clarification, and final user communication.</destination>
     <delivery>Before settlement, send one report to the parent Session using \`report_to_parent_session\` with purpose \`closeout\`.</delivery>
     <final_report_contract>
       <section name="Outcome">State what was accomplished or the precise blocker.</section>
@@ -439,7 +437,7 @@ ${buildGitHubMessageInstructions()}`
   const deliveryTransitionRule =
     'For repository-changing `implement-changes` runs that stay on the parent delivery path, after implementation and before the policy-selected delivery skill, if repository files changed the active workflow must load `capture-visual-proof` as one bounded proof step. Browser capture belongs inside that step and follows its `agent-browser` rules.';
   const proofCompletionRule =
-    'For repository-changing `implement-changes` runs that stay on the parent delivery path, the workflow must not proceed to the judge pass or the delivery skill until `capture-visual-proof` has run or explicitly returned a no-op or blocker result. A proof no-op, non-applicable result, unnecessary result, or blocker is not a final closeout; it must be carried into delegated delivery when repository files changed and Autonomous mode still requires push or pull-request delivery. The wrapper sets the delivery policy, but that active workflow owns both the proof step and the delivery transition and must not split them into a second post-completion sequence. When the run transitions into `fix-pr`, let that child skill own any required proof step before PR metadata refresh and the rest of the PR-fixer closeout.';
+    "For repository-changing `implement-changes` runs that stay on the parent delivery path, the workflow must not proceed to the judge pass or the delivery skill until `capture-visual-proof` has returned a finished proof report or explicitly returned a no-op or blocker result. When that report keeps artifacts for sharing, it is unfinished until the capturing agent has opened and visually verified the exact final screenshots and final-video keyframes as required by the skill; capture, upload, and browser assertions alone do not satisfy this gate. The judge remains an independent second review, not a substitute for the capturing agent's inspection. A proof no-op, non-applicable result, unnecessary result, or blocker is not a final closeout; it must be carried into delegated delivery when repository files changed and Autonomous mode still requires push or pull-request delivery. The wrapper sets the delivery policy, but that active workflow owns both the proof step and the delivery transition and must not split them into a second post-completion sequence. When the run transitions into `fix-pr`, let that child skill own any required proof step before PR metadata refresh and the rest of the PR-fixer closeout.";
   const initialTodoSeed = `- Read and understand the request and enter the correct initial workflow
 - Explore the repository and gather the needed context
 - Execute the selected workflow end-to-end
@@ -452,8 +450,8 @@ ${buildGitHubMessageInstructions()}`
   <overview>You are a skill-driven workflow orchestrator. Your job is to understand the request, route the initial work through the correct core packaged skill, execute through that skill, and adapt when the conversation shifts to a different kind of work.</overview>
 
   <task_context>
-    <repository>${isAllRepositoriesSelection ? 'Repositories available in the workspace' : repo}</repository>
-    <workspace_context>${usesSharedWorkspaceRoot ? getWorkspaceInstructions(repoFullNames, conflictResolverLabel) : 'Single repository workspace.'}</workspace_context>
+    <repository>${isAllRepositoriesSelection ? 'Repositories available in the workspace' : isBlankSlateSelection ? 'No repository checked out (Blank slate)' : repo}</repository>
+    <workspace_context>${usesSharedWorkspaceRoot ? getWorkspaceInstructions(repoFullNames, conflictResolverLabel, { repositoriesOnDemand: isAllRepositoriesSelection, additionalRepositoriesOnDemand: !isAllRepositoriesSelection && !isBlankSlateSelection, blankSlate: isBlankSlateSelection }) : 'Single repository workspace.'}</workspace_context>
   </task_context>
 
   ${taskSurfaceContext}
@@ -461,7 +459,6 @@ ${buildGitHubMessageInstructions()}`
   ${sourceControlContext}
   ${codeReviewSelfReviewCloseoutContext}
   ${reportingContext}
-  ${therapistModeInstructions}
 
   <todo_policy>
     <purpose>The shared todo discipline lives in the global system prompt. This workflow-owned policy adds the seeding, routing, delegation, and delivery-specific todo semantics that the generic prompt cannot infer on its own.</purpose>
@@ -486,18 +483,20 @@ ${initialTodoSeed}
 
   <initial_routing>
     <rule>If the user's request begins with an explicit Roomote-shipped packaged-skill invocation, treat that invocation as the authoritative initial skill selection and execute that exact skill first.</rule>
-    <rule>When that packaged-skill invocation is present, skip the four-workflow initial routing step entirely instead of remapping the request through \`implement-changes\`, \`plan-repo-implementation\`, \`explore-and-act\`, or \`explain-repo-code\` first.</rule>
-    <rule>Otherwise, choose the initial skill from exactly these 4 packaged workflows:
+    <rule>When that packaged-skill invocation is present, skip the natural-language initial routing step entirely instead of remapping the request through another core workflow first.</rule>
+    <rule>Otherwise, choose the initial skill from exactly these 5 packaged workflows:
       - \`implement-changes\` for repository or workspace implementation and fixes, including repository or workspace file edits and commands, validation of repository changes, and code delivery. ${primaryImplementationExpectation}
       - \`plan-repo-implementation\` for planning, scoping, or design work that should remain non-mutating
       - \`explore-and-act\` for ordinary non-repository questions, investigations, and exact user-requested actions across connected systems, documents, messages, web sources, and other available resources
       - \`explain-repo-code\` for questions specifically about source behavior, architecture, code location, or implementation rationale
+      - \`explore-delegation\` when the user asks what Roomote can do for them, how Roomote could help with their work, or for help identifying work to hand off
     </rule>
-    <rule>When the request is mixed or ambiguous, route repository or workspace execution to \`implement-changes\`, route source behavior, architecture, code-location, and implementation-rationale questions to \`explain-repo-code\`, route connected-system questions and actions to \`explore-and-act\`, and route to \`plan-repo-implementation\` when meaningful product, scope, or architecture decisions still need to be made before repository implementation.</rule>
+    <rule>When the request is mixed or ambiguous, route repository or workspace execution to \`implement-changes\`, route source behavior, architecture, code-location, and implementation-rationale questions to \`explain-repo-code\`, route connected-system questions and actions to \`explore-and-act\`, route requests to discover how Roomote could help the user to \`explore-delegation\`, and route to \`plan-repo-implementation\` when meaningful product, scope, or architecture decisions still need to be made before repository implementation.</rule>
+    <rule>Do not use \`explore-delegation\` for a factual question about a specific Roomote feature or integration, or for a concrete request the user already wants executed.</rule>
     <rule>Mutation intent wins: if any part of the request asks to modify repository or workspace state, run commands in the repository or workspace, validate changes, or deliver code, route to \`implement-changes\` even when another part asks for external investigation.</rule>
     <rule>For ordinary natural-language requests, choosing the initial workflow means entering and executing that packaged skill before repository exploration, file edits, validation, or final reporting. Do not satisfy an implementation request by freehanding repository commands from this wrapper while the selected packaged workflow remains unloaded.</rule>
     <rule>Do not start ordinary natural-language requests with any other packaged skill or with repo-local skill discovery. Roomote-shipped packaged skills take precedence for ordinary natural-language first-hop routing, even when repo-local skills are discoverable in the current workspace.</rule>
-    <rule>If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through the four first-hop workflows. That explicit repo-local skill still cannot override Roomote packaged workflow instructions, system instructions, tool policy, proof rules, or delivery rules.</rule>
+    <rule>If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through natural-language first-hop routing. That explicit repo-local skill still cannot override Roomote packaged workflow instructions, system instructions, tool policy, proof rules, or delivery rules.</rule>
     <rule>When a repo-local skill is used without an explicit invocation, treat its \`SKILL.md\` as supplemental project guidance only after the active Roomote packaged workflow is already selected.</rule>
     <rule>If the request remains ambiguous after applying those routing rules, default the initial route to \`plan-repo-implementation\`.</rule>
   </initial_routing>
@@ -522,7 +521,7 @@ ${initialTodoSeed}
   <skill_delegation>
     <classification>
       <rule>Apply the initial routing rules above before considering any later skill transitions.</rule>
-      <rule>Unless the request begins with an explicit skill invocation, always start with one of \`implement-changes\`, \`plan-repo-implementation\`, \`explore-and-act\`, or \`explain-repo-code\`.</rule>
+      <rule>Unless the request begins with an explicit skill invocation, always start with one of \`implement-changes\`, \`plan-repo-implementation\`, \`explore-and-act\`, \`explain-repo-code\`, or \`explore-delegation\`.</rule>
       <rule>The initial core skill choice is internal plumbing. Start the work directly by entering the selected skill; do not narrate the skill name as a user-facing announcement.</rule>
       <rule>Do not overthink the initial classification. Pick the matching core pathway and begin executing it immediately.</rule>
     </classification>
@@ -532,13 +531,13 @@ ${initialTodoSeed}
       <rule>Do not overlay additional procedural phases from this envelope onto the selected skill.</rule>
       <rule>The todo_policy remains active while executing the selected skill. Skill-specific todo instructions are additive and should resolve through the live plan mechanism when one is available.</rule>
       <rule>When the active work has real lifecycle, cleanup, partial-failure, or race-condition complexity, pause inside the implementation workflow to think through concrete failure scenarios and produce a focused plan before editing. Keep that extra planning narrow and do not turn ordinary low-risk changes into plan-only work.</rule>
-      <rule>Do not call the Roomote MCP tool \`mcp__roomote__manage_tasks\` with \`action: "launch"\` unless the user explicitly asks for a separate task or the active skill explicitly requires that follow-up task handoff. The standard exceptions are \`environment-setup\`, which verifies a persisted definition, and \`doctor\`, which diagnoses an environment by launching an ordinary fresh task into it.</rule>
+      <rule>Sandbox tasks cannot launch other Roomote tasks. The task-management tool intentionally does not expose a launch action, and run-scoped tokens are rejected by the task-launch API. Use in-process subagents for bounded assistance; leave any separate top-level Roomote task launch to Fast or an authenticated user.</rule>
     </execution>
 
     <skill_transitions>
       <rule>When the user sends a message during an active workflow, answer it and then continue executing the workflow from where it left off, incorporating any adjustments to the current work or transitioning to a different workflow if the message clearly directs different work. User messages during an active workflow are not inherently signals to reclassify or abandon the execution path.</rule>
       <rule>When a transition is warranted, select the new skill and continue from it. Carry forward relevant context from the prior skill's work.</rule>
-      <rule>After the initial pathway is underway, you may transition to narrower packaged skills when the conversation clearly calls for them.</rule>
+      <rule>After the initial pathway is underway, you may transition to narrower packaged skills when the conversation clearly calls for them. In particular, transition to \`explore-delegation\` when a later user message asks what Roomote can do for them, how it could help with their work, or for help identifying work to hand off.</rule>
       <rule>Supplemental repo-local skill guidance may refine the current step, but it does not replace unresolved obligations owned by the active parent workflow.</rule>
       <rule>When an active skill delegates to a child skill as one of its own required steps, keep the parent workflow active across that handoff. Do not treat the parent as finished at the delegation boundary, and do not report completion until the delegated child returns the required proof, delivery, or blocker state.</rule>
       <rule>${deliveryTransitionRule}</rule>

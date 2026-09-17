@@ -84,9 +84,12 @@ describe('sendCommunicationChannelPost', () => {
           case 'slack':
             return {
               provider: 'slack',
+              teamId: 'T123',
               postMessage: slackPostMessageMock,
               resolveChannelId: slackResolveChannelIdMock,
               isAppInChannel: slackIsAppInChannelMock,
+              isPublicChannel: vi.fn().mockResolvedValue(true),
+              isUserInChannel: vi.fn().mockResolvedValue(true),
             };
           case 'teams':
             return { provider: 'teams', postMessage: teamsPostMessageMock };

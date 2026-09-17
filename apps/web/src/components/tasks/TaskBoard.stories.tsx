@@ -98,8 +98,6 @@ const tasks: Task[] = [
   }),
   createTask('blocked-1', 'Publish the next worker image', {
     state: 'failed',
-    goalStatus: 'blocked',
-    goalBlockedReason: 'Container registry credentials need to be renewed.',
     surface: 'github',
   }),
   createTask('blocked-2', 'Review authentication boundary changes', {

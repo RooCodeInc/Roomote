@@ -277,6 +277,78 @@ describe('MockAgentMailServer', () => {
     ).toEqual([]);
   });
 
+  it('serves inbox-scoped webhook routes pinned to the inbox', async () => {
+    const state = baseState();
+    state.inboxes.push({
+      inbox_id: 'other@agentmail.to',
+      username: 'other',
+      domain: 'agentmail.to',
+      created_at: '2026-08-01T00:00:00.000Z',
+    });
+    const { server, baseUrl } = await startServer(state);
+    onCleanup(() => server.stop());
+
+    const created = await api(
+      baseUrl,
+      'POST',
+      `/v0/inboxes/${INBOX_ID}/webhooks`,
+      {
+        url: 'https://roomote.example.test/api/webhooks/agentmail',
+        client_id: 'roomote-webhook',
+        event_types: ['message.received'],
+        // Ignored: the path pins the scope.
+        inbox_ids: ['other@agentmail.to'],
+      },
+    );
+    expect(created.status).toBe(200);
+    expect(created.body.inbox_ids).toEqual([INBOX_ID]);
+    expect(created.body.pod_ids).toBeUndefined();
+    const webhookId = String(created.body.webhook_id);
+
+    expect(
+      (await api(baseUrl, 'GET', `/v0/inboxes/${INBOX_ID}/webhooks`)).body
+        .webhooks,
+    ).toHaveLength(1);
+    expect(
+      (await api(baseUrl, 'GET', '/v0/inboxes/other@agentmail.to/webhooks'))
+        .body.webhooks,
+    ).toEqual([]);
+    expect(
+      (
+        await api(
+          baseUrl,
+          'GET',
+          `/v0/inboxes/other@agentmail.to/webhooks/${webhookId}`,
+        )
+      ).status,
+    ).toBe(404);
+
+    const patched = await api(
+      baseUrl,
+      'PATCH',
+      `/v0/inboxes/${INBOX_ID}/webhooks/${webhookId}`,
+      {
+        add_inbox_ids: ['other@agentmail.to'],
+        event_types: ['message.received', 'message.bounced'],
+      },
+    );
+    // Only event types move on an inbox-scoped webhook.
+    expect(patched.body.inbox_ids).toEqual([INBOX_ID]);
+    expect(patched.body.event_types).toEqual([
+      'message.received',
+      'message.bounced',
+    ]);
+
+    await api(
+      baseUrl,
+      'DELETE',
+      `/v0/inboxes/${INBOX_ID}/webhooks/${webhookId}`,
+    );
+    expect((await api(baseUrl, 'GET', '/v0/webhooks')).body.webhooks).toEqual(
+      [],
+    );
+  });
+
   it('delivers pod-scoped webhooks only for inboxes inside the pod', async () => {
     const received: ReceivedDelivery[] = [];
     const listener = await startStubWebhook(received);

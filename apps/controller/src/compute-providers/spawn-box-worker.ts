@@ -7,8 +7,6 @@ import {
   type TaskRun,
   createComputeProviderMutationEventRecorder,
   db,
-  eq,
-  taskRuns,
 } from '@roomote/db/server';
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
@@ -27,6 +25,10 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
+import {
+  prepareHostedWorkerLaunch,
+  type CredentialEgressLifecycle,
+} from '../credential-egress';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 import { COMPUTE_BOOTSTRAP_TIMEOUT_MS } from './timeouts';
 
@@ -95,6 +97,8 @@ export async function spawnBoxWorker(
     boxTimeoutMs: number;
     localTarballPath?: string;
     deploymentSlug?: string;
+    /** Session-egress admission; omitted in unit paths that do not exercise it. */
+    credentialEgress?: CredentialEgressLifecycle;
   },
 ): Promise<{ machineId: string; sandboxCmdId?: string }> {
   const { namedPorts, environmentSnapshotId, environmentConfig } =
@@ -187,6 +191,13 @@ export async function spawnBoxWorker(
     field: 'provisionStartedAt',
     launchMode: launchOptions.launchMode,
   });
+
+  const launchHostedWorker = await prepareHostedWorkerLaunch({
+    credentialEgress: config.credentialEgress,
+    taskRun,
+    provider: 'box',
+  });
+
   const machine = await createBoxMachine({
     boxApiKey: config.boxApiKey,
     boxApiBaseUrl: config.boxApiBaseUrl,
@@ -254,44 +265,47 @@ export async function spawnBoxWorker(
         phase: 'launch_worker',
       }),
     });
-    const result = await computeClient.runCommand({
-      instanceId: machine.machineId,
-      cmd: 'worker',
-      args,
-      env: buildBoxWorkerEnv({
+    const result = await launchHostedWorker(
+      buildBoxWorkerEnv({
         authToken,
         sandboxExpiresAtMs: Date.now() + config.boxTimeoutMs,
         deploymentSlug: config.deploymentSlug,
         environmentId,
         machineType,
-        extraEnv: { SANDBOX_TIMEOUT_MS: String(config.boxTimeoutMs) },
+        extraEnv: {
+          SANDBOX_TIMEOUT_MS: String(config.boxTimeoutMs),
+        },
       }),
-      detached: true,
-      signal: AbortSignal.timeout(60_000),
-    });
-    launchedCommandId = result.commandId;
-    if (result.exitCode !== null && result.exitCode !== 0) {
-      throw new Error(
-        `Detached Box worker exited with code ${result.exitCode}`,
-      );
-    }
-    await recordMutation({
-      provider: 'box',
-      operation: 'run_command',
-      eventType: 'completed',
-      instanceId: machine.machineId,
-      message: `Detached worker launched for Box ${machine.machineId}.`,
-      details: buildComputeProviderMutationDetails(mutationContext, {
-        commandId: result.commandId ?? null,
-        exitCode: result.exitCode,
-      }),
-    });
-    if (result.commandId) {
-      await db
-        .update(taskRuns)
-        .set({ sandboxCmdId: result.commandId })
-        .where(eq(taskRuns.id, taskRun.id));
-    }
+      async (env) => {
+        const launchResult = await computeClient.runCommand({
+          instanceId: machine.machineId,
+          cmd: 'worker',
+          args,
+          env,
+          detached: true,
+          signal: AbortSignal.timeout(60_000),
+        });
+        launchedCommandId = launchResult.commandId;
+        if (launchResult.exitCode !== null && launchResult.exitCode !== 0) {
+          throw new Error(
+            `Detached Box worker exited with code ${launchResult.exitCode}`,
+          );
+        }
+        await recordMutation({
+          provider: 'box',
+          operation: 'run_command',
+          eventType: 'completed',
+          instanceId: machine.machineId,
+          message: `Detached worker launched for Box ${machine.machineId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            commandId: launchResult.commandId ?? null,
+            exitCode: launchResult.exitCode,
+          }),
+        });
+        return launchResult;
+      },
+    );
+
     return {
       machineId: machine.machineId,
       ...(result.commandId ? { sandboxCmdId: result.commandId } : {}),

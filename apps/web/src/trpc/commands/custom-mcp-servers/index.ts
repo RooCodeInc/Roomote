@@ -8,7 +8,10 @@ import {
   mcpConnections,
 } from '@roomote/db/server';
 import { decrypt, encrypt } from '@roomote/db/encryption';
-import { getValidAccessToken } from '@roomote/sdk/server';
+import {
+  getValidAccessToken,
+  prepareDeploymentCustomMcpOAuthConnection,
+} from '@roomote/sdk/server';
 import { safeFetch } from '@roomote/sdk/server/safe-fetch';
 import {
   MAX_CUSTOM_MCP_SERVERS,
@@ -643,39 +646,15 @@ export async function connectCustomMcpServerCommand(
     throw new Error('redirectTo must be a relative path');
   }
 
-  const [connection] = await db
-    .insert(mcpConnections)
-    .values({
-      userId: null,
-      mcpId: customMcpConnectionId(server.id),
-      connectionRole: 'default',
-      authConfig: {},
-      enabled: false,
-      authStatus: 'pending',
-    })
-    .onConflictDoUpdate({
-      target: [
-        mcpConnections.userId,
-        mcpConnections.mcpId,
-        mcpConnections.connectionRole,
-      ],
-      set: {
-        authConfig: {},
-        enabled: false,
-        authStatus: 'pending',
-        updatedAt: new Date(),
-      },
-    })
-    .returning();
-
-  if (!connection) {
-    throw new Error('Failed to create MCP connection');
-  }
+  const { connectionId } = await prepareDeploymentCustomMcpOAuthConnection(
+    server.id,
+    { resetClient: true },
+  );
 
   // Relative path so the browser stays on its current domain.
   return input.redirectTo
-    ? `/api/mcp-oauth/initiate/${connection.id}?redirectTo=${encodeURIComponent(input.redirectTo)}`
-    : `/api/mcp-oauth/initiate/${connection.id}`;
+    ? `/api/mcp-oauth/initiate/${connectionId}?redirectTo=${encodeURIComponent(input.redirectTo)}`
+    : `/api/mcp-oauth/initiate/${connectionId}`;
 }
 
 /** Drop the stored OAuth connection (tokens) without deleting the server. */

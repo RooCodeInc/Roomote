@@ -11,6 +11,7 @@ import {
   fastAgentConversations,
   fastAgentMessages,
   gte,
+  getSessionGoal,
   gt,
   ilike,
   inArray,
@@ -20,6 +21,8 @@ import {
   llmUsageEvents,
   lt,
   or,
+  privateSessionAccess,
+  repositories,
   sessionParticipants,
   sessionPins,
   sessions,
@@ -38,10 +41,12 @@ import {
   type BackgroundAutomationKey,
 } from '@roomote/types';
 import { syncFastAgentSlackTitleBestEffort } from '@roomote/sdk/server';
+import { getRetryableFailedStartRunIds } from '@roomote/cloud-agents/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { parseCreatorFilterValue } from '@/lib/task-creator-filter';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
+import { parsePullRequestFilterValue } from '@/lib/pull-request-filter';
 
 import { getFastSessionById } from './fast-sessions';
 import { customAutomationSessionAccess } from './custom-automation-session-access';
@@ -64,6 +69,7 @@ type SessionListInput = {
   period?: number | 'all';
   q?: string | null;
   ids?: string[];
+  ownedOnly?: boolean;
   before?: string | null;
   limit?: number;
 };
@@ -82,7 +88,7 @@ function sessionScope(auth: SessionAuth) {
 // The /sessions listing mirrors the /tasks listing instead: admins see every
 // Session, other users see the Sessions they own, participate in, or spoke in.
 function sessionListScope(auth: SessionAuth) {
-  if (auth.isAdmin) return undefined;
+  if (auth.isAdmin) return sessionScope(auth);
   return and(
     sessionScope(auth),
     or(
@@ -111,6 +117,16 @@ function sessionListScope(auth: SessionAuth) {
             ),
           ),
       ),
+    ),
+  );
+}
+
+function sessionOwnerScope(auth: SessionAuth) {
+  return or(
+    eq(sessions.ownerUserId, auth.userId),
+    and(
+      eq(sessions.ownerAutomation, 'custom_automation'),
+      customAutomationSessionAccess({ ...auth, isAdmin: false }),
     ),
   );
 }
@@ -394,14 +410,21 @@ function listConditions(
   const cursor = decodeCursor(input.before);
   const scope = input.scope ?? 'all';
   const period = input.period ?? 'all';
-  const pullRequestNumber = Number(input.pullRequest);
+  const pullRequest = input.pullRequest
+    ? parsePullRequestFilterValue(input.pullRequest)
+    : null;
 
   return and(
     sessionListScope(auth),
+    input.ownedOnly ? sessionOwnerScope(auth) : undefined,
     eq(sessions.visibility, 'visible'),
     isNull(sessions.archivedAt),
     input.ids ? inArray(sessions.id, input.ids) : undefined,
-    input.status ? eq(sessions.cachedStatus, input.status) : undefined,
+    input.status === 'ready'
+      ? or(eq(sessions.cachedStatus, 'ready'), isNull(sessions.cachedStatus))
+      : input.status
+        ? eq(sessions.cachedStatus, input.status)
+        : undefined,
     input.user ? sessionCreatorCondition(input.user) : undefined,
     input.source
       ? eq(sessions.sourceSurface, input.source as never)
@@ -444,19 +467,55 @@ function listConditions(
       ? taskExistsCondition(eq(tasks.repositoryName, input.repository))
       : undefined,
     input.model ? taskExistsCondition(eq(tasks.model, input.model)) : undefined,
-    input.pullRequest && Number.isFinite(pullRequestNumber)
+    pullRequest
       ? exists(
           db
             .select({ one: sql`1` })
             .from(sessionTasks)
+            .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
             .innerJoin(
               taskPullRequests,
               eq(taskPullRequests.taskId, sessionTasks.taskId),
             )
+            .leftJoin(
+              repositories,
+              eq(repositories.id, taskPullRequests.repositoryId),
+            )
             .where(
               and(
                 eq(sessionTasks.sessionId, sessions.id),
-                eq(taskPullRequests.prNumber, pullRequestNumber),
+                isNull(tasks.deletedAt),
+                eq(taskPullRequests.repository, pullRequest.repository),
+                eq(taskPullRequests.prNumber, pullRequest.number),
+                pullRequest.provider
+                  ? eq(
+                      taskPullRequests.sourceControlProvider,
+                      pullRequest.provider,
+                    )
+                  : undefined,
+                pullRequest.repositoryId
+                  ? or(
+                      eq(
+                        taskPullRequests.repositoryId,
+                        pullRequest.repositoryId,
+                      ),
+                      and(
+                        isNull(taskPullRequests.host),
+                        isNull(taskPullRequests.repositoryId),
+                      ),
+                    )
+                  : pullRequest.host
+                    ? or(
+                        eq(
+                          sql`coalesce(${taskPullRequests.host}, ${repositories.host})`,
+                          pullRequest.host,
+                        ),
+                        and(
+                          isNull(taskPullRequests.host),
+                          isNull(taskPullRequests.repositoryId),
+                        ),
+                      )
+                    : undefined,
               ),
             ),
         )
@@ -473,6 +532,8 @@ const baseSelection = {
   ownerKind: sessions.ownerKind,
   ownerUserId: sessions.ownerUserId,
   ownerAutomation: sessions.ownerAutomation,
+  privacy: sessions.privacy,
+  privateOwnerUserId: sessions.privateOwnerUserId,
   ownerName: users.name,
   ownerEmail: users.email,
   ownerImageUrl: users.imageUrl,
@@ -789,7 +850,7 @@ export async function findAccessibleSession(
   return session ?? null;
 }
 
-/** Direct-link reads for authenticated deployment members, not action authorization. */
+/** Direct-link reads remain collaborative for shared Sessions. */
 export async function findReadableSession(
   auth: SessionAuth,
   sessionId: string,
@@ -800,9 +861,12 @@ export async function findReadableSession(
     .from(sessions)
     .leftJoin(users, eq(users.id, sessions.ownerUserId))
     .where(
-      or(
-        eq(sessions.id, sessionId),
-        eq(sessions.fastConversationId, sessionId),
+      and(
+        or(
+          eq(sessions.id, sessionId),
+          eq(sessions.fastConversationId, sessionId),
+        ),
+        privateSessionAccess(auth),
       ),
     )
     .limit(1);
@@ -837,7 +901,6 @@ async function getSessionTasks(sessionId: string) {
       title: tasks.title,
       workflow: tasks.workflow,
       state: tasks.state,
-      goalStatus: tasks.goalStatus,
       repositoryName: tasks.repositoryName,
       model: tasks.model,
       activityAt: tasks.activityAt,
@@ -862,6 +925,8 @@ async function getSessionTasks(sessionId: string) {
           id: taskRuns.id,
           status: taskRuns.status,
           taskPhase: taskRuns.taskPhase,
+          payloadKind: taskRuns.payloadKind,
+          payload: taskRuns.payload,
           error: taskRuns.error,
           result: taskRuns.result,
           machineDomain: taskRuns.machineDomain,
@@ -920,6 +985,8 @@ async function getSessionTasks(sessionId: string) {
     ]);
 
   const latestRunByTask = new Map(latestRuns.map((run) => [run.taskId, run]));
+  const retryableFailedStartRunIds =
+    await getRetryableFailedStartRunIds(latestRuns);
   const usageByTask = new Map(
     usageRows.map((row) => [row.taskId, Number(row.costMicroUsd)]),
   );
@@ -931,6 +998,7 @@ async function getSessionTasks(sessionId: string) {
           id: latestRunRow.id,
           status: latestRunRow.status,
           taskPhase: latestRunRow.taskPhase,
+          canRetryFailedStart: retryableFailedStartRunIds.has(latestRunRow.id),
           error: latestRunRow.error,
           result: latestRunRow.result,
         }
@@ -992,9 +1060,10 @@ export async function getSessionById(auth: SessionAuth, sessionId: string) {
   if (!session) return null;
   // Fetch the task rollups once and feed them into hydration; this endpoint
   // is polled, so the duplicate linked-tasks join was pure waste.
-  const [sessionTaskDetails, artifacts] = await Promise.all([
+  const [sessionTaskDetails, artifacts, goal] = await Promise.all([
     getSessionTasks(session.id),
     getSessionArtifacts(session.id),
+    getSessionGoal(session.id),
   ]);
   const [hydrated] = await hydrateSessionRows(auth, [session], {
     preloadedLinkedTasks: sessionTaskDetails.map((task) => ({
@@ -1013,13 +1082,14 @@ export async function getSessionById(auth: SessionAuth, sessionId: string) {
     tasks: sessionTaskDetails.map((task) => ({
       state: task.state,
       taskPhase: task.latestRun?.taskPhase ?? null,
-      goalStatus: task.goalStatus,
     })),
+    goalStatus: goal?.status ?? null,
   });
   return {
     ...hydrated!,
     tasks: sessionTaskDetails,
     artifacts,
+    goal,
     status: liveStatus,
   };
 }
@@ -1046,7 +1116,6 @@ export async function getSessionTimeline(
     title: task.title,
     workflow: task.workflow,
     state: task.state,
-    goalStatus: task.goalStatus,
     repositoryName: task.repositoryName,
     activityAt: task.activityAt,
     attachedAt: task.attachedAt,
@@ -1162,7 +1231,7 @@ export async function getSessionForTask(auth: SessionAuth, taskId: string) {
     .select({ sessionId: sessions.id, title: sessions.title })
     .from(sessionTasks)
     .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
-    .where(eq(sessionTasks.taskId, taskId))
+    .where(and(eq(sessionTasks.taskId, taskId), privateSessionAccess(auth)))
     .limit(1);
   return row ?? null;
 }
@@ -1186,6 +1255,7 @@ export async function updateSessionMetadata(
       .where(
         and(
           eq(sessions.id, sessionId),
+          privateSessionAccess(auth),
           auth.isAdmin ? undefined : eq(sessions.ownerUserId, auth.userId),
         ),
       )

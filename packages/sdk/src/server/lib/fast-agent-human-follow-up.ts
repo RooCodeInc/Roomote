@@ -151,7 +151,11 @@ export async function admitFastAgentInlineHumanTurn(params: {
         .where(eq(fastAgentParentEvents.id, row.id));
     }
 
-    if (supersedesPendingTurns(params.event)) {
+    // An ambient aside may be ignored; it cannot replace an unfinished request.
+    if (
+      supersedesPendingTurns(params.event) &&
+      params.event.allowSilentAmbientReply !== true
+    ) {
       await tx
         .update(fastAgentParentEvents)
         .set({

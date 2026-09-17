@@ -55,7 +55,9 @@ import { startAutomationRecommendationsQueue } from './automation-recommendation
 import { startFastAgentParentEventQueue } from './fast-agent-parent-event-queue';
 import { startAgentMailWebhookEventsQueue } from './agentmail-webhook-events-queue';
 import { readBullMqQueueHealth } from './health';
+import { startBullMqLivenessWatchdog } from './liveness-watchdog';
 import { startSessionWakeupQueue } from './session-wakeup-queue';
+import { startHomeComposerRecommendationsQueue } from './home-composer-recommendations-queue';
 import { installBullMqGracefulShutdown } from './graceful-shutdown';
 
 // Deployments roll every service at once while migrations run only ahead
@@ -229,6 +231,11 @@ const {
   worker: agentMailWebhookEventsWorker,
   queueEvents: agentMailWebhookEventsQueueEvents,
 } = await startAgentMailWebhookEventsQueue();
+const {
+  queue: homeComposerRecommendationsQueue,
+  worker: homeComposerRecommendationsWorker,
+  queueEvents: homeComposerRecommendationsQueueEvents,
+} = startHomeComposerRecommendationsQueue();
 
 const serverAdapter = new HonoAdapter(serveStatic);
 
@@ -271,6 +278,9 @@ createBullBoard({
     new BullMQAdapter(fastAgentParentEventQueue, { readOnlyMode: false }),
     new BullMQAdapter(sessionWakeupQueue, { readOnlyMode: false }),
     new BullMQAdapter(agentMailWebhookEventsQueue, { readOnlyMode: false }),
+    new BullMQAdapter(homeComposerRecommendationsQueue, {
+      readOnlyMode: false,
+    }),
   ],
   serverAdapter,
 });
@@ -406,11 +416,26 @@ app.route('/admin/queues', serverAdapter.registerPlugin());
 
 app.get('/', (c) => c.redirect('/admin/queues'));
 
+// A hung job loop looks healthy to Railway, to the Redis client, and to
+// /admin/health. The watchdog exits the process so the on-failure restart
+// policy recovers it; see liveness-watchdog.ts.
+const livenessWatchdog = startBullMqLivenessWatchdog({
+  worker: schedulerWorker,
+  redisStatus: () => redis.status,
+  onStale: ({ idleMs }) =>
+    captureBullMqMessage(
+      `bullmq scheduler worker made no progress for ${Math.round(idleMs / 1000)}s; restarting`,
+      undefined,
+      { component: 'liveness-watchdog', signal: 'scheduler-worker-stalled' },
+    ),
+});
+
 // Resumed Fast turns execute inside this process, so shutdown drains and
 // aborts them before anything else closes; see graceful-shutdown.ts.
 installBullMqGracefulShutdown({
   fastAgentWorker: fastAgentParentEventWorker,
   closeRemaining: async () => {
+    livenessWatchdog.stop();
     await schedulerWorker.close();
     await schedulerQueueEvents.close();
     await schedulerQueue.close();
@@ -469,6 +494,9 @@ installBullMqGracefulShutdown({
     await agentMailWebhookEventsWorker.close();
     await agentMailWebhookEventsQueueEvents.close();
     await agentMailWebhookEventsQueue.close();
+    await homeComposerRecommendationsWorker.close();
+    await homeComposerRecommendationsQueueEvents.close();
+    await homeComposerRecommendationsQueue.close();
     await discordGatewaySupervisor.stop();
     await closeRedis();
   },

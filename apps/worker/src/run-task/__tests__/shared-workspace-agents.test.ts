@@ -92,3 +92,74 @@ describe('writeSharedWorkspaceAgentsFile', () => {
     expect(fs.existsSync(path.join(roomoteRepoPath, 'AGENTS.md'))).toBe(false);
   });
 });
+
+describe('on-demand repositories', () => {
+  const onDemandRepositories = [
+    {
+      fullName: 'Roomote/example-app',
+      sourceControlProvider: 'github' as const,
+      defaultBranch: 'main',
+      description: null,
+      private: false,
+    },
+    {
+      fullName: 'Roomote/docs',
+      sourceControlProvider: 'github' as const,
+      defaultBranch: 'main',
+      description: 'Docs site',
+      private: false,
+    },
+  ];
+
+  it('explains how to check repositories out when none are cloned yet', () => {
+    const content = buildSharedWorkspaceAgentsContent({
+      repoPaths: {},
+      onDemandRepositories,
+    });
+
+    expect(content).toContain(
+      'Additional repositories are checked out on demand:',
+    );
+    expect(content).toContain(
+      'This task can use 2 repositories; 0 are checked out right now. `REPOSITORIES.md`',
+    );
+    expect(content).toContain(
+      'call the `clone_repository` tool with `repositoryFullName` (for example `Roomote/example-app`)',
+    );
+    expect(content).toContain('Do not run `git clone` yourself');
+    expect(content).not.toContain('Prepared repositories:');
+  });
+
+  it('writes /repos/AGENTS.md for an on-demand workspace with no checkouts', () => {
+    const workspaceRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'shared-workspace-agents-on-demand-'),
+    );
+
+    const wroteFile = writeSharedWorkspaceAgentsFile({
+      workspacePath: workspaceRoot,
+      usesSharedWorkspaceRoot: true,
+      repoPaths: {},
+      onDemandRepositories,
+    });
+
+    expect(wroteFile).toBe(true);
+    expect(
+      fs.readFileSync(path.join(workspaceRoot, 'AGENTS.md'), 'utf8'),
+    ).toContain('0 are checked out right now');
+  });
+
+  it('still skips the file for an empty workspace without on-demand repositories', () => {
+    const workspaceRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'shared-workspace-agents-empty-'),
+    );
+
+    expect(
+      writeSharedWorkspaceAgentsFile({
+        workspacePath: workspaceRoot,
+        usesSharedWorkspaceRoot: true,
+        repoPaths: {},
+      }),
+    ).toBe(false);
+    expect(fs.existsSync(path.join(workspaceRoot, 'AGENTS.md'))).toBe(false);
+  });
+});

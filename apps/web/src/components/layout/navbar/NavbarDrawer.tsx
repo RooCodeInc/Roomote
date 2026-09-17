@@ -1,8 +1,10 @@
 import { Fragment, useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import { useMediaQuery } from 'usehooks-ts';
 import {
   Menu,
+  Plus,
   X,
   Settings,
   Tooltip,
@@ -10,6 +12,8 @@ import {
   TooltipTrigger,
 } from '@/components/system';
 import { useAuthorizedUser } from '@/hooks/useUser';
+import { useResultsPage } from '@/hooks/useResultsPage';
+import { RecentSessions } from '@/components/layout/side-nav/RecentSessions';
 
 import {
   Button,
@@ -27,12 +31,21 @@ import {
 
 export const NavbarDrawer = ({
   setupIncomplete = false,
+  onNewSession,
 }: {
   setupIncomplete?: boolean;
+  onNewSession?: () => void;
 }) => {
   const pathname = usePathname();
   const { isAdmin } = useAuthorizedUser();
-  const visibleNavItems = getVisiblePrimaryNavItems({ isAdmin });
+  const { enabled: resultsEnabled } = useResultsPage();
+  const visibleNavItems = getVisiblePrimaryNavItems({
+    isAdmin,
+    resultsEnabled,
+  });
+  const isMobile = useMediaQuery('(max-width: 767px)', {
+    initializeWithValue: false,
+  });
 
   const [open, setOpen] = useState(false);
 
@@ -62,7 +75,21 @@ export const NavbarDrawer = ({
               </div>
             </DrawerHeader>
 
-            <div className="flex flex-1 flex-col gap-2 p-4">
+            <div className="scroll-thin flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-4">
+              <Button
+                variant="ghost"
+                size="lg"
+                className="justify-start"
+                aria-label="New Session"
+                onClick={() => {
+                  setOpen(false);
+                  onNewSession?.();
+                }}
+              >
+                <Plus className="size-5" />
+                New Session
+              </Button>
+
               {visibleNavItems.map((item) => {
                 const Icon = item.icon;
                 const disabled = setupIncomplete && item.requiresSetup;
@@ -111,6 +138,10 @@ export const NavbarDrawer = ({
                   Settings
                 </Link>
               </Button>
+
+              <div className="pt-4">
+                <RecentSessions enabled={isMobile} />
+              </div>
             </div>
           </div>
         </DrawerContent>

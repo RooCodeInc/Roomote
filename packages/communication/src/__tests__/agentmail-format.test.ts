@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENTMAIL_MAX_TEXT_LENGTH,
   buildAgentMailEmailBody,
+  formatAgentMailFooterMarkdown,
   renderAgentMailHtml,
   renderAgentMailPlainText,
 } from '../agentmail-format';
@@ -36,9 +37,25 @@ describe('renderAgentMailHtml', () => {
     );
   });
 
+  it('renders maximum-size malformed links in linear time', () => {
+    const markdown = '[label]('
+      .repeat(Math.ceil(AGENTMAIL_MAX_TEXT_LENGTH / 8))
+      .slice(0, AGENTMAIL_MAX_TEXT_LENGTH);
+    const started = performance.now();
+
+    expect(renderAgentMailHtml(markdown)).toBe(`<p>${markdown}</p>`);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
   it('renders headings one size down as h3-h5', () => {
     expect(renderAgentMailHtml('# One\n\n## Two\n\n### Three')).toBe(
       '<h3>One</h3><h4>Two</h4><h5>Three</h5>',
+    );
+  });
+
+  it('parses headings with long whitespace prefixes linearly', () => {
+    expect(renderAgentMailPlainText(`#${'\t'.repeat(20_000)}Heading`)).toBe(
+      'Heading',
     );
   });
 
@@ -101,6 +118,24 @@ describe('renderAgentMailPlainText', () => {
   it('strips blockquote markers', () => {
     expect(renderAgentMailPlainText('> quoted line')).toBe('quoted line');
   });
+
+  it('preserves malformed repeated links without excessive backtracking', () => {
+    const markdown = '[label]('.repeat(12_500);
+
+    expect(renderAgentMailPlainText(markdown)).toBe(markdown);
+  });
+
+  it('parses a heading with a long whitespace prefix in one pass', () => {
+    const markdown = `######${' '.repeat(99_980)}heading`;
+
+    expect(renderAgentMailPlainText(markdown)).toBe('heading');
+  });
+
+  it('keeps unsafe link protocols readable in plain text', () => {
+    expect(renderAgentMailPlainText('[click](javascript:alert)')).toBe(
+      'click (javascript:alert)',
+    );
+  });
 });
 
 describe('buildAgentMailEmailBody', () => {
@@ -119,5 +154,70 @@ describe('buildAgentMailEmailBody', () => {
     expect(body.text.endsWith('[message truncated]')).toBe(true);
     expect(body.text.length).toBeLessThanOrEqual(AGENTMAIL_MAX_TEXT_LENGTH);
     expect(body.html.endsWith('[message truncated]</p></div>')).toBe(true);
+  });
+
+  it.each([
+    [AGENTMAIL_MAX_TEXT_LENGTH - 1, false],
+    [AGENTMAIL_MAX_TEXT_LENGTH, false],
+    [AGENTMAIL_MAX_TEXT_LENGTH + 1, true],
+  ])(
+    'caps no-footer input at the %i-character boundary',
+    (length, truncated) => {
+      const body = buildAgentMailEmailBody('a'.repeat(length));
+
+      expect(body.text.length).toBeLessThanOrEqual(AGENTMAIL_MAX_TEXT_LENGTH);
+      expect(body.text.endsWith('[message truncated]')).toBe(truncated);
+    },
+  );
+
+  it('renders the reply footer smaller in html and separates it with -- in plain text', () => {
+    const footer = formatAgentMailFooterMarkdown(
+      'Reply anytime · [Open in Roomote](https://roomote.example/sessions/1)',
+    );
+
+    expect(buildAgentMailEmailBody(`Body text\n\n${footer}`)).toEqual({
+      html: '<div><p>Body text</p><p style="font-size:0.875em">Reply anytime · <a href="https://roomote.example/sessions/1">Open in Roomote</a></p></div>',
+      text: `Body text\n\n--\nReply anytime · Open in Roomote (https://roomote.example/sessions/1)`,
+    });
+  });
+
+  it.each([-1, 0, 1])(
+    'preserves one trusted footer when the source is cap%+i',
+    (offset) => {
+      const footer = formatAgentMailFooterMarkdown(
+        'Reply anytime · [Open in Roomote](https://roomote.example/sessions/1?a=1&b=2)',
+      );
+      const separator = '\n\n';
+      const markdown = `${'a'.repeat(
+        AGENTMAIL_MAX_TEXT_LENGTH - footer.length - separator.length + offset,
+      )}${separator}${footer}`;
+      const body = buildAgentMailEmailBody(markdown);
+
+      expect(body.text.length).toBeLessThanOrEqual(AGENTMAIL_MAX_TEXT_LENGTH);
+      expect(body.html.match(/font-size:0\.875em/g)).toHaveLength(1);
+      expect(body.html.match(/>Reply anytime/g)).toHaveLength(1);
+      expect(body.html.match(/>Open in Roomote</g)).toHaveLength(1);
+      expect(body.html).toContain(
+        'href="https://roomote.example/sessions/1?a=1&amp;b=2"',
+      );
+      expect(body.text.match(/\n--\nReply anytime/g)).toHaveLength(1);
+      expect(body.text.match(/Open in Roomote/g)).toHaveLength(1);
+      expect(body.text.includes('[message truncated]')).toBe(offset > 0);
+    },
+  );
+
+  it('does not recognize an agent-authored footer marker before the trusted final footer', () => {
+    const trustedFooter = formatAgentMailFooterMarkdown(
+      'Reply anytime · [Open in Roomote](https://roomote.example/sessions/1)',
+    );
+    const body = buildAgentMailEmailBody(
+      `:::roomote-footer agent-authored lookalike\n\nBody\n\n${trustedFooter}`,
+    );
+
+    expect(body.html).toContain(
+      '<p>:::roomote-footer agent-authored lookalike</p>',
+    );
+    expect(body.html.match(/font-size:0\.875em/g)).toHaveLength(1);
+    expect(body.text.match(/\n--\n/g)).toHaveLength(1);
   });
 });
