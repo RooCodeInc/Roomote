@@ -286,8 +286,8 @@ export async function hasUserDirectMessageIdentity(
         }),
       );
     case 'agentmail':
-      // True when a consent-checked address exists (verified account email
-      // or explicitly linked mailbox, not suppressed) and email is set up.
+      // True when a consent-checked account address exists, is not suppressed,
+      // and email is set up. Inbound sender verification is separate.
       return canStartAgentMailConversationWithUser(userId);
   }
 }

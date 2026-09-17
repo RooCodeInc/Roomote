@@ -113,7 +113,7 @@ describe('AutomationDestinationPicker', () => {
           {
             id: 'verified:user-1:abc',
             name: 'owner@example.com',
-            label: 'owner@example.com · Verified',
+            label: 'owner@example.com · Account email',
           },
         ]}
         onChange={onChange}
@@ -134,7 +134,7 @@ describe('AutomationDestinationPicker', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole('combobox', { name: 'Email address' }),
-    ).toHaveTextContent('owner@example.com · Verified');
+    ).toHaveTextContent('owner@example.com · Account email');
     expect(
       screen.queryByRole('combobox', { name: 'Email destination type' }),
     ).not.toBeInTheDocument();
