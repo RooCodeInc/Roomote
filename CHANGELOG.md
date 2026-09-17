@@ -2,6 +2,44 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.11.0 (2026-09-17)
+
+Roomote 1.11 adds private Sessions, smarter model routing and triage, cross-platform peer conversations, and safer integration and operator workflows.
+
+### Highlights
+
+- Keep sensitive work owner-only in private Sessions, with explicit approval before publishing anything outside the Session.
+- Route coding work by natural-language conditions and use the optional TypeSafe Jev judgment model for faster routing and triage decisions.
+- Continue peer conversations across Slack and Discord while making Fast and Slack delivery more resilient.
+- Add and authorize custom remote MCPs from Fast, use GitHub tools across connected repositories, and send platform issue reports only after admin confirmation.
+
+### Minor changes
+
+- Let admins define natural-language coding-model routing rules in Settings > Models, selecting an enabled model and reasoning level for strongly matching work while explicit choices and deployment defaults remain authoritative.
+- Extend experimental peer conversations from Slack to established Discord Fast threads, so linked participants can continue discussion after mentioning one another while Roomote stays quiet unless addressed or clearly needed.
+- Allow Roomote to send notifications and automation reports to account email addresses before they are verified, while keeping verification required for inbound email commands and replies.
+- Let deployment administrators add and authorize custom remote MCP integrations from Fast Sessions without sharing credentials in chat, and prefer a service's official remote MCP server over an integration key when nothing connected covers it.
+- Let tasks and Fast Sessions report admin-fixable platform, configuration, and access issues through the existing Platform Issue Alerts flow. Admins review the exact details in a confirmation page before sending anything to Roomote.
+- Add optional Private Sessions that keep transcripts, tasks, artifacts, and integration data owner-only and out of shared Memory. Admins enable them deployment-wide; owners can publish through normal tools after explicitly approving what leaves the Session.
+- Add an optional judgment model for fast routing and triage decisions. Admins can connect TypeSafe in Settings > Models and choose Jev via TypeSafe or Jev via Vercel AI Gateway under Judgment model (or set `R_JUDGMENT_MODEL`). When it is on, Roomote uses it for channel launch criteria, request classification, unmentioned thread replies, Fast environment and skill hints, integration tool search, Memory result ordering, PR review noise, email auto-replies, and Discord forum tags, and keeps its existing behavior whenever the judgment model is unsure or unavailable.
+
+### Patch changes
+
+- Make automation controls predictable: scheduled automations ask for a frequency before enabling, required custom fields show validation guidance, and Results shares only output proven safe for the whole deployment.
+- Apply Experimental settings deployment-wide under admin control, keep the peer-conversation control consistent with neighboring settings, and preserve configured Auto-respond channels when the automation is disabled and re-enabled.
+- Give Fast Sessions the same repository access a coding task has. A signed-in member can use GitHub repository tools under one cached installation token that reaches only the connected repositories. Searches pass through with GitHub's own query syntax, `org:` and `repo:` qualifiers pick the right installation, and reads no longer have to name a repository. Calls routed across installations no longer fail with `invalid session` because the GitHub proxy does not carry MCP sessions upstream. Coding tasks stay read-only on this tool path and keep writing through their own checkout.
+- Keep Fast Sessions responsive through transient connection resets, show Working only while Roomote is actually responding, and surface delegated task reports immediately instead of waiting for the parent turn to finish.
+- Fast Sessions find out what connecting to a service's remote MCP server requires before suggesting it. Roomote now registers the deployment with the provider when the server is added, so an authorization link is only shared when it can succeed; a provider that only accepts approved clients is reported in its own words and Roomote continues with your integration key. When an authorization link does fail, the Session is told why instead of landing on a silent page.
+- Agents now check shared Memory for unfamiliar people, projects, companies, and terms before asking users to provide context that Roomote may already know.
+- The "Add your key" card on a Session page now goes away once the conversation moves past the agent's request. It shows only while that request is the open ask, and it disappears when the owner replies without saving a key, saves one, or the approval expires. The approval itself stays available in the key dialog.
+- Allow an owning user to continue a private Session without restating its privacy mode on every turn, while keeping explicit privacy mismatches and non-owner access rejected.
+- Avoid automatically opening Session task panels for tasks that failed before execution started.
+- Return to the Environments list after creating an environment. Legacy environment links on Home now start ordinary Sessions instead of directly launching tasks.
+- Make analytics and anonymous reporting more accurate by counting user-started and private Sessions correctly and adding aggregate Session creation, source, owner, token, and cost totals to daily instance reports.
+- Improve Session interfaces by preserving the current user's avatar identity, hiding the artifact tab when a Session has no artifacts, restoring Voice for private Session creation, and labeling artifact download links for screen readers.
+- Recover cleanly when web authentication expires instead of redirecting repeatedly between sign-in and authenticated pages.
+- Prevent Slack messages from disappearing after transient processing failures and keep peer conversations responsive to the current linked participant without making Roomote appear active during side discussions.
+
 ## 1.10.0 (2026-09-16)
 
 Roomote 1.10 expands agent research and multi-repository work, reorganizes personal and shared integrations, and improves Session reliability, mobile input, artifact previews, and operator diagnostics.
