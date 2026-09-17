@@ -2003,11 +2003,11 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(adminPrompt).not.toContain(
       'a failed verification only means there is no MCP and the key route applies',
     );
-    expect(nonAdminPrompt).toContain(
-      'Keep that administrator setup as the outcome and do not offer an integration-key fallback unless the human explicitly asked for API access',
-    );
-    expect(nonAdminPrompt).not.toContain(
-      'offer the integration-key route in the same message',
-    );
+    expect(nonAdminPrompt).not.toContain('Remote MCP: call `add_remote_mcp`');
+    for (const prompt of [adminPrompt, nonAdminPrompt]) {
+      expect(prompt).not.toContain('Only deployment administrators');
+      expect(prompt).not.toContain('deployment administrator can connect');
+      expect(prompt).not.toContain('deployment administrator must authorize');
+    }
   });
 });
