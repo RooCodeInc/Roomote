@@ -151,6 +151,7 @@ agentInstructions: |
 | `env`                     | map               | no       | Workspace environment variables available to every task.                                                                  |
 | `services`                | list              | no       | Managed services to start. See [Services](#services).                                                                     |
 | `docker_projects`         | list              | no       | Existing Compose or Dockerfile projects to build and start. See [Docker projects](#docker-projects).                      |
+| `analysis_recipe`         | map               | no       | A pinned repository-free analysis runtime created by Roomote. The first supported recipe is `r-bioconductor`.            |
 | `ports`                   | list              | no       | Named preview ports. See [Ports](#ports).                                                                                 |
 | `oidc`                    | map               | no       | Sandbox OIDC targets. See [OIDC](#oidc).                                                                                  |
 | `mcpServers`              | map               | no       | Custom MCP servers for this environment. See [MCP servers](#mcp-servers).                                                 |

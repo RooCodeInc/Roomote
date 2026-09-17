@@ -52,6 +52,7 @@ import {
   setupOrganizationEnvironment,
   EnvironmentSetupStatusWriter,
 } from './setup/index';
+import { setupAnalysisRecipe } from './setup/workspace/analysis-recipe';
 
 export type SetupMode = 'full' | 'directDispatch';
 
@@ -487,6 +488,32 @@ async function runSetup({
         workspace.environmentConfig.repositories,
         initializeRepositoriesResult.environment?.repoPaths,
       );
+
+      if (workspace.environmentConfig.analysis_recipe) {
+        const recipeName =
+          workspace.environmentConfig.analysis_recipe.catalog_id;
+        setupStatusWriter.addRecipeCommands(recipeName, [
+          'Pull pinned R/Bioconductor runtime',
+          'Restore pinned R packages',
+          'Verify pinned R packages',
+        ]);
+        try {
+          await setupAnalysisRecipe(logger, {
+            recipe: workspace.environmentConfig.analysis_recipe,
+            workspacePath: initializeRepositoriesResult.workspacePath,
+            envVars: workspaceOptions.envVars,
+            onCommandStart: (name) =>
+              setupStatusWriter.markRecipeCommandRunning(recipeName, name),
+            onCommandResult: (result) =>
+              setupStatusWriter.markRecipeCommandResult(recipeName, result),
+          });
+        } catch (error) {
+          setupStatusWriter.finalize({
+            error: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        }
+      }
 
       if (!backgroundEnvironmentSetup) {
         const warnings =

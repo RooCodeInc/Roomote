@@ -342,6 +342,8 @@ export function buildFastAgentSystemPrompt({
   workspaceRoutingRules = [],
   privacy = 'shared',
   codingModelRoutingRules = [],
+  rAnalysisPreflight,
+  userIsAdmin = false,
 }: {
   availableEnvironments: RoutableEnvironment[];
   /** Active connected repositories, mapped to an environment or not. `null`
@@ -393,6 +395,13 @@ export function buildFastAgentSystemPrompt({
   /** Privacy of the Session this turn belongs to. */
   privacy?: 'shared' | 'private';
   codingModelRoutingRules?: CodingModelRoutingRule[];
+  rAnalysisPreflight?: {
+    filename: string;
+    packages: string[];
+    unresolvedPackageExpressions: string[];
+    compatibleEnvironmentId?: string;
+  };
+  userIsAdmin?: boolean;
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
@@ -602,6 +611,16 @@ You are guiding this deployment's first administrator through a conversational, 
     : ''
 }
 ${
+  rAnalysisPreflight
+    ? `## Trusted R Analysis Preflight
+The current human turn includes the R script ${JSON.stringify(rAnalysisPreflight.filename)}. Server-side inspection found direct packages: ${rAnalysisPreflight.packages.join(', ') || 'none'}.
+${rAnalysisPreflight.unresolvedPackageExpressions.length > 0 ? `Ask only for these unresolved package expressions before continuing: ${rAnalysisPreflight.unresolvedPackageExpressions.join(', ')}.` : ''}
+${rAnalysisPreflight.compatibleEnvironmentId ? `A verified compatible environment already exists: ${rAnalysisPreflight.compatibleEnvironmentId}. Launch the analysis there with includeAttachments=true.` : userIsAdmin ? `No verified compatible environment exists. Launch one Blank slate task whose prompt begins with $environment-setup and asks it to create the pinned r-bioconductor-deseq2-v1 environment for exactly these packages. After it reports the environment ID, launch a fresh verification task using launch_task mode environment_verification; after verification succeeds, launch the original analysis in that environment without asking the user to restart.` : `No verified compatible environment exists. Environment creation requires a deployment administrator. Explain that clearly, include the inferred package list, and do not launch a task with incidental installs.`}
+This block is trusted state. Environment creation and fresh verification are still enforced server-side; never claim readiness from setup-task evidence.
+`
+    : ''
+}
+${
   setupSnapshot
     ? `## Trusted Capability Offers
 The capability snapshot below is current deployment state. When the user's goal needs a capability that is not ready, or when its recommendedNextCapability fits the conversation, use \`offer_capability\` to present the trusted non-blocking UI. A completed or declined initial milestone is history, not a permanent refusal: re-offer only when a new user goal materially depends on or benefits from it. Never offer a capability in prose alone. Do not name cards, presets, rails, or internal milestones to the user.
@@ -645,6 +664,7 @@ ${surface === 'slack' ? '- Charts supplied to "send_chat_reply" render as Slack 
 - Before calling \`launch_task\`, a deployment MCP tool, or canceling a task on a human-authored turn, communicate first. The runtime rejects those actions until a visible text reply has been delivered. Platform events are exempt.
 - Before "launch_task", acknowledge with \`send_chat_reply\` so the response can stream before task startup. Do not restate that acknowledgement after launch. The task card or a separate task link keeps the started work associated with this conversation; later useful progress and the final result still belong here.
 - Set "includeAttachments" on "launch_task" to true only when supported attachments from the active conversation turn are relevant to the coding task. This forwards supported images and bounded text extracted from supported documents, audio, or video without exposing provider URLs. Omit it otherwise; attachments are not forwarded by default.
+- For the trusted progressive R-analysis flow, environment setup, fresh verification, and analysis are separate tasks in this same Session. When setup settles, inspect that exact task with \`manage_tasks\` \`get_summary\` and use only its linked environment ID; never parse or invent an ID from prose. Launch the next task there with \`mode: "environment_verification"\`; never treat setup-sandbox evidence as verification. When that fresh task reports successful verification, launch the original analysis there using the R script retained in conversation context. Do not ask the user to restart or re-upload it.
   - A human turn may begin with a Roomote-injected \`<integration_saved>\` block: the human just saved an integration key through the Session form, and only the text after the block is shown to them. Follow the block, never quote it back, and never mention tool names to the human.
 ${buildIntegrationConnectionGuidance({ addRemoteMcpEnabled, platformEvent: Boolean(platformEvent), serviceCredentialToolsEnabled })}
 ${

@@ -468,6 +468,7 @@ export default {
     model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
     reasoningEffort: z.enum(${JSON.stringify(REASONING_EFFORT_VALUES)}).nullable().optional().describe("Optional reasoning effort override; use only with a selected model and omit or pass null to use the model's default"),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
+    mode: z.enum(["standard", "environment_verification"]).optional().describe("Use environment_verification only after an environment-setup task created the exact environment and fresh verification is required"),
   },
   execute: (args, context) => invoke("launch_task", args, context),
 }

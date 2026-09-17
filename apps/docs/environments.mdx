@@ -78,6 +78,12 @@ Add enough context for Roomote to start productively:
 Environment changes apply to new tasks. Running tasks keep the workspace they
 already started with.
 
+For supported R/Bioconductor analyses, Roomote can also create a repository-free
+environment from an uploaded R script. The saved recipe pins the runtime image
+and package lock, is verified in a fresh workspace, and can be reused by later
+compatible scripts. Packages installed ad hoc during one task are not added to
+that recipe automatically.
+
 ## Edit an environment
 
 When you edit an existing environment, Roomote gives you four views of the
