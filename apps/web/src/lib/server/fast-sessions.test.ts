@@ -521,9 +521,9 @@ describe('Fast session queries', () => {
     const session = await createFastSession({
       userId: owner.id,
       conversationId: 'admitted-child-receipt',
+      updatedAt: new Date('2026-09-17T16:00:00.000Z'),
     });
     const eventId = 'fast-parent-child-message:report-1:user';
-    const turnId = 'fast-parent-child-message:report-1';
     const admittedAtMs = 1_789_660_000_000;
     const event = {
       type: 'child_message',
@@ -537,7 +537,6 @@ describe('Fast session queries', () => {
     await createFastMessage({
       conversationId: session.id,
       eventId,
-      turnId,
       turnSeq: 0,
       ts: admittedAtMs,
       eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
