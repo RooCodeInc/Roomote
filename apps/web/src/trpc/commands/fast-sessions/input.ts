@@ -96,16 +96,7 @@ export const startFastSessionInputSchema = z
     /** Open the Session for a voice call; any text is the pre-typed message. */
     voiceCall: z.boolean().optional(),
   })
-  .superRefine((input, ctx) => {
-    requireFastSessionContent(input, ctx);
-    if (input.privacy === 'private' && input.voiceCall) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Private Sessions cannot start as voice calls',
-        path: ['voiceCall'],
-      });
-    }
-  });
+  .superRefine(requireFastSessionContent);
 
 export const replyToFastSessionInputSchema = z
   .object({

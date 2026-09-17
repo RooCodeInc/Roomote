@@ -343,6 +343,9 @@ describe('Fast session queries', () => {
 
     for (const id of [conversation.id, unified.id]) {
       await expect(
+        findAccessibleFastSession(ownerAuth, id),
+      ).resolves.toMatchObject({ id: conversation.id });
+      await expect(
         findReadableFastSession(ownerAuth, id),
       ).resolves.toMatchObject({ id: conversation.id });
       expect(
@@ -357,6 +360,7 @@ describe('Fast session queries', () => {
         { userId: other.id, isAdmin: false },
         { userId: other.id, isAdmin: true },
       ]) {
+        await expect(findAccessibleFastSession(auth, id)).resolves.toBeNull();
         await expect(findReadableFastSession(auth, id)).resolves.toBeNull();
         await expect(getFastSessionTasks(auth, id)).resolves.toBeNull();
         await expect(
