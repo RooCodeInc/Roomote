@@ -225,7 +225,10 @@ import {
   type FastAgentPromptKind,
 } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
-import { resolveFastAgentRoutingHint } from './fast-agent-routing-hint';
+import {
+  resolveFastAgentLaunchModelSelection,
+  resolveFastAgentRoutingHint,
+} from './fast-agent-routing-hint';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
@@ -473,6 +476,7 @@ const launchTaskArgsSchema = z.object({
   prompt: z.string().trim().min(1),
   environmentId: z.string().trim().min(1).nullable().optional(),
   model: z.string().trim().min(1).nullable().optional(),
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
   includeAttachments: z.boolean().optional().default(false),
 });
 
@@ -3218,7 +3222,11 @@ export async function answerFastAgentQuestion({
         console.warn(
           `[Fast Agent] Task model options unavailable: ${formatErrorForLog(error)}`,
         );
-        return { models: [], defaultModelId: undefined };
+        return {
+          models: [],
+          defaultModelId: undefined,
+          codingModelRoutingRules: [],
+        };
       }),
       getOrCreateFastAgentSession({
         userId,
@@ -3295,6 +3303,8 @@ export async function answerFastAgentQuestion({
             environments: availableEnvironments,
             routingRules:
               agentBehaviorSettings?.workspaceRoutingSettings?.rules,
+            models: taskModelOptions.models,
+            codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
           })
         : undefined;
     const [personalizationContext, availableSkills] = await Promise.all([
@@ -3585,6 +3595,9 @@ export async function answerFastAgentQuestion({
             senderDisplayName?.trim() || currentUser.displayName || undefined,
           githubLogin: currentUser.githubLogin || undefined,
         };
+    const routingHint = userMessageResult?.initialHumanTurn
+      ? await routingHintRequest
+      : undefined;
     const {
       bootstrapMessages,
       turnMessages,
@@ -3606,9 +3619,7 @@ export async function answerFastAgentQuestion({
       resumedAfterInferenceRetry,
       previousAttempt,
       voiceMode,
-      routingHint: userMessageResult?.initialHumanTurn
-        ? await routingHintRequest
-        : undefined,
+      routingHint: routingHint?.context,
       skillRelevanceContext: await skillRelevanceContextPromise,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
@@ -3647,6 +3658,7 @@ export async function answerFastAgentQuestion({
       workspaceRoutingRules:
         agentBehaviorSettings?.workspaceRoutingSettings?.rules,
       privacy: currentSessionPrivacy,
+      codingModelRoutingRules: taskModelOptions.codingModelRoutingRules,
     });
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,
@@ -4622,6 +4634,14 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.launchTask: {
             const args = launchTaskArgsSchema.parse(call.args);
+            const {
+              model: selectedModel,
+              reasoningEffort: selectedReasoningEffort,
+            } = resolveFastAgentLaunchModelSelection({
+              explicitModel: args.model,
+              explicitReasoningEffort: args.reasoningEffort,
+              routingHint,
+            });
             const validEnvironmentIds = new Set([
               ALL_REPOSITORIES,
               NO_REPOSITORIES,
@@ -4637,12 +4657,28 @@ export async function answerFastAgentQuestion({
               };
             }
             if (
-              args.model &&
-              !taskModelOptions.models.some((model) => model.id === args.model)
+              selectedModel &&
+              !taskModelOptions.models.some(
+                (model) => model.id === selectedModel,
+              )
             ) {
               return {
                 success: false,
-                error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
+                error: `Model "${selectedModel}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
+              };
+            }
+            const reasoningModelId =
+              selectedModel ?? taskModelOptions.defaultModelId;
+            if (
+              selectedReasoningEffort &&
+              reasoningModelId &&
+              taskModelOptions.models.find(
+                (model) => model.id === reasoningModelId,
+              )?.metadata?.supportsReasoning === false
+            ) {
+              return {
+                success: false,
+                error: `Model "${reasoningModelId}" does not support configurable reasoning effort.`,
               };
             }
             try {
@@ -4653,7 +4689,8 @@ export async function answerFastAgentQuestion({
             const signature = `launch_task:${JSON.stringify([
               args.prompt,
               args.environmentId ?? null,
-              args.model ?? null,
+              selectedModel,
+              selectedReasoningEffort,
               args.includeAttachments,
             ])}`;
             if (completedTaskActions.has(signature)) {
@@ -4724,7 +4761,8 @@ export async function answerFastAgentQuestion({
                   ? { images }
                   : {}),
                 environmentId: args.environmentId ?? null,
-                model: args.model ?? null,
+                model: selectedModel,
+                reasoningEffort: selectedReasoningEffort,
                 parentSessionId: session.id,
                 // Stable across a resumed run of this turn: a repeat of the
                 // same launch (the process died between launching and

@@ -1747,6 +1747,7 @@ export async function saveSetupNewModelConfigCommand(
           );
 
           return normalizeTaskModelSettings({
+            ...current,
             models: [
               ...(current.models ?? []).filter((item) => item.id !== model.id),
               model,

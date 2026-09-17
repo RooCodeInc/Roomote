@@ -758,6 +758,131 @@ describe('lookupTaskModelCommand', () => {
     );
   });
 
+  it('persists normalized coding-model routing rules', async () => {
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'OPENROUTER_API_KEY',
+    ]);
+
+    const result = await updateTaskModelSettingsCommand(buildMockAuth(), {
+      models: [
+        {
+          id: 'z-ai/glm-5.6',
+          displayName: 'GLM 5.6',
+          family: 'GLM',
+          metadata: null,
+        },
+      ],
+      allowedModelIds: ['z-ai/glm-5.6'],
+      defaultModelId: 'z-ai/glm-5.6',
+      helperModelId: null,
+      visionModelId: null,
+      codeReviewModelId: null,
+      planningModelId: null,
+      codingModelReasoningEffort: null,
+      helperModelReasoningEffort: null,
+      visionModelReasoningEffort: null,
+      codeReviewModelReasoningEffort: null,
+      planningModelReasoningEffort: null,
+      codingModelRoutingRules: [
+        {
+          modelId: 'z-ai/glm-5.6',
+          reasoningEffort: 'high',
+          condition: ' Complex engineering tasks ',
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        set: expect.objectContaining({
+          taskModelSettings: expect.objectContaining({
+            codingModelRoutingRules: [
+              {
+                modelId: 'openrouter/z-ai/glm-5.6',
+                reasoningEffort: 'high',
+                condition: 'Complex engineering tasks',
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('rejects routing rules for disabled and non-reasoning models', async () => {
+    const baseInput = {
+      models: [
+        {
+          id: 'openai/gpt-5.6',
+          displayName: 'GPT 5.6',
+          family: 'GPT',
+          metadata: {
+            contextWindow: null,
+            inputTypes: null,
+            inputPricePerToken: null,
+            outputPricePerToken: null,
+            lastRefreshedAt: null,
+            supportsReasoning: false,
+          },
+        },
+        {
+          id: 'anthropic/claude-sonnet-5',
+          displayName: 'Claude Sonnet 5',
+          family: 'Claude',
+        },
+      ],
+      allowedModelIds: ['openai/gpt-5.6'],
+      defaultModelId: 'openai/gpt-5.6',
+      helperModelId: null,
+      visionModelId: null,
+      codeReviewModelId: null,
+      planningModelId: null,
+      codingModelReasoningEffort: null,
+      helperModelReasoningEffort: null,
+      visionModelReasoningEffort: null,
+      codeReviewModelReasoningEffort: null,
+      planningModelReasoningEffort: null,
+    } satisfies Parameters<typeof updateTaskModelSettingsCommand>[1];
+
+    await expect(
+      updateTaskModelSettingsCommand(buildMockAuth(), {
+        ...baseInput,
+        codingModelRoutingRules: [
+          {
+            modelId: 'anthropic/claude-sonnet-5',
+            reasoningEffort: 'high',
+            condition: 'Complex tasks',
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      success: false,
+      fieldErrors: {
+        codingModelRoutingRules: 'Routing rules must use enabled models.',
+      },
+    });
+
+    await expect(
+      updateTaskModelSettingsCommand(buildMockAuth(), {
+        ...baseInput,
+        codingModelRoutingRules: [
+          {
+            modelId: 'openai/gpt-5.6',
+            reasoningEffort: 'high',
+            condition: 'Complex tasks',
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      success: false,
+      fieldErrors: {
+        codingModelRoutingRules:
+          'Routing rule reasoning requires a model that supports reasoning.',
+      },
+    });
+  });
+
   it('accepts shorthand default model IDs when they normalize to an enabled model', async () => {
     const auth = buildMockAuth();
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([

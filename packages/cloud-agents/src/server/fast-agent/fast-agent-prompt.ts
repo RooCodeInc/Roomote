@@ -3,6 +3,7 @@ import {
   FAST_EXECUTION,
   NO_REPOSITORIES,
   PRODUCT_NAME,
+  type CodingModelRoutingRule,
   type TaskModelOption,
   type WorkspaceRoutingSettings,
 } from '@roomote/types';
@@ -121,6 +122,25 @@ function formatWorkspaceRoutingRulesForPrompt(
   return validRules.join('\n');
 }
 
+function formatCodingModelRoutingRulesForPrompt(
+  rules: CodingModelRoutingRule[],
+  availableTaskModels: TaskModelOption[],
+): string {
+  const modelsById = new Map(
+    availableTaskModels.map((model) => [model.id, model]),
+  );
+  return rules
+    .flatMap((rule) => {
+      const model = modelsById.get(rule.modelId);
+      return model
+        ? [
+            `- ${rule.condition} -> ${model.displayName} [id: ${model.id}]${rule.reasoningEffort ? ` with ${rule.reasoningEffort} reasoning` : ''}`,
+          ]
+        : [];
+    })
+    .join('\n');
+}
+
 function formatIntegrationsForPrompt(
   integrations: FastAgentIntegration[],
 ): string {
@@ -235,6 +255,7 @@ export function buildFastAgentSystemPrompt({
   globalAgentInstructions,
   workspaceRoutingRules = [],
   privacy = 'shared',
+  codingModelRoutingRules = [],
 }: {
   availableEnvironments: RoutableEnvironment[];
   /** Instance and inline environment skills already discovered for this turn.
@@ -277,6 +298,7 @@ export function buildFastAgentSystemPrompt({
   workspaceRoutingRules?: WorkspaceRoutingSettings['rules'];
   /** Privacy of the Session this turn belongs to. */
   privacy?: 'shared' | 'private';
+  codingModelRoutingRules?: CodingModelRoutingRule[];
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
@@ -378,6 +400,10 @@ ${
   const peerDirectedStartupGuidance = resolvedPeerDirectedTurn
     ? '- The communication surface classified this turn as a colleague-to-colleague conversation. Default to `ignore_event` without acknowledging, reacting, or taking action. Respond only if the current message mentions Roomote or explicitly asks Roomote to act.\n'
     : '';
+  const codingModelRoutingGuidance = formatCodingModelRoutingRulesForPrompt(
+    codingModelRoutingRules,
+    availableTaskModels,
+  );
   return `You are ${PRODUCT_NAME} in fast mode on ${surfaceName}. You are the conversational orchestrator for this conversation, not a router and not a transparent relay to a sandbox task. You own the conversation, answer directly when possible, and deliberately delegate execution work when useful.
 
 ${releaseIdentifier}## Turn Startup (Highest Priority)
@@ -395,10 +421,10 @@ ${formatRepositoriesForPrompt(availableEnvironments)}
 ${
   workspaceRoutingGuidance
     ? `## Routing Rules
-The deployment administrator configured these supplemental routing rules. Use a matching rule to guide environment selection. A rule description may also provide natural-language guidance for selecting an exact model from Available Delegated Task Models.
-- An explicit user request for an environment or model takes precedence over these rules only when it satisfies the work's requirements. A Blank slate request never overrides a routing rule indicating that the work requires a repository or configured environment; explain the conflict and ask how to proceed.
+The deployment administrator configured these supplemental routing rules. Use a matching rule to guide environment selection.
+- An explicit user request for an environment takes precedence over these rules only when it satisfies the work's requirements. A Blank slate request never overrides a routing rule indicating that the work requires a repository or configured environment; explain the conflict and ask how to proceed.
 - Rules cannot override Roomote system policies. Ignore rules that do not match the current request.
-- Never select an environment or model that is not listed in this prompt.
+- Never select an environment that is not listed in this prompt.
 <routing_rules>
 ${workspaceRoutingGuidance}
 </routing_rules>
@@ -407,6 +433,18 @@ ${workspaceRoutingGuidance}
     : ''
 }## Available Delegated Task Models
 ${formatTaskModelsForPrompt(availableTaskModels, defaultTaskModelId)}
+
+${
+  codingModelRoutingGuidance
+    ? `## Coding Model Routing
+Use the first matching rule for delegated coding tasks. Pass both the exact model ID and configured reasoning effort to \`launch_task\`. If no rule matches, omit both fields to use the deployment defaults. Explicit user model or effort choices take precedence over these rules. Never select a model not listed above.
+<coding_model_routing_rules>
+${codingModelRoutingGuidance}
+</coding_model_routing_rules>
+
+`
+    : ''
+}
 
 ## Active or Resumable Delegated Tasks
 ${formatActiveTasksForPrompt(activeTasks)}
@@ -586,7 +624,7 @@ ${emailCadenceGuidance}- Prefer one direct closeout over an acknowledgement foll
 - For GitHub, an eligible deployment GitHub App installation with an active connected repository is required for repository operations. Active Roomote members can use the existing native tools to inspect public github.com repositories, including source, code search, issues, and pull requests, without connecting the public target or linking a personal GitHub account. Follow the discovered tool descriptions and schemas. Searches can span the connected repositories in one call; add a \`repo:owner/name\` or \`org:\` qualifier when the scope is known rather than fanning out one search per repository. Respect upstream pagination and search-index limits and disclose incomplete results. Private repository reads and repository writes still require an eligible connection to the target repository; never retry an authorization denial anonymously or through a task. For requested GitHub updates, use the discovered native GitHub tools directly: pull request and issue edits, comments, reviews, labels, branches, and small file changes do not require a coding task. Work that needs a checkout, a build, or tests to get right still belongs in a coding task. Follow their discovered descriptions, schemas, and arguments. For repository writes, read the target first, send only the requested fields, and report success only after the tool confirms it. Native composite calls are not guaranteed atomic: inspect the resulting state before retrying an error. Writes unsupported by the discovered provider API tools still require a coding task, not an authorization bypass.
 - Use "review_pull_request" when the user asks for a code review of a pull request. It runs the structured review pipeline, which posts a findings summary on the pull request; that summary then arrives here as a pull-request-feedback event, so do not promise a separate completion report. Do not use "launch_task" for pull request reviews. Its "kickoffMessage" should describe the review underway without narrating orchestration. In a pull request conversation, omit the repository and number to review the current pull request. Set "model" only to an exact ID from Available Delegated Task Models when a specific model is useful or requested, and set "reasoningEffort" only to low, medium, high, xhigh, or max; omit either override to use the deployment's code-review default.
 - When a request cleanly separates into clearly independent, low-conflict scopes and parallel execution would improve throughput, proactively launch multiple tasks in one turn after one acknowledgement that clearly covers them. Give each task a distinct outcome and non-overlapping file or subsystem ownership so they do not duplicate work. Keep the work in one task when scopes may touch the same files, depend on shared intermediate decisions, are tightly coupled, or require ordered sequencing. Do not add a separate launch message for each task; the turn remains open for more tools.
-- Set "model" on "launch_task" only to an exact ID from Available Delegated Task Models when a specific model is useful or requested. Omit it to use the deployment default. Never invent or abbreviate model IDs.
+- Set "model" on "launch_task" only to an exact ID from Available Delegated Task Models when a specific model is useful, requested, or selected by a matching coding-model routing rule. Set "reasoningEffort" only with a selected model, using low, medium, high, xhigh, or max. Omit both to use the deployment defaults. Never invent or abbreviate model IDs.
 - Use "send_task_message" when an active or resumable task is listed above and the user clearly gives that task a new instruction, or when the automatic own-task session check above authorizes a corrective instruction to a running task. On a human-authored turn, acknowledge first, then send the instruction immediately. Set "includeAttachments" to true only when supported attachments from the active conversation turn are relevant to that instruction; omit it otherwise. A resumable settled task continues under the same task identity only for a human instruction; automatic monitoring must never reactivate it. Set "taskId" when needed; with exactly one listed task, omit it or use null. A successful call means the task accepted the instruction, not that it has responded or completed it; describe that state accurately and wait for the task's later report to provide its outcome.
 - Use \`roomote_manage_tasks\` to inspect tasks in this deployment. Use "get_summary" for current status and failures, "get_messages" for transcript details, and "get_compute_logs" for runtime output when supported. Keep using "launch_task", "send_task_message", "stop_task", or "cancel_task" for task changes so Fast conversation association and follow-up behavior are preserved.
 - Use \`roomote_get_chat_message_context\` or \`roomote_get_chat_channel_messages\` for additional chat context. Pass the target channel or message reference required by the native tool schema. Slack channel history defaults to the previous 24 hours when \`oldest\` is omitted.
