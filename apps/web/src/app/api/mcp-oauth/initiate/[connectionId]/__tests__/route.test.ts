@@ -100,7 +100,7 @@ vi.mock('@/lib/server/mcp-oauth-replay-continuation', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  OAuthClientRegistrationError: MockRegistrationError,
+  ClientRegistrationRejectedError: MockRegistrationError,
   describeRegistrationRefusal: describeRegistrationRefusalMock,
   discoverOAuthEndpoints: discoverOAuthEndpointsMock,
   discoverOAuthProtectedResourceMetadata:

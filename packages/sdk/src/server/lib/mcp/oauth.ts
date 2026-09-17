@@ -299,13 +299,13 @@ export async function discoverOAuthEndpoints(
  * client (refused redirect URI, closed registration); anything else is
  * transient and worth retrying later.
  */
-export class OAuthClientRegistrationError extends Error {
+export class ClientRegistrationRejectedError extends Error {
   readonly status: number;
   readonly body: string;
 
   constructor(status: number, body: string) {
     super(`OAuth client registration failed: ${body}`);
-    this.name = 'OAuthClientRegistrationError';
+    this.name = 'ClientRegistrationRejectedError';
     this.status = status;
     this.body = body;
   }
@@ -334,7 +334,7 @@ export async function registerOAuthClient(
   });
 
   if (!response.ok) {
-    throw new OAuthClientRegistrationError(
+    throw new ClientRegistrationRejectedError(
       response.status,
       await response.text(),
     );

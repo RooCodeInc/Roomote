@@ -34,7 +34,7 @@ import {
 } from './data';
 import { createBoundedCustomMcpFetch } from './custom-fetch';
 import {
-  OAuthClientRegistrationError,
+  ClientRegistrationRejectedError,
   discoverOAuthEndpoints,
   discoverOAuthProtectedResourceMetadata,
   getPreferredTokenEndpointAuthMethod,
@@ -431,14 +431,15 @@ const CALLBACK_PATH = '/api/mcp-oauth/callback';
  * The provider's own explanation of a refused client registration, in a
  * form safe to hand to the agent: the OAuth `error_description` (or `error`)
  * when the body is JSON, otherwise the plain text, with control characters
- * removed and the length bounded. Undefined when there is nothing usable.
+ * and markup delimiters (angle brackets, quotes, ampersands) removed and the
+ * length bounded. Undefined when there is nothing usable.
  */
 export function describeRegistrationRefusal(
   error: unknown,
 ): string | undefined {
   const message = error instanceof Error ? error.message : String(error);
   const body =
-    error instanceof OAuthClientRegistrationError
+    error instanceof ClientRegistrationRejectedError
       ? error.body
       : message.replace(/^OAuth client registration failed:\s*/, '');
   let text = body;
@@ -458,7 +459,7 @@ export function describeRegistrationRefusal(
     // Plain-text body.
   }
   const cleaned = text
-    .replace(/[\u0000-\u001f\u007f<>]+/g, ' ')
+    .replace(/[\u0000-\u001f\u007f<>"'&]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   if (!cleaned) return undefined;
@@ -520,7 +521,7 @@ async function ensureRegisteredClient(
     // Only the provider's own decision is a refusal. A timeout, a guarded
     // fetch failure, or a 5xx is left unresolved so the next attempt retries
     // instead of routing this server to manual setup for good.
-    if (error instanceof OAuthClientRegistrationError && error.isRefusal) {
+    if (error instanceof ClientRegistrationRejectedError && error.isRefusal) {
       return { ok: false, reason: describeRegistrationRefusal(error) };
     }
     const detail = describeRegistrationRefusal(error);

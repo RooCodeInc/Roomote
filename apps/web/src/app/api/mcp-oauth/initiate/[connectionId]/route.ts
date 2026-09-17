@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { db, mcpConnections, eq } from '@roomote/db/server';
 import {
-  OAuthClientRegistrationError,
+  ClientRegistrationRejectedError,
   describeRegistrationRefusal,
   discoverOAuthEndpoints,
   discoverOAuthProtectedResourceMetadata,
@@ -336,7 +336,7 @@ export async function GET(
         // Only the provider's decision is a refusal; a timeout or a 5xx is
         // rethrown so the connection stays pending and retryable.
         if (
-          !(error instanceof OAuthClientRegistrationError && error.isRefusal)
+          !(error instanceof ClientRegistrationRejectedError && error.isRefusal)
         ) {
           throw error;
         }

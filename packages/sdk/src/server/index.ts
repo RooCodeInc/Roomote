@@ -557,7 +557,7 @@ export { resolveUserMcpServerConfigs } from './routers/mcp-connections';
 export {
   discoverOAuthEndpoints,
   discoverOAuthProtectedResourceMetadata,
-  OAuthClientRegistrationError,
+  ClientRegistrationRejectedError,
   registerOAuthClient,
   getPreferredTokenEndpointAuthMethod,
   generateCodeVerifier,
