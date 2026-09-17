@@ -15,6 +15,8 @@ import {
   claimSlackEvent,
   completeSlackEventClaim,
   releaseSlackEventClaim,
+  renewSlackEventClaim,
+  slackEventLeaseRenewal,
   type SlackEventClaim,
 } from './event-gate.js';
 import { handleSlackInteractivePayload } from './dispatch/interactive.js';
@@ -30,6 +32,18 @@ import { verifySlackRequest } from './verifySlackRequest.js';
 import { resumePendingSlackAuthRequest } from './events/auth-resume.js';
 
 export const slack = new Hono();
+
+function renewSlackEventLease(claim: SlackEventClaim): () => void {
+  const interval = setInterval(() => {
+    void renewSlackEventClaim(claim).catch((error) => {
+      apiLogger.warn(
+        `Failed to renew Slack event lease ${claim.key}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  }, slackEventLeaseRenewal.intervalMs);
+  interval.unref();
+  return () => clearInterval(interval);
+}
 
 slack.post('/auth/resume', async (c) => {
   let rawBody: unknown;
@@ -236,15 +250,21 @@ slack.post('/', async (c) => {
         `text: ${eventLogDetails.text}`,
     );
 
+    const stopLeaseRenewal = eventClaim
+      ? renewSlackEventLease(eventClaim)
+      : () => {};
+
     try {
       await dispatchSlackEvent({
         event,
         context,
       });
+      stopLeaseRenewal();
       if (eventClaim) {
         await completeSlackEventClaim(eventClaim);
       }
     } catch (error) {
+      stopLeaseRenewal();
       console.error(
         `❌ Failed to process ${event.type}: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );

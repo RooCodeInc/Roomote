@@ -7,6 +7,12 @@ import {
   SLACK_EVENT_DEDUP_PREFIX,
 } from './constants.js';
 
+const SLACK_EVENT_PROCESSING_TTL_SECONDS = 30;
+
+export const slackEventLeaseRenewal = {
+  intervalMs: 10 * 1000,
+};
+
 const CLAIM_EVENT_SCRIPT = `
 local existing = redis.call('GET', KEYS[1])
 if existing == 'done' then
@@ -41,6 +47,13 @@ end
 return redis.call('DEL', KEYS[1])
 `;
 
+const RENEW_EVENT_SCRIPT = `
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+  return false
+end
+return redis.call('EXPIRE', KEYS[1], ARGV[2])
+`;
+
 export type SlackEventClaim = {
   key: string;
   token: string;
@@ -61,7 +74,7 @@ export async function claimSlackEvent(
     1,
     key,
     token,
-    EVENT_DEDUP_TTL_SECONDS.toString(),
+    SLACK_EVENT_PROCESSING_TTL_SECONDS.toString(),
   );
 
   if (result === 'claimed') {
@@ -98,4 +111,18 @@ export async function releaseSlackEventClaim(
   );
 
   return released === 1;
+}
+
+export async function renewSlackEventClaim(
+  claim: SlackEventClaim,
+): Promise<boolean> {
+  const renewed = await getRedis().eval(
+    RENEW_EVENT_SCRIPT,
+    1,
+    claim.key,
+    claim.token,
+    SLACK_EVENT_PROCESSING_TTL_SECONDS.toString(),
+  );
+
+  return renewed === 1;
 }

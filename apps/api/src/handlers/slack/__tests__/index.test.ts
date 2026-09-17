@@ -134,6 +134,9 @@ describe('Slack event callback deduplication', () => {
         if (mocks.redisValues.get(key) !== token) {
           return 0;
         }
+        if (script.includes("redis.call('EXPIRE'")) {
+          return 1;
+        }
         if (script.includes("redis.call('SET'")) {
           mocks.redisValues.set(key, 'done');
           return 1;
@@ -199,5 +202,35 @@ describe('Slack event callback deduplication', () => {
     const retryResponse = await sendCallback();
     expect(retryResponse.status).toBe(200);
     expect(mocks.dispatchSlackEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it('renews the processing lease while dispatch remains active', async () => {
+    const { slackEventLeaseRenewal } = await import('../event-gate.js');
+    const originalInterval = slackEventLeaseRenewal.intervalMs;
+    vi.useFakeTimers();
+    slackEventLeaseRenewal.intervalMs = 10;
+    mocks.dispatchSlackEvent.mockImplementationOnce(
+      () => new Promise<void>((resolve) => setTimeout(resolve, 25)),
+    );
+
+    try {
+      const responsePromise = sendCallback();
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(mocks.redisEval).toHaveBeenCalledWith(
+        expect.stringContaining("redis.call('EXPIRE'"),
+        1,
+        'slack:event:Ev123',
+        expect.stringMatching(/^processing:/u),
+        '30',
+      );
+
+      await vi.advanceTimersByTimeAsync(15);
+      const response = await responsePromise;
+      expect(response.status).toBe(200);
+    } finally {
+      slackEventLeaseRenewal.intervalMs = originalInterval;
+      vi.useRealTimers();
+    }
   });
 });
