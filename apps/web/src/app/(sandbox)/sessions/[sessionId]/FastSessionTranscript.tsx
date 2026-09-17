@@ -141,17 +141,18 @@ function isIntegrationKeyRequest(message: TranscriptMessage) {
 }
 
 /**
- * The approval a key request created, read from the tool's JSON output. Null
- * when the output is missing or not the expected shape.
+ * The approval a key request created, read from the tool's JSON output. The
+ * native tool persists `{ pending, sessionUrl }` as is; a `{ success, result }`
+ * wrapper is accepted too. Null when the output is missing or another shape.
  */
 function integrationKeyRequestPendingRef(message: TranscriptMessage) {
   const output = (message.payload as { output?: unknown } | null)?.output;
   if (typeof output !== 'string') return null;
   try {
-    const parsed = JSON.parse(output) as {
-      pending?: { pendingRef?: unknown };
-    } | null;
-    const ref = parsed?.pending?.pendingRef;
+    type Body = { pending?: { pendingRef?: unknown } } | null;
+    const parsed = JSON.parse(output) as (Body & { result?: Body }) | null;
+    const ref =
+      parsed?.pending?.pendingRef ?? parsed?.result?.pending?.pendingRef;
     return typeof ref === 'string' && ref ? ref : null;
   } catch {
     return null;
