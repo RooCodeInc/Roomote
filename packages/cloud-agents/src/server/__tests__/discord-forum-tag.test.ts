@@ -1,5 +1,11 @@
-const { mockGenerateTrackedNonTaskObject } = vi.hoisted(() => ({
-  mockGenerateTrackedNonTaskObject: vi.fn(),
+const { mockGenerateTrackedNonTaskObject, mockEvaluateTypeSafeJudgments } =
+  vi.hoisted(() => ({
+    mockGenerateTrackedNonTaskObject: vi.fn(),
+    mockEvaluateTypeSafeJudgments: vi.fn(),
+  }));
+
+vi.mock('../typesafe-judgment', () => ({
+  evaluateTypeSafeJudgments: mockEvaluateTypeSafeJudgments,
 }));
 
 vi.mock('../non-task-provider-usage', async (importOriginal) => {
@@ -31,6 +37,7 @@ const tags: DiscordForumTagCandidate[] = [
 describe('selectDiscordForumTag', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(null);
   });
 
   it('returns the router-selected available tag', async () => {
@@ -97,5 +104,81 @@ describe('selectDiscordForumTag', () => {
         availableTags: tags,
       }),
     ).resolves.toBeNull();
+  });
+
+  describe('with the judgment model', () => {
+    function mockJudgment(choice: string, confidence: number) {
+      mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+        tag: {
+          type: 'choice',
+          choice,
+          probabilities: { [choice]: confidence },
+          confidence,
+        },
+      });
+    }
+
+    beforeEach(() => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('uses a confident pick without calling the helper model', async () => {
+      mockJudgment('tag1', 0.97);
+
+      await expect(
+        selectDiscordForumTag({
+          taskDescription: 'Update the installation guide for macOS.',
+          availableTags: tags,
+        }),
+      ).resolves.toEqual({
+        tagId: 'tag-docs',
+        reasoning: 'Judgment model: best-fitting tag (confidence=0.97).',
+      });
+      expect(mockEvaluateTypeSafeJudgments).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: {
+            taskDescription: 'Update the installation guide for macOS.',
+            availableTags: ['Bug', 'Documentation'],
+          },
+        }),
+      );
+      expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the helper model when the pick is not confident', async () => {
+      mockJudgment('tag0', 0.45);
+      mockGenerateTrackedNonTaskObject.mockResolvedValueOnce({
+        object: { tagId: 'tag-docs', reasoning: 'Docs work.' },
+      });
+
+      await expect(
+        selectDiscordForumTag({
+          taskDescription: 'Clean things up a bit.',
+          availableTags: tags,
+        }),
+      ).resolves.toEqual({ tagId: 'tag-docs', reasoning: 'Docs work.' });
+      expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to the helper model when the judgment model fails', async () => {
+      mockEvaluateTypeSafeJudgments.mockRejectedValueOnce(
+        new Error('TypeSafe request failed with HTTP 503'),
+      );
+      mockGenerateTrackedNonTaskObject.mockResolvedValueOnce({
+        object: { tagId: 'tag-bug', reasoning: 'A crash.' },
+      });
+
+      await expect(
+        selectDiscordForumTag({
+          taskDescription: 'The login page crashes.',
+          availableTags: tags,
+        }),
+      ).resolves.toEqual({ tagId: 'tag-bug', reasoning: 'A crash.' });
+      expect(console.warn).toHaveBeenCalled();
+    });
   });
 });
