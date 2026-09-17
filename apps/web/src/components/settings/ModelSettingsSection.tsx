@@ -451,11 +451,12 @@ function CodingModelRoutingRulesEditor({
         type="button"
         variant="ghost"
         size="sm"
+        className="-ml-4"
         disabled={rules.length >= MAX_CODING_MODEL_ROUTING_RULES}
         onClick={onAdd}
       >
         <Plus />
-        Add another model routing rule
+        Add a model routing rule
       </Button>
     </div>
   );

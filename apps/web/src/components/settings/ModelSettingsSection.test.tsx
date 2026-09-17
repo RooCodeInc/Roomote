@@ -632,7 +632,7 @@ describe('ModelSettingsSection', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Add another model routing rule',
+        name: 'Add a model routing rule',
       }),
     );
     const condition = screen.getByLabelText('Routing rule 1 condition');
