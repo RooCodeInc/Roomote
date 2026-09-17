@@ -194,6 +194,7 @@ export async function recordInstalledRelease(
         provider: destination.provider,
         destinationKey: `${destination.provider}:${destination.channelId}`,
         channelId: destination.channelId,
+        serviceUrl: destination.serviceUrl ?? null,
       })
       .onConflictDoNothing({
         target: [
@@ -277,7 +278,8 @@ export async function drainReleaseAnnouncementDeliveries(
       }
       const serviceUrl =
         claim.row.provider === 'teams'
-          ? await findTeamsConversationServiceUrl(claim.row.channelId)
+          ? (claim.row.serviceUrl ??
+            (await findTeamsConversationServiceUrl(claim.row.channelId)))
           : null;
       if (claim.row.provider === 'teams' && !serviceUrl) {
         throw new Error('No Teams service URL for destination');

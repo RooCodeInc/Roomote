@@ -9858,6 +9858,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "service_url": {
+          "name": "service_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "status": {
           "name": "status",
           "type": "text",

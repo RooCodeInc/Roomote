@@ -5,6 +5,7 @@ CREATE TABLE "release_announcement_deliveries" (
 	"provider" text NOT NULL,
 	"destination_key" text NOT NULL,
 	"channel_id" text NOT NULL,
+	"service_url" text,
 	"status" text DEFAULT 'pending' NOT NULL,
 	"lease_token" uuid,
 	"lease_expires_at" timestamp,

@@ -337,6 +337,7 @@ export const releaseAnnouncementDeliveries = pgTable(
       .notNull(),
     destinationKey: text('destination_key').notNull(),
     channelId: text('channel_id').notNull(),
+    serviceUrl: text('service_url'),
     status: text('status')
       .$type<'pending' | 'delivered'>()
       .notNull()

@@ -255,4 +255,25 @@ describe('release announcement delivery', () => {
       expect.objectContaining({ channelId: 'release-chat' }),
     );
   });
+
+  it('reuses a persisted service URL for Teams direct-message retries', async () => {
+    await db.insert(releaseAnnouncementDeliveries).values({
+      previousVersion: '1.0.0',
+      installedVersion: '1.2.0',
+      provider: 'teams',
+      destinationKey: 'teams:dm-conversation',
+      channelId: 'dm-conversation',
+      serviceUrl: 'https://smba.example/amer/',
+    });
+
+    await expect(
+      drainReleaseAnnouncementDeliveries({ changelogMarkdown: changelog }),
+    ).resolves.toEqual({ delivered: 1, failed: 0 });
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'dm-conversation',
+        serviceUrl: 'https://smba.example/amer/',
+      }),
+    );
+  });
 });
