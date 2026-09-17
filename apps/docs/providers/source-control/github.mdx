@@ -287,13 +287,15 @@ Native updates that combine several actions are not guaranteed to be atomic.
 After an error, Roomote inspects the resulting state before retrying so an action
 that already succeeded is not blindly repeated.
 
-### Create gists
+### Gists
 
 Fast Sessions and coding tasks can create a gist owned by the acting member's
-linked GitHub account. Tool discovery requires the deployment's normal eligible
+linked GitHub account. Fast can also read or update a gist when the member
+shares its link; GitHub keeps every revision. Roomote never lists a member's
+existing gists and never deletes one. Tool discovery requires the deployment's normal eligible
 GitHub App installation and active connected repository, but gist creation uses
 the member's user access token rather than a repository installation token. Link
-GitHub under **Settings -> Linked Accounts** first: the gist tool is offered only
+GitHub under **Settings -> Linked Accounts** first: gist tools are offered only
 to members with a linked account. The deployment's GitHub App
 must have the **Gists: Read and write** account permission; after an operator
 adds that permission, members must reauthorize or reconnect their linked GitHub
