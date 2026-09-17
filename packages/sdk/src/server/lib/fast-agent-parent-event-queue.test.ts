@@ -138,6 +138,7 @@ import {
   enqueueFastAgentParentEventForRun,
   FastAgentParentBusyError,
   recoverPendingFastAgentParentEvents,
+  waitForFastAgentParentEventSettlement,
 } from './fast-agent-parent-event-queue';
 import type { FastAgentParentEvent } from './fast-agent-parent-event';
 
@@ -237,6 +238,30 @@ describe('Fast parent event durable queue', () => {
     );
     await vi.waitFor(() => expect(errorSpy).toHaveBeenCalledOnce());
     errorSpy.mockRestore();
+  });
+
+  it.each([
+    [{ deliveredAt: new Date(), discardedAt: null }, 'delivered'],
+    [{ deliveredAt: null, discardedAt: new Date() }, 'discarded'],
+  ] as const)(
+    'observes an admitted event through its %s terminal state',
+    async (row, expected) => {
+      mocks.findPending.mockResolvedValueOnce(row);
+
+      await expect(
+        waitForFastAgentParentEventSettlement('event-key'),
+      ).resolves.toBe(expected);
+    },
+  );
+
+  it('rejects when an admitted event disappears before settlement', async () => {
+    mocks.findPending.mockResolvedValueOnce(undefined);
+
+    await expect(
+      waitForFastAgentParentEventSettlement('missing-event'),
+    ).rejects.toThrow(
+      'Queued Fast parent event missing-event disappeared before settlement.',
+    );
   });
 
   describe('canonical event semantics', () => {

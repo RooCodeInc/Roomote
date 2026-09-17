@@ -528,6 +528,33 @@ async function isStillPending(id: string): Promise<boolean> {
   return Boolean(row) && !row!.deliveredAt && !row!.discardedAt;
 }
 
+/**
+ * Observe an already-admitted event until its durable delivery attempt has
+ * settled. This does not change admission into a synchronous delivery
+ * contract: callers must admit first, then use this only for best-effort
+ * post-turn work that used to run after an in-process turn.
+ */
+export async function waitForFastAgentParentEventSettlement(
+  eventKey: string,
+  options: { pollIntervalMs?: number } = {},
+): Promise<'delivered' | 'discarded'> {
+  const pollIntervalMs = options.pollIntervalMs ?? 100;
+  for (;;) {
+    const row = await db.query.fastAgentParentEvents.findFirst({
+      where: eq(fastAgentParentEvents.eventKey, eventKey),
+      columns: { deliveredAt: true, discardedAt: true },
+    });
+    if (!row) {
+      throw new Error(
+        `Queued Fast parent event ${eventKey} disappeared before settlement.`,
+      );
+    }
+    if (row.deliveredAt) return 'delivered';
+    if (row.discardedAt) return 'discarded';
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+}
+
 async function markDelivered(id: string) {
   await db
     .update(fastAgentParentEvents)

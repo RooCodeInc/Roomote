@@ -260,6 +260,7 @@ export {
   FastAgentParentBusyError,
   FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
   recoverPendingFastAgentParentEvents,
+  waitForFastAgentParentEventSettlement,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
   type FastAgentParentEventQueueRequest,

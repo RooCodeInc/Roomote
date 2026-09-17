@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
+import { after } from 'next/server';
 
 import {
   buildFastAgentArtifactCreator,
   enqueueFastAgentParentEvent,
+  waitForFastAgentParentEventSettlement,
 } from '@roomote/sdk/server';
 import { buildFastAgentSetupAdapter } from '@roomote/cloud-agents/server';
 import {
@@ -762,7 +764,7 @@ async function enqueueDurableWebPlatformEventTurn(
   if (!turn.durableSessionId || !turn.setupContext || !turn.currentMessageId) {
     throw new Error('A setup platform event requires durable turn context.');
   }
-  await enqueueFastAgentParentEvent({
+  const { eventKey } = await enqueueFastAgentParentEvent({
     parent: {
       sessionId: turn.durableSessionId,
       conversation: turn.delivery.conversation,
@@ -782,6 +784,24 @@ async function enqueueDurableWebPlatformEventTurn(
       setupContext: turn.setupContext,
     },
   });
+  const onTurnSettled = turn.adapterExtensions?.onTurnSettled;
+  if (onTurnSettled) {
+    // Durable admission remains an immediate handoff. The previous direct
+    // web-turn path ran this reconciliation from its finally block; observe
+    // the durable row in the request's after() lifetime so the same web-owned
+    // setup logic runs once presentation reaches a terminal state, without
+    // serializing callbacks or making enqueue success depend on inference.
+    after(async () => {
+      try {
+        await waitForFastAgentParentEventSettlement(eventKey);
+        await onTurnSettled();
+      } catch (error) {
+        console.error(
+          `[Setup] Post-turn reconciliation failed for ${turn.delivery.conversation.conversationId}: ${formatErrorForLog(error)}`,
+        );
+      }
+    });
+  }
 }
 
 async function buildSetupPlatformEventTurn(
