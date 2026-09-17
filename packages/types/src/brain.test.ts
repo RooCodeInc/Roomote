@@ -19,6 +19,9 @@ describe('Brain MCP instructions', () => {
       'An unfamiliar person, project, company, name, or term is a reason to retrieve relevant memory, not to immediately ask the user what it means',
     );
     expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      'Run the required preflight `query` first, then use the narrowest appropriate lookup for any specific unresolved gap',
+    );
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
       'Ask for clarification only if bounded retrieval leaves material ambiguity, or the required memory is unavailable and that ambiguity blocks progress',
     );
     expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
