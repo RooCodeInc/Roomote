@@ -1652,6 +1652,7 @@ export function AutomationsSettings({
   const savedStateRef = useRef<FormState | null>(null);
   const savingAutomationRef = useRef<AutomationId | null>(null);
   const togglingAutomationRef = useRef<AutomationId | null>(null);
+  const scheduledEnableSetupRef = useRef<AutomationId | null>(null);
   const didApplyInitialHashRef = useRef(false);
 
   const connectSlack = useConnectSlack(SETTINGS_PATHS.automations, {
@@ -1878,6 +1879,9 @@ export function AutomationsSettings({
             ? mergeAutomationFields(prev, mapped, savedAutomation)
             : mapped,
         );
+        if (scheduledEnableSetupRef.current === savedAutomation) {
+          scheduledEnableSetupRef.current = null;
+        }
 
         void queryClient.invalidateQueries({
           queryKey: trpc.automations.getSettings.queryKey(),
@@ -2091,6 +2095,19 @@ export function AutomationsSettings({
 
   const setAutomationOpen = useCallback(
     (automationId: AutomationId, open: boolean) => {
+      if (!open && scheduledEnableSetupRef.current === automationId) {
+        setFormState((current) =>
+          current && savedStateRef.current
+            ? resetAutomationFields(
+                current,
+                savedStateRef.current,
+                automationId,
+              )
+            : current,
+        );
+        scheduledEnableSetupRef.current = null;
+      }
+
       setOpenAutomationIds((prev) => {
         const next = new Set(prev);
         if (open) {
@@ -2241,6 +2258,16 @@ export function AutomationsSettings({
       if (!formState || !savedState || updateMutation.isPending) return;
 
       const nextState = { ...formState };
+      const openScheduledSetup = (setDefaultFrequency: () => void) => {
+        if (!enabled) return false;
+
+        setDefaultFrequency();
+        setFieldErrors({});
+        setFormState(nextState);
+        scheduledEnableSetupRef.current = automationId;
+        setAutomationOpen(automationId, true);
+        return true;
+      };
       switch (automationId) {
         case 'callRoomoteViaEmoji':
           nextState.callRoomoteViaEmojiEnabled = enabled;
@@ -2252,36 +2279,76 @@ export function AutomationsSettings({
           nextState.reviewerEnabled = enabled;
           break;
         case 'managerStats':
-          nextState.managerStatsFrequency = enabled ? 'weekly' : 'off';
+          if (
+            openScheduledSetup(() => {
+              nextState.managerStatsFrequency = 'weekly';
+            })
+          )
+            return;
+          nextState.managerStatsFrequency = 'off';
           break;
         case 'providerUsageLimit':
-          nextState.providerUsageLimitFrequency = enabled
-            ? 'every_hour'
-            : 'off';
+          if (
+            openScheduledSetup(() => {
+              nextState.providerUsageLimitFrequency = 'every_hour';
+            })
+          )
+            return;
+          nextState.providerUsageLimitFrequency = 'off';
           break;
         case 'sentryTriage':
-          if (enabled && !sentryConnected) {
-            toast.error(
-              'Configure Sentry in Settings > Integrations before enabling Triage Sentry Issues.',
-            );
+          if (
+            openScheduledSetup(() => {
+              nextState.sentryTriageFrequency = 'daily';
+            })
+          )
             return;
-          }
-          nextState.sentryTriageFrequency = enabled ? 'daily' : 'off';
+          nextState.sentryTriageFrequency = 'off';
           break;
         case 'dependabotTriage':
-          nextState.dependabotTriageFrequency = enabled ? 'daily' : 'off';
+          if (
+            openScheduledSetup(() => {
+              nextState.dependabotTriageFrequency = 'daily';
+            })
+          )
+            return;
+          nextState.dependabotTriageFrequency = 'off';
           break;
         case 'codeqlTriage':
-          nextState.codeqlTriageFrequency = enabled ? 'daily' : 'off';
+          if (
+            openScheduledSetup(() => {
+              nextState.codeqlTriageFrequency = 'daily';
+            })
+          )
+            return;
+          nextState.codeqlTriageFrequency = 'off';
           break;
         case 'conflictResolver':
-          nextState.conflictResolverFrequency = enabled ? 'every_hour' : 'off';
+          if (
+            openScheduledSetup(() => {
+              nextState.conflictResolverFrequency = 'every_hour';
+            })
+          )
+            return;
+          nextState.conflictResolverFrequency = 'off';
           break;
         case 'suggester':
-          nextState.suggesterFrequency = enabled ? 'daily' : 'off';
+          if (
+            openScheduledSetup(() => {
+              nextState.suggesterFrequency = 'daily';
+            })
+          )
+            return;
+          nextState.suggesterFrequency = 'off';
           break;
         case 'announcer':
-          nextState.announcerFrequency = enabled ? 'daily' : 'off';
+          if (
+            openScheduledSetup(() => {
+              nextState.announcerFrequency = 'daily';
+            })
+          )
+            return;
+          nextState.announcerFrequency = 'off';
           break;
         case 'platformIssueAlerts':
           nextState.platformIssueAlertsEnabled = enabled;
@@ -2289,7 +2356,13 @@ export function AutomationsSettings({
         case 'securityAuditor':
         case 'codeQualityAuditor': {
           const automation = SCHEDULE_ONLY_AUTOMATIONS_BY_ID[automationId];
-          nextState[automation.frequencyField] = enabled ? 'every_hour' : 'off';
+          if (
+            openScheduledSetup(() => {
+              nextState[automation.frequencyField] = 'every_hour';
+            })
+          )
+            return;
+          nextState[automation.frequencyField] = 'off';
           break;
         }
         case 'ciFailureTriage':
@@ -2325,7 +2398,7 @@ export function AutomationsSettings({
         buildAutomationSettingsSaveInput(nextState, savedState, automationId),
       );
     },
-    [formState, savedState, sentryConnected, updateMutation],
+    [formState, savedState, setAutomationOpen, updateMutation],
   );
   const showChannelAutoStartSlackChannelWarning =
     shouldShowChannelAutoStartWarning({

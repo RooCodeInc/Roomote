@@ -792,15 +792,19 @@ export function CustomAutomationsSection({
     }
   };
 
-  const editAutomation = (row: CustomAutomationListItem) => {
+  const editAutomation = (
+    row: CustomAutomationListItem,
+    enabled = row.enabled,
+  ) => {
     setEditingId(row.id);
     setIsCreating(false);
-    setForm(
-      formFromRow(
+    setForm({
+      ...formFromRow(
         row,
         capabilitiesLoaded ? connectedDestinationProviders : null,
       ),
-    );
+      enabled,
+    });
     setResolvedCron(row.cronExpression ?? null);
     setScheduleSummary(null);
     window.history.replaceState(
@@ -1169,13 +1173,14 @@ export function CustomAutomationsSection({
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Switch
+              id="custom-automation-enabled"
               checked={form.enabled}
               disabled={busy}
               onCheckedChange={(checked) =>
                 setForm((current) => ({ ...current, enabled: checked }))
               }
             />
-            <Label>Enabled</Label>
+            <Label htmlFor="custom-automation-enabled">Enabled</Label>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -1363,13 +1368,18 @@ export function CustomAutomationsSection({
                           checked={row.enabled}
                           disabled={busy}
                           className="border-border data-[state=unchecked]:bg-muted"
-                          onCheckedChange={(enabled) =>
+                          onCheckedChange={(enabled) => {
+                            if (enabled && row.scheduleMode !== 'off') {
+                              editAutomation(row, true);
+                              return;
+                            }
+
                             toggleMutation.mutate({
                               id: row.id,
                               ...writeInputFromRow(row),
                               enabled,
-                            })
-                          }
+                            });
+                          }}
                         />
                       }
                       summary={

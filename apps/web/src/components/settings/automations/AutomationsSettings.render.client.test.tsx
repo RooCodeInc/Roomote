@@ -1199,19 +1199,81 @@ describe('AutomationsSettings', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('enables schedule-backed automations at their established default frequency', async () => {
+  it('requires confirmation before enabling a schedule-backed automation', async () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
       await screen.findByRole('switch', {
-        name: 'Enable Weekly Manager Stats',
+        name: 'Enable Resolve PR Conflicts',
+      }),
+    );
+
+    expect(mutations.updateSettings).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole('dialog', { name: 'Resolve PR Conflicts' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Resolve PR Conflicts schedule' }),
+    ).toHaveTextContent('Every hour');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(
+      screen.getByRole('switch', { name: 'Enable Resolve PR Conflicts' }),
+    ).not.toBeChecked();
+    expect(mutations.updateSettings).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'Enable Resolve PR Conflicts' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }));
+
+    expect(mutations.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        savingAutomation: 'conflictResolver',
+        conflictResolverFrequency: 'every_hour',
+      }),
+    );
+  });
+
+  it('requires confirmation before enabling a scheduled custom automation', async () => {
+    setRunnableCustomAutomation();
+    state.customAutomations[0]!.enabled = false;
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('switch', { name: 'Toggle Daily scan' }),
+    );
+
+    expect(
+      screen.getByRole('dialog', { name: 'Edit custom automation' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Schedule' }),
+    ).toHaveTextContent('Daily');
+    expect(screen.getByRole('switch', { name: 'Enabled' })).toBeChecked();
+    expect(mutations.updateSettings).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(
+      screen.getByRole('switch', { name: 'Toggle Daily scan' }),
+    ).not.toBeChecked();
+    expect(mutations.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it('disables a scheduled automation directly', async () => {
+    state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('switch', {
+        name: 'Disable Weekly Manager Stats',
       }),
     );
 
     expect(mutations.updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         savingAutomation: 'managerStats',
-        managerStatsFrequency: 'weekly',
+        managerStatsFrequency: 'off',
       }),
     );
     expect(

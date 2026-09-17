@@ -352,11 +352,15 @@ export async function updateBackgroundAgentSettingsCommand(
 > {
   assertAdmin(auth);
   const fieldErrors: BackgroundAgentFieldErrors = {};
-  const [existingSettings, existingProviderUsageLimitAutomation] =
-    await Promise.all([
-      getBackgroundAgentSettingsForDeployment(),
-      getAutomationByKey('provider_usage_limit'),
-    ]);
+  const [
+    existingSettings,
+    existingProviderUsageLimitAutomation,
+    existingChannelAutoStartAutomation,
+  ] = await Promise.all([
+    getBackgroundAgentSettingsForDeployment(),
+    getAutomationByKey('provider_usage_limit'),
+    getAutomationByKey('slack_channel_auto_start'),
+  ]);
   const platformIssueAlertsEnabled =
     input.savingAutomation === 'platformIssueAlerts'
       ? (input.platformIssueAlertsEnabled ??
@@ -951,9 +955,11 @@ export async function updateBackgroundAgentSettingsCommand(
   );
   const channelAutoStartEnabled =
     input.channelAutoStartEnabled ??
-    finalResolvedChannelAutoStartRows.length +
-      finalResolvedChannelAutoStartDiscordRows.length >
-      0;
+    (existingChannelAutoStartAutomation
+      ? existingSettings.channelAutoStartEnabled
+      : finalResolvedChannelAutoStartRows.length +
+          finalResolvedChannelAutoStartDiscordRows.length >
+        0);
   const managerChannelHasApp =
     input.savingAutomation === 'managerChannel' &&
     managerChannelChanged &&
