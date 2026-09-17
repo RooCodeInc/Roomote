@@ -158,7 +158,11 @@ import {
   loadFastAgentPromptSkillCatalog,
 } from './fast-agent-prompt-skill-catalog';
 import { RemoteFastAgentInstanceSkillSource } from './fast-agent-instance-skill-source';
-import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
+import {
+  buildFastAgentExplicitSkillInvocationContext,
+  parseFastAgentExplicitSkillInvocation,
+} from './fast-agent-skill-invocation';
+import { buildFastAgentSkillRelevanceContext } from './fast-agent-skill-relevance';
 import {
   findFastAgentUnresolvedRequest,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
@@ -1527,6 +1531,7 @@ function buildFastAgentMessages({
   resumedAfterInferenceRetry = false,
   previousAttempt,
   voiceMode = false,
+  skillRelevanceContext,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -1548,6 +1553,9 @@ function buildFastAgentMessages({
   /** What an earlier attempt at this same turn already did, when resuming. */
   previousAttempt?: FastAgentTurnAttemptSummary | null;
   voiceMode?: boolean;
+  /** Per-turn `<skill_relevance>` hint; kept out of the system prompt so the
+   * prompt stays cacheable across turns. */
+  skillRelevanceContext?: string;
 }): {
   bootstrapMessages: ModelMessage[];
   turnMessages: ModelMessage[];
@@ -1586,6 +1594,7 @@ function buildFastAgentMessages({
   const currentUserMessageText = [
     voiceMode ? '<voice_mode active="true" />' : undefined,
     explicitSkillInvocationContext,
+    skillRelevanceContext,
     wrappedCurrentUserMessageText,
   ]
     .filter((entry): entry is string => Boolean(entry))
@@ -3262,6 +3271,22 @@ export async function answerFastAgentQuestion({
           return null;
         }),
     ]);
+    // The optional judgment model's skill hint for this request. Started now
+    // so it runs alongside the session bookkeeping below; it never rejects.
+    // A request that already names a skill with `$name` needs no hint.
+    const skillRelevanceContextPromise =
+      substantiveHumanInput &&
+      availableSkills &&
+      !parseFastAgentExplicitSkillInvocation(
+        question,
+        conversation.surface,
+        slackRoomoteUserId,
+      )
+        ? buildFastAgentSkillRelevanceContext({
+            catalog: availableSkills,
+            request: question,
+          })
+        : undefined;
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
@@ -3516,6 +3541,7 @@ export async function answerFastAgentQuestion({
       resumedAfterInferenceRetry,
       previousAttempt,
       voiceMode,
+      skillRelevanceContext: await skillRelevanceContextPromise,
     });
     const releaseVersion = resolveRoomoteReleaseVersion(
       Env.RELEASE_PRODUCT_VERSION,
