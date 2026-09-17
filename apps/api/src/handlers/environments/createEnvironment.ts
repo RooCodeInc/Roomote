@@ -9,8 +9,12 @@ import {
   eq,
   inArray,
   repositories,
+  taskMessages,
   taskRuns,
   users,
+  sql,
+  desc,
+  type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
   type TaskPayload,
@@ -35,6 +39,8 @@ export const EVAL_ENVIRONMENT_WRITE_ERROR =
   'isEval is reserved for internal eval environments.';
 export const ENVIRONMENT_ADMIN_REQUIRED_ERROR =
   'Admin access is required to create or update environments.';
+export const ENVIRONMENT_APPROVAL_REQUIRED_ERROR =
+  'Explicit user approval for this exact environment proposal is required.';
 
 type PostgresErrorLike = {
   code?: string;
@@ -82,6 +88,67 @@ export function getEnvironmentRepositoryConfigError(
 
 function extractRunId(auth: McpAuth): number | null {
   return 'runId' in auth.authContext ? auth.authContext.runId : null;
+}
+
+export async function consumeEnvironmentProposalApproval(
+  dbOrTx: DatabaseOrTransaction,
+  auth: McpAuth,
+  proposalHash: string,
+): Promise<boolean> {
+  if (auth.authContext.tokenType !== 'run') return true;
+  const runId = extractRunId(auth);
+  if (!runId) return false;
+
+  const run = await dbOrTx.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
+    columns: { taskId: true },
+  });
+  if (!run?.taskId) return false;
+
+  const questionId = `environment-approval:${proposalHash}`;
+  const responses = await dbOrTx.query.taskMessages.findMany({
+    where: and(
+      eq(taskMessages.taskId, run.taskId),
+      eq(taskMessages.eventType, 'roomote_runtime.request_user_input_response'),
+    ),
+    orderBy: [desc(taskMessages.createdAt)],
+    limit: 50,
+  });
+
+  for (const response of responses) {
+    const payload = response.payload as {
+      resolution?: unknown;
+      answers?: Record<string, { answers?: unknown }>;
+      environmentApprovalConsumedAt?: unknown;
+    };
+    if (
+      payload.resolution !== 'submitted' ||
+      payload.environmentApprovalConsumedAt ||
+      !Array.isArray(payload.answers?.[questionId]?.answers) ||
+      !payload.answers[questionId]!.answers!.includes('approve')
+    ) {
+      continue;
+    }
+
+    const [consumed] = await dbOrTx
+      .update(taskMessages)
+      .set({
+        payload: {
+          ...payload,
+          environmentApprovalConsumedAt: new Date().toISOString(),
+          environmentApprovalProposalHash: proposalHash,
+        },
+      })
+      .where(
+        and(
+          eq(taskMessages.id, response.id),
+          sql`${taskMessages.payload} ->> 'environmentApprovalConsumedAt' IS NULL`,
+        ),
+      )
+      .returning({ id: taskMessages.id });
+    return Boolean(consumed);
+  }
+  return false;
 }
 
 /**
@@ -246,7 +313,11 @@ export async function createEnvironment(
     return c.json({ error: 'config is required' }, 400);
   }
 
-  const requestBody = body as { config: unknown; isEval?: unknown };
+  const requestBody = body as {
+    config: unknown;
+    isEval?: unknown;
+    approvedProposalHash?: unknown;
+  };
 
   if (
     Object.prototype.hasOwnProperty.call(requestBody, 'isEval') &&
@@ -328,6 +399,17 @@ export async function createEnvironment(
     const verificationTaskId = await resolveCallingVerificationTaskId(auth);
 
     const created = await db.transaction(async (tx) => {
+      if (
+        auth.authContext.tokenType === 'run' &&
+        (typeof requestBody.approvedProposalHash !== 'string' ||
+          !(await consumeEnvironmentProposalApproval(
+            tx,
+            auth,
+            requestBody.approvedProposalHash,
+          )))
+      ) {
+        throw new EnvironmentApprovalRequiredError();
+      }
       const inserted = await tx
         .insert(environments)
         .values({
@@ -384,6 +466,9 @@ export async function createEnvironment(
       name: config.name,
     });
   } catch (error) {
+    if (error instanceof EnvironmentApprovalRequiredError) {
+      return c.json({ error: ENVIRONMENT_APPROVAL_REQUIRED_ERROR }, 403);
+    }
     if (isEnvironmentNameUniqueViolation(error)) {
       return duplicateEnvironmentNameResponse(c);
     }
@@ -401,3 +486,5 @@ export async function createEnvironment(
     );
   }
 }
+
+class EnvironmentApprovalRequiredError extends Error {}

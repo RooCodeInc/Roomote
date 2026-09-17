@@ -119,6 +119,7 @@ repositories:
     );
 
     expect(tasksApiClient.createEnvironment).toHaveBeenCalledWith(config, {
+      approvedProposalHash: expect.any(String),
       config: expect.objectContaining({ name: 'Renamed Project' }),
     });
   });
@@ -212,6 +213,7 @@ repositories:
     expect(parsed.environmentId).toBe('env-existing');
     expect(tasksApiClient.updateEnvironment).toHaveBeenCalledWith(config, {
       environmentId: 'env-existing',
+      approvedProposalHash: projectProposalHash,
       config: expect.objectContaining({ name: 'My Project' }),
     });
   });

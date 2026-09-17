@@ -14,6 +14,7 @@ const {
   mockUsersFindFirst,
   mockCreateSnapshot,
   mockEnvironmentInsertValues,
+  mockTaskMessagesFindMany,
 } = vi.hoisted(() => ({
   mockTaskRunFindFirst: vi.fn(),
   mockRepositoriesFindMany: vi.fn().mockResolvedValue([]),
@@ -21,12 +22,27 @@ const {
   mockUsersFindFirst: vi.fn(),
   mockCreateSnapshot: vi.fn(),
   mockEnvironmentInsertValues: vi.fn(),
+  mockTaskMessagesFindMany: vi.fn().mockResolvedValue([
+    {
+      id: 'approval-message',
+      payload: {
+        resolution: 'submitted',
+        answers: {
+          'environment-approval:approved-hash': { answers: ['approve'] },
+        },
+      },
+    },
+  ]),
 }));
 
 vi.mock('@roomote/db/server', async (importOriginal) => {
   const original = await importOriginal<typeof import('@roomote/db/server')>();
 
   const tx = {
+    query: {
+      taskRuns: { findFirst: mockTaskRunFindFirst },
+      taskMessages: { findMany: mockTaskMessagesFindMany },
+    },
     insert: () => ({
       values: (values: Record<string, unknown>) => {
         mockEnvironmentInsertValues(values);
@@ -34,6 +50,11 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
           returning: async () => [{ id: 'env-new' }],
         };
       },
+    }),
+    update: () => ({
+      set: () => ({
+        where: () => ({ returning: async () => [{ id: 'approval-message' }] }),
+      }),
     }),
   };
 
@@ -105,6 +126,17 @@ describe.each([
 ] as const)('%s user-context gate', (_name, method, path) => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockTaskMessagesFindMany.mockResolvedValue([
+      {
+        id: 'approval-message',
+        payload: {
+          resolution: 'submitted',
+          answers: {
+            'environment-approval:approved-hash': { answers: ['approve'] },
+          },
+        },
+      },
+    ]);
     mockUsersFindFirst.mockResolvedValue({ role: 'admin', deletedAt: null });
   });
 
@@ -257,6 +289,17 @@ describe.each([
 describe('createEnvironment attribution', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockTaskMessagesFindMany.mockResolvedValue([
+      {
+        id: 'approval-message',
+        payload: {
+          resolution: 'submitted',
+          answers: {
+            'environment-approval:approved-hash': { answers: ['approve'] },
+          },
+        },
+      },
+    ]);
     mockUsersFindFirst.mockResolvedValue({ role: 'admin', deletedAt: null });
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockRepositoriesFindMany.mockResolvedValue([
@@ -273,6 +316,8 @@ describe('createEnvironment attribution', () => {
     // attachEnvironmentIdToTaskRun payload sync, which can no-op.
     mockTaskRunFindFirst
       .mockResolvedValueOnce({ actingUserId: 'user-live' })
+      .mockResolvedValueOnce({ taskId: 'task-1' })
+      .mockResolvedValueOnce({ taskId: 'task-1' })
       .mockResolvedValueOnce(null);
 
     const app = createApp({
@@ -287,6 +332,7 @@ describe('createEnvironment attribution', () => {
       new Request('http://localhost/environments', {
         method: 'POST',
         body: JSON.stringify({
+          approvedProposalHash: 'approved-hash',
           config: {
             name: 'Attribution Test',
             repositories: [{ repository: 'acme/app' }],
@@ -304,6 +350,31 @@ describe('createEnvironment attribution', () => {
       expect.anything(),
       expect.objectContaining({ createdByUserId: 'user-live' }),
     );
+  });
+
+  it('rejects a run-token write without a trusted approval response', async () => {
+    mockTaskRunFindFirst
+      .mockResolvedValueOnce({ actingUserId: 'user-live' })
+      .mockResolvedValueOnce({ taskId: 'task-1' })
+      .mockResolvedValueOnce({ taskId: 'task-1' });
+    mockTaskMessagesFindMany.mockResolvedValueOnce([]);
+
+    const app = createApp(deploymentRunToken());
+    const response = await app.request('/environments', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        approvedProposalHash: 'unapproved-hash',
+        config: { name: 'Unapproved', repositories: [] },
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        'Explicit user approval for this exact environment proposal is required.',
+    });
+    expect(mockEnvironmentInsertValues).not.toHaveBeenCalled();
   });
 
   it('creates an environment without repository mappings', async () => {
