@@ -1,9 +1,12 @@
 import { Hono } from 'hono';
 
 import {
+  decodeMcpToolIntent,
   filterMcpToolDefinitions,
   formatSingleLineLog,
   getEffectiveAllowedMcpToolNames,
+  type McpToolIntent,
+  MCP_TOOL_INTENT_HEADER,
   type RunTokenContext,
   isMcpToolAllowed,
   isUserToken,
@@ -363,6 +366,15 @@ export interface McpAuthContext {
   runId?: number;
 }
 
+export interface McpProxyRequestContext {
+  /**
+   * The tool the calling client is about to invoke, when it said so via
+   * MCP_TOOL_INTENT_HEADER. Lets a proxy authorize `initialize` and
+   * `tools/list` under the credential the eventual call will need.
+   */
+  intent: McpToolIntent | null;
+}
+
 interface McpProxyConfig {
   name: string;
   /** Static upstream URL; omit when resolveCredentials returns one. */
@@ -371,6 +383,7 @@ interface McpProxyConfig {
     auth: McpAuthContext,
     routeParams: Record<string, string>,
     request: unknown,
+    context: McpProxyRequestContext,
   ) => Promise<ResolvedCredentials>;
   allowAuthTokens?: boolean;
   validateTaskRunToken?: (auth: RunTokenContext) => Promise<Response | null>;
@@ -915,7 +928,9 @@ export function createMcpProxy(config: McpProxyConfig) {
     let credentials: ResolvedCredentials;
 
     try {
-      credentials = await resolveCredentials(auth, c.req.param(), parsedBody);
+      credentials = await resolveCredentials(auth, c.req.param(), parsedBody, {
+        intent: decodeMcpToolIntent(c.req.header(MCP_TOOL_INTENT_HEADER)),
+      });
     } catch (error) {
       console.warn(
         formatSingleLineLog(`${logPrefix} Failed to resolve credentials`, {

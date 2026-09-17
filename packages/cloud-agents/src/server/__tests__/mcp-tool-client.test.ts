@@ -5,7 +5,11 @@ import {
   McpError,
   type CallToolResult,
 } from '@modelcontextprotocol/sdk/types.js';
-import { formatErrorForLog } from '@roomote/types';
+import {
+  decodeMcpToolIntent,
+  formatErrorForLog,
+  MCP_TOOL_INTENT_HEADER,
+} from '@roomote/types';
 import {
   callMcpTool,
   extractMcpToolResultPayload,
@@ -215,6 +219,66 @@ describe('callMcpTool with the real AI SDK and local MCP server', () => {
       ).resolves.toBeNull();
       expect(call).not.toHaveBeenCalled();
       expect(close).toHaveBeenCalledOnce();
+    } finally {
+      await endpoint.close();
+    }
+  });
+});
+
+describe('MCP tool intent', () => {
+  it('announces the tool on every request of a call, with only scoping arguments', async () => {
+    const seen: { method: string; intent: string | undefined }[] = [];
+    const endpoint = await startMcpToolTestServer(() => ({ content: [] }), {
+      onRequest: (request) => {
+        const header = request.headers[MCP_TOOL_INTENT_HEADER];
+        seen.push({
+          method: request.method ?? '',
+          intent: Array.isArray(header) ? header[0] : header,
+        });
+      },
+    });
+    try {
+      await callMcpTool({
+        url: endpoint.url,
+        toolName: 'integration_request',
+        args: {
+          owner: 'acme',
+          repo: 'api',
+          query: 'repo:acme/api is:open',
+          content: 'a large payload that must never ride on a header',
+          public: false,
+        },
+      });
+      const posts = seen.filter((entry) => entry.method === 'POST');
+      // initialize, the initialized notification, tools/list, tools/call.
+      expect(posts.length).toBeGreaterThanOrEqual(3);
+      for (const post of posts) {
+        expect(decodeMcpToolIntent(post.intent)).toEqual({
+          name: 'integration_request',
+          arguments: {
+            owner: 'acme',
+            repo: 'api',
+            query: 'repo:acme/api is:open',
+          },
+        });
+      }
+    } finally {
+      await endpoint.close();
+    }
+  });
+
+  it('sends no intent for plain discovery', async () => {
+    const seen: (string | undefined)[] = [];
+    const endpoint = await startMcpToolTestServer(() => ({ content: [] }), {
+      onRequest: (request) => {
+        const header = request.headers[MCP_TOOL_INTENT_HEADER];
+        seen.push(Array.isArray(header) ? header[0] : header);
+      },
+    });
+    try {
+      await listMcpTools({ url: endpoint.url });
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((value) => value === undefined)).toBe(true);
     } finally {
       await endpoint.close();
     }

@@ -210,7 +210,7 @@ export function createGithubMcp(options?: {
     upstream: Env.GITHUB_MCP_SERVER_URL ?? DEFAULT_GITHUB_MCP_URL,
     allowAuthTokens: options?.allowAuthTokens,
     allowedToolNames,
-    resolveCredentials: async (auth, _params, request) => {
+    resolveCredentials: async (auth, _params, request, context) => {
       if (Array.isArray(request))
         throw new McpProxyError(
           400,
@@ -219,16 +219,31 @@ export function createGithubMcp(options?: {
       const rpc = request as
         | { method?: string; params?: { name?: string; arguments?: unknown } }
         | undefined;
-      const name = rpc?.method === 'tools/call' ? rpc.params?.name : undefined;
+      const isCall = rpc?.method === 'tools/call';
       if (
-        rpc?.method === 'tools/call' &&
-        (typeof name !== 'string' || !allowedToolNames.includes(name))
+        isCall &&
+        (typeof rpc?.params?.name !== 'string' ||
+          !allowedToolNames.includes(rpc.params.name))
       ) {
         throw new McpProxyError(
           403,
           'GitHub MCP tool is not allowed on this endpoint',
         );
       }
+      // GitHub binds an MCP session to the credential that opened it, and
+      // the credential here depends on the tool. A client that announces
+      // the tool it is about to call gets its handshake authorized under
+      // that same credential; a bare handshake keeps the generic read path.
+      const announced =
+        !isCall &&
+        context.intent &&
+        allowedToolNames.includes(context.intent.name)
+          ? context.intent
+          : null;
+      const name = isCall ? rpc?.params?.name : announced?.name;
+      const toolArguments = isCall
+        ? rpc?.params?.arguments
+        : announced?.arguments;
       let userId: string | undefined;
       if (auth.tokenType === 'auth') {
         userId = await resolveActingUserId(auth);
@@ -251,7 +266,7 @@ export function createGithubMcp(options?: {
             'GitHub MCP writes require a user-scoped auth token',
           );
         }
-        const parsed = repositoryArgs.safeParse(rpc?.params?.arguments);
+        const parsed = repositoryArgs.safeParse(toolArguments);
         if (!parsed.success)
           throw new McpProxyError(
             400,
@@ -270,33 +285,34 @@ export function createGithubMcp(options?: {
           },
           appCredentials,
         );
-        const originalArgs = rpc?.params?.arguments as Record<string, unknown>;
+        const originalArgs = (toolArguments ?? {}) as Record<string, unknown>;
         const targetNumber =
           originalArgs.pullNumber ?? originalArgs.issue_number;
-        console.info(
-          JSON.stringify({
-            event: 'github_mcp_write_authorized',
-            userId,
-            runId: auth.runId,
-            tool: name,
-            repositoryId: repository.id,
-            repositoryFullName: repository.fullName,
-            installationId: installation.installationId,
-            targetNumber:
-              typeof targetNumber === 'number' ? targetNumber : undefined,
-            commentId:
-              typeof originalArgs.commentId === 'number'
-                ? originalArgs.commentId
-                : undefined,
-          }),
-        );
+        if (isCall)
+          console.info(
+            JSON.stringify({
+              event: 'github_mcp_write_authorized',
+              userId,
+              runId: auth.runId,
+              tool: name,
+              repositoryId: repository.id,
+              repositoryFullName: repository.fullName,
+              installationId: installation.installationId,
+              targetNumber:
+                typeof targetNumber === 'number' ? targetNumber : undefined,
+              commentId:
+                typeof originalArgs.commentId === 'number'
+                  ? originalArgs.commentId
+                  : undefined,
+            }),
+          );
         return {
           authHeader: token,
           extraHeaders: buildRouterGitHubHeaders(false),
         };
       }
       if (name && accountWriteToolNames.includes(name)) {
-        if (!gistArgs.safeParse(rpc?.params?.arguments).success) {
+        if (isCall && !gistArgs.safeParse(toolArguments).success) {
           throw new McpProxyError(
             400,
             'GitHub gist creation requires filename, content, and an explicit public boolean. Use false for a secret gist, which is link-accessible rather than private.',
@@ -332,14 +348,15 @@ export function createGithubMcp(options?: {
             'Link your GitHub account under Settings > Linked Accounts before creating a gist.',
           );
         }
-        console.info(
-          JSON.stringify({
-            event: 'github_mcp_account_write_authorized',
-            userId,
-            runId: auth.runId,
-            tool: name,
-          }),
-        );
+        if (isCall)
+          console.info(
+            JSON.stringify({
+              event: 'github_mcp_account_write_authorized',
+              userId,
+              runId: auth.runId,
+              tool: name,
+            }),
+          );
         return {
           authHeader: token,
           extraHeaders: buildRouterGitHubHeaders(false),
@@ -347,9 +364,7 @@ export function createGithubMcp(options?: {
       }
       // Unconnected targets use a single connected repository's credential;
       // GitHub denies private repositories outside that token's scope.
-      const target = name
-        ? getReadTarget(name, rpc?.params?.arguments)
-        : undefined;
+      const target = name ? getReadTarget(name, toolArguments) : undefined;
       const fullName = target ? `${target.owner}/${target.repo}` : undefined;
       const credentials = await resolveRuntimeGitHubAppCredentials();
       let connected = await findRepository(credentials, fullName);

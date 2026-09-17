@@ -1,4 +1,6 @@
 import {
+  decodeMcpToolIntent,
+  encodeMcpToolIntent,
   buildInferenceGatewayOpenCodeBaseUrl,
   buildInferenceGatewayUrl,
   CHATGPT_GATEWAY_PROVIDER_ID,
@@ -334,5 +336,40 @@ describe('inference gateway key lookups', () => {
     ).toEqual(['ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY']);
     expect(parseInferenceGatewayKeys('')).toEqual([]);
     expect(parseInferenceGatewayKeys(undefined)).toEqual([]);
+  });
+});
+
+describe('MCP tool intent header', () => {
+  it('round-trips the tool name with only credential-scoping arguments', () => {
+    const encoded = encodeMcpToolIntent({
+      name: 'create_gist',
+      arguments: {
+        filename: 'x.md',
+        content: 'y'.repeat(10_000),
+        public: false,
+        owner: 'acme',
+      },
+    });
+    expect(encoded).not.toBeNull();
+    expect(encoded!.length).toBeLessThan(200);
+    expect(decodeMcpToolIntent(encoded)).toEqual({
+      name: 'create_gist',
+      arguments: { owner: 'acme' },
+    });
+  });
+
+  it('treats anything malformed as no hint', () => {
+    expect(decodeMcpToolIntent(undefined)).toBeNull();
+    expect(decodeMcpToolIntent('not-base64-json')).toBeNull();
+    expect(
+      decodeMcpToolIntent(Buffer.from('{"name":7}').toString('base64url')),
+    ).toBeNull();
+    expect(
+      decodeMcpToolIntent(
+        Buffer.from('{"name":"x","arguments":{"owner":1}}').toString(
+          'base64url',
+        ),
+      ),
+    ).toEqual({ name: 'x' });
   });
 });

@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -12,7 +12,11 @@ import {
 /** A real local MCP endpoint, shared by client and broker regression tests. */
 export async function startMcpToolTestServer(
   call: (request: CallToolRequest) => CallToolResult,
-  options: { httpFailure?: boolean } = {},
+  options: {
+    httpFailure?: boolean;
+    /** Observes every HTTP request before the MCP transport handles it. */
+    onRequest?: (request: IncomingMessage) => void;
+  } = {},
 ) {
   const mcp = new Server(
     { name: 'mcp-tool-client-test', version: '1.0.0' },
@@ -30,6 +34,7 @@ export async function startMcpToolTestServer(
   });
   await mcp.connect(transport);
   const server = createServer(async (request, response) => {
+    options.onRequest?.(request);
     if (options.httpFailure) {
       response.writeHead(503).end('Service unavailable (503)');
       return;

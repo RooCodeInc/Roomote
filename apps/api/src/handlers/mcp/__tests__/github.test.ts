@@ -35,6 +35,8 @@ vi.mock('../../long-lived-fetch', () => ({
   fetchWithLongLivedStreamDispatcher: mocks.upstream,
 }));
 
+import { encodeMcpToolIntent, MCP_TOOL_INTENT_HEADER } from '@roomote/types';
+
 import { createGithubMcp } from '../github';
 
 describe('GitHub MCP bounded writes', () => {
@@ -174,7 +176,11 @@ describe('GitHub MCP bounded writes', () => {
     return hono;
   }
 
-  function post(body: unknown, target = app()) {
+  function post(
+    body: unknown,
+    target = app(),
+    extraHeaders: Record<string, string> = {},
+  ) {
     return target.request('/github', {
       method: 'POST',
       headers: {
@@ -182,9 +188,30 @@ describe('GitHub MCP bounded writes', () => {
         authorization: 'Bearer caller-secret',
         cookie: 'secret-cookie',
         'x-github-token': 'secret-token',
+        ...extraHeaders,
       },
       body: JSON.stringify(body),
     });
+  }
+
+  const initialize = {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'test', version: '1' },
+    },
+  };
+
+  function withIntent(name: string, arguments_?: Record<string, unknown>) {
+    return {
+      [MCP_TOOL_INTENT_HEADER]: encodeMcpToolIntent({
+        name,
+        arguments: arguments_,
+      })!,
+    };
   }
 
   function call(
@@ -353,6 +380,87 @@ describe('GitHub MCP bounded writes', () => {
     } finally {
       await db.delete(users).where(eq(users.id, other.id));
     }
+  });
+
+  it('opens the session under the user token when the client announces a gist', async () => {
+    // GitHub binds the session to the credential that opened it. The
+    // handshake for a gist call must use the same linked-account token the
+    // call will, or the call comes back "invalid session".
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    mocks.userToken.mockResolvedValue('private-actor-token');
+    try {
+      const response = await post(initialize, app(), withIntent('create_gist'));
+      expect(response.status).toBe(200);
+      expect(mocks.mint).not.toHaveBeenCalled();
+      const init = mocks.upstream.mock.calls[0]![1] as RequestInit;
+      expect(new Headers(init.headers).get('authorization')).toBe(
+        'Bearer private-actor-token',
+      );
+      expect(new Headers(init.headers).get('X-MCP-Readonly')).toBe('false');
+      // The audit line belongs to the call, not to the handshake.
+      expect(log).not.toHaveBeenCalledWith(
+        expect.stringContaining('github_mcp_account_write_authorized'),
+      );
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('scopes the handshake credential to the repository an announced read targets', async () => {
+    // A connected repository of its own, so the assertion cannot be met by
+    // the deterministic default the bare handshake would have picked.
+    const targetOwner = `intent-${crypto.randomUUID()}`;
+    const targetInstallation = await githubInstallationFactory.create({
+      installedByUserId: installer.id,
+      appId: 123,
+    });
+    const targetRepository = await repositoryFactory.create({
+      installationId: targetInstallation.id,
+      linkedByUserId: installer.id,
+      fullName: `${targetOwner}/target`,
+    });
+    try {
+      const response = await post(
+        { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+        app(),
+        withIntent('search_pull_requests', {
+          query: `repo:${targetOwner}/target is:pr is:open`,
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+        {
+          type: 'installationId',
+          installationId: targetInstallation.id,
+          repositoryIds: [targetRepository.githubRepoId],
+        },
+        appCredentials,
+      );
+    } finally {
+      await db
+        .delete(repositories)
+        .where(eq(repositories.id, targetRepository.id));
+      await db
+        .delete(githubInstallations)
+        .where(eq(githubInstallations.id, targetInstallation.id));
+    }
+  });
+
+  it('ignores an announced tool that is not allowed and keeps the generic handshake', async () => {
+    mocks.userToken.mockResolvedValue('private-actor-token');
+    const response = await post(
+      initialize,
+      app(),
+      withIntent('delete_repository', { owner, repo: 'second' }),
+    );
+    expect(response.status).toBe(200);
+    // Generic read path: an installation token, never the user's.
+    expect(mocks.mint).toHaveBeenCalledOnce();
+    expect(mocks.userToken).not.toHaveBeenCalled();
+    const init = mocks.upstream.mock.calls[0]![1] as RequestInit;
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer scoped-test-token',
+    );
   });
 
   it('audits gist authorization without logging content, filenames, or credentials', async () => {

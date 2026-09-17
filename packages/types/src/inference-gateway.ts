@@ -68,6 +68,82 @@ export const CHATGPT_CODEX_UPSTREAM_PATH = '/backend-api/codex/responses';
 export const CHATGPT_ACCOUNT_ID_HEADER = 'ChatGPT-Account-Id';
 
 /**
+ * Tells a Roomote MCP proxy which tool a short-lived client is about to
+ * call, on every request of that client's lifecycle. Some upstreams bind
+ * the MCP session to the credential that opened it, and the proxy chooses
+ * credentials per tool; without the hint, `initialize` and `tools/list` are
+ * authorized as generic reads and the eventual `tools/call` arrives on a
+ * session opened by a different identity, which GitHub rejects as an
+ * invalid session. Base64url JSON of {@link McpToolIntent}.
+ */
+export const MCP_TOOL_INTENT_HEADER = 'x-roomote-mcp-tool-intent';
+
+export type McpToolIntent = {
+  name: string;
+  /** Only the arguments that steer credential choice, never full payloads. */
+  arguments?: Record<string, unknown>;
+};
+
+/** Argument keys that can change which credential a proxy picks. */
+export const MCP_TOOL_INTENT_ARGUMENT_KEYS = [
+  'owner',
+  'repo',
+  'query',
+] as const;
+
+const MCP_TOOL_INTENT_MAX_BYTES = 4_096;
+
+export function encodeMcpToolIntent(input: {
+  name: string;
+  arguments?: Record<string, unknown> | undefined;
+}): string | null {
+  const scoped: Record<string, unknown> = {};
+  for (const key of MCP_TOOL_INTENT_ARGUMENT_KEYS) {
+    const value = input.arguments?.[key];
+    if (typeof value === 'string' && value.length <= 512) scoped[key] = value;
+  }
+  const intent: McpToolIntent = {
+    name: input.name,
+    ...(Object.keys(scoped).length > 0 ? { arguments: scoped } : {}),
+  };
+  const encoded = Buffer.from(JSON.stringify(intent), 'utf8').toString(
+    'base64url',
+  );
+  return encoded.length <= MCP_TOOL_INTENT_MAX_BYTES ? encoded : null;
+}
+
+/** Null for anything malformed; a hint is advisory, never an error. */
+export function decodeMcpToolIntent(
+  header: string | null | undefined,
+): McpToolIntent | null {
+  if (!header || header.length > MCP_TOOL_INTENT_MAX_BYTES) return null;
+  try {
+    const parsed: unknown = JSON.parse(
+      Buffer.from(header, 'base64url').toString('utf8'),
+    );
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      typeof (parsed as { name?: unknown }).name !== 'string'
+    )
+      return null;
+    const rawArguments = (parsed as { arguments?: unknown }).arguments;
+    const scoped: Record<string, unknown> = {};
+    if (rawArguments && typeof rawArguments === 'object')
+      for (const key of MCP_TOOL_INTENT_ARGUMENT_KEYS) {
+        const value = (rawArguments as Record<string, unknown>)[key];
+        if (typeof value === 'string') scoped[key] = value;
+      }
+    return {
+      name: (parsed as { name: string }).name,
+      ...(Object.keys(scoped).length > 0 ? { arguments: scoped } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Sandbox-facing marker set at dequeue when the gateway is serving a
  * connected ChatGPT subscription: the worker rebases the OpenCode `openai`
  * provider onto the gateway instead of materializing `OPENCODE_AUTH_CONTENT`,

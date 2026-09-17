@@ -6,7 +6,11 @@
  * closes the transport.
  */
 
-import { parseMcpToolResult } from '@roomote/types';
+import {
+  encodeMcpToolIntent,
+  MCP_TOOL_INTENT_HEADER,
+  parseMcpToolResult,
+} from '@roomote/types';
 
 export class McpToolCallError extends Error {
   readonly upstreamText!: string | null;
@@ -108,7 +112,19 @@ export async function callMcpTool(options: {
   toolCallId?: string;
   signal?: AbortSignal;
 }): Promise<unknown | null> {
-  const client = await createCancellableMcpClient(options);
+  // The whole handshake announces the tool it exists for, so a proxy that
+  // picks credentials per tool can open the session under the right one.
+  const intent = encodeMcpToolIntent({
+    name: options.toolName,
+    arguments: options.args,
+  });
+  const client = await createCancellableMcpClient({
+    ...options,
+    headers: {
+      ...options.headers,
+      ...(intent ? { [MCP_TOOL_INTENT_HEADER]: intent } : {}),
+    },
+  });
 
   try {
     const definitions = await client.listTools({
