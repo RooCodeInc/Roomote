@@ -528,6 +528,10 @@ import {
   getReleaseStatusCommand,
   getReleaseHistoryCommand,
 } from '../commands/product-releases';
+import {
+  getPlatformIssueReportCommand,
+  submitPlatformIssueReportCommand,
+} from '../commands/platform-issue-reports';
 import { getStatuspageIncident } from '@roomote/slack';
 
 const stateRecordSchema = z.record(z.string());
@@ -1163,6 +1167,19 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setTaskPinnedCommand(auth, input),
+      ),
+  }),
+
+  platformIssueReports: createRouter({
+    byId: protectedProcedure
+      .input(z.object({ reportId: z.string().uuid() }))
+      .query(({ ctx: { auth }, input }) =>
+        getPlatformIssueReportCommand(auth, input.reportId),
+      ),
+    submit: protectedProcedure
+      .input(z.object({ reportId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        submitPlatformIssueReportCommand(auth, input.reportId),
       ),
   }),
 

@@ -164,6 +164,7 @@ export function buildAutomationSettingsMessage(
     taskUrl?: string | null;
     slackIcon?: string;
     contentBlocks?: SlackBlock[];
+    additionalActions?: Record<string, unknown>[];
   },
 ): SlackAutomationSettingsMessage {
   const trimmedText = text.trim();
@@ -184,6 +185,7 @@ export function buildAutomationSettingsMessage(
       ),
       configureUrl: buildManagerSlackSettingsUrl(hash),
       taskUrl: options?.taskUrl,
+      additionalActions: options?.additionalActions,
       contentBlocks: options?.contentBlocks ?? [
         {
           type: 'section',
