@@ -5,7 +5,6 @@ import {
   deploymentSettings,
   eq,
   releaseAnnouncementDeliveries,
-  automations,
   upsertAutomation,
 } from '@roomote/db/server';
 
@@ -58,9 +57,22 @@ beforeEach(async () => {
     messageId: 'message-1',
   });
   await db.delete(releaseAnnouncementDeliveries);
-  await db
-    .delete(automations)
-    .where(eq(automations.key, 'release_announcements'));
+  await upsertAutomation(db, {
+    key: 'release_announcements',
+    enabled: true,
+    settings: { optedOut: false },
+    targets: [],
+    managedTargetKinds: [
+      'slack_channel',
+      'slack_user',
+      'teams_channel',
+      'teams_user',
+      'telegram_chat',
+      'telegram_user',
+      'discord_channel',
+      'discord_user',
+    ],
+  });
   await db
     .insert(deploymentSettings)
     .values({
@@ -91,7 +103,7 @@ describe('installed release transitions', () => {
     ).toHaveLength(0);
   });
 
-  it('queues one delivery for a newer release under concurrent recorders', async () => {
+  it('inherits the standard Manager Channel destination and deduplicates concurrent recorders', async () => {
     await recordInstalledRelease('1.0.0');
     await db
       .update(deploymentSettings)
@@ -225,5 +237,22 @@ describe('release announcement delivery', () => {
       drainReleaseAnnouncementDeliveries({ changelogMarkdown: changelog }),
     ).resolves.toEqual({ delivered: 0, failed: 0 });
     expect(mocks.postMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('delivers through a provider-neutral Telegram destination', async () => {
+    await db.insert(releaseAnnouncementDeliveries).values({
+      previousVersion: '1.0.0',
+      installedVersion: '1.2.0',
+      provider: 'telegram',
+      destinationKey: 'telegram:release-chat',
+      channelId: 'release-chat',
+    });
+
+    await expect(
+      drainReleaseAnnouncementDeliveries({ changelogMarkdown: changelog }),
+    ).resolves.toEqual({ delivered: 1, failed: 0 });
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channelId: 'release-chat' }),
+    );
   });
 });

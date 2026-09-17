@@ -121,6 +121,11 @@ export type FormState = {
   announcerInstructions: string;
   platformIssueAlertsEnabled: boolean;
   releaseAnnouncementsEnabled?: boolean;
+  releaseAnnouncementsTargetProvider:
+    | 'none'
+    | AutomationCapableCommunicationProvider;
+  releaseAnnouncementsTargetMode: 'channel' | 'direct_message';
+  releaseAnnouncementsTargetChannelId: string;
   mergeAnnouncerTargetProvider: 'none' | AutomationCapableCommunicationProvider;
   mergeAnnouncerTargetMode: 'channel' | 'direct_message';
   mergeAnnouncerTargetChannelId: string;
@@ -233,7 +238,9 @@ const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> = [
 
 const RELEASE_ANNOUNCEMENT_FIELDS: Array<keyof FormState> = [
   'releaseAnnouncementsEnabled',
-  ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.releaseAnnouncements,
+  'releaseAnnouncementsTargetProvider',
+  'releaseAnnouncementsTargetMode',
+  'releaseAnnouncementsTargetChannelId',
 ];
 
 const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
@@ -452,6 +459,13 @@ export function buildAutomationSettingsSaveInput(
     platformIssueAlertsEnabled: stateToSave.platformIssueAlertsEnabled,
     releaseAnnouncementsEnabled:
       stateToSave.releaseAnnouncementsEnabled ?? true,
+    releaseAnnouncementsTargetProvider:
+      stateToSave.releaseAnnouncementsTargetProvider === 'none'
+        ? null
+        : stateToSave.releaseAnnouncementsTargetProvider,
+    releaseAnnouncementsTargetMode: stateToSave.releaseAnnouncementsTargetMode,
+    releaseAnnouncementsTargetChannelId:
+      stateToSave.releaseAnnouncementsTargetChannelId.trim() || null,
     ...buildDestinationChannelSaveInput(stateToSave),
   };
 }

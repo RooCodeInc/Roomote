@@ -966,6 +966,8 @@ export function normalizeBackgroundAgentSettings(
   const platformIssueAlerts = automationMap.get('platform_issue_alerts');
   const releaseAnnouncements = automationMap.get('release_announcements');
   const mergeAnnouncerTarget = getAutomationCommunicationTarget(mergeAnnouncer);
+  const releaseAnnouncementsTarget =
+    getAutomationCommunicationTarget(releaseAnnouncements);
 
   const managerSlackChannelId = row?.managerSlackChannelId ?? null;
   const managerDiscordChannelId = row?.managerDiscordChannelId ?? null;
@@ -1038,6 +1040,20 @@ export function normalizeBackgroundAgentSettings(
       getAutomationSettingBoolean(platformIssueAlerts, 'optedOut') !== true,
     releaseAnnouncementsEnabled:
       getAutomationSettingBoolean(releaseAnnouncements, 'optedOut') !== true,
+    releaseAnnouncementsTargetProvider:
+      releaseAnnouncementsTarget?.provider === 'sentry'
+        ? null
+        : (releaseAnnouncementsTarget?.provider ?? null),
+    releaseAnnouncementsTargetMode: releaseAnnouncementsTarget
+      ? releaseAnnouncementsTarget.targetKind.endsWith('_user')
+        ? 'direct_message'
+        : 'channel'
+      : null,
+    releaseAnnouncementsTargetChannelId:
+      releaseAnnouncementsTarget &&
+      !releaseAnnouncementsTarget.targetKind.endsWith('_user')
+        ? releaseAnnouncementsTarget.externalRef
+        : null,
 
     callRoomoteViaEmojiEnabled:
       callRoomoteViaEmoji?.enabled === true &&

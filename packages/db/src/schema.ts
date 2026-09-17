@@ -332,7 +332,9 @@ export const releaseAnnouncementDeliveries = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     previousVersion: text('previous_version').notNull(),
     installedVersion: text('installed_version').notNull(),
-    provider: text('provider').$type<'slack' | 'discord'>().notNull(),
+    provider: text('provider')
+      .$type<'slack' | 'teams' | 'telegram' | 'discord'>()
+      .notNull(),
     destinationKey: text('destination_key').notNull(),
     channelId: text('channel_id').notNull(),
     status: text('status')
@@ -364,7 +366,7 @@ export const releaseAnnouncementDeliveries = pgTable(
     ),
     check(
       'release_announcement_deliveries_provider_check',
-      sql`${table.provider} in ('slack', 'discord')`,
+      sql`${table.provider} in ('slack', 'teams', 'telegram', 'discord')`,
     ),
   ],
 );

@@ -9,13 +9,13 @@ import {
   eq,
   findActiveSlackInstallationForChannel,
   getBackgroundAgentSettings,
+  getAutomationRuntime,
   isNull,
   lte,
   lt,
   or,
   releaseAnnouncementDeliveries,
   recordAutomationRunOutcome,
-  resolveAutomationDestination,
   sql,
 } from '@roomote/db/server';
 import {
@@ -27,6 +27,11 @@ import {
 } from '@roomote/types';
 
 import { getCommunicationProviderAdapter } from './communication-providers';
+import {
+  findTeamsConversationServiceUrl,
+  listConnectedCommunicationProviders,
+  resolveAutomationRuntimeDestination,
+} from '../automations/destination';
 
 const DEPLOYMENT_ID = 'default';
 const DELIVERY_LEASE_MS = 2 * 60 * 1_000;
@@ -117,6 +122,17 @@ export async function recordInstalledRelease(
   if (!installedVersion || !isParsableProductVersion(installedVersion)) {
     return 'invalid_version';
   }
+  const runtime = await getAutomationRuntime('release_announcements');
+  const enabled = runtime.enabled && runtime.settings.optedOut !== true;
+  const connectedProviders = enabled
+    ? await listConnectedCommunicationProviders()
+    : [];
+  const destination = enabled
+    ? await resolveAutomationRuntimeDestination({
+        runtime,
+        slackConnected: connectedProviders.includes('slack'),
+      })
+    : null;
 
   return db.transaction(async (tx) => {
     await tx.execute(
@@ -131,13 +147,7 @@ export async function recordInstalledRelease(
       where: eq(deploymentSettings.id, DEPLOYMENT_ID),
       columns: {
         installedReleaseVersion: true,
-        managerSlackChannelId: true,
-        managerDiscordChannelId: true,
       },
-    });
-    const releaseAutomation = await tx.query.automations.findFirst({
-      where: (automations, { eq }) =>
-        eq(automations.key, 'release_announcements'),
     });
     const previousVersion = normalizeProductVersion(
       settings?.installedReleaseVersion,
@@ -171,21 +181,10 @@ export async function recordInstalledRelease(
       })
       .where(eq(deploymentSettings.id, DEPLOYMENT_ID));
     if (comparison < 0) return 'rollback_baselined';
-    if (releaseAutomation?.settings?.optedOut === true) {
+    if (!enabled) {
       return 'announcement_disabled';
     }
-
-    const destination = resolveAutomationDestination(
-      releaseAutomation,
-      settings?.managerSlackChannelId ?? null,
-      settings?.managerDiscordChannelId ?? null,
-    );
-    if (
-      !destination ||
-      (destination.provider !== 'slack' && destination.provider !== 'discord')
-    ) {
-      return 'no_destination';
-    }
+    if (!destination) return 'no_destination';
 
     await tx
       .insert(releaseAnnouncementDeliveries)
@@ -276,11 +275,19 @@ export async function drainReleaseAnnouncementDeliveries(
       if (!adapter) {
         throw new Error(`No active ${claim.row.provider} connection`);
       }
+      const serviceUrl =
+        claim.row.provider === 'teams'
+          ? await findTeamsConversationServiceUrl(claim.row.channelId)
+          : null;
+      if (claim.row.provider === 'teams' && !serviceUrl) {
+        throw new Error('No Teams service URL for destination');
+      }
       const result = await adapter.postMessage({
         channelId: claim.row.channelId,
         text,
         textFormat: 'markdown',
         idempotencyKey: `release:${claim.row.installedVersion}:${claim.row.destinationKey}`,
+        ...(serviceUrl ? { serviceUrl } : {}),
         ...(claim.row.provider === 'slack'
           ? { blocks: [{ type: 'markdown', text }] }
           : {}),

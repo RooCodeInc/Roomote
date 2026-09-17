@@ -429,7 +429,10 @@ import {
   triggerAutomationCommand,
   updateCustomAutomationCommand,
 } from '../commands/automations';
-import { mergeAnnouncerDestinationInputShape } from '../commands/automations/settings-schema';
+import {
+  mergeAnnouncerDestinationInputShape,
+  releaseAnnouncementsDestinationInputShape,
+} from '../commands/automations/settings-schema';
 import {
   actOnResultCommand,
   clearResultsCommand,
@@ -779,6 +782,7 @@ const automationsRouter = createRouter({
           .optional(),
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
         ...mergeAnnouncerDestinationInputShape,
+        ...releaseAnnouncementsDestinationInputShape,
         issueFixerInstructions: z.string().max(8_000).nullable().optional(),
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
@@ -822,20 +826,6 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         releaseAnnouncementsEnabled: z.boolean().optional(),
-        releaseAnnouncementsSlackChannel: z
-          .string()
-          .trim()
-          .min(1)
-          .max(160)
-          .nullable()
-          .optional(),
-        releaseAnnouncementsDiscordChannel: z
-          .string()
-          .trim()
-          .min(1)
-          .max(160)
-          .nullable()
-          .optional(),
         securityAuditorSlackChannel: z
           .string()
           .trim()

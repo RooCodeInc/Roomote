@@ -45,7 +45,6 @@ export type BackgroundAgentFieldErrorKey =
   | 'suggesterSlackChannel'
   | 'announcerSlackChannel'
   | 'platformIssueSlackChannel'
-  | 'releaseAnnouncementsSlackChannel'
   | 'sentryTriageSlackChannel'
   | 'dependabotTriageSlackChannel'
   | 'codeqlTriageSlackChannel'
@@ -63,7 +62,6 @@ export type BackgroundAgentFieldErrorKey =
   | 'suggesterDiscordChannel'
   | 'announcerDiscordChannel'
   | 'platformIssueDiscordChannel'
-  | 'releaseAnnouncementsDiscordChannel'
   | 'suggesterUseTelegram'
   | 'suggesterUseTeams'
   | 'sentryTriageProjectSlugs'
@@ -85,7 +83,6 @@ export type SlackChannelFieldErrorKey = Extract<
   | 'suggesterSlackChannel'
   | 'announcerSlackChannel'
   | 'platformIssueSlackChannel'
-  | 'releaseAnnouncementsSlackChannel'
   | 'sentryTriageSlackChannel'
   | 'dependabotTriageSlackChannel'
   | 'codeqlTriageSlackChannel'
@@ -108,7 +105,6 @@ export type DiscordChannelFieldErrorKey = Extract<
   | 'suggesterDiscordChannel'
   | 'announcerDiscordChannel'
   | 'platformIssueDiscordChannel'
-  | 'releaseAnnouncementsDiscordChannel'
 >;
 
 /** A Discord channel the automations destination picker can target. */
@@ -128,7 +124,6 @@ export interface SlackChannelAccessWarnings {
   suggesterSlackChannel: string | null;
   announcerSlackChannel: string | null;
   platformIssueSlackChannel: string | null;
-  releaseAnnouncementsSlackChannel: string | null;
   sentryTriageSlackChannel: string | null;
   dependabotTriageSlackChannel: string | null;
   codeqlTriageSlackChannel: string | null;
@@ -145,7 +140,6 @@ export interface SlackChannelDisplayNames {
   suggesterSlackChannel: string | null;
   announcerSlackChannel: string | null;
   platformIssueSlackChannel: string | null;
-  releaseAnnouncementsSlackChannel: string | null;
   sentryTriageSlackChannel: string | null;
   dependabotTriageSlackChannel: string | null;
   codeqlTriageSlackChannel: string | null;
@@ -331,8 +325,9 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   platformIssueSlackChannel: string | null;
   platformIssueDiscordChannel?: string | null;
   releaseAnnouncementsEnabled?: boolean;
-  releaseAnnouncementsSlackChannel?: string | null;
-  releaseAnnouncementsDiscordChannel?: string | null;
+  releaseAnnouncementsTargetProvider?: AutomationCapableCommunicationProvider | null;
+  releaseAnnouncementsTargetMode?: 'channel' | 'direct_message';
+  releaseAnnouncementsTargetChannelId?: string | null;
   securityAuditorSlackChannel?: string | null;
   securityAuditorDiscordChannel?: string | null;
   codeQualityAuditorSlackChannel?: string | null;

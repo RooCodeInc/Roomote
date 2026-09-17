@@ -8,7 +8,7 @@ import {
 
 describe('automation destination field registry', () => {
   it('keeps a stable one-of Slack/Discord descriptor for each destination automation', () => {
-    expect(AUTOMATION_DESTINATION_DESCRIPTORS).toHaveLength(12);
+    expect(AUTOMATION_DESTINATION_DESCRIPTORS).toHaveLength(11);
     expect(
       new Set(
         AUTOMATION_DESTINATION_DESCRIPTORS.map(
@@ -49,13 +49,6 @@ describe('automation destination field registry', () => {
     ).toMatchObject({
       automationId: 'codeQualityAuditor',
       automationKey: 'code_quality_auditor',
-    });
-    expect(
-      getAutomationDestinationDescriptorByKey('release_announcements'),
-    ).toMatchObject({
-      automationId: 'releaseAnnouncements',
-      optionalDiscordInput: true,
-      slackSettingsIncludesManagerFallback: false,
     });
     expect(isAutomationDestinationAutomationId('ciFailureTriage')).toBe(true);
     expect(isAutomationDestinationAutomationId('reviewer')).toBe(false);

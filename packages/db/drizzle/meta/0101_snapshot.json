@@ -9985,7 +9985,7 @@
         },
         "release_announcement_deliveries_provider_check": {
           "name": "release_announcement_deliveries_provider_check",
-          "value": "\"release_announcement_deliveries\".\"provider\" in ('slack', 'discord')"
+          "value": "\"release_announcement_deliveries\".\"provider\" in ('slack', 'teams', 'telegram', 'discord')"
         }
       },
       "isRLSEnabled": false

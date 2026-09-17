@@ -16,7 +16,7 @@ CREATE TABLE "release_announcement_deliveries" (
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "release_announcement_deliveries_status_check" CHECK ("release_announcement_deliveries"."status" in ('pending', 'delivered')),
-	CONSTRAINT "release_announcement_deliveries_provider_check" CHECK ("release_announcement_deliveries"."provider" in ('slack', 'discord'))
+	CONSTRAINT "release_announcement_deliveries_provider_check" CHECK ("release_announcement_deliveries"."provider" in ('slack', 'teams', 'telegram', 'discord'))
 );
 --> statement-breakpoint
 ALTER TABLE "deployment_settings" ADD COLUMN "installed_release_version" text;--> statement-breakpoint

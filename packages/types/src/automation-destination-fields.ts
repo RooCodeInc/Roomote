@@ -23,8 +23,7 @@ export type AutomationDestinationAutomationId =
   | 'ciFailureTriage'
   | 'suggester'
   | 'announcer'
-  | 'platformIssueAlerts'
-  | 'releaseAnnouncements';
+  | 'platformIssueAlerts';
 
 export type AutomationDestinationDescriptor = {
   automationId: AutomationDestinationAutomationId;
@@ -176,17 +175,6 @@ export const AUTOMATION_DESTINATION_DESCRIPTORS = [
     discordField: 'platformIssueDiscordChannel',
     slackSettingsKey: 'platformIssueSlackChannelId',
     discordSettingsKey: 'platformIssueDiscordChannelId',
-    slackSettingsIncludesManagerFallback: false,
-    optionalDiscordInput: true,
-    managedTargetKinds: ['slack_channel', 'discord_channel'],
-  },
-  {
-    automationId: 'releaseAnnouncements',
-    automationKey: 'release_announcements',
-    slackField: 'releaseAnnouncementsSlackChannel',
-    discordField: 'releaseAnnouncementsDiscordChannel',
-    slackSettingsKey: 'releaseAnnouncementsSlackChannelId',
-    discordSettingsKey: 'releaseAnnouncementsDiscordChannelId',
     slackSettingsIncludesManagerFallback: false,
     optionalDiscordInput: true,
     managedTargetKinds: ['slack_channel', 'discord_channel'],

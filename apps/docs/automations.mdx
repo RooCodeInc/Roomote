@@ -472,10 +472,11 @@ establishes a silent baseline, so enabling the feature or installing Roomote
 does not replay historical announcements. Restarts, retries of the same
 version, and rollbacks do not post. When an update skips releases, the message
 selects up to three authored highlights across the intervening changelog entries
-and links to the full notes for the installed release. Its own Slack or Discord
-destination wins, followed by the shared Manager Channel. Delivery failures
-remain pending for retry without reposting a destination already recorded as
-successful.
+and links to the full notes for the installed release. Leave its destination on
+**Default** to use the standard automation destination, or choose a Slack,
+Microsoft Teams, Telegram, or Discord channel or direct message. Delivery
+failures remain pending for retry without reposting a destination already
+recorded as successful.
 
 An alert's **Send to Roomote** action opens an admin-only confirmation page with
 the exact title, report details, and source task or Session link. Viewing the

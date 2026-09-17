@@ -173,8 +173,9 @@ function buildInput(
     platformIssueSlackChannel: null,
     platformIssueDiscordChannel: null,
     releaseAnnouncementsEnabled: true,
-    releaseAnnouncementsSlackChannel: null,
-    releaseAnnouncementsDiscordChannel: null,
+    releaseAnnouncementsTargetProvider: null,
+    releaseAnnouncementsTargetMode: 'channel',
+    releaseAnnouncementsTargetChannelId: null,
     ...overrides,
   };
 }
@@ -816,26 +817,25 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   }, 15_000);
 
   it('configures and disables installed release announcements as a built-in automation', async () => {
-    await insertAvailableDiscordChannel({
-      guildId: 'guild-1',
-      channelId: 'D-RELEASES',
-      channelName: 'releases',
-    });
+    await insertSlackInstallation();
 
     const result = await updateBackgroundAgentSettingsCommand(
       adminAuth,
       buildInput({
         savingAutomation: 'releaseAnnouncements',
         releaseAnnouncementsEnabled: false,
-        releaseAnnouncementsDiscordChannel: 'D-RELEASES',
+        releaseAnnouncementsTargetProvider: 'slack',
+        releaseAnnouncementsTargetMode: 'channel',
+        releaseAnnouncementsTargetChannelId: 'C-RELEASES',
       }),
     );
 
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.settings.releaseAnnouncementsEnabled).toBe(false);
-      expect(result.settings.releaseAnnouncementsDiscordChannelId).toBe(
-        'D-RELEASES',
+      expect(result.settings.releaseAnnouncementsTargetProvider).toBe('slack');
+      expect(result.settings.releaseAnnouncementsTargetChannelId).toBe(
+        'C-RELEASES',
       );
     }
     await expect(
@@ -847,9 +847,9 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       settings: { optedOut: true },
       targets: [
         {
-          provider: 'discord',
-          targetKind: 'discord_channel',
-          externalRef: 'D-RELEASES',
+          provider: 'slack',
+          targetKind: 'slack_channel',
+          externalRef: 'C-RELEASES',
         },
       ],
     });
