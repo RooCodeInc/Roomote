@@ -388,7 +388,7 @@ describe('tool presentation resolver', () => {
     ).toMatchObject({ verb: 'Failed to Start', object: 'coding task' });
   });
 
-  it('describes integration key tools in plain words', () => {
+  it('describes integration key tools and historical request calls in plain words', () => {
     expect(
       resolveToolPresentation(
         toolData({
