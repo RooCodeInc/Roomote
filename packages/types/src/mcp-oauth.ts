@@ -171,6 +171,20 @@ export interface McpConnectionElevenLabsConfig {
   voiceId: string;
 }
 
+/**
+ * Deployment-scoped TypeSafe connection config stored in
+ * mcpConnections.authConfig.
+ *
+ * Credential-only: the key for the optional judgment model (Jev), consumed by
+ * control-plane routing judgments. Excluded from agent MCP config delivery so
+ * the key never reaches a task sandbox. The API key is expected to be
+ * encrypted before persistence.
+ */
+export interface McpConnectionTypeSafeConfig {
+  type: 'typesafe';
+  encryptedApiKey: string;
+}
+
 export interface OpenAiRealtimeVoiceOption {
   id: string;
   label: string;
@@ -324,6 +338,7 @@ export type McpConnectionAuthConfig =
   | McpConnectionRipplingConfig
   | McpConnectionGranolaConfig
   | McpConnectionElevenLabsConfig
+  | McpConnectionTypeSafeConfig
   | McpConnectionVoiceConfig
   | McpConnectionVercelConfig
   | McpConnectionGrafanaConfig
@@ -771,6 +786,15 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     serverMode: 'credential_only',
   },
   {
+    id: 'typesafe',
+    name: 'TypeSafe',
+    description: `Add a TypeSafe key so ${PRODUCT_NAME} makes routing and triage decisions faster with the Jev judgment model`,
+    icon: 'typesafe',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'credential_only',
+  },
+  {
     id: 'voice',
     name: 'Voice',
     description: `Add an OpenAI key with GPT-Live access so your team can talk to ${PRODUCT_NAME} on a call`,
@@ -1191,6 +1215,20 @@ export function isMcpConnectionElevenLabsConfig(
     typeof authConfig.encryptedApiKey === 'string' &&
     'voiceId' in authConfig &&
     typeof authConfig.voiceId === 'string',
+  );
+}
+
+export function isMcpConnectionTypeSafeConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionTypeSafeConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'typesafe' &&
+    'encryptedApiKey' in authConfig &&
+    typeof authConfig.encryptedApiKey === 'string' &&
+    authConfig.encryptedApiKey.length > 0,
   );
 }
 
