@@ -6,7 +6,6 @@ import {
   waitFor,
 } from '@testing-library/react';
 
-import { ALL_REPOSITORIES } from '@roomote/types';
 import type { PromptInputMessage } from '@/components/ai-elements';
 import {
   clearPendingFastSessionLaunch,
@@ -208,7 +207,6 @@ vi.mock('./BottomSheetTabs', () => ({
 }));
 
 import { NewTaskForm } from '@/components/tasks/NewTaskForm';
-import { TaskLaunchConfigProvider } from '@/components/tasks/TaskLaunchConfig';
 import { Home } from './Home';
 
 vi.mock('@/components/tasks', async () => {
@@ -1027,60 +1025,20 @@ describe('Home', () => {
     expect(screen.getByText('Onboarding')).toBeInTheDocument();
   });
 
-  it('pins environmentId URL launches with deployment defaults', async () => {
-    currentSearchParams = 'environmentId=env-created';
-
-    render(
-      <TaskLaunchConfigProvider
-        value={{
-          defaultComputeProvider: 'modal',
-          availableComputeProviders: ['modal', 'docker'],
-        }}
-      >
-        <Home initialPlaceholderIndex={0} />
-      </TaskLaunchConfigProvider>,
-    );
-
-    expect(screen.getByTestId('selected-model-id')).toHaveTextContent(
-      'openrouter/openai/gpt-5.4',
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockStartFastSession).toHaveBeenCalledWith({
-        text: 'Test prompt',
-        images: undefined,
-        attachmentTexts: undefined,
-        model: 'openrouter/openai/gpt-5.4',
-        pinnedLaunch: {
-          launchId: expect.any(String),
-          repo: ALL_REPOSITORIES,
-          environmentId: 'env-created',
-          harness: 'opencode-server',
-          computeProvider: 'modal',
-        },
-      });
-    });
-    expect(mockPush).toHaveBeenCalledWith('/task/task-4');
-  });
-
-  it('passes selected reasoning to an environmentId URL launch', async () => {
+  it('treats a legacy environment URL as an ordinary Session launch', async () => {
     currentSearchParams = 'environmentId=env-created';
     render(<Home initialPlaceholderIndex={0} />);
-
     fireEvent.click(screen.getByRole('button', { name: 'Use high reasoning' }));
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
-    await waitFor(() => {
-      expect(mockStartFastSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          reasoningEffort: 'high',
-          pinnedLaunch: expect.objectContaining({
-            environmentId: 'env-created',
-          }),
-        }),
-      );
-    });
+    await waitFor(() => expect(mockStartFastSession).toHaveBeenCalled());
+    expect(mockStartFastSession.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ text: 'Test prompt', reasoningEffort: 'high' }),
+    );
+    expect(mockStartFastSession.mock.calls[0]?.[0]).not.toHaveProperty(
+      'pinnedLaunch',
+    );
+    expect(mockPush).not.toHaveBeenCalledWith('/task/task-4');
   });
 
   it('prefills editable prompt and model details from the URL', async () => {
