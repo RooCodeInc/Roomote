@@ -659,6 +659,49 @@ it('opens the standalone custom editor without querying admin settings', () => {
   expect(state.queriedKeys).not.toContainEqual(['comms', 'status']);
 });
 
+it('validates required custom automation fields before creating', () => {
+  render(<CustomAutomationsSection />);
+  fireEvent.click(screen.getByRole('button', { name: 'New' }));
+  fireEvent.click(
+    screen.getByRole('combobox', { name: 'Preferred environment' }),
+  );
+  fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+
+  const name = screen.getByRole('textbox', { name: 'Name' });
+  const prompt = screen.getByRole('textbox', { name: 'Prompt' });
+  fireEvent.change(name, { target: { value: '   ' } });
+  fireEvent.change(prompt, { target: { value: '\n ' } });
+  mutations.updateSettings.mockClear();
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+  expect(mutations.updateSettings).not.toHaveBeenCalled();
+  expect(name).toHaveFocus();
+  expect(name).toHaveAttribute('aria-invalid', 'true');
+  expect(name).toHaveAccessibleDescription('Enter a name.');
+  expect(prompt).toHaveAttribute('aria-invalid', 'true');
+  expect(prompt).toHaveAccessibleDescription('Enter a prompt.');
+  expect(screen.getByText('Enter a name.')).toHaveAttribute('role', 'alert');
+  expect(screen.getByText('Enter a prompt.')).toHaveAttribute('role', 'alert');
+
+  fireEvent.change(name, { target: { value: 'Local validation proof' } });
+  expect(name).not.toHaveAttribute('aria-invalid');
+  expect(screen.queryByText('Enter a name.')).not.toBeInTheDocument();
+  expect(prompt).toHaveAttribute('aria-invalid', 'true');
+
+  fireEvent.change(prompt, {
+    target: { value: 'Verify required-field validation.' },
+  });
+  expect(prompt).not.toHaveAttribute('aria-invalid');
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+  expect(mutations.updateSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      name: 'Local validation proof',
+      prompt: 'Verify required-field validation.',
+      environmentId: '__fast__',
+    }),
+  );
+});
+
 async function openSuggesterCard() {
   fireEvent.click(
     await screen.findByRole('switch', {

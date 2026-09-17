@@ -97,6 +97,8 @@ type CustomAutomationFormState = {
   targetChannelId: string;
 };
 
+type CustomAutomationFieldErrors = Partial<Record<'name' | 'prompt', string>>;
+
 const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
   prompt: '',
@@ -501,6 +503,11 @@ export function CustomAutomationsSection({
   );
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<CustomAutomationFormState>(EMPTY_FORM);
+  const [fieldErrors, setFieldErrors] = useState<CustomAutomationFieldErrors>(
+    {},
+  );
+  const nameRef = useRef<HTMLInputElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
   const [resolvedCron, setResolvedCron] = useState<string | null>(null);
   const [scheduleSummary, setScheduleSummary] = useState<string | null>(null);
   const [localFilter, setLocalFilter] = useState<AutomationListFilter>('all');
@@ -617,6 +624,7 @@ export function CustomAutomationsSection({
         toast.success('Custom automation created');
         setIsCreating(false);
         setForm(EMPTY_FORM);
+        setFieldErrors({});
         setResolvedCron(null);
         setScheduleSummary(null);
         await invalidate();
@@ -633,6 +641,7 @@ export function CustomAutomationsSection({
         toast.success('Custom automation saved');
         setEditingId(null);
         setForm(EMPTY_FORM);
+        setFieldErrors({});
         setResolvedCron(null);
         setScheduleSummary(null);
         window.history.replaceState(
@@ -782,6 +791,7 @@ export function CustomAutomationsSection({
     setIsCreating(false);
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setFieldErrors({});
     setResolvedCron(null);
     setScheduleSummary(null);
     if (window.location.hash.startsWith('#custom-automation-')) {
@@ -796,6 +806,7 @@ export function CustomAutomationsSection({
   const editAutomation = (row: CustomAutomationListItem) => {
     setEditingId(row.id);
     setIsCreating(false);
+    setFieldErrors({});
     setForm(
       formFromRow(
         row,
@@ -861,6 +872,20 @@ export function CustomAutomationsSection({
   }, [capabilitiesLoaded, connectedDestinationProviders]);
 
   const saveForm = () => {
+    const requiredFieldErrors: CustomAutomationFieldErrors = {};
+    if (!form.name.trim()) {
+      requiredFieldErrors.name = 'Enter a name.';
+    }
+    if (!form.prompt.trim()) {
+      requiredFieldErrors.prompt = 'Enter a prompt.';
+    }
+    if (requiredFieldErrors.name || requiredFieldErrors.prompt) {
+      setFieldErrors(requiredFieldErrors);
+      (requiredFieldErrors.name ? nameRef : promptRef).current?.focus();
+      return;
+    }
+    setFieldErrors({});
+
     if (!form.environmentId) {
       toast.error('Choose an environment.');
       return;
@@ -927,33 +952,72 @@ export function CustomAutomationsSection({
         <div className="space-y-2">
           <Label htmlFor="custom-automation-name">Name</Label>
           <Input
+            ref={nameRef}
             id="custom-automation-name"
             value={form.name}
             maxLength={100}
             disabled={busy}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, name: event.target.value }))
+            aria-invalid={fieldErrors.name ? true : undefined}
+            aria-describedby={
+              fieldErrors.name ? 'custom-automation-name-error' : undefined
             }
+            onChange={(event) => {
+              const name = event.target.value;
+              setForm((current) => ({ ...current, name }));
+              if (name.trim() && fieldErrors.name) {
+                setFieldErrors((current) => ({ ...current, name: undefined }));
+              }
+            }}
             placeholder="Weekly flaky-test scan"
           />
+          {fieldErrors.name ? (
+            <p
+              id="custom-automation-name-error"
+              role="alert"
+              className="text-sm text-destructive"
+            >
+              {fieldErrors.name}
+            </p>
+          ) : null}
         </div>
 
         <div className="space-y-2">
           <Label htmlFor="custom-automation-prompt">Prompt</Label>
           <Textarea
+            ref={promptRef}
             id="custom-automation-prompt"
             value={form.prompt}
             maxLength={8000}
             disabled={busy}
             rows={5}
-            onChange={(event) =>
+            aria-invalid={fieldErrors.prompt ? true : undefined}
+            aria-describedby={
+              fieldErrors.prompt ? 'custom-automation-prompt-error' : undefined
+            }
+            onChange={(event) => {
+              const prompt = event.target.value;
               setForm((current) => ({
                 ...current,
-                prompt: event.target.value,
-              }))
-            }
+                prompt,
+              }));
+              if (prompt.trim() && fieldErrors.prompt) {
+                setFieldErrors((current) => ({
+                  ...current,
+                  prompt: undefined,
+                }));
+              }
+            }}
             placeholder="What should Roomote do on each run?"
           />
+          {fieldErrors.prompt ? (
+            <p
+              id="custom-automation-prompt-error"
+              role="alert"
+              className="text-sm text-destructive"
+            >
+              {fieldErrors.prompt}
+            </p>
+          ) : null}
         </div>
 
         <div className="space-y-2">
@@ -1212,6 +1276,7 @@ export function CustomAutomationsSection({
           );
           setIsCreating(true);
           setEditingId(null);
+          setFieldErrors({});
           setForm({
             ...EMPTY_FORM,
             targetProvider: target.provider,
