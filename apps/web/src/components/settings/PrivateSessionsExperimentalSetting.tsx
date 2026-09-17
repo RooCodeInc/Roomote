@@ -19,8 +19,9 @@ export function PrivateSessionsExperimentalSetting() {
           onCheckedChange={setEnabled}
         />
         <p className="text-sm text-muted-foreground">
-          Let members create owner-only web Sessions without writing to shared
-          memory or publishing to shared destinations.
+          Let members create owner-only web Sessions that stay out of shared
+          memory. The agent asks the owner before publishing anything outside
+          the Session.
         </p>
       </div>
     </Section>

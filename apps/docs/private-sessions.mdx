@@ -17,8 +17,14 @@ For a private Session, Roomote:
 - allows read-only shared Brain searches while omitting private query text and results from Roomote's durable tool history
 - prevents private integration arguments and results from appearing in ordinary tool audits and transcripts
 - lets the owner create, preview, and download artifacts while keeping artifact metadata and content owner-only
-- blocks shared publishing, including communication-provider posts, external notifications, source-control writes, wakeups, shared memory integrations, and deployment-wide customizations
+- keeps private content out of shared memory integrations
 - disables a private integration connection before deleting its local credentials when you disconnect it
+
+## Publishing from a private Session
+
+A private Session keeps the agent's full tools and permissions. It can push branches, open and comment on pull requests, post to chat channels, use shared integrations, schedule wakeups, and create automations or skills, the same as a shared Session.
+
+Roomote tells the agent that the Session is private and instructs it to ask the owner before any action that makes content visible outside the Session, naming what it will publish and where. A request that already names the action and destination counts as approval. This is guidance to the agent, not a technical block, so review what the agent proposes to publish before you approve it.
 
 Roomote does not convert an existing shared Session into a private one. Start private work in a new private Session so content from the earlier conversation cannot cross the boundary.
 

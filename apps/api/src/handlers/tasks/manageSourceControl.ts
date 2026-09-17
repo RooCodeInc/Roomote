@@ -1,7 +1,6 @@
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
-import { db, eq, tasks } from '@roomote/db/server';
 import {
   claimLatestUserMessageForReplyQuote,
   completeClaimedLatestUserMessageForReplyQuote,
@@ -36,14 +35,6 @@ import {
 import { logHandlerError } from '../utils';
 
 const GITHUB_REPLY_QUOTE_MAX_LENGTH = 280;
-
-const PRIVATE_TASK_READ_ACTIONS = new Set([
-  'get_pull_request',
-  'list_pull_request_comments',
-  'list_pull_requests',
-  'get_issue',
-  'list_issue_comments',
-]);
 
 function formatGitHubReplyQuote(params: {
   userName: string;
@@ -103,21 +94,6 @@ export async function manageSourceControl(
       runId: auth.authContext.runId,
       taskId,
     });
-    const task = await db.query.tasks.findFirst({
-      where: eq(tasks.id, taskId),
-      columns: { privacy: true },
-    });
-    if (
-      task?.privacy === 'private' &&
-      !PRIVATE_TASK_READ_ACTIONS.has(input.action)
-    ) {
-      return c.json(
-        {
-          error: 'Source-control publishing is unavailable for private tasks.',
-        },
-        403,
-      );
-    }
     const payload = getPayloadRecord(taskRun.payload);
     let targetProvider = input.sourceControlProvider;
     const repositoryProviders = resolveRepositoryProvidersFromPayload(payload);

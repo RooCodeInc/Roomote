@@ -73,34 +73,6 @@ describe('resolveBuiltInMcpServers', () => {
     expect(Object.keys(BUILT_IN_MCPS).sort()).toEqual(expectedBuiltInMcpNames);
   });
 
-  it('removes external MCP overlays from private task sandboxes', () => {
-    const servers = resolveBuiltInMcpServers(
-      {
-        ROOMOTE_CLOUD_TOKEN: 'run-token',
-        R_APP_URL: 'https://api.example.com',
-      },
-      {
-        userMcpServers: {
-          external: { url: 'https://external.example/mcp' },
-        },
-      },
-      {
-        environment: { command: 'environment-mcp' },
-      },
-      {},
-      {
-        deployment: { command: 'deployment-mcp' },
-      },
-      'private',
-    );
-
-    expect(servers.roomote).toBeDefined();
-    expect(servers.external).toBeUndefined();
-    expect(servers.github).toBeDefined();
-    expect(servers.environment).toBeUndefined();
-    expect(servers.deployment).toBeUndefined();
-  });
-
   it.each([
     '/api/mcp/http-integrations',
     'https://web.test/api/mcp/http-integrations',

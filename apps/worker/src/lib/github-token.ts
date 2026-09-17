@@ -556,18 +556,6 @@ function matchesAllowedGitPath(
   );
 }
 
-export function isReadOnlySourceControlWrite(
-  credential: Pick<SourceControlProxyCredential, 'readOnly'>,
-  proxiedPath: string,
-  service: string | null,
-): boolean {
-  return Boolean(
-    credential.readOnly &&
-    (proxiedPath.endsWith('/git-receive-pack') ||
-      (proxiedPath.endsWith('/info/refs') && service === 'git-receive-pack')),
-  );
-}
-
 function buildProxyForwardHeaders(
   requestHeaders: Headers,
   authorizationHeader: string,
@@ -637,19 +625,6 @@ async function handleSourceControlProxyRequest(
 
   if (!credential) {
     return new Response('Repository access denied\n', {
-      status: 403,
-      headers: { 'content-type': 'text/plain; charset=utf-8' },
-    });
-  }
-
-  if (
-    isReadOnlySourceControlWrite(
-      credential,
-      proxiedPath,
-      url.searchParams.get('service'),
-    )
-  ) {
-    return new Response('Repository publishing is disabled for this task\n', {
       status: 403,
       headers: { 'content-type': 'text/plain; charset=utf-8' },
     });

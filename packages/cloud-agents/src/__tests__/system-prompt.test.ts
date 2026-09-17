@@ -1,4 +1,7 @@
-import { ROOMOTE_SYSTEM_PROMPT } from '../system-prompt';
+import {
+  buildRoomoteSystemPrompt,
+  ROOMOTE_SYSTEM_PROMPT,
+} from '../system-prompt';
 
 describe('ROOMOTE_SYSTEM_PROMPT', () => {
   it('keeps Roomote identity without generic coding-agent policy', () => {
@@ -22,5 +25,14 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
     expect(ROOMOTE_SYSTEM_PROMPT).not.toContain(
       'follow the shared workspace guidance for the prepared repositories',
     );
+  });
+
+  it('tells private tasks to get owner approval before external actions', () => {
+    const prompt = buildRoomoteSystemPrompt(undefined, { privacy: 'private' });
+
+    expect(prompt).toContain('# Private Session');
+    expect(prompt).toContain('You keep your full tools and permissions.');
+    expect(prompt).toContain("get the owner's explicit approval");
+    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('Private Session');
   });
 });

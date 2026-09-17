@@ -70,6 +70,22 @@ describe.each([
 });
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('adds ask-first guidance only for private Sessions', () => {
+    const privatePrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      privacy: 'private',
+    });
+
+    expect(privatePrompt).toContain('## Private Session');
+    expect(privatePrompt).toContain("get the owner's explicit approval");
+    expect(privatePrompt).toContain(
+      'Delegated tasks inherit this private Session.',
+    );
+    expect(
+      buildFastAgentSystemPrompt({ availableEnvironments: [] }),
+    ).not.toContain('## Private Session');
+  });
+
   it('includes matching workspace and model guidance as supplemental routing rules', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [
