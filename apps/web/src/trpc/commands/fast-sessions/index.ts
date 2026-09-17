@@ -84,7 +84,11 @@ import {
   currentEpochSeconds,
   signArtifactId,
 } from '@/lib/server/artifact-signature';
-import type { PinnedFastSessionLaunchInput } from './input';
+import { getSessions } from '@/lib/server/sessions';
+import type {
+  PinnedFastSessionLaunchInput,
+  SelectedSessionContextInput,
+} from './input';
 import { startPinnedFastSessionLaunch } from './pinned-launch';
 
 const ARTIFACT_SIGNATURE_CACHE_WINDOW_SECONDS = 60 * 60;
@@ -509,6 +513,73 @@ async function resolveSelectedIntegrationContext(
   ].join('\n');
 }
 
+async function resolveSelectedSessionContext(
+  auth: UserAuthSuccess,
+  selection: SelectedSessionContextInput | undefined,
+): Promise<string | undefined> {
+  if (!selection) return undefined;
+
+  const requestedIds = [
+    ...new Set(
+      selection.kind === 'recent'
+        ? selection.sessionIds
+        : [selection.sessionId],
+    ),
+  ];
+  const { sessions: authorizedSessions } = await getSessions(auth, {
+    ids: requestedIds,
+    limit: requestedIds.length,
+  });
+  const sessionsById = new Map(
+    authorizedSessions.map((session) => [session.id, session]),
+  );
+  const selectedSessions = requestedIds
+    .map((id) => sessionsById.get(id))
+    .filter((session): session is NonNullable<typeof session> =>
+      Boolean(session),
+    );
+  if (selectedSessions.length === 0) return undefined;
+
+  return [
+    selection.kind === 'recent'
+      ? 'The user selected their recently visited Sessions as context for this message, ordered by their visit history:'
+      : 'The user selected this Session as context for this message:',
+    ...selectedSessions.map(
+      (session) => `- ${session.title} [canonical Session ID: ${session.id}]`,
+    ),
+    'Use only this title and canonical ID to understand the reference. Do not assume transcript contents or fetch a transcript unless the user asks.',
+  ].join('\n');
+}
+
+async function resolveSelectedMessageContext(
+  auth: UserAuthSuccess,
+  input: {
+    integrationIds?: string[];
+    sessionContext?: SelectedSessionContextInput;
+  },
+): Promise<string | undefined> {
+  const [integrationContext, sessionContext] = await Promise.all([
+    resolveSelectedIntegrationContext(auth.userId, input.integrationIds).catch(
+      (error) => {
+        console.warn(
+          `[Fast Web] Selected integration context unavailable: ${formatErrorForLog(error)}`,
+        );
+        return undefined;
+      },
+    ),
+    resolveSelectedSessionContext(auth, input.sessionContext).catch((error) => {
+      console.warn(
+        `[Fast Web] Selected Session context unavailable: ${formatErrorForLog(error)}`,
+      );
+      return undefined;
+    }),
+  ]);
+  const contexts = [integrationContext, sessionContext].filter(
+    (context): context is string => Boolean(context),
+  );
+  return contexts.length > 0 ? contexts.join('\n\n') : undefined;
+}
+
 export async function startFastSessionCommand(
   auth: UserAuthSuccess,
   input: {
@@ -516,6 +587,7 @@ export async function startFastSessionCommand(
     images?: string[];
     attachmentTexts?: string[];
     integrationIds?: string[];
+    sessionContext?: SelectedSessionContextInput;
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
     conversationId?: string;
@@ -603,15 +675,10 @@ export async function startFastSessionCommand(
       auth,
       unifiedSession.id,
     );
-    const currentMessageAgentContext = await resolveSelectedIntegrationContext(
-      auth.userId,
-      input.integrationIds,
-    ).catch((error) => {
-      console.warn(
-        `[Fast Web] Selected integration context unavailable: ${formatErrorForLog(error)}`,
-      );
-      return undefined;
-    });
+    const currentMessageAgentContext = await resolveSelectedMessageContext(
+      auth,
+      input,
+    );
 
     scheduleWebFastAgentTurn({
       userId: auth.userId,
@@ -835,6 +902,7 @@ export async function replyToFastSessionCommand(
     images?: string[];
     attachmentTexts?: string[];
     integrationIds?: string[];
+    sessionContext?: SelectedSessionContextInput;
     model?: string | null;
     reasoningEffort?: ReasoningEffort | null;
   },
@@ -860,14 +928,7 @@ export async function replyToFastSessionCommand(
       senderDisplayName,
       question: input.text,
     }),
-    resolveSelectedIntegrationContext(auth.userId, input.integrationIds).catch(
-      (error) => {
-        console.warn(
-          `[Fast Web] Selected integration context unavailable: ${formatErrorForLog(error)}`,
-        );
-        return undefined;
-      },
-    ),
+    resolveSelectedMessageContext(auth, input),
   ]);
   if (!delivery) {
     throw new Error(

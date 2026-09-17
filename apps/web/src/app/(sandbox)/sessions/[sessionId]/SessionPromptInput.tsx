@@ -43,7 +43,10 @@ import {
   X,
 } from '@/components/system';
 import { SessionModelSwitcher } from '@/components/tasks/SessionModelSwitcher';
-import { useSessionIntegrationMentions } from '@/components/tasks/useSessionIntegrationMentions';
+import {
+  type SelectedSessionContext,
+  useSessionContextMentions,
+} from '@/components/tasks/useSessionContextMentions';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/AttachmentsDisplay';
@@ -53,6 +56,7 @@ export type SessionPromptSubmission = PromptInputMessage & {
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
   integrationIds?: string[];
+  sessionContext?: SelectedSessionContext;
 };
 
 export type SessionModelSelection = {
@@ -275,7 +279,7 @@ export function SessionPromptInput({
   const [isUpdatingModelSelection, setIsUpdatingModelSelection] =
     useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const integrationMentions = useSessionIntegrationMentions({
+  const contextMentions = useSessionContextMentions({
     sessionId,
     value: prompt,
     onValueChange: setPrompt,
@@ -356,7 +360,10 @@ export function SessionPromptInput({
       toast.success(`Pursuing goal: ${objective}`);
       sent = true;
     } else {
-      const integrationIds = integrationMentions.getSelectedIntegrationIds(
+      const integrationIds = contextMentions.getSelectedIntegrationIds(
+        message.text,
+      );
+      const sessionContext = contextMentions.getSelectedSessionContext(
         message.text,
       );
       // Always send the current picker state: it round-trips the persisted
@@ -366,11 +373,12 @@ export function SessionPromptInput({
         model: model || null,
         reasoningEffort,
         ...(integrationIds.length > 0 ? { integrationIds } : {}),
+        ...(sessionContext ? { sessionContext } : {}),
       });
     }
     if (sent) {
       setPrompt('');
-      integrationMentions.resetSelectedIntegrations();
+      contextMentions.resetSelectedContext();
     }
     return sent;
   };
@@ -441,7 +449,7 @@ export function SessionPromptInput({
       >
         {!voice?.active ? <AttachmentsDisplay /> : null}
         <PromptInputBody>
-          {integrationMentions.suggestions}
+          {contextMentions.suggestions}
           {voice?.active ? (
             <VoiceConversationPanel
               voice={{ ...voice, onToggle: handleVoiceToggle }}
@@ -453,31 +461,31 @@ export function SessionPromptInput({
                 ref={textareaRef}
                 value={prompt}
                 onChange={(event) =>
-                  integrationMentions.handleValueChange(
+                  contextMentions.handleValueChange(
                     event.target.value,
                     event.target.selectionStart,
                   )
                 }
                 onSelect={(event) =>
-                  integrationMentions.handleCursorChange(
+                  contextMentions.handleCursorChange(
                     event.currentTarget.selectionStart,
                   )
                 }
                 onClick={(event) =>
-                  integrationMentions.handleCursorChange(
+                  contextMentions.handleCursorChange(
                     event.currentTarget.selectionStart,
                   )
                 }
                 onFocus={() => {
                   setIsTextareaFocused(true);
-                  integrationMentions.handleFocus();
+                  contextMentions.handleFocus();
                 }}
                 onBlur={() => {
                   setIsTextareaFocused(false);
-                  integrationMentions.handleBlur();
+                  contextMentions.handleBlur();
                 }}
                 onKeyDown={(event) => {
-                  if (integrationMentions.handleKeyDown(event)) return;
+                  if (contextMentions.handleKeyDown(event)) return;
                   handleSuggestionKeyDown(event);
                 }}
                 placeholder={ghostSuggestion ?? 'Message agent'}
@@ -485,7 +493,7 @@ export function SessionPromptInput({
                   ghostSuggestion ? suggestionHintId : undefined
                 }
                 disabled={isBusy}
-                {...integrationMentions.inputProps}
+                {...contextMentions.inputProps}
               />
               {ghostSuggestion && (
                 <>

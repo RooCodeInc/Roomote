@@ -10,6 +10,25 @@ import {
 const MAX_FAST_ATTACHMENT_COUNT = 20;
 const MAX_FAST_ATTACHMENT_TEXT_CHARS = 200_000;
 const MAX_FAST_INTEGRATION_MENTIONS = 10;
+const MAX_FAST_SESSION_CONTEXT_IDS = 10;
+
+export const selectedSessionContextSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('recent'),
+    sessionIds: z
+      .array(z.string().uuid())
+      .min(1)
+      .max(MAX_FAST_SESSION_CONTEXT_IDS),
+  }),
+  z.object({
+    kind: z.literal('session'),
+    sessionId: z.string().uuid(),
+  }),
+]);
+
+export type SelectedSessionContextInput = z.infer<
+  typeof selectedSessionContextSchema
+>;
 
 const fastSessionMessageInputShape = {
   text: z.string().trim(),
@@ -32,6 +51,7 @@ const fastSessionMessageInputShape = {
     .array(z.string().trim().min(1))
     .max(MAX_FAST_INTEGRATION_MENTIONS)
     .optional(),
+  sessionContext: selectedSessionContextSchema.optional(),
   model: z.string().trim().min(1).nullable().optional(),
   reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable().optional(),
 };

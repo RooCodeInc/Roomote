@@ -34,6 +34,10 @@ let capturedHomeSuggestionsQueryEnabled: boolean | undefined;
 let capturedDefaultReasoningEffort: string | null | undefined;
 let submittedPromptText = 'Test prompt';
 let submittedIntegrationIds: string[] | undefined;
+let submittedSessionContext:
+  | { kind: 'recent'; sessionIds: string[] }
+  | { kind: 'session'; sessionId: string }
+  | undefined;
 
 const {
   voiceState,
@@ -91,6 +95,7 @@ vi.mock('@/trpc/client', () => ({
     fastSessions: {
       integrationMentions: { query: vi.fn() },
     },
+    sessions: { list: { query: vi.fn() } },
   }),
   useTRPC: () => ({
     home: {
@@ -231,7 +236,12 @@ vi.mock('@/components/tasks', async () => {
       voice,
     }: {
       onSubmit: (
-        message: PromptInputMessage & { integrationIds?: string[] },
+        message: PromptInputMessage & {
+          integrationIds?: string[];
+          sessionContext?:
+            | { kind: 'recent'; sessionIds: string[] }
+            | { kind: 'session'; sessionId: string };
+        },
       ) => Promise<void> | void;
       onPromptTextChange?: (value: string) => void;
       promptText?: string;
@@ -260,6 +270,9 @@ vi.mock('@/components/tasks', async () => {
               files: [],
               ...(submittedIntegrationIds
                 ? { integrationIds: submittedIntegrationIds }
+                : {}),
+              ...(submittedSessionContext
+                ? { sessionContext: submittedSessionContext }
                 : {}),
             });
 
@@ -367,6 +380,7 @@ describe('Home', () => {
     capturedDefaultReasoningEffort = undefined;
     submittedPromptText = 'Test prompt';
     submittedIntegrationIds = undefined;
+    submittedSessionContext = undefined;
     localStorage.clear();
     vi.clearAllMocks();
 
@@ -959,6 +973,30 @@ describe('Home', () => {
         images: undefined,
         attachmentTexts: undefined,
         integrationIds: ['sentry'],
+        model: undefined,
+        conversationId: expect.any(String),
+      }),
+    );
+  });
+
+  it('carries selected Session context into a new Fast session', async () => {
+    const selectedSessionId = '33333333-3333-4333-8333-333333333333';
+    currentEnvironments = [];
+    submittedPromptText = '@Sessions: Fix uploads continue this';
+    submittedSessionContext = {
+      kind: 'session',
+      sessionId: selectedSessionId,
+    };
+
+    render(<Home initialPlaceholderIndex={0} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() =>
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: '@Sessions: Fix uploads continue this',
+        images: undefined,
+        attachmentTexts: undefined,
+        sessionContext: { kind: 'session', sessionId: selectedSessionId },
         model: undefined,
         conversationId: expect.any(String),
       }),

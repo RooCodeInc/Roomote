@@ -53,6 +53,54 @@ describe('Fast session input schemas', () => {
     ).toThrow('Array must contain at most 10 element(s)');
   });
 
+  it('accepts bounded recent and individual Session context selections', () => {
+    const firstSessionId = '11111111-1111-4111-8111-111111111111';
+    expect(
+      replyToFastSessionInputSchema.parse({
+        sessionId: '00000000-0000-4000-8000-000000000000',
+        text: '@Sessions compare this work',
+        sessionContext: {
+          kind: 'recent',
+          sessionIds: [firstSessionId],
+        },
+      }).sessionContext,
+    ).toEqual({ kind: 'recent', sessionIds: [firstSessionId] });
+    expect(
+      startFastSessionInputSchema.parse({
+        text: '@Sessions: Fix uploads continue this',
+        sessionContext: { kind: 'session', sessionId: firstSessionId },
+      }).sessionContext,
+    ).toEqual({ kind: 'session', sessionId: firstSessionId });
+    expect(() =>
+      startFastSessionInputSchema.parse({
+        text: '@Sessions compare these',
+        sessionContext: {
+          kind: 'recent',
+          sessionIds: Array.from(
+            { length: 11 },
+            (_, index) =>
+              `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+          ),
+        },
+      }),
+    ).toThrow('Array must contain at most 10 element(s)');
+  });
+
+  it('rejects malformed or empty Session context selections', () => {
+    expect(() =>
+      startFastSessionInputSchema.parse({
+        text: '@Sessions compare these',
+        sessionContext: { kind: 'recent', sessionIds: [] },
+      }),
+    ).toThrow('Array must contain at least 1 element(s)');
+    expect(() =>
+      startFastSessionInputSchema.parse({
+        text: '@Sessions: Unknown',
+        sessionContext: { kind: 'session', sessionId: 'forged' },
+      }),
+    ).toThrow('Invalid uuid');
+  });
+
   it('accepts a stable client conversation identity for initial retries', () => {
     expect(
       startFastSessionInputSchema.parse({

@@ -48,6 +48,7 @@ const {
   narrationState,
   composerSuggestionState,
   integrationMentionsState,
+  sessionMentionsState,
   voiceStatusQuery,
   recordVoiceTurnMutate,
   recordVoiceCallEventMutate,
@@ -71,6 +72,10 @@ const {
       name: string;
       description: string;
     }>,
+  },
+  sessionMentionsState: {
+    recentIds: [] as string[],
+    sessions: [] as Array<{ id: string; title: string }>,
   },
   voiceStatusQuery: vi.fn(),
   recordVoiceTurnMutate: vi.fn(),
@@ -120,6 +125,13 @@ vi.mock('@/hooks/useUser', () => ({
     isSignedIn: authenticatedUserState.user !== null,
     authStatus:
       authenticatedUserState.user === null ? 'signed-out' : 'signed-in',
+  }),
+}));
+
+vi.mock('@/hooks/useRecentSessions', () => ({
+  useRecentSessions: () => ({
+    recentSessionIds: sessionMentionsState.recentIds,
+    recordVisit: vi.fn(),
   }),
 }));
 
@@ -174,6 +186,7 @@ vi.mock('@/trpc/client', () => ({
       reviewAction: { mutate: reviewActionMutate },
       updateModelSelection: { mutate: updateModelSelectionMutate },
     },
+    sessions: { list: { query: vi.fn() } },
     voice: {
       status: { query: voiceStatusQuery },
       recordTurn: { mutate: recordVoiceTurnMutate },
@@ -210,7 +223,12 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
           data: { integrations: integrationMentionsState.integrations },
           isPending: false,
         }
-      : { data: composerSuggestionState.data },
+      : options.queryKey?.[0] === 'sessions.contextMentions'
+        ? {
+            data: { sessions: sessionMentionsState.sessions },
+            isPending: false,
+          }
+        : { data: composerSuggestionState.data },
 }));
 
 // Wakeup polling has dedicated provider-backed tests. Keep this suite's query
@@ -351,6 +369,8 @@ beforeEach(() => {
   narrationState.enabled = false;
   composerSuggestionState.data = undefined;
   integrationMentionsState.integrations = [];
+  sessionMentionsState.recentIds = [];
+  sessionMentionsState.sessions = [];
   openTaskPanel.mockReset();
   openTasksPanel.mockReset();
   voiceStatusQuery.mockReset();
@@ -2665,7 +2685,7 @@ describe('FastSessionTranscript', () => {
     });
 
     expect(
-      await screen.findByRole('listbox', { name: 'Available integrations' }),
+      await screen.findByRole('listbox', { name: 'Available context' }),
     ).toBeInTheDocument();
     expect(input).toHaveAttribute('aria-autocomplete', 'list');
     expect(input).toHaveAttribute('aria-expanded', 'true');
@@ -2689,6 +2709,181 @@ describe('FastSessionTranscript', () => {
         sessionId: 'session-integration-keyboard',
         text: '@Sentry investigate the latest error',
         integrationIds: ['sentry'],
+        model: null,
+        reasoningEffort: null,
+      }),
+    );
+  });
+
+  it('selects one recent Session with the keyboard and submits its canonical ID', async () => {
+    const selectedSessionId = '44444444-4444-4444-8444-444444444444';
+    sessionMentionsState.recentIds = [selectedSessionId];
+    sessionMentionsState.sessions = [
+      { id: selectedSessionId, title: 'Fix artifact uploads' },
+    ];
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-context-keyboard"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, {
+      target: { value: '@Sessions', selectionStart: 9 },
+    });
+    const listbox = await screen.findByRole('listbox', {
+      name: 'Available context',
+    });
+    expect(listbox).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: 'ArrowDown', code: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    expect(input).toHaveValue('@Sessions: Fix artifact uploads ');
+
+    fireEvent.change(input, {
+      target: {
+        value: '@Sessions: Fix artifact uploads continue this',
+        selectionStart: 44,
+      },
+    });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() =>
+      expect(replyMutate).toHaveBeenCalledWith({
+        sessionId: 'session-context-keyboard',
+        text: '@Sessions: Fix artifact uploads continue this',
+        sessionContext: { kind: 'session', sessionId: selectedSessionId },
+        model: null,
+        reasoningEffort: null,
+      }),
+    );
+  });
+
+  it('supports touch selection for the bounded recent Sessions list', async () => {
+    const firstSessionId = '55555555-5555-4555-8555-555555555555';
+    const secondSessionId = '66666666-6666-4666-8666-666666666666';
+    sessionMentionsState.recentIds = [firstSessionId, secondSessionId];
+    sessionMentionsState.sessions = [
+      { id: secondSessionId, title: 'Second session' },
+      { id: firstSessionId, title: 'First session' },
+    ];
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-context-touch"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, {
+      target: { value: '@Sessions', selectionStart: 9 },
+    });
+    const option = await screen.findByRole('option', {
+      name: /Share title and ID for 2 recently visited Sessions/,
+    });
+    expect(
+      fireEvent.pointerDown(option, {
+        pointerType: 'touch',
+        cancelable: true,
+      }),
+    ).toBe(false);
+    fireEvent.click(option);
+    expect(input).toHaveValue('@Sessions ');
+
+    fireEvent.change(input, {
+      target: { value: '@Sessions compare these', selectionStart: 23 },
+    });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() =>
+      expect(replyMutate).toHaveBeenCalledWith({
+        sessionId: 'session-context-touch',
+        text: '@Sessions compare these',
+        sessionContext: {
+          kind: 'recent',
+          sessionIds: [firstSessionId, secondSessionId],
+        },
+        model: null,
+        reasoningEffort: null,
+      }),
+    );
+  });
+
+  it('does not offer or submit Session context for quoted mention text', async () => {
+    const selectedSessionId = '77777777-7777-4777-8777-777777777777';
+    sessionMentionsState.recentIds = [selectedSessionId];
+    sessionMentionsState.sessions = [
+      { id: selectedSessionId, title: 'Quoted session' },
+    ];
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-context-quoted"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, {
+      target: { value: 'Compare "@Sessions"', selectionStart: 18 },
+    });
+    expect(
+      screen.queryByRole('listbox', { name: 'Available context' }),
+    ).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() =>
+      expect(replyMutate).toHaveBeenCalledWith({
+        sessionId: 'session-context-quoted',
+        text: 'Compare "@Sessions"',
+        model: null,
+        reasoningEffort: null,
+      }),
+    );
+  });
+
+  it('clears a selected Session when its visible mention is removed', async () => {
+    const selectedSessionId = '88888888-8888-4888-8888-888888888888';
+    sessionMentionsState.recentIds = [selectedSessionId];
+    sessionMentionsState.sessions = [
+      { id: selectedSessionId, title: 'Removed session' },
+    ];
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-context-removed"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, {
+      target: { value: '@Sessions', selectionStart: 9 },
+    });
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: /Share title and ID for 1 recently visited Session/,
+      }),
+    );
+    fireEvent.change(input, {
+      target: { value: 'Continue without context', selectionStart: 24 },
+    });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() =>
+      expect(replyMutate).toHaveBeenCalledWith({
+        sessionId: 'session-context-removed',
+        text: 'Continue without context',
         model: null,
         reasoningEffort: null,
       }),
