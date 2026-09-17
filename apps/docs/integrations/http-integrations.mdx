@@ -14,6 +14,11 @@ Roomote Cloud, Modal, Docker, E2B, Daytona, Azure, Blaxel, and Box. It requires 
 provider-specific networking configuration or proxy service. Existing connected
 integration tools remain available and should be used first.
 
+For a general "connect to X" request, Roomote prefers a connected integration
+for that service, then the service's official remote MCP server, and uses HTTP
+integrations or an integration key when neither applies or when you ask for the
+service's API.
+
 <Warning>
   This is credential mediation, not network isolation. Agents are instructed to
   use the integration tools, but normal sandbox networking remains available.
