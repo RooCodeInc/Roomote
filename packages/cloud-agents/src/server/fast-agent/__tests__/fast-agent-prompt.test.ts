@@ -1983,4 +1983,31 @@ describe('buildFastAgentSystemPrompt', () => {
       'Remote MCP: call `add_remote_mcp` with only its name and URL',
     );
   });
+
+  it('does not bypass an applicable or indeterminate remote MCP with an integration key', () => {
+    const adminPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      addRemoteMcpEnabled: true,
+      serviceCredentialToolsEnabled: true,
+    });
+    const nonAdminPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      addRemoteMcpEnabled: false,
+      serviceCredentialToolsEnabled: true,
+    });
+
+    expect(adminPrompt).toContain(
+      'Treat a verification tool error, network failure, or otherwise indeterminate result as unresolved',
+    );
+    expect(adminPrompt).toContain('do not switch to the key route');
+    expect(adminPrompt).not.toContain(
+      'a failed verification only means there is no MCP and the key route applies',
+    );
+    expect(nonAdminPrompt).toContain(
+      'Keep that administrator setup as the outcome and do not offer an integration-key fallback unless the human explicitly asked for API access',
+    );
+    expect(nonAdminPrompt).not.toContain(
+      'offer the integration-key route in the same message',
+    );
+  });
 });
