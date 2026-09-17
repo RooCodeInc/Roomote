@@ -521,14 +521,19 @@ describe('collectInstanceReportStats task usage isolation', () => {
     const suffix = Date.now().toString();
     const productModel = `product-model-${suffix}`;
     const snapshotModel = `snapshot-model-${suffix}`;
+    const privateOwner = await userFactory.create();
     const productTask = await taskFactory.create({
       workflow: 'standard',
       model: productModel,
+      privacy: 'private',
+      privateOwnerUserId: privateOwner.id,
       createdAt: now,
     });
     const snapshotTask = await taskFactory.create({
       workflow: 'env_snapshot',
       model: snapshotModel,
+      privacy: 'private',
+      privateOwnerUserId: privateOwner.id,
       createdAt: now,
     });
 
