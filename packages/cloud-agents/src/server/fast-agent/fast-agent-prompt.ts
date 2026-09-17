@@ -437,7 +437,7 @@ ${formatTaskModelsForPrompt(availableTaskModels, defaultTaskModelId)}
 ${
   codingModelRoutingGuidance
     ? `## Coding Model Routing
-Use the first matching rule for delegated coding tasks. Pass both the exact model ID and configured reasoning effort to \`launch_task\`. If no rule matches, omit both fields to use the deployment defaults. Explicit user model or effort choices take precedence over these rules. Never select a model not listed above.
+Evaluate every routing rule and use the strongest matching rule only when its condition clearly and strongly matches the delegated coding task. Do not use a weak best-available match. Pass both the exact model ID and configured reasoning effort to \`launch_task\`. If no rule is a strong match, omit both fields to use the deployment defaults. Explicit user model or effort choices take precedence over these rules. Never select a model not listed above.
 <coding_model_routing_rules>
 ${codingModelRoutingGuidance}
 </coding_model_routing_rules>

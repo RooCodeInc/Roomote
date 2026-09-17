@@ -142,7 +142,11 @@ describe('buildFastAgentSystemPrompt', () => {
       'Explicit user model or effort choices take precedence',
     );
     expect(prompt).toContain(
-      'If no rule matches, omit both fields to use the deployment defaults',
+      'Evaluate every routing rule and use the strongest matching rule only when its condition clearly and strongly matches',
+    );
+    expect(prompt).toContain('Do not use a weak best-available match');
+    expect(prompt).toContain(
+      'If no rule is a strong match, omit both fields to use the deployment defaults',
     );
   });
 

@@ -17,6 +17,7 @@ import {
  * with at least this confidence. Starting value, not tuned.
  */
 const ROUTING_HINT_MIN_CONFIDENCE = 0.7;
+const MODEL_ROUTING_HINT_MIN_CONFIDENCE = 0.8;
 
 /** Beyond these limits the choice gets too wide to be useful. */
 const MAX_HINT_ENVIRONMENTS = 40;
@@ -181,7 +182,7 @@ export async function resolveFastAgentRoutingHint(params: {
     questions.model = {
       type: 'choice',
       instructions:
-        'Which coding-model routing rule matches the work asked for in `request`? Use `threadContext` only to understand the work. Choose a rule only when its saved condition clearly applies. An explicit user model or reasoning-effort request takes precedence and should use the deployment default choice here. Otherwise choose the deployment default when no rule matches, and choose unclear when several rules match equally.',
+        'Evaluate every coding-model routing rule against the work asked for in `request`, independent of list order. Use `threadContext` only to understand the work. Choose the single strongest matching rule only when its saved condition clearly and strongly applies. Do not choose a weak best-available match. An explicit user model or reasoning-effort request takes precedence and should use the deployment default choice here. Choose the deployment default when no rule is a strong match, and choose unclear when several rules are similarly strong.',
       criteria: {
         ...Object.fromEntries(
           modelRules.map((rule, index) => {
@@ -193,8 +194,9 @@ export async function resolveFastAgentRoutingHint(params: {
           }),
         ),
         [DEFAULT_MODEL]:
-          'No saved model-routing condition matches, or the user explicitly requested a model or reasoning level. Use the deployment default or explicit user choice.',
-        [UNCLEAR]: 'Several saved model-routing conditions match equally.',
+          'No saved model-routing condition strongly matches, the best available match is weak, or the user explicitly requested a model or reasoning level. Use the deployment default or explicit user choice.',
+        [UNCLEAR]:
+          'Several saved model-routing conditions are similarly strong, so no single strongest rule is clear.',
       },
     };
   }
@@ -234,7 +236,7 @@ export async function resolveFastAgentRoutingHint(params: {
     const modelRule =
       modelAnswer &&
       modelIndex >= 0 &&
-      modelAnswer.confidence >= ROUTING_HINT_MIN_CONFIDENCE
+      modelAnswer.confidence >= MODEL_ROUTING_HINT_MIN_CONFIDENCE
         ? modelRules[modelIndex]
         : undefined;
     const recommendations = [

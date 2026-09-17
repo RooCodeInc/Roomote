@@ -181,7 +181,7 @@ describe('resolveFastAgentRoutingHint', () => {
     });
   });
 
-  it('returns the model and effort from a confident matching rule', async () => {
+  it('lets a later strongly matching rule win independent of list order', async () => {
     mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
       model: {
         type: 'choice',
@@ -214,6 +214,73 @@ describe('resolveFastAgentRoutingHint', () => {
       reasoningEffort: 'high',
       context: expect.stringContaining('Claude Sonnet 5'),
     });
+
+    const modelQuestion =
+      mockEvaluateTypeSafeJudgments.mock.calls[0]![0].questions.model;
+    expect(modelQuestion.instructions).toContain(
+      'Evaluate every coding-model routing rule',
+    );
+    expect(modelQuestion.instructions).toContain('independent of list order');
+    expect(modelQuestion.instructions).toContain(
+      'single strongest matching rule only when its saved condition clearly and strongly applies',
+    );
+  });
+
+  it('keeps deployment defaults for a weak best-available model match', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+      model: {
+        type: 'choice',
+        choice: 'model_rule_1',
+        confidence: 0.79,
+        probabilities: { model_rule_1: 0.79 },
+      },
+    });
+
+    await expect(
+      resolveFastAgentRoutingHint({
+        request: 'Update a task',
+        environments: [],
+        models,
+        codingModelRoutingRules: [
+          {
+            modelId: 'anthropic/claude-sonnet-5',
+            reasoningEffort: 'high',
+            condition: 'Complex reasoning and engineering tasks',
+          },
+        ],
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('keeps deployment defaults when similarly strong rules are ambiguous', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+      model: {
+        type: 'choice',
+        choice: 'unclear',
+        confidence: 0.95,
+        probabilities: { unclear: 0.95 },
+      },
+    });
+
+    await expect(
+      resolveFastAgentRoutingHint({
+        request: 'Refactor a complex scheduler',
+        environments: [],
+        models,
+        codingModelRoutingRules: [
+          {
+            modelId: 'openai/gpt-5.6',
+            reasoningEffort: 'high',
+            condition: 'Complex refactors',
+          },
+          {
+            modelId: 'anthropic/claude-sonnet-5',
+            reasoningEffort: 'high',
+            condition: 'Complex engineering tasks',
+          },
+        ],
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it('keeps deployment defaults when no model rule matches', async () => {
