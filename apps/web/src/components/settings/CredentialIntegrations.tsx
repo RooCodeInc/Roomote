@@ -166,7 +166,7 @@ type CredentialRuntime = {
   dialog: ReactNode;
 };
 
-export type AdminConfiguredIntegrationItemOptions = {
+type AdminConfiguredIntegrationItemOptions = {
   integration: McpIntegrationDefinition;
   connection?: { authStatus?: string | null };
   orgEnabled: boolean;
