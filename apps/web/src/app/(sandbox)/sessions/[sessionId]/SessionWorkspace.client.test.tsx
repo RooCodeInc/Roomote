@@ -884,6 +884,165 @@ describe('SessionWorkspace', () => {
     expect(screen.queryByLabelText('Full task inactive-3')).toBeNull();
   });
 
+  it.each(['unified', 'fast'] as const)(
+    'does not automatically open failed starts from the %s task source',
+    async (taskSource) => {
+      const task = (
+        taskId: string,
+        status: RunStatus,
+        canRetryFailedStart: boolean,
+      ) => ({
+        ...singleTask,
+        taskId,
+        title: taskId,
+        latestRun: {
+          id: 1,
+          status,
+          taskPhase: null,
+          canRetryFailedStart,
+          error: status === RunStatus.Failed ? 'Task failed' : null,
+          result: null,
+        },
+      });
+      const tasks = [
+        task('failed-start', RunStatus.Failed, true),
+        task('failed-after-execution', RunStatus.Failed, false),
+        task('completed', RunStatus.Completed, false),
+      ];
+
+      renderWorkspace({
+        isMobile: false,
+        workspaceWidth: 1280,
+        sessionOverride:
+          taskSource === 'fast'
+            ? { taskSource: 'fast', tasks: [], taskCards: tasks }
+            : { tasks },
+      });
+
+      expect(
+        await screen.findByLabelText('Full task failed-after-execution'),
+      ).toBeVisible();
+      expect(screen.getByLabelText('Full task completed')).toBeVisible();
+      expect(screen.queryByLabelText('Full task failed-start')).toBeNull();
+    },
+  );
+
+  it('does not automatically open a newly arrived failed start', async () => {
+    const failedStart = {
+      ...singleTask,
+      taskId: 'failed-start',
+      title: 'Failed start',
+      latestRun: {
+        id: 2,
+        status: RunStatus.Failed,
+        taskPhase: null,
+        canRetryFailedStart: true,
+        error: 'Task failed to start',
+        result: null,
+      },
+    };
+    const completedTask = {
+      ...secondTask,
+      latestRun: {
+        id: 3,
+        status: RunStatus.Completed,
+        taskPhase: null,
+        canRetryFailedStart: false,
+        error: null,
+        result: null,
+      },
+    };
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [singleTask] },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [singleTask, failedStart, completedTask],
+      });
+    });
+
+    expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.queryByLabelText('Full task failed-start')).toBeNull();
+  });
+
+  it('keeps failed starts available through explicit task links', async () => {
+    const failedStart = {
+      ...singleTask,
+      taskId: 'failed-start',
+      title: 'Failed start',
+      latestRun: {
+        id: 2,
+        status: RunStatus.Failed,
+        taskPhase: null,
+        canRetryFailedStart: true,
+        error: 'Task failed to start',
+        result: null,
+      },
+    };
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [failedStart, secondTask] },
+      selectedTaskId: failedStart.taskId,
+    });
+
+    expect(
+      await screen.findByLabelText('Full task failed-start'),
+    ).toBeVisible();
+    expect(screen.getByLabelText('Full task task-2')).toBeVisible();
+  });
+
+  it('automatically opens a failed start after its retry begins booting', async () => {
+    const failedStart = {
+      ...singleTask,
+      taskId: 'failed-start',
+      title: 'Failed start',
+      latestRun: {
+        id: 2,
+        status: RunStatus.Failed,
+        taskPhase: null,
+        canRetryFailedStart: true,
+        error: 'Task failed to start',
+        result: null,
+      },
+    };
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [failedStart, secondTask] },
+    });
+
+    expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.queryByLabelText('Full task failed-start')).toBeNull();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [
+          {
+            ...failedStart,
+            latestRun: {
+              ...failedStart.latestRun,
+              id: 3,
+              status: RunStatus.Pending,
+              canRetryFailedStart: false,
+              error: null,
+            },
+          },
+          secondTask,
+        ],
+      });
+    });
+
+    expect(
+      await screen.findByLabelText('Full task failed-start'),
+    ).toBeVisible();
+  });
+
   it('prioritizes running tasks within an automatically opened arrival batch', async () => {
     const { queryClient } = renderWorkspace({
       isMobile: false,

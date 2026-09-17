@@ -2130,16 +2130,46 @@ const RELAUNCHABLE_FAILED_START_PAYLOAD_KINDS: ReadonlySet<TaskPayloadKind> =
  * before provisioning and must not block restart after a failed start;
  * anything else means the run did work a relaunch would redo.
  */
-async function hasNonKickoffTaskMessages(runId: number): Promise<boolean> {
-  const priorHarnessMessage = await db.query.taskMessages.findFirst({
-    where: and(
-      eq(taskMessages.runId, runId),
-      sql`coalesce(${taskMessages.metadata}->>'source', '') <> ${TASK_KICKOFF_MESSAGE_SOURCE}`,
-    ),
-    columns: { id: true },
-  });
+type FailedStartRunCandidate = Pick<
+  TaskRun,
+  'id' | 'status' | 'payloadKind' | 'payload'
+>;
 
-  return Boolean(priorHarnessMessage);
+/**
+ * Resolve failed-start retry eligibility in one query for task summary lists.
+ */
+export async function getRetryableFailedStartRunIds(
+  sourceRuns: FailedStartRunCandidate[],
+): Promise<Set<number>> {
+  const candidates = sourceRuns.filter(
+    (sourceRun) =>
+      sourceRun.status === RunStatus.Failed &&
+      isRelaunchableFailedStartPayloadKind(sourceRun.payloadKind) &&
+      Boolean(sourceRun.payload?.repo || sourceRun.payload?.environmentId),
+  );
+  if (candidates.length === 0) return new Set();
+
+  const priorHarnessMessages = await db
+    .selectDistinct({ runId: taskMessages.runId })
+    .from(taskMessages)
+    .where(
+      and(
+        inArray(
+          taskMessages.runId,
+          candidates.map((run) => run.id),
+        ),
+        sql`coalesce(${taskMessages.metadata}->>'source', '') <> ${TASK_KICKOFF_MESSAGE_SOURCE}`,
+      ),
+    );
+  const runsWithHarnessMessages = new Set(
+    priorHarnessMessages.map(({ runId }) => runId),
+  );
+
+  return new Set(
+    candidates
+      .filter((run) => !runsWithHarnessMessages.has(run.id))
+      .map((run) => run.id),
+  );
 }
 
 /**
@@ -2149,25 +2179,10 @@ async function hasNonKickoffTaskMessages(runId: number): Promise<boolean> {
  * command from disagreeing — a client-side approximation previously either
  * offered a retry that always errored, or hid one that would have worked.
  */
-export async function canRetryFailedStart(sourceRun: {
-  id: number;
-  status: TaskRun['status'];
-  payloadKind: TaskRun['payloadKind'];
-  payload: TaskRun['payload'];
-}): Promise<boolean> {
-  if (sourceRun.status !== RunStatus.Failed) {
-    return false;
-  }
-
-  if (!isRelaunchableFailedStartPayloadKind(sourceRun.payloadKind)) {
-    return false;
-  }
-
-  if (!sourceRun.payload?.repo && !sourceRun.payload?.environmentId) {
-    return false;
-  }
-
-  return !(await hasNonKickoffTaskMessages(sourceRun.id));
+export async function canRetryFailedStart(
+  sourceRun: FailedStartRunCandidate,
+): Promise<boolean> {
+  return (await getRetryableFailedStartRunIds([sourceRun])).has(sourceRun.id);
 }
 
 export function isRelaunchableFailedStartPayloadKind(
@@ -2335,7 +2350,7 @@ export async function enqueueTaskRelaunch(
     );
   }
 
-  if (await hasNonKickoffTaskMessages(sourceRun.id)) {
+  if (!(await getRetryableFailedStartRunIds([sourceRun])).has(sourceRun.id)) {
     throw new Error(
       'Only failed environment starts can be restarted. This run already has task messages.',
     );

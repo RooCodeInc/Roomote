@@ -41,6 +41,7 @@ import {
   type BackgroundAutomationKey,
 } from '@roomote/types';
 import { syncFastAgentSlackTitleBestEffort } from '@roomote/sdk/server';
+import { getRetryableFailedStartRunIds } from '@roomote/cloud-agents/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { parseCreatorFilterValue } from '@/lib/task-creator-filter';
@@ -924,6 +925,8 @@ async function getSessionTasks(sessionId: string) {
           id: taskRuns.id,
           status: taskRuns.status,
           taskPhase: taskRuns.taskPhase,
+          payloadKind: taskRuns.payloadKind,
+          payload: taskRuns.payload,
           error: taskRuns.error,
           result: taskRuns.result,
           machineDomain: taskRuns.machineDomain,
@@ -982,6 +985,8 @@ async function getSessionTasks(sessionId: string) {
     ]);
 
   const latestRunByTask = new Map(latestRuns.map((run) => [run.taskId, run]));
+  const retryableFailedStartRunIds =
+    await getRetryableFailedStartRunIds(latestRuns);
   const usageByTask = new Map(
     usageRows.map((row) => [row.taskId, Number(row.costMicroUsd)]),
   );
@@ -993,6 +998,7 @@ async function getSessionTasks(sessionId: string) {
           id: latestRunRow.id,
           status: latestRunRow.status,
           taskPhase: latestRunRow.taskPhase,
+          canRetryFailedStart: retryableFailedStartRunIds.has(latestRunRow.id),
           error: latestRunRow.error,
           result: latestRunRow.result,
         }
