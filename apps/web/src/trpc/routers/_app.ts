@@ -65,6 +65,7 @@ import {
 import {
   getSessionByIdCommand,
   getSessionForTask,
+  getRecentlyMessagedSessionsCommand,
   getSessions,
   getSessionTimeline,
   archiveSessionCommand,
@@ -3180,6 +3181,9 @@ export const appRouter = createRouter({
   }),
 
   sessions: createRouter({
+    recentlyMessaged: protectedProcedure.query(({ ctx: { auth } }) =>
+      getRecentlyMessagedSessionsCommand(auth),
+    ),
     wakeups: protectedProcedure
       .input(sessionIdInputSchema)
       .query(({ ctx: { auth }, input }) =>

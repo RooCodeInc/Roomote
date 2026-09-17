@@ -18,6 +18,7 @@ import type { UserAuthSuccess } from '@/types';
 import {
   findAccessibleSession,
   getLatestExternalSessionEvent,
+  getRecentlyMessagedSessions,
   getSessionById,
   getSessionForTask,
   getSessions,
@@ -58,6 +59,14 @@ export const sessionsListInputSchema = z.object({
   before: z.string().nullish(),
   limit: z.number().int().min(1).max(200).optional(),
 });
+
+export async function getRecentlyMessagedSessionsCommand(
+  auth: UserAuthSuccess,
+) {
+  return {
+    sessions: await getRecentlyMessagedSessions(auth, 10),
+  };
+}
 
 export async function markSessionReadCommand(
   auth: UserAuthSuccess,

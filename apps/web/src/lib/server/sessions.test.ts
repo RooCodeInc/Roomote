@@ -40,6 +40,7 @@ import {
   findAccessibleSessionByFastConversationId,
   findReadableSession,
   getLatestExternalSessionEvent,
+  getRecentlyMessagedSessions,
   getSessionById,
   getSessionForTask,
   getSessionSources,
@@ -488,6 +489,98 @@ describe('unified Session queries', () => {
     );
 
     expect(result.sessions.map((session) => session.id)).toEqual([included.id]);
+  });
+
+  it('orders recently messaged Sessions by the actor latest visible human message', async () => {
+    const actor = await userFactory.create();
+    const other = await userFactory.create();
+
+    async function createFastSession(title: string, activityAt: number) {
+      const [conversation] = await db
+        .insert(fastAgentConversations)
+        .values({
+          userId: other.id,
+          surface: 'web',
+          workspaceId: other.id,
+          conversationId: crypto.randomUUID(),
+        })
+        .returning();
+      const session = await sessionFactory.create({
+        ownerKind: 'user',
+        ownerUserId: other.id,
+        fastConversationId: conversation!.id,
+        title,
+        activityAt,
+      });
+      return { conversation: conversation!, session };
+    }
+
+    async function addMessage(
+      conversationId: string,
+      userId: string,
+      ts: number,
+      metadata: Record<string, unknown> = {},
+    ) {
+      await db.insert(fastAgentMessages).values({
+        conversationId,
+        eventId: crypto.randomUUID(),
+        turnId: crypto.randomUUID(),
+        turnSeq: 1,
+        ts,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'Message' }],
+        metadata: {
+          userId,
+          turnSource: 'human',
+          visibleInTranscript: true,
+          ...metadata,
+        },
+      });
+    }
+
+    const older = await createFastSession('Older actor message', 900);
+    const newer = await createFastSession('Newer actor message', 100);
+    const otherOnly = await createFastSession('Only another user', 1_000);
+    const visitedOnly = await createFastSession(
+      'Viewed but never messaged',
+      2_000,
+    );
+    const hiddenMessage = await createFastSession(
+      'Hidden actor message',
+      3_000,
+    );
+    const archived = await createFastSession('Archived actor message', 4_000);
+    await db
+      .update(sessions)
+      .set({ archivedAt: new Date() })
+      .where(eq(sessions.id, archived.session.id));
+    await db.insert(sessionParticipants).values({
+      sessionId: visitedOnly.session.id,
+      userId: actor.id,
+      role: 'member',
+      lastReadEventAt: 99_999,
+      lastReadEventId: 'viewed-event',
+    });
+
+    await addMessage(older.conversation.id, actor.id, 100);
+    await addMessage(older.conversation.id, other.id, 10_000);
+    await addMessage(newer.conversation.id, actor.id, 300);
+    await addMessage(otherOnly.conversation.id, other.id, 20_000);
+    await addMessage(hiddenMessage.conversation.id, actor.id, 30_000, {
+      visibleInTranscript: false,
+    });
+    await addMessage(archived.conversation.id, actor.id, 40_000);
+
+    const result = await getRecentlyMessagedSessions(
+      { userId: actor.id, isAdmin: false },
+      10,
+    );
+
+    expect(result.map((session) => session.id)).toEqual([
+      newer.session.id,
+      older.session.id,
+    ]);
   });
 
   it('treats null Session statuses as ready across search and pagination', async () => {

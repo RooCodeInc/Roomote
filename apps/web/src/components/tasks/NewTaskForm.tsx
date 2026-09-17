@@ -17,7 +17,10 @@ import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { useFastSessionLauncher } from '@/hooks/task-runs';
 import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
-import { useSessionIntegrationMentions } from '@/components/tasks/useSessionIntegrationMentions';
+import {
+  type SelectedSessionContext,
+  useSessionContextMentions,
+} from '@/components/tasks/useSessionContextMentions';
 
 import { type PromptInputMessage } from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
@@ -30,6 +33,7 @@ type SubmissionSnapshot = {
   images?: string[];
   attachmentTexts?: string[];
   integrationIds?: string[];
+  sessionContext?: SelectedSessionContext;
 };
 
 type NewTaskFormProps = {
@@ -73,14 +77,12 @@ export function NewTaskForm({
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<
     ReasoningEffort | null | undefined
   >(undefined);
-  const integrationMentionTextareaRef = useRef<HTMLTextAreaElement | null>(
-    null,
-  );
-  const integrationMentions = useSessionIntegrationMentions({
+  const contextMentionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const contextMentions = useSessionContextMentions({
     enabled: !environmentIdParam,
     value: promptText,
     onValueChange: setPromptText,
-    textareaRef: integrationMentionTextareaRef,
+    textareaRef: contextMentionTextareaRef,
   });
 
   useEffect(() => setPromptText(initialPromptText), [initialPromptText]);
@@ -172,13 +174,16 @@ export function NewTaskForm({
   const handleVoiceToggle = useCallback(() => {
     if (openingVoiceSession) return;
     const integrationIds =
-      integrationMentions.getSelectedIntegrationIds(promptText);
+      contextMentions.getSelectedIntegrationIds(promptText);
+    const sessionContext =
+      contextMentions.getSelectedSessionContext(promptText);
     setOpeningVoiceSession(true);
     void startFastSessionRef
       .current(
         {
           text: promptText.trim(),
           ...(integrationIds.length > 0 ? { integrationIds } : {}),
+          ...(sessionContext ? { sessionContext } : {}),
           model: selectedModelOverrideId,
           ...(selectedReasoningEffort !== undefined
             ? { reasoningEffort: selectedReasoningEffort }
@@ -193,7 +198,7 @@ export function NewTaskForm({
     promptText,
     selectedModelOverrideId,
     selectedReasoningEffort,
-    integrationMentions,
+    contextMentions,
   ]);
   const voiceActive = openingVoiceSession;
 
@@ -201,7 +206,12 @@ export function NewTaskForm({
   const showVoice = voiceEnabled && !environmentIdParam;
 
   const handleSubmit = useCallback(
-    async (message: PromptInputMessage & { integrationIds?: string[] }) => {
+    async (
+      message: PromptInputMessage & {
+        integrationIds?: string[];
+        sessionContext?: SelectedSessionContext;
+      },
+    ) => {
       const text = message.text.trim();
 
       const preparedPrompt = await preparePromptAttachments({
@@ -215,6 +225,7 @@ export function NewTaskForm({
         images: preparedPrompt.images,
         attachmentTexts: preparedPrompt.attachmentTexts,
         integrationIds: message.integrationIds,
+        sessionContext: message.sessionContext,
       };
 
       if (!environmentIdParam) {
@@ -231,6 +242,9 @@ export function NewTaskForm({
           attachmentTexts: submission.attachmentTexts,
           ...(submission.integrationIds?.length
             ? { integrationIds: submission.integrationIds }
+            : {}),
+          ...(submission.sessionContext
+            ? { sessionContext: submission.sessionContext }
             : {}),
           model: selectedModelOverrideId,
           ...(selectedReasoningEffort !== undefined
@@ -280,9 +294,7 @@ export function NewTaskForm({
         animateContainer={false}
         submitWithMetaKey={false}
         submitDisabledReason={submitDisabledReason}
-        integrationMentions={
-          environmentIdParam ? undefined : integrationMentions
-        }
+        contextMentions={environmentIdParam ? undefined : contextMentions}
         voice={
           showVoice
             ? { active: voiceActive, onToggle: handleVoiceToggle }

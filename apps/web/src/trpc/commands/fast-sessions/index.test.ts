@@ -3,6 +3,8 @@ const mocks = vi.hoisted(() => ({
   acquireTurnLock: vi.fn(),
   answerQuestion: vi.fn(),
   listIntegrations: vi.fn(),
+  getRecentlyMessagedSessions: vi.fn(),
+  getSessions: vi.fn(),
   resolveApiBaseUrl: vi.fn(),
   resolveMcpConfigs: vi.fn(),
   findAccessibleSession: vi.fn(),
@@ -83,6 +85,11 @@ vi.mock('@/lib/server/fast-sessions', () => ({
   getFastSessionPrReviewOfferStatus: mocks.getOfferStatus,
   getFastSessionTasks: mocks.getFastSessionTasks,
   updateFastSessionPrReviewOfferStatus: mocks.updateOfferStatus,
+}));
+
+vi.mock('@/lib/server/sessions', () => ({
+  getRecentlyMessagedSessions: mocks.getRecentlyMessagedSessions,
+  getSessions: mocks.getSessions,
 }));
 
 vi.mock('@/lib/server/artifact-signature', () => ({
@@ -230,6 +237,8 @@ describe('setup context on ordinary Fast session input', () => {
     );
     mocks.answerQuestion.mockResolvedValue('Ready');
     mocks.listIntegrations.mockResolvedValue([]);
+    mocks.getRecentlyMessagedSessions.mockResolvedValue([]);
+    mocks.getSessions.mockResolvedValue({ sessions: [], nextCursor: null });
     mocks.resolveApiBaseUrl.mockReturnValue('https://roomote.test');
     mocks.resolveMcpConfigs.mockResolvedValue({});
     mocks.buildReplyDelivery.mockResolvedValue({
@@ -348,6 +357,80 @@ describe('setup context on ordinary Fast session input', () => {
     const turn = await runScheduled();
 
     expect(turn.currentMessageAgentContext).toBeUndefined();
+  });
+
+  it('resolves one selected canonical Session into durable trusted context', async () => {
+    const selectedSessionId = '11111111-1111-4111-8111-111111111111';
+    mocks.getSessions.mockResolvedValue({
+      sessions: [{ id: selectedSessionId, title: 'Fix artifact uploads' }],
+      nextCursor: null,
+    });
+
+    await replyToFastSessionCommand(auth, {
+      sessionId: session.id,
+      text: '@Sessions: Fix artifact uploads continue this',
+      sessionContext: { kind: 'session', sessionId: selectedSessionId },
+    });
+    const turn = await runScheduled();
+
+    expect(mocks.getSessions).toHaveBeenCalledWith(auth, {
+      ids: [selectedSessionId],
+      limit: 1,
+    });
+    expect(turn.currentMessageAgentContext).toContain(
+      `Fix artifact uploads [canonical Session ID: ${selectedSessionId}]`,
+    );
+    expect(turn.currentMessageAgentContext).toContain(
+      'Do not assume transcript contents',
+    );
+    const { persistFastAgentInlineHumanTurn } =
+      await import('@roomote/sdk/server');
+    expect(vi.mocked(persistFastAgentInlineHumanTurn)).toHaveBeenCalledWith({
+      parent: expect.objectContaining({ sessionId: session.id }),
+      event: expect.objectContaining({
+        agentContext: turn.currentMessageAgentContext,
+      }),
+    });
+  });
+
+  it('uses the server latest-message order for recent Sessions and omits stale or forged IDs', async () => {
+    const recentIds = [
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222',
+      '33333333-3333-4333-8333-333333333333',
+    ];
+    mocks.getRecentlyMessagedSessions.mockResolvedValue([
+      { id: recentIds[1], title: 'Most recent message' },
+      { id: recentIds[0], title: 'Earlier message' },
+    ]);
+
+    await replyToFastSessionCommand(auth, {
+      sessionId: session.id,
+      text: '@Sessions compare these',
+      sessionContext: { kind: 'recent', sessionIds: recentIds },
+    });
+    const turn = await runScheduled();
+
+    expect(turn.currentMessageAgentContext).toContain(
+      'Sessions they recently messaged',
+    );
+    expect(
+      turn.currentMessageAgentContext.indexOf('Most recent message'),
+    ).toBeLessThan(turn.currentMessageAgentContext.indexOf('Earlier message'));
+    expect(turn.currentMessageAgentContext).not.toContain(recentIds[2]);
+    expect(mocks.getRecentlyMessagedSessions).toHaveBeenCalledWith(auth, 10);
+  });
+
+  it('does not infer Session context from typed or quoted mention text', async () => {
+    await replyToFastSessionCommand(auth, {
+      sessionId: session.id,
+      text: 'Compare "@Sessions" with this work',
+    });
+    const turn = await runScheduled();
+
+    expect(turn.currentMessageAgentContext).toBeUndefined();
+    expect(mocks.getRecentlyMessagedSessions).not.toHaveBeenCalled();
+    expect(mocks.getSessions).not.toHaveBeenCalled();
   });
 
   it('does not expose integration mentions for an inaccessible Session', async () => {

@@ -28,7 +28,10 @@ import { useVoiceDictation } from '@/hooks/useVoiceDictation';
 import { useGhostSuggestion } from '@/hooks/useGhostSuggestion';
 import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
 import { cn } from '@/lib/utils';
-import type { useSessionIntegrationMentions } from './useSessionIntegrationMentions';
+import type {
+  SelectedSessionContext,
+  useSessionContextMentions,
+} from './useSessionContextMentions';
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -107,7 +110,10 @@ type TaskPromptInputProps = {
   promptText: string;
   onPromptTextChange: (text: string) => void;
   onSubmit: (
-    message: PromptInputMessage & { integrationIds?: string[] },
+    message: PromptInputMessage & {
+      integrationIds?: string[];
+      sessionContext?: SelectedSessionContext;
+    },
   ) => Promise<void> | void;
   placeholder: string;
   /** Optional empty-composer suggestion accepted with Tab. */
@@ -137,7 +143,7 @@ type TaskPromptInputProps = {
    * conversation rather than filling the textarea.
    */
   voice?: TaskPromptVoiceControls;
-  integrationMentions?: ReturnType<typeof useSessionIntegrationMentions>;
+  contextMentions?: ReturnType<typeof useSessionContextMentions>;
 };
 
 type TaskPromptVoiceControls = {
@@ -165,7 +171,7 @@ export function TaskPromptInput({
   submitIcon,
   surface = 'default',
   voice,
-  integrationMentions,
+  contextMentions,
 }: TaskPromptInputProps) {
   const [isTextareaFocused, setIsTextareaFocused] = useState(false);
   const voiceDictation = useVoiceDictation({
@@ -204,10 +210,14 @@ export function TaskPromptInput({
         key={promptKey}
         onSubmit={(message) => {
           const integrationIds =
-            integrationMentions?.getSelectedIntegrationIds(message.text) ?? [];
+            contextMentions?.getSelectedIntegrationIds(message.text) ?? [];
+          const sessionContext = contextMentions?.getSelectedSessionContext(
+            message.text,
+          );
           return onSubmit({
             ...message,
             ...(integrationIds.length > 0 ? { integrationIds } : {}),
+            ...(sessionContext ? { sessionContext } : {}),
           });
         }}
         clearOnSubmit={false}
@@ -216,10 +226,10 @@ export function TaskPromptInput({
       >
         <AttachmentsDisplay />
         <PromptInputBody>
-          {integrationMentions?.suggestions}
+          {contextMentions?.suggestions}
           <div className="flex items-start">
             <PromptInputTextarea
-              ref={integrationMentions?.textareaRef}
+              ref={contextMentions?.textareaRef}
               autoFocus={autoFocus}
               placeholder={ghostSuggestion ?? placeholder}
               disabled={isBusy}
@@ -235,8 +245,8 @@ export function TaskPromptInput({
               value={promptText}
               submitWithMetaKey={submitWithMetaKey}
               onChange={(event) => {
-                if (integrationMentions) {
-                  integrationMentions.handleValueChange(
+                if (contextMentions) {
+                  contextMentions.handleValueChange(
                     event.target.value,
                     event.target.selectionStart,
                   );
@@ -245,31 +255,31 @@ export function TaskPromptInput({
                 }
               }}
               onSelect={(event) =>
-                integrationMentions?.handleCursorChange(
+                contextMentions?.handleCursorChange(
                   event.currentTarget.selectionStart,
                 )
               }
               onClick={(event) =>
-                integrationMentions?.handleCursorChange(
+                contextMentions?.handleCursorChange(
                   event.currentTarget.selectionStart,
                 )
               }
               onFocus={() => {
                 setIsTextareaFocused(true);
-                integrationMentions?.handleFocus();
+                contextMentions?.handleFocus();
                 onPromptFocusChange?.(true);
               }}
               onBlur={() => {
                 setIsTextareaFocused(false);
-                integrationMentions?.handleBlur();
+                contextMentions?.handleBlur();
                 onPromptFocusChange?.(false);
               }}
               onKeyDown={(event) => {
-                if (integrationMentions?.handleKeyDown(event)) return;
+                if (contextMentions?.handleKeyDown(event)) return;
                 handleSuggestionKeyDown(event);
               }}
               aria-describedby={ghostSuggestion ? suggestionHintId : undefined}
-              {...integrationMentions?.inputProps}
+              {...contextMentions?.inputProps}
             />
             {ghostSuggestion ? (
               <>

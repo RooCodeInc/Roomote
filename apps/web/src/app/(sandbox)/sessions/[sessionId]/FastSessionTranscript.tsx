@@ -1224,6 +1224,9 @@ export function FastSessionTranscript({
           ...(message.integrationIds?.length
             ? { integrationIds: message.integrationIds }
             : {}),
+          ...(message.sessionContext
+            ? { sessionContext: message.sessionContext }
+            : {}),
           model: message.model ?? null,
           reasoningEffort: message.reasoningEffort ?? null,
         });
