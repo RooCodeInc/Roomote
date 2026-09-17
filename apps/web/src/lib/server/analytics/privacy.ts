@@ -2,7 +2,7 @@ import type { UserAuthSuccess } from '@/types';
 
 import { createLabelBackedDimensionValue } from './dimensions';
 
-export const PRIVATE_ANALYTICS_LABEL = 'Private';
+const PRIVATE_ANALYTICS_LABEL = 'Private';
 export const PRIVATE_SESSION_LABEL = 'Private session';
 export const PRIVATE_TASK_LABEL = 'Private task';
 
