@@ -9,9 +9,10 @@ import { PERSONAL_THEME_STORAGE_KEY } from '@/types/preferences';
 
 export function PersonalThemeSync() {
   const { isSignedIn } = useUser();
-  const { preferences, isLoading } = usePersonalPreferences({
-    enabled: isSignedIn,
-  });
+  const { preferences, hasLoadedPreferences, isLoading } =
+    usePersonalPreferences({
+      enabled: isSignedIn,
+    });
   const { theme, setTheme } = useTheme();
   const wasSignedInRef = useRef(isSignedIn);
 
@@ -26,7 +27,7 @@ export function PersonalThemeSync() {
 
     wasSignedInRef.current = isSignedIn;
 
-    if (!isSignedIn || isLoading) {
+    if (!isSignedIn || isLoading || !hasLoadedPreferences) {
       return;
     }
 
@@ -44,7 +45,14 @@ export function PersonalThemeSync() {
         preferences.colorTheme,
       );
     }
-  }, [isLoading, isSignedIn, preferences.colorTheme, setTheme, theme]);
+  }, [
+    hasLoadedPreferences,
+    isLoading,
+    isSignedIn,
+    preferences.colorTheme,
+    setTheme,
+    theme,
+  ]);
 
   return null;
 }

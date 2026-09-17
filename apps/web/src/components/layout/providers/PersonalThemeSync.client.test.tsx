@@ -8,6 +8,7 @@ const { personalPreferencesState, themeState, userState } = vi.hoisted(() => ({
       colorTheme: 'system' as PersonalColorTheme,
       narrationMode: false,
     },
+    hasLoadedPreferences: true,
     isLoading: false,
   },
   themeState: {
@@ -43,6 +44,7 @@ describe('PersonalThemeSync', () => {
       narrationMode: false,
     };
     personalPreferencesState.isLoading = false;
+    personalPreferencesState.hasLoadedPreferences = true;
     themeState.theme = 'system';
     userState.isSignedIn = true;
   });
@@ -70,6 +72,26 @@ describe('PersonalThemeSync', () => {
     render(<PersonalThemeSync />);
 
     expect(themeState.setTheme).not.toHaveBeenCalled();
+  });
+
+  it('preserves the cached theme through an initial load failure and syncs after recovery', () => {
+    personalPreferencesState.hasLoadedPreferences = false;
+    themeState.theme = 'dark';
+    window.localStorage.setItem('roomote-color-theme', 'dark');
+
+    const { rerender } = render(<PersonalThemeSync />);
+
+    expect(themeState.setTheme).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem('roomote-color-theme')).toBe('dark');
+
+    personalPreferencesState.hasLoadedPreferences = true;
+    personalPreferencesState.preferences = {
+      colorTheme: 'light',
+      narrationMode: false,
+    };
+    rerender(<PersonalThemeSync />);
+
+    expect(themeState.setTheme).toHaveBeenCalledWith('light');
   });
 
   it('does not override browser storage when the viewer is signed out', () => {
@@ -106,5 +128,15 @@ describe('PersonalThemeSync', () => {
 
     expect(themeState.setTheme).not.toHaveBeenCalled();
     expect(window.localStorage.getItem('roomote-color-theme')).toBe('light');
+  });
+
+  it('backfills a legitimate system preference after it has loaded', () => {
+    themeState.theme = 'system';
+    window.localStorage.setItem('roomote-color-theme', 'dark');
+
+    render(<PersonalThemeSync />);
+
+    expect(themeState.setTheme).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem('roomote-color-theme')).toBe('system');
   });
 });
