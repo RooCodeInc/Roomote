@@ -816,7 +816,9 @@ export abstract class BaseController {
     );
 
     try {
-      await this.finishFailedTaskRun(taskRun, errorMessage);
+      // This path already claimed Failed atomically; run the remaining
+      // terminal side effects instead of treating that status as a lost race.
+      await this.finishFailedTaskRun(taskRun, errorMessage, undefined, false);
     } catch (error) {
       captureControllerException(error, {
         runId: taskRun.id,
@@ -930,6 +932,7 @@ export abstract class BaseController {
     taskRun: TaskRun,
     errorMessage: string,
     errorCode?: TaskRunErrorCodeValue,
+    preserveExistingOutcome = true,
   ): Promise<void> {
     // Use the centralized termination path so all side-effects (email, Slack,
     // Linear notifications, lock release, snapshot pending→failed, etc.) are
@@ -938,7 +941,7 @@ export abstract class BaseController {
       id: taskRun.id,
       status: RunStatus.Failed,
       error: errorMessage,
-      preserveExistingOutcome: true,
+      ...(preserveExistingOutcome ? { preserveExistingOutcome: true } : {}),
       ...(errorCode ? { errorCode } : {}),
     });
   }

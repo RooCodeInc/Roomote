@@ -720,7 +720,6 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       id: 42,
       status: RunStatus.Failed,
       error: 'Worker process exited before claiming task run (exit code 1)',
-      preserveExistingOutcome: true,
     });
   });
 
@@ -752,7 +751,6 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       id: 42,
       status: RunStatus.Failed,
       error: expectedError,
-      preserveExistingOutcome: true,
     });
   });
 
