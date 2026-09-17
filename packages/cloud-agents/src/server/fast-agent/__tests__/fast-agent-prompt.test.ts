@@ -1286,7 +1286,7 @@ describe('buildFastAgentSystemPrompt', () => {
         'an eligible deployment GitHub App installation with an active connected repository is required',
         'without connecting the public target or linking a personal GitHub account',
         'including source, code search, issues, and pull requests',
-        'exactly one positive `repo:owner/name` qualifier',
+        'Searches can span the connected repositories in one call',
         'Respect upstream pagination and search-index limits and disclose incomplete results',
         'Private repository reads and repository writes still require an eligible connection to the target repository',
         'never retry an authorization denial anonymously or through a task',
@@ -1390,7 +1390,10 @@ describe('buildFastAgentSystemPrompt', () => {
           : { turnSource: 'platform_event' as const, platformEventKind: turn }),
       });
       expect(prompt).toContain(
-        'these bounded actions do not require a coding task',
+        'use the discovered native GitHub tools directly',
+      );
+      expect(prompt).toContain(
+        'Work that needs a checkout, a build, or tests to get right still belongs in a coding task',
       );
       expect(prompt).toContain(
         'Writes unsupported by the discovered provider API tools still require a coding task, not an authorization bypass',
@@ -1399,7 +1402,6 @@ describe('buildFastAgentSystemPrompt', () => {
         "A permission denial is not a reason to bypass the integration's authorization",
       );
       for (const guidance of [
-        '`update_pull_request`, `merge_pull_request`, `add_issue_comment`, and `add_reply_to_pull_request_comment`',
         "`create_gist` is available, it uses the current member's linked GitHub account",
         'requires an explicit `public` value',
         'Use `public: false` unless the user explicitly requests public publishing',

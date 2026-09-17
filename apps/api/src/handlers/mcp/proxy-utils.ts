@@ -375,6 +375,15 @@ interface McpProxyConfig {
   allowAuthTokens?: boolean;
   validateTaskRunToken?: (auth: RunTokenContext) => Promise<Response | null>;
   allowedToolNames?: readonly string[];
+  /**
+   * The upstream answers every request on its own, with no MCP session.
+   * Session ids are neither forwarded nor returned, so nothing upstream is
+   * ever tied to the credential of an earlier request. For a proxy that
+   * chooses credentials per request (GitHub: installation token for
+   * repository tools, the member's account token for gists), a session
+   * would bind the first credential and reject the next.
+   */
+  statelessUpstream?: boolean;
   stripToolSchemaPatterns?: boolean;
   timeoutMs?: number;
   /**
@@ -763,10 +772,17 @@ export function createMcpProxy(config: McpProxyConfig) {
     allowAuthTokens = false,
     validateTaskRunToken = verifyTaskRunTokenTargetExists,
     allowedToolNames,
+    statelessUpstream = false,
     stripToolSchemaPatterns: shouldStripToolSchemaPatterns = false,
     guardUpstreamEgress,
     maxRequestBodyBytes,
   } = config;
+
+  const buildResponseHeaders = (upstreamHeaders: Headers): Headers => {
+    const headers = buildProxyResponseHeaders(upstreamHeaders);
+    if (statelessUpstream) headers.delete('mcp-session-id');
+    return headers;
+  };
 
   // Guarded dispatchers pin connections to DNS answers vetted against the
   // private-range blocklist; constructed once per proxy, shared by requests.
@@ -1026,6 +1042,7 @@ export function createMcpProxy(config: McpProxyConfig) {
         c.req.raw.headers,
         method,
       );
+      if (statelessUpstream) proxyHeaders.delete('mcp-session-id');
 
       if (credentials.extraHeaders) {
         for (const [key, value] of Object.entries(credentials.extraHeaders)) {
@@ -1204,7 +1221,7 @@ export function createMcpProxy(config: McpProxyConfig) {
               stripToolSchemaPatterns: shouldStripToolSchemaPatterns,
             },
           );
-          const headers = buildProxyResponseHeaders(upstreamResponse.headers);
+          const headers = buildResponseHeaders(upstreamResponse.headers);
           headers.set('content-type', 'application/json');
 
           upstreamResponse.body?.cancel().catch(() => {});
@@ -1221,7 +1238,7 @@ export function createMcpProxy(config: McpProxyConfig) {
       if (method === 'POST' && isJsonResponse(contentType)) {
         return new Response(await upstreamResponse.text(), {
           status: upstreamResponse.status,
-          headers: buildProxyResponseHeaders(upstreamResponse.headers),
+          headers: buildResponseHeaders(upstreamResponse.headers),
         });
       }
 
@@ -1259,7 +1276,7 @@ export function createMcpProxy(config: McpProxyConfig) {
             // the upstream connection instead of leaving it open.
             upstreamResponse.body?.cancel().catch(() => {});
 
-            const headers = buildProxyResponseHeaders(upstreamResponse.headers);
+            const headers = buildResponseHeaders(upstreamResponse.headers);
             headers.set('content-type', 'application/json');
 
             return new Response(JSON.stringify(response), {
@@ -1280,7 +1297,7 @@ export function createMcpProxy(config: McpProxyConfig) {
       if (credentials.maxResponseBodyBytes !== undefined) {
         return new Response(await upstreamResponse.text(), {
           status: upstreamResponse.status,
-          headers: buildProxyResponseHeaders(upstreamResponse.headers),
+          headers: buildResponseHeaders(upstreamResponse.headers),
         });
       }
 
@@ -1307,7 +1324,7 @@ export function createMcpProxy(config: McpProxyConfig) {
         }),
         {
           status: upstreamResponse.status,
-          headers: buildProxyResponseHeaders(upstreamResponse.headers),
+          headers: buildResponseHeaders(upstreamResponse.headers),
         },
       );
     } catch (error) {

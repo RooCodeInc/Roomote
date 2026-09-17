@@ -782,7 +782,7 @@ describe('fast-agent integration broker', () => {
     },
   );
 
-  it('exposes GitHub reads and bounded writes through the existing router MCP', async () => {
+  it('exposes GitHub reads and writes through the existing router MCP', async () => {
     mocks.isRouterMcpServerEnabled.mockReturnValue(true);
     mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
     mocks.listMcpTools.mockResolvedValue([
@@ -818,7 +818,7 @@ describe('fast-agent integration broker', () => {
       'create_gist',
     ]);
     expect(integrations[0]?.description).toContain(
-      'including reviewer requests, draft status, merges, and comment reactions',
+      'use the native GitHub tools directly for pull request and issue edits',
     );
     expect(integrations[0]?.description).toContain(
       'secret, link-accessible gist, not a private gist',
