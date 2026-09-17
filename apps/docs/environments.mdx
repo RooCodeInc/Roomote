@@ -49,6 +49,12 @@ If the resulting environment needs changes, edit it from
 **Settings > Environments** and update the repositories, guidance, services, or
 YAML definition there.
 
+When an agent proposes creating or changing an environment, it first shows the
+concrete setup, expected maximum build time, and effect on running and future
+tasks. Creation or update waits for explicit approval of that exact proposal;
+administrator access alone is not consent, and a materially changed proposal
+must be approved again.
+
 ## Start from a brand-new repository
 
 You do not need an existing codebase to set up an environment. From

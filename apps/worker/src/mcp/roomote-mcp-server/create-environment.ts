@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import YAML from 'yaml';
 
 import {
@@ -99,46 +101,118 @@ function applyOverrides(
   };
 }
 
+function stableSerialize(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
+  return `{${Object.entries(value)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${stableSerialize(entry)}`)
+    .join(',')}}`;
+}
+
+function parseFinalDefinition(params: {
+  definition: unknown;
+  format?: ParseFormat;
+  name?: string;
+  description?: string;
+}): EnvironmentConfig {
+  const normalized = normalizeDefinition(
+    params.definition,
+    params.format ?? 'auto',
+  );
+  const parsedConfig = environmentConfigSchema.safeParse(normalized);
+  if (!parsedConfig.success) {
+    throw new Error(
+      `Invalid environment configuration: ${parsedConfig.error.issues.map((issue) => issue.message).join(', ')}`,
+    );
+  }
+  return applyOverrides(parsedConfig.data, params);
+}
+
+export function buildEnvironmentProposal(config: EnvironmentConfig): {
+  proposalHash: string;
+  summary: {
+    name: string;
+    repositories: number;
+    setupCommands: number;
+    dockerProjects: number;
+    analysisRecipe: string | null;
+    maximumConfiguredSetupMinutes: number;
+  };
+} {
+  const setupCommands = config.repositories.flatMap(
+    (repository) => repository.commands ?? [],
+  );
+  const configuredSeconds =
+    setupCommands.reduce((total, command) => total + command.timeout, 0) +
+    (config.docker_projects ?? []).reduce(
+      (total, project) => total + (project.startup_timeout_seconds ?? 600),
+      0,
+    ) +
+    (config.analysis_recipe ? 5_400 : 0);
+  return {
+    proposalHash: createHash('sha256')
+      .update(stableSerialize(config))
+      .digest('hex'),
+    summary: {
+      name: config.name,
+      repositories: config.repositories.length,
+      setupCommands: setupCommands.length,
+      dockerProjects: config.docker_projects?.length ?? 0,
+      analysisRecipe: config.analysis_recipe?.catalog_id ?? null,
+      maximumConfiguredSetupMinutes: Math.ceil(configuredSeconds / 60),
+    },
+  };
+}
+
+export async function handlePreviewEnvironment(params: {
+  definition: unknown;
+  format?: ParseFormat;
+  name?: string;
+  description?: string;
+  environmentId?: string;
+}): Promise<ToolResult> {
+  try {
+    const finalConfig = parseFinalDefinition(params);
+    const proposal = buildEnvironmentProposal(finalConfig);
+    return successResult({
+      ...proposal,
+      action: params.environmentId ? 'update' : 'create',
+      impact: params.environmentId
+        ? 'Running tasks keep their current workspace. New tasks use this definition; runtime-affecting changes clear verification and rebuild the cached baseline.'
+        : 'Creates an unverified reusable environment. A fresh task must build and verify it before it is ready for analysis.',
+      approvalRequired: true,
+      message:
+        'Explain this exact proposal, maximum configured setup time, and disruption impact to the user, then request explicit approval. Material changes require a new preview and approval.',
+    });
+  } catch (error) {
+    return catchError(error);
+  }
+}
+
 export async function handleCreateEnvironment(
   params: {
     definition: unknown;
     format?: ParseFormat;
     name?: string;
     description?: string;
+    approvedProposalHash?: string;
   },
   config: RoomoteConfig,
 ): Promise<ToolResult> {
   try {
-    const normalized = normalizeDefinition(
-      params.definition,
-      params.format ?? 'auto',
-    );
-    const parsedConfig = environmentConfigSchema.safeParse(normalized);
-
-    if (!parsedConfig.success) {
+    const finalConfig = parseFinalDefinition(params);
+    if (
+      buildEnvironmentProposal(finalConfig).proposalHash !==
+      params.approvedProposalHash
+    ) {
       return errorResult(
-        `Invalid environment configuration: ${parsedConfig.error.issues
-          .map((issue) => issue.message)
-          .join(', ')}`,
-      );
-    }
-
-    const finalConfig = applyOverrides(parsedConfig.data, {
-      name: params.name,
-      description: params.description,
-    });
-
-    const finalParse = environmentConfigSchema.safeParse(finalConfig);
-    if (!finalParse.success) {
-      return errorResult(
-        `Invalid environment configuration: ${finalParse.error.issues
-          .map((issue) => issue.message)
-          .join(', ')}`,
+        'Explicit approval is required for this exact environment proposal. Preview it, explain its time and disruption impact, and request user approval before retrying.',
       );
     }
 
     const result = await createEnvironment(config, {
-      config: finalParse.data,
+      config: finalConfig,
     });
 
     return successResult({
@@ -158,6 +232,7 @@ export async function handleUpdateEnvironment(
     format?: ParseFormat;
     name?: string;
     description?: string;
+    approvedProposalHash?: string;
   },
   config: RoomoteConfig,
 ): Promise<ToolResult> {
@@ -167,37 +242,19 @@ export async function handleUpdateEnvironment(
       return errorResult('environmentId is required for update');
     }
 
-    const normalized = normalizeDefinition(
-      params.definition,
-      params.format ?? 'auto',
-    );
-    const parsedConfig = environmentConfigSchema.safeParse(normalized);
-
-    if (!parsedConfig.success) {
+    const finalConfig = parseFinalDefinition(params);
+    if (
+      buildEnvironmentProposal(finalConfig).proposalHash !==
+      params.approvedProposalHash
+    ) {
       return errorResult(
-        `Invalid environment configuration: ${parsedConfig.error.issues
-          .map((issue) => issue.message)
-          .join(', ')}`,
-      );
-    }
-
-    const finalConfig = applyOverrides(parsedConfig.data, {
-      name: params.name,
-      description: params.description,
-    });
-
-    const finalParse = environmentConfigSchema.safeParse(finalConfig);
-    if (!finalParse.success) {
-      return errorResult(
-        `Invalid environment configuration: ${finalParse.error.issues
-          .map((issue) => issue.message)
-          .join(', ')}`,
+        'Explicit approval is required for this exact environment proposal. Preview it, explain its time and disruption impact, and request user approval before retrying.',
       );
     }
 
     const result = await updateEnvironment(config, {
       environmentId,
-      config: finalParse.data,
+      config: finalConfig,
     });
 
     return successResult({
