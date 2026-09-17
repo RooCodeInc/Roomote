@@ -177,6 +177,8 @@ export async function handlePreviewEnvironment(params: {
     const proposal = buildEnvironmentProposal(finalConfig);
     return successResult({
       ...proposal,
+      approvalQuestionId: `environment-approval:${proposal.proposalHash}`,
+      approvalAnswer: 'approve',
       action: params.environmentId ? 'update' : 'create',
       impact: params.environmentId
         ? 'Running tasks keep their current workspace. New tasks use this definition; runtime-affecting changes clear verification and rebuild the cached baseline.'
@@ -213,6 +215,7 @@ export async function handleCreateEnvironment(
 
     const result = await createEnvironment(config, {
       config: finalConfig,
+      approvedProposalHash: params.approvedProposalHash,
     });
 
     return successResult({
@@ -255,6 +258,7 @@ export async function handleUpdateEnvironment(
     const result = await updateEnvironment(config, {
       environmentId,
       config: finalConfig,
+      approvedProposalHash: params.approvedProposalHash,
     });
 
     return successResult({

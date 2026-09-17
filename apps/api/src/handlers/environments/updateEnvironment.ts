@@ -24,6 +24,8 @@ import {
   EVAL_ENVIRONMENT_WRITE_ERROR,
   attachEnvironmentIdToTaskRun,
   canAdministerEnvironments,
+  consumeEnvironmentProposalApproval,
+  ENVIRONMENT_APPROVAL_REQUIRED_ERROR,
   getEnvironmentRepositoryConfigError,
   isEnvironmentNameUniqueViolation,
   resolveCallingVerificationTaskId,
@@ -68,7 +70,11 @@ export async function updateEnvironment(
     return c.json({ error: 'config is required' }, 400);
   }
 
-  const requestBody = body as { config?: unknown; isEval?: unknown };
+  const requestBody = body as {
+    config?: unknown;
+    isEval?: unknown;
+    approvedProposalHash?: unknown;
+  };
   const hasConfig = Object.prototype.hasOwnProperty.call(requestBody, 'config');
   const hasIsEval = Object.prototype.hasOwnProperty.call(requestBody, 'isEval');
 
@@ -173,6 +179,17 @@ export async function updateEnvironment(
     const verificationTaskId = await resolveCallingVerificationTaskId(auth);
 
     await db.transaction(async (tx) => {
+      if (
+        auth.authContext.tokenType === 'run' &&
+        (typeof requestBody.approvedProposalHash !== 'string' ||
+          !(await consumeEnvironmentProposalApproval(
+            tx,
+            auth,
+            requestBody.approvedProposalHash,
+          )))
+      ) {
+        throw new EnvironmentApprovalRequiredError();
+      }
       const now = new Date();
 
       await updateEnvironmentDefinition(tx, {
@@ -207,6 +224,9 @@ export async function updateEnvironment(
       name: config.name,
     });
   } catch (error) {
+    if (error instanceof EnvironmentApprovalRequiredError) {
+      return c.json({ error: ENVIRONMENT_APPROVAL_REQUIRED_ERROR }, 403);
+    }
     if (isEnvironmentNameUniqueViolation(error)) {
       return duplicateEnvironmentNameResponse(c);
     }
@@ -224,3 +244,5 @@ export async function updateEnvironment(
     );
   }
 }
+
+class EnvironmentApprovalRequiredError extends Error {}

@@ -1159,7 +1159,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'For create/update: exact proposalHash returned by preview after the user explicitly approved that proposal. A changed definition requires a new preview and approval.',
+          'For create/update: exact proposalHash returned by preview after request_user_input recorded an approval response using the returned approvalQuestionId and approvalAnswer. The server consumes that approval once; a changed definition requires a new preview and approval.',
         ),
     },
     annotations: {

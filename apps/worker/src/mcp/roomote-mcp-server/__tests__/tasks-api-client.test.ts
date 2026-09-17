@@ -648,6 +648,7 @@ describe('createEnvironment', () => {
     });
 
     const result = await createEnvironment(config, {
+      approvedProposalHash: 'hash-1',
       config: {
         name: 'My Project',
         repositories: [{ repository: 'owner/repo' }],
@@ -666,6 +667,7 @@ describe('createEnvironment', () => {
 
     const body = JSON.parse(fetchCall?.[1]?.body as string);
     expect(body).toEqual({
+      approvedProposalHash: 'hash-1',
       config: {
         name: 'My Project',
         repositories: [{ repository: 'owner/repo' }],
@@ -682,6 +684,7 @@ describe('createEnvironment', () => {
 
     await expect(
       createEnvironment(config, {
+        approvedProposalHash: 'hash-1',
         config: {
           name: 'My Project',
           repositories: [{ repository: 'owner/repo' }],
@@ -710,6 +713,7 @@ describe('updateEnvironment', () => {
 
     const result = await updateEnvironment(config, {
       environmentId: 'env-123',
+      approvedProposalHash: 'hash-2',
       config: {
         name: 'Updated Project',
         repositories: [{ repository: 'owner/repo' }],
@@ -728,6 +732,7 @@ describe('updateEnvironment', () => {
 
     const body = JSON.parse(fetchCall?.[1]?.body as string);
     expect(body).toEqual({
+      approvedProposalHash: 'hash-2',
       config: {
         name: 'Updated Project',
         repositories: [{ repository: 'owner/repo' }],
@@ -745,6 +750,7 @@ describe('updateEnvironment', () => {
     await expect(
       updateEnvironment(config, {
         environmentId: 'env-missing',
+        approvedProposalHash: 'hash-2',
         config: {
           name: 'Updated Project',
           repositories: [{ repository: 'owner/repo' }],
