@@ -75,6 +75,7 @@ const {
   },
   sessionMentionsState: {
     sessions: [] as Array<{ id: string; title: string }>,
+    isPending: false,
   },
   voiceStatusQuery: vi.fn(),
   recordVoiceTurnMutate: vi.fn(),
@@ -218,7 +219,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
       : options.queryKey?.[0] === 'sessions.recentlyMessaged'
         ? {
             data: { sessions: sessionMentionsState.sessions },
-            isPending: false,
+            isPending: sessionMentionsState.isPending,
           }
         : { data: composerSuggestionState.data },
 }));
@@ -362,6 +363,7 @@ beforeEach(() => {
   composerSuggestionState.data = undefined;
   integrationMentionsState.integrations = [];
   sessionMentionsState.sessions = [];
+  sessionMentionsState.isPending = false;
   openTaskPanel.mockReset();
   openTasksPanel.mockReset();
   voiceStatusQuery.mockReset();
@@ -2664,6 +2666,7 @@ describe('FastSessionTranscript', () => {
     sessionMentionsState.sessions = [
       { id: recentSessionId, title: 'Session that should not win' },
     ];
+    sessionMentionsState.isPending = true;
     replyMutate.mockResolvedValue({ success: true });
 
     render(

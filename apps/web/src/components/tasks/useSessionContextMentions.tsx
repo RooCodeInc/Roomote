@@ -428,7 +428,9 @@ export function useSessionContextMentions({
     setActiveIndex(0);
   };
 
-  const isLoading = integrationsQuery.isPending || sessionsQuery.isPending;
+  const isLoading =
+    integrationsQuery.isPending ||
+    (options.length === 0 && showSessions && sessionsQuery.isPending);
   const isError = integrationsQuery.isError || sessionsQuery.isError;
   const inputProps = {
     'aria-autocomplete': 'list' as const,
