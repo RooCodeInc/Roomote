@@ -1059,6 +1059,15 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
           ) {
             throw new Error('Session privacy does not match the conversation.');
           }
+          if (
+            bound?.privacy === 'private' &&
+            (resolvedOwner.kind !== 'user' ||
+              bound.privateOwnerUserId !== resolvedOwner.userId)
+          ) {
+            throw new Error(
+              'Fast conversation private owner does not match the caller.',
+            );
+          }
           if (bound?.fastConversationId) {
             return {
               ...(await loadConversationRecord(tx, bound.fastConversationId)),

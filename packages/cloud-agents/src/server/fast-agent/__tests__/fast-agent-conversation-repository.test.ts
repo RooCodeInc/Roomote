@@ -545,6 +545,44 @@ describe('Fast conversation repository', () => {
       .where(inArray(sessions.id, [origin!.id, other!.id]));
   });
 
+  it('rejects a non-owner reusing an already bound private Session', async () => {
+    const owner = await createUser();
+    const otherUser = await createUser();
+    const created = await getOrCreateFastAgentSession({
+      userId: owner.id,
+      conversation: {
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+      },
+      privacy: 'private',
+    });
+    const bound = await getSessionForFastConversation(db, created.id);
+
+    await expect(
+      getOrCreateFastAgentSession({
+        userId: owner.id,
+        conversation: {
+          surface: 'web',
+          workspaceId: owner.id,
+          conversationId: crypto.randomUUID(),
+        },
+        sessionId: bound!.id,
+      }),
+    ).resolves.toMatchObject({ id: created.id, privacy: 'private' });
+    await expect(
+      getOrCreateFastAgentSession({
+        userId: otherUser.id,
+        conversation: {
+          surface: 'web',
+          workspaceId: otherUser.id,
+          conversationId: crypto.randomUUID(),
+        },
+        sessionId: bound!.id,
+      }),
+    ).rejects.toThrow('private owner does not match');
+  });
+
   it('converges concurrent launches into one Session on the conversation that bound first', async () => {
     const user = await createUser();
     const [origin] = await db
