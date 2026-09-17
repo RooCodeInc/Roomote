@@ -45,7 +45,6 @@ import {
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE,
   INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE,
-  matchIntegrationTools,
   parseDiscordMessagePermalink,
   parseSlackChannelPermalink,
   parseSlackMessagePermalink,
@@ -198,6 +197,7 @@ import {
 } from './fast-agent-integration-broker';
 import { McpToolCallError } from '../mcp-tool-client';
 import { describeUnknownIntegrationArguments } from './fast-agent-integration-args';
+import { matchIntegrationToolsWithRanking } from './fast-agent-integration-tool-ranking';
 import {
   cancelFastAgentTask,
   launchFastAgentPrReview,
@@ -541,17 +541,18 @@ const callIntegrationToolArgsSchema = z.object(
 
 /**
  * Resolve on-demand integration tools for `find_integration_tools` from the
- * in-memory catalog; matching and ranking are shared with task sandboxes.
+ * in-memory catalog; keyword matching is shared with task sandboxes, and the
+ * optional judgment model can re-rank free-text queries here.
  */
-function findFastAgentIntegrationTools(
+async function findFastAgentIntegrationTools(
   integrations: FastAgentIntegration[],
   args: z.infer<typeof findIntegrationToolsArgsSchema>,
-): {
+): Promise<{
   tools: IntegrationToolCandidate[];
   truncated: boolean;
   availableToolCount: number;
   unknownIntegration: boolean;
-} {
+}> {
   if (
     args.integrationId &&
     !integrations.some((integration) => integration.id === args.integrationId)
@@ -574,7 +575,7 @@ function findFastAgentIntegrationTools(
     })),
   );
   return {
-    ...matchIntegrationTools(candidates, args),
+    ...(await matchIntegrationToolsWithRanking(candidates, args)),
     unknownIntegration: false,
   };
 }
@@ -4090,7 +4091,7 @@ export async function answerFastAgentQuestion({
       success: false as const,
       error: `The "${integrationId}" server is mounted natively; call its tools directly by their ${integrationId}_ prefixed names.`,
     });
-    const describeIntegrationTools = (
+    const describeIntegrationTools = async (
       args: z.infer<typeof findIntegrationToolsArgsSchema>,
     ) => {
       if (
@@ -4099,7 +4100,10 @@ export async function answerFastAgentQuestion({
       ) {
         return nativeIntegrationError(args.integrationId);
       }
-      const found = findFastAgentIntegrationTools(onDemandIntegrations, args);
+      const found = await findFastAgentIntegrationTools(
+        onDemandIntegrations,
+        args,
+      );
       if (found.unknownIntegration) {
         return {
           success: false as const,
@@ -4159,7 +4163,7 @@ export async function answerFastAgentQuestion({
           };
         }
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools) {
-          return describeIntegrationTools(
+          return await describeIntegrationTools(
             findIntegrationToolsArgsSchema.parse(call.args),
           );
         }

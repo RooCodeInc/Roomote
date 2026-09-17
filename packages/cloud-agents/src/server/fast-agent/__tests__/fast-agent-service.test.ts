@@ -296,6 +296,10 @@ vi.mock('../fast-agent-integration-broker', () => ({
   callFastAgentIntegration: mocks.callIntegration,
 }));
 
+vi.mock('../../typesafe-judgment', () => ({
+  evaluateTypeSafeJudgments: vi.fn(async () => null),
+}));
+
 vi.mock('../fast-agent-context-telemetry', () => ({
   captureFastAgentCapabilityOffer: mocks.captureCapabilityOffer,
   captureFastAgentInferenceContext: mocks.captureInferenceContext,
