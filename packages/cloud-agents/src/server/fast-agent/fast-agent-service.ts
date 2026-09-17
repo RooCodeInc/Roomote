@@ -2935,6 +2935,7 @@ export async function answerFastAgentQuestion({
     message: string,
     post: () => Promise<void>,
   ) => {
+    startSurfaceActivity();
     const call = await beginCanonicalToolEvent({
       title: FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
       args: { purpose: 'closeout', message },

@@ -4389,6 +4389,34 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('starts deferred activity for a system error closeout', async () => {
+    mocks.generateText.mockRejectedValueOnce(
+      new Error(
+        "ContentFilterError: The response was blocked by the provider's content filter",
+      ),
+    );
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    const adapter = callbacks({ activity });
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      allowSilentAmbientReply: true,
+      adapter,
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(activity.start).toHaveBeenCalledOnce();
+    expect(activity.settle).toHaveBeenCalledOnce();
+    expect(activity.dispose).not.toHaveBeenCalled();
+    expect(activity.start.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(adapter.postReply).mock.invocationCallOrder[0]!,
+    );
+  });
+
   it('disposes dormant ambient activity when the turn loses its lock', async () => {
     const controller = new AbortController();
     const lost = new FastAgentTurnLockLostError();
