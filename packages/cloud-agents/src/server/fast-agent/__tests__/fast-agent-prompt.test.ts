@@ -771,13 +771,28 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(enabledPrompt).toContain('the page where the human creates a key');
     expect(enabledPrompt).toContain(
+      'what connecting to it requires (whether clients must be approved or allowlisted by the provider',
+    );
+    expect(enabledPrompt).toContain(
+      'Suggest the MCP route only when connecting is something this human can complete now',
+    );
+    expect(enabledPrompt).toContain(
+      'A result that needs manual client registration or static headers means the MCP is not connectable by this human now',
+    );
+    expect(enabledPrompt).toContain(
+      "when the result carries the provider's `reason`, give it to the human in plain words",
+    );
+    expect(enabledPrompt).toContain(
+      "never characterize a provider's status (beta, unsupported, a future capability) from memory",
+    );
+    expect(enabledPrompt).toContain(
       'say in one sentence where they create that key',
     );
     expect(enabledPrompt).toContain(
       'stdio project or a repository is not a hosted MCP',
     );
     expect(enabledPrompt).toContain(
-      'A pending MCP state (an authorization link or manual client registration) means the MCP exists',
+      'An authorization link is a pending MCP state',
     );
     expect(enabledPrompt).toContain(
       'a denied authorization is never bypassed with a key',
@@ -2006,15 +2021,19 @@ describe('buildFastAgentSystemPrompt', () => {
       'Treat a verification tool error, network failure, or otherwise indeterminate result as unresolved',
     );
     expect(adminPrompt).toContain('do not switch to the key route');
+    expect(adminPrompt).toContain(
+      'Roomote registers this deployment with the provider before returning an authorization link',
+    );
+    expect(adminPrompt).toContain("relay the provider's `reason` when present");
     expect(adminPrompt).not.toContain(
       'a failed verification only means there is no MCP and the key route applies',
     );
     expect(nonAdminPrompt).not.toContain('Remote MCP: call `add_remote_mcp`');
     expect(nonAdminPrompt).toContain(
-      'Remote MCP setup is unavailable from this Session',
+      'Remote MCP setup is not available from this Session',
     );
     expect(nonAdminPrompt).toContain(
-      'stop with that outcome and do not offer an integration-key fallback unless the human explicitly asked for API access',
+      'use the key route and mention the MCP in one sentence',
     );
     for (const prompt of [adminPrompt, nonAdminPrompt]) {
       expect(prompt).not.toContain('Only deployment administrators');

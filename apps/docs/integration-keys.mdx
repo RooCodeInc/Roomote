@@ -17,8 +17,11 @@ When you ask Roomote to connect a service without saying how, it uses a
 connected integration for that service if there is one, then the service's
 official remote MCP server when one exists, and an integration key otherwise or
 when you ask for the service's API. When it does not already know the service,
-it reads the provider's documentation first to find the MCP server or, failing
-that, the API origin, the key header, and where you create a key.
+it reads the provider's documentation first to find the MCP server and what
+connecting to it requires. If the provider must approve or allowlist clients,
+or access is limited to a beta or a plan, Roomote uses an integration key and
+mentions the MCP as an option. Otherwise it looks up the API origin, the key
+header, and where you create a key.
 
 <Note>
   Integration keys are gated deployment-wide. An admin can turn on

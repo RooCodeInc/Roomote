@@ -565,6 +565,7 @@ export { resolveUserMcpServerConfigs } from './routers/mcp-connections';
 export {
   discoverOAuthEndpoints,
   discoverOAuthProtectedResourceMetadata,
+  ClientRegistrationRejectedError,
   registerOAuthClient,
   getPreferredTokenEndpointAuthMethod,
   generateCodeVerifier,
@@ -584,6 +585,7 @@ export {
 
 export {
   addRemoteCustomMcpForFast,
+  describeRegistrationRefusal,
   prepareDeploymentCustomMcpOAuthConnection,
   type AddRemoteCustomMcpResult,
 } from './lib/mcp/add-remote-custom-mcp';

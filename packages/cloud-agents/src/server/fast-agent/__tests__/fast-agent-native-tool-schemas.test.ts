@@ -402,7 +402,10 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       "a service's official hosted remote MCP endpoint",
     );
     expect(tool.description).toContain(
-      'mean the MCP exists and setup is pending',
+      "means this human cannot connect it now: relay the result's reason (the provider's own words) when present, share settingsUrl as the alternative",
+    );
+    expect(tool.description).toContain(
+      'registers this deployment with the provider before returning an authorization link',
     );
 
     expect(Object.keys(tool.args!).sort()).toEqual(['name', 'url']);
