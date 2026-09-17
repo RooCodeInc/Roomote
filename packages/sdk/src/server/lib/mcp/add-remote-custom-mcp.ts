@@ -34,6 +34,7 @@ import {
 } from './data';
 import { createBoundedCustomMcpFetch } from './custom-fetch';
 import {
+  OAuthClientRegistrationError,
   discoverOAuthEndpoints,
   discoverOAuthProtectedResourceMetadata,
   getPreferredTokenEndpointAuthMethod,
@@ -436,7 +437,10 @@ export function describeRegistrationRefusal(
   error: unknown,
 ): string | undefined {
   const message = error instanceof Error ? error.message : String(error);
-  const body = message.replace(/^OAuth client registration failed:\s*/, '');
+  const body =
+    error instanceof OAuthClientRegistrationError
+      ? error.body
+      : message.replace(/^OAuth client registration failed:\s*/, '');
   let text = body;
   try {
     const parsed = JSON.parse(body) as {
@@ -454,7 +458,7 @@ export function describeRegistrationRefusal(
     // Plain-text body.
   }
   const cleaned = text
-    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/[\u0000-\u001f\u007f<>]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   if (!cleaned) return undefined;
@@ -513,7 +517,17 @@ async function ensureRegisteredClient(
       options,
     );
   } catch (error) {
-    return { ok: false, reason: describeRegistrationRefusal(error) };
+    // Only the provider's own decision is a refusal. A timeout, a guarded
+    // fetch failure, or a 5xx is left unresolved so the next attempt retries
+    // instead of routing this server to manual setup for good.
+    if (error instanceof OAuthClientRegistrationError && error.isRefusal) {
+      return { ok: false, reason: describeRegistrationRefusal(error) };
+    }
+    throw new Error(
+      `Could not register with the provider right now; try again later. ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
   await storeClientInformation(
     connectionId,
