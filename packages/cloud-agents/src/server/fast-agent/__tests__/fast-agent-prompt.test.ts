@@ -1213,6 +1213,15 @@ describe('buildFastAgentSystemPrompt', () => {
       "Describe the user's work, findings, and outcomes, not the machinery used to produce them",
     );
     expect(prompt).toContain(
+      'Lead with the plain-language outcome and match the detail to the request',
+    );
+    expect(prompt).toContain(
+      'Omit endpoint paths, request methods, status codes, authentication jargon, implementation details, and process explanations',
+    );
+    expect(prompt).toContain(
+      'Do not overstate what a narrow check proves; preserve meaningful scope or permission limits in plain language',
+    );
+    expect(prompt).toContain(
       'Delegated tasks, child or parent runs, queues, steering, routing, environments, and lifecycle states are internal details',
     );
     expect(prompt).toContain('details already visible in a task card');
@@ -1234,7 +1243,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Never label a message as a progress update or use policy vocabulary',
     );
     expect(prompt).toContain(
-      'duplicate messages, lifecycle-only signals, machinery-only narration, and routine logs',
+      'duplicate messages, including repeated completion reports with no new useful outcome',
     );
     expect(prompt).toContain(
       'Do not suppress a useful update merely because expectations have not changed',
