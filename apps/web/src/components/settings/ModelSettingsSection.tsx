@@ -171,8 +171,7 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
   {
     role: 'helper',
     label: 'Helper model',
-    description:
-      'Used for non-task calls such as routing, titles, and summaries.',
+    description: 'Used for non-task calls such as titles and summaries.',
     icon: HandHelping,
     placeholder: 'Select a helper model',
     reasoningAriaLabel: 'Helper model reasoning level',
