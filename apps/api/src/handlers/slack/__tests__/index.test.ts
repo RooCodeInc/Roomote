@@ -233,4 +233,41 @@ describe('Slack event callback deduplication', () => {
       vi.useRealTimers();
     }
   });
+
+  it('stops renewing a processing lease after the maximum duration', async () => {
+    const { slackEventLeaseRenewal } = await import('../event-gate.js');
+    const originalInterval = slackEventLeaseRenewal.intervalMs;
+    const originalMaxDuration = slackEventLeaseRenewal.maxDurationMs;
+    vi.useFakeTimers();
+    slackEventLeaseRenewal.intervalMs = 10;
+    slackEventLeaseRenewal.maxDurationMs = 25;
+    let resolveDispatch: (() => void) | undefined;
+    mocks.dispatchSlackEvent.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDispatch = resolve;
+        }),
+    );
+
+    try {
+      const responsePromise = sendCallback();
+      await vi.advanceTimersByTimeAsync(30);
+      const renewalCalls = () =>
+        mocks.redisEval.mock.calls.filter(([script]) =>
+          String(script).includes("redis.call('EXPIRE'"),
+        );
+
+      expect(renewalCalls()).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(renewalCalls()).toHaveLength(2);
+
+      resolveDispatch?.();
+      const response = await responsePromise;
+      expect(response.status).toBe(200);
+    } finally {
+      slackEventLeaseRenewal.intervalMs = originalInterval;
+      slackEventLeaseRenewal.maxDurationMs = originalMaxDuration;
+      vi.useRealTimers();
+    }
+  });
 });

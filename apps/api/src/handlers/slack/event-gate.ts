@@ -11,6 +11,7 @@ const SLACK_EVENT_PROCESSING_TTL_SECONDS = 30;
 
 export const slackEventLeaseRenewal = {
   intervalMs: 10 * 1000,
+  maxDurationMs: 3 * 60 * 1000,
 };
 
 const CLAIM_EVENT_SCRIPT = `

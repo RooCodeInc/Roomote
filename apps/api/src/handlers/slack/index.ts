@@ -34,12 +34,26 @@ import { resumePendingSlackAuthRequest } from './events/auth-resume.js';
 export const slack = new Hono();
 
 function renewSlackEventLease(claim: SlackEventClaim): () => void {
+  const startedAt = Date.now();
   const interval = setInterval(() => {
-    void renewSlackEventClaim(claim).catch((error) => {
+    if (Date.now() - startedAt >= slackEventLeaseRenewal.maxDurationMs) {
+      clearInterval(interval);
       apiLogger.warn(
-        `Failed to renew Slack event lease ${claim.key}: ${error instanceof Error ? error.message : String(error)}`,
+        `Slack event lease renewal limit reached for ${claim.key}; allowing the lease to expire`,
       );
-    });
+      return;
+    }
+    void renewSlackEventClaim(claim)
+      .then((renewed) => {
+        if (!renewed) {
+          clearInterval(interval);
+        }
+      })
+      .catch((error) => {
+        apiLogger.warn(
+          `Failed to renew Slack event lease ${claim.key}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
   }, slackEventLeaseRenewal.intervalMs);
   interval.unref();
   return () => clearInterval(interval);
