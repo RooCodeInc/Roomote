@@ -1490,6 +1490,7 @@ export function ModelSettingsSection({
     index: number,
     rule: CodingModelRoutingRule,
   ) => {
+    suppressNextSaveSuccessToast();
     applyDraftUpdates(
       {
         codingModelRoutingRules: codingModelRoutingRules.map(
