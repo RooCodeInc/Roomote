@@ -101,13 +101,23 @@ generation is unavailable, Home keeps the standard non-personalized suggestions.
 An admin can turn the experiment off to stop personalized suggestion requests
 for every member.
 
-### Continue Slack peer conversations
+### Continue peer conversations
 
-**Slack peer conversations** is a deployment-wide experiment controlled by
-admins under **Settings > Experimental**. When enabled, eligible human replies
-can continue reaching Fast after someone mentions another participant. Fast is
-instructed to stay quiet around peer discussion unless it has a useful reason to
-participate. Direct Roomote mentions work normally with the experiment on or off.
+**Peer conversations** is a deployment-wide experiment controlled by admins
+under **Settings > Experimental**. When enabled, eligible human replies in
+established Slack or Discord Fast threads can continue reaching Fast after
+someone mentions another participant. Fast is instructed to stay quiet around
+peer discussion unless Roomote is addressed directly or the context clearly
+calls for its response. Direct Roomote mentions work normally with the experiment
+on or off.
+
+The experiment does not monitor whole channels. Discord supplies messages from
+the established thread and resolved user mentions. Telegram is not included:
+bot privacy settings can prevent ambient group messages from reaching Roomote,
+and Telegram Fast conversations are isolated per linked sender. Microsoft Teams
+is also not included because its channel Fast conversations are isolated per
+linked sender; webhook delivery and delegated Graph history are not a single
+shared, owner-bound Fast conversation signal.
 
 ## Personalize how Roomote works with you
 

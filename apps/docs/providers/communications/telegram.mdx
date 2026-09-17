@@ -121,6 +121,12 @@ current one, opening a new topic when Telegram supports it; in a plain private
 chat the request joins that chat's conversation. `/goal` makes the Fast Session
 own and pursue the supplied objective; Fast may delegate child tasks as needed.
 
+The **Peer conversations** experiment does not apply to Telegram. Telegram's
+privacy settings can prevent ambient group messages from reaching bots, and
+Roomote keeps Telegram Fast Sessions isolated per linked sender rather than
+treating a group or topic as one owner-bound conversation. Roomote does not
+claim to observe group messages that Telegram does not deliver.
+
 While a private-chat Fast turn is running, Telegram shows a non-empty
 **Roomote is working...** rich-message draft, then replaces it with rich response
 text as generation continues. The completed response is always finalized as a

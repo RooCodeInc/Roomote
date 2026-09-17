@@ -74,6 +74,7 @@ async function routeDecision(
     isRoomoteThread?: boolean;
     isAutomationReportThread?: boolean;
     isOpenConversationThread?: boolean;
+    peerConversationsExperimentEnabled?: boolean;
     botUserId?: string;
   } = {},
 ) {
@@ -91,6 +92,8 @@ async function routeDecision(
         ? 'roomote-user-1'
         : options.ownedThreadUserId,
     isOpenConversationThread: options.isOpenConversationThread,
+    peerConversationsExperimentEnabled:
+      options.peerConversationsExperimentEnabled,
     isAutomationReportThread: options.isAutomationReportThread,
     fetchThreadMessages: fetchThreadMessagesMock,
   });
@@ -401,6 +404,32 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
     ).resolves.toBe(false);
   });
 
+  it('routes peer discussion in an opted-in open Fast conversation', async () => {
+    await expect(
+      routeDecision(
+        threadReplyMessage({
+          content: `hey <@${USER_3}> look at this`,
+          mentions: [{ id: USER_3, username: 'grace' }],
+        }),
+        {
+          isOpenConversationThread: true,
+          peerConversationsExperimentEnabled: true,
+        },
+      ),
+    ).resolves.toBe(true);
+    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps subsequent ambient turns in the opted-in Fast conversation', async () => {
+    await expect(
+      routeDecision(threadReplyMessage({ content: 'I agree' }), {
+        isOpenConversationThread: true,
+        peerConversationsExperimentEnabled: true,
+      }),
+    ).resolves.toBe(true);
+    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+  });
+
   it('does not route a forwarded snapshot that mentions someone else', async () => {
     fetchThreadMessagesMock.mockResolvedValue([
       humanHistory(
@@ -474,7 +503,11 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
     ]);
 
     await expect(
-      routeDecision(threadReplyMessage({}), { isRoomoteThread: false }),
+      routeDecision(threadReplyMessage({}), {
+        isRoomoteThread: false,
+        isOpenConversationThread: true,
+        peerConversationsExperimentEnabled: true,
+      }),
     ).resolves.toBe(false);
   });
 });

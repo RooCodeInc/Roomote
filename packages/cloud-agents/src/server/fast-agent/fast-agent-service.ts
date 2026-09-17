@@ -2649,10 +2649,11 @@ export async function answerFastAgentQuestion({
         `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,
       );
       for (const { row } of batch) injectedHumanFollowUpIds.add(row.id);
-      // Only a surface that classified the message as ambient may leave it
-      // unanswered; an unmarked follow-up (web, PR, older rows) counts as
-      // directed.
-      if (batch.some(({ followUp }) => followUp.directedAtRoomote !== false)) {
+      // Only a surface that explicitly marked the turn quiet-eligible may
+      // leave it unanswered; unmarked follow-ups and older rows require one.
+      if (
+        batch.some(({ followUp }) => followUp.allowSilentAmbientReply !== true)
+      ) {
         steeredDirectedFollowUp = true;
       }
       injectedHumanFollowUpMessages.push(...batchMessages);

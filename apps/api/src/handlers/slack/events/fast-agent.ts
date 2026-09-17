@@ -261,7 +261,8 @@ export async function processFastAgentMessage(params: {
         ? { senderDisplayName: currentMessage.username }
         : {}),
       ...(event.user ? { senderExternalId: event.user } : {}),
-      directedAtRoomote: !allowSilentAmbientReply,
+      directedAtRoomote: isDirected,
+      allowSilentAmbientReply,
       ...(params.originSessionId
         ? { deliveryConversation: incomingConversation }
         : {}),
