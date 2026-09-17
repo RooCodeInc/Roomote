@@ -47,6 +47,7 @@ import {
   normalizeTaskModelSettings,
 } from '@roomote/types';
 import type {
+  CodingModelRoutingRule,
   DeploymentModelConfig,
   ReasoningEffort,
   SetupModelProviderId,
@@ -136,6 +137,7 @@ type TaskModelSettingsResult = {
     displayName: string;
     family: string;
   }>;
+  codingModelRoutingRules: CodingModelRoutingRule[];
 };
 
 type TaskModelSuggestionResult = {
@@ -292,6 +294,7 @@ export async function getTaskModelSettingsCommand(
       displayName,
       family,
     })),
+    codingModelRoutingRules: settings.codingModelRoutingRules ?? [],
   };
 }
 
@@ -940,6 +943,7 @@ function removeTaskModelsForProvider({
   );
 
   const taskModelSettings = normalizeTaskModelSettings({
+    ...settings,
     models,
     allowedModelIds,
     defaultModelId: removedModelIds.has(settings.defaultModelId)
@@ -1208,6 +1212,7 @@ export async function updateTaskModelSettingsCommand(
     codeReviewModelReasoningEffort: ReasoningEffort | null;
     exploreModelReasoningEffort?: ReasoningEffort | null;
     planningModelReasoningEffort: ReasoningEffort | null;
+    codingModelRoutingRules?: CodingModelRoutingRule[];
   },
 ): Promise<
   | {
@@ -1226,6 +1231,7 @@ export async function updateTaskModelSettingsCommand(
         codeReviewModelId?: string;
         exploreModelId?: string;
         planningModelId?: string;
+        codingModelRoutingRules?: string;
       };
     }
 > {
@@ -1241,6 +1247,7 @@ export async function updateTaskModelSettingsCommand(
     codeReviewModelId?: string;
     exploreModelId?: string;
     planningModelId?: string;
+    codingModelRoutingRules?: string;
   } = {};
   const models = (() => {
     try {
@@ -1288,6 +1295,13 @@ export async function updateTaskModelSettingsCommand(
       ];
     }),
   ) as Record<TaskModelRole, ReasoningEffort | null | undefined>;
+  const codingModelRoutingRules = input.codingModelRoutingRules?.map(
+    (rule) => ({
+      ...rule,
+      modelId: normalizeTaskModelId(rule.modelId),
+      condition: rule.condition.trim(),
+    }),
+  );
 
   if (models.length === 0) {
     fieldErrors.models = 'Add at least one model.';
@@ -1307,6 +1321,27 @@ export async function updateTaskModelSettingsCommand(
     fieldErrors.defaultModelId = 'Choose a valid default model.';
   } else if (!allowedModelIds.includes(normalizedDefaultModelId)) {
     fieldErrors.defaultModelId = 'The default model must be enabled.';
+  }
+
+  if (
+    codingModelRoutingRules?.some(
+      (rule) =>
+        !allowedModelIds.includes(rule.modelId) ||
+        !knownModelIds.has(rule.modelId),
+    )
+  ) {
+    fieldErrors.codingModelRoutingRules =
+      'Routing rules must use enabled models.';
+  } else if (
+    codingModelRoutingRules?.some(
+      (rule) =>
+        rule.reasoningEffort !== null &&
+        models.find((model) => model.id === rule.modelId)?.metadata
+          ?.supportsReasoning === false,
+    )
+  ) {
+    fieldErrors.codingModelRoutingRules =
+      'Routing rule reasoning requires a model that supports reasoning.';
   }
 
   for (const role of TASK_MODEL_ROLES) {
@@ -1388,6 +1423,10 @@ export async function updateTaskModelSettingsCommand(
       models,
       allowedModelIds,
       defaultModelId: normalizedDefaultModelId,
+      codingModelRoutingRules:
+        codingModelRoutingRules ??
+        normalizeTaskModelSettings(persisted?.taskModelSettings ?? null)
+          .codingModelRoutingRules,
       catalogSyncedModelIds: normalizeTaskModelSettings(
         persisted?.taskModelSettings ?? null,
       ).catalogSyncedModelIds,
@@ -1843,6 +1882,7 @@ export async function refreshTaskModelMetadataCommand(
   });
 
   const taskModelSettings = normalizeTaskModelSettings({
+    ...persistedSettings,
     models: refreshedModels,
     allowedModelIds,
     defaultModelId,

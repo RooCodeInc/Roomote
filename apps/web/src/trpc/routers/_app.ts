@@ -32,6 +32,7 @@ import {
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
   sessionGoalInputSchema,
+  codingModelRoutingRuleSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
@@ -2644,6 +2645,7 @@ export const appRouter = createRouter({
           planningModelReasoningEffort: z
             .enum(REASONING_EFFORT_VALUES)
             .nullable(),
+          codingModelRoutingRules: z.array(codingModelRoutingRuleSchema),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>

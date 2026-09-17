@@ -163,6 +163,34 @@ describe('task model settings', () => {
     expect('catalogSyncedModelIds' in settings).toBe(false);
   });
 
+  it('normalizes coding-model routing rules and drops disabled targets', () => {
+    const settings = normalizeTaskModelSettings({
+      models: DEFAULT_TASK_MODEL_SETTINGS.models,
+      allowedModelIds: ['openrouter/openai/gpt-5.6-terra'],
+      defaultModelId: 'openrouter/openai/gpt-5.6-terra',
+      codingModelRoutingRules: [
+        {
+          modelId: ' openrouter/openai/gpt-5.6-terra ',
+          reasoningEffort: 'high',
+          condition: ' Complex engineering tasks ',
+        },
+        {
+          modelId: 'openrouter/anthropic/claude-sonnet-5',
+          reasoningEffort: 'medium',
+          condition: 'Routine tasks',
+        },
+      ],
+    });
+
+    expect(settings.codingModelRoutingRules).toEqual([
+      {
+        modelId: 'openrouter/openai/gpt-5.6-terra',
+        reasoningEffort: 'high',
+        condition: 'Complex engineering tasks',
+      },
+    ]);
+  });
+
   it('collapses an empty catalogSyncedModelIds list to no baseline', () => {
     const settings = normalizeTaskModelSettings({
       models: DEFAULT_TASK_MODEL_SETTINGS.models,

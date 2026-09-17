@@ -452,11 +452,12 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Delegate new repository or workspace execution work to a Roomote task, optionally using an exact deployment-enabled model ID. Supported current-turn attachments are forwarded only when includeAttachments is true.",
+  description: "Delegate new repository or workspace execution work to a Roomote task, optionally using an exact deployment-enabled model ID and reasoning effort. Supported current-turn attachments are forwarded only when includeAttachments is true.",
   args: {
     prompt: z.string().min(1).describe("Complete task instruction"),
     environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact launch target ID from the system prompt; pass "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories, pass "${ALL_REPOSITORIES}" for all active repositories, or omit/pass null to use normal workspace routing`)}),
     model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
+    reasoningEffort: z.enum(${JSON.stringify(REASONING_EFFORT_VALUES)}).nullable().optional().describe("Optional reasoning effort override; use only with a selected model and omit or pass null to use the model's default"),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
   },
   execute: (args, context) => invoke("launch_task", args, context),

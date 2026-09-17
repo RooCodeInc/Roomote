@@ -170,6 +170,11 @@ function buildSettingsData(
     codingReasoningEffort?: ReasoningEffort | null;
     orchestrationReasoningEffort?: ReasoningEffort | null;
     helperReasoningEffort?: ReasoningEffort | null;
+    codingModelRoutingRules?: Array<{
+      modelId: string;
+      reasoningEffort: ReasoningEffort | null;
+      condition: string;
+    }>;
   } = {},
 ) {
   return {
@@ -293,6 +298,7 @@ function buildSettingsData(
         },
       },
     ],
+    codingModelRoutingRules: overrides.codingModelRoutingRules ?? [],
   };
 }
 
@@ -618,6 +624,62 @@ describe('ModelSettingsSection', () => {
     ).toBeInTheDocument();
     // Orchestration, helper, vision, and explore fall back to Low.
     expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(4);
+  });
+
+  it('adds, saves, edits, and removes coding-model routing rules', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add another model routing rule',
+      }),
+    );
+    const condition = screen.getByLabelText('Routing rule 1 condition');
+    fireEvent.change(condition, {
+      target: { value: 'Routine tasks where speed matters' },
+    });
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        codingModelRoutingRules: [
+          {
+            modelId: 'openrouter/openai/gpt-5.4',
+            reasoningEffort: 'medium',
+            condition: 'Routine tasks where speed matters',
+          },
+        ],
+      }),
+    );
+
+    updateMutateAsyncMock.mockClear();
+    fireEvent.change(condition, {
+      target: { value: 'Routine implementation tasks' },
+    });
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        codingModelRoutingRules: [
+          expect.objectContaining({
+            condition: 'Routine implementation tasks',
+          }),
+        ],
+      }),
+    );
+
+    updateMutateAsyncMock.mockClear();
+    fireEvent.click(screen.getByLabelText('Remove routing rule 1'));
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ codingModelRoutingRules: [] }),
+    );
   });
 
   it('hides the reasoning selector for models that do not support reasoning', () => {

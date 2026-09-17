@@ -86,7 +86,7 @@ describe('buildFastAgentSystemPrompt', () => {
     ).not.toContain('## Private Session');
   });
 
-  it('includes matching workspace and model guidance as supplemental routing rules', () => {
+  it('includes matching workspace guidance as supplemental routing rules', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [
         { id: 'env-app', name: 'App', repositoryNames: ['acme/app'] },
@@ -96,7 +96,7 @@ describe('buildFastAgentSystemPrompt', () => {
       ],
       workspaceRoutingRules: [
         {
-          description: 'For frontend work, use App and prefer GPT-5.6.',
+          description: 'For frontend work, use App.',
           target: 'env-app',
         },
       ],
@@ -104,20 +104,49 @@ describe('buildFastAgentSystemPrompt', () => {
 
     expect(prompt).toContain('## Routing Rules');
     expect(prompt).toContain(
-      'For frontend work, use App and prefer GPT-5.6. -> App [id: env-app]',
+      'For frontend work, use App. -> App [id: env-app]',
     );
     expect(prompt).toContain(
-      "An explicit user request for an environment or model takes precedence over these rules only when it satisfies the work's requirements",
+      "An explicit user request for an environment takes precedence over these rules only when it satisfies the work's requirements",
     );
     expect(prompt).toContain(
       'A Blank slate request never overrides a routing rule indicating that the work requires a repository or configured environment',
     );
     expect(prompt).toContain('supplemental routing rules');
-    expect(prompt).toContain(
-      'natural-language guidance for selecting an exact model from Available Delegated Task Models',
-    );
     expect(prompt.indexOf('## Routing Rules')).toBeLessThan(
       prompt.indexOf('## Available Delegated Task Models'),
+    );
+  });
+
+  it('includes coding-model routing rules with model and effort', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      availableTaskModels: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT 5.6', family: 'GPT' },
+      ],
+      defaultTaskModelId: 'openai/gpt-5.6',
+      codingModelRoutingRules: [
+        {
+          modelId: 'openai/gpt-5.6',
+          reasoningEffort: 'high',
+          condition: 'Complex reasoning and engineering tasks',
+        },
+      ],
+    });
+
+    expect(prompt).toContain('## Coding Model Routing');
+    expect(prompt).toContain(
+      'Complex reasoning and engineering tasks -> GPT 5.6 [id: openai/gpt-5.6] with high reasoning',
+    );
+    expect(prompt).toContain(
+      'Explicit user model or effort choices take precedence',
+    );
+    expect(prompt).toContain(
+      'Evaluate every routing rule and use the strongest matching rule only when its condition clearly and strongly matches',
+    );
+    expect(prompt).toContain('Do not use a weak best-available match');
+    expect(prompt).toContain(
+      'If no rule is a strong match, omit both fields to use the deployment defaults',
     );
   });
 
@@ -697,7 +726,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'GPT-5.6 [id: openai/gpt-5.6] (deployment default)',
     );
     expect(prompt).toContain('Claude Sonnet 5 [id: anthropic/claude-sonnet-5]');
-    expect(prompt).toContain('Omit it to use the deployment default');
+    expect(prompt).toContain('Omit both to use the deployment defaults');
     expect(prompt).toContain('manage_tasks');
     expect(prompt).toContain('get_chat_message_context');
     expect(prompt).toContain('get_chat_channel_messages');
