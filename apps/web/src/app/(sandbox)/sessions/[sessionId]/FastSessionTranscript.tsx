@@ -49,6 +49,7 @@ import {
   type SlackMentionScope,
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
+import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
 import { useSessionVoiceCallLease } from '@/hooks/useSessionVoiceCallLease';
 import { useSessionNavigationState } from '@/hooks/useSessionNavigationState';
@@ -421,6 +422,7 @@ export function FastSessionTranscript({
   defaultReasoningEffort = null,
   owner,
   headerExtras,
+  privateSession = false,
   headerActions,
   secretSessionId,
   sessionGoal,
@@ -438,6 +440,7 @@ export function FastSessionTranscript({
   defaultReasoningEffort?: ReasoningEffort | null;
   owner?: TranscriptOwner;
   headerExtras?: ReactNode;
+  privateSession?: boolean;
   headerActions?: ReactNode;
   secretSessionId?: string;
   sessionGoal?: SessionGoal | null;
@@ -1675,8 +1678,11 @@ export function FastSessionTranscript({
             >
               {title ?? fallbackTitle}
             </h1>
-            {(effectiveSessionModel || headerExtras) && (
-              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+            {(privateSession || effectiveSessionModel || headerExtras) && (
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 text-xs text-muted-foreground">
+                {privateSession ? (
+                  <PrivateSessionIcon className="text-accent-foreground" />
+                ) : null}
                 {effectiveSessionModel ? (
                   <ModelBadge
                     model={effectiveSessionModel}

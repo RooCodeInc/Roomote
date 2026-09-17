@@ -229,6 +229,7 @@ const session: SessionInfo = {
   ownerName: 'Test User',
   ownerEmail: 'test@example.com',
   ownerImageUrl: null,
+  privacy: 'shared',
   surface: 'slack',
   model: 'model-1',
   reasoningEffort: null,

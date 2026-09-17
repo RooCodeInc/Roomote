@@ -5,7 +5,11 @@ import { formatInferenceCost, getUserDisplayName } from '@/lib';
 import { formatAutomationLabel } from '@/lib/task-creator-filter';
 import {
   Avatar,
+  BasicTooltip,
+  BrandIcon,
   DollarSign,
+  Globe,
+  Mail,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -13,8 +17,12 @@ import {
 import { PullRequestBadge } from '@/components/sandbox';
 import { SessionStatusBadge } from '@/components/sessions/SessionStatusBadge';
 import { SessionSearchSnippet } from '@/components/sessions/SessionSearchSnippet';
-import { getSessionSurfaceLabel } from '@/components/sessions/session-surfaces';
 import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInferenceCostBreakdown';
+import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
+import {
+  getSessionSurfaceBrandIcon,
+  getSessionSurfaceLabel,
+} from '@/components/sessions/session-surfaces';
 import { TaskAutomationIcon } from '@/components/tasks/TaskAutomationIcon';
 
 type SessionCardData = {
@@ -26,6 +34,7 @@ type SessionCardData = {
   ownerEmail: string | null;
   ownerImageUrl: string | null;
   ownerUserId: string | null;
+  privacy: 'shared' | 'private';
   sourceSurface: string;
   activityAt: number;
   cachedStatus: 'active' | 'needs_input' | 'blocked' | 'ready' | null;
@@ -60,13 +69,17 @@ export function SessionCard({
   view?: 'list' | 'board';
 }) {
   const actorName =
-    session.ownerKind === 'automation' && session.ownerAutomation
-      ? formatAutomationLabel(session.ownerAutomation)
-      : (getUserDisplayName({
-          name: session.ownerName,
-          email: session.ownerEmail,
-        }) ?? 'Roomote');
+    session.ownerKind === 'user' && session.ownerUserId === viewerUserId
+      ? 'You'
+      : session.ownerKind === 'automation' && session.ownerAutomation
+        ? formatAutomationLabel(session.ownerAutomation)
+        : (getUserDisplayName({
+            name: session.ownerName,
+            email: session.ownerEmail,
+          }) ?? 'Roomote');
   const status = session.cachedStatus ?? 'ready';
+  const surfaceLabel = getSessionSurfaceLabel(session.sourceSurface);
+  const surfaceBrandIcon = getSessionSurfaceBrandIcon(session.sourceSurface);
 
   return (
     <div className="ph-no-capture group relative flex w-full items-start gap-3 p-4 transition-colors hover:bg-accent-foreground/10">
@@ -107,7 +120,12 @@ export function SessionCard({
         <div className="flex items-start justify-between gap-2 text-xs text-muted-foreground/75 md:items-center">
           <div className="flex min-w-0 flex-wrap items-center gap-1">
             <span className="truncate">{actorName}</span>
-            {view === 'list' ? <span>started a session</span> : null}
+            {view === 'list' ? (
+              <span>
+                started {session.privacy === 'private' ? 'a private' : 'a'}{' '}
+                session
+              </span>
+            ) : null}
           </div>
           <span className="shrink-0 text-xs text-muted-foreground">
             {formatDistanceToNow(new Date(session.activityAt * 1000), {
@@ -124,12 +142,24 @@ export function SessionCard({
           className="line-clamp-2 wrap-anywhere"
         />
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          {session.privacy === 'private' ? <PrivateSessionIcon /> : null}
           {status === 'active' || status === 'ready' ? null : (
             <SessionStatusBadge status={status} className="capitalize" />
           )}
-          {view === 'list' ? (
-            <span>{getSessionSurfaceLabel(session.sourceSurface)}</span>
-          ) : null}
+          <BasicTooltip content={surfaceLabel}>
+            <span
+              aria-label={surfaceLabel}
+              className="pointer-events-auto inline-flex items-center"
+            >
+              {surfaceBrandIcon ? (
+                <BrandIcon icon={surfaceBrandIcon} name="" className="size-3" />
+              ) : session.sourceSurface === 'agentmail' ? (
+                <Mail className="size-3" aria-hidden="true" />
+              ) : (
+                <Globe className="size-3" aria-hidden="true" />
+              )}
+            </span>
+          </BasicTooltip>
           {session.pullRequests.map((pullRequest) => (
             <PullRequestBadge
               key={`${pullRequest.repository}:${pullRequest.number}`}

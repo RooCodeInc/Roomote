@@ -318,6 +318,7 @@ const fastSessionSelection = {
   ownerName: users.name,
   ownerEmail: users.email,
   ownerImageUrl: users.imageUrl,
+  privacy: fastAgentConversations.privacy,
   title: fastAgentConversations.title,
   model: fastAgentConversations.model,
   reasoningEffort: fastAgentConversations.reasoningEffort,

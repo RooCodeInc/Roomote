@@ -3219,6 +3219,31 @@ describe('FastSessionTranscript', () => {
     );
   });
 
+  it('shows private session metadata before the model in the header', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="private-session"
+        initialMessages={[]}
+        initialTitle="Private planning"
+        sessionModel="model-1"
+        privateSession
+      />,
+    );
+
+    const privateIndicator = screen.getByLabelText('Private session');
+    expect(privateIndicator).toHaveClass('text-accent-foreground');
+    expect(
+      privateIndicator.querySelector('.lucide-hat-glasses'),
+    ).toBeInTheDocument();
+    const metadata = privateIndicator.parentElement;
+    expect(metadata).not.toBeNull();
+    expect(metadata?.textContent).toContain('model-1');
+    expect(
+      privateIndicator.compareDocumentPosition(screen.getByText('model-1')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('hides the reply composer for non-web sessions', () => {
     render(
       <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,

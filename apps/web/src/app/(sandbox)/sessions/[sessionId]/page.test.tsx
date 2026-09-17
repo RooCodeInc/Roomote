@@ -389,6 +389,7 @@ describe('Session detail page', () => {
       ownerEmail: 'user@example.com',
       ownerImageUrl: null,
       sourceSurface: 'slack',
+      privacy: 'private',
       fastConversationId: '6a1f8f1e-0000-4000-8000-000000000005',
       directInferenceCostMicroUsd: 100_000,
       inferenceCostMicroUsd: 300_000,
@@ -470,6 +471,7 @@ describe('Session detail page', () => {
         canReply: true,
         initialTitle: 'Session title',
         fallbackTitle: 'Session title',
+        privateSession: true,
       }),
       undefined,
     );
