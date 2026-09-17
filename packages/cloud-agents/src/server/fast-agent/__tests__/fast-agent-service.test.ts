@@ -5209,7 +5209,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('reports a platform issue with Fast Session and acting-user context', async () => {
+  it('reports a platform issue with Fast session and acting-user context', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -5246,9 +5246,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('returns a tool failure when Session report authorization fails', async () => {
+  it('returns a tool failure when session report authorization fails', async () => {
     mocks.createPlatformIssueReport.mockRejectedValueOnce(
-      new Error('This user cannot report issues from this private Session.'),
+      new Error('This user cannot report issues from this private session.'),
     );
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -5264,7 +5264,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           }),
         ).resolves.toMatchObject({
           success: false,
-          error: 'This user cannot report issues from this private Session.',
+          error: 'This user cannot report issues from this private session.',
         });
         return '';
       },

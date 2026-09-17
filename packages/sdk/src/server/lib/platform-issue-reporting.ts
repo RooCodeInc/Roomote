@@ -43,7 +43,7 @@ function getAppUrl(): string {
 function describePlatformIssueSource(source: PlatformIssueSource): string {
   return source.taskId
     ? `task ${source.taskId}`
-    : `Session ${source.sessionId}`;
+    : `session ${source.sessionId}`;
 }
 
 export function buildPlatformIssueSourceUrl(
@@ -90,7 +90,7 @@ function buildPlatformIssueAlertText(params: {
     params.utmSource,
   );
   const submissionUrl = buildPlatformIssueSubmissionUrl(params.reportId);
-  const sourceLabel = params.source.taskId ? 'task' : 'Session';
+  const sourceLabel = params.source.taskId ? 'task' : 'session';
 
   return appendManagerSlackFooter(
     `Platform issue reported: *${params.report.title}*\n` +
@@ -339,14 +339,14 @@ export async function createFastSessionPlatformIssueReport(input: {
     columns: { id: true, privacy: true, privateOwnerUserId: true },
   });
   if (!session) {
-    throw new Error('This Fast conversation is not attached to a Session.');
+    throw new Error('This Fast conversation is not attached to a session.');
   }
   if (
     session.privacy === 'private' &&
     session.privateOwnerUserId !== input.userId
   ) {
     throw new Error(
-      'This user cannot report issues from this private Session.',
+      'This user cannot report issues from this private session.',
     );
   }
 
@@ -390,7 +390,7 @@ export async function createFastSessionPlatformIssueReport(input: {
     }));
 
   if (!reportRow?.sessionId) {
-    throw new Error('Failed to persist the Session platform issue report.');
+    throw new Error('Failed to persist the session platform issue report.');
   }
 
   await notifyPlatformIssueReport({
@@ -400,7 +400,7 @@ export async function createFastSessionPlatformIssueReport(input: {
     slackPostedAt: reportRow.slackPostedAt,
   }).catch((error) => {
     console.warn(
-      `[platformIssueReporting] Failed to deliver Session platform issue alert: ${
+      `[platformIssueReporting] Failed to deliver session platform issue alert: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

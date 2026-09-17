@@ -43,21 +43,21 @@ beforeEach(() => {
   submitMock.mockResolvedValue({ success: true, submittedAt: new Date() });
 });
 
-it('labels a Session-origin report with its Session context', () => {
+it('labels a session-origin report with its session context', () => {
   const queryClient = new QueryClient();
   render(
     <QueryClientProvider client={queryClient}>
       <PlatformIssueSubmission
         report={{
           ...REPORT,
-          sourceLabel: 'Session',
+          sourceLabel: 'session',
           taskUrl: 'https://app.example.com/sessions/session-1',
         }}
       />
     </QueryClientProvider>,
   );
 
-  expect(screen.getByText('Session link')).toBeInTheDocument();
+  expect(screen.getByText('session link')).toBeInTheDocument();
 });
 
 it('shows exactly what will be shared without submitting on page load', () => {

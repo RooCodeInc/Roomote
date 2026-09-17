@@ -4549,7 +4549,7 @@ export async function answerFastAgentQuestion({
               return {
                 success: false,
                 error:
-                  'This platform issue report has no Session event context.',
+                  'This platform issue report has no session event context.',
               };
             }
             const report = platformIssueReportSchema.parse(call.args);
