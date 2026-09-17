@@ -79,6 +79,12 @@ The inbox complements configured chat and Email report destinations rather
 than replacing them. Automation runs still keep their normal Sessions and
 delivery behavior when the experiment is off.
 
+Results is shared across the deployment only for output Roomote can prove is
+safe to share: destinationless automations and reports sent to confirmed public
+Slack channels. Email, direct messages, private Slack channels, and providers
+without authoritative public/private destination metadata stay out of Results.
+Older results without a saved visibility decision also remain private.
+
 ## Pull request automations
 
 These automations react to pull requests, issues, and repository state.
@@ -447,15 +453,22 @@ Channel and then the supported primary Teams, Telegram, or Discord conversation
 fallback. The check is deterministic, supports **Run now**, and never starts a
 Roomote task or session.
 
-**Platform Issue Alerts** are enabled by default. Their own Slack or Discord
-destination wins, followed by the shared Manager Channel. If neither channel is
-configured, Roomote sends the alert directly to active deployment admins using
-each admin's first linked provider in this order: Slack, Teams, Telegram, then
-Discord. Admins need a linked account and must be reachable by the bot for this
-fallback to work. When only some admins receive an alert, Roomote keeps it
-pending and retries the remaining deliveries instead of marking the report
-complete. Disable the automation explicitly if the deployment should not send
-these alerts.
+**Platform Issue Alerts** are enabled by default. Tasks and Fast Sessions use
+them for admin-fixable platform, configuration, and access defects. Their own
+Slack or Discord destination wins, followed by the shared Manager Channel. If
+neither channel is configured, Roomote sends the alert directly to active
+deployment admins using each admin's first linked provider in this order:
+Slack, Teams, Telegram, then Discord. Admins need a linked account and must be
+reachable by the bot for this fallback to work. When only some admins receive
+an alert, Roomote keeps it pending and retries the remaining deliveries instead
+of marking the report complete. Disable the automation explicitly if the
+deployment should not send these alerts.
+
+An alert's **Send to Roomote** action opens an admin-only confirmation page with
+the exact title, report details, and source task or Session link. Viewing the
+page does not submit anything: an admin must confirm before the report leaves
+the deployment. A failed submission remains retryable, and repeated clicks on
+an already submitted report do not create duplicates.
 
 Each automation card shows a **Reports to** line with the destination the next
 run will use and which setting produced it. Reports go to the automation's own
