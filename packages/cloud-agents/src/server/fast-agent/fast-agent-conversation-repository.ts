@@ -828,6 +828,7 @@ export interface FastAgentConversationRepository {
     sessionId?: string;
     /** Title to seed only when this call creates the conversation. */
     initialTitle?: string;
+    /** Creation value or explicit assertion; omission preserves an existing mode. */
     privacy?: 'shared' | 'private';
     initialModel?: string;
     initialReasoningEffort?: ReasoningEffort;
@@ -993,7 +994,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
       conversation,
       sessionId,
       initialTitle,
-      privacy = 'shared',
+      privacy,
       initialModel,
       initialReasoningEffort,
     }) {
@@ -1052,6 +1053,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
               : null;
           if (
             bound &&
+            privacy !== undefined &&
             (bound.privacy !== privacy ||
               bound.privateOwnerUserId !== requestedPrivateOwner)
           ) {
@@ -1075,7 +1077,7 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
                 resolvedOwner.kind === 'automation'
                   ? resolvedOwner.automationKey
                   : null,
-              privacy,
+              privacy: privacy ?? 'shared',
               privateOwnerUserId:
                 privacy === 'private' && resolvedOwner.kind === 'user'
                   ? resolvedOwner.userId
@@ -1110,9 +1112,18 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
         if (!record) {
           throw new Error('Failed to create or load Fast conversation.');
         }
-        if (record.privacy !== privacy) {
+        if (privacy !== undefined && record.privacy !== privacy) {
           throw new Error(
             'Fast conversation privacy does not match the caller.',
+          );
+        }
+        if (
+          record.privacy === 'private' &&
+          (resolvedOwner.kind !== 'user' ||
+            record.privateOwnerUserId !== resolvedOwner.userId)
+        ) {
+          throw new Error(
+            'Fast conversation private owner does not match the caller.',
           );
         }
         // Only an explicit owner asserts who the conversation belongs to. A

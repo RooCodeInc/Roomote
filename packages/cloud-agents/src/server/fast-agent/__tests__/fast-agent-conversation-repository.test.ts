@@ -202,10 +202,21 @@ describe('Fast conversation repository', () => {
     });
     await expect(
       getOrCreateFastAgentSession({
-        owner: { kind: 'user', userId: owner.id },
+        userId: owner.id,
         conversation,
       }),
-    ).rejects.toThrow('privacy does not match');
+    ).resolves.toMatchObject({
+      id: created.id,
+      privacy: 'private',
+      created: false,
+    });
+    const otherUser = await createUser();
+    await expect(
+      getOrCreateFastAgentSession({
+        userId: otherUser.id,
+        conversation,
+      }),
+    ).rejects.toThrow('private owner does not match');
     await expect(
       getOrCreateFastAgentSession({
         owner: { kind: 'user', userId: owner.id },
