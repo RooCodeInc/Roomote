@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto';
 
 const mocks = vi.hoisted(() => ({
   continueWithLock: vi.fn(),
+  evaluateTypeSafeJudgments: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
+  evaluateTypeSafeJudgments: mocks.evaluateTypeSafeJudgments,
 }));
 
 vi.mock('../../fast-agent-surface-reply', () => ({
@@ -100,6 +105,11 @@ describe('agentmail webhook event outbox (real database)', () => {
     process.env.R_AGENTMAIL_API_KEY = 'am_test_key';
     process.env.R_AGENTMAIL_WEBHOOK_SECRET = 'whsec_dGVzdA==';
     process.env.R_AGENTMAIL_INBOX_ID = INBOX;
+  });
+
+  beforeEach(() => {
+    mocks.evaluateTypeSafeJudgments.mockReset();
+    mocks.evaluateTypeSafeJudgments.mockResolvedValue(null);
   });
 
   it('acknowledges and drops deliveries while the email channel is disabled', async () => {
@@ -367,6 +377,40 @@ describe('agentmail webhook event outbox (real database)', () => {
     });
     await processAgentMailWebhookEvent(deliveryId);
 
+    const eventRow = await db.query.agentmailWebhookEvents.findFirst({
+      where: eq(agentmailWebhookEvents.deliveryId, deliveryId),
+    });
+    expect(eventRow?.state).toBe('processed');
+
+    const conversation = await db.query.agentmailConversations.findFirst({
+      where: eq(agentmailConversations.providerThreadId, threadId),
+    });
+    expect(conversation).toBeUndefined();
+  });
+
+  it('drops mail the judgment model confidently judges an automatic reply', async () => {
+    const { senderEmail } = await createVerifiedSender();
+    mocks.evaluateTypeSafeJudgments.mockResolvedValue({
+      autoReply: { type: 'noul', noul: 0.97 },
+    });
+
+    const deliveryId = `msg_${randomUUID()}`;
+    const threadId = `thread-${randomUUID()}`;
+    await recordAgentMailWebhookEvent({
+      deliveryId,
+      eventId: null,
+      eventType: 'message.received',
+      payload: messageReceivedPayload({
+        eventId: `evt_${randomUUID()}`,
+        threadId,
+        messageId: `m-${randomUUID()}`,
+        from: senderEmail,
+        text: 'I am out of the office until Monday with limited access to email.',
+      }),
+    });
+    await processAgentMailWebhookEvent(deliveryId);
+
+    expect(mocks.evaluateTypeSafeJudgments).toHaveBeenCalledTimes(1);
     const eventRow = await db.query.agentmailWebhookEvents.findFirst({
       where: eq(agentmailWebhookEvents.deliveryId, deliveryId),
     });
