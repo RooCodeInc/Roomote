@@ -10,26 +10,32 @@ import {
   openIntegrationKeyDialog,
 } from './integration-key-dialog';
 
+export interface OpenIntegrationKeyRequest {
+  /** Event id of the request; a new id refetches the approvals. */
+  eventId: string;
+  /** The approval that request created, when the tool output named it. */
+  pendingRef: string | null;
+}
+
 /**
- * One card per approval still waiting for a key, shown to the Session owner
- * at the end of the conversation while the agent's request is the open ask.
- * It goes away once the key is saved, the approval expires, or the owner
- * replies and the conversation moves on; the approvals themselves stay open
- * in the key dialog either way.
+ * The card for the approval the Session owner is being asked for right now,
+ * shown at the end of the conversation while the agent's request is the open
+ * ask. It goes away once the key is saved, the approval expires, or the owner
+ * replies and the conversation moves on. Earlier approvals the owner never
+ * answered stay open in the key dialog but get no card of their own.
  */
 export function PendingIntegrationKeys({
   sessionId,
-  openRequestId,
+  openRequest,
 }: {
   sessionId: string;
-  /**
-   * Event id of the key request the conversation is still waiting on, or null
-   * when there is none. A new id refetches; null hides the card.
-   */
-  openRequestId: string | null;
+  /** The key request the conversation is still waiting on; null hides the card. */
+  openRequest: OpenIntegrationKeyRequest | null;
 }) {
   const { data, error, errorUpdatedAt, isFetching, refetch } =
     useSessionIntegrationApprovals(sessionId);
+  const openRequestId = openRequest?.eventId ?? null;
+  const openPendingRef = openRequest?.pendingRef ?? null;
   useEffect(() => {
     if (openRequestId) void refetch();
   }, [openRequestId, refetch]);
@@ -40,7 +46,14 @@ export function PendingIntegrationKeys({
       window.removeEventListener(INTEGRATION_KEYS_CHANGED_EVENT, handleChange);
   }, [refetch]);
 
-  const pending = useMemo(() => data?.pending ?? [], [data]);
+  // Only the open request's approval gets a card. When the request did not
+  // name one, every open approval shows rather than none.
+  const pending = useMemo(() => {
+    const all = data?.pending ?? [];
+    return openPendingRef
+      ? all.filter((item) => item.pendingRef === openPendingRef)
+      : all;
+  }, [data, openPendingRef]);
   // Approvals stop accepting a key at expiresAt; refetch then so the card
   // disappears without waiting for another trigger.
   const nextExpiry = useMemo(

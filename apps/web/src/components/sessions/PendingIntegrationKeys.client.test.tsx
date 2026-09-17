@@ -30,7 +30,11 @@ function response(pending: unknown[] = []) {
   return new Response(JSON.stringify({ pending, secrets: [] }));
 }
 
-function setup(openRequestId: string | null = 'req-1') {
+const openRequest = { eventId: 'req-1', pendingRef: demo.pendingRef };
+
+function setup(
+  request: { eventId: string; pendingRef: string | null } | null = openRequest,
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });
@@ -39,7 +43,7 @@ function setup(openRequestId: string | null = 'req-1') {
     client,
     ...render(
       <QueryClientProvider client={client}>
-        <PendingIntegrationKeys sessionId="s1" openRequestId={openRequestId} />
+        <PendingIntegrationKeys sessionId="s1" openRequest={request} />
       </QueryClientProvider>,
     ),
   };
@@ -121,10 +125,35 @@ describe('PendingIntegrationKeys', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('shows only the approval the open request created', async () => {
+    const other = {
+      ...demo,
+      pendingRef: '6a1f8f1e-0000-4000-8000-000000000008',
+      label: 'Intercom',
+      origin: 'https://api.intercom.io',
+    };
+    fetchMock.mockResolvedValue(response([demo, other]));
+    setup({ eventId: 'req-2', pendingRef: other.pendingRef });
+    expect(
+      await screen.findByText('Add your Intercom key'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Add your Figma key')).toBeNull();
+  });
+
+  it('shows every open approval when the request did not name one', async () => {
+    const other = { ...demo, pendingRef: 'other', label: 'Intercom' };
+    fetchMock.mockResolvedValue(response([demo, other]));
+    setup({ eventId: 'req-3', pendingRef: null });
+    expect(
+      await screen.findByText('Add your Intercom key'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Add your Figma key')).toBeInTheDocument();
+  });
+
   it('shows pending approvals and opens the dialog fragment', async () => {
     fetchMock.mockResolvedValue(response([demo]));
     window.location.hash = '';
-    setup('req-1');
+    setup();
     expect(await screen.findByText('Add your Figma key')).toBeInTheDocument();
     expect(
       screen.getByText('https://api.figma.com · GET, HEAD'),

@@ -140,6 +140,24 @@ function isIntegrationKeyRequest(message: TranscriptMessage) {
   );
 }
 
+/**
+ * The approval a key request created, read from the tool's JSON output. Null
+ * when the output is missing or not the expected shape.
+ */
+function integrationKeyRequestPendingRef(message: TranscriptMessage) {
+  const output = (message.payload as { output?: unknown } | null)?.output;
+  if (typeof output !== 'string') return null;
+  try {
+    const parsed = JSON.parse(output) as {
+      pending?: { pendingRef?: unknown };
+    } | null;
+    const ref = parsed?.pending?.pendingRef;
+    return typeof ref === 'string' && ref ? ref : null;
+  } catch {
+    return null;
+  }
+}
+
 function shouldSuppressTrustedInputToolMessage(
   message: TranscriptMessage,
   requestTurnIds: ReadonlySet<string>,
@@ -1615,7 +1633,7 @@ export function FastSessionTranscript({
   // (or after saving one, since that posts a reply), the ask is over and the
   // card goes away, even though the approval stays open in the dialog. A
   // request that arrives while the owner is watching also opens the dialog.
-  const openIntegrationKeyRequestId = useMemo(() => {
+  const openIntegrationKeyRequest = useMemo(() => {
     let latest: TranscriptMessage | null = null;
     let latestHumanMessage: TranscriptMessage | null = null;
     for (const message of messages) {
@@ -1640,8 +1658,13 @@ export function FastSessionTranscript({
     ) {
       return null;
     }
-    return latest.eventId;
+    return {
+      eventId: latest.eventId,
+      pendingRef: integrationKeyRequestPendingRef(latest),
+    };
   }, [messages]);
+  const openIntegrationKeyRequestId =
+    openIntegrationKeyRequest?.eventId ?? null;
   const seenIntegrationKeyRequestId = useRef<string | null | undefined>(
     undefined,
   );
@@ -1803,7 +1826,7 @@ export function FastSessionTranscript({
             {secretSessionId ? (
               <PendingIntegrationKeys
                 sessionId={secretSessionId}
-                openRequestId={openIntegrationKeyRequestId}
+                openRequest={openIntegrationKeyRequest}
               />
             ) : null}
           </ConversationContent>
