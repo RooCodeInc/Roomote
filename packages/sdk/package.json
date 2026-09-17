@@ -64,6 +64,18 @@
       "import": "./src/server/lib/safe-fetch.ts",
       "require": "./src/server/lib/safe-fetch.ts"
     },
+    "./server/service-credentials": {
+      "import": "./src/server/lib/service-credentials.ts",
+      "require": "./src/server/lib/service-credentials.ts"
+    },
+    "./server/add-remote-custom-mcp": {
+      "import": "./src/server/lib/mcp/add-remote-custom-mcp.ts",
+      "require": "./src/server/lib/mcp/add-remote-custom-mcp.ts"
+    },
+    "./server/credential-egress": {
+      "import": "./src/server/lib/credential-egress.ts",
+      "require": "./src/server/lib/credential-egress.ts"
+    },
     "./server/notion-api": {
       "import": "./src/server/lib/notion-api.ts",
       "require": "./src/server/lib/notion-api.ts"
@@ -103,13 +115,16 @@
     "@trpc/server": "^11.15.0",
     "bullmq": "^5.78.0",
     "cron-parser": "5.6.1",
+    "htmlparser2": "8.0.2",
     "superjson": "^2.2.6",
+    "turndown": "7.2.0",
     "undici": "^7.29.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@roomote/config-typescript": "workspace:^",
     "@types/node": "^24.10.13",
+    "@types/turndown": "5.0.5",
     "vitest": "^4.1.1"
   }
 }

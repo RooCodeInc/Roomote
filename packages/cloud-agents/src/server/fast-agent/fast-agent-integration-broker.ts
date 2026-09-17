@@ -1,5 +1,13 @@
-import { createAuthToken, ROOMOTE_MCP_PATH } from '@roomote/auth';
+import {
+  createAuthToken,
+  createSessionBrokerToken,
+  ROOMOTE_MCP_PATH,
+} from '@roomote/auth';
 import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
+import {
+  HTTP_INTEGRATIONS_MCP_ID,
+  HTTP_INTEGRATIONS_INSTRUCTIONS,
+} from '../../http-integrations';
 import {
   getBitbucketOAuthConnection,
   resolveBitbucketInstanceHost,
@@ -8,8 +16,6 @@ import { resolveAdoInstanceHost } from '@roomote/ado';
 import { resolveGiteaInstanceHost } from '@roomote/gitea';
 import {
   and,
-  beginSlackFastIntegrationCall,
-  completeSlackFastIntegrationCall,
   db,
   deploymentSecrets,
   eq,
@@ -21,12 +27,15 @@ import {
 import { resolveGitLabInstanceHost } from '@roomote/gitlab';
 import {
   createMemoryMcpInstructions,
+  BRAIN_MCP_ID,
   MCP_INTEGRATION_PROXY_PATH_PREFIX,
   MCP_ROUTING_PROXY_PATH_PREFIX,
   ROOMOTE_MCP_ID,
+  PUBLIC_URL_FETCH_DEFAULT_TIMEOUT_SECONDS,
+  PUBLIC_URL_FETCH_MAX_TIMEOUT_SECONDS,
   getMcpIntegration,
+  getMcpIntegrationDataPolicy,
   getMemoryMcpDisplayName,
-  formatErrorForLog,
   isMemoryMcpServer,
 } from '@roomote/types';
 
@@ -37,16 +46,13 @@ import {
 } from '../mcp-tool-client';
 import { isRouterMcpServerEnabled } from '../mcp-policy';
 import { resolveApiBaseUrl } from '../shared-utils';
-import {
-  getFastAgentConversationStorageWorkspaceId,
-  type FastAgentMcpServerConfig,
-  type FastAgentConversation,
-} from './fast-agent-conversation';
+import { type FastAgentMcpServerConfig } from './fast-agent-conversation';
 
 export type FastAgentIntegration = {
   id: string;
   name: string;
   description: string;
+  dataPolicy?: 'shared' | 'private';
   instructions?: string;
   tools: McpToolDefinition[];
   endpoint?: {
@@ -67,10 +73,12 @@ type BrokerContext = {
   apiBaseUrl?: string;
 };
 
-type IntegrationAuditContext = BrokerContext & {
+type IntegrationCallContext = BrokerContext & {
+  humanTurn?: boolean;
   sessionId: string;
-  conversation: FastAgentConversation;
-  messageId: string;
+  privacy?: 'shared' | 'private';
+  privateOwnerUserId?: string | null;
+  privateSessionsExperimentEnabled?: boolean;
 };
 
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
@@ -78,6 +86,30 @@ const FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS = 30_000;
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_MAX_ENTRIES = 1_000;
 const FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS = 10_000;
 const FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS = 60_000;
+const FAST_AGENT_PUBLIC_FETCH_TIMEOUT_GRACE_MS = 5_000;
+
+function resolveFastIntegrationCallTimeoutMs(request: {
+  integrationId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+}): number {
+  if (
+    request.integrationId !== ROOMOTE_MCP_ID ||
+    request.toolName !== 'fetch_url'
+  ) {
+    return FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS;
+  }
+
+  const requested =
+    typeof request.args.timeout === 'number' &&
+    Number.isFinite(request.args.timeout) &&
+    request.args.timeout > 0
+      ? Math.min(request.args.timeout, PUBLIC_URL_FETCH_MAX_TIMEOUT_SECONDS)
+      : PUBLIC_URL_FETCH_DEFAULT_TIMEOUT_SECONDS;
+  return (
+    Math.ceil(requested * 1_000) + FAST_AGENT_PUBLIC_FETCH_TIMEOUT_GRACE_MS
+  );
+}
 
 type IntegrationToolCacheEntry = {
   expiresAt: number;
@@ -263,7 +295,18 @@ function integrationProxyUrl(baseUrl: string, integrationId: string): string {
 
 function describeMcpServer(
   id: string,
-): Pick<FastAgentIntegration, 'name' | 'description' | 'instructions'> {
+): Pick<
+  FastAgentIntegration,
+  'name' | 'description' | 'instructions' | 'dataPolicy'
+> {
+  if (id === HTTP_INTEGRATIONS_MCP_ID) {
+    return {
+      name: 'HTTP integrations',
+      description:
+        'API-mediated HTTP requests to operator-configured integrations.',
+      instructions: HTTP_INTEGRATIONS_INSTRUCTIONS,
+    };
+  }
   if (id === ROOMOTE_MCP_ID) {
     return {
       name: 'Roomote',
@@ -287,6 +330,7 @@ function describeMcpServer(
       integration?.description ??
       'Use tools from this deployment-configured MCP server.',
     instructions: integration?.instructions,
+    dataPolicy: getMcpIntegrationDataPolicy(integration),
   };
 }
 
@@ -422,7 +466,7 @@ async function isNativeProviderMergeAvailable(
 /**
  * Actor-resolved remote MCP servers only. Local transports and filesystem
  * tools remain sandbox-only. Tools disabled by the deployment remain
- * unavailable, and calls to exposed tools are audited.
+ * unavailable.
  */
 export async function listFastAgentIntegrations(
   context: BrokerContext,
@@ -588,6 +632,7 @@ export async function listFastAgentIntegrations(
         id: result.value.id,
         name: result.value.name,
         description: result.value.description,
+        dataPolicy: result.value.dataPolicy,
         instructions: isMemory
           ? createMemoryMcpInstructions(result.value.id, {
               primary: primaryMemory,
@@ -601,16 +646,8 @@ export async function listFastAgentIntegrations(
   });
 }
 
-function serializeAuditPreview(value: unknown, maxLength: number): string {
-  try {
-    return (JSON.stringify(value) ?? String(value)).slice(0, maxLength);
-  } catch {
-    return '[Unserializable integration result]';
-  }
-}
-
 export async function callFastAgentIntegration(
-  context: IntegrationAuditContext,
+  context: IntegrationCallContext,
   available: FastAgentIntegration[],
   request: {
     integrationId: string;
@@ -627,6 +664,29 @@ export async function callFastAgentIntegration(
   if (!integration.tools.some((tool) => tool.name === request.toolName)) {
     throw new Error('That integration tool is not available to fast mode.');
   }
+  const privateBrainRead =
+    context.privacy === 'private' && request.integrationId === BRAIN_MCP_ID;
+  const privateIntegrationCall = integration.dataPolicy === 'private';
+  if (
+    privateIntegrationCall &&
+    (context.privateSessionsExperimentEnabled !== true ||
+      context.privacy !== 'private' ||
+      context.privateOwnerUserId !== context.userId)
+  ) {
+    throw new Error(
+      'Private integrations require a private Session owned by the current user.',
+    );
+  }
+  if (
+    context.privacy === 'private' &&
+    isMemoryMcpServer(request.integrationId) &&
+    request.integrationId !== BRAIN_MCP_ID
+  ) {
+    throw new Error('Private Sessions cannot write to shared memory.');
+  }
+  if (privateBrainRead && request.toolName === 'synthesize') {
+    throw new Error('Brain synthesis is unavailable in private Sessions.');
+  }
   if (
     request.integrationId === ROOMOTE_MCP_ID &&
     request.toolName === 'manage_tasks' &&
@@ -637,86 +697,51 @@ export async function callFastAgentIntegration(
     );
   }
 
-  // Fail closed: an integration tool never executes unless its durable audit
-  // record exists first.
-  const audit = await beginSlackFastIntegrationCall({
-    fastAgentConversationId: context.sessionId,
-    userId: context.userId,
-    slackTeamId: getFastAgentConversationStorageWorkspaceId(
-      context.conversation,
-    ),
-    slackChannel:
-      'replyTarget' in context.conversation
-        ? context.conversation.replyTarget.channelId
-        : context.conversation.conversationId,
-    slackThreadTs: context.conversation.conversationId,
-    slackMessageTs: context.messageId,
-    integrationId: integration.id,
-    toolName: request.toolName,
-    arguments: request.args,
-  });
-
-  try {
-    // The token minted at list time is short-lived, so deployment-proxy calls
-    // re-mint it here: a call late in a long turn must not send an expired
-    // bearer. Direct upstream endpoints keep their own resolved headers.
-    let endpoint = integration.endpoint;
-    if (!endpoint || endpoint.deploymentProxy) {
-      const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
-      endpoint = endpoint
-        ? {
-            ...endpoint,
-            headers: {
-              ...endpoint.headers,
-              Authorization: `Bearer ${authToken}`,
-            },
-          }
-        : {
-            url: integrationProxyUrl(apiBaseUrl, integration.id),
-            headers: { Authorization: `Bearer ${authToken}` },
-          };
-    }
-    const result = await withFastIntegrationTimeout(
-      (signal) =>
-        callMcpTool({
-          url: endpoint.url,
-          headers: endpoint.headers,
-          toolName: request.toolName,
-          args: request.args,
-          toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,
-          signal,
-        }),
-      FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS,
-      `Fast ${integration.id}/${request.toolName} integration call`,
-    );
-
-    try {
-      await completeSlackFastIntegrationCall({
-        id: audit.id,
-        status: 'succeeded',
-        resultPreview: serializeAuditPreview(result, 30_000),
-        startedAt: audit.startedAt,
-      });
-    } catch (error) {
-      console.warn(
-        `[Fast Agent] Could not complete integration audit ${audit.id}: ${formatErrorForLog(error)}`,
-      );
-    }
-
-    return result;
-  } catch (error) {
-    try {
-      await completeSlackFastIntegrationCall({
-        id: audit.id,
-        status: 'failed',
-        error: formatErrorForLog(error).slice(0, 10_000),
-        startedAt: audit.startedAt,
-      });
-    } catch (auditError) {
-      console.warn(
-        `[Fast Agent] Could not complete failed integration audit ${audit.id}: ${formatErrorForLog(auditError)}`,
-      );
-    }
-    throw error;
+  // The token minted at list time is short-lived, so deployment-proxy calls
+  // re-mint it here: a call late in a long turn must not send an expired
+  // bearer. Direct upstream endpoints keep their own resolved headers.
+  let endpoint = integration.endpoint;
+  if (!endpoint || endpoint.deploymentProxy) {
+    const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
+    endpoint = endpoint
+      ? {
+          ...endpoint,
+          headers: {
+            ...endpoint.headers,
+            Authorization: `Bearer ${authToken}`,
+          },
+        }
+      : {
+          url: integrationProxyUrl(apiBaseUrl, integration.id),
+          headers: { Authorization: `Bearer ${authToken}` },
+        };
   }
+  if (
+    integration.id === HTTP_INTEGRATIONS_MCP_ID &&
+    endpoint.deploymentProxy &&
+    context.humanTurn
+  ) {
+    endpoint = {
+      ...endpoint,
+      headers: {
+        ...endpoint.headers,
+        Authorization: `Bearer ${await createSessionBrokerToken({
+          userId: context.userId,
+          fastConversationId: context.sessionId,
+        })}`,
+      },
+    };
+  }
+  return withFastIntegrationTimeout(
+    (signal) =>
+      callMcpTool({
+        url: endpoint.url,
+        headers: endpoint.headers,
+        toolName: request.toolName,
+        args: request.args,
+        signal,
+      }),
+    resolveFastIntegrationCallTimeoutMs(request),
+    `Fast ${integration.id}/${request.toolName} integration call`,
+  );
 }

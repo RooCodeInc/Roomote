@@ -1,3 +1,4 @@
+import { stripLeadingIntegrationSavedBlock } from '@roomote/types';
 import { createHash } from 'node:crypto';
 
 import {
@@ -14,8 +15,16 @@ import {
   type FastAgentTurnAdapter,
   type FastAgentTurnLockHandle,
 } from '@roomote/cloud-agents/server';
-import { and, db, eq, slackInstallations } from '@roomote/db/server';
 import {
+  and,
+  db,
+  eq,
+  getSessionForFastConversation,
+  replaceSessionGoal,
+  slackInstallations,
+} from '@roomote/db/server';
+import {
+  DEFAULT_SESSION_GOAL_MAX_CONTINUATIONS,
   isFastAgentSourceControlConversation,
   type FastAgentHumanFollowUpEvent,
 } from '@roomote/types';
@@ -84,71 +93,14 @@ import {
 } from './fast-agent-telegram-activity';
 import { addFastAgentTelegramTopicTitleSync } from './fast-agent-telegram-title-sync';
 
-const SLACK_QUOTE_MAX_LENGTH = 100;
-const DISCORD_QUOTE_MAX_LENGTH = 280;
-
-function normalizeQuoteText(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
-}
-
-function truncateQuoteText(text: string, maxLength: number): string {
-  if (text.length <= maxLength) {
-    return text;
-  }
-
-  return `${text.slice(0, maxLength).trimEnd()}...`;
-}
-
-function escapeSlackMrkdwnText(text: string): string {
-  return text
-    .replaceAll('\\', '\\\\')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('*', '\\*')
-    .replaceAll('_', '\\_')
-    .replaceAll('~', '\\~')
-    .replaceAll('`', '\\`');
-}
-
-/** `>*{name}:* {text}` — the same one-line quote the task reply path uses. */
-function buildSlackReplyQuote(params: {
-  senderDisplayName: string | null;
-  text: string;
-}): string | null {
-  const username = escapeSlackMrkdwnText(
-    normalizeQuoteText(params.senderDisplayName ?? 'Someone'),
-  );
-  const text = escapeSlackMrkdwnText(
-    truncateQuoteText(normalizeQuoteText(params.text), SLACK_QUOTE_MAX_LENGTH),
-  );
-
-  if (!username || !text) {
-    return null;
-  }
-
-  return `>*${username}:* ${text}`;
-}
-
-function buildDiscordReplyQuote(params: {
-  senderDisplayName: string | null;
-  text: string;
-}): string | null {
-  const username = normalizeQuoteText(params.senderDisplayName ?? 'Someone');
-  const text = truncateQuoteText(
-    normalizeQuoteText(params.text),
-    DISCORD_QUOTE_MAX_LENGTH,
-  );
-
-  if (!username || !text) {
-    return null;
-  }
-
-  return `> **${username}:** ${text}`;
-}
+import {
+  buildMarkdownReplyQuote,
+  buildSlackReplyQuote,
+} from './fast-agent-reply-quote';
 
 export type FastAgentSurfaceReplyDelivery = {
   conversation: FastAgentConversation;
+  canonicalConversation?: FastAgentConversation;
   adapter: Pick<
     FastAgentTurnAdapter,
     | 'activity'
@@ -179,6 +131,8 @@ type FastAgentSurfaceReplyParams = {
    */
   activeTasks?: FastAgentActiveTask[];
   externalInput?: FastAgentReactionExternalInput;
+  /** Per-turn provider route for an explicit cross-surface notification reply. */
+  deliveryConversation?: FastAgentConversation;
   /**
    * Admission-time hooks for callers that must not block on the whole turn
    * (suggestion launchers finalize their claim as soon as the turn is
@@ -219,7 +173,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   currentMessageId?: string;
   replyToMessageId?: string;
   externalInput?: FastAgentReactionExternalInput;
+  deliveryConversation?: FastAgentConversation;
 }): Promise<FastAgentSurfaceReplyDelivery | null> {
+  // A turn Roomote framed for the agent (the post-save continuation) is
+  // quoted on side surfaces exactly as the human sees it on the web.
+  const visibleQuestion = stripLeadingIntegrationSavedBlock(params.question);
   const session = await fastAgentConversationRepository.findById({
     id: params.sessionId,
   });
@@ -233,14 +191,20 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   if (!canAccess) {
     return null;
   }
-  const conversation = session.conversation;
+  const conversation = params.deliveryConversation ?? session.conversation;
   const createArtifact = buildFastAgentArtifactCreator(session.id);
+  const withCanonical = (
+    delivery: Omit<FastAgentSurfaceReplyDelivery, 'canonicalConversation'>,
+  ): FastAgentSurfaceReplyDelivery => ({
+    ...delivery,
+    canonicalConversation: session.conversation,
+  });
 
   if (conversation.surface === 'web' || conversation.surface === 'automation') {
     // No side channel to post into: the canonical transcript the service
     // persists is the reply surface, and the shared conversation context
     // carries the exchange into the automation's future runs.
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -249,7 +213,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         }),
         postReply: async () => {},
       },
-    };
+    });
   }
 
   const footerContext = await resolveFastSessionReplyFooterContext({
@@ -277,7 +241,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       ? null
       : buildSlackReplyQuote({
           senderDisplayName: params.senderDisplayName,
-          text: params.question,
+          text: visibleQuestion,
         });
     // Streaming a reply outside a DM needs the Slack user it is addressed
     // to; a sender without a linked Slack account gets whole replies.
@@ -286,7 +250,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       slackTeamId: conversation.workspaceId,
     }).catch(() => null);
 
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -391,7 +355,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           footerContext,
         }),
       },
-    };
+    });
   }
 
   if (conversation.surface === 'discord') {
@@ -403,9 +367,9 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
 
     let pendingQuote = params.externalInput
       ? null
-      : buildDiscordReplyQuote({
+      : buildMarkdownReplyQuote({
           senderDisplayName: params.senderDisplayName,
-          text: params.question,
+          text: visibleQuestion,
         });
 
     const activity = createFastAgentTypingActivity({
@@ -490,7 +454,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       activity.reassert();
       return result;
     };
-    return { conversation, adapter };
+    return withCanonical({ conversation, adapter });
   }
 
   if (conversation.surface === 'teams') {
@@ -505,7 +469,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       return null;
     }
     const serviceUrl = route.serviceUrl;
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -551,7 +515,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           footerContext,
         }),
       },
-    };
+    });
   }
 
   if (conversation.surface === 'linear') {
@@ -562,7 +526,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       return null;
     }
     const agentSessionId = conversation.replyTarget.channelId;
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -581,7 +545,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           return { messageId: buildLinearFastReplyMessageId() };
         },
       },
-    };
+    });
   }
 
   if (isFastAgentSourceControlConversation(conversation)) {
@@ -589,7 +553,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     if (!delivery) {
       return null;
     }
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         createArtifact,
@@ -600,10 +564,10 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           sessionId: session.id,
           quote: params.externalInput
             ? null
-            : buildSourceControlReplyQuote({ text: params.question }),
+            : buildSourceControlReplyQuote({ text: visibleQuestion }),
         }),
       },
-    };
+    });
   }
 
   if (conversation.surface === 'telegram') {
@@ -677,7 +641,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       });
       return { messageId: posted.messageId };
     };
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         activity,
@@ -700,7 +664,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           return result;
         },
       },
-    };
+    });
   }
 
   if (conversation.surface === 'agentmail') {
@@ -716,7 +680,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     // from ever colliding — web-initiated turns have no unique inbound
     // message id, and a reused key with a different body is a provider 409.
     let agentMailPostIndex = 0;
-    return {
+    return withCanonical({
       conversation,
       adapter: {
         launchTask: createFastAgentCommunicationTaskLauncher({
@@ -745,7 +709,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         },
         replaceReply: async (handle) => handle,
       },
-    };
+    });
   }
 
   return null;
@@ -796,6 +760,9 @@ function buildSurfaceHumanFollowUpEvent(
       : {}),
     ...(params.agentContext ? { agentContext: params.agentContext } : {}),
     ...(params.activeTasks?.length ? { activeTasks: params.activeTasks } : {}),
+    ...(params.deliveryConversation
+      ? { deliveryConversation: params.deliveryConversation }
+      : {}),
     ...(params.externalInput
       ? {
           senderExternalId: params.externalInput.reactor.externalUserId,
@@ -821,7 +788,7 @@ async function admitFastAgentSurfaceHumanFollowUp(
   return admitFastAgentHumanFollowUp({
     parent: {
       sessionId: params.sessionId,
-      conversation: delivery.conversation,
+      conversation: delivery.canonicalConversation ?? delivery.conversation,
     },
     event: buildSurfaceHumanFollowUpEvent(params),
     forceQueue: forceQueue && !params.externalInput,
@@ -839,7 +806,7 @@ async function runFastAgentSurfaceReply(
   const release =
     (admission?.kind === 'turn' ? admission.turnLock : null) ??
     (await acquireFastAgentTurnLock({
-      conversation: delivery.conversation,
+      conversation: delivery.canonicalConversation ?? delivery.conversation,
     }));
   if (!release) {
     params.onRejected?.();
@@ -925,7 +892,7 @@ async function runFastAgentSurfaceReplyWithLock(
       const inlineAdmission = await admitFastAgentInlineHumanTurn({
         parent: {
           sessionId: params.sessionId,
-          conversation: delivery.conversation,
+          conversation: delivery.canonicalConversation ?? delivery.conversation,
         },
         event: buildSurfaceHumanFollowUpEvent(params),
       }).catch((error) => {
@@ -959,6 +926,9 @@ async function runFastAgentSurfaceReplyWithLock(
       userId: params.userId,
       apiBaseUrl,
       conversation: delivery.conversation,
+      ...(delivery.canonicalConversation
+        ? { canonicalConversation: delivery.canonicalConversation }
+        : {}),
       currentMessageId: params.currentMessageId,
       signal: release.signal,
       ...(admittedTurn
@@ -1043,4 +1013,42 @@ export async function queueFastAgentSurfaceReply(
     },
   );
   return true;
+}
+
+export async function startFastSessionGoal(
+  params: Omit<FastAgentSurfaceReplyParams, 'question'> & {
+    objective: string;
+  },
+): Promise<
+  | { success: true; goal: import('@roomote/types').SessionGoal }
+  | { success: false; error: string }
+> {
+  const session = await getSessionForFastConversation(db, params.sessionId);
+  if (!session) {
+    return { success: false, error: 'Session not found.' };
+  }
+  const activation = await replaceSessionGoal({
+    sessionId: session.id,
+    userId: params.userId,
+    goal: {
+      objective: params.objective,
+      maxContinuations: DEFAULT_SESSION_GOAL_MAX_CONTINUATIONS,
+    },
+  });
+  try {
+    const { objective, ...replyParams } = params;
+    const queued = await queueFastAgentSurfaceReply({
+      ...replyParams,
+      question: objective,
+    });
+    if (queued) return { success: true, goal: activation.goal };
+    await activation.rollback();
+    return {
+      success: false,
+      error: 'The Session goal could not be delivered. Please try again.',
+    };
+  } catch (error) {
+    await activation.rollback().catch(() => undefined);
+    throw error;
+  }
 }

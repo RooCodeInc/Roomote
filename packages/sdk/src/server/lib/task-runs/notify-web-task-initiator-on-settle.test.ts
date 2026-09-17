@@ -3,11 +3,16 @@ import { RunStatus } from '@roomote/types';
 const mocks = vi.hoisted(() => ({
   findTask: vi.fn(),
   getSessionForTask: vi.fn(),
+  hasAttention: vi.fn(),
   isPresent: vi.fn(),
   recordEvent: vi.fn(),
   returning: vi.fn(),
   selectTaskStateRun: vi.fn(),
   sendPersonalNotification: vi.fn(),
+  findLatestReceipt: vi.fn(),
+  findTaskMessage: vi.fn(),
+  resolvePresentation: vi.fn(),
+  getChatPreference: vi.fn(),
 }));
 
 function updateChain() {
@@ -27,6 +32,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   eq: (...args: unknown[]) => args,
   getSessionForTask: mocks.getSessionForTask,
+  getUserChatInitiationProvider: mocks.getChatPreference,
   recordTaskRunLifecycleEvent: mocks.recordEvent,
   selectTaskStateRun: mocks.selectTaskStateRun,
   sql: vi.fn(),
@@ -41,7 +47,13 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     `https://roomote.test/task/${taskId}`,
 }));
 vi.mock('../user-direct-message', () => ({
-  sendUserDirectMessageBestEffort: mocks.sendPersonalNotification,
+  sendUserDirectMessageBestEffortWithReceipts: mocks.sendPersonalNotification,
+}));
+vi.mock('../session-attention-notification', () => ({
+  findLatestSessionAttentionReceipt: mocks.findLatestReceipt,
+  findTaskAttentionMessage: mocks.findTaskMessage,
+  hasTaskRunAttentionNotification: mocks.hasAttention,
+  resolveSessionAttentionPresentation: mocks.resolvePresentation,
 }));
 vi.mock('./fast-agent-delivery-claim', () => ({
   buildDeliveryClaimMarker: () => 'delivering:1',
@@ -56,6 +68,9 @@ const eligibleTask = {
   initiatorUserId: 'user-1',
   state: 'completed',
   surface: 'web',
+  trigger: 'manual',
+  initiatorKind: 'user',
+  prompt: 'Please ship the notification fallback.',
   title: 'Ship notification fallback',
   runs: [{ id: 42, status: RunStatus.Completed, startedAt: new Date() }],
 };
@@ -67,9 +82,27 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
     mocks.selectTaskStateRun.mockReturnValue(eligibleTask.runs[0]);
     mocks.returning.mockResolvedValue([{ id: run.id }]);
     mocks.getSessionForTask.mockResolvedValue({ id: 'session-1' });
+    mocks.hasAttention.mockResolvedValue(false);
     mocks.isPresent.mockResolvedValue(false);
-    mocks.sendPersonalNotification.mockResolvedValue(['slack']);
+    mocks.findLatestReceipt.mockResolvedValue(null);
+    mocks.findTaskMessage.mockResolvedValue('The actual task response.');
+    mocks.resolvePresentation.mockResolvedValue({ sessionId: 'session-1' });
+    mocks.getChatPreference.mockResolvedValue(null);
+    mocks.sendPersonalNotification.mockResolvedValue({
+      deliveredProviders: ['slack'],
+      receipts: [],
+    });
     mocks.recordEvent.mockResolvedValue(undefined);
+  });
+
+  it('uses the user task-starting chat preference for a new notification route', async () => {
+    mocks.getChatPreference.mockResolvedValue('discord');
+
+    await notifyWebTaskInitiatorOnSettle(run, RunStatus.Completed);
+
+    expect(mocks.sendPersonalNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ preferredProvider: 'discord' }),
+    );
   });
 
   it.each([
@@ -78,7 +111,7 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
     [RunStatus.Canceled, 'was canceled'],
   ] as const)(
     'delivers a %s settle through the personal waterfall',
-    async (status, label) => {
+    async (status, _label) => {
       mocks.findTask.mockResolvedValue({
         ...eligibleTask,
         state: status,
@@ -92,14 +125,18 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
 
       expect(mocks.sendPersonalNotification).toHaveBeenCalledWith({
         userId: 'user-1',
-        text: expect.stringContaining(
-          `**Ship notification fallback** ${label}.`,
-        ),
+        text: expect.stringContaining('The actual task response.'),
         logContext: 'notifyWebTaskInitiatorOnSettle',
         idempotencyKey: expect.stringMatching(
           /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/,
         ),
+        presentation: { sessionId: 'session-1' },
       });
+      expect(mocks.sendPersonalNotification).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining('Ship notification fallback'),
+        }),
+      );
     },
   );
 
@@ -123,6 +160,8 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
     ['non-web origin', { surface: 'slack' }],
     ['missing initiating user', { initiatorUserId: null }],
     ['task still active', { state: 'active' }],
+    ['scheduled task', { trigger: 'schedule' }],
+    ['automation initiator', { initiatorKind: 'automation' }],
   ])('suppresses %s', async (_label, override) => {
     mocks.findTask.mockResolvedValue({ ...eligibleTask, ...override });
 
@@ -144,8 +183,47 @@ describe('notifyWebTaskInitiatorOnSettle', () => {
     expect(mocks.sendPersonalNotification).not.toHaveBeenCalled();
   });
 
+  it('does not duplicate a completed attention notification at terminal settle', async () => {
+    mocks.hasAttention.mockResolvedValue(true);
+
+    await expect(
+      notifyWebTaskInitiatorOnSettle(run, RunStatus.Completed),
+    ).resolves.toBe('not_applicable');
+
+    expect(mocks.sendPersonalNotification).not.toHaveBeenCalled();
+  });
+
+  it('leaves Fast child terminal reporting to its parent Session', async () => {
+    mocks.findTask.mockResolvedValue({
+      ...eligibleTask,
+      runs: [
+        {
+          ...eligibleTask.runs[0],
+          payload: {
+            fastAgentParent: {
+              sessionId: '11111111-1111-4111-8111-111111111111',
+              conversation: {
+                surface: 'web',
+                workspaceId: 'web',
+                conversationId: '22222222-2222-4222-8222-222222222222',
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    await expect(
+      notifyWebTaskInitiatorOnSettle(run, RunStatus.Completed),
+    ).resolves.toBe('not_applicable');
+    expect(mocks.sendPersonalNotification).not.toHaveBeenCalled();
+  });
+
   it('releases a failed delivery claim so a later finalization can retry', async () => {
-    mocks.sendPersonalNotification.mockResolvedValue([]);
+    mocks.sendPersonalNotification.mockResolvedValue({
+      deliveredProviders: [],
+      receipts: [],
+    });
 
     await notifyWebTaskInitiatorOnSettle(run, RunStatus.Completed);
     await notifyWebTaskInitiatorOnSettle(run, RunStatus.Completed);

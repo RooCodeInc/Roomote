@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { TaskRunErrorCode } from '@roomote/types';
 
 import { resolveFromWorkspaceRoot } from '../repo-paths';
+import { removeLegacyCredentialEgressHostPolicy } from '@roomote/compute-providers';
 
 const execFileAsync = promisify(execFile);
 
@@ -23,6 +24,7 @@ type DockerNetworkInspect = {
   Id?: string;
   Name?: string;
   Labels?: Record<string, string> | null;
+  Options?: Record<string, string>;
   Containers?: Record<
     string,
     {
@@ -51,7 +53,7 @@ type DockerContainerInspect = {
 
 export type DockerCommand = (
   args: string[],
-  options?: { allowFailure?: boolean; signal?: AbortSignal },
+  options?: { allowFailure?: boolean; signal?: AbortSignal; input?: Buffer },
 ) => Promise<string>;
 
 export type DockerWorkerEgressPolicy = 'internet' | 'none';
@@ -286,16 +288,40 @@ export function formatSpawnWorkerError(error: unknown): string {
 
 export async function docker(
   args: string[],
-  options: { allowFailure?: boolean; signal?: AbortSignal } = {},
+  options: {
+    allowFailure?: boolean;
+    signal?: AbortSignal;
+    input?: Buffer;
+  } = {},
 ): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('docker', args, {
+    const execOptions = {
       cwd: resolveFromWorkspaceRoot('.'),
       maxBuffer: 10 * 1024 * 1024,
       signal: options.signal,
-    });
+    };
 
-    return stdout;
+    if (options.input === undefined) {
+      const { stdout } = await execFileAsync('docker', args, execOptions);
+      return stdout;
+    }
+
+    // `docker cp -` reads a tar stream from stdin, so callers can stream file
+    // content into a container without staging it on controller disk.
+    const input = options.input;
+    return await new Promise<string>((resolve, reject) => {
+      const child = execFile('docker', args, execOptions, (error, stdout) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(stdout);
+      });
+      child.stdin?.on('error', () => {
+        // The exit callback reports the real failure.
+      });
+      child.stdin?.end(input);
+    });
   } catch (error) {
     // Cancellation must not be treated as a soft failure; allowFailure only
     // covers Docker CLI / object-state errors, not AbortSignal abort.
@@ -520,6 +546,50 @@ export async function prepareDockerTaskNetwork(
   return taskNetwork;
 }
 
+/**
+ * Shell fragment that resolves a working iptables backend into
+ * `$iptables_cmd` (installing it on Alpine-based worker images when absent)
+ * and fails the helper when none exists.
+ */
+const IPTABLES_PRELUDE = [
+  'find_iptables() {',
+  '  for candidate in iptables-nft iptables-legacy iptables; do',
+  '    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -S OUTPUT >/dev/null 2>&1; then',
+  '      printf "%s" "$candidate"',
+  '      return 0',
+  '    fi',
+  '  done',
+  '  return 1',
+  '}',
+  'iptables_cmd="$(find_iptables || true)"',
+  'if [ -z "$iptables_cmd" ] && command -v apk >/dev/null 2>&1; then',
+  '  apk add --no-cache iptables >/dev/null',
+  '  iptables_cmd="$(find_iptables || true)"',
+  'fi',
+  'if [ -z "$iptables_cmd" ]; then',
+  '  echo "no supported iptables backend (nft, legacy, or default); cannot apply sandbox egress policy" >&2',
+  '  exit 1',
+  'fi',
+].join('\n');
+
+/**
+ * Drop packets destined TO the Docker bridge gateway so a sandbox cannot
+ * hairpin into host-published services, while keeping the gateway usable as
+ * the default next hop.
+ */
+const DOCKER_GATEWAY_BLOCK = [
+  'gateway="$(ip route show default | awk \'NR == 1 { print $3 }\')"',
+  'if [ -n "$gateway" ]; then',
+  // Heal namespaces set up by controllers that still blackholed the gateway
+  // as a route; retained standby workers keep their netns across upgrades.
+  '  ip route del blackhole "$gateway/32" 2>/dev/null || true',
+  '  "$iptables_cmd" -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || "$iptables_cmd" -A OUTPUT -d "$gateway" -j DROP',
+  // The route blackhole also covered forwarded traffic; keep that property in
+  // case the worker netns ever routes packets.
+  '  "$iptables_cmd" -C FORWARD -d "$gateway" -j DROP 2>/dev/null || "$iptables_cmd" -A FORWARD -d "$gateway" -j DROP',
+  'fi',
+].join('\n');
+
 export async function attachDockerEgressPolicy(
   params: {
     containerName: string;
@@ -561,58 +631,30 @@ export async function attachDockerEgressPolicy(
     '/bin/sh',
     params.image,
     '-c',
-    // `replace` keeps the script idempotent when a helper is re-run against a
-    // network namespace that already holds some of the routes.
-    [
-      ...BLOCKED_METADATA_ROUTES.map(
-        (route) => `ip route replace blackhole ${route}`,
-      ),
-      ...(params.blockDockerGateway
-        ? [
-            ...BLOCKED_PRIVATE_ROUTES.map(
-              (route) => `ip route replace blackhole ${route}`,
-            ),
-            // Do not blackhole the default gateway as a host route: on Linux
-            // that /32 is more specific than the on-link bridge subnet and
-            // breaks next-hop resolution for public egress (git clone, HTTPS).
-            // Drop only packets destined TO the gateway IP so host hairpin is
-            // blocked while using the gateway as default next-hop still works.
-            [
-              'gateway="$(ip route show default | awk \'NR == 1 { print $3 }\')"',
-              'if [ -n "$gateway" ]; then',
-              // Heal namespaces set up by controllers that still blackholed
-              // the gateway as a route; retained standby workers keep their
-              // netns across controller upgrades.
-              '  ip route del blackhole "$gateway/32" 2>/dev/null || true',
-              '  find_iptables() {',
-              '    for candidate in iptables-nft iptables-legacy iptables; do',
-              '      if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -S OUTPUT >/dev/null 2>&1; then',
-              '        printf "%s" "$candidate"',
-              '        return 0',
-              '      fi',
-              '    done',
-              '    return 1',
-              '  }',
-              '  iptables_cmd="$(find_iptables || true)"',
-              '  if [ -z "$iptables_cmd" ] && command -v apk >/dev/null 2>&1; then',
-              '    apk add --no-cache iptables >/dev/null',
-              '    iptables_cmd="$(find_iptables || true)"',
-              '  fi',
-              '  if [ -n "$iptables_cmd" ]; then',
-              '    "$iptables_cmd" -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || "$iptables_cmd" -A OUTPUT -d "$gateway" -j DROP',
-              // The route blackhole also covered forwarded traffic; keep that
-              // property in case the worker netns ever routes packets.
-              '    "$iptables_cmd" -C FORWARD -d "$gateway" -j DROP 2>/dev/null || "$iptables_cmd" -A FORWARD -d "$gateway" -j DROP',
-              '  else',
-              '    echo "no supported iptables backend (nft, legacy, or default); cannot block docker gateway $gateway" >&2',
-              '    exit 1',
-              '  fi',
-              'fi',
-            ].join('\n'),
-          ]
-        : []),
-    ].join(' && '),
+    buildDockerEgressPolicyScript(params),
   ]);
+}
+
+function buildDockerEgressPolicyScript(params: {
+  blockDockerGateway: boolean;
+}): string {
+  // `replace` keeps the script idempotent when a helper is re-run against a
+  // network namespace that already holds some of the routes.
+  return [
+    ...BLOCKED_METADATA_ROUTES.map(
+      (route) => `ip route replace blackhole ${route}`,
+    ),
+    ...(params.blockDockerGateway
+      ? BLOCKED_PRIVATE_ROUTES.map(
+          (route) => `ip route replace blackhole ${route}`,
+        )
+      : []),
+    ...(params.blockDockerGateway ? [IPTABLES_PRELUDE] : []),
+    // Do not blackhole the default gateway as a host route: on Linux that
+    // /32 is more specific than the on-link bridge subnet and breaks
+    // next-hop resolution for public egress (git clone, HTTPS).
+    ...(params.blockDockerGateway ? [DOCKER_GATEWAY_BLOCK] : []),
+  ].join(' && ');
 }
 
 /**
@@ -871,6 +913,9 @@ async function removeDockerTaskNetwork(
       allowFailure: true,
     });
   }
+
+  // Networks from before the gateway removal still hold host firewall chains.
+  if (network) await removeLegacyCredentialEgressHostPolicy(network, runDocker);
 
   await runDocker(['network', 'rm', taskNetwork], { allowFailure: true });
 }

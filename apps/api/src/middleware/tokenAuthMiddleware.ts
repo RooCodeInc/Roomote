@@ -5,9 +5,13 @@ import {
   validateAuthToken,
   validateMcpAccessToken,
   validateRunToken,
+  validateSessionBrokerToken,
 } from '@roomote/auth';
 import { db, deploymentSettings, eq, users } from '@roomote/db/server';
-import { isRoomoteDeploymentDisabled } from '@roomote/types';
+import {
+  CREDENTIAL_EGRESS_PROXY_PATH,
+  isRoomoteDeploymentDisabled,
+} from '@roomote/types';
 
 import type { Variables } from '../types';
 
@@ -27,9 +31,9 @@ const INFERENCE_GATEWAY_PATH_PREFIX = '/api/inference';
 /**
  * Provider SDKs pointed at the inference gateway send their "API key" (the
  * run token) through provider-specific headers: `x-api-key` for Anthropic,
- * `x-goog-api-key` for Gemini. Accept the token from those headers on the
- * inference gateway surface only; everywhere else the Authorization bearer
- * header remains the single token transport.
+ * `api-key` for Azure, and `x-goog-api-key` for Gemini. Accept the token from
+ * those headers on the inference gateway surface only; everywhere else the
+ * Authorization bearer header remains the single token transport.
  */
 function extractBearerToken(
   c: Context<{ Variables: Variables }>,
@@ -46,7 +50,11 @@ function extractBearerToken(
     path === INFERENCE_GATEWAY_PATH_PREFIX ||
     path.startsWith(`${INFERENCE_GATEWAY_PATH_PREFIX}/`)
   ) {
-    return c.req.header('x-api-key') ?? c.req.header('x-goog-api-key');
+    return (
+      c.req.header('x-api-key') ??
+      c.req.header('api-key') ??
+      c.req.header('x-goog-api-key')
+    );
   }
 
   return undefined;
@@ -54,9 +62,31 @@ function extractBearerToken(
 
 export const tokenAuthMiddleware = () =>
   createMiddleware(async (c: Context<{ Variables: Variables }>, next: Next) => {
+    // The credential egress proxy authenticates a substitute token in the
+    // grant's own header slot. It is never a Roomote bearer, so validating it
+    // here would only log a failed lookup on every proxied request.
+    if (c.req.path.startsWith(`${CREDENTIAL_EGRESS_PROXY_PATH}/`)) {
+      await next();
+      return;
+    }
+
     const token = extractBearerToken(c);
 
     if (token) {
+      // This token is intentionally invalid on every other API/MCP resource.
+      if (c.req.path === '/api/mcp/http-integrations') {
+        try {
+          const auth = await validateSessionBrokerToken(token);
+          if (await deploymentAllowsTokenAuth())
+            c.set('sessionBrokerAuth', auth);
+        } catch {
+          // Ordinary user and run tokens retain their existing semantics.
+        }
+        if (c.get('sessionBrokerAuth')) {
+          await next();
+          return;
+        }
+      }
       // Try run token first (has more specific claims)
       let isRunToken = false;
 

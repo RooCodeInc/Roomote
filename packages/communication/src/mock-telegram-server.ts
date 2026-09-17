@@ -10,6 +10,17 @@ import { TELEGRAM_MAX_RICH_MESSAGE_LENGTH } from './telegram-format';
 
 type JsonRecord = Record<string, unknown>;
 
+function getRichMessageText(
+  richMessage: JsonRecord | undefined,
+): string | null {
+  if (!richMessage) return null;
+  return typeof richMessage.markdown === 'string' &&
+    richMessage.html === undefined &&
+    richMessage.blocks === undefined
+    ? richMessage.markdown
+    : null;
+}
+
 export type MockTelegramUser = {
   id: number;
   is_bot?: boolean;
@@ -714,11 +725,16 @@ export class MockTelegramServer {
           return;
         }
         const richMessage = body.rich_message as JsonRecord | undefined;
-        if (!richMessage || typeof richMessage.html !== 'string') {
-          apiError(response, 400, 'Bad Request: rich message is empty');
+        const richMessageText = getRichMessageText(richMessage);
+        if (richMessageText === null) {
+          apiError(
+            response,
+            400,
+            'Bad Request: rich message must use Markdown formatting',
+          );
           return;
         }
-        if (richMessage.html.length > TELEGRAM_MAX_RICH_MESSAGE_LENGTH) {
+        if (richMessageText.length > TELEGRAM_MAX_RICH_MESSAGE_LENGTH) {
           apiError(response, 400, 'Bad Request: rich message is too long');
           return;
         }
@@ -728,7 +744,7 @@ export class MockTelegramServer {
             draft.message_thread_id !== body.message_thread_id,
         );
         const stored = this.storeOutgoingMessage(response, body, {
-          rich_message: richMessage,
+          rich_message: richMessage!,
         });
         if (stored) apiResult(response, this.toTelegramMessage(stored));
         return;
@@ -746,15 +762,20 @@ export class MockTelegramServer {
         }
         const draftId = Number(body.draft_id);
         const richMessage = body.rich_message as JsonRecord | undefined;
+        const richMessageText = getRichMessageText(richMessage);
         if (!Number.isSafeInteger(draftId) || draftId === 0) {
           apiError(response, 400, 'Bad Request: draft_id must be non-zero');
           return;
         }
-        if (!richMessage || typeof richMessage.html !== 'string') {
-          apiError(response, 400, 'Bad Request: rich message is empty');
+        if (richMessageText === null) {
+          apiError(
+            response,
+            400,
+            'Bad Request: rich message must use Markdown formatting',
+          );
           return;
         }
-        if (richMessage.html.length > TELEGRAM_MAX_RICH_MESSAGE_LENGTH) {
+        if (richMessageText.length > TELEGRAM_MAX_RICH_MESSAGE_LENGTH) {
           apiError(response, 400, 'Bad Request: rich message is too long');
           return;
         }
@@ -764,7 +785,7 @@ export class MockTelegramServer {
           ...(typeof body.message_thread_id === 'number'
             ? { message_thread_id: body.message_thread_id }
             : {}),
-          rich_message: richMessage,
+          rich_message: richMessage!,
         };
         this.state.richDrafts = [
           ...(this.state.richDrafts ?? []).filter(
@@ -822,14 +843,15 @@ export class MockTelegramServer {
           return;
         }
         const messageText = String(body.text ?? '');
+        const richMessageText = getRichMessageText(richMessage);
 
-        if (!messageText && typeof richMessage?.html !== 'string') {
+        if (!messageText && richMessageText === null) {
           apiError(response, 400, 'Bad Request: message text is empty');
           return;
         }
         if (
-          typeof richMessage?.html === 'string' &&
-          richMessage.html.length > TELEGRAM_MAX_RICH_MESSAGE_LENGTH
+          richMessageText !== null &&
+          richMessageText.length > TELEGRAM_MAX_RICH_MESSAGE_LENGTH
         ) {
           apiError(response, 400, 'Bad Request: rich message is too long');
           return;

@@ -61,6 +61,12 @@ export type SaveGranolaConnectionInput = z.infer<
   typeof saveGranolaConnectionSchema
 >;
 
+export const saveExaConnectionSchema = z.object({
+  apiKey: z.string().transform((value) => value.trim()),
+});
+
+export type SaveExaConnectionInput = z.infer<typeof saveExaConnectionSchema>;
+
 export const saveElevenLabsConnectionSchema = z.object({
   apiKey: z.string().transform((value) => value.trim()),
   voiceId: z

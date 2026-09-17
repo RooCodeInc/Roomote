@@ -48,7 +48,7 @@ it('reports queue admission failure without rejecting terminal finalization', as
     }),
   ).resolves.toBe(false);
   expect(error).toHaveBeenCalledWith(
-    '[enqueueWebTaskInitiatorSettleNotification] Failed to enqueue retry for run 42: redis unavailable',
+    '[enqueueWebTaskInitiatorSettleNotification run 42] Failed to enqueue retry: redis unavailable',
   );
   error.mockRestore();
 });

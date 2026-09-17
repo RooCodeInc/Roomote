@@ -1885,7 +1885,10 @@ describe('SandboxProvider runtime state sync', () => {
       text: 'keep going',
     };
 
-    queryClient.setQueryData(queryKey, [optimisticEnvelope]);
+    queryClient.setQueryData(queryKey, {
+      messages: [optimisticEnvelope],
+      nextCursor: null,
+    });
 
     render(
       <QueryClientProvider client={queryClient}>
@@ -1927,28 +1930,30 @@ describe('SandboxProvider runtime state sync', () => {
     });
 
     expect(
-      queryClient.getQueryData<TaskMessageEnvelope[]>(queryKey),
-    ).toMatchObject([
-      {
-        id: 'persisted:client-message-1',
-        userId: 'user-from-metadata',
-        userName: 'Metadata User',
-        userEmail: 'metadata@example.com',
-        userImageUrl: 'https://example.com/metadata.png',
-        metadata: {
-          sessionId: 'session-live-user-prompt',
-          sequence: 5,
+      queryClient.getQueryData<{ messages: TaskMessageEnvelope[] }>(queryKey),
+    ).toMatchObject({
+      messages: [
+        {
+          id: 'persisted:client-message-1',
           userId: 'user-from-metadata',
           userName: 'Metadata User',
           userEmail: 'metadata@example.com',
           userImageUrl: 'https://example.com/metadata.png',
+          metadata: {
+            sessionId: 'session-live-user-prompt',
+            sequence: 5,
+            userId: 'user-from-metadata',
+            userName: 'Metadata User',
+            userEmail: 'metadata@example.com',
+            userImageUrl: 'https://example.com/metadata.png',
+          },
+          payload: {
+            clientMessageId: 'client-message-1',
+          },
+          text: 'keep going',
         },
-        payload: {
-          clientMessageId: 'client-message-1',
-        },
-        text: 'keep going',
-      },
-    ]);
+      ],
+    });
 
     expect(invalidateQueriesSpy).not.toHaveBeenCalled();
 

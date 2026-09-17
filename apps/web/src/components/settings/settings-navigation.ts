@@ -108,11 +108,10 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     id: 'integrations',
     label: 'Integrations',
     title: 'Integrations',
-    description:
-      'Enable deployment integrations. Individual users can optionally link their own accounts when an integration supports it.',
+    description: 'Connect Roomote with tools your team uses.',
     href: SETTINGS_PATHS.integrations,
     icon: PlugIcon,
-    adminOnly: true,
+    adminOnly: false,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.integrations),
   },
   {

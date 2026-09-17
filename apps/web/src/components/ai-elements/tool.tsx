@@ -152,7 +152,7 @@ export const ToolHeader = ({
         (isRunning ? (
           <Spinner size="sm" className="shrink-0" />
         ) : collapsible ? (
-          <CollapsibleIconTrigger icon={ActionIcon} />
+          <CollapsibleIconTrigger icon={ActionIcon} scopeToTrigger />
         ) : (
           <ActionIcon className="size-3 shrink-0" />
         ))}
@@ -197,7 +197,7 @@ export const ToolHeader = ({
   return (
     <CollapsibleTrigger
       className={cn(
-        'flex w-full items-center justify-between cursor-pointer transition-opacity hover:opacity-50 text-muted-foreground',
+        'group/collapsible-icon-trigger flex w-full items-center justify-between cursor-pointer transition-opacity hover:opacity-50 text-muted-foreground',
         className,
       )}
       {...props}

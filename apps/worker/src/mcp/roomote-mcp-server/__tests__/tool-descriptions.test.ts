@@ -11,6 +11,7 @@ import {
 import {
   CREATE_CUSTOM_SKILL_TOOL,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  PUBLIC_URL_FETCH_TOOL,
   UPDATE_CUSTOM_SKILL_TOOL,
 } from '@roomote/types';
 
@@ -154,6 +155,21 @@ describe('roomote MCP tool descriptions', () => {
     expect(toolNames).toContain('manage_tasks');
     expect(toolNames).not.toContain('diagnose_environment');
     expect(toolNames).not.toContain('complete_doctor_report');
+  });
+
+  it('registers the shared guarded public URL fetch descriptor', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(registeredTools, PUBLIC_URL_FETCH_TOOL.name);
+
+    expect(tool.config.title).toBe(PUBLIC_URL_FETCH_TOOL.title);
+    expect(tool.config.description).toBe(PUBLIC_URL_FETCH_TOOL.description);
+    expect(tool.config.annotations).toEqual(PUBLIC_URL_FETCH_TOOL.annotations);
+    expect(Object.keys(tool.config.inputSchema)).toEqual([
+      'url',
+      'format',
+      'timeout',
+      'headers',
+    ]);
   });
 
   it('documents every built-in custom automation schedule preset', async () => {
@@ -906,7 +922,7 @@ describe('roomote MCP tool descriptions', () => {
     const latestField = getInputSchemaField(lookupTool, 'latest');
 
     expect(lookupTool.config.description).toBe(
-      'Fetch readable history from the task communication channel. When the task has no communication channel, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply.',
+      'Fetch readable history from the task communication channel. When the task has no communication channel, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply. Large results are cut to the newest messages: when the response has truncated set, call again with latest set to nextLatest (and the same oldest) to read older messages.',
     );
     expect(channelField.description).toBe(
       'Optional channel ID, name, mention, or Slack/Discord channel/message link. Omit it to use the task communication channel.',

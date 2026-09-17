@@ -9,12 +9,16 @@ const {
   mockCreateVoicePreview,
   mockCleanVoiceTranscript,
   mockResolveVoiceId,
+  mockGetVoiceConsent,
+  mockLoadVoiceWorkspaceContext,
 } = vi.hoisted(() => ({
   mockResolveVoiceOpenAiKey: vi.fn(),
   mockCreateVoiceLiveSession: vi.fn(),
   mockCreateVoicePreview: vi.fn(),
   mockCleanVoiceTranscript: vi.fn(),
   mockResolveVoiceId: vi.fn(),
+  mockGetVoiceConsent: vi.fn(),
+  mockLoadVoiceWorkspaceContext: vi.fn(),
 }));
 
 vi.mock('@/lib/server/voice', async (importOriginal) => ({
@@ -36,7 +40,11 @@ const voiceContext = {
 };
 
 vi.mock('@/lib/server/voice-context', () => ({
-  loadVoiceWorkspaceContext: vi.fn(async () => voiceContext),
+  loadVoiceWorkspaceContext: mockLoadVoiceWorkspaceContext,
+}));
+
+vi.mock('../preferences', () => ({
+  getVoiceConsentCommand: mockGetVoiceConsent,
 }));
 
 const {
@@ -66,6 +74,7 @@ const auth = {
   name: 'Matt',
   primaryEmail: 'matt@example.com',
   isAdmin: true,
+  cloudEnabled: true,
 } as unknown as import('@/types').UserAuthSuccess;
 
 import {
@@ -79,6 +88,8 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockGetVoiceConsent.mockResolvedValue(true);
+  mockLoadVoiceWorkspaceContext.mockResolvedValue(voiceContext);
   mockResolveVoiceId.mockResolvedValue('marin');
   mockRefreshOwnTaskFollowThroughWakeupCadence.mockResolvedValue(null);
 });
@@ -119,6 +130,36 @@ describe('createVoiceLiveSessionCommand', () => {
       context: voiceContext,
       voiceId: 'marin',
     });
+  });
+
+  it('rejects an unaccepted Cloud user before loading context or contacting OpenAI', async () => {
+    mockGetVoiceConsent.mockResolvedValue(false);
+
+    await expect(
+      createVoiceLiveSessionCommand(auth, { sdp: 'offer-sdp' }),
+    ).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: 'Accept voice data sharing before using voice',
+    });
+    expect(mockResolveVoiceOpenAiKey).not.toHaveBeenCalled();
+    expect(mockLoadVoiceWorkspaceContext).not.toHaveBeenCalled();
+    expect(mockCreateVoiceLiveSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps non-Cloud live voice behavior unchanged', async () => {
+    mockResolveVoiceOpenAiKey.mockResolvedValue('sk-test');
+    mockCreateVoiceLiveSession.mockResolvedValue({
+      sessionId: 'live_abc',
+      sdp: 'answer-sdp',
+    });
+
+    await expect(
+      createVoiceLiveSessionCommand(
+        { ...auth, cloudEnabled: false },
+        { sdp: 'offer-sdp' },
+      ),
+    ).resolves.toEqual({ sessionId: 'live_abc', sdp: 'answer-sdp' });
+    expect(mockGetVoiceConsent).not.toHaveBeenCalled();
   });
 
   it('refuses when voice is not configured', async () => {
@@ -209,6 +250,17 @@ describe('cleanVoiceTranscriptCommand', () => {
       text: 'um check the the build status',
       context: voiceContext,
     });
+  });
+
+  it('rejects unaccepted Cloud transcript cleanup before loading context or contacting OpenAI', async () => {
+    mockGetVoiceConsent.mockResolvedValue(false);
+
+    await expect(
+      cleanVoiceTranscriptCommand(auth, { text: 'check the build' }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    expect(mockResolveVoiceOpenAiKey).not.toHaveBeenCalled();
+    expect(mockLoadVoiceWorkspaceContext).not.toHaveBeenCalled();
+    expect(mockCleanVoiceTranscript).not.toHaveBeenCalled();
   });
 
   it('falls back to the raw transcript when cleanup fails', async () => {

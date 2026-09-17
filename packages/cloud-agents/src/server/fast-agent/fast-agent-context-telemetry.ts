@@ -8,8 +8,24 @@ import type {
   FastAgentSurface,
   FastAgentTurnSource,
 } from './fast-agent-conversation';
+import type { FastAgentCapabilityId } from '@roomote/types';
 
 const FAST_AGENT_CONTEXT_MANIFEST_VERSION = 1;
+
+export function captureFastAgentCapabilityOffer(input: {
+  userId: string;
+  capability: FastAgentCapabilityId;
+  outcome: 'requested' | 'shown' | 'deduplicated' | 'unavailable';
+  advancedInitialSetup: boolean;
+}): void {
+  void captureEvent(`capability_offer_${input.outcome}`, {
+    userId: input.userId,
+    properties: {
+      capability: input.capability,
+      advanced_initial_setup: input.advancedInitialSetup,
+    },
+  });
+}
 
 export type FastAgentSessionPath =
   | 'warm'
@@ -233,6 +249,7 @@ export function captureFastAgentTurnSettled(input: {
   integrationCount?: number;
   integrationToolCount?: number;
   activeTaskCount?: number;
+  promptSkillCount?: number;
   openCodeServerLeaseMs?: number;
   openCodeSessionValidateMs?: number;
   openCodeSessionCreateMs?: number;
@@ -278,6 +295,7 @@ export function captureFastAgentTurnSettled(input: {
       integration_count: input.integrationCount ?? null,
       integration_tool_count: input.integrationToolCount ?? null,
       active_task_count: input.activeTaskCount ?? null,
+      prompt_skill_count: input.promptSkillCount ?? null,
       opencode_server_lease_ms: input.openCodeServerLeaseMs ?? null,
       opencode_session_validate_ms: input.openCodeSessionValidateMs ?? null,
       opencode_session_create_ms: input.openCodeSessionCreateMs ?? null,

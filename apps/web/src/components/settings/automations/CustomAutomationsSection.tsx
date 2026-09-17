@@ -46,6 +46,7 @@ import {
   Label,
   Play,
   Plus,
+  RetryableLoadError,
   Select,
   SelectContent,
   SelectItem,
@@ -717,6 +718,8 @@ export function CustomAutomationsSection({
       : scheduleSummary;
 
   const rows = useMemo(() => listQuery.data ?? [], [listQuery.data]);
+  const initialListLoadFailed =
+    listQuery.isError && listQuery.data === undefined;
   const normalizedSearch = search.trim().toLowerCase();
   const visibleRows =
     filter === 'built-in'
@@ -1256,7 +1259,13 @@ export function CustomAutomationsSection({
           <div role="table" aria-label="Automations">
             <AutomationListHeader />
             <div role="rowgroup" className="divide-y divide-background">
-              {listQuery.isPending && filter !== 'built-in' ? (
+              {initialListLoadFailed && filter !== 'built-in' ? (
+                <RetryableLoadError
+                  message="Failed to load custom automations."
+                  isRetrying={listQuery.isFetching}
+                  onRetry={() => void listQuery.refetch()}
+                />
+              ) : listQuery.isPending && filter !== 'built-in' ? (
                 <div data-testid="custom-automations-skeleton">
                   {Array.from({ length: 2 }).map((_, index) => (
                     <div
@@ -1272,7 +1281,8 @@ export function CustomAutomationsSection({
                   ))}
                 </div>
               ) : null}
-              {!listQuery.isPending &&
+              {!initialListLoadFailed &&
+              !listQuery.isPending &&
               visibleRows.length === 0 &&
               (filter === 'custom' || (!children && filter === 'all')) ? (
                 <p className="px-4 py-6 text-sm text-muted-foreground">

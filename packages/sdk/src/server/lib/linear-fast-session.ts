@@ -7,7 +7,7 @@ import {
 import { asc, db, eq, users } from '@roomote/db/server';
 import type { LinearClient } from '@roomote/linear';
 import {
-  ALL_REPOSITORIES,
+  resolveFastAgentLaunchWorkspace,
   buildFastAgentChildTaskMetadata,
   TaskPayloadKind,
   type FastAgentConversation,
@@ -120,7 +120,7 @@ export function createFastAgentLinearTaskLauncher(params: {
       }) => ({
         type: TaskPayloadKind.StandardTask,
         payload: {
-          repo: ALL_REPOSITORIES,
+          ...resolveFastAgentLaunchWorkspace(environmentId),
           description: prompt,
           ...(issue
             ? {
@@ -138,9 +138,6 @@ export function createFastAgentLinearTaskLauncher(params: {
             sessionId: parentSessionId,
             conversation: params.conversation,
           }),
-          ...(environmentId && environmentId !== ALL_REPOSITORIES
-            ? { environmentId }
-            : {}),
           ...(model
             ? { harnessModelOverrides: { 'opencode-server': model } }
             : {}),

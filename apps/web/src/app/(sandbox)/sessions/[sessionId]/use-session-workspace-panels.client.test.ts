@@ -107,7 +107,8 @@ describe('sessionWorkspacePanelReducer', () => {
     });
 
     expect(seeded.taskPanelIds).toEqual(['task-2', 'task-3']);
-    expect(seeded.promptFocusTaskId).toBe('task-1');
+    expect(seeded.explicitTaskPanelIds).toEqual([]);
+    expect(seeded.promptFocusTaskId).toBeNull();
     expect(getOrderedSessionTaskPanelIds(seeded, 'task-1')).toEqual([
       'task-1',
       'task-2',
@@ -138,12 +139,12 @@ describe('sessionWorkspacePanelReducer', () => {
     {
       utilityPanel: null,
       expectedUtilityPanel: null,
-      expectedFocus: 'task-3',
+      expectedFocus: null,
     },
     {
       utilityPanel: { kind: 'tasks' } as const,
       expectedUtilityPanel: null,
-      expectedFocus: 'task-3',
+      expectedFocus: null,
     },
     {
       utilityPanel: { kind: 'info' } as const,
@@ -195,8 +196,9 @@ describe('sessionWorkspacePanelReducer', () => {
     ).toEqual({
       utilityPanel: null,
       taskPanelIds: ['task-1', 'task-3'],
+      explicitTaskPanelIds: ['task-1', 'task-2', 'task-3'],
       taskArtifacts: {},
-      promptFocusTaskId: 'task-2',
+      promptFocusTaskId: null,
     });
   });
 

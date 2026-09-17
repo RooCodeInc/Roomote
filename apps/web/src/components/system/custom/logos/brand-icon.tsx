@@ -276,6 +276,30 @@ function GranolaIcon({
   );
 }
 
+function ExaIcon({
+  name,
+  className,
+  isDecorative,
+}: {
+  name: string;
+  className?: string;
+  isDecorative: boolean;
+}) {
+  return (
+    <svg
+      viewBox="0 0 151 182"
+      role={isDecorative ? undefined : 'img'}
+      aria-hidden={isDecorative || undefined}
+      aria-label={isDecorative ? undefined : name}
+      focusable="false"
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M150.5 14.106c0 .23-.079.452-.223.63L88.477 91l61.8 76.264c.144.178.223.4.223.63V181a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1V1a1 1 0 0 1 1-1h148.5a1 1 0 0 1 1 1v13.106ZM30.406 162.72h91.322l-45.662-56.394-45.66 56.394Zm-11.111-62.458v45.526l36.862-45.526H19.295Zm0-19.281h36.248L19.295 36.212V80.98Zm56.771-5.307 45.662-56.392H30.406l45.66 56.392Z" />
+    </svg>
+  );
+}
+
 function ZeroIcon({
   name,
   className,
@@ -659,6 +683,12 @@ export function BrandIcon({ icon, name, className }: BrandIconProps) {
         className={className}
         isDecorative={isDecorative}
       />
+    );
+  }
+
+  if (icon === 'exa') {
+    return (
+      <ExaIcon name={name} className={className} isDecorative={isDecorative} />
     );
   }
 

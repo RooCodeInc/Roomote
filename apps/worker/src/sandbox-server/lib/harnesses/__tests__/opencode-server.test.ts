@@ -432,66 +432,6 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('adds trusted goal generation context without changing the visible prompt', async () => {
-    const { client, harness } = createHarness();
-    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
-    harness.subscribeRuntimePersistedEnvelope((envelope) =>
-      persistedEnvelopes.push(envelope),
-    );
-
-    try {
-      await connectHarness(harness, client);
-
-      expect(
-        harness.sendCommand({
-          commandName: TaskCommandName.StartNewTask,
-          data: {
-            text: 'Finish the replacement goal.',
-            goalContext: {
-              objective: 'Finish the replacement goal.',
-              generation: 'goal-generation:replacement',
-              status: 'active',
-              maxContinuations: 5,
-              continuationsUsed: 0,
-              blockedReason: null,
-              completedAt: null,
-            },
-            visibleInTranscript: true,
-          },
-        }),
-      ).toBe(true);
-
-      await vi.waitFor(() => {
-        expect(client.promptAsync).toHaveBeenCalledTimes(1);
-      });
-      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
-        request: {
-          parts: [
-            {
-              type: 'text',
-              text: expect.stringContaining('<task_goal enabled="true">'),
-            },
-          ],
-        },
-      });
-      const agentPrompt = client.promptAsync.mock.calls[0]?.[0] as
-        | { request?: { parts?: Array<{ type: string; text?: string }> } }
-        | undefined;
-      const agentPromptText = agentPrompt?.request?.parts?.[0]?.text;
-      expect(agentPromptText).toContain('goal-generation:replacement');
-      expect(agentPromptText).toContain('Goal Mode is enabled for this turn');
-      expect(agentPromptText).not.toContain('/goal');
-      expect(
-        persistedEnvelopes.find(
-          (envelope) =>
-            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-        )?.payload.text,
-      ).toBe('Finish the replacement goal.');
-    } finally {
-      harness.dispose();
-    }
-  });
-
   it('persists linked child-session assistant messages and records their usage', async () => {
     const { client, harness } = createHarness();
     const inferenceUsageEvents: HarnessInferenceUsageEvent[] = [];
@@ -3469,6 +3409,398 @@ describe('OpenCodeServerHarness', () => {
       expect(
         harness.getQueuedMessages().map((message) => message.text),
       ).toEqual(['Queued follow-up.']);
+    } finally {
+      harness.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries a turn that went idle with a provider-interrupted tool call', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    const emitApplyPatchPart = (state: Record<string, unknown>) =>
+      client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'prt_patch_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            tool: 'apply_patch',
+            callID: 'call_patch_1',
+            state: {
+              input: { patchText: '*** Begin Patch' },
+              ...state,
+            },
+          },
+        },
+      });
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Scaffold the project.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await emitApplyPatchPart({ status: 'running' });
+      // The provider closed the stream mid-call. OpenCode's runtime treats
+      // that as end of stream: it marks the pending tool interrupted and the
+      // session goes idle with no session.error.
+      await emitApplyPatchPart({
+        status: 'error',
+        error: 'Tool execution aborted',
+        metadata: { interrupted: true },
+      });
+      client.message.mockResolvedValueOnce(
+        createFinalAssistantMessage({ text: '' }),
+      );
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        ),
+      ).toBe(false);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+            String(envelope.payload.text ?? '').includes(
+              'the provider stream was interrupted',
+            ) &&
+            String(envelope.payload.text ?? '').includes('Retrying in 5s') &&
+            asRecord(envelope.payload.providerRetryNotice)?.kind ===
+              'provider_error',
+        ),
+      ).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        request: {
+          parts: [
+            {
+              type: 'text',
+              text: expect.stringContaining(
+                'Continue. The previous model request failed due to a provider error',
+              ),
+            },
+          ],
+        },
+      });
+
+      // The retried turn completes normally.
+      client.message.mockResolvedValueOnce(
+        createFinalAssistantMessage({ messageId: 'msg_2', text: 'Done.' }),
+      );
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_2',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 2 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskCompleted,
+          ),
+        ).toBe(true);
+      });
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not retry tool calls interrupted by a user cancel', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    const emitBashPart = (state: Record<string, unknown>) =>
+      client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'prt_bash_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            tool: 'bash',
+            callID: 'call_bash_1',
+            state: { input: { command: 'sleep 60' }, ...state },
+          },
+        },
+      });
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Run something slow.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await emitBashPart({ status: 'running' });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.CancelTask,
+          data: { cancelledBy: { name: 'Tester', source: 'web' } },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskAborted,
+          ),
+        ).toBe(true);
+      });
+
+      await emitBashPart({
+        status: 'error',
+        error: 'Tool execution aborted',
+        metadata: { interrupted: true },
+      });
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) => envelope.payload.providerRetryNotice !== undefined,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores tool calls interrupted by a queued replay but still recovers the replayed turn', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    const userMessageIdOfPrompt = (callIndex: number): string =>
+      (
+        client.promptAsync.mock.calls[callIndex]?.[0] as {
+          request: { messageID: string };
+        }
+      ).request.messageID;
+    const emitToolPart = (
+      messageID: string,
+      callID: string,
+      state: Record<string, unknown>,
+    ) =>
+      client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: `prt_${callID}`,
+            sessionID: 'ses_1',
+            messageID,
+            type: 'tool',
+            tool: 'bash',
+            callID,
+            state: { input: { command: 'sleep 60' }, ...state },
+          },
+        },
+      });
+    const interrupted = {
+      status: 'error',
+      error: 'Tool execution aborted',
+      metadata: { interrupted: true },
+    };
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+      await client.emit({
+        type: 'session.status',
+        properties: { sessionID: 'ses_1', status: { type: 'busy' } },
+      });
+
+      const firstUserMessageId = userMessageIdOfPrompt(0);
+      const oldAssistantMessageId = `${firstUserMessageId}1`;
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: oldAssistantMessageId,
+            sessionID: 'ses_1',
+            role: 'assistant',
+            parentID: firstUserMessageId,
+            time: { created: 1 },
+          },
+        },
+      });
+      await emitToolPart(oldAssistantMessageId, 'call_old', {
+        status: 'running',
+      });
+
+      // Native injection fails, so the steer aborts the turn and replays.
+      client.promptAsync.mockRejectedValueOnce(new Error('injection refused'));
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: {
+          text: 'Steer to this instead.',
+          autoSteerWhenQueued: true,
+          visibleInTranscript: true,
+        },
+      });
+      await vi.waitFor(() => {
+        expect(client.abort).toHaveBeenCalledTimes(1);
+        expect(client.promptAsync).toHaveBeenCalledTimes(3);
+      });
+
+      // The superseded turn's tool is reported interrupted only after the
+      // replayed prompt is already running; it must not count against the
+      // new turn.
+      await emitToolPart(oldAssistantMessageId, 'call_old', interrupted);
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+        },
+      });
+
+      // The replayed turn then loses its own tool call to a provider cutoff.
+      const replayedUserMessageId = userMessageIdOfPrompt(2);
+      const newAssistantMessageId = `${replayedUserMessageId}1`;
+      await emitToolPart(newAssistantMessageId, 'call_new', {
+        status: 'running',
+      });
+      await emitToolPart(newAssistantMessageId, 'call_new', interrupted);
+      client.message.mockResolvedValueOnce(
+        createFinalAssistantMessage({
+          messageId: newAssistantMessageId,
+          text: '',
+        }),
+      );
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: newAssistantMessageId,
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 2 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        ),
+      ).toBe(false);
+      const notices = persistedEnvelopes.filter(
+        (envelope) =>
+          asRecord(envelope.payload.providerRetryNotice)?.kind ===
+          'provider_error',
+      );
+      expect(notices).toHaveLength(1);
+      expect(String(notices[0]?.payload.text ?? '')).toContain(
+        'before 1 tool call finished',
+      );
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(client.promptAsync).toHaveBeenCalledTimes(4);
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
     } finally {
       harness.dispose();
       vi.useRealTimers();

@@ -646,7 +646,7 @@ describe('route policy enforcement', () => {
           }
         | undefined;
       expect(Buffer.byteLength(JSON.stringify(legacy))).toBe(202_099);
-      expect(Buffer.byteLength(JSON.stringify(first))).toBe(2_091);
+      expect(Buffer.byteLength(JSON.stringify(first))).toBe(2_138);
       expect(firstUpdate?.narrative).toEqual([
         expect.objectContaining({
           direction: 'Codex → Roomote',
@@ -678,6 +678,25 @@ describe('route policy enforcement', () => {
   });
 
   describe('task-token routes', () => {
+    it('rate limits TTS by validated run identity instead of forwarded headers', async () => {
+      seedRateLimitBucket('tts', 'principal', 'run:999', 60, 100_000);
+
+      for (const spoofedAddress of ['198.51.100.1', '198.51.100.2']) {
+        const response = await createApiApp().request(
+          'http://localhost/api/tts',
+          {
+            method: 'POST',
+            headers: {
+              authorization: 'Bearer test-run-token',
+              'x-forwarded-for': spoofedAddress,
+            },
+          },
+        );
+
+        expect(response.status).toBe(429);
+      }
+    });
+
     it('rejects unauthenticated artifact requests centrally', async () => {
       const response = await createApiApp().request(
         'http://localhost/api/artifacts',

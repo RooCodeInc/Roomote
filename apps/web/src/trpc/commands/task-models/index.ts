@@ -667,7 +667,12 @@ export async function saveTaskModelProviderCommand(
           : undefined,
       });
 
-      if (probe.error) {
+      if (
+        probe.error &&
+        (probe.failureReason === 'invalid_credentials' ||
+          probe.failureReason === 'insufficient_credits' ||
+          probe.failureReason === 'invalid_endpoint')
+      ) {
         throw new Error(`${provider.label}: ${probe.error}`);
       }
     }

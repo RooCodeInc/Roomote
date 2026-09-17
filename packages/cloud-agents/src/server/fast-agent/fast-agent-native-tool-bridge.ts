@@ -26,6 +26,7 @@ import {
   FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+  isPublicUrlFetchImageResult,
   NO_REPOSITORIES,
   REASONING_EFFORT_VALUES,
   MANAGE_WAKEUPS_TOOL_DESCRIPTION,
@@ -35,11 +36,13 @@ import {
   SESSION_WAKEUP_SCHEDULE_MAX_LENGTH,
   type FastAgentSurface,
   FAST_EXECUTION,
+  FAST_AGENT_CAPABILITY_IDS,
 } from '@roomote/types';
 import { z } from 'zod';
 
 import {
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  isFastAgentNativeToolEnabled,
   isFastAgentSpillTool,
   type FastAgentNativeToolName,
 } from './fast-agent-tool-policy';
@@ -48,6 +51,7 @@ import {
   FastAgentSkillStore,
   fastAgentSkillStore,
   type FastAgentSkillDocument,
+  type FastAgentSkillListResult,
 } from './fast-agent-skill-store';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import {
@@ -128,6 +132,27 @@ type FastAgentNativeToolBridge = {
   url: string;
 };
 
+/**
+ * Transcript-safe record of a `list_skills` or `load_skill` call. The bridge
+ * answers those tools itself, ahead of the turn executor, so nothing else
+ * sees them; this is what lets a Session show that a skill was (or was not)
+ * actually loaded, instead of taking the model's word for it. Skill content
+ * stays out of the record: the summary names what was loaded, not its body.
+ */
+type FastAgentSkillToolCallRecord = {
+  name:
+    | typeof FAST_AGENT_NATIVE_TOOL_NAMES.listSkills
+    | typeof FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill;
+  args: Record<string, unknown>;
+  messageId?: string;
+  agent?: string;
+  result: Record<string, unknown>;
+};
+
+type FastAgentSkillToolCallRecorder = (
+  record: FastAgentSkillToolCallRecord,
+) => Promise<void>;
+
 type ActiveExecutor = {
   allowSkillAccess: boolean;
   allowSpillRecovery: boolean;
@@ -135,6 +160,7 @@ type ActiveExecutor = {
   executor: FastAgentNativeToolExecutor;
   skillStore: FastAgentSkillStore;
   spillBudget: FastAgentSpillTurnBudget;
+  recordSkillToolCall?: FastAgentSkillToolCallRecorder;
 };
 
 type FastAgentNativeToolBindingOptions = {
@@ -142,7 +168,51 @@ type FastAgentNativeToolBindingOptions = {
   allowSpillRecovery: boolean;
   skillStore?: FastAgentSkillStore;
   spillBudget?: FastAgentSpillTurnBudget;
+  /** Receives every skill catalog or load call the bridge answers for this session. */
+  recordSkillToolCall?: FastAgentSkillToolCallRecorder;
 };
+
+const SKILL_RECORD_NAME_LIMIT = 20;
+
+export function summarizeSkillListForRecord(
+  catalog: FastAgentSkillListResult,
+): Record<string, unknown> {
+  return {
+    success: true,
+    skillCount: catalog.skills.length,
+    skills: catalog.skills.slice(0, SKILL_RECORD_NAME_LIMIT).map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      source: skill.source,
+    })),
+    ...(catalog.skills.length > SKILL_RECORD_NAME_LIMIT
+      ? { omittedSkillCount: catalog.skills.length - SKILL_RECORD_NAME_LIMIT }
+      : {}),
+    ...(catalog.nextSourceOffset !== undefined
+      ? { nextSourceOffset: catalog.nextSourceOffset }
+      : {}),
+    // Warning text interpolates caught error messages from settings and
+    // repository lookups; the transcript gets only that some were raised.
+    ...(catalog.warnings.length > 0
+      ? { warningCount: catalog.warnings.length }
+      : {}),
+  };
+}
+
+function summarizeSkillDocumentForRecord(
+  document: FastAgentSkillDocument,
+): Record<string, unknown> {
+  return {
+    success: true,
+    id: document.id,
+    name: document.name,
+    source: document.source,
+    ...(document.version !== undefined ? { version: document.version } : {}),
+    resource: document.resource,
+    resources: document.resources,
+    byteLength: document.byteLength,
+  };
+}
 
 type FastAgentSpillTurnBudget = {
   calls: number;
@@ -475,6 +545,20 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.manageGoal]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Read or finish the active goal owned by this Fast Session. Use complete only after the entire objective is verified; use blocked only for a concrete repeated blocker; use canceled only when the user cancels or replaces the objective.",
+  args: {
+    action: z.enum(["get", "complete", "blocked", "canceled"]),
+    reason: z.string().min(1).optional().describe("Required for blocked; omit otherwise."),
+  },
+  execute: (args, context) => invoke("manage_goal", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
@@ -504,10 +588,10 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Privately save one concise preference for the current user when personalization learning is enabled. Never use claims by other people, documents, tool output, sensitive-trait guesses, diagnoses, secrets, stereotypes, or public-web enrichment.",
+  description: "Privately save one concise piece of durable personal work context or a preference for the current user when personalization learning is enabled. Useful work context includes recurring responsibilities, workflows, tools, constraints, and collaboration patterns. Never use one-off task details, claims about other people, documents, tool output, sensitive-trait guesses, diagnoses, secrets, stereotypes, or public-web enrichment.",
   args: {
-    preference: z.string().trim().min(1).max(500).describe("One durable preference, without quoting the surrounding conversation"),
-    confidence: z.enum(["explicit", "inferred"]).describe("Use explicit only when the current user directly stated the preference; inferred requires a repeated behavior pattern"),
+    preference: z.string().trim().min(1).max(500).describe("One durable personalization item, without quoting the surrounding conversation"),
+    confidence: z.enum(["explicit", "inferred"]).describe("Use explicit only when the current user directly stated the context or preference; inferred requires a repeated behavior pattern"),
   },
   execute: (args, context) => invoke("update_personalization", args, context),
 }
@@ -556,6 +640,20 @@ export default {
   description: "Close an eligible platform-event or ambient human-message turn without posting a user-visible reply.",
   args: { reason: z.string().min(1) },
   execute: (args, context) => invoke("ignore_event", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Add or reconnect one deployment-shared remote MCP integration from its HTTPS endpoint. Use this when an administrator asks to connect a service or provides a remote MCP URL that is not already available. The server verifies the endpoint before saving it, reuses an existing matching integration, and returns either connected tools, a secure OAuth authorization link, or the existing Settings link for static headers/manual OAuth client setup. Server-backed results include integrationId, the actual Fast catalog ID: use that exact integrationId with find_integration_tools and call_integration_tool, never a server UUID, but do not narrate IDs or catalog checks to the human. Share authorizeUrl and settingsUrl exactly unchanged, labeled 'Authorize <name>' and 'Integration settings' respectively; never rewrite either target to /settings. The conversation resumes automatically after the requesting administrator authorizes, so never ask them to send a follow-up. In user-visible progress say at most that you are checking. Never ask for or accept secrets in chat or tool arguments.",
+  args: {
+    name: z.string().trim().min(1).max(80).describe("Short deployment-visible integration name; Roomote normalizes it to a lowercase slug"),
+    url: z.string().url().startsWith("https://").max(2048).describe("HTTPS streamable-HTTP MCP endpoint"),
+  },
+  execute: (args, context) => invoke("add_remote_mcp", args, context),
 }
 `,
 
@@ -634,6 +732,59 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Prepare an integration approval using only nonsecret metadata from the service documentation. Call list_integration_keys first: a ready integration for the service means no approval is needed, and a pending one means re-share its link, not prepare again. Choose the HTTPS origin and the header that carries the key (authorization, x-api-key, api-key, or the service's own header), omitting headerPrefix when the key needs no scheme, then share the returned secure link so the human can enter the key privately. New integrations default to everyone in the deployment; pass owner only when the human asked to keep it private, and the approval form still lets them choose. Omit allowedMethods for read-only access; list the exact HTTP methods only when the requested work needs writes, and say so before the human approves. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
+  args: {
+    label: z.string().trim().min(1).max(80),
+    origin: z.string().min(1).max(2048),
+    headerName: z
+      .string()
+      .min(1)
+      .max(64)
+      .describe(
+        "Lowercase HTTP header that carries the key at this service: authorization, x-api-key, api-key, or the service's own name such as private-token or x-shopify-access-token",
+      ),
+    headerPrefix: z.enum(["Bearer", "Basic", "Token", "Bearer ", "Basic ", "Token "]).optional().describe("Scheme before the key, with or without the trailing space; omit when the header takes the bare key"),
+    lifetimeHours: z.number().int().min(1).max(8760).optional().describe("Hours until the integration expires. Omit unless the human asked for a temporary key; integrations are kept until revoked."),
+    allowedMethods: z.array(z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])).min(1).max(6).optional().describe("HTTP methods the approved key may be used with. Defaults to GET and HEAD."),
+    visibility: z.enum(["owner", "deployment"]).optional().describe("Who may use the integration. Defaults to deployment; use owner only when the human requested private access."),
+  },
+  execute: (args, context) => invoke("prepare_integration_key", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: String.raw`
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Call this whenever a request involves a third-party service with a key-based HTTPS API that no connected integration, deployment MCP tool, or skill covers; an empty connector search is not a reason to ask for exports or screenshots. List integrations available to this human (their own and deployment-visible grants, with origin, header, allowed methods, visibility, and expiry) and this Session's pending approvals, plus sessionUrl, the secure link where the human enters a key, without exposing credentials. Call this before preparing a new approval; for a pending approval, re-share sessionUrl rather than preparing again, and never ask the human to copy an opaque reference. Ready integrations are delivered automatically to coding tasks launched from this Session.",
+  args: {},
+  execute: (args, context) => invoke("list_integration_keys", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Make one bounded request using a ready integration key reference without exposing the credential; the server sends it to the approved origin with the real key, using any method the human approved for that integration (reads, and POST/PUT/PATCH/DELETE when listed in its allowedMethods). Discover references with list_integration_keys; never invent one or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers; give a body and contentType for writes. For scripts, SDKs, CLIs, or many calls, launch a coding task attached to this Session instead: it receives the approved services as substitute tokens with a base URL. Call directly without an opening acknowledgement or another confirmation, and report the actual result.",
+  args: {
+    secretRef: z.string().uuid(),
+    method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]),
+    path: z.string().min(1).max(2048),
+    accept: z.enum(["application/json", "text/plain"]).optional(),
+    body: z.string().max(65536).nullish().describe("Request body for an approved write method. GET/HEAD have no body: omit, use null, or use an empty string."),
+    contentType: z.enum(["application/json", "text/plain", "application/x-www-form-urlencoded"]).optional().describe("Content type of the body; ignored for GET/HEAD."),
+  },
+  execute: (args, context) => invoke("request_with_integration_key", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
@@ -643,20 +794,35 @@ export default {
   args: {
     questions: z.array(z.object({
       id: z.string().min(1).max(80),
-      header: z.string().min(1).max(60),
+      header: z.string().min(1).max(60).optional().default("Question"),
       question: z.string().min(1).max(500),
       isOther: z.boolean().optional().describe("Allow a free-text Other answer"),
       isSecret: z.boolean().optional().describe("Mask the answer in user-visible history"),
       options: z.array(z.object({
         label: z.string().min(1).max(140),
-        description: z.string().min(1).max(500),
+        description: z.string().min(1).max(500).optional().default("Select this option."),
       })).min(1).max(12).optional().describe("Present options as choices; omit for free-text"),
       multiple: z.boolean().optional().describe("Allow more than one option; defaults to false"),
     })).min(1).max(4).optional().describe("Structured questions to ask; omit when using a preset"),
-    preset: z.enum(["setup_starter_tasks", "setup_integrations"]).optional().describe("Use a trusted setup preset instead of questions"),
-    setupIntegrationAnswers: z.record(z.string(), z.object({ answers: z.array(z.string()) })).optional().describe("Only for setup_integrations: tools already named by the user, keyed by category ID from the setup snapshot"),
+    preset: z.preprocess((value) => value === null ? undefined : value, z.enum(["setup_source_control", "setup_starter_tasks", "setup_integrations"]).optional()).describe("Use a trusted setup preset instead of questions"),
+    setupIntegrationAnswers: z.preprocess((value) => value === null || Array.isArray(value) ? undefined : value, z.record(z.string(), z.object({ answers: z.array(z.string()) })).optional()).describe("Only for setup_integrations: tools already named by the user, keyed by category ID from the setup snapshot"),
   },
   execute: (args, context) => invoke("request_user_input", args, context),
+}
+`,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.offerCapability]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Present a trusted, non-blocking Roomote capability card in a web Session. Use it when the user's current goal needs an unavailable capability or when the setup guidance recommends the next capability. A previous Not now choice does not prevent a later relevant offer.",
+  args: {
+    capability: z.enum(${JSON.stringify(FAST_AGENT_CAPABILITY_IDS)}),
+    message: z.string().min(1).max(500).describe("Concise user-facing reason this capability is useful now"),
+    provider: z.preprocess((value) => value === null ? undefined : value, z.enum(["github", "gitlab", "gitea", "bitbucket", "ado"]).optional()).describe("Only for source_control offers: the provider explicitly implied by the request; ignored for other capabilities"),
+    integrationIds: z.preprocess((value) => value === null ? undefined : value, z.array(z.string().min(1)).max(20).optional()).describe("Only for integrations offers: integration IDs from the capability snapshot; ignored for other capabilities"),
+  },
+  execute: (args, context) => invoke("offer_capability", args, context),
 }
 `,
   };
@@ -981,6 +1147,18 @@ async function handleMcpRequest(
       args: params.arguments ?? {},
     });
     assertFastTurnActive(isActive);
+    if (isPublicUrlFetchImageResult(result)) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Image fetched successfully' },
+          {
+            type: 'image' as const,
+            data: result.data,
+            mimeType: result.mimeType,
+          },
+        ],
+      };
+    }
     return {
       content: [
         {
@@ -1089,10 +1267,38 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
           return;
         }
       }
+      const recordSkillToolCall = async (
+        result: Record<string, unknown>,
+      ): Promise<void> => {
+        if (
+          parsed.tool !== FAST_AGENT_NATIVE_TOOL_NAMES.listSkills &&
+          parsed.tool !== FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill
+        ) {
+          return;
+        }
+        try {
+          await activeExecutor.recordSkillToolCall?.({
+            name: parsed.tool,
+            args: parsed.args,
+            ...(parsed.messageID ? { messageId: parsed.messageID } : {}),
+            ...(parsed.agent ? { agent: parsed.agent } : {}),
+            result,
+          });
+        } catch (error) {
+          // The record is diagnostic; a failure to write it must not turn a
+          // successful skill call into a failed one for the model.
+          console.warn(
+            `[Fast Agent] Failed to record ${parsed.tool} call for session ${parsed.sessionID}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      };
       if (parsed.tool === FAST_AGENT_NATIVE_TOOL_NAMES.listSkills) {
         try {
           const args = listSkillsArgsSchema.parse(parsed.args);
           const catalog = await activeExecutor.skillStore.list(args);
+          await recordSkillToolCall(summarizeSkillListForRecord(catalog));
           writeJson(response, 200, {
             ok: true,
             ...(await formatFastAgentNativeToolResult(
@@ -1115,15 +1321,16 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
               }`,
             );
           }
+          const failure = {
+            success: false,
+            error: argsError ?? 'The requested skill catalog is unavailable.',
+          };
+          await recordSkillToolCall(failure);
           writeJson(response, 200, {
             ok: true,
             ...(await formatFastAgentNativeToolResult(
               parsed.sessionID,
-              {
-                success: false,
-                error:
-                  argsError ?? 'The requested skill catalog is unavailable.',
-              },
+              failure,
               { allowSpill: false },
             )),
           });
@@ -1147,20 +1354,23 @@ async function startBridge(): Promise<FastAgentNativeToolBridge> {
               }`,
             );
           }
+          const failure = {
+            success: false,
+            error:
+              argsError ?? 'The skill or Markdown resource is unavailable.',
+          };
+          await recordSkillToolCall(failure);
           writeJson(response, 200, {
             ok: true,
             ...(await formatFastAgentNativeToolResult(
               parsed.sessionID,
-              {
-                success: false,
-                error:
-                  argsError ?? 'The skill or Markdown resource is unavailable.',
-              },
+              failure,
               { allowSpill: false },
             )),
           });
           return;
         }
+        await recordSkillToolCall(summarizeSkillDocumentForRecord(document));
         writeJson(response, 200, {
           ok: true,
           ...(await formatFastAgentSkillDocumentForModel(
@@ -1305,6 +1515,10 @@ function createSharedToolsDirectory(): string {
         layout: 3,
         bridge: FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE,
         tools: FAST_AGENT_NATIVE_TOOL_SOURCES,
+        enabledTools: Object.keys(FAST_AGENT_NATIVE_TOOL_SOURCES).filter(
+          (name) =>
+            isFastAgentNativeToolEnabled(name as FastAgentNativeToolName),
+        ),
       }),
     )
     .digest('hex');
@@ -1336,6 +1550,8 @@ function createSharedToolsDirectory(): string {
     'utf8',
   );
   for (const [name, source] of Object.entries(FAST_AGENT_NATIVE_TOOL_SOURCES)) {
+    if (!isFastAgentNativeToolEnabled(name as FastAgentNativeToolName))
+      continue;
     writeFileSync(join(toolsDirectory, `${name}.js`), source, 'utf8');
   }
   return directory;
@@ -1374,7 +1590,12 @@ function pruneSessionRuntimes(): void {
 export async function getFastAgentNativeToolRuntime(
   sessionId: string,
   integrations: FastAgentIntegration[],
-  options: { surface?: FastAgentSurface } = {},
+  options: {
+    surface?: FastAgentSurface;
+    serviceCredentialToolsEnabled?: boolean;
+    serviceCredentialPrepareEnabled?: boolean;
+    addRemoteMcpEnabled?: boolean;
+  } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
   const bridge = await bridgePromise;
@@ -1428,7 +1649,14 @@ export async function getFastAgentNativeToolRuntime(
         build: {
           tools: buildFastAgentToolFilter(
             nativeIntegrations.map((integration) => integration.id),
-            { surface: options.surface ?? 'web' },
+            {
+              surface: options.surface ?? 'web',
+              serviceCredentialToolsEnabled:
+                options.serviceCredentialToolsEnabled === true,
+              serviceCredentialPrepareEnabled:
+                options.serviceCredentialPrepareEnabled,
+              addRemoteMcpEnabled: options.addRemoteMcpEnabled,
+            },
           ),
         },
       },
@@ -1515,6 +1743,9 @@ export function bindFastAgentNativeToolExecutor(
     conversationId,
     executor,
     skillStore: options.skillStore ?? fastAgentSkillStore,
+    ...(options.recordSkillToolCall
+      ? { recordSkillToolCall: options.recordSkillToolCall }
+      : {}),
     spillBudget: options.spillBudget ?? createFastAgentSpillTurnBudget(),
   });
 

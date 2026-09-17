@@ -19,12 +19,14 @@ const {
   mockAuthenticateSlack,
   mockAuthenticateGitHub,
   mockAuthenticateLinear,
+  mockStartDelegationSession,
 } = vi.hoisted(() => ({
   mockPush: vi.fn(),
   mockReplace: vi.fn(),
   mockAuthenticateSlack: vi.fn(),
   mockAuthenticateGitHub: vi.fn(),
   mockAuthenticateLinear: vi.fn(),
+  mockStartDelegationSession: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -43,6 +45,13 @@ vi.mock('@/hooks/environments', () => ({
     data: environments,
     isPending: environmentsPending,
     isSuccess: environmentsSuccess,
+  }),
+}));
+
+vi.mock('@/hooks/task-runs', () => ({
+  useFastSessionLauncher: () => ({
+    isPending: false,
+    startFastSession: mockStartDelegationSession,
   }),
 }));
 
@@ -183,11 +192,29 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+it('prioritizes delegation discovery and starts its interview directly', () => {
+  environments = [];
+  hasEnabledAutomations = false;
+
+  render(<OnboardingCard />);
+
+  expect(
+    screen.getByText('Find something to take off your plate'),
+  ).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Explore' }));
+  expect(mockStartDelegationSession).toHaveBeenCalledWith({
+    text: '$explore-delegation Find something to take off my plate.',
+  });
+});
+
 it('prioritizes environment setup and persists its dismissal', () => {
   environments = [];
   hasEnabledAutomations = false;
 
   render(<OnboardingCard />);
+
+  dismissCard();
 
   expect(
     screen.getByText(
@@ -213,6 +240,7 @@ it('offers environment setup only to admins after environments load', () => {
   environmentsSuccess = false;
 
   const { rerender } = render(<OnboardingCard />);
+  dismissCard();
   expect(
     screen.queryByRole('button', { name: 'Create' }),
   ).not.toBeInTheDocument();
@@ -248,6 +276,7 @@ it('prioritizes automations and opens the automations page', () => {
   ];
 
   render(<OnboardingCard />);
+  dismissCard();
   expect(
     screen.getByText("Put your team's work on autopilot with automations"),
   ).toBeInTheDocument();
@@ -282,6 +311,7 @@ it('prioritizes communication accounts before source-control accounts', () => {
   ];
 
   render(<OnboardingCard />);
+  dismissCard();
   expect(screen.getByText('Link your Slack account')).toBeInTheDocument();
   dismissCard();
   expect(screen.getByText('Link your Discord account')).toBeInTheDocument();
@@ -301,6 +331,7 @@ it('does not offer Slack installation, but links an installed Slack account', ()
   ];
 
   render(<OnboardingCard />);
+  dismissCard();
   expect(
     screen.queryByText(/Chat with Roomote on Slack/),
   ).not.toBeInTheDocument();
@@ -311,6 +342,7 @@ it('does not offer Slack installation, but links an installed Slack account', ()
 
 it('uses the requested admin integration setup order', () => {
   render(<OnboardingCard />);
+  dismissCard();
 
   for (const name of [
     'Notion',
@@ -333,6 +365,7 @@ it('uses the requested admin integration setup order', () => {
 
 it('opens the highlighted integration settings for admin setup', () => {
   render(<OnboardingCard />);
+  dismissCard();
 
   fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
   expect(mockPush).toHaveBeenCalledWith(
@@ -345,6 +378,7 @@ it('does not offer deployment-scoped Notion setup to non-admins', () => {
   enabledMcpIds = ['notion'];
 
   render(<OnboardingCard />);
+  dismissCard();
   expect(
     screen.queryByText('Link your Notion account'),
   ).not.toBeInTheDocument();
@@ -364,6 +398,7 @@ it('starts Slack linking directly', () => {
     },
   ];
   render(<OnboardingCard />);
+  dismissCard();
 
   fireEvent.click(screen.getByRole('button', { name: 'Link' }));
   expect(mockAuthenticateSlack).toHaveBeenCalledWith('/', expect.any(Object));
@@ -380,6 +415,7 @@ it('opens the Discord account-link dialog directly', () => {
     },
   ];
   render(<OnboardingCard />);
+  dismissCard();
 
   fireEvent.click(screen.getByRole('button', { name: 'Link' }));
   expect(screen.getByText('Discord link flow')).toBeInTheDocument();

@@ -12,6 +12,7 @@ it('invalidates every integration status projection', async () => {
       userConnections: query('connections'),
       oauthReadiness: query('oauth'),
       availability: query('availability'),
+      voiceConnection: query('voice'),
     },
   };
 
@@ -28,5 +29,6 @@ it('invalidates every integration status projection', async () => {
     ['connections'],
     ['oauth'],
     ['availability'],
+    ['voice'],
   ]);
 });

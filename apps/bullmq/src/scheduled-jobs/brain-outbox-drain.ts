@@ -32,6 +32,7 @@ import {
   parseBrainToolPayloads,
   postBrainToolCall,
   isBrainEmbeddingAvailable,
+  requestHomeComposerRecommendationPrecomputeForRun,
   resolveBrainConnection,
 } from '@roomote/sdk/server';
 import {
@@ -764,6 +765,19 @@ export async function drainBrainHistoricalIngestion(input: {
   }
 }
 
+export function requestHomeComposerPrecomputeAfterMemorySettlement(
+  runId: number,
+  result: 'settled' | 'superseded',
+): void {
+  if (result === 'settled') {
+    void requestHomeComposerRecommendationPrecomputeForRun(runId).catch(() =>
+      console.warn(
+        `${LOG_PREFIX} failed to request Home recommendation precompute`,
+      ),
+    );
+  }
+}
+
 /** Returns false when no pending events remained to claim. */
 async function drainOneBatch(connection: {
   baseUrl: string;
@@ -785,6 +799,11 @@ async function drainOneBatch(connection: {
             'skipped',
             'run no longer exists',
           );
+          return null;
+        }
+
+        if (run.task.privacy === 'private') {
+          await markBrainMemoryEvent(db, event.id, 'skipped', 'private task');
           return null;
         }
 
@@ -885,10 +904,12 @@ async function drainOneBatch(connection: {
           : isBrainNotReady(error)
             ? 'not-ready'
             : null,
-      onSettled: (prepared, result) =>
+      onSettled: (event, prepared, result) => {
         console.log(
           `${LOG_PREFIX} ${result === 'settled' ? prepared.settledMessage : prepared.supersededMessage} (${prepared.page.slug})`,
-        ),
+        );
+        requestHomeComposerPrecomputeAfterMemorySettlement(event.runId, result);
+      },
       onBackpressure: (kind) =>
         console.log(
           `${LOG_PREFIX} ${kind === 'rate-limited' ? 'rate limited by' : 'cannot reach or embed into'} the brain; pausing until next tick`,
@@ -970,6 +991,7 @@ async function drainOneFastMemoryBatch(connection: {
             surface: fastAgentConversations.surface,
             userId: fastAgentConversations.userId,
             userName: users.name,
+            privacy: fastAgentConversations.privacy,
           })
           .from(fastAgentConversations)
           .leftJoin(users, eq(users.id, fastAgentConversations.userId))
@@ -982,6 +1004,16 @@ async function drainOneFastMemoryBatch(connection: {
             event.id,
             'skipped',
             'conversation no longer exists',
+          );
+          return null;
+        }
+
+        if (conversation.privacy === 'private') {
+          await markFastAgentMemoryEvent(
+            db,
+            event.id,
+            'skipped',
+            'private conversation',
           );
           return null;
         }
@@ -1017,7 +1049,7 @@ async function drainOneFastMemoryBatch(connection: {
           : isBrainNotReady(error)
             ? 'not-ready'
             : null,
-      onSettled: (prepared, result) =>
+      onSettled: (_event, prepared, result) =>
         console.log(
           `${LOG_PREFIX} ${result === 'settled' ? prepared.settledMessage : prepared.supersededMessage} (${prepared.page.slug})`,
         ),

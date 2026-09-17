@@ -4,6 +4,7 @@ import {
   customAutomationTaskAccess,
   db,
   eq,
+  privateTaskAccess,
   tasks,
 } from '@roomote/db/server';
 
@@ -17,7 +18,7 @@ export async function canReadTask(auth: TaskAuth, taskId: string) {
   const [task] = await db
     .select({ id: tasks.id })
     .from(tasks)
-    .where(eq(tasks.id, taskId))
+    .where(and(eq(tasks.id, taskId), privateTaskAccess(auth)))
     .limit(1);
   return !!task;
 }

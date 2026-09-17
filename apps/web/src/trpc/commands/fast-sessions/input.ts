@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import {
   computeProviders,
+  fastAgentCapabilityIdSchema,
   launchCodingHarnesses,
   REASONING_EFFORT_VALUES,
 } from '@roomote/types';
@@ -90,11 +91,21 @@ export const startFastSessionInputSchema = z
   .object({
     ...fastSessionMessageInputShape,
     conversationId: z.string().uuid().optional(),
+    privacy: z.enum(['shared', 'private']).optional(),
     pinnedLaunch: pinnedFastSessionLaunchSchema.optional(),
     /** Open the Session for a voice call; any text is the pre-typed message. */
     voiceCall: z.boolean().optional(),
   })
-  .superRefine(requireFastSessionContent);
+  .superRefine((input, ctx) => {
+    requireFastSessionContent(input, ctx);
+    if (input.privacy === 'private' && input.voiceCall) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Private Sessions cannot start as voice calls',
+        path: ['voiceCall'],
+      });
+    }
+  });
 
 export const replyToFastSessionInputSchema = z
   .object({
@@ -110,6 +121,14 @@ export const fastSessionPrReviewActionInputSchema = z.object({
   sessionId: z.string().uuid(),
   deliveryId: z.string().uuid(),
   choice: z.enum(['yes', 'auto', 'dismiss']),
+});
+
+export const fastSessionCapabilityOfferResponseInputSchema = z.object({
+  sessionId: z.string().uuid(),
+  offerId: z.string().min(1),
+  capability: fastAgentCapabilityIdSchema,
+  resolution: z.enum(['completed', 'dismissed']),
+  selectedIds: z.array(z.string().min(1)).max(20).optional(),
 });
 
 export const updateFastSessionModelSelectionInputSchema = z.object({

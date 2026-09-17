@@ -691,6 +691,60 @@ describe('ModelSettingsSection', () => {
     expect(availableSection).toHaveTextContent('just now');
   });
 
+  it('labels model metadata and exposes tooltip details to keyboard users', async () => {
+    settingsData.current = buildSettingsData();
+
+    renderModelSettingsSection();
+
+    const metadata = screen.getByLabelText('GPT 5.4 metadata');
+    expect(within(metadata).getByText('Context')).toBeInTheDocument();
+    expect(within(metadata).getByText('Inputs')).toBeInTheDocument();
+    expect(within(metadata).getByText('Price')).toBeInTheDocument();
+    expect(within(metadata).getByText('Updated')).toBeInTheDocument();
+
+    const context = within(metadata).getByLabelText(
+      /Context window: 1,050,000 tokens/,
+    );
+    expect(context).toHaveAttribute('tabindex', '0');
+
+    fireEvent.focus(context);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'This is the maximum amount of prompt, file, image, and conversation context the model can consider at once.',
+    );
+  });
+
+  it('gives missing metadata values meaningful accessible labels', () => {
+    const data = buildSettingsData();
+    settingsData.current = {
+      ...data,
+      models: data.models.map((model, index) =>
+        index === 0 ? { ...model, metadata: null } : model,
+      ),
+    };
+
+    renderModelSettingsSection();
+
+    const metadata = screen.getByLabelText('GPT 5.4 metadata');
+    expect(
+      within(metadata).getByLabelText(
+        'Context window is unavailable for this model.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(metadata).getByLabelText(
+        'Supported input types are unavailable for this model.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(metadata).getByLabelText(
+        'Input and output pricing are unavailable for this model.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(metadata).getByLabelText('Metadata has not been refreshed yet.'),
+    ).toBeInTheDocument();
+  });
+
   it('preselects a connected provider in the add-model flow', () => {
     settingsData.current = buildSettingsData();
     providerSetupData.current = buildProviderSetupData({

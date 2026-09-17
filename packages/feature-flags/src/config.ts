@@ -20,4 +20,10 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     description:
       'Share anonymous usage analytics (instance and user activity identified only by random IDs) with the Roomote team. Enabled by default; absent means enabled.',
   },
+  private_sessions_experiment_enabled: {
+    kind: 'deployment-control',
+    group: null,
+    description:
+      'Allow members to create owner-only private Sessions. Disabled by default; absent means disabled.',
+  },
 };

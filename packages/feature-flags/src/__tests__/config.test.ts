@@ -7,6 +7,7 @@ describe('deployment metadata config', () => {
     expect(Object.keys(DEPLOYMENT_METADATA_BOOLEAN_CONFIG).sort()).toEqual([
       'anonymous_analytics_enabled',
       'deployment_disabled',
+      'private_sessions_experiment_enabled',
     ]);
     for (const descriptor of Object.values(
       DEPLOYMENT_METADATA_BOOLEAN_CONFIG,

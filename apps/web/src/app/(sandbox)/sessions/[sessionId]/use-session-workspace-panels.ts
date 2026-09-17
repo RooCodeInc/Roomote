@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
+import { useSessionNavigationState } from '@/hooks/useSessionNavigationState';
 import { parseSessionArtifactSearchParams } from '@/lib/artifact-view-urls';
 import type { SessionArtifactViewerSelection } from './session-task-panel-context';
 
@@ -24,6 +25,7 @@ export type TaskArtifactSelection = { path: string; version?: number };
 export type SessionWorkspacePanelState = {
   utilityPanel: UtilityWorkspacePanel | null;
   taskPanelIds: string[];
+  explicitTaskPanelIds: string[];
   taskArtifacts: Record<string, TaskArtifactSelection>;
   promptFocusTaskId: string | null;
 };
@@ -37,6 +39,13 @@ export type SessionWorkspacePanelAction =
   | {
       type: 'add-tasks';
       taskIds: string[];
+      selectedTaskId: string | null;
+      capacity: number;
+    }
+  | {
+      type: 'promote-running-tasks';
+      runningTaskIds: string[];
+      transitionedTaskIds: string[];
       selectedTaskId: string | null;
       capacity: number;
     }
@@ -113,6 +122,7 @@ export function createSessionWorkspacePanelState({
       ? { kind: 'artifacts', artifact: null }
       : null,
     taskPanelIds: [],
+    explicitTaskPanelIds: [],
     taskArtifacts: {},
     promptFocusTaskId: selectedTaskId,
   };
@@ -136,10 +146,6 @@ export function sessionWorkspacePanelReducer(
       return {
         ...state,
         taskPanelIds,
-        promptFocusTaskId:
-          action.selectedTaskId ??
-          action.taskIds.find((taskId) => taskId !== action.selectedTaskId) ??
-          null,
       };
     }
     case 'add-tasks': {
@@ -157,16 +163,56 @@ export function sessionWorkspacePanelReducer(
         );
         insertionIndex += 1;
       }
-      const shouldFocus =
+      const shouldShowTaskPanels =
         state.utilityPanel === null || state.utilityPanel.kind === 'tasks';
       return {
         ...state,
-        utilityPanel: shouldFocus ? null : state.utilityPanel,
+        utilityPanel: shouldShowTaskPanels ? null : state.utilityPanel,
         taskPanelIds,
-        promptFocusTaskId: shouldFocus
-          ? (action.taskIds[0] ?? state.promptFocusTaskId)
-          : state.promptFocusTaskId,
       };
+    }
+    case 'promote-running-tasks': {
+      const runningTaskIdSet = new Set(action.runningTaskIds);
+      const explicitTaskPanelIdSet = new Set(state.explicitTaskPanelIds);
+      const visibleSlotCount = Math.max(
+        0,
+        action.capacity - (action.selectedTaskId ? 1 : 0),
+      );
+      const taskPanelIds = [...state.taskPanelIds];
+      let changed = false;
+
+      for (const taskId of action.transitionedTaskIds) {
+        const taskIndex = taskPanelIds.indexOf(taskId);
+        if (
+          taskId === action.selectedTaskId ||
+          taskIndex < visibleSlotCount ||
+          explicitTaskPanelIdSet.has(taskId)
+        ) {
+          continue;
+        }
+
+        let replacementIndex = -1;
+        for (let index = visibleSlotCount - 1; index >= 0; index -= 1) {
+          const visibleTaskId = taskPanelIds[index];
+          if (
+            visibleTaskId &&
+            !runningTaskIdSet.has(visibleTaskId) &&
+            !explicitTaskPanelIdSet.has(visibleTaskId)
+          ) {
+            replacementIndex = index;
+            break;
+          }
+        }
+        if (replacementIndex < 0) continue;
+
+        taskPanelIds.splice(taskIndex, 1);
+        const replacedTaskId = taskPanelIds[replacementIndex]!;
+        taskPanelIds[replacementIndex] = taskId;
+        taskPanelIds.splice(visibleSlotCount, 0, replacedTaskId);
+        changed = true;
+      }
+
+      return changed ? { ...state, taskPanelIds } : state;
     }
     case 'open-task': {
       const taskArtifacts = withoutTaskArtifact(
@@ -180,6 +226,9 @@ export function sessionWorkspacePanelReducer(
         return {
           ...state,
           utilityPanel: null,
+          explicitTaskPanelIds: [
+            ...new Set([...state.explicitTaskPanelIds, action.taskId]),
+          ],
           taskArtifacts,
           promptFocusTaskId: action.taskId,
         };
@@ -202,6 +251,9 @@ export function sessionWorkspacePanelReducer(
         ...state,
         utilityPanel: null,
         taskPanelIds,
+        explicitTaskPanelIds: [
+          ...new Set([...state.explicitTaskPanelIds, action.taskId]),
+        ],
         taskArtifacts,
         promptFocusTaskId: action.taskId,
       };
@@ -215,13 +267,14 @@ export function sessionWorkspacePanelReducer(
         taskPanelIds: action.taskIds.filter(
           (taskId) => taskId !== action.selectedTaskId,
         ),
+        explicitTaskPanelIds: [...action.taskIds],
         taskArtifacts: {},
-        promptFocusTaskId: action.selectedTaskId ?? action.taskIds[0] ?? null,
       };
     case 'show-main':
       return {
         utilityPanel: null,
         taskPanelIds: [],
+        explicitTaskPanelIds: [],
         taskArtifacts: {},
         promptFocusTaskId: null,
       };
@@ -270,6 +323,9 @@ export function sessionWorkspacePanelReducer(
           action.taskId === action.selectedTaskId
             ? state.taskPanelIds
             : state.taskPanelIds.filter((taskId) => taskId !== action.taskId),
+        explicitTaskPanelIds: state.explicitTaskPanelIds.filter(
+          (taskId) => taskId !== action.taskId,
+        ),
         taskArtifacts: withoutTaskArtifact(state.taskArtifacts, action.taskId),
       };
     case 'select-panel-task': {
@@ -279,6 +335,13 @@ export function sessionWorkspacePanelReducer(
         action.currentTaskId,
         action.nextTaskId,
       ]);
+      const explicitTaskPanelIds = [
+        ...new Set([
+          ...state.explicitTaskPanelIds,
+          action.currentTaskId,
+          action.nextTaskId,
+        ]),
+      ];
       if (action.currentTaskId === action.selectedTaskId) {
         const nextIndex = state.taskPanelIds.indexOf(action.nextTaskId);
         if (nextIndex < 0) return { ...state, taskArtifacts };
@@ -287,6 +350,7 @@ export function sessionWorkspacePanelReducer(
           taskPanelIds: state.taskPanelIds.map((taskId, index) =>
             index === nextIndex ? action.currentTaskId : taskId,
           ),
+          explicitTaskPanelIds,
           taskArtifacts,
         };
       }
@@ -296,6 +360,7 @@ export function sessionWorkspacePanelReducer(
           taskPanelIds: state.taskPanelIds.map((taskId) =>
             taskId === action.currentTaskId ? action.selectedTaskId! : taskId,
           ),
+          explicitTaskPanelIds,
           taskArtifacts,
         };
       }
@@ -306,7 +371,12 @@ export function sessionWorkspacePanelReducer(
       const taskPanelIds = [...state.taskPanelIds];
       taskPanelIds[currentIndex] = action.nextTaskId;
       if (nextIndex >= 0) taskPanelIds[nextIndex] = action.currentTaskId;
-      return { ...state, taskPanelIds, taskArtifacts };
+      return {
+        ...state,
+        taskPanelIds,
+        explicitTaskPanelIds,
+        taskArtifacts,
+      };
     }
     case 'focus-complete':
       return state.promptFocusTaskId === action.taskId
@@ -362,6 +432,8 @@ export function getVisibleSessionTaskPanelIds(
 type SessionWorkspacePanelControllerOptions = {
   sessionId: string;
   taskIds: string[];
+  automaticTaskPanelIds: string[];
+  runningTaskIds: string[];
   singleRunningTaskId: string | null;
   taskPanelCapacity: number;
   isMdOrLarger: boolean;
@@ -371,6 +443,8 @@ type SessionWorkspacePanelControllerOptions = {
 export function useSessionWorkspacePanels({
   sessionId,
   taskIds,
+  automaticTaskPanelIds,
+  runningTaskIds,
   singleRunningTaskId,
   taskPanelCapacity,
   isMdOrLarger,
@@ -378,6 +452,7 @@ export function useSessionWorkspacePanels({
 }: SessionWorkspacePanelControllerOptions) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const navigationState = useSessionNavigationState();
   const selectedTaskId = searchParams.get('task');
   const selectedPanelTaskId =
     selectedTaskId && taskIds.includes(selectedTaskId) ? selectedTaskId : null;
@@ -393,7 +468,18 @@ export function useSessionWorkspacePanels({
     createSessionWorkspacePanelState,
   );
   const knownTaskIdsRef = useRef<string[] | null>(null);
+  const runningTaskIdsRef = useRef<string[] | null>(null);
   const widePanelsSeededRef = useRef(false);
+
+  useEffect(() => {
+    if (selectedPanelTaskId) {
+      navigationState?.setTaskPanelDismissed(
+        sessionId,
+        selectedPanelTaskId,
+        false,
+      );
+    }
+  }, [navigationState, selectedPanelTaskId, sessionId]);
 
   const replaceSearchParams = useCallback(
     (update: (params: URLSearchParams) => void) => {
@@ -427,33 +513,65 @@ export function useSessionWorkspacePanels({
   useEffect(() => {
     if (!isMdOrLarger || workspaceWidth <= 0) return;
 
+    const dismissedTaskPanelIds =
+      navigationState?.getDismissedTaskPanelIds(sessionId);
     const previousTaskIds = knownTaskIdsRef.current;
+    const previousRunningTaskIds = runningTaskIdsRef.current;
     knownTaskIdsRef.current = taskIds;
+    runningTaskIdsRef.current = runningTaskIds;
     if (!widePanelsSeededRef.current && taskPanelCapacity >= 2) {
       widePanelsSeededRef.current = true;
       dispatch({
         type: 'seed-wide-panels',
-        taskIds,
+        taskIds: dismissedTaskPanelIds
+          ? automaticTaskPanelIds.filter(
+              (taskId) => !dismissedTaskPanelIds.has(taskId),
+            )
+          : automaticTaskPanelIds,
         selectedTaskId: selectedPanelTaskId,
       });
       return;
     }
-    if (!previousTaskIds) return;
+    if (!previousTaskIds || !previousRunningTaskIds) return;
 
     const previousTaskIdSet = new Set(previousTaskIds);
-    const newTaskIds = taskIds.filter(
-      (taskId) => !previousTaskIdSet.has(taskId),
+    const previousRunningTaskIdSet = new Set(previousRunningTaskIds);
+    const newTaskIds = automaticTaskPanelIds.filter(
+      (taskId) =>
+        !previousTaskIdSet.has(taskId) && !dismissedTaskPanelIds?.has(taskId),
     );
-    if (newTaskIds.length === 0) return;
-    dispatch({
-      type: 'add-tasks',
-      taskIds: newTaskIds,
-      selectedTaskId: selectedPanelTaskId,
-      capacity: taskPanelCapacity,
-    });
+    if (newTaskIds.length > 0) {
+      dispatch({
+        type: 'add-tasks',
+        taskIds: newTaskIds,
+        selectedTaskId: selectedPanelTaskId,
+        capacity: taskPanelCapacity,
+      });
+    }
+    if (widePanelsSeededRef.current) {
+      const transitionedTaskIds = runningTaskIds.filter(
+        (taskId) =>
+          previousTaskIdSet.has(taskId) &&
+          !previousRunningTaskIdSet.has(taskId) &&
+          !dismissedTaskPanelIds?.has(taskId),
+      );
+      if (transitionedTaskIds.length > 0) {
+        dispatch({
+          type: 'promote-running-tasks',
+          runningTaskIds,
+          transitionedTaskIds,
+          selectedTaskId: selectedPanelTaskId,
+          capacity: taskPanelCapacity,
+        });
+      }
+    }
   }, [
     isMdOrLarger,
+    automaticTaskPanelIds,
+    navigationState,
+    runningTaskIds,
     selectedPanelTaskId,
+    sessionId,
     taskIds,
     taskPanelCapacity,
     workspaceWidth,
@@ -461,6 +579,7 @@ export function useSessionWorkspacePanels({
 
   const openTaskPanel = useCallback(
     (taskId: string) => {
+      navigationState?.setTaskPanelDismissed(sessionId, taskId, false);
       dispatch({
         type: 'open-task',
         taskId,
@@ -475,7 +594,13 @@ export function useSessionWorkspacePanels({
         selectTask(taskId);
       }
     },
-    [selectedPanelTaskId, selectTask, taskPanelCapacity],
+    [
+      navigationState,
+      selectedPanelTaskId,
+      selectTask,
+      sessionId,
+      taskPanelCapacity,
+    ],
   );
   const openTasksPanel = useCallback(() => {
     if (singleRunningTaskId) {
@@ -485,15 +610,16 @@ export function useSessionWorkspacePanels({
     }
     dispatch({ type: 'open-tasks-utility' });
   }, [selectTask, singleRunningTaskId]);
-  const openTasksSideBySide = useCallback(
-    () =>
-      dispatch({
-        type: 'open-tasks-side-by-side',
-        taskIds,
-        selectedTaskId: selectedPanelTaskId,
-      }),
-    [selectedPanelTaskId, taskIds],
-  );
+  const openTasksSideBySide = useCallback(() => {
+    for (const taskId of taskIds) {
+      navigationState?.setTaskPanelDismissed(sessionId, taskId, false);
+    }
+    dispatch({
+      type: 'open-tasks-side-by-side',
+      taskIds,
+      selectedTaskId: selectedPanelTaskId,
+    });
+  }, [navigationState, selectedPanelTaskId, sessionId, taskIds]);
   const showMain = useCallback(() => {
     dispatch({ type: 'show-main' });
     selectTask(null);
@@ -520,6 +646,7 @@ export function useSessionWorkspacePanels({
   }, []);
   const closeTaskPanel = useCallback(
     (taskId: string) => {
+      navigationState?.setTaskPanelDismissed(sessionId, taskId, true);
       dispatch({
         type: 'close-task',
         taskId,
@@ -527,11 +654,12 @@ export function useSessionWorkspacePanels({
       });
       if (taskId === selectedPanelTaskId) selectTask(null);
     },
-    [selectedPanelTaskId, selectTask],
+    [navigationState, selectedPanelTaskId, selectTask, sessionId],
   );
   const selectPanelTask = useCallback(
     (currentTaskId: string, nextTaskId: string) => {
       if (currentTaskId === nextTaskId) return;
+      navigationState?.setTaskPanelDismissed(sessionId, nextTaskId, false);
       dispatch({
         type: 'select-panel-task',
         currentTaskId,
@@ -541,7 +669,7 @@ export function useSessionWorkspacePanels({
       if (currentTaskId === selectedPanelTaskId) selectTask(nextTaskId);
       else if (nextTaskId === selectedPanelTaskId) selectTask(currentTaskId);
     },
-    [selectedPanelTaskId, selectTask],
+    [navigationState, selectedPanelTaskId, selectTask, sessionId],
   );
   const openTaskArtifact = useCallback(
     (taskId: string, path: string, version?: number) =>

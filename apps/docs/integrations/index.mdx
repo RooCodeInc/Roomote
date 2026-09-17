@@ -55,6 +55,7 @@ from [Personal Settings](/personal-settings).
 | <IntegrationName href="/integrations/better-stack" icon="betterstack" name="Better Stack" />                      | Monitoring and incident context                   | Admin connection once                      |
 | <IntegrationName href="/integrations/braintrust" icon="braintrust" name="Braintrust" />                           | Prompts, runs, and evaluation context             | Enable first, then teammates link accounts |
 | <IntegrationName href="/integrations/elevenlabs" icon="elevenlabs" name="ElevenLabs" />                        | Voice narration for feature-demo videos           | Admin connection once                      |
+| <IntegrationName href="/integrations/exa" icon="exa" name="Exa" />                                              | Keyless web search; optional Agent research       | Admin enables; API key optional             |
 | <IntegrationName href="/integrations/grafana" icon="grafana" name="Grafana" />                                    | Dashboards, alerting, and monitoring context      | Admin connection once                      |
 | <IntegrationName href="/integrations/granola" icon="granola" name="Granola" />                                    | Meeting notes, transcripts, and decisions         | Admin connection once                      |
 | <IntegrationName href="/integrations/jira" icon="jira" name="Jira" />                                             | Issues, projects, and JQL-backed issue context    | Admin connection once                      |
@@ -75,6 +76,13 @@ from [Personal Settings](/personal-settings).
 | <IntegrationName href="/integrations/voice" icon="openai" name="Voice" />                               | Voice calls with Roomote on Fast Sessions         | Admin connection once                      |
 | <IntegrationName href="/integrations/x" icon="x" name="X" />                                                      | Public X posts, users, trends, and news           | Admin connection once                      |
 | <IntegrationName href="/integrations/zero" icon="/logo/integrations/zero.svg" name="Zero" />                      | Paid external capabilities via Zero               | Admin connection once                      |
+
+## HTTP APIs without an MCP server
+
+Deployment operators can configure [HTTP integrations](/integrations/http-integrations)
+for approved HTTPS APIs. Fast sessions and sandbox agents use the same actor
+access rules, while Roomote keeps credentials server-side and attaches them to
+authorized requests. This opt-in feature does not change sandbox networking.
 
 ## Custom MCP servers
 

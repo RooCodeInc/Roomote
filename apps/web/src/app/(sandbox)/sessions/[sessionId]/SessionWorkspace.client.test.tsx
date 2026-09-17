@@ -10,6 +10,7 @@ import {
 } from '@testing-library/react';
 
 import { SandboxLayoutContext } from '../../use-sandbox-layout';
+import { SessionNavigationStateProvider } from '@/hooks/useSessionNavigationState';
 import {
   SessionHeaderPullRequests,
   SessionWorkspace,
@@ -31,6 +32,7 @@ const {
   routerReplaceMock,
   artifactQueryState,
   artifactQueryInputs,
+  disabledTaskPrompts,
 } = vi.hoisted(() => ({
   useMediaQueryMock: vi.fn(),
   useResizeObserverMock: vi.fn(),
@@ -45,6 +47,7 @@ const {
     path: string;
     version?: number;
   }>,
+  disabledTaskPrompts: new Set<string>(),
 }));
 
 vi.mock('usehooks-ts', () => ({
@@ -175,7 +178,10 @@ vi.mock('./NestedTaskSidePanel', () => ({
   }) => (
     <div aria-label={`Full task ${taskId}`} data-session-task-panel={taskId}>
       Nested panel {taskId}
-      <textarea aria-label={`Task prompt ${taskId}`} />
+      <textarea
+        aria-label={`Task prompt ${taskId}`}
+        disabled={disabledTaskPrompts.has(taskId)}
+      />
       <button
         type="button"
         onClick={() => onOpenArtifact('proof/nested.png', 3)}
@@ -328,11 +334,15 @@ function renderWorkspace({
     defaultOptions: { queries: { retry: false } },
   });
   const workspace = () => (
-    <QueryClientProvider client={queryClient}>
-      <SandboxLayoutProvider>
-        <SessionWorkspace session={initialSession}>{children}</SessionWorkspace>
-      </SandboxLayoutProvider>
-    </QueryClientProvider>
+    <SessionNavigationStateProvider>
+      <QueryClientProvider client={queryClient}>
+        <SandboxLayoutProvider>
+          <SessionWorkspace session={initialSession}>
+            {children}
+          </SessionWorkspace>
+        </SandboxLayoutProvider>
+      </QueryClientProvider>
+    </SessionNavigationStateProvider>
   );
   const result = render(workspace());
 
@@ -343,11 +353,22 @@ function renderWorkspace({
       observedWorkspaceWidth = width;
       result.rerender(workspace());
     },
+    refresh() {
+      result.rerender(workspace());
+    },
     resizeToMobile() {
       mediaQuery.matches = true;
       act(() =>
         viewportChangeListener?.({ matches: true } as MediaQueryListEvent),
       );
+    },
+    navigateAwayAndBack() {
+      result.rerender(
+        <SessionNavigationStateProvider>
+          <div>Another session</div>
+        </SessionNavigationStateProvider>,
+      );
+      result.rerender(workspace());
     },
   };
 }
@@ -398,6 +419,7 @@ function OpenTasksPanel() {
 describe('SessionWorkspace', () => {
   beforeEach(() => {
     routerReplaceMock.mockClear();
+    disabledTaskPrompts.clear();
     artifactQueryInputs.length = 0;
     artifactQueryState.dataByPath = {
       'tmp/capture-visual-proof/sidebar-alignment.png': {
@@ -458,6 +480,55 @@ describe('SessionWorkspace', () => {
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
     expect(artifacts.querySelector('svg')).toHaveClass('lucide-layout-grid');
+  });
+
+  it('exposes the expanded state while utility panels open, switch, and close', () => {
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: {
+        tasks: [
+          {
+            ...singleTask,
+            previews: [
+              {
+                serviceName: 'WEB_APP',
+                url: 'https://task-1-web-app.preview.test/',
+                isPrimary: true,
+                runId: 11,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const tasks = screen.getByRole('button', { name: 'Tasks' });
+    const preview = screen.getByRole('button', { name: 'Live Preview' });
+    const artifacts = screen.getByRole('button', { name: 'Artifacts' });
+    const sessionInfo = screen.getByRole('button', { name: 'Session info' });
+
+    for (const control of [tasks, preview, artifacts, sessionInfo]) {
+      expect(control).toHaveAttribute('aria-expanded', 'false');
+      expect(control).not.toHaveAttribute('aria-controls');
+    }
+
+    fireEvent.click(tasks);
+    expect(tasks).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(artifacts);
+    expect(tasks).toHaveAttribute('aria-expanded', 'false');
+    expect(artifacts).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(sessionInfo);
+    expect(artifacts).toHaveAttribute('aria-expanded', 'false');
+    expect(sessionInfo).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(preview);
+    expect(sessionInfo).toHaveAttribute('aria-expanded', 'false');
+    expect(preview).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel' }));
+    expect(preview).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('aggregates task pull requests in the header and removes duplicates', async () => {
@@ -590,7 +661,10 @@ describe('SessionWorkspace', () => {
 
     expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
+    const sessionInfo = screen.getByRole('button', { name: 'Session info' });
+    expect(sessionInfo).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(sessionInfo);
+    expect(sessionInfo).toHaveAttribute('aria-expanded', 'true');
 
     const hiddenTranscriptPanel = screen
       .getByText('Session transcript')
@@ -607,6 +681,8 @@ describe('SessionWorkspace', () => {
     ).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Hide sidebar' }));
+
+    expect(screen.queryByRole('button', { name: 'Session info' })).toBeNull();
 
     expect(
       screen.getByRole('button', { name: 'Close session info' }),
@@ -761,6 +837,258 @@ describe('SessionWorkspace', () => {
 
     expect(screen.getByLabelText('Full task task-7')).toBeVisible();
     expect(screen.queryByLabelText('Full task task-5')).toBeNull();
+  });
+
+  it('automatically opens running tasks first while preserving relative status order', async () => {
+    const task = (
+      taskId: string,
+      status: RunStatus,
+      taskPhase: string | null,
+    ): SessionInfo['tasks'][number] => ({
+      ...singleTask,
+      taskId,
+      title: taskId,
+      latestRun: {
+        id: 1,
+        status,
+        taskPhase,
+        error: null,
+        result: null,
+      },
+    });
+    renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1920,
+      sessionOverride: {
+        tasks: [
+          task('inactive-1', RunStatus.Completed, null),
+          task('running-1', RunStatus.Running, 'running'),
+          task('inactive-2', RunStatus.Completed, null),
+          task('running-2', RunStatus.Pending, null),
+          task('inactive-3', RunStatus.Completed, null),
+        ],
+      },
+    });
+
+    const firstRunning = await screen.findByLabelText('Full task running-1');
+    const secondRunning = screen.getByLabelText('Full task running-2');
+    const firstInactive = screen.getByLabelText('Full task inactive-1');
+
+    expect(firstRunning.compareDocumentPosition(secondRunning)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(secondRunning.compareDocumentPosition(firstInactive)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.queryByLabelText('Full task inactive-2')).toBeNull();
+    expect(screen.queryByLabelText('Full task inactive-3')).toBeNull();
+  });
+
+  it('prioritizes running tasks within an automatically opened arrival batch', async () => {
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1920,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+    });
+    const inactiveTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Completed task',
+      latestRun: {
+        id: 3,
+        status: RunStatus.Completed,
+        taskPhase: null,
+        error: null,
+        result: null,
+      },
+    };
+    const runningTask = {
+      ...singleTask,
+      taskId: 'task-4',
+      title: 'Running task',
+      latestRun: {
+        id: 4,
+        status: RunStatus.Running,
+        taskPhase: 'running',
+        error: null,
+        result: null,
+      },
+    };
+
+    expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [singleTask, secondTask, inactiveTask, runningTask],
+      });
+    });
+
+    expect(await screen.findByLabelText('Full task task-4')).toBeVisible();
+    expect(screen.queryByLabelText('Full task task-3')).toBeNull();
+  });
+
+  it('promotes an existing hidden task when it begins running', async () => {
+    const existingRunningTask = {
+      ...secondTask,
+      latestRun: {
+        id: 2,
+        status: RunStatus.Running,
+        taskPhase: 'running',
+        error: null,
+        result: null,
+      },
+    };
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Hidden task',
+    };
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: {
+        tasks: [singleTask, existingRunningTask, thirdTask],
+      },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    expect(screen.getByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.queryByLabelText('Full task task-3')).toBeNull();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [
+          singleTask,
+          existingRunningTask,
+          {
+            ...thirdTask,
+            latestRun: {
+              id: 3,
+              status: RunStatus.Running,
+              taskPhase: 'running',
+              error: null,
+              result: null,
+            },
+          },
+        ],
+      });
+    });
+
+    const existingRunningPanel = screen.getByLabelText('Full task task-2');
+    const promotedRunningPanel =
+      await screen.findByLabelText('Full task task-3');
+    expect(
+      existingRunningPanel.compareDocumentPosition(promotedRunningPanel),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
+  });
+
+  it('preserves manual panel selections when a hidden task begins running', async () => {
+    const existingRunningTask = {
+      ...secondTask,
+      latestRun: {
+        id: 2,
+        status: RunStatus.Running,
+        taskPhase: 'running',
+        error: null,
+        result: null,
+      },
+    };
+    const thirdTask = {
+      ...singleTask,
+      taskId: 'task-3',
+      title: 'Third task',
+    };
+    const manuallySelectedTask = {
+      ...singleTask,
+      taskId: 'task-4',
+      title: 'Manually selected task',
+    };
+    const hiddenTask = {
+      ...singleTask,
+      taskId: 'task-5',
+      title: 'Hidden task',
+    };
+    const { queryClient } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1920,
+      sessionOverride: {
+        tasks: [
+          singleTask,
+          existingRunningTask,
+          thirdTask,
+          manuallySelectedTask,
+          hiddenTask,
+        ],
+      },
+    });
+
+    expect(await screen.findByLabelText('Full task task-3')).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Select task-4 from task-3' }),
+    );
+    expect(screen.getByLabelText('Full task task-4')).toBeVisible();
+    act(() => {
+      queryClient.setQueryData(['sessions', 'byId', session.id], {
+        ...session,
+        tasks: [
+          singleTask,
+          existingRunningTask,
+          thirdTask,
+          manuallySelectedTask,
+          {
+            ...hiddenTask,
+            latestRun: {
+              id: 5,
+              status: RunStatus.Running,
+              taskPhase: 'running',
+              error: null,
+              result: null,
+            },
+          },
+        ],
+      });
+    });
+
+    const existingRunningPanel = screen.getByLabelText('Full task task-2');
+    const promotedRunningPanel =
+      await screen.findByLabelText('Full task task-5');
+    const manualPanel = screen.getByLabelText('Full task task-4');
+    expect(
+      existingRunningPanel.compareDocumentPosition(promotedRunningPanel),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(promotedRunningPanel.compareDocumentPosition(manualPanel)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
+  });
+
+  it('keeps closed task panels dismissed after navigating away and back', async () => {
+    const { navigateAwayAndBack } = renderWorkspace({
+      isMobile: false,
+      workspaceWidth: 1280,
+      sessionOverride: { tasks: [singleTask, secondTask] },
+    });
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Close panel task-1' }));
+
+    navigateAwayAndBack();
+
+    expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
+    expect(screen.queryByLabelText('Full task task-1')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'View coding task: Update homepage background',
+      }),
+    );
+    expect(screen.getByLabelText('Full task task-1')).toBeVisible();
+
+    navigateAwayAndBack();
+
+    expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
   });
 
   it('limits focus dimming to the Session and task conversations', async () => {
@@ -960,8 +1288,9 @@ describe('SessionWorkspace', () => {
     expect(screen.getByRole('button', { name: 'Tasks' })).toBeDisabled();
   });
 
-  it('lists session tasks with delegated task cards', () => {
-    renderWorkspace({
+  it('focuses a deliberately selected task when its prompt becomes ready', async () => {
+    disabledTaskPrompts.add('task-1');
+    const workspace = renderWorkspace({
       isMobile: false,
       sessionOverride: { tasks: [singleTask] },
     });
@@ -981,28 +1310,42 @@ describe('SessionWorkspace', () => {
     );
 
     expect(screen.getByText('Nested panel task-1')).toBeInTheDocument();
-    expect(screen.getByLabelText('Task prompt task-1')).toHaveFocus();
+    expect(screen.getByLabelText('Task prompt task-1')).toBeDisabled();
+    disabledTaskPrompts.clear();
+    workspace.refresh();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Task prompt task-1')).toHaveFocus(),
+    );
   });
 
-  it('opens tasks side-by-side when the Tasks rail item is middle-clicked', async () => {
+  it('opens tasks side-by-side without moving focus from the session prompt', async () => {
     renderWorkspace({
       isMobile: false,
       workspaceWidth: 1280,
+      children: <textarea aria-label="Session prompt" />,
       sessionOverride: { tasks: [singleTask, secondTask] },
     });
 
     expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Close panel task-1' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close panel task-2' }));
-
-    fireEvent(
-      screen.getByRole('button', { name: 'Tasks' }),
-      new MouseEvent('auxclick', { bubbles: true, button: 1 }),
-    );
+    const sessionPrompt = screen.getByLabelText('Session prompt');
+    sessionPrompt.focus();
+    const tasksButton = screen.getByRole('button', { name: 'Tasks' });
+    if (fireEvent.pointerDown(tasksButton, { button: 0 })) tasksButton.focus();
+    fireEvent.click(tasksButton);
+    const sideBySideButton = screen.getByRole('button', {
+      name: 'Open side-by-side',
+    });
+    if (fireEvent.pointerDown(sideBySideButton, { button: 0 })) {
+      sideBySideButton.focus();
+    }
+    fireEvent.click(sideBySideButton);
 
     expect(screen.getByLabelText('Full task task-1')).toBeVisible();
     expect(screen.getByLabelText('Full task task-2')).toBeVisible();
-    expect(screen.getByText('Session transcript')).toBeVisible();
+    expect(sessionPrompt).toHaveFocus();
   });
 
   it('moves focus between visible prompt inputs with Alt+Arrow keys', async () => {
@@ -1050,32 +1393,41 @@ describe('SessionWorkspace', () => {
     expect(sessionPrompt).toHaveFocus();
   });
 
-  it('focuses the first task when several task panels open initially', async () => {
+  it('keeps session prompt focus when task prompts become ready after initial panel expansion', async () => {
     const thirdTask = {
       ...singleTask,
       taskId: 'task-3',
       title: 'Add homepage tests',
     };
-    renderWorkspace({
+    disabledTaskPrompts.add('task-1');
+    disabledTaskPrompts.add('task-2');
+    disabledTaskPrompts.add('task-3');
+    const workspace = renderWorkspace({
       isMobile: false,
       workspaceWidth: 1600,
-      children: <textarea aria-label="Session prompt" />,
+      children: <textarea aria-label="Session prompt" autoFocus />,
       sessionOverride: { tasks: [singleTask, secondTask, thirdTask] },
     });
 
-    expect(await screen.findByLabelText('Task prompt task-3')).toBeVisible();
+    expect(await screen.findByLabelText('Task prompt task-3')).toBeDisabled();
+    disabledTaskPrompts.clear();
+    workspace.refresh();
+
+    expect(screen.getByLabelText('Task prompt task-3')).toBeEnabled();
     await waitFor(() =>
-      expect(screen.getByLabelText('Task prompt task-1')).toHaveFocus(),
+      expect(screen.getByLabelText('Session prompt')).toHaveFocus(),
     );
   });
 
-  it('opens and focuses the first task when several delegated tasks start', async () => {
+  it('does not move session prompt focus when new delegated task prompts become ready', async () => {
     const thirdTask = {
       ...singleTask,
       taskId: 'task-3',
       title: 'Add homepage tests',
     };
-    const { queryClient } = renderWorkspace({
+    disabledTaskPrompts.add('task-2');
+    disabledTaskPrompts.add('task-3');
+    const { queryClient, refresh } = renderWorkspace({
       isMobile: false,
       workspaceWidth: 1600,
       children: <textarea aria-label="Session prompt" />,
@@ -1083,8 +1435,8 @@ describe('SessionWorkspace', () => {
     });
 
     expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
-    expect(screen.getByRole('heading', { name: 'Tasks' })).toBeVisible();
+    const sessionPrompt = screen.getByLabelText('Session prompt');
+    sessionPrompt.focus();
     act(() => {
       queryClient.setQueryData(['sessions', 'byId', session.id], {
         ...session,
@@ -1094,9 +1446,12 @@ describe('SessionWorkspace', () => {
 
     expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
     expect(screen.getByLabelText('Full task task-3')).toBeVisible();
-    await waitFor(() =>
-      expect(screen.getByLabelText('Task prompt task-2')).toHaveFocus(),
-    );
+    expect(screen.getByLabelText('Task prompt task-2')).toBeDisabled();
+    disabledTaskPrompts.clear();
+    refresh();
+
+    expect(screen.getByLabelText('Task prompt task-2')).toBeEnabled();
+    await waitFor(() => expect(sessionPrompt).toHaveFocus());
   });
 
   it('replaces the URL-selected task when a task card opens at one-panel capacity', () => {
@@ -1186,6 +1541,61 @@ describe('SessionWorkspace', () => {
         version: 1,
       }),
     );
+  });
+
+  it('shows a bounded tabular thumbnail for Session artifacts', async () => {
+    artifactQueryState.dataByPath['session-1:reports/results.csv'] = {
+      id: 'session-csv',
+      taskId: null,
+      sessionId: 'session-1',
+      path: 'reports/results.csv',
+      version: 1,
+      artifactType: 'general',
+      contentType: 'text/csv',
+      content: 'name,score\nAda,98',
+      size: 20,
+      createdAt: new Date('2026-01-05T00:00:00.000Z'),
+      downloadUrl: '/api/artifacts/session-csv/download',
+    };
+    renderWorkspace({
+      isMobile: false,
+      sessionOverride: {
+        artifacts: [
+          {
+            id: 'session-csv',
+            path: 'reports/results.csv',
+            version: 1,
+            artifactType: 'general',
+            contentType: 'text/csv',
+            size: 20,
+            createdAt: new Date('2026-01-05T00:00:00.000Z'),
+          },
+        ],
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+
+    expect(
+      screen.getByRole('button', { name: 'Open Results from Session' }),
+    ).toBeVisible();
+    const card = screen.getByRole('button', {
+      name: 'Open Results from Session',
+    });
+    await waitFor(() => {
+      expect(artifactQueryInputs).toContainEqual({
+        sessionId: 'session-1',
+        path: 'reports/results.csv',
+        version: 1,
+        preview: true,
+      });
+      expect(card.querySelector('.tabular-artifact-grid')).toHaveAttribute(
+        'data-state',
+        'ready',
+      );
+    });
+    expect(card).toHaveTextContent('Ada');
+    expect(card).toHaveTextContent('98');
   });
 
   it('opens a deep-linked Session artifact without a click and clears the link on back', async () => {

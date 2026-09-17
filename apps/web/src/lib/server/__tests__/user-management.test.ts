@@ -16,6 +16,9 @@ const { state } = vi.hoisted(() => ({
     credentialAccountExists: false,
     capturedResetUrl:
       'https://roomote.example.com/api/auth/reset-password/token',
+    passwordResetDelivery: { sent: true } as
+      | { sent: true }
+      | { sent: false; reason: 'send_failed' },
     requestedPasswordReset: undefined as
       | { email: string; redirectTo: string }
       | undefined,
@@ -29,6 +32,10 @@ vi.mock('@roomote/sdk/server/request-instance-ping', () => ({
 
 vi.mock('../auth', () => ({
   PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS: 3600,
+  capturePasswordResetDelivery: async (callback: () => Promise<void>) => {
+    await callback();
+    return state.passwordResetDelivery;
+  },
   capturePasswordResetLink: async (callback: () => Promise<void>) => {
     await callback();
     return state.capturedResetUrl;
@@ -126,6 +133,7 @@ vi.mock('@roomote/db/server', () => {
 import {
   createPasswordResetLinkForUser,
   removeUser,
+  requestSelfServicePasswordReset,
   updateUserRole,
   userHasCredentialAccount,
 } from '../user-management';
@@ -141,6 +149,7 @@ beforeEach(() => {
   state.credentialAccountExists = false;
   state.capturedResetUrl =
     'https://roomote.example.com/api/auth/reset-password/token';
+  state.passwordResetDelivery = { sent: true };
   state.requestedPasswordReset = undefined;
 });
 
@@ -292,6 +301,65 @@ describe('createPasswordResetLinkForUser', () => {
     });
 
     expect(result).toEqual({ created: false, reason: 'not_generated' });
+  });
+});
+
+describe('requestSelfServicePasswordReset', () => {
+  it('does nothing for an unknown or removed account', async () => {
+    await expect(
+      requestSelfServicePasswordReset('missing@example.com'),
+    ).resolves.toBe('no_active_user');
+
+    expect(state.requestedPasswordReset).toBeUndefined();
+  });
+
+  it('does nothing for an OAuth-only account', async () => {
+    state.target = {
+      id: 'user-1',
+      email: 'ada@example.com',
+      role: 'member',
+      deletedAt: null,
+    };
+
+    await expect(
+      requestSelfServicePasswordReset('ADA@example.com'),
+    ).resolves.toBe('no_credential_account');
+
+    expect(state.requestedPasswordReset).toBeUndefined();
+  });
+
+  it('requests delivery for an active credential account', async () => {
+    state.target = {
+      id: 'user-1',
+      email: 'ada@example.com',
+      role: 'member',
+      deletedAt: null,
+    };
+    state.credentialAccountExists = true;
+
+    await expect(
+      requestSelfServicePasswordReset(' ADA@example.com '),
+    ).resolves.toBe('sent');
+
+    expect(state.requestedPasswordReset).toEqual({
+      email: 'ada@example.com',
+      redirectTo: 'https://roomote.example.com/reset-password',
+    });
+  });
+
+  it('reports provider delivery failures without exposing them publicly', async () => {
+    state.target = {
+      id: 'user-1',
+      email: 'ada@example.com',
+      role: 'member',
+      deletedAt: null,
+    };
+    state.credentialAccountExists = true;
+    state.passwordResetDelivery = { sent: false, reason: 'send_failed' };
+
+    await expect(
+      requestSelfServicePasswordReset('ada@example.com'),
+    ).resolves.toBe('send_failed');
   });
 });
 

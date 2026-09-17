@@ -1,6 +1,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import {
+  CLONE_REPOSITORY_TOOL_NAME,
+  ON_DEMAND_REPOSITORIES_MANIFEST_FILE,
+  type OnDemandRepository,
+} from '../workspace/on-demand-repositories';
+
 function formatPreparedRepositories(
   repoPaths: Record<string, string>,
 ): string[] {
@@ -9,10 +15,31 @@ function formatPreparedRepositories(
     .map(([repoName, repoPath]) => `- \`${repoName}\` -> \`${repoPath}\``);
 }
 
+function formatOnDemandRepositoriesGuidance({
+  onDemandRepositories,
+  clonedCount,
+}: {
+  onDemandRepositories: readonly OnDemandRepository[];
+  clonedCount: number;
+}): string[] {
+  const total = onDemandRepositories.length;
+  const example = onDemandRepositories[0]?.fullName ?? 'owner/repo';
+
+  return [
+    '',
+    'Additional repositories are checked out on demand:',
+    `- This task can use ${total} ${total === 1 ? 'repository' : 'repositories'}; ${clonedCount} ${clonedCount === 1 ? 'is' : 'are'} checked out right now. \`${ON_DEMAND_REPOSITORIES_MANIFEST_FILE}\` in this directory lists every repository with its default branch and description; read it to pick the right one.`,
+    `- Before reading, searching, or changing a repository that is not checked out, call the \`${CLONE_REPOSITORY_TOOL_NAME}\` tool with \`repositoryFullName\` (for example \`${example}\`). It clones the repository under this directory, returns the path, and updates \`${ON_DEMAND_REPOSITORIES_MANIFEST_FILE}\`. Large repositories can take a minute or two.`,
+    '- Check out only the repositories the task needs. Do not run `git clone` yourself, and do not assume a repository is missing from the deployment because it has no directory here.',
+  ];
+}
+
 export function buildSharedWorkspaceAgentsContent({
   repoPaths,
+  onDemandRepositories,
 }: {
   repoPaths: Record<string, string>;
+  onDemandRepositories?: readonly OnDemandRepository[];
 }): string {
   const lines = [
     '# Shared Workspace Guidance',
@@ -25,6 +52,15 @@ export function buildSharedWorkspaceAgentsContent({
 
   if (preparedRepositories.length > 0) {
     lines.push('', 'Prepared repositories:', ...preparedRepositories);
+  }
+
+  if (onDemandRepositories) {
+    lines.push(
+      ...formatOnDemandRepositoriesGuidance({
+        onDemandRepositories,
+        clonedCount: preparedRepositories.length,
+      }),
+    );
   }
 
   lines.push(
@@ -45,22 +81,26 @@ export function writeSharedWorkspaceAgentsFile({
   workspacePath,
   usesSharedWorkspaceRoot,
   repoPaths,
+  onDemandRepositories,
 }: {
   workspacePath: string;
   usesSharedWorkspaceRoot?: boolean;
   repoPaths?: Record<string, string>;
+  onDemandRepositories?: readonly OnDemandRepository[];
 }): boolean {
   if (!usesSharedWorkspaceRoot || !repoPaths) {
     return false;
   }
 
-  if (Object.keys(repoPaths).length === 0) {
+  // An on-demand workspace starts with no checkouts but still needs the
+  // guidance that tells the agent how to get one.
+  if (Object.keys(repoPaths).length === 0 && !onDemandRepositories) {
     return false;
   }
 
   fs.writeFileSync(
     path.join(workspacePath, 'AGENTS.md'),
-    buildSharedWorkspaceAgentsContent({ repoPaths }),
+    buildSharedWorkspaceAgentsContent({ repoPaths, onDemandRepositories }),
     'utf8',
   );
 

@@ -13,6 +13,12 @@
  */
 
 import { getRedis } from '@roomote/redis';
+import {
+  db,
+  listRecentUserTaskMemoryRuns,
+  type RecentUserTaskMemoryRun,
+} from '@roomote/db/server';
+import { brainNamespacePrefix } from '@roomote/types';
 
 import { resolveBrainConnection } from './brain-clients';
 import { callBrainTool } from './brain-mcp';
@@ -33,6 +39,12 @@ export type BrainCorpusPage = {
 export type BrainCorpusSnapshot = {
   pages: BrainCorpusPage[];
 };
+
+export type RecentBrainTaskMemory = BrainCorpusPage & {
+  content: string;
+};
+
+export type RecentBrainTaskMemoryRef = RecentUserTaskMemoryRun;
 
 function toDate(value: unknown): Date | null {
   if (typeof value !== 'string' && typeof value !== 'number') {
@@ -677,14 +689,7 @@ export async function readBrainPage(
   }
 
   try {
-    const payloads = await callBrainTool(
-      connection,
-      'get_page',
-      { slug, fuzzy: false },
-      { timeoutMs: CORPUS_REQUEST_TIMEOUT_MS },
-    );
-
-    return extractBrainPageContent(slug, payloads);
+    return await readBrainPageWithConnection(connection, slug);
   } catch (error) {
     console.warn(
       `[brain] page read failed: ${
@@ -694,4 +699,79 @@ export async function readBrainPage(
 
     return null;
   }
+}
+
+async function readBrainPageWithConnection(
+  connection: BrainConnection,
+  slug: string,
+): Promise<BrainCorpusPageContent | null> {
+  const payloads = await callBrainTool(
+    connection,
+    'get_page',
+    { slug, fuzzy: false },
+    { timeoutMs: CORPUS_REQUEST_TIMEOUT_MS },
+  );
+
+  return extractBrainPageContent(slug, payloads);
+}
+
+/**
+ * Read a small newest-first task-memory window with the existing read-scoped
+ * Brain credential. The upstream credential retains deployment/source scope;
+ * this helper adds no broader corpus walk or authorization bypass.
+ */
+export async function listRecentBrainTaskMemoryRefs(input: {
+  userId: string;
+  limit?: number;
+}): Promise<RecentBrainTaskMemoryRef[]> {
+  const boundedLimit = Math.max(1, Math.min(Math.floor(input.limit ?? 5), 10));
+  return listRecentUserTaskMemoryRuns(db, {
+    userId: input.userId,
+    limit: boundedLimit,
+  });
+}
+
+export async function readBrainTaskMemories(
+  refs: RecentBrainTaskMemoryRef[],
+): Promise<RecentBrainTaskMemory[]> {
+  if (refs.length === 0) {
+    return [];
+  }
+
+  const connection = await resolveBrainConnection('agent');
+  if (!connection) {
+    return [];
+  }
+
+  try {
+    const memories = await Promise.all(
+      refs.map(({ taskId, runId }) =>
+        readBrainPageWithConnection(
+          connection,
+          `${brainNamespacePrefix('tasks')}${taskId}/runs/${runId}`,
+        ),
+      ),
+    );
+
+    return memories.flatMap((memory) =>
+      memory?.content?.trim()
+        ? [{ ...memory, content: memory.content.trim() }]
+        : [],
+    );
+  } catch (error) {
+    console.warn(
+      `[brain] recent task-memory read failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return [];
+  }
+}
+
+export async function readRecentBrainTaskMemories(input: {
+  userId: string;
+  limit?: number;
+}): Promise<RecentBrainTaskMemory[]> {
+  const refs = await listRecentBrainTaskMemoryRefs(input);
+  return readBrainTaskMemories(refs);
 }

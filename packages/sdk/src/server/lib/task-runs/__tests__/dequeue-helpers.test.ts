@@ -241,6 +241,16 @@ describe('createSourceControlTokenForTaskRun', () => {
     );
   });
 
+  it('fails closed when a private task would receive a raw source-control token', async () => {
+    await expect(
+      createSourceControlTokenForTaskRun(
+        makeTaskRun({ repo: 'owner/repo', description: 'Private task' }),
+        '[test]',
+        { maxRetries: 1, readOnly: true },
+      ),
+    ).rejects.toThrow('cannot supply read-only credentials');
+  });
+
   it('does not require or mint source-control credentials for Blank slate', async () => {
     const result = await createSourceControlTokenForTaskRun(
       makeTaskRun({
@@ -265,6 +275,29 @@ describe('createSourceControlTokenForTaskRun', () => {
     expect(mockCreateTaskRunGiteaCredentials).not.toHaveBeenCalled();
     expect(mockCreateTaskRunAdoCredentials).not.toHaveBeenCalled();
     expect(mockCreateTaskRunBitbucketCredentials).not.toHaveBeenCalled();
+  });
+
+  it('mints credentials for a Blank slate stamped with the deployment repositories', async () => {
+    const taskRun = makeTaskRun({
+      repo: NO_REPOSITORIES,
+      description: 'Investigate and open a PR if needed',
+      sourceControlProvider: 'github',
+      repositoryProviders: { 'acme/api': 'github', 'acme/web': 'github' },
+    });
+
+    const result = await createSourceControlTokenForTaskRun(taskRun, '[test]', {
+      maxRetries: 1,
+    });
+
+    expect(result).toMatchObject({
+      provider: 'github',
+      token: 'ghs_app_token',
+      envVars: { GH_TOKEN: 'ghs_app_token' },
+      source: 'app',
+    });
+    expect(mockCreateTaskRunWorkerGitHubTokenWithMetadata).toHaveBeenCalledWith(
+      taskRun,
+    );
   });
 
   it('creates GitLab token metadata from repo-scoped credentials', async () => {
@@ -357,6 +390,35 @@ describe('createSourceControlTokenForTaskRun', () => {
         },
       ],
     });
+  });
+
+  it('marks proxy-only credentials read-only for private tasks', async () => {
+    mockCreateTaskRunScopedGitLabTokens.mockResolvedValue({
+      credentials: [],
+      proxyCredentials: [
+        {
+          host: 'gitlab.com',
+          repositoryFullName: 'group/project',
+          username: 'oauth2',
+          token: 'oauth_access_token',
+        },
+      ],
+      artifactsPatch: { gitlabScopedProjectTokens: [] },
+      expiresAt: null,
+    });
+
+    const result = await createSourceControlTokenForTaskRun(
+      makeTaskRun({
+        repo: 'group/project',
+        description: 'Private task',
+        sourceControlProvider: 'gitlab',
+      }),
+      '[test]',
+      { maxRetries: 1, readOnly: true },
+    );
+    expect(result?.gitProxyCredentials).toEqual([
+      expect.objectContaining({ readOnly: true }),
+    ]);
   });
 
   it('threads GitLab OAuth access-token expiry into runtime token metadata', async () => {

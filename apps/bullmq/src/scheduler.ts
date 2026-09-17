@@ -13,6 +13,8 @@ import {
   sentryTriageJob,
   suggesterJob,
   notifyWebTaskInitiatorOnSettle,
+  processSessionAttentionNotificationJob,
+  type SessionAttentionNotificationJob,
   type WebTaskInitiatorSettleNotificationJob,
   type AutomationJobResult,
   type AutomationRunOpts,
@@ -91,7 +93,7 @@ async function createJobs(queue: Queue): Promise<void> {
 
   await queue.upsertJobScheduler(
     ScheduledJobName.Heartbeat,
-    { every: 1 * 60 * 60 * 1000 }, // Every hour.
+    { every: 60 * 1000 }, // Every minute: the liveness signal for /health/bullmq.
   );
 
   await queue.upsertJobScheduler(
@@ -240,8 +242,14 @@ async function createJobs(queue: Queue): Promise<void> {
   console.log('[createJobs] getJobSchedulers ->', schedulers);
 }
 
+/** Jobs that run every minute and would only add noise to the log. */
+const QUIET_JOB_NAMES: ReadonlySet<string> = new Set([
+  ScheduledJobName.PrReviewNotificationDispatch,
+  ScheduledJobName.Heartbeat,
+]);
+
 const runJobs = async (job: ScheduledJob): Promise<void> => {
-  if (job.name !== ScheduledJobName.PrReviewNotificationDispatch) {
+  if (!QUIET_JOB_NAMES.has(job.name)) {
     console.log(`[runJobs] processing job ${job.id} of type ${job.name}`);
   }
 
@@ -294,6 +302,15 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       }
       return;
     }
+    case ScheduledJobName.SessionAttentionNotification: {
+      const result = await processSessionAttentionNotificationJob(
+        job.data as SessionAttentionNotificationJob,
+      );
+      if (result === 'failed') {
+        throw new Error('Session attention notification failed');
+      }
+      return;
+    }
     case ScheduledJobName.CustomAutomations:
       await customAutomationsJob();
       return;
@@ -335,7 +352,7 @@ export async function startScheduler() {
   });
 
   worker.on('completed', (job) => {
-    if (job.name !== ScheduledJobName.PrReviewNotificationDispatch) {
+    if (!QUIET_JOB_NAMES.has(job.name)) {
       console.log(
         `[Worker#on(completed)] job ${job.id} completed successfully`,
       );

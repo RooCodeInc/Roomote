@@ -137,7 +137,18 @@ async function checkController(): Promise<CheckResult> {
       };
     }
 
-    const lastHeartbeatTime = parseInt(lastHeartbeat, 10);
+    const lastHeartbeatTime = Number(lastHeartbeat);
+
+    if (!Number.isFinite(lastHeartbeatTime)) {
+      return {
+        ok: false,
+        error: 'Controller heartbeat in Redis is invalid',
+        summary: {
+          controllerHeartbeatAgeMs: null,
+        },
+      };
+    }
+
     const elapsedSeconds = (Date.now() - lastHeartbeatTime) / 1000;
     const controllerHeartbeatAgeMs = Math.round(elapsedSeconds * 1000);
 

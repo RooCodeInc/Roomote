@@ -66,6 +66,7 @@ vi.mock('../../sandbox-oidc', () => ({
 }));
 
 const { spawnDaytonaWorker } = await import('../spawn-daytona-worker');
+const { cleanupDaytonaInstance } = await import('@roomote/compute-providers');
 
 describe('spawnDaytonaWorker', () => {
   beforeEach(() => {
@@ -175,6 +176,99 @@ describe('spawnDaytonaWorker', () => {
       expect.objectContaining({
         provider: 'daytona',
         config: expect.objectContaining({ memoryGiB: 4 }),
+      }),
+    );
+  });
+
+  it('carries the Credential egress bootstrap env and admits after the worker launches', async () => {
+    mockGetNamedPortsForTaskRun.mockResolvedValue({
+      namedPorts: [],
+      environmentSnapshotId: undefined,
+      environmentConfig: undefined,
+    });
+    const admit = vi.fn().mockResolvedValue({
+      workloadId: 'w1',
+      generation: 1,
+      substitutes: [],
+    });
+    const planApiProxy = vi.fn().mockResolvedValue({
+      required: true,
+      bootstrapEnv: {
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+      },
+      admit,
+    });
+    const taskRun = {
+      id: 123,
+      taskId: 'task_123',
+      vendor: 'daytona',
+      sourceSnapshotId: null,
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: { repo: 'test/repo' },
+    } as unknown as TaskRun;
+
+    await spawnDaytonaWorker(taskRun, 'auth_token', {
+      daytonaApiKey: 'api-key',
+      daytonaSnapshotName: 'worker-snapshot',
+      daytonaTimeoutMs: 60_000,
+      credentialEgress: { planApiProxy } as never,
+    });
+
+    expect(planApiProxy).toHaveBeenCalledWith({ taskRun, provider: 'daytona' });
+    expect(mockRunCommand.mock.calls.at(-1)![0].env).toMatchObject({
+      ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+      ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+    });
+    // Admission runs only once the worker is launched and waiting.
+    expect(admit).toHaveBeenCalledOnce();
+    expect(admit.mock.invocationCallOrder[0]!).toBeGreaterThan(
+      mockRunCommand.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('cleans up the sandbox when Credential egress admission fails after launch', async () => {
+    mockGetNamedPortsForTaskRun.mockResolvedValue({
+      namedPorts: [],
+      environmentSnapshotId: undefined,
+      environmentConfig: undefined,
+    });
+    const planApiProxy = vi.fn().mockResolvedValue({
+      required: true,
+      bootstrapEnv: {
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+      },
+      admit: vi
+        .fn()
+        .mockRejectedValue(
+          new Error('Credential egress bootstrap admission timed out'),
+        ),
+    });
+
+    await expect(
+      spawnDaytonaWorker(
+        {
+          id: 123,
+          taskId: 'task_123',
+          vendor: 'daytona',
+          sourceSnapshotId: null,
+          payloadKind: TaskPayloadKind.StandardTask,
+          payload: { repo: 'test/repo' },
+        } as unknown as TaskRun,
+        'auth_token',
+        {
+          daytonaApiKey: 'api-key',
+          daytonaSnapshotName: 'worker-snapshot',
+          daytonaTimeoutMs: 60_000,
+          credentialEgress: { planApiProxy } as never,
+        },
+      ),
+    ).rejects.toThrow('Credential egress bootstrap admission timed out');
+    expect(cleanupDaytonaInstance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceId: 'daytona-machine-123',
+        phase: 'spawn_worker',
       }),
     );
   });

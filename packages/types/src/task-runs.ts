@@ -116,32 +116,33 @@ export const TASK_STATES = [
 
 export type TaskState = (typeof TASK_STATES)[number];
 
-export const TASK_GOAL_STATUSES = [
+export const SESSION_GOAL_STATUSES = [
   'active',
   'complete',
   'blocked',
   'budget_limited',
+  'canceled',
 ] as const;
 
-export type TaskGoalStatus = (typeof TASK_GOAL_STATUSES)[number];
+export type SessionGoalStatus = (typeof SESSION_GOAL_STATUSES)[number];
 
-export const DEFAULT_TASK_GOAL_MAX_CONTINUATIONS = 5;
+export const DEFAULT_SESSION_GOAL_MAX_CONTINUATIONS = 5;
 
-export const taskGoalInputSchema = z.object({
+export const sessionGoalInputSchema = z.object({
   objective: z.string().trim().min(1).max(10_000),
   maxContinuations: z
     .number()
     .int()
     .min(1)
     .max(20)
-    .default(DEFAULT_TASK_GOAL_MAX_CONTINUATIONS),
+    .default(DEFAULT_SESSION_GOAL_MAX_CONTINUATIONS),
 });
 
-export type TaskGoalInput = z.infer<typeof taskGoalInputSchema>;
+export type SessionGoalInput = z.infer<typeof sessionGoalInputSchema>;
 
-export type TaskGoal = TaskGoalInput & {
-  generation: string | null;
-  status: TaskGoalStatus;
+export type SessionGoal = SessionGoalInput & {
+  generation: string;
+  status: SessionGoalStatus;
   continuationsUsed: number;
   blockedReason: string | null;
   completedAt: Date | null;

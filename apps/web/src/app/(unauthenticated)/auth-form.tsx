@@ -10,6 +10,7 @@ import {
 
 import { authClient } from '@/lib/auth-client';
 import { getAuthProviderCallbackUrl } from '@/lib/auth-provider-callback';
+import { getSafeSignInRedirectPath } from '@/lib/auth-redirect';
 import { cn } from '@/lib/utils';
 import { OriginMismatchAlert } from '@/components/layout';
 import { EmailPasswordAuth } from './email-password-auth';
@@ -45,18 +46,6 @@ function AuthProviderIcon({ provider }: { provider: AuthProvider }) {
   return <BrandIcon icon={provider} name="" className="size-4" />;
 }
 
-function getSafeRedirectUrl(rawRedirectUrl: string | null): string {
-  if (!rawRedirectUrl) {
-    return '/setup';
-  }
-
-  if (!rawRedirectUrl.startsWith('/') || rawRedirectUrl.startsWith('//')) {
-    return '/setup';
-  }
-
-  return rawRedirectUrl;
-}
-
 function getAuthErrorMessage(
   error: { message?: string } | null | undefined,
   fallback: string,
@@ -71,6 +60,7 @@ export function AuthForm({
   hideModeSwitchMessage = false,
   noticeMessage = null,
   accountLinkHelpText = null,
+  passwordResetAvailable = false,
 }: {
   enabledProviders?: AuthProvider[];
   /**
@@ -90,11 +80,12 @@ export function AuthForm({
    */
   noticeMessage?: string | null;
   accountLinkHelpText?: string | null;
+  passwordResetAvailable?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectUrl = useMemo(
-    () => getSafeRedirectUrl(searchParams.get('redirect_url')),
+    () => getSafeSignInRedirectPath(searchParams.get('redirect_url'), '/setup'),
     [searchParams],
   );
   const enabledProviderSet = useMemo(
@@ -222,6 +213,7 @@ export function AuthForm({
               <EmailPasswordAuth
                 redirectUrl={redirectUrl}
                 accountLinkHelpText={accountLinkHelpText}
+                passwordResetAvailable={passwordResetAvailable}
                 allowSignUp={canSignUp}
                 labelsAsPlaceholders={true}
                 hideModeSwitchMessage={

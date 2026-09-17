@@ -124,7 +124,11 @@ vi.mock('./canonical-forwarded-proto', () => ({
   withCanonicalForwardedProto: vi.fn((request) => request),
 }));
 
-import { getAuth, sendAuthenticatedVerificationEmail } from './auth';
+import {
+  capturePasswordResetDelivery,
+  getAuth,
+  sendAuthenticatedVerificationEmail,
+} from './auth';
 
 function getAdoOAuthProvider() {
   const config = genericOAuthCalls.at(-1)?.config;
@@ -197,6 +201,79 @@ describe('getAuth', () => {
       freshAge: 0,
     });
     expect(options.emailAndPassword.revokeSessionsOnPasswordReset).toBe(true);
+  });
+
+  it('delivers password reset links through AgentMail when email is enabled', async () => {
+    mockIsEmailChannelEnabled.mockReturnValue(true);
+    await getAuth();
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+      emailAndPassword: {
+        sendResetPassword: (input: {
+          user: { email: string };
+          url: string;
+        }) => Promise<void>;
+      };
+    };
+    await options.emailAndPassword.sendResetPassword({
+      user: { email: 'person@example.com' },
+      url: 'https://roomote.example.com/api/auth/reset-password/token',
+    });
+
+    expect(mockSendAgentMailSystemEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'person@example.com',
+        subject: 'Reset your Roomote password',
+        text: expect.stringContaining(
+          'https://roomote.example.com/api/auth/reset-password/token',
+        ),
+      }),
+    );
+  });
+
+  it('captures the password reset delivery result for internal callers', async () => {
+    mockIsEmailChannelEnabled.mockReturnValue(true);
+    mockSendAgentMailSystemEmail.mockResolvedValue({
+      sent: false,
+      reason: 'send_failed',
+    });
+    await getAuth();
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+      emailAndPassword: {
+        sendResetPassword: (input: {
+          user: { email: string };
+          url: string;
+        }) => Promise<void>;
+      };
+    };
+    const result = await capturePasswordResetDelivery(() =>
+      options.emailAndPassword.sendResetPassword({
+        user: { email: 'person@example.com' },
+        url: 'https://roomote.example.com/api/auth/reset-password/token',
+      }),
+    );
+
+    expect(result).toEqual({ sent: false, reason: 'send_failed' });
+  });
+
+  it('does not attempt password reset delivery when email is disabled', async () => {
+    await getAuth();
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+      emailAndPassword: {
+        sendResetPassword: (input: {
+          user: { email: string };
+          url: string;
+        }) => Promise<void>;
+      };
+    };
+    await options.emailAndPassword.sendResetPassword({
+      user: { email: 'person@example.com' },
+      url: 'https://roomote.example.com/api/auth/reset-password/token',
+    });
+
+    expect(mockSendAgentMailSystemEmail).not.toHaveBeenCalled();
   });
 
   it('reports authenticated resend delivery failures without weakening public endpoint privacy', async () => {

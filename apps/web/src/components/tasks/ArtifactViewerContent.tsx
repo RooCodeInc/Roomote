@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Streamdown, defaultRemarkPlugins } from 'streamdown';
 import remarkBreaks from 'remark-breaks';
@@ -17,7 +17,15 @@ import {
   getSessionArtifactViewUrl,
 } from '@/lib/artifact-view-urls';
 import { cn } from '@/lib/utils';
-import { isHtmlArtifact, isMarkdownArtifact } from '@/lib/artifact-types';
+import {
+  getTabularArtifactFormat,
+  isHtmlArtifact,
+  isMarkdownArtifact,
+} from '@/lib/artifact-types';
+import {
+  parseTabularArtifact,
+  TABULAR_PREVIEW_LIMITS,
+} from '@/lib/tabular-artifacts';
 
 import {
   Download,
@@ -32,6 +40,12 @@ import {
   BasicTooltip,
   Loader2Icon,
   MediaViewerImage,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from '@/components/system';
 import {
   CodeBlock,
@@ -117,6 +131,108 @@ interface ArtifactViewerContentProps {
   showToolbar?: boolean;
   isLoading?: boolean;
   emptyMessage?: string;
+  firstRowIsHeader?: boolean;
+  onFirstRowIsHeaderChange?: (checked: boolean) => void;
+}
+
+function TabularArtifactPreview({
+  content,
+  format,
+  firstRowIsHeader,
+}: {
+  content: string;
+  format: 'csv' | 'tsv';
+  firstRowIsHeader: boolean;
+}) {
+  const preview = useMemo(
+    () => parseTabularArtifact(content, format),
+    [content, format],
+  );
+  const hasLimit =
+    preview.rowsTruncated || preview.columnsTruncated || preview.cellsTruncated;
+  const headerRow = firstRowIsHeader ? preview.rows[0] : undefined;
+  const dataRows = firstRowIsHeader ? preview.rows.slice(1) : preview.rows;
+
+  if (preview.rows.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+        This table is empty. Source view is still available.
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-w-0 p-3 sm:p-4">
+      {(hasLimit || preview.malformed) && (
+        <div
+          className="mb-3 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+          role="status"
+        >
+          {hasLimit && (
+            <span>
+              Preview is limited to {TABULAR_PREVIEW_LIMITS.rows} rows,{' '}
+              {TABULAR_PREVIEW_LIMITS.columns} columns, and{' '}
+              {TABULAR_PREVIEW_LIMITS.cellCharacters.toLocaleString()}{' '}
+              characters per cell. Source view contains the full loaded content.
+            </span>
+          )}{' '}
+          {preview.malformed && (
+            <span>
+              Malformed quoted data was found; the available values are shown
+              below.
+            </span>
+          )}
+        </div>
+      )}
+      <div className="min-w-0 overflow-x-auto">
+        <Table className="w-max min-w-full border-separate border-spacing-0 font-mono text-xs">
+          <caption className="sr-only">
+            {format === 'csv' ? 'CSV' : 'TSV'} preview. The first artifact row
+            is{' '}
+            {firstRowIsHeader ? 'shown as column headings.' : 'shown as data.'}
+          </caption>
+          <TableHeader>
+            <TableRow>
+              <TableHead
+                scope="col"
+                className="sticky left-0 z-20 border-r bg-muted/95 text-right"
+              >
+                Row
+              </TableHead>
+              {Array.from({ length: preview.columnCount }, (_, index) => (
+                <TableHead key={index} scope="col" className="bg-muted/95">
+                  {headerRow ? (headerRow[index] ?? '') : `Column ${index + 1}`}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {dataRows.map((row, rowIndex) => (
+              <TableRow key={rowIndex}>
+                <TableHead
+                  scope="row"
+                  className="sticky left-0 z-10 border-r bg-background text-right align-top text-muted-foreground"
+                >
+                  {rowIndex + (firstRowIsHeader ? 2 : 1)}
+                </TableHead>
+                {Array.from(
+                  { length: preview.columnCount },
+                  (_, columnIndex) => (
+                    <TableCell
+                      key={columnIndex}
+                      className="max-w-96 min-w-24 whitespace-pre-wrap break-words align-top"
+                    >
+                      {row[columnIndex] ?? ''}
+                    </TableCell>
+                  ),
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
 }
 
 export function ArtifactViewerContent({
@@ -128,6 +244,8 @@ export function ArtifactViewerContent({
   showToolbar = true,
   isLoading = false,
   emptyMessage = 'Select an artifact to inspect it here.',
+  firstRowIsHeader: controlledFirstRowIsHeader,
+  onFirstRowIsHeaderChange,
 }: ArtifactViewerContentProps) {
   const artifactOwner = owner ?? { taskId: taskIdProp! };
   const taskId = 'taskId' in artifactOwner ? artifactOwner.taskId : undefined;
@@ -136,6 +254,10 @@ export function ArtifactViewerContent({
   const pathname = usePathname();
   const router = useRouter();
   const [isRaw, setIsRaw] = useState(false);
+  const [localFirstRowIsHeader, setLocalFirstRowIsHeader] = useState(false);
+  const firstRowIsHeader = controlledFirstRowIsHeader ?? localFirstRowIsHeader;
+  const setFirstRowIsHeader =
+    onFirstRowIsHeaderChange ?? setLocalFirstRowIsHeader;
   const [isCopied, setIsCopied] = useState(false);
   const [isUrlCopied, setIsUrlCopied] = useState(false);
   const [isRawUrlCopied, setIsRawUrlCopied] = useState(false);
@@ -200,6 +322,7 @@ export function ArtifactViewerContent({
 
   useEffect(() => {
     setIsRaw(false);
+    setLocalFirstRowIsHeader(false);
   }, [artifact?.path, artifact?.version]);
 
   const latestVersion = versions[0]?.version;
@@ -219,12 +342,17 @@ export function ArtifactViewerContent({
     : false;
   const isMarkdown =
     !!artifact && isMarkdownArtifact(artifact.contentType, artifact.path);
+  const tabularFormat = artifact
+    ? getTabularArtifactFormat(artifact.contentType, artifact.path)
+    : null;
+  const isTabular = tabularFormat !== null;
   const isImage = artifact?.contentType.startsWith('image/') ?? false;
   const isVideo = artifact?.contentType.startsWith('video/') ?? false;
   const isPDF = artifact?.contentType === 'application/pdf';
   const isText =
     !isHTML &&
     !isMarkdown &&
+    !isTabular &&
     !isImage &&
     !isVideo &&
     !isPDF &&
@@ -233,6 +361,7 @@ export function ArtifactViewerContent({
 
   const canRender =
     isText ||
+    (isTabular && artifact?.content !== undefined) ||
     (isHTML && artifact?.content) ||
     (isMarkdown && artifact?.content) ||
     ((isImage || isVideo || isPDF) && artifact?.downloadUrl);
@@ -411,14 +540,54 @@ export function ArtifactViewerContent({
                   </Label>
                 </div>
               )}
+              {canRender && isTabular && (
+                <>
+                  <div className="flex items-center gap-2">
+                    <Label
+                      htmlFor="tabular-header-row"
+                      className="cursor-pointer text-xs"
+                    >
+                      First row is a header
+                    </Label>
+                    <Switch
+                      id="tabular-header-row"
+                      checked={firstRowIsHeader}
+                      onCheckedChange={setFirstRowIsHeader}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label
+                      htmlFor="tabular-source-mode"
+                      className="cursor-pointer text-xs"
+                    >
+                      Preview
+                    </Label>
+                    <Switch
+                      id="tabular-source-mode"
+                      checked={isRaw}
+                      onCheckedChange={setIsRaw}
+                    />
+                    <Label
+                      htmlFor="tabular-source-mode"
+                      className="cursor-pointer text-xs"
+                    >
+                      Source
+                    </Label>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
 
         <div
           className={cn(
-            'ph-no-capture flex-1 min-h-0 bg-card overflow-y-auto h-full',
-            (isMarkdown && !isRaw) || (isHTML && !isRaw) || isPDF || isVideo
+            'ph-no-capture flex-1 min-h-0 bg-background overflow-y-auto h-full',
+            (isMarkdown && !isRaw) ||
+              (isHTML && !isRaw) ||
+              (isTabular && !isRaw) ||
+              isPDF ||
+              isVideo
               ? 'overflow-x-hidden'
               : 'overflow-x-auto',
           )}
@@ -437,7 +606,7 @@ export function ArtifactViewerContent({
           ) : canRender ? (
             <>
               {isMarkdown && !isRaw && artifact.content && (
-                <div className="max-w-3xl p-6 text-sm">
+                <div className="mx-auto w-full max-w-4xl p-6 text-sm">
                   <Streamdown
                     className="size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
                     remarkPlugins={[
@@ -467,9 +636,25 @@ export function ArtifactViewerContent({
                 />
               )}
 
-              {((isMarkdown && isRaw) || (isHTML && isRaw) || isText) &&
+              {tabularFormat && !isRaw && artifact.content !== undefined && (
+                <TabularArtifactPreview
+                  content={artifact.content}
+                  format={tabularFormat}
+                  firstRowIsHeader={firstRowIsHeader}
+                />
+              )}
+
+              {((isMarkdown && isRaw) ||
+                (isHTML && isRaw) ||
+                (isTabular && isRaw) ||
+                isText) &&
                 artifact.content && (
-                  <div className="min-w-0 overflow-x-auto p-2 text-sm leading-relaxed text-foreground">
+                  <div
+                    className={cn(
+                      'min-w-0 overflow-x-auto p-2 text-sm leading-relaxed text-foreground',
+                      isText && 'mx-auto w-full max-w-4xl',
+                    )}
+                  >
                     <CodeBlock
                       code={artifact.content}
                       language={language}
@@ -482,6 +667,7 @@ export function ArtifactViewerContent({
                 <MediaViewerImage
                   src={artifact.downloadUrl}
                   alt={artifact.path}
+                  viewportClassName="bg-background"
                 />
               )}
 
@@ -494,7 +680,7 @@ export function ArtifactViewerContent({
               )}
 
               {isVideo && (
-                <div className="flex h-full w-full min-w-0 items-center justify-center bg-zinc-800 p-4">
+                <div className="flex h-full w-full min-w-0 items-center justify-center bg-background p-4">
                   <video
                     src={artifact.downloadUrl}
                     controls

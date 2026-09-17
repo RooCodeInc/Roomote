@@ -142,6 +142,22 @@ as per-task auth tokens or workspace paths.
 | `WEB_DEV_LOGIN_ENABLED` | Local only           | Explicit opt-in (`true` or `1`) for the `/auth/dev-login` development login route. Dev login stays disabled without it, even in development app envs. `pnpm dev` sets it automatically for local development.                                                                                                                                                                                                                           |
 | `SKIP_ENV_VALIDATION`   | Avoid                | Skips env validation when present. Useful for narrow tooling cases, not normal deployments.                                                                                                                                                                                                                                                                                                                                             |
 
+### HTTP integrations
+
+These opt-in settings configure [HTTP integrations](/integrations/http-integrations)
+for Fast and sandbox agents. They are independent of the curated integration
+catalog's enablement policy.
+
+| Env var | Required | Used for |
+| --- | --- | --- |
+| `R_HTTP_INTEGRATIONS_ENABLED` | Optional | Enables operator-manifest integrations. Defaults to `false`. The shared API broker remains available for owner-approved integration keys without a manifest. Set consistently on API, web, and background control-plane services. |
+| `R_HTTP_INTEGRATIONS_CONFIG_PATH` | When enabled, API only | Absolute path to the read-only JSON manifest of HTTPS origins, method/path rules, actor access, and credential environment-variable references. |
+| `R_CREDENTIAL_EGRESS_PROXY_HOST` | Optional, API and controller | Dedicated hostname, for example `egress.example.com`, at whose root the API serves the credential egress proxy so SDK clients that allow only a host override can use it. Point the name at the API service and set the same value on the controller, which delivers it to sandboxes as their base URL. The `/api/credential-egress` path on the API host keeps working either way. |
+
+Referenced credential variables belong only on the API server, never in task
+environment configuration. Restart services after deployment environment or
+manifest changes.
+
 ### Database, Redis, and artifacts
 
 | Env var                 | Required    | Used for                                                                                                                                       |
@@ -421,6 +437,7 @@ apply semantics.
 | `API_EXTERNAL_REQUEST_TIMEOUT_MS`        | Optional         | Default external request timeout. Defaults to 10 seconds.                             |
 | `API_SLOW_REQUEST_THRESHOLD_MS`          | Optional         | Threshold for slow API request logging. Defaults to 5 seconds.                        |
 | `API_SLOW_EXTERNAL_REQUEST_THRESHOLD_MS` | Optional         | Threshold for slow external request logging. Defaults to 2 seconds.                   |
+| `R_TRUSTED_PROXY_CLIENT_IP_HEADER`        | Optional         | Header used for client-IP abuse limits: `fly-client-ip`, `x-forwarded-for`, or `x-real-ip`. Set this only when the deployment ingress overwrites that header; otherwise callers share a safe fallback bucket. |
 | `RELEASE_VERSION`                        | Release images   | Baked release version used for release tagging and worker image derivation.           |
 | `RELEASE_PRODUCT_VERSION`                | Release images   | Baked product (changelog) version shown by in-app release notices on channel builds.  |
 | `GITHUB_SHA`                             | Release metadata | Commit SHA fallback for monitoring release metadata.                                  |

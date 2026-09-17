@@ -15,6 +15,7 @@ import {
 import { type TaskRun, sdk } from '@roomote/sdk/client';
 
 import { WorkerEnv } from '../../env';
+import { waitForCredentialEgressDelivery } from '../../env/credential-egress-bootstrap';
 import {
   type HarnessLogger,
   createStartupLogger,
@@ -22,6 +23,7 @@ import {
   HARNESS_LOG_FILE_NAME,
 } from '../../logging';
 import type { WorkspaceConfig } from '../../workspace';
+import type { OnDemandRepository } from '../../workspace/on-demand-repositories';
 import type { RepoLocalSkill } from '../../workspace/repo-local-skills';
 import { callbackMap } from '../../callbacks';
 import { getLinearSessionActivityStreamCallbacks } from '../../callbacks/linear-agent';
@@ -90,6 +92,7 @@ interface ExecuteTaskRunConfig<TJobContext extends PreparedTaskRunBase> {
     usesSharedWorkspaceRoot: boolean;
     repoPaths?: Record<string, string>;
     repoLocalSkills?: RepoLocalSkill[];
+    onDemandRepositories?: OnDemandRepository[];
     workspaceReadinessWarnings?: string[];
     backgroundEnvironmentSetup: BackgroundEnvironmentSetupNotifier;
     cancelSignal: AbortSignal;
@@ -397,6 +400,15 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
     // object with system-level entries.
     const userEnvVars = { ...envVars };
 
+    // Session-egress client configuration (proxy, PUBLIC CA bundle, and
+    // substitute tokens) is part of the runtime env so shells, the harness,
+    // and repo commands all see the same ordinary-client settings. It wins
+    // over deployment-provided proxy variables: with egress enforced outside
+    // the sandbox, any other proxy is unreachable anyway.
+    if (!workerEnv.credentialEgressBootstrapRequired) {
+      Object.assign(envVars, workerEnv.buildCredentialEgressClientEnv());
+    }
+
     // Worker config values are read once here so their captured values
     // (auth keys, API URLs) can be reused throughout setup and runtime.
     const taskWorkspace = resolveTaskWorkspace(taskRun.payload);
@@ -519,6 +531,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
     );
 
     const runEnvironmentSetupInBackground =
+      !workerEnv.credentialEgressBootstrapRequired &&
       shouldRunParallelTaskEnvironmentSetup({
         taskRun,
         jobContext,
@@ -599,6 +612,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       preparedWorkspace?.usesSharedWorkspaceRoot ?? false;
     const repoPaths = preparedWorkspace?.repoPaths;
     const repoLocalSkills = preparedWorkspace?.repoLocalSkills;
+    const onDemandRepositories = preparedWorkspace?.onDemandRepositories;
 
     if (taskRun && preparedWorkspace?.repositoryPreparationOutcome) {
       await recordWorkerRuntimeEvent(
@@ -639,6 +653,25 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       runId: taskRun.id,
       field: 'setupCompletedAt',
     });
+
+    if (workerEnv.credentialEgressBootstrapRequired) {
+      const nonce = workerEnv.credentialEgressBootstrapNonce;
+      await sdk.mcpConnections.markCredentialEgressBootstrapReady(nonce);
+      const delivery = await waitForCredentialEgressDelivery(
+        () => sdk.mcpConnections.getCredentialEgressDelivery(nonce),
+        backgroundEnvironmentSetupController.cancelSignal,
+      );
+      workerEnv.acceptCredentialEgressDelivery(delivery);
+      Object.assign(envVars, workerEnv.buildCredentialEgressClientEnv());
+      workerEnv.setRuntimeEnv(envVars);
+      await injectEnvVars(envVars, taskRun, {
+        previewProxyBaseUrl: workerEnv.previewProxyBaseUrl,
+        previewProxySubdomainSuffix: workerEnv.previewProxySubdomainSuffix,
+        sourceControlToken: jobContext.sourceControlToken,
+        omitInheritedModelRuntimeEnvFromShell:
+          taskWorkspace.type === 'environment',
+      });
+    }
 
     // setupCompletedAt only marks the blocking portion of setup; environment
     // setup may keep running in the background. Track its real lifecycle so
@@ -700,6 +733,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       usesSharedWorkspaceRoot,
       repoPaths,
       repoLocalSkills,
+      onDemandRepositories,
       workspaceReadinessWarnings:
         preparedWorkspace?.environmentSetupWarnings?.map(
           (warning) => warning.message,

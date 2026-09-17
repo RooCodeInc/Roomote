@@ -22,21 +22,27 @@ describe('personal preferences', () => {
     ).resolves.toEqual(
       expect.objectContaining({
         mindReaderMode: false,
-        therapistMode: false,
+        slackPeerConversationsExperimentEnabled: false,
+        homeComposerSuggestionsEnabled: false,
+        serviceCredentialToolsEnabled: false,
       }),
     );
   });
 
-  it('persists therapist mode without replacing other metadata', async () => {
+  it('persists the Slack peer-conversations experiment without replacing other metadata', async () => {
     const user = await userFactory.create({
       metadata: { existing_value: 'preserved' },
     });
 
     await expect(
       updatePersonalPreferencesCommand(buildAuth(user.id), {
-        therapistMode: true,
+        slackPeerConversationsExperimentEnabled: true,
       }),
-    ).resolves.toEqual(expect.objectContaining({ therapistMode: true }));
+    ).resolves.toEqual(
+      expect.objectContaining({
+        slackPeerConversationsExperimentEnabled: true,
+      }),
+    );
 
     const storedUser = await db.query.users.findFirst({
       where: eq(users.id, user.id),
@@ -46,10 +52,96 @@ describe('personal preferences', () => {
     expect(storedUser?.metadata).toEqual(
       expect.objectContaining({
         existing_value: 'preserved',
-        therapist_mode: true,
+        slack_peer_conversations_experiment_enabled: true,
       }),
     );
   });
+
+  it('persists the integration keys experiment per user', async () => {
+    const user = await userFactory.create({
+      metadata: { existing_value: 'preserved' },
+    });
+
+    await expect(
+      updatePersonalPreferencesCommand(buildAuth(user.id), {
+        serviceCredentialToolsEnabled: true,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({ serviceCredentialToolsEnabled: true }),
+    );
+
+    const storedUser = await db.query.users.findFirst({
+      where: eq(users.id, user.id),
+      columns: { metadata: true },
+    });
+    expect(storedUser?.metadata).toEqual(
+      expect.objectContaining({
+        existing_value: 'preserved',
+        integration_keys_enabled: true,
+      }),
+    );
+  });
+
+  it('persists the Home suggestions experimental flag per user', async () => {
+    const user = await userFactory.create({
+      metadata: { existing_value: 'preserved' },
+    });
+
+    await expect(
+      updatePersonalPreferencesCommand(buildAuth(user.id), {
+        homeComposerSuggestionsEnabled: true,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({ homeComposerSuggestionsEnabled: true }),
+    );
+
+    const storedUser = await db.query.users.findFirst({
+      where: eq(users.id, user.id),
+      columns: { metadata: true },
+    });
+    expect(storedUser?.metadata).toEqual(
+      expect.objectContaining({
+        existing_value: 'preserved',
+        home_composer_suggestions_enabled: true,
+      }),
+    );
+  });
+
+  it.each([undefined, false])(
+    'ignores a legacy therapist mode value of %s without dropping it on updates',
+    async (therapistMode) => {
+      const user = await userFactory.create({
+        metadata: {
+          existing_value: 'preserved',
+          ...(therapistMode === undefined
+            ? {}
+            : { therapist_mode: therapistMode }),
+        },
+      });
+
+      const preferences = await getPersonalPreferencesCommand(
+        buildAuth(user.id),
+      );
+      expect(preferences).not.toHaveProperty('therapistMode');
+
+      await updatePersonalPreferencesCommand(buildAuth(user.id), {
+        mindReaderMode: true,
+      });
+
+      const storedUser = await db.query.users.findFirst({
+        where: eq(users.id, user.id),
+        columns: { metadata: true },
+      });
+
+      expect(storedUser?.metadata).toEqual({
+        existing_value: 'preserved',
+        ...(therapistMode === undefined
+          ? {}
+          : { therapist_mode: therapistMode }),
+        mind_reader_mode: true,
+      });
+    },
+  );
 
   it('persists mind reader mode without replacing other metadata', async () => {
     const user = await userFactory.create({

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   queueEventsConstructor: vi.fn(),
   threadFooterRefreshJob: vi.fn(),
   notifyWebTaskInitiatorOnSettle: vi.fn(),
+  processSessionAttentionNotificationJob: vi.fn(),
 }));
 
 vi.mock('bullmq', () => ({
@@ -50,6 +51,8 @@ vi.mock('@roomote/sdk/server', () => ({
   sentryTriageJob: vi.fn(),
   suggesterJob: vi.fn(),
   notifyWebTaskInitiatorOnSettle: mocks.notifyWebTaskInitiatorOnSettle,
+  processSessionAttentionNotificationJob:
+    mocks.processSessionAttentionNotificationJob,
 }));
 
 vi.mock('./redis', () => ({ getRedis: () => ({}) }));
@@ -109,6 +112,28 @@ describe('startScheduler', () => {
     expect(mocks.notifyWebTaskInitiatorOnSettle).toHaveBeenCalledWith(
       { id: 42, taskId: 'task-1' },
       'completed',
+    );
+  });
+
+  it('retries failed attention notifications through BullMQ', async () => {
+    mocks.processSessionAttentionNotificationJob.mockResolvedValue('failed');
+    await startScheduler();
+    const handler = mocks.workerConstructor.mock.calls[0]![1] as (job: {
+      name: string;
+      data: unknown;
+    }) => Promise<void>;
+    const data = {
+      target: 'task',
+      runId: 42,
+      kind: 'result_ready',
+      eventId: 'completion-1',
+    };
+
+    await expect(
+      handler({ name: ScheduledJobName.SessionAttentionNotification, data }),
+    ).rejects.toThrow('Session attention notification failed');
+    expect(mocks.processSessionAttentionNotificationJob).toHaveBeenCalledWith(
+      data,
     );
   });
   beforeEach(() => {

@@ -614,8 +614,78 @@
     {
       "idx": 87,
       "version": "7",
-      "when": 1789243462242,
-      "tag": "0087_uneven_scalphunter",
+      "when": 1789313722171,
+      "tag": "0087_nifty_the_twelve",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1789327237549,
+      "tag": "0088_many_impossible_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1789331048419,
+      "tag": "0089_cynical_raider",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1789340757427,
+      "tag": "0090_noisy_mach_iv",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1789384172188,
+      "tag": "0091_cold_inertia",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1789487623308,
+      "tag": "0092_conscious_scourge",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1789491155779,
+      "tag": "0093_aberrant_reavers",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1789493497726,
+      "tag": "0094_nasty_post",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1789529923432,
+      "tag": "0095_secret_maggott",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1789569406816,
+      "tag": "0096_special_polaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1789605037877,
+      "tag": "0097_panoramic_abomination",
       "breakpoints": true
     }
   ]

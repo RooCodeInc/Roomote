@@ -6,8 +6,10 @@ import {
 } from '@roomote/types';
 
 import {
+  getTaskMessageEnvelopePage,
   getTaskMessageEnvelopes,
   getTaskSuggestableMessages,
+  TASK_MESSAGE_ENVELOPE_PAGE_SIZE,
 } from './task-messages';
 
 describe('getTaskMessageEnvelopes', () => {
@@ -44,6 +46,58 @@ describe('getTaskMessageEnvelopes', () => {
       userEmail: null,
       userImageUrl: null,
     });
+  });
+
+  it('pages backward through a large transcript without gaps or duplicates', async () => {
+    const task = await taskFactory.create({
+      id: 'task-message-paginated-history',
+      title: 'Paginated history',
+    });
+    const run = await runFactory.create({ taskId: task.id });
+    const messageCount = TASK_MESSAGE_ENVELOPE_PAGE_SIZE * 5 + 5;
+    const createdAt = Date.now() - messageCount;
+
+    await db.insert(taskMessages).values(
+      Array.from({ length: messageCount }, (_, index) => ({
+        runId: run.id,
+        taskId: task.id,
+        ts: index + 1,
+        createdAt: new Date(createdAt + index),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant' as const,
+        protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+        contentBlocks: [{ type: 'text' as const, text: `message-${index}` }],
+        payload: {},
+      })),
+    );
+
+    const newestPage = await getTaskMessageEnvelopePage({ taskId: task.id });
+
+    expect(newestPage.messages).toHaveLength(TASK_MESSAGE_ENVELOPE_PAGE_SIZE);
+    expect(newestPage.messages[0]?.text).toBe(
+      `message-${messageCount - TASK_MESSAGE_ENVELOPE_PAGE_SIZE}`,
+    );
+    expect(newestPage.messages.at(-1)?.text).toBe(
+      `message-${messageCount - 1}`,
+    );
+    expect(newestPage.nextCursor).not.toBeNull();
+
+    let cursor = newestPage.nextCursor;
+    let combined = newestPage.messages;
+    while (cursor) {
+      const olderPage = await getTaskMessageEnvelopePage({
+        taskId: task.id,
+        cursor,
+      });
+      combined = [...olderPage.messages, ...combined];
+      cursor = olderPage.nextCursor;
+    }
+
+    expect(combined[0]?.text).toBe('message-0');
+    expect(combined.at(-1)?.text).toBe(`message-${messageCount - 1}`);
+    expect(new Set(combined.map((message) => message.id)).size).toBe(
+      messageCount,
+    );
   });
 });
 

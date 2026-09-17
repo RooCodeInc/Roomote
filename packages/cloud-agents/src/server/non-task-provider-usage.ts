@@ -54,6 +54,9 @@ export const FAST_AGENT_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
 ).map((permission) => ({
   permission,
   pattern: '*',
+  // `task` is the only OpenCode built-in Fast exposes. In particular,
+  // `webfetch` remains denied here as well as in the generated agent filter:
+  // it would otherwise issue model-selected requests from the control plane.
   action: permission === 'task' ? 'allow' : 'deny',
 }));
 
@@ -1863,10 +1866,7 @@ async function generateTrackedNonTaskObjectWithSdk<
       system: params.system,
       format: {
         type: 'json_schema',
-        schema: zodToJsonSchema(params.schema, {
-          $refStrategy: 'none',
-          target: 'jsonSchema7',
-        }) as Record<string, unknown>,
+        schema: buildNonTaskStructuredOutputJsonSchema(params.schema),
         retryCount:
           params.structuredOutputRetryCount ??
           DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
@@ -1896,6 +1896,15 @@ async function generateTrackedNonTaskObjectWithSdk<
   return { object };
 }
 
+export function buildNonTaskStructuredOutputJsonSchema(
+  schema: z.ZodTypeAny,
+): Record<string, unknown> {
+  return zodToJsonSchema(schema, {
+    $refStrategy: 'none',
+    target: 'jsonSchema7',
+  }) as Record<string, unknown>;
+}
+
 export async function generateTrackedNonTaskObject<
   TSchema extends z.ZodTypeAny,
 >(
@@ -1908,6 +1917,24 @@ function unwrapNonTaskInferenceError(error: unknown): unknown {
   return error instanceof NonTaskOpenCodePromptError
     ? error.providerError
     : error;
+}
+
+function formatNativeErrorCauseDetail(error: unknown): string {
+  const detail: string[] = [];
+  const seen = new Set<object>();
+  let current = error;
+
+  for (let depth = 0; depth <= 4; depth += 1) {
+    if (!current || typeof current !== 'object' || seen.has(current)) break;
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    for (const key of ['message', 'code'] as const) {
+      if (typeof record[key] === 'string') detail.push(record[key]);
+    }
+    current = record.cause;
+  }
+
+  return detail.join(' ');
 }
 
 function findInferenceErrorStatusCode(error: unknown): number | undefined {
@@ -1986,7 +2013,7 @@ export function classifyNonTaskInferenceError(
   const responseBody =
     typeof data?.responseBody === 'string' ? data.responseBody : '';
   const detail =
-    `${formatOpenCodeSdkError(inferenceError)} ${responseBody}`.toLowerCase();
+    `${formatOpenCodeSdkError(inferenceError)} ${formatNativeErrorCauseDetail(inferenceError)} ${responseBody}`.toLowerCase();
   const errorName = typeof record?.name === 'string' ? record.name : '';
   const gatewayBlocked =
     (statusCode === 403 && /^\s*(?:<!doctype|<html)/iu.test(responseBody)) ||

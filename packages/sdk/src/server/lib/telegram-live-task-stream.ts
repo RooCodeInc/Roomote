@@ -168,6 +168,12 @@ export async function renderTelegramLiveTaskStream(input: {
   const data = await getTelegramLiveTaskStreamData(input.taskId);
   if (!data) return { card: false, updated: false };
 
+  // The owning Fast Session posts the successful result. Preserve the live
+  // message and its pointer so a resumed run can continue editing it.
+  if (input.status === 'complete') {
+    return { card: true, updated: true };
+  }
+
   const provider =
     await createTelegramCommunicationProviderFromRuntimeCredentials();
   if (!provider) return { card: false, updated: false };
@@ -178,11 +184,9 @@ export async function renderTelegramLiveTaskStream(input: {
         ? input.details?.trim() === 'Waiting for your input…'
           ? 'waiting'
           : 'running'
-        : input.status === 'complete'
-          ? 'completed'
-          : input.output === 'Stopped.'
-            ? 'stopped'
-            : 'failed';
+        : input.output === 'Stopped.'
+          ? 'stopped'
+          : 'failed';
     await provider.editMessageText({
       channelId: data.channelId,
       messageId: data.messageId,

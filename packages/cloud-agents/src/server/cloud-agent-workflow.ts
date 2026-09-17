@@ -59,7 +59,6 @@ import {
 } from './commit-author';
 
 import { getTaskUrl } from './task-url';
-import { getTherapistModeEnabledForUser } from './therapist-mode';
 
 type StandardTaskSurface = NonNullable<
   Parameters<typeof standardTask>[0]['taskSurface']
@@ -116,6 +115,7 @@ export function resolveStandardTaskSurface({
 }
 
 export function resolveAggregateSourceControl({
+  repo,
   sourceControlProvider,
   sourceControlHost,
   repositoryProviders,
@@ -126,24 +126,33 @@ export function resolveAggregateSourceControl({
   | 'sourceControlHost'
   | 'repositoryProviders'
   | 'selectedRepositories'
->): RepositorySourceControl | undefined {
+> & { repo?: string }): RepositorySourceControl | undefined {
   if (!sourceControlProvider) {
     return undefined;
   }
 
-  const providers = repositoryProviders
-    ? new Set(Object.values(repositoryProviders))
-    : null;
   const selectedRepositoryNames = selectedRepositories
     ? [...new Set(selectedRepositories)]
-    : [];
+    : repo && repo !== ALL_REPOSITORIES
+      ? [repo]
+      : [];
+  const providers = repositoryProviders
+    ? new Set(
+        selectedRepositoryNames.length > 0
+          ? selectedRepositoryNames.flatMap((repository) => {
+              const provider = repositoryProviders[repository];
+              return provider ? [provider] : [];
+            })
+          : sourceControlHost
+            ? [sourceControlProvider]
+            : Object.values(repositoryProviders),
+      )
+    : null;
   const hasCompleteSelection =
     selectedRepositoryNames.length === 0 ||
-    (Object.keys(repositoryProviders ?? {}).length ===
-      selectedRepositoryNames.length &&
-      selectedRepositoryNames.every((repository) =>
-        Object.hasOwn(repositoryProviders ?? {}, repository),
-      ));
+    selectedRepositoryNames.every((repository) =>
+      Object.hasOwn(repositoryProviders ?? {}, repository),
+    );
 
   if (
     !hasCompleteSelection ||
@@ -234,14 +243,6 @@ export async function generatePrompt({
   const codeReviewsEnabled = reviewCodeSettings?.enabled ?? false;
   const codeReviewReviewOnCommit = reviewCodeSettings?.reviewOnCommit ?? true;
   const codeReviewReviewDraftPrs = reviewCodeSettings?.reviewDraftPrs ?? true;
-  const resolveTherapistMode = () =>
-    getTherapistModeEnabledForUser(taskRun.actingUserId).catch((error) => {
-      console.warn(
-        `[Cloud Agent] Personal preferences unavailable: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return false;
-    });
-
   switch (taskSpec.type) {
     // <Workflow: PR review, Trigger: GitHub>
     case TaskPayloadKind.GithubPrReview:
@@ -251,7 +252,6 @@ export async function generatePrompt({
         taskRunUrl,
         additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
-        therapistModeEnabled: await resolveTherapistMode(),
       });
     case TaskPayloadKind.GithubPrReviewSync:
       return githubPrReviewSync({
@@ -261,7 +261,6 @@ export async function generatePrompt({
         taskRunUrl,
         additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
-        therapistModeEnabled: await resolveTherapistMode(),
       });
 
     // <Workflow: PR review follow-up, Trigger: GitHub>
@@ -272,7 +271,6 @@ export async function generatePrompt({
         taskRunUrl,
         additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
-        therapistModeEnabled: await resolveTherapistMode(),
       });
 
     // <Workflow: PR conflict resolution, Trigger: GitHub>
@@ -281,7 +279,6 @@ export async function generatePrompt({
         taskSpec,
         taskRunUrl,
         attribution: commitAuthor,
-        therapistModeEnabled: await resolveTherapistMode(),
       });
 
     // <Workflow: standard, Trigger: Slack>
@@ -296,7 +293,6 @@ export async function generatePrompt({
         codeReviewReviewOnCommit,
         codeReviewReviewDraftPrs,
         prAction,
-        therapistModeEnabled: await resolveTherapistMode(),
       });
     }
 
@@ -312,7 +308,6 @@ export async function generatePrompt({
         codeReviewReviewOnCommit,
         codeReviewReviewDraftPrs,
         prAction,
-        therapistModeEnabled: await resolveTherapistMode(),
       });
 
     // <Workflow: standard, Trigger: Manual>
@@ -492,7 +487,6 @@ export async function generatePrompt({
         sourceControlProvider: targetSourceControl?.provider,
         prAction,
         reportConsumer,
-        therapistModeEnabled: await resolveTherapistMode(),
       });
 
       if (!inheritedCommunicationContext && slackChannel && slackThreadTs) {

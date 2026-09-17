@@ -21,6 +21,7 @@ export enum ScheduledJobName {
   SessionsReconcile = 'SessionsReconcile',
   ThreadFooterRefresh = 'ThreadFooterRefresh',
   WebTaskInitiatorSettleNotification = 'WebTaskInitiatorSettleNotification',
+  SessionAttentionNotification = 'SessionAttentionNotification',
 }
 
 /**

@@ -9,6 +9,7 @@ import {
 import {
   db,
   desc,
+  demoSeedDevelopmentIntegration,
   mcpConnections,
   deploymentMcpEnablements,
   customMcpServers,
@@ -26,6 +27,7 @@ import {
   getMcpIntegrationUpstreamUrl,
   MCP_INTEGRATIONS,
   isMcpConnectionAsanaConfig,
+  isMcpConnectionExaConfig,
   isMcpConnectionNotionConfig,
   isMcpConnectionGranolaConfig,
   isMcpConnectionGbrainConfig,
@@ -53,6 +55,14 @@ import {
   router,
 } from '../trpc';
 import { resolveActorScopedUserContext } from '../lib/auth';
+import {
+  readCredentialEgressDelivery,
+  markCredentialEgressBootstrapReady,
+} from '../lib/credential-egress-delivery';
+import {
+  HTTP_INTEGRATIONS_MCP_ID,
+  HTTP_INTEGRATIONS_MCP_PATH,
+} from '../../http-integrations';
 
 const INTEGRATION_PROXY_MCP_IDS = new Set(
   MCP_INTEGRATIONS.map((integration) => integration.id),
@@ -138,6 +148,11 @@ async function resolveMcpServerConfigs(options: {
     };
   }
 
+  // Reserved infrastructure descriptor, independent of Settings connections.
+  servers[HTTP_INTEGRATIONS_MCP_ID] = {
+    url: `${options.requestOrigin ?? ''}${HTTP_INTEGRATIONS_MCP_PATH}`,
+    headers: {},
+  };
   if (!options.includeCacheRevision) {
     for (const server of Object.values(servers)) {
       delete server.cacheRevision;
@@ -261,6 +276,38 @@ export const mcpConnectionsRouter = router({
    * needs to launch the local process, which a member's plain auth token must
    * not be able to read directly.
    */
+  markCredentialEgressBootstrapReady: authenticatedProcedure
+    .input(z.object({ nonce: z.string().uuid() }).strict())
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await markCredentialEgressBootstrapReady(ctx.auth, input.nonce);
+        return { requested: true };
+      } catch {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Credential egress bootstrap unavailable',
+        });
+      }
+    }),
+
+  getCredentialEgressDelivery: authenticatedProcedure
+    .input(z.object({ nonce: z.string().uuid() }).strict())
+    .query(async ({ ctx, input }) => {
+      try {
+        return {
+          environment: await readCredentialEgressDelivery(
+            ctx.auth,
+            input.nonce,
+          ),
+        };
+      } catch {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Credential egress client configuration unavailable',
+        });
+      }
+    }),
+
   getCustomStdioMcpServers: authenticatedProcedure.query(async ({ ctx }) => {
     if (!isRunToken(ctx.auth)) {
       throw new TRPCError({
@@ -329,6 +376,16 @@ async function buildCustomMcpServerConfigs(
   for (const row of rows) {
     // stdio servers ride the worker merge path via getCustomStdioMcpServers.
     if (row.stdio || !row.url) {
+      continue;
+    }
+
+    if (row.id === demoSeedDevelopmentIntegration.id) {
+      if (Env.APP_ENV !== 'development') continue;
+      servers[row.name] = {
+        url: `${requestOrigin ?? ''}/api/mcp/development-fixtures`,
+        headers: {},
+        cacheRevision: `${row.updatedAt?.getTime() ?? 0}`,
+      };
       continue;
     }
 
@@ -441,6 +498,29 @@ async function buildCuratedMcpServerConfigs(ctx: {
     ]),
   );
   const requestOrigin = ctx.requestOrigin;
+
+  for (const entry of enabledConnections) {
+    if (entry.connection) {
+      continue;
+    }
+
+    const integration = getMcpIntegration(entry.enabledMcpId);
+    if (!integration?.supportsKeylessAccess) {
+      continue;
+    }
+
+    servers[integration.id] = {
+      url: buildProxyUrl(integration.id, requestOrigin),
+      headers: { 'X-MCP-Client': PRODUCT_NAME },
+      ...(entry.disabledTools?.length
+        ? { disabledTools: entry.disabledTools }
+        : {}),
+    };
+    logInfo('[getMcpServerConfigs] Included keyless integration:', {
+      mcpId: integration.id,
+      via: 'keyless_proxy',
+    });
+  }
 
   for (const connection of connections) {
     logInfo('[getMcpServerConfigs] Processing connection:', {
@@ -571,6 +651,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
         isMcpConnectionVercelConfig(authConfig) ||
         isMcpConnectionGrafanaConfig(authConfig) ||
         isMcpConnectionGbrainConfig(authConfig) ||
+        isMcpConnectionExaConfig(authConfig) ||
         isMcpConnectionXConfig(authConfig)
       ) {
         servers[connection.mcpId] = {

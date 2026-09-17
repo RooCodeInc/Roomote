@@ -47,6 +47,23 @@ import {
 
 const SandboxReconnectContext = createContext<SandboxReconnect>(() => {});
 export const SandboxHistoryReadyContext = createContext(false);
+export const SandboxHistoryControlsContext = createContext<{
+  isError: boolean;
+  isRetrying: boolean;
+  retry: () => Promise<unknown>;
+  hasOlderMessages: boolean;
+  isFetchingOlderMessages: boolean;
+  olderMessagesError: unknown;
+  fetchOlderMessages: () => Promise<boolean>;
+}>({
+  isError: false,
+  isRetrying: false,
+  retry: async () => undefined,
+  hasOlderMessages: false,
+  isFetchingOlderMessages: false,
+  olderMessagesError: null,
+  fetchOlderMessages: async () => false,
+});
 
 type SandboxTaskPhase = TaskStatus['phase'];
 
@@ -60,7 +77,19 @@ interface SandboxProviderProps {
   history: Pick<
     TaskMessageEnvelopesQueryState,
     'data' | 'isSuccess' | 'isError'
-  >;
+  > &
+    Partial<
+      Pick<
+        TaskMessageEnvelopesQueryState,
+        | 'isPending'
+        | 'isFetching'
+        | 'refetch'
+        | 'hasOlderMessages'
+        | 'isFetchingOlderMessages'
+        | 'olderMessagesError'
+        | 'fetchOlderMessages'
+      >
+    >;
   initialTaskStatus?: RunStatus | null;
   initialTaskPhase?: TaskPhase | null;
   /** @deprecated Workspace content now renders while transcript history hydrates. */
@@ -201,14 +230,28 @@ export function SandboxProvider({
     store,
     titleRefreshTimerRef,
   });
+  const historyControls = useMemo(
+    () => ({
+      isError: history.isError,
+      isRetrying: history.isFetching ?? history.isPending ?? false,
+      retry: history.refetch ?? (async () => undefined),
+      hasOlderMessages: history.hasOlderMessages ?? false,
+      isFetchingOlderMessages: history.isFetchingOlderMessages ?? false,
+      olderMessagesError: history.olderMessagesError ?? null,
+      fetchOlderMessages: history.fetchOlderMessages ?? (async () => false),
+    }),
+    [history],
+  );
 
   return (
     <SandboxReconnectContext.Provider value={reconnect}>
-      <SandboxHistoryReadyContext.Provider value={historyReady}>
-        <SandboxStoreContext.Provider value={store}>
-          {children}
-        </SandboxStoreContext.Provider>
-      </SandboxHistoryReadyContext.Provider>
+      <SandboxHistoryControlsContext.Provider value={historyControls}>
+        <SandboxHistoryReadyContext.Provider value={historyReady}>
+          <SandboxStoreContext.Provider value={store}>
+            {children}
+          </SandboxStoreContext.Provider>
+        </SandboxHistoryReadyContext.Provider>
+      </SandboxHistoryControlsContext.Provider>
     </SandboxReconnectContext.Provider>
   );
 }
@@ -254,6 +297,10 @@ export function useSandboxMessages(): {
 
 export function useSandboxHistoryReady(): boolean {
   return useContext(SandboxHistoryReadyContext);
+}
+
+export function useSandboxHistoryControls() {
+  return useContext(SandboxHistoryControlsContext);
 }
 
 export function useSandboxClient(): SandboxClient | null {

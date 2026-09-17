@@ -47,17 +47,27 @@ async function createFastSession({
   userId,
   conversationId,
   updatedAt,
+  privacy = 'shared',
+  privateOwnerUserId = null,
+  surface = 'slack',
+  workspaceId,
 }: {
   userId: string;
   conversationId: string;
   updatedAt: Date;
+  privacy?: 'shared' | 'private';
+  privateOwnerUserId?: string | null;
+  surface?: 'web' | 'slack';
+  workspaceId?: string;
 }) {
   const [session] = await db
     .insert(fastAgentConversations)
     .values({
       userId,
-      surface: 'slack',
-      workspaceId: `workspace-${conversationId}`,
+      privacy,
+      privateOwnerUserId,
+      surface,
+      workspaceId: workspaceId ?? `workspace-${conversationId}`,
       conversationId,
       compatibilityMessages: [{ role: 'user', content: 'Hello' }],
       updatedAt,
@@ -311,6 +321,66 @@ describe('Fast session queries', () => {
     },
   );
 
+  it('keeps private Fast transcripts owner-only, including for admins', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const conversation = await createFastSession({
+      userId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      surface: 'web',
+      workspaceId: owner.id,
+      conversationId: crypto.randomUUID(),
+      updatedAt: new Date(),
+    });
+    const unified = await ensureSessionForFastConversation(db, conversation.id);
+    await createFastMessage({
+      conversationId: conversation.id,
+      eventId: 'owner-only-result',
+      turnSeq: 1,
+    });
+    const ownerAuth = { userId: owner.id, isAdmin: false };
+
+    for (const id of [conversation.id, unified.id]) {
+      await expect(
+        findReadableFastSession(ownerAuth, id),
+      ).resolves.toMatchObject({ id: conversation.id });
+      expect(
+        (await getFastSessionMessagesCommand(ownerAuth as UserAuthSuccess, id))
+          .messages,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ eventId: 'owner-only-result' }),
+        ]),
+      );
+      for (const auth of [
+        { userId: other.id, isAdmin: false },
+        { userId: other.id, isAdmin: true },
+      ]) {
+        await expect(findReadableFastSession(auth, id)).resolves.toBeNull();
+        await expect(getFastSessionTasks(auth, id)).resolves.toBeNull();
+        await expect(
+          getFastSessionMessagesCommand(auth as UserAuthSuccess, id),
+        ).rejects.toThrow('Fast session not found');
+      }
+    }
+    expect(
+      (await getFastSessionById(ownerAuth, conversation.id))?.messages,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventId: 'owner-only-result' }),
+      ]),
+    );
+    for (const auth of [
+      { userId: other.id, isAdmin: false },
+      { userId: other.id, isAdmin: true },
+    ]) {
+      await expect(
+        getFastSessionById(auth, conversation.id),
+      ).resolves.toBeNull();
+    }
+  });
+
   it('keeps ordinary conversations collaborative even when human text mentions an automation', async () => {
     const owner = await userFactory.create();
     const other = await userFactory.create();
@@ -400,6 +470,47 @@ describe('Fast session queries', () => {
       await expect(getFastSessionTasks(auth, id)).resolves.toBeNull();
     }
   });
+
+  it.each(['history', 'polling'])(
+    'shows only the request text of a Roomote-framed human turn in %s',
+    async (readMode) => {
+      const owner = await userFactory.create();
+      const session = await createFastSession({
+        userId: owner.id,
+        conversationId: `framed-turn-${readMode}`,
+        updatedAt: new Date(),
+      });
+      await createFastMessage({
+        conversationId: session.id,
+        eventId: 'framed-turn',
+        turnSeq: 0,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        metadata: { visibleInTranscript: true, turnSource: 'human' },
+        contentBlocks: [
+          {
+            type: 'text',
+            text: '<integration_saved>\nCall list_integration_keys and continue.\n</integration_saved>\nI added the integration, go ahead.',
+          },
+        ],
+      });
+      const result =
+        readMode === 'history'
+          ? await getFastSessionById(
+              { userId: owner.id, isAdmin: false },
+              session.id,
+            )
+          : await getFastSessionMessagesSince(session.id, 0);
+      expect(result?.messages).toHaveLength(1);
+      expect(result?.messages[0]?.contentBlocks).toEqual([
+        { type: 'text', text: 'I added the integration, go ahead.' },
+      ]);
+      expect(result?.messages[0]?.metadata).toMatchObject({
+        visibleInTranscript: true,
+        turnSource: 'human',
+      });
+    },
+  );
 
   it.each(['history', 'polling'])(
     'enriches known task references with current non-deleted titles in %s',

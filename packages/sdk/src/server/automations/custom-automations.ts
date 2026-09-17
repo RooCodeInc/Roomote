@@ -155,20 +155,70 @@ async function resolveDestination(
   }
 
   if (provider === 'slack') {
-    const channel = await db.query.slackInstallationChannels.findFirst({
+    const expectedTeamId =
+      typeof target.metadata?.slackTeamId === 'string'
+        ? target.metadata.slackTeamId
+        : null;
+    const channels = await db.query.slackInstallationChannels.findMany({
       where: eq(slackInstallationChannels.channelId, target.externalRef),
       columns: { id: true },
       with: {
         slackInstallation: {
-          columns: { isActive: true, teamId: true },
+          columns: { botAccessToken: true, isActive: true, teamId: true },
         },
       },
+      limit: 2,
     });
-    return channel?.slackInstallation.isActive
+    if (channels.length > 1) return null;
+    const channel = channels[0];
+    if (channel) {
+      const installation = channel.slackInstallation;
+      return installation.isActive &&
+        (!expectedTeamId || installation.teamId === expectedTeamId) &&
+        (await new SlackNotifier(installation.botAccessToken).isAppInChannel(
+          target.externalRef,
+        )) === true
+        ? {
+            provider,
+            channelId: target.externalRef,
+            teamId: installation.teamId,
+            source: 'automation_target',
+          }
+        : null;
+    }
+
+    // Native channel discovery reads Slack live and does not populate the
+    // joined-channel cache. Resolve legacy and API-created targets the same
+    // way when no cached owner exists, while still failing closed on an
+    // ambiguous or indeterminate workspace match.
+    const installations = (
+      await db.query.slackInstallations.findMany({
+        where: eq(slackInstallations.isActive, true),
+        columns: { botAccessToken: true, teamId: true },
+      })
+    ).filter(
+      (installation) =>
+        !expectedTeamId || installation.teamId === expectedTeamId,
+    );
+    const candidates = await Promise.all(
+      installations.map(async (installation) => ({
+        installation,
+        membership: await new SlackNotifier(
+          installation.botAccessToken,
+        ).isAppInChannel(target.externalRef),
+      })),
+    );
+    if (candidates.some((candidate) => candidate.membership === null)) {
+      return null;
+    }
+    const matches = candidates.filter(
+      (candidate) => candidate.membership === true,
+    );
+    return matches.length === 1
       ? {
           provider,
           channelId: target.externalRef,
-          teamId: channel.slackInstallation.teamId,
+          teamId: matches[0]!.installation.teamId,
           source: 'automation_target',
         }
       : null;

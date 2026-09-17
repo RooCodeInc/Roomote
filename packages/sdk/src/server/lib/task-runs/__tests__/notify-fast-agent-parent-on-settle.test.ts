@@ -9,10 +9,12 @@ const mocks = vi.hoisted(() => ({
   listPullRequests: vi.fn(),
   getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
   canRetryFailedStart: vi.fn(),
+  findRun: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    query: { taskRuns: { findFirst: mocks.findRun } },
     update: vi.fn(() => ({
       set: vi.fn((values: unknown) => {
         mocks.updateSet(values);
@@ -82,6 +84,10 @@ describe('notifyFastAgentParentOnSettle', () => {
     mocks.listPullRequests.mockResolvedValue([]);
     mocks.recordLifecycle.mockResolvedValue(undefined);
     mocks.canRetryFailedStart.mockResolvedValue(false);
+    mocks.findRun.mockResolvedValue({
+      actingUserId: 'user-1',
+      task: { initiatorKind: 'user' },
+    });
   });
 
   it('stays quiet for a successful review child settle', async () => {
@@ -166,6 +172,7 @@ describe('notifyFastAgentParentOnSettle', () => {
         type: 'task_settled',
         taskId: 'child-task',
         runId: 200,
+        actingUserId: 'user-1',
         title: 'Implement the fix',
         status: RunStatus.Idle,
         taskUrl: 'https://roomote.example/task/child-task',
@@ -185,6 +192,40 @@ describe('notifyFastAgentParentOnSettle', () => {
         details: expect.objectContaining({
           reason: 'fast_agent_parent_settle_event',
         }),
+      }),
+    );
+  });
+
+  it('omits the settle actor when the run has no acting user', async () => {
+    mocks.findRun.mockResolvedValueOnce({
+      actingUserId: null,
+      task: { initiatorKind: 'user' },
+    });
+    await notifyFastAgentParentOnSettle(
+      makeRun({ fastAgentParent: fastParent }, { actingUserId: null }),
+      RunStatus.Idle,
+    );
+
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.not.objectContaining({ actingUserId: expect.anything() }),
+      }),
+    );
+  });
+
+  it('does not treat an automation acting user as a human task initiator', async () => {
+    mocks.findRun.mockResolvedValueOnce({
+      actingUserId: 'user-1',
+      task: { initiatorKind: 'automation' },
+    });
+    await notifyFastAgentParentOnSettle(
+      makeRun({ fastAgentParent: fastParent }),
+      RunStatus.Idle,
+    );
+
+    expect(mocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.not.objectContaining({ actingUserId: expect.anything() }),
       }),
     );
   });

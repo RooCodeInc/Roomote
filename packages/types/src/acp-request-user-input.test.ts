@@ -102,6 +102,12 @@ describe('request_user_input multi-select payloads', () => {
     expect(
       parseAcpRequestUserInputPayload({
         ...payload,
+        preset: 'setup_source_control',
+      })?.preset,
+    ).toBe('setup_source_control');
+    expect(
+      parseAcpRequestUserInputPayload({
+        ...payload,
         preset: 'setup_starter_tasks',
       })?.preset,
     ).toBe('setup_starter_tasks');

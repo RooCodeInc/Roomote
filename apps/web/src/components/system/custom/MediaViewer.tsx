@@ -93,12 +93,14 @@ export function MediaViewerDialog({
 interface MediaViewerImageProps extends ComponentProps<'div'> {
   src: string | null | undefined;
   alt: string;
+  viewportClassName?: string;
 }
 
 export function MediaViewerImage({
   src,
   alt,
   className,
+  viewportClassName,
   ...props
 }: MediaViewerImageProps) {
   const [loadedImageUrl, setLoadedImageUrl] = useState<string | null>(() =>
@@ -457,7 +459,10 @@ export function MediaViewerImage({
     <div className={cn('relative h-full w-full', className)} {...props}>
       <div
         ref={imageViewportRef}
-        className="h-full w-full overflow-auto bg-zinc-800 p-4"
+        className={cn(
+          'h-full w-full overflow-auto bg-zinc-800 p-4',
+          viewportClassName,
+        )}
         onClick={handleImageClick}
         onDoubleClick={handleImageDoubleClick}
         onMouseDown={handleImageMouseDown}

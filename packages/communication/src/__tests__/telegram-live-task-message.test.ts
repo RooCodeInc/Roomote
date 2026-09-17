@@ -25,12 +25,38 @@ describe('buildTelegramLiveTaskMessage', () => {
         'Updating the task lifecycle and rerunning focused tests.',
       ].join('\n'),
       htmlText:
-        '<details><summary>Fixing bug…</summary>Updating the task lifecycle and rerunning focused tests.</details>',
+        '<details><summary>Fixing bug…</summary>\n\nUpdating the task lifecycle and rerunning focused tests.\n\n</details>',
       footerText:
         'Open in Roomote: https://roomote.example/sessions/session-1?task=task-1&utm_source=telegram',
       footerHtmlText:
         '<a href="https://roomote.example/sessions/session-1?task=task-1&amp;utm_source=telegram">Open in Roomote</a>',
     });
+  });
+
+  it('keeps Markdown block boundaries inside details and hides internal attachment paths', () => {
+    const message = buildTelegramLiveTaskMessage({
+      status: 'running',
+      progress: [
+        'Based on visual inspection of `/tmp/roomote-opencode-visual-attachments/session/message/image-1.jpg`, here are the facts:',
+        '',
+        '### Visible formatting',
+        '',
+        '- Literal example: `**not bold**`',
+      ].join('\n'),
+    });
+
+    expect(message.text).not.toContain('roomote-opencode-visual-attachments');
+    expect(message.htmlText).toBe(
+      [
+        '<details><summary>Based on visual inspection of the attached image, here are the facts:</summary>',
+        '',
+        '### Visible formatting',
+        '',
+        '- Literal example: `**not bold**`',
+        '',
+        '</details>',
+      ].join('\n'),
+    );
   });
 
   it('keeps single-line running progress visibly plain', () => {
@@ -47,7 +73,6 @@ describe('buildTelegramLiveTaskMessage', () => {
 
   it.each([
     ['waiting', 'Waiting for your input…'],
-    ['completed', 'Completed.'],
     ['failed', 'Task failed.'],
     ['stopped', 'Stopped.'],
   ] as const)('formats %s as one compact line', (status, expected) => {
@@ -64,7 +89,9 @@ describe('buildTelegramLiveTaskMessage', () => {
     });
 
     expect(message.htmlText).toContain('Fixing &lt;Telegram&gt;...');
-    expect(message.htmlText).toContain('</summary>&lt;&gt;&amp;&lt;&gt;&amp;');
+    expect(message.htmlText).toContain(
+      '</summary>\n\n&lt;&gt;&amp;&lt;&gt;&amp;',
+    );
     expect(message.htmlText).not.toMatch(/&(?!amp;|lt;|gt;)/);
     expect(message.htmlText.endsWith('</details>')).toBe(true);
     expect(message.text.length).toBeLessThanOrEqual(
@@ -75,7 +102,7 @@ describe('buildTelegramLiveTaskMessage', () => {
     );
   });
 
-  it('reserves the native footer envelope in near-limit editable HTML', () => {
+  it('reserves the native footer envelope in near-limit embedded HTML', () => {
     const message = buildTelegramLiveTaskMessage({
       status: 'running',
       progress: `Working\n${'x'.repeat(TELEGRAM_MAX_RICH_MESSAGE_LENGTH)}`,
@@ -87,10 +114,11 @@ describe('buildTelegramLiveTaskMessage', () => {
     });
 
     expect(chunks).toHaveLength(1);
-    expect(chunks[0]!.html.length).toBeLessThanOrEqual(
+    expect(chunks[0]!.richMessage.markdown.length).toBeLessThanOrEqual(
       TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
     );
-    expect(chunks[0]!.html).toContain('<footer>');
+    expect(chunks[0]!.richMessage.markdown.startsWith('<details>')).toBe(true);
+    expect(chunks[0]!.richMessage.markdown).toContain('<footer>');
   });
 
   it('matches the checked-in compact text demo fixture', () => {
@@ -108,11 +136,6 @@ describe('buildTelegramLiveTaskMessage', () => {
       '',
       'WAITING',
       joinMessage(buildTelegramLiveTaskMessage({ status: 'waiting', taskUrl })),
-      '',
-      'COMPLETED',
-      joinMessage(
-        buildTelegramLiveTaskMessage({ status: 'completed', taskUrl }),
-      ),
       '',
       'FAILED',
       joinMessage(buildTelegramLiveTaskMessage({ status: 'failed', taskUrl })),

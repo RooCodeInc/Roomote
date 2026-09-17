@@ -61,6 +61,8 @@ vi.mock('../../github/notifyPullRequestTerminalStatus', () => ({
 vi.mock('../../pull-request-fact-sync', () => ({
   scheduleSourceControlPullRequestFactSync:
     mockScheduleSourceControlPullRequestFactSync,
+  toValidDate: (value: string | null | undefined) =>
+    value ? new Date(value.replace(' UTC', 'Z').replace(' ', 'T')) : null,
 }));
 
 vi.mock('../getGitLabAutomationTargets', () => ({
@@ -404,7 +406,10 @@ describe('handleGitLabMergeRequest', () => {
       'acme/backend',
       42,
       'merged',
-      { host: 'gitlab.com' },
+      {
+        host: 'gitlab.com',
+        mergedAt: new Date('2026-07-10T00:00:00.000Z'),
+      },
     );
     expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
       expect.objectContaining({ targetBranch: 'main' }),

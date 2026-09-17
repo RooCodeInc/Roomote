@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
-import { ErrorState, Skeleton } from '@/components/system';
+import { RetryableLoadError, Skeleton } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 
 import { BrainCorpusSection } from './BrainCorpusSection';
@@ -31,7 +31,8 @@ export function BrainSettings() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { data, isPending, isError } = useQuery(trpc.brain.get.queryOptions());
+  const settingsQuery = useQuery(trpc.brain.get.queryOptions());
+  const { data, isPending, isError } = settingsQuery;
   const selectedSlug = searchParams.get('memory');
   const [namespaceId, setNamespaceId] = useState<string | null>(null);
   const selectMemory = useCallback(
@@ -63,8 +64,15 @@ export function BrainSettings() {
     return <BrainSettingsSkeleton />;
   }
 
-  if (isError) {
-    return <ErrorState title="Failed to load Memory" />;
+  if (isError && data === undefined) {
+    return (
+      <RetryableLoadError
+        className="border"
+        message="Failed to load Memory."
+        isRetrying={settingsQuery.isFetching}
+        onRetry={() => void settingsQuery.refetch()}
+      />
+    );
   }
 
   /*

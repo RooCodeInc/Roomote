@@ -16,7 +16,7 @@ import {
 } from '@roomote/communication';
 import { refreshThreadFooterCarrier } from '@roomote/communication/thread-footer-carrier-lifecycle';
 import {
-  ALL_REPOSITORIES,
+  isFastAgentLaunchTargetSentinel,
   buildFastAgentChildTaskMetadata,
   formatErrorForLog,
   linkedWorkItemProviderSchema,
@@ -214,7 +214,9 @@ export function createFastAgentSourceControlTaskLauncher(params: {
             sessionId: parentSessionId,
             conversation: params.parentConversation ?? params.conversation,
           }),
-          ...(environmentId && environmentId !== ALL_REPOSITORIES
+          // The child works on the discussion's own repository whatever
+          // target the Session named; a sentinel is never an environment.
+          ...(environmentId && !isFastAgentLaunchTargetSentinel(environmentId)
             ? { environmentId }
             : {}),
           ...(model

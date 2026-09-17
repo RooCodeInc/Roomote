@@ -2,6 +2,8 @@ import {
   automationResults,
   db,
   eq,
+  taskFactory,
+  tasks,
   userFactory,
   users,
   workItems,
@@ -16,6 +18,10 @@ describe('Results commands', () => {
       metadata: { results_page_enabled: true },
     });
     const auth = { userId: user.id } as UserAuthSuccess;
+    const sourceTask = await taskFactory.create({
+      repositoryName: 'RooCodeInc/Roomote',
+      repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
+    });
     const [report] = await db
       .insert(automationResults)
       .values({
@@ -24,6 +30,7 @@ describe('Results commands', () => {
         content: 'Report body',
         priority: 'normal',
         dedupeKey: `test:${user.id}:report`,
+        sourceTaskId: sourceTask.id,
       })
       .returning({ id: automationResults.id });
     const [suggestion] = await db
@@ -37,6 +44,8 @@ describe('Results commands', () => {
         resultAutomationName: 'Security Auditor',
         resultPriority: 'critical',
         resultUserId: user.id,
+        sourceTaskId: sourceTask.id,
+        targetRepositoryFullName: 'RooCodeInc/Roomote',
       })
       .returning({ id: workItems.id });
 
@@ -45,6 +54,25 @@ describe('Results commands', () => {
       expect(results.map((result) => result.id)).toEqual([
         suggestion!.id,
         report!.id,
+      ]);
+      expect(results).toEqual([
+        expect.objectContaining({
+          id: suggestion!.id,
+          repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
+        }),
+        expect.objectContaining({
+          id: report!.id,
+          repositoryUrl: 'https://github.com/RooCodeInc/Roomote',
+        }),
+      ]);
+
+      await db
+        .update(tasks)
+        .set({ deletedAt: new Date() })
+        .where(eq(tasks.id, sourceTask.id));
+      await expect(listResultsCommand(auth)).resolves.toEqual([
+        expect.objectContaining({ id: suggestion!.id, repositoryUrl: null }),
+        expect.objectContaining({ id: report!.id, repositoryUrl: null }),
       ]);
 
       await actOnResultCommand(auth, {
@@ -55,11 +83,25 @@ describe('Results commands', () => {
       await expect(listResultsCommand(auth)).resolves.toEqual([
         expect.objectContaining({ id: report!.id }),
       ]);
+
+      await actOnResultCommand(auth, {
+        id: report!.id,
+        kind: 'report',
+        action: 'accept',
+      });
+      const acceptedReport = await db.query.automationResults.findFirst({
+        where: eq(automationResults.id, report!.id),
+      });
+      expect(acceptedReport).toMatchObject({
+        acceptanceReason: 'manual',
+        ignoredAt: null,
+      });
     } finally {
       await db.delete(workItems).where(eq(workItems.id, suggestion!.id));
       await db
         .delete(automationResults)
         .where(eq(automationResults.id, report!.id));
+      await db.delete(tasks).where(eq(tasks.id, sourceTask.id));
       await db.delete(users).where(eq(users.id, user.id));
     }
   });

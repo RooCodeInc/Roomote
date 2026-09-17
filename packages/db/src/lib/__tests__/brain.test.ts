@@ -14,8 +14,10 @@ import {
   eq,
   tasks,
   taskRuns,
+  users,
   taskFactory,
   userFactory,
+  automations,
   brainMemoryEvents,
   brainCollectorItems,
   brainSyncState,
@@ -28,6 +30,7 @@ import {
   maybeEnqueueBrainMemoryEvent,
   saveBrainAgentSummary,
   requeueBrainMemoryEventsForTasks,
+  requeueFailedBrainMemoryEvents,
   resetBrainIngestionState,
   canonicalizeBrainCollectorItemSlugs,
   deleteBrainCollectorItems,
@@ -38,6 +41,10 @@ import {
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
   listBrainCollectorItemsBySlugPrefix,
+  listRecentUserTaskMemoryRuns,
+  listEligibleUserTaskMemoryRuns,
+  findHomeComposerPrecomputeUserForRun,
+  isHomeComposerSuggestionsEnabled,
   seedBrainCollectorItems,
   upsertBrainCollectorItems,
   upsertBrainSyncState,
@@ -123,6 +130,177 @@ describe('resetBrainIngestionState', () => {
       lastError: null,
       processedAt: null,
     });
+  });
+});
+
+describe('private task memory exclusion', () => {
+  it('keeps automatic, explicit, requeue, and backfill paths terminally skipped', async () => {
+    const owner = await userFactory.create();
+    const run = await makeCompletedRun(undefined, {
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+
+    await maybeEnqueueBrainMemoryEvent(db, run.id);
+    await saveBrainAgentSummary(db, run.id, 'private canary summary');
+    expect(await requeueBrainMemoryEventsForTasks(db, [run.taskId])).toBe(0);
+    expect(await backfillBrainMemoryEvents(db)).toBe(0);
+
+    const [event] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.runId, run.id));
+    expect(event).toMatchObject({
+      status: 'skipped',
+      agentSummary: null,
+      lastError: 'private task',
+    });
+    await db
+      .update(brainMemoryEvents)
+      .set({ status: 'failed' })
+      .where(eq(brainMemoryEvents.runId, run.id));
+    expect(await requeueFailedBrainMemoryEvents(db)).toBe(0);
+    await expect(
+      db.query.brainMemoryEvents.findFirst({
+        where: eq(brainMemoryEvents.runId, run.id),
+      }),
+    ).resolves.toMatchObject({ status: 'failed' });
+    expect(await claimPendingBrainMemoryEvents(db, 10)).toEqual([]);
+  });
+});
+
+describe('listRecentUserTaskMemoryRuns', () => {
+  it('returns only landed user-initiated memories owned by the requested user', async () => {
+    const owner = await userFactory.create();
+    const otherUser = await userFactory.create();
+    await db
+      .insert(automations)
+      .values({ key: 'issue_fixer' })
+      .onConflictDoNothing();
+    const olderOwned = await makeCompletedRun(
+      new Date('2026-09-10T12:00:00Z'),
+      { initiatorUserId: owner.id },
+    );
+    const newerOwned = await makeCompletedRun(
+      new Date('2026-09-12T12:00:00Z'),
+      { initiatorUserId: owner.id },
+    );
+    const otherOwned = await makeCompletedRun(
+      new Date('2026-09-13T12:00:00Z'),
+      { initiatorUserId: otherUser.id },
+    );
+    const automation = await makeCompletedRun(
+      new Date('2026-09-14T12:00:00Z'),
+      {
+        initiatorKind: 'automation',
+        initiatorUserId: null,
+        initiatorAutomation: 'issue_fixer',
+        actorExternalId: null,
+      },
+    );
+    await db
+      .update(taskRuns)
+      .set({ actingUserId: owner.id })
+      .where(eq(taskRuns.id, automation.id));
+    const ownerAttributedSystem = await makeCompletedRun(
+      new Date('2026-09-15T12:00:00Z'),
+      {
+        surface: 'system',
+        initiatorKind: 'user',
+        initiatorUserId: owner.id,
+      },
+    );
+    const hiddenOwned = await makeCompletedRun(
+      new Date('2026-09-15T13:00:00Z'),
+      { initiatorUserId: owner.id, visibility: 'hidden' },
+    );
+    const deletedOwned = await makeCompletedRun(
+      new Date('2026-09-15T14:00:00Z'),
+      { initiatorUserId: owner.id, deletedAt: new Date() },
+    );
+    const pendingOwned = await makeCompletedRun(
+      new Date('2026-09-16T12:00:00Z'),
+      { initiatorUserId: owner.id },
+    );
+
+    await db.insert(brainMemoryEvents).values([
+      { runId: olderOwned.id, status: 'done' },
+      { runId: newerOwned.id, status: 'done' },
+      { runId: otherOwned.id, status: 'done' },
+      { runId: automation.id, status: 'done' },
+      { runId: ownerAttributedSystem.id, status: 'done' },
+      { runId: hiddenOwned.id, status: 'done' },
+      { runId: deletedOwned.id, status: 'done' },
+      { runId: pendingOwned.id, status: 'pending' },
+    ]);
+
+    await expect(
+      listRecentUserTaskMemoryRuns(db, { userId: owner.id, limit: 5 }),
+    ).resolves.toEqual([
+      {
+        taskId: newerOwned.taskId,
+        runId: newerOwned.id,
+        completedAt: new Date('2026-09-12T12:00:00Z'),
+        memoryRevision: 0,
+      },
+      {
+        taskId: olderOwned.taskId,
+        runId: olderOwned.id,
+        completedAt: new Date('2026-09-10T12:00:00Z'),
+        memoryRevision: 0,
+      },
+    ]);
+    await expect(
+      listRecentUserTaskMemoryRuns(db, { userId: owner.id, limit: 1 }),
+    ).resolves.toHaveLength(1);
+
+    await expect(
+      listEligibleUserTaskMemoryRuns(db, {
+        userId: owner.id,
+        runIds: [newerOwned.id, otherOwned.id, hiddenOwned.id],
+      }),
+    ).resolves.toEqual([
+      {
+        taskId: newerOwned.taskId,
+        runId: newerOwned.id,
+        completedAt: new Date('2026-09-12T12:00:00Z'),
+        memoryRevision: 0,
+      },
+    ]);
+
+    expect(await isHomeComposerSuggestionsEnabled(db, owner.id)).toBe(false);
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, newerOwned.id),
+    ).toBeNull();
+
+    await db
+      .update(users)
+      .set({ metadata: { home_composer_suggestions_enabled: true } })
+      .where(eq(users.id, owner.id));
+
+    expect(await isHomeComposerSuggestionsEnabled(db, owner.id)).toBe(true);
+    expect(await findHomeComposerPrecomputeUserForRun(db, newerOwned.id)).toBe(
+      owner.id,
+    );
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, automation.id),
+    ).toBeNull();
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, ownerAttributedSystem.id),
+    ).toBeNull();
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, hiddenOwned.id),
+    ).toBeNull();
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, deletedOwned.id),
+    ).toBeNull();
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, pendingOwned.id),
+    ).toBeNull();
+    expect(
+      await findHomeComposerPrecomputeUserForRun(db, otherOwned.id),
+    ).toBeNull();
   });
 });
 

@@ -30,6 +30,10 @@ import {
 
 import { primeEnvironmentOidcForMachine } from '../sandbox-oidc';
 import {
+  prepareHostedWorkerLaunch,
+  type CredentialEgressLifecycle,
+} from '../credential-egress';
+import {
   getNamedPortsForTaskRun,
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
@@ -240,6 +244,8 @@ export async function spawnModalWorker(
       launchDiagnostics?: string;
     }) => Promise<'ignore' | 'restart' | 'failed'>;
     onWorkerRestart?: () => void;
+    /** Session-egress admission; omitted in unit paths that do not exercise it. */
+    credentialEgress?: CredentialEgressLifecycle;
   },
 ): Promise<{
   machineId: string;
@@ -267,8 +273,14 @@ export async function spawnModalWorker(
     modalTags,
     onWorkerExit,
     onWorkerRestart,
+    credentialEgress,
   } = config;
   const parsedModalRegions = parseModalRegions(modalRegions);
+  const launchHostedWorker = await prepareHostedWorkerLaunch({
+    credentialEgress,
+    taskRun,
+    provider: vendor,
+  });
   const environmentId = taskRun.payload.environmentId;
 
   const { namedPorts, environmentSnapshotId, environmentConfig } =
@@ -543,11 +555,8 @@ export async function spawnModalWorker(
       `worker ${args.join(' ')} started on ${machine.machineId}`,
     );
 
-    const result = await computeClient.runCommand({
-      instanceId: machine.machineId,
-      cmd: 'worker',
-      args,
-      env: buildModalWorkerEnv({
+    const result = await launchHostedWorker(
+      buildModalWorkerEnv({
         authToken,
         sandboxExpiresAtMs: Date.now() + modalTimeoutMs,
         deploymentSlug,
@@ -557,141 +566,144 @@ export async function spawnModalWorker(
           SANDBOX_TIMEOUT_MS: String(modalTimeoutMs),
         },
       }),
-      detached: true,
-      signal: AbortSignal.timeout(60_000),
-      ...(computeLog
-        ? {
-            onOutput: (event: {
-              stream: 'stdout' | 'stderr';
-              data: string;
-            }) => {
-              void computeLog.append(event.stream, event.data);
-            },
-          }
-        : {}),
-      ...(onWorkerExit || computeLog
-        ? {
-            onExit: async ({ exitCode }: { exitCode: number }) => {
-              await computeLog?.append(
-                'command',
-                `worker exited with code ${exitCode}`,
-              );
-
-              if (!onWorkerExit) {
-                return;
+      async (env) => {
+        const launchResult = await computeClient.runCommand({
+          instanceId: machine.machineId,
+          cmd: 'worker',
+          args,
+          env,
+          detached: true,
+          signal: AbortSignal.timeout(60_000),
+          ...(computeLog
+            ? {
+                onOutput: (event: {
+                  stream: 'stdout' | 'stderr';
+                  data: string;
+                }) => {
+                  void computeLog.append(event.stream, event.data);
+                },
               }
+            : {}),
+          ...(onWorkerExit || computeLog
+            ? {
+                onExit: async ({ exitCode }: { exitCode: number }) => {
+                  await computeLog?.append(
+                    'command',
+                    `worker exited with code ${exitCode}`,
+                  );
 
-              const disposition = await onWorkerExit({ exitCode });
+                  if (!onWorkerExit) {
+                    return;
+                  }
 
-              if (disposition === 'ignore') {
-                return;
+                  const disposition = await onWorkerExit({ exitCode });
+
+                  if (disposition === 'ignore') {
+                    return;
+                  }
+
+                  try {
+                    await cleanupModalInstance({
+                      computeClient,
+                      instanceId: machine.machineId,
+                      phase: 'worker_bootstrap_exit',
+                      error: new Error(
+                        `Detached worker exited before task run #${taskRun.id} started (exit code ${exitCode})`,
+                      ),
+                      logPrefix: 'spawnModalWorker',
+                      onMutation: recordMutation,
+                      ...mutationContext,
+                    });
+                  } finally {
+                    // The restart decision is already durable. Do not strand it if
+                    // provider cleanup fails; the new worker can still be launched
+                    // and the orphaned sandbox remains covered by orphan recovery.
+                    if (disposition === 'restart') {
+                      onWorkerRestart?.();
+                    }
+                  }
+                },
               }
-
-              try {
-                await cleanupModalInstance({
-                  computeClient,
-                  instanceId: machine.machineId,
-                  phase: 'worker_bootstrap_exit',
-                  error: new Error(
-                    `Detached worker exited before task run #${taskRun.id} started (exit code ${exitCode})`,
-                  ),
-                  logPrefix: 'spawnModalWorker',
-                  onMutation: recordMutation,
-                  ...mutationContext,
-                });
-              } finally {
-                // The restart decision is already durable. Do not strand it if
-                // provider cleanup fails; the new worker can still be launched
-                // and the orphaned sandbox remains covered by orphan recovery.
-                if (disposition === 'restart') {
-                  onWorkerRestart?.();
-                }
-              }
-            },
-          }
-        : {}),
-    });
-    await computeLog?.flush();
-
-    // A detached worker must remain alive long enough to claim the run. Route
-    // grace-period exits through the same classifier as later exits so the
-    // first bootstrap failure gets its one durable replacement.
-    if (result.exitCode !== null) {
-      await computeLog?.append(
-        'command',
-        `worker exited with code ${result.exitCode}`,
-      );
-      // Without any captured output the exit is undiagnosable from logs, so
-      // probe the still-alive sandbox before classification/cleanup.
-      const probeDiagnostics =
-        truncateLaunchOutput(result.stdout) ||
-        truncateLaunchOutput(result.stderr)
-          ? undefined
-          : await captureWorkerLaunchDiagnostics(
-              computeClient,
-              machine.machineId,
-            );
-      const launchDiagnostics = buildLaunchOutputSummary(
-        result,
-        probeDiagnostics,
-      );
-      const exitError = buildDetachedWorkerExitError(
-        command,
-        result,
-        probeDiagnostics,
-      );
-
-      if (onWorkerExit) {
-        // The classifier finalizes the run itself on the 'failed' disposition
-        // (this spawn then returns without rethrowing), so the diagnostics
-        // must travel with the exit event to reach the run's error.
-        const disposition = await onWorkerExit({
-          exitCode: result.exitCode,
-          ...(launchDiagnostics ? { launchDiagnostics } : {}),
+            : {}),
         });
+        await computeLog?.flush();
 
-        if (disposition !== 'ignore') {
-          immediateExitDisposition = disposition;
-          throw exitError;
+        // A detached worker must remain alive long enough to claim the run. Route
+        // grace-period exits through the same classifier as later exits so the
+        // first bootstrap failure gets its one durable replacement.
+        if (launchResult.exitCode !== null) {
+          await computeLog?.append(
+            'command',
+            `worker exited with code ${launchResult.exitCode}`,
+          );
+          // Without any captured output the exit is undiagnosable from logs, so
+          // probe the still-alive sandbox before classification/cleanup.
+          const probeDiagnostics =
+            truncateLaunchOutput(launchResult.stdout) ||
+            truncateLaunchOutput(launchResult.stderr)
+              ? undefined
+              : await captureWorkerLaunchDiagnostics(
+                  computeClient,
+                  machine.machineId,
+                );
+          const launchDiagnostics = buildLaunchOutputSummary(
+            launchResult,
+            probeDiagnostics,
+          );
+          const exitError = buildDetachedWorkerExitError(
+            command,
+            launchResult,
+            probeDiagnostics,
+          );
+
+          if (onWorkerExit) {
+            // The classifier finalizes the run itself on the 'failed' disposition
+            // (this spawn then returns without rethrowing), so the diagnostics
+            // must travel with the exit event to reach the run's error.
+            const disposition = await onWorkerExit({
+              exitCode: launchResult.exitCode,
+              ...(launchDiagnostics ? { launchDiagnostics } : {}),
+            });
+
+            if (disposition !== 'ignore') {
+              immediateExitDisposition = disposition;
+              throw exitError;
+            }
+
+            // The worker claimed the run before exiting, so its normal lifecycle
+            // owns terminal state and sandbox cleanup from this point onward.
+          } else {
+            throw exitError;
+          }
         }
 
-        // The worker claimed the run before exiting, so its normal lifecycle
-        // owns terminal state and sandbox cleanup from this point onward.
-      } else {
-        throw exitError;
-      }
-    }
+        await recordMutation({
+          provider: vendor,
+          operation: 'run_command',
+          eventType: 'completed',
+          instanceId: machine.machineId,
+          message: `runCommand launched detached worker ${command} for Modal instance ${machine.machineId}.`,
+          details: buildComputeProviderMutationDetails(mutationContext, {
+            command: 'worker',
+            args,
+            detached: true,
+            phase: 'launch_worker',
+            commandId: launchResult.commandId ?? null,
+            commandOutputLookupSupported:
+              computeClient.capabilities.supportsCommandOutputLookup,
+            exitCode: launchResult.exitCode,
+          }),
+        });
+        await computeLog?.append(
+          'command',
+          launchResult.commandId
+            ? `worker is running as command ${launchResult.commandId}`
+            : 'worker is running',
+        );
 
-    await recordMutation({
-      provider: vendor,
-      operation: 'run_command',
-      eventType: 'completed',
-      instanceId: machine.machineId,
-      message: `runCommand launched detached worker ${command} for Modal instance ${machine.machineId}.`,
-      details: buildComputeProviderMutationDetails(mutationContext, {
-        command: 'worker',
-        args,
-        detached: true,
-        phase: 'launch_worker',
-        commandId: result.commandId ?? null,
-        commandOutputLookupSupported:
-          computeClient.capabilities.supportsCommandOutputLookup,
-        exitCode: result.exitCode,
-      }),
-    });
-    await computeLog?.append(
-      'command',
-      result.commandId
-        ? `worker is running as command ${result.commandId}`
-        : 'worker is running',
+        return launchResult;
+      },
     );
-
-    if (result.commandId) {
-      await db
-        .update(taskRuns)
-        .set({ sandboxCmdId: result.commandId })
-        .where(eq(taskRuns.id, taskRun.id));
-    }
 
     return {
       machineId: machine.machineId,

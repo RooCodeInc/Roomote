@@ -1,6 +1,17 @@
 // pnpm --filter @roomote/cloud-agents test src/server/workflows/__tests__/githubPrReviewComment.test.ts
 
+const { mockFetchIssueComment, mockUpdateIssueComment } = vi.hoisted(() => ({
+  mockFetchIssueComment: vi.fn(),
+  mockUpdateIssueComment: vi.fn(),
+}));
+
+vi.mock('@roomote/github', () => ({
+  Cli: { fetchIssueComment: mockFetchIssueComment },
+  updateIssueComment: mockUpdateIssueComment,
+}));
+
 import {
+  finalizeGithubPrReviewComment,
   buildGithubCommitHref,
   buildInProgressReviewSummaryBody,
   buildReviewMetaFooter,
@@ -312,5 +323,64 @@ describe('buildTerminalReviewSummaryBody', () => {
     });
 
     expect(updated).toContain('- [ ] Surviving finding');
+  });
+});
+
+describe('finalizeGithubPrReviewComment', () => {
+  beforeEach(() => {
+    mockFetchIssueComment.mockReset();
+    mockUpdateIssueComment.mockReset();
+  });
+
+  it('reports a failed comment read instead of pretending nothing was published', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockFetchIssueComment.mockRejectedValueOnce(
+      new Error('gh: HTTP 502: Bad Gateway'),
+    );
+
+    const result = await finalizeGithubPrReviewComment({
+      gitHubToken: 'token',
+      owner: 'owner',
+      repo: 'repo',
+      prNumber: 42,
+      commentId: 456,
+      terminalStatus: 'Review could not be completed.',
+    });
+
+    expect(result).toEqual({
+      finalized: false,
+      fetchFailed: true,
+      commentId: 456,
+    });
+    expect(mockUpdateIssueComment).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Could not read review summary comment 456'),
+    );
+    warn.mockRestore();
+  });
+
+  it('returns the body untouched when the agent already finalized the summary', async () => {
+    const body = [
+      '<!-- roomote-review-summary sha=abc1234 mode=initial version=2 phase=reviewed -->',
+      '<!-- roomote-review-status:start -->',
+      'No code issues found.',
+      '<!-- roomote-review-status:end -->',
+      '<!-- roomote-review-checklist:start -->',
+      '<!-- roomote-review-checklist:end -->',
+      '<sub>Reviewed [abc1234](https://github.com/owner/repo/commit/abc1234)</sub>',
+    ].join('\n');
+    mockFetchIssueComment.mockResolvedValueOnce({ body });
+
+    const result = await finalizeGithubPrReviewComment({
+      gitHubToken: 'token',
+      owner: 'owner',
+      repo: 'repo',
+      prNumber: 42,
+      commentId: 456,
+      terminalStatus: 'Review could not be completed.',
+    });
+
+    expect(result).toEqual({ finalized: false, body });
+    expect(mockUpdateIssueComment).not.toHaveBeenCalled();
   });
 });

@@ -1,12 +1,15 @@
 import type { ModelMessage } from 'ai';
 import {
+  type ChatInitiationOrder,
   and,
   desc,
   db,
   eq,
   inArray,
   isTaskRunFollowUpCandidate,
+  isChatInitiationProvider,
   isNull,
+  recordUserChatInitiationProvider,
   taskRuns,
   tasks,
 } from '@roomote/db/server';
@@ -26,6 +29,8 @@ type FastAgentSessionRecord = {
   id: string;
   userId: string | null;
   owner: FastAgentConversationOwner;
+  privacy?: 'shared' | 'private';
+  privateOwnerUserId?: string | null;
   title: string | null;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
@@ -49,8 +54,10 @@ export async function getOrCreateFastAgentSession({
   conversation,
   sessionId,
   initialTitle,
+  privacy,
   initialModel,
   initialReasoningEffort,
+  chatInitiationOrder,
 }: {
   owner?: FastAgentConversationOwner;
   userId?: string;
@@ -59,24 +66,53 @@ export async function getOrCreateFastAgentSession({
   sessionId?: string;
   /** Title to seed only when this call creates the conversation. */
   initialTitle?: string;
+  privacy?: 'shared' | 'private';
   initialModel?: string;
   initialReasoningEffort?: ReasoningEffort;
+  /** Human turn start order; records the provider only for a new Session. */
+  chatInitiationOrder?: ChatInitiationOrder;
 }): Promise<FastAgentSessionRecord> {
-  return fastAgentConversationRepository.getOrCreate({
+  const session = await fastAgentConversationRepository.getOrCreate({
     ...(owner ? { owner } : {}),
     ...(userId ? { userId } : {}),
     conversation,
     ...(sessionId ? { sessionId } : {}),
     ...(initialTitle ? { initialTitle } : {}),
+    ...(privacy ? { privacy } : {}),
     ...(initialModel !== undefined ? { initialModel } : {}),
     ...(initialReasoningEffort !== undefined ? { initialReasoningEffort } : {}),
   });
+  if (
+    chatInitiationOrder &&
+    session.created &&
+    userId &&
+    isChatInitiationProvider(conversation.surface)
+  ) {
+    await recordUserChatInitiationProvider(
+      userId,
+      conversation.surface,
+      chatInitiationOrder,
+    ).catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to record chat initiation provider: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  }
+  return session;
 }
 
 export async function hasFastAgentSession(
   conversation: FastAgentConversation,
 ): Promise<boolean> {
   return fastAgentConversationRepository.exists(conversation);
+}
+
+export async function getFastAgentSessionOwner(
+  conversation: FastAgentConversation,
+): Promise<FastAgentConversationOwner | null> {
+  const session =
+    await fastAgentConversationRepository.findByConversation(conversation);
+  return session?.owner ?? null;
 }
 
 export async function getActiveFastAgentTasks(

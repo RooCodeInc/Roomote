@@ -101,6 +101,8 @@ vi.mock('../../github/notifyPullRequestTerminalStatus', () => ({
 vi.mock('../../pull-request-fact-sync', () => ({
   scheduleSourceControlPullRequestFactSync:
     mockScheduleSourceControlPullRequestFactSync,
+  toValidDate: (value: string | null | undefined) =>
+    value ? new Date(value) : null,
 }));
 
 vi.mock('../getAdoAutomationTargets', async () => {
@@ -538,7 +540,10 @@ describe('handleAdoPullRequest', () => {
       'acme/Platform/backend',
       42,
       'merged',
-      { host: 'dev.azure.com' },
+      {
+        host: 'dev.azure.com',
+        mergedAt: new Date('2026-07-10T00:00:00.000Z'),
+      },
     );
     expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
       expect.objectContaining({ targetBranch: 'main' }),

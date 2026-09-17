@@ -28,9 +28,6 @@ describe('githubPrReview prompt source', () => {
     );
     expect(workflowContent).not.toContain('task_link_fix_all:');
     expect(workflowContent).not.toContain('fix_issue_base_url:');
-    expect(workflowContent).toContain('therapistModeEnabled?: boolean;');
-    expect(workflowContent).toContain(
-      'linkedWorkItems,\n    therapistModeEnabled,',
-    );
+    expect(workflowContent).not.toContain('therapistModeEnabled');
   });
 });

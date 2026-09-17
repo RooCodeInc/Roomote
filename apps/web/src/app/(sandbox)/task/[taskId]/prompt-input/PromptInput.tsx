@@ -152,17 +152,15 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             : count,
         0,
       ) ?? 0;
-    // The revision is the persisted assistant-message count, matching the
-    // server generation cache: each completed agent turn mints a new query
-    // key (and so a fresh suggestion), while the user's own messages and
-    // UI-only or optimistic events cannot advance it.
+    // Use the latest persisted assistant timestamp rather than a count so the
+    // revision remains monotonic when the bounded transcript window advances.
     const historyRevision =
       taskHistory?.reduce(
-        (count, message) =>
+        (latestTs, message) =>
           message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
           message.text?.trim()
-            ? count + 1
-            : count,
+            ? Math.max(latestTs, message.ts)
+            : latestTs,
         0,
       ) ?? 0;
 
@@ -339,6 +337,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       acceptGhostSuggestion,
       consumeSuggestion,
       handleSuggestionKeyDown,
+      handleSuggestionPointerDown,
     } = useGhostSuggestion({
       suggestion,
       active: !prompt && !sending && isAwaitingHuman,
@@ -497,10 +496,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       async (message: PromptInputMessage) => {
         const text = message.text.trim();
         const hasAttachments = (message.files?.length ?? 0) > 0;
-        const goalCommandMatch = /^\/goal(?:\s+([\s\S]*))?$/i.exec(text);
-        const goalObjective = goalCommandMatch
-          ? (goalCommandMatch[1] ?? '').trim()
-          : null;
         // Keyed off the live pending request rather than the task phase:
         // the phase can report running while the turn is still blocked on
         // the question, and a message here must answer it, not steer.
@@ -514,20 +509,12 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           !taskRun?.taskId ||
           sending
         ) {
-          return;
+          return false;
         }
 
-        if (
-          !shouldAnswerPendingFreeText &&
-          goalObjective !== null &&
-          (!goalObjective || hasAttachments)
-        ) {
-          toast.error(
-            hasAttachments
-              ? 'Goal Mode does not support attachments.'
-              : 'Describe the goal after /goal.',
-          );
-          return;
+        if (!shouldAnswerPendingFreeText && /^\/goal(?:\s|$)/i.test(text)) {
+          toast.error('Start Goal Mode from the Session conversation.');
+          return false;
         }
 
         consumeSuggestion();
@@ -548,11 +535,11 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
               handleMessageSent();
             }
 
-            return;
+            return answered;
           }
 
           const preparedPrompt = await preparePromptAttachments({
-            text: goalObjective ?? text,
+            text,
             attachments: message.files,
           });
 
@@ -569,35 +556,19 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           });
           optimisticClientMessageId = clientMessageId;
 
-          if (goalObjective !== null) {
-            const started = await trpcClient.taskRuns.startGoal.mutate({
-              taskId: taskRun.taskId,
-              goal: { objective: goalObjective },
-              clientMessageId,
-              userImageUrl,
-            });
-
-            if (!started.success) {
-              throw new Error(started.error);
-            }
-          } else {
-            await trpcClient.sandboxSession.sendPrompt.mutate({
-              taskId: taskRun.taskId,
-              prompt: preparedPrompt.text,
-              images: preparedPrompt.images,
-              source: 'web',
-              clientMessageId,
-              userImageUrl,
-              autoSteerWhenQueued: true,
-            });
-          }
-
-          if (goalObjective !== null) {
-            toast.success('Goal Mode enabled');
-          }
+          await trpcClient.sandboxSession.sendPrompt.mutate({
+            taskId: taskRun.taskId,
+            prompt: preparedPrompt.text,
+            images: preparedPrompt.images,
+            source: 'web',
+            clientMessageId,
+            userImageUrl,
+            autoSteerWhenQueued: true,
+          });
 
           handleMessageSent();
         } catch (err) {
+          handlePromptChange(text);
           if (optimisticClientMessageId) {
             const failedClientMessageId = optimisticClientMessageId;
 
@@ -613,6 +584,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           toast.error(
             err instanceof Error ? err.message : 'Failed to send message.',
           );
+          throw err;
         } finally {
           setSending(false);
         }
@@ -712,19 +684,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         );
     }, [applyPromptChange, focusTextarea]);
 
-    // Re-focus the textarea after a message is sent. We use an effect rather
-    // than focusing in handleSubmit because the inner PromptInput component
-    // calls form.reset() *after* handleSubmit's promise resolves, which would
-    // steal focus away from a synchronous .focus() call.
-    const wasSendingRef = useRef(false);
-    useEffect(() => {
-      if (wasSendingRef.current && !sending) {
-        // Delay one frame so the inner form.reset() completes first.
-        requestAnimationFrame(() => focusTextarea());
-      }
-      wasSendingRef.current = sending;
-    }, [sending, focusTextarea]);
-
     // Auto-focus the textarea when recording stops so the user can immediately
     // press Enter / Cmd+Enter to send the dictated text.
     const wasRecordingRef = useRef(false);
@@ -808,6 +767,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         <PromptInputRoot
           onSubmit={handleSubmit}
           accept={ROOMOTE_FILE_ATTACHMENT_ACCEPT}
+          keepFocusOnSubmit
           multiple
         >
           <AttachmentsDisplay />
@@ -840,7 +800,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
                     <button
                       type="button"
                       aria-label="Insert suggested message"
-                      onPointerDown={(event) => event.preventDefault()}
+                      onPointerDown={handleSuggestionPointerDown}
                       onClick={acceptGhostSuggestion}
                       className="mt-4 mr-4 shrink-0 whitespace-nowrap rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
                     >

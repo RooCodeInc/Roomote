@@ -37,9 +37,25 @@ describe('renderAgentMailHtml', () => {
     );
   });
 
+  it('renders maximum-size malformed links in linear time', () => {
+    const markdown = '[label]('
+      .repeat(Math.ceil(AGENTMAIL_MAX_TEXT_LENGTH / 8))
+      .slice(0, AGENTMAIL_MAX_TEXT_LENGTH);
+    const started = performance.now();
+
+    expect(renderAgentMailHtml(markdown)).toBe(`<p>${markdown}</p>`);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
   it('renders headings one size down as h3-h5', () => {
     expect(renderAgentMailHtml('# One\n\n## Two\n\n### Three')).toBe(
       '<h3>One</h3><h4>Two</h4><h5>Three</h5>',
+    );
+  });
+
+  it('parses headings with long whitespace prefixes linearly', () => {
+    expect(renderAgentMailPlainText(`#${'\t'.repeat(20_000)}Heading`)).toBe(
+      'Heading',
     );
   });
 
@@ -101,6 +117,24 @@ describe('renderAgentMailPlainText', () => {
 
   it('strips blockquote markers', () => {
     expect(renderAgentMailPlainText('> quoted line')).toBe('quoted line');
+  });
+
+  it('preserves malformed repeated links without excessive backtracking', () => {
+    const markdown = '[label]('.repeat(12_500);
+
+    expect(renderAgentMailPlainText(markdown)).toBe(markdown);
+  });
+
+  it('parses a heading with a long whitespace prefix in one pass', () => {
+    const markdown = `######${' '.repeat(99_980)}heading`;
+
+    expect(renderAgentMailPlainText(markdown)).toBe('heading');
+  });
+
+  it('keeps unsafe link protocols readable in plain text', () => {
+    expect(renderAgentMailPlainText('[click](javascript:alert)')).toBe(
+      'click (javascript:alert)',
+    );
   });
 });
 

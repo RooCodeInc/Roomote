@@ -25,6 +25,17 @@ import {
 import { loadVoiceWorkspaceContext } from '@/lib/server/voice-context';
 import type { UserAuthSuccess } from '@/types';
 
+import { getVoiceConsentCommand } from '../preferences';
+
+async function assertVoiceConsent(auth: UserAuthSuccess): Promise<void> {
+  if (!auth.cloudEnabled || (await getVoiceConsentCommand(auth))) return;
+
+  throw new TRPCError({
+    code: 'PRECONDITION_FAILED',
+    message: 'Accept voice data sharing before using voice',
+  });
+}
+
 /**
  * Whether live voice conversation is available on this deployment. Voice
  * requires its own `R_VOICE_OPENAI_API_KEY`; without one the UI hides the
@@ -42,6 +53,8 @@ export async function createVoiceLiveSessionCommand(
   auth: UserAuthSuccess,
   input: { sdp: string },
 ): Promise<VoiceLiveSession> {
+  await assertVoiceConsent(auth);
+
   const [apiKey, voiceId] = await Promise.all([
     resolveVoiceOpenAiKey(),
     resolveVoiceId(),
@@ -118,6 +131,8 @@ export async function cleanVoiceTranscriptCommand(
   auth: UserAuthSuccess,
   input: { text: string },
 ): Promise<{ text: string }> {
+  await assertVoiceConsent(auth);
+
   const text = input.text.trim();
 
   if (!(await resolveVoiceOpenAiKey())) {

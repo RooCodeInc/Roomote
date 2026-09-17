@@ -1,5 +1,5 @@
 {
-  "id": "ddf4cd9a-22c5-4d1c-8405-c84364a05fa3",
+  "id": "e8fefa44-0b8c-4f49-9297-133bd99b7de2",
   "prevId": "78faf767-b110-4ac3-966e-07f3ced5db5f",
   "version": "7",
   "dialect": "postgresql",
@@ -4086,18 +4086,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "open_code_projection_hash": {
-          "name": "open_code_projection_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "open_code_projected_through_seq": {
-          "name": "open_code_projected_through_seq",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
         "model": {
           "name": "model",
           "type": "text",
@@ -4387,12 +4375,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "conversation_seq": {
-          "name": "conversation_seq",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
         "turn_id": {
           "name": "turn_id",
           "type": "text",
@@ -4410,12 +4392,6 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true
-        },
-        "observed_at": {
-          "name": "observed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
         },
         "event_type": {
           "name": "event_type",
@@ -4506,49 +4482,6 @@
         },
         "fast_agent_messages_conversation_order_idx": {
           "name": "fast_agent_messages_conversation_order_idx",
-          "columns": [
-            {
-              "expression": "conversation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "conversation_seq",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "fast_agent_messages_conversation_seq_unique": {
-          "name": "fast_agent_messages_conversation_seq_unique",
-          "columns": [
-            {
-              "expression": "conversation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "conversation_seq",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"fast_agent_messages\".\"conversation_seq\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "fast_agent_messages_legacy_order_idx": {
-          "name": "fast_agent_messages_legacy_order_idx",
           "columns": [
             {
               "expression": "conversation_id",
@@ -9252,6 +9185,322 @@
         "sandbox_oidc_targets_owner_required": {
           "name": "sandbox_oidc_targets_owner_required",
           "value": "run_id IS NOT NULL"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.session_attention_notification_messages": {
+      "name": "session_attention_notification_messages",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "notification_id": {
+          "name": "notification_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel_id": {
+          "name": "channel_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "session_attention_notification_messages_route_unique": {
+          "name": "session_attention_notification_messages_route_unique",
+          "columns": [
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "channel_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "message_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "session_attention_notification_messages_thread_idx": {
+          "name": "session_attention_notification_messages_thread_idx",
+          "columns": [
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "channel_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "thread_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "session_attention_notification_messages_notification_id_session_attention_notifications_id_fk": {
+          "name": "session_attention_notification_messages_notification_id_session_attention_notifications_id_fk",
+          "tableFrom": "session_attention_notification_messages",
+          "tableTo": "session_attention_notifications",
+          "columnsFrom": ["notification_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "session_attention_notification_messages_provider_check": {
+          "name": "session_attention_notification_messages_provider_check",
+          "value": "\"session_attention_notification_messages\".\"provider\" in ('discord', 'slack', 'teams', 'telegram', 'agentmail')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.session_attention_notifications": {
+      "name": "session_attention_notifications",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_key": {
+          "name": "event_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lease_token": {
+          "name": "lease_token",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_expires_at": {
+          "name": "lease_expires_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "session_attention_notifications_event_unique": {
+          "name": "session_attention_notifications_event_unique",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "event_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "session_attention_notifications_run_idx": {
+          "name": "session_attention_notifications_run_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "session_attention_notifications_session_id_sessions_id_fk": {
+          "name": "session_attention_notifications_session_id_sessions_id_fk",
+          "tableFrom": "session_attention_notifications",
+          "tableTo": "sessions",
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "session_attention_notifications_task_id_tasks_id_fk": {
+          "name": "session_attention_notifications_task_id_tasks_id_fk",
+          "tableFrom": "session_attention_notifications",
+          "tableTo": "tasks",
+          "columnsFrom": ["task_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "session_attention_notifications_run_id_task_runs_id_fk": {
+          "name": "session_attention_notifications_run_id_task_runs_id_fk",
+          "tableFrom": "session_attention_notifications",
+          "tableTo": "task_runs",
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "session_attention_notifications_user_id_users_id_fk": {
+          "name": "session_attention_notifications_user_id_users_id_fk",
+          "tableFrom": "session_attention_notifications",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "session_attention_notifications_kind_check": {
+          "name": "session_attention_notifications_kind_check",
+          "value": "\"session_attention_notifications\".\"kind\" in ('result_ready', 'input_needed')"
+        },
+        "session_attention_notifications_outcome_check": {
+          "name": "session_attention_notifications_outcome_check",
+          "value": "\"session_attention_notifications\".\"outcome\" IS NULL OR \"session_attention_notifications\".\"outcome\" in ('delivered', 'skipped_present', 'failed')"
         }
       },
       "isRLSEnabled": false

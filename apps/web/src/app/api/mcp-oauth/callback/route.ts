@@ -7,6 +7,7 @@ import {
   mcpConnections,
   deploymentMcpEnablements,
   eq,
+  sessions,
 } from '@roomote/db/server';
 import {
   getMcpIntegration,
@@ -21,6 +22,7 @@ import {
   discoverOAuthEndpoints,
   exchangeCodeForTokens,
   consumeOAuthState,
+  consumeMcpOauthReplay,
   storeTokens,
   getClientInformation,
   updateAuthStatus,
@@ -32,6 +34,8 @@ import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { logger } from '@/lib/server/logger';
 import { captureIntegrationLifecycleEvent } from '@/lib/server/integration-telemetry';
+import { buildRemoteMcpConnectedContinuation } from '@/lib/server/integration-saved-continuation';
+import { replyToFastSessionCommand } from '@/trpc/commands/fast-sessions';
 import {
   hydrateLinearMcpConnectionAfterOauth,
   LinearReplayIdentityMismatchError,
@@ -438,6 +442,47 @@ export async function GET(request: NextRequest) {
         integration.id,
         userId,
       );
+    }
+
+    if (customTarget && oauthState.replayToken) {
+      const replay = await consumeMcpOauthReplay(oauthState.replayToken);
+      if (
+        replay &&
+        replay.userId === userId &&
+        replay.connectionId === resolvedConnectionId &&
+        replay.mcpId === connection.mcpId &&
+        replay.sessionId
+      ) {
+        const ownerSession = await db.query.sessions.findFirst({
+          where: and(
+            eq(sessions.id, replay.sessionId),
+            eq(sessions.ownerKind, 'user'),
+            eq(sessions.ownerUserId, userId),
+          ),
+          columns: {
+            archivedAt: true,
+            fastConversationId: true,
+          },
+        });
+        if (ownerSession?.fastConversationId && !ownerSession.archivedAt) {
+          try {
+            await replyToFastSessionCommand(authResult, {
+              sessionId: ownerSession.fastConversationId,
+              text: buildRemoteMcpConnectedContinuation(customTarget.name),
+            });
+          } catch (continuationError) {
+            logger.error(
+              {
+                event: 'custom_mcp_oauth_continuation_failed',
+                connectionId: resolvedConnectionId,
+                integrationId: connection.mcpId,
+                errorName: getErrorName(continuationError),
+              },
+              'Failed to continue the Fast Session after custom MCP OAuth',
+            );
+          }
+        }
+      }
     }
 
     return redirectToResult({ status: 'connected' });

@@ -1,4 +1,5 @@
 import {
+  fastSessionCapabilityOfferResponseInputSchema,
   replyToFastSessionInputSchema,
   startFastSessionInputSchema,
   updateFastSessionModelSelectionInputSchema,
@@ -43,6 +44,35 @@ describe('Fast session input schemas', () => {
       text: 'Implement this plan',
       conversationId: '11111111-1111-4111-8111-111111111111',
     });
+  });
+
+  it('accepts private mode only on Session creation', () => {
+    expect(
+      startFastSessionInputSchema.parse({
+        text: 'Review private context',
+        privacy: 'private',
+      }),
+    ).toEqual({ text: 'Review private context', privacy: 'private' });
+    expect(
+      replyToFastSessionInputSchema.parse({
+        sessionId: '00000000-0000-4000-8000-000000000000',
+        text: 'Make this private',
+        privacy: 'private',
+      }),
+    ).toEqual({
+      sessionId: '00000000-0000-4000-8000-000000000000',
+      text: 'Make this private',
+    });
+  });
+
+  it('rejects private voice-call creation', () => {
+    expect(() =>
+      startFastSessionInputSchema.parse({
+        text: '',
+        privacy: 'private',
+        voiceCall: true,
+      }),
+    ).toThrow('Private Sessions cannot start as voice calls');
   });
 
   it('rejects too many extracted attachments', () => {
@@ -99,5 +129,28 @@ describe('Fast session input schemas', () => {
       model: 'openrouter/z-ai/glm-5.2',
       reasoningEffort: 'high',
     });
+  });
+
+  it('validates capability offer responses and bounds selected intent', () => {
+    expect(
+      fastSessionCapabilityOfferResponseInputSchema.parse({
+        sessionId: '00000000-0000-4000-8000-000000000000',
+        offerId: 'cap:offer-1',
+        capability: 'starter_work',
+        resolution: 'completed',
+        selectedIds: ['speed-up-ci'],
+      }),
+    ).toMatchObject({
+      capability: 'starter_work',
+      selectedIds: ['speed-up-ci'],
+    });
+    expect(() =>
+      fastSessionCapabilityOfferResponseInputSchema.parse({
+        sessionId: '00000000-0000-4000-8000-000000000000',
+        offerId: 'cap:offer-1',
+        capability: 'credentials',
+        resolution: 'completed',
+      }),
+    ).toThrow();
   });
 });

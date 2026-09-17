@@ -10,6 +10,7 @@ import {
   mcpConnections,
   deploymentMcpEnablements,
   resolveInvocationIdentityMap,
+  taskRuns,
 } from '@roomote/db/server';
 import {
   findLinearDeploymentMcpConnection,
@@ -55,6 +56,7 @@ import { registerRoomoteMemberTools } from './roomote-member-tools';
 import { registerRoomoteCustomAutomationsTool } from './roomote-custom-automations-tool';
 import { registerRoomoteCustomSkillsTool } from './roomote-custom-skills-tool';
 import { registerRoomoteCommunicationTools } from './roomote-communication-tools';
+import { registerRoomotePublicUrlFetchTool } from './roomote-public-url-fetch';
 
 const ROOMOTE_MCP_SERVER_INFO = {
   name: 'roomote-router-mcp',
@@ -398,6 +400,7 @@ function createRoomoteMcpServer(
   actingUserId: string | null,
   toolAuth: McpAuth,
   registerMemberTools: boolean,
+  privateTask: boolean,
 ) {
   const server = new NullableOptionalsMcpServer(ROOMOTE_MCP_SERVER_INFO, {
     instructions: `Use get_about_me for Roomote platform, integration, and getting-started context. Use ${CHAT_MESSAGE_CONTEXT_TOOL.name} for surrounding context from the task communication channel or a referenced Slack/Discord message. Use ${CHAT_CHANNEL_MESSAGES_TOOL.name} for readable history from the task communication channel or an explicitly linked channel.`,
@@ -405,12 +408,15 @@ function createRoomoteMcpServer(
 
   if (registerMemberTools) {
     registerRoomoteMemberTools(server, toolAuth);
-    if (actingUserId) {
+    if (actingUserId && !privateTask) {
       registerRoomoteCommunicationTools(server, actingUserId);
     }
   }
-  registerRoomoteCustomAutomationsTool(server, toolAuth);
-  registerRoomoteCustomSkillsTool(server, toolAuth);
+  if (!privateTask) {
+    registerRoomoteCustomAutomationsTool(server, toolAuth);
+    registerRoomoteCustomSkillsTool(server, toolAuth);
+  }
+  registerRoomotePublicUrlFetchTool(server);
 
   server.registerTool(
     'get_about_me',
@@ -585,11 +591,22 @@ function createRoomoteMcpRouter(options: {
               }
             : rawAuth,
       };
+      const privateTask =
+        rawAuth.tokenType === 'run' && rawAuth.runId
+          ? (
+              await db.query.taskRuns.findFirst({
+                where: eq(taskRuns.id, rawAuth.runId),
+                columns: { id: true },
+                with: { task: { columns: { privacy: true } } },
+              })
+            )?.task?.privacy === 'private'
+          : false;
       const server = createRoomoteMcpServer(
         auth,
         actingUserId,
         toolAuth,
         options.memberTools,
+        privateTask,
       );
 
       await server.connect(transport);

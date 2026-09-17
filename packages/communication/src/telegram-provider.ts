@@ -10,7 +10,10 @@ import type {
 import { UnsupportedCommunicationOperationError } from './provider';
 import { readBoundedResponseBody } from './bounded-response-body';
 import { getTelegramApiBaseUrl } from './telegram-api-base-url';
-import { planTelegramRichMessages } from './telegram-format';
+import {
+  planTelegramRichMessages,
+  type TelegramInputRichMessage,
+} from './telegram-format';
 
 export type TelegramCommunicationProviderOptions = {
   botToken: string;
@@ -64,8 +67,6 @@ type TelegramInlineKeyboardMarkup = {
   >;
 };
 
-type TelegramRichMessage = { html: string };
-
 function buildTelegramReplyMarkup(
   buttons: CommunicationMessageButton[][] | undefined,
 ): TelegramInlineKeyboardMarkup | undefined {
@@ -109,10 +110,6 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     const text = input.text;
     const images = input.images ?? [];
     const threadId = parsePositiveInteger(input.threadId);
-    // Honor an explicit reply target when callers supply one (task closeouts,
-    // launch-failure recovery, onboarding threads). Callers that prefer a
-    // free-floating chronological send simply omit replyToMessageId.
-    const replyToMessageId = parsePositiveInteger(input.replyToMessageId);
     const footerText = input.footerText;
     const hasText = Boolean(text?.trim() || footerText?.trim());
 
@@ -144,11 +141,9 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     for (const [index, chunk] of chunks.entries()) {
       const result = await this.sendRichMessageChunk({
         chatId: input.channelId,
-        richMessage: { html: chunk.html },
+        richMessage: chunk.richMessage,
         threadId,
-        // Reply threading only anchors the first message of a long reply;
-        // buttons attach to the last message so they sit under the content.
-        replyToMessageId: index === 0 ? replyToMessageId : undefined,
+        // Buttons attach to the last message so they sit under the content.
         replyMarkup: index === lastSendIndex ? replyMarkup : undefined,
       });
 
@@ -162,8 +157,6 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
         url: image.url,
         caption: image.altText,
         threadId,
-        replyToMessageId:
-          firstResult === null && index === 0 ? replyToMessageId : undefined,
         replyMarkup:
           chunks.length + index === lastSendIndex ? replyMarkup : undefined,
       });
@@ -195,7 +188,6 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     url: string;
     caption?: string;
     threadId?: number;
-    replyToMessageId?: number;
     replyMarkup?: TelegramInlineKeyboardMarkup;
   }): Promise<{ message_id: number; message_thread_id?: number }> {
     const response = await this.fetchWithRetry(
@@ -209,14 +201,6 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
           ...(params.caption ? { caption: params.caption } : {}),
           ...(params.threadId ? { message_thread_id: params.threadId } : {}),
           ...(params.replyMarkup ? { reply_markup: params.replyMarkup } : {}),
-          ...(params.replyToMessageId
-            ? {
-                reply_parameters: {
-                  message_id: params.replyToMessageId,
-                  allow_sending_without_reply: true,
-                },
-              }
-            : {}),
         }),
       },
       { method: 'sendPhoto', retryNetworkErrors: false },
@@ -237,18 +221,16 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     });
     return this.sendRichMessageChunk({
       chatId: params.chatId,
-      richMessage: { html: chunk!.html },
+      richMessage: chunk!.richMessage,
       threadId: params.threadId,
-      replyToMessageId: params.replyToMessageId,
       replyMarkup: params.replyMarkup,
     });
   }
 
   private async sendRichMessageChunk(params: {
     chatId: string;
-    richMessage: TelegramRichMessage;
+    richMessage: TelegramInputRichMessage;
     threadId?: number;
-    replyToMessageId?: number;
     replyMarkup?: TelegramInlineKeyboardMarkup;
   }): Promise<{ message_id: number; message_thread_id?: number }> {
     const response = await this.fetchWithRetry(
@@ -261,14 +243,6 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
           rich_message: params.richMessage,
           ...(params.threadId ? { message_thread_id: params.threadId } : {}),
           ...(params.replyMarkup ? { reply_markup: params.replyMarkup } : {}),
-          ...(params.replyToMessageId
-            ? {
-                reply_parameters: {
-                  message_id: params.replyToMessageId,
-                  allow_sending_without_reply: true,
-                },
-              }
-            : {}),
         }),
       },
       { method: 'sendRichMessage', retryNetworkErrors: false },
@@ -324,7 +298,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
         body: JSON.stringify({
           chat_id: input.channelId,
           message_id: Number.parseInt(input.messageId, 10),
-          rich_message: { html: chunks[0]!.html },
+          rich_message: chunks[0]!.richMessage,
           link_preview_options: { is_disabled: true },
           reply_markup: buildTelegramReplyMarkup(input.buttons) ?? {
             inline_keyboard: [],
@@ -413,7 +387,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     await this.callBotApi('sendRichMessageDraft', {
       chat_id: chatId,
       draft_id: input.draftId,
-      rich_message: { html: chunk!.html },
+      rich_message: chunk!.richMessage,
       ...(threadId ? { message_thread_id: threadId } : {}),
     });
   }
@@ -560,10 +534,25 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
   async registerCommands(): Promise<void> {
     await this.callBotApi('setMyCommands', {
       commands: [
+        { command: 'new', description: 'Start a fresh task' },
+        {
+          command: 'goal',
+          description: 'Keep working toward an objective',
+        },
+      ],
+      scope: { type: 'all_group_chats' },
+    });
+    await this.callBotApi('setMyCommands', {
+      commands: [
         { command: 'start', description: 'Show welcome and command help' },
         { command: 'help', description: 'Show command help' },
         { command: 'new', description: 'Start a fresh task' },
+        {
+          command: 'goal',
+          description: 'Keep working toward an objective',
+        },
       ],
+      scope: { type: 'all_private_chats' },
     });
   }
 

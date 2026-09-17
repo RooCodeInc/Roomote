@@ -13,17 +13,16 @@ import {
 
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
-import { stagePendingFastSessionLaunch } from '@/lib/pending-fast-session-launch';
-import { sessionPathWithVoiceAutostart } from '@/lib/voice-autostart';
-
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
-import { useStartFastSession } from '@/hooks/task-runs';
+import { useFastSessionLauncher } from '@/hooks/task-runs';
 import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
+import { usePrivateSessionsExperiment } from '@/hooks/usePrivateSessionsExperiment';
 
 import { type PromptInputMessage } from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
 import { useTaskLaunchConfig } from '@/components/tasks/TaskLaunchConfig';
+import { Lock, Switch } from '@/components/system';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
 
@@ -33,21 +32,14 @@ type SubmissionSnapshot = {
   attachmentTexts?: string[];
 };
 
-type FastSessionSubmission = {
-  text: string;
-  images?: string[];
-  attachmentTexts?: string[];
-  model?: string | null;
-  reasoningEffort?: ReasoningEffort | null;
-  /** Open the Session for a voice call; it may start with nothing typed. */
-  voiceCall?: boolean;
-};
-
 type NewTaskFormProps = {
   animate?: boolean;
   onTaskStarted?: () => void;
   initialPrompt?: string;
   placeholder?: string;
+  promptSuggestion?: string;
+  onPromptFocusChange?: (focused: boolean) => void;
+  autoFocus?: boolean;
   textareaMaxHeight?: number;
   promptContainerRef?: Ref<HTMLDivElement>;
 };
@@ -57,6 +49,9 @@ export function NewTaskForm({
   onTaskStarted,
   initialPrompt = '',
   placeholder = DEFAULT_PROMPT_PLACEHOLDER,
+  promptSuggestion,
+  onPromptFocusChange,
+  autoFocus = true,
   textareaMaxHeight,
   promptContainerRef,
 }: NewTaskFormProps) {
@@ -78,62 +73,20 @@ export function NewTaskForm({
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<
     ReasoningEffort | null | undefined
   >(undefined);
+  const [privateSession, setPrivateSession] = useState(
+    searchParams.get('private') === '1',
+  );
+  const { enabled: privateSessionsEnabled } = usePrivateSessionsExperiment();
+  const privateModeActive = privateSessionsEnabled && privateSession;
 
   useEffect(() => setPromptText(initialPromptText), [initialPromptText]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
-  const startFastSessionMutation = useStartFastSession();
-  const fastConversationRetryRef = useRef<{
-    conversationId: string;
-    payloadKey: string;
-  } | null>(null);
-
-  const startFastSession = useCallback(
-    async (
-      payload: FastSessionSubmission,
-      options: { voice?: boolean } = {},
-    ): Promise<void> => {
-      // A second submit while the first is in flight would mint a second
-      // session and orphan one of them.
-      if (startFastSessionMutation.isPending) {
-        return;
-      }
-      const payloadKey = JSON.stringify(payload);
-      const conversationId =
-        fastConversationRetryRef.current?.payloadKey === payloadKey
-          ? fastConversationRetryRef.current.conversationId
-          : crypto.randomUUID();
-      fastConversationRetryRef.current = { conversationId, payloadKey };
-      try {
-        const { sessionId, fastConversationId } =
-          await startFastSessionMutation.mutateAsync({
-            ...payload,
-            conversationId,
-          });
-        if (payload.text || payload.images?.length) {
-          stagePendingFastSessionLaunch(sessionId, {
-            fastConversationId: fastConversationId ?? conversationId,
-            text: payload.text,
-            images: payload.images,
-          });
-        }
-        fastConversationRetryRef.current = null;
-        onTaskStarted?.();
-        router.push(
-          options.voice
-            ? sessionPathWithVoiceAutostart(sessionId)
-            : `/sessions/${sessionId}`,
-        );
-      } catch (error) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : 'Failed to start Fast session',
-        );
-      }
-    },
-    [onTaskStarted, startFastSessionMutation, router],
-  );
+  const {
+    isPending: isFastSessionPending,
+    mutation: startFastSessionMutation,
+    startFastSession,
+  } = useFastSessionLauncher({ onSessionStarted: onTaskStarted });
   const launchTaskModels = useLaunchTaskModels();
   const defaultModelId = environmentIdParam
     ? launchTaskModels.data?.defaultModelId
@@ -197,7 +150,7 @@ export function NewTaskForm({
     ],
   );
 
-  const isBusy = startFastSessionMutation.isPending;
+  const isBusy = isFastSessionPending;
 
   const submitDisabledReason = getTaskLaunchDisabledReason(managedAccess);
 
@@ -237,7 +190,7 @@ export function NewTaskForm({
   const voiceActive = openingVoiceSession;
 
   // Voice only applies to Fast sessions; an environment launch is a task.
-  const showVoice = voiceEnabled && !environmentIdParam;
+  const showVoice = voiceEnabled && !environmentIdParam && !privateModeActive;
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
@@ -268,6 +221,7 @@ export function NewTaskForm({
           images: submission.images,
           attachmentTexts: submission.attachmentTexts,
           model: selectedModelOverrideId,
+          ...(privateModeActive ? { privacy: 'private' as const } : {}),
           ...(selectedReasoningEffort !== undefined
             ? { reasoningEffort: selectedReasoningEffort }
             : {}),
@@ -291,6 +245,7 @@ export function NewTaskForm({
       startFastSession,
       selectedModelOverrideId,
       selectedReasoningEffort,
+      privateModeActive,
     ],
   );
 
@@ -308,7 +263,9 @@ export function NewTaskForm({
         onPromptTextChange={setPromptText}
         onSubmit={handleSubmit}
         placeholder={placeholder}
-        autoFocus
+        promptSuggestion={promptSuggestion}
+        onPromptFocusChange={onPromptFocusChange}
+        autoFocus={autoFocus}
         textareaMaxHeight={textareaMaxHeight}
         animateContainer={false}
         submitWithMetaKey={false}
@@ -319,16 +276,29 @@ export function NewTaskForm({
             : undefined
         }
         tools={
-          <SessionModelSwitcher
-            model={selectedModelOverrideId ?? ''}
-            onModelChange={(model) =>
-              setSelectedModelOverrideId(model || undefined)
-            }
-            reasoningEffort={selectedReasoningEffort ?? null}
-            onReasoningEffortChange={setSelectedReasoningEffort}
-            defaultModelId={defaultModelId}
-            defaultReasoningEffort={defaultReasoningEffort}
-          />
+          <div className="flex items-center gap-2">
+            {!environmentIdParam && privateSessionsEnabled ? (
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Lock className="size-3.5" />
+                <span>Private</span>
+                <Switch
+                  checked={privateSession}
+                  onCheckedChange={setPrivateSession}
+                  aria-label="Start a private Session"
+                />
+              </label>
+            ) : null}
+            <SessionModelSwitcher
+              model={selectedModelOverrideId ?? ''}
+              onModelChange={(model) =>
+                setSelectedModelOverrideId(model || undefined)
+              }
+              reasoningEffort={selectedReasoningEffort ?? null}
+              onReasoningEffortChange={setSelectedReasoningEffort}
+              defaultModelId={defaultModelId}
+              defaultReasoningEffort={defaultReasoningEffort}
+            />
+          </div>
         }
       />
     </div>

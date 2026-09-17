@@ -1,9 +1,11 @@
 import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 const mockEnv = vi.hoisted(() => ({
+  APP_ENV: 'development',
   R_CURATED_INTEGRATIONS_DISABLED: false,
   R_CUSTOM_MCP_DISABLED: false,
   R_GBRAIN_URL: undefined as string | undefined,
+  R_HTTP_INTEGRATIONS_ENABLED: false,
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -81,6 +83,9 @@ const {
 });
 
 vi.mock('@roomote/db/server', () => ({
+  demoSeedDevelopmentIntegration: {
+    id: '00000000-0000-4000-8000-000000000301',
+  },
   db: {
     select: mockSelect,
     query: {
@@ -155,6 +160,15 @@ const consoleWarnSpy = vi
 const consoleErrorSpy = vi
   .spyOn(console, 'error')
   .mockImplementation(() => undefined);
+
+function httpBrokerServers(origin = 'https://api.preview.roomote.run') {
+  return {
+    _roomote_http_integrations: {
+      url: `${origin}/api/mcp/http-integrations`,
+      headers: {},
+    },
+  };
+}
 
 function createCaller(requestUrl?: string) {
   const auth: AuthTokenContext = {
@@ -235,13 +249,16 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnv.R_CURATED_INTEGRATIONS_DISABLED = false;
+    mockEnv.APP_ENV = 'development';
     mockEnv.R_GBRAIN_URL = undefined;
+    mockEnv.R_HTTP_INTEGRATIONS_ENABLED = false;
     mockIsBrainEnabled.mockResolvedValue(false);
     mockFindTaskRun.mockResolvedValue({
       actingUserId: null,
     });
     mockFindEnablements.mockResolvedValue([]);
     mockFindConnections.mockResolvedValue([]);
+    mockFindCustomServers.mockResolvedValue([]);
     mockOrderBy.mockResolvedValue([buildJoinedConnectionRow()]);
   });
 
@@ -250,9 +267,40 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
 
     const result = await createCaller().getMcpServerConfigs();
 
-    expect(result).toEqual({ servers: {} });
+    expect(result).toEqual({ servers: httpBrokerServers('') });
     expect(mockSelect).not.toHaveBeenCalled();
     expect(mockGetValidAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('always exposes only the reserved HTTP descriptor independently of the operator manifest flag', async () => {
+    mockEnv.R_CURATED_INTEGRATIONS_DISABLED = true;
+    const caller = createJobCaller('https://api.example.com/trpc');
+    expect(await caller.getMcpServerConfigs()).toEqual({
+      servers: httpBrokerServers('https://api.example.com'),
+    });
+    mockEnv.R_HTTP_INTEGRATIONS_ENABLED = true;
+    const expected = {
+      _roomote_http_integrations: {
+        url: 'https://api.example.com/api/mcp/http-integrations',
+        headers: {},
+      },
+    };
+    expect(await caller.getMcpServerConfigs()).toEqual({ servers: expected });
+    expect(
+      await resolveUserMcpServerConfigs({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).toEqual(expected);
+    expect(mockGetValidAccessToken).not.toHaveBeenCalled();
+    mockEnv.R_HTTP_INTEGRATIONS_ENABLED = false;
+    expect(await caller.getMcpServerConfigs()).toEqual({ servers: expected });
+    expect(
+      await resolveUserMcpServerConfigs({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).toEqual(expected);
   });
 
   it('includes the member-capable Roomote MCP for Fast user sessions', async () => {
@@ -268,6 +316,95 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
       url: 'https://api.preview.roomote.run/mcp',
       headers: {},
     });
+  });
+
+  it('makes enabled keyless Exa available to Fast without a connection', async () => {
+    mockOrderBy.mockResolvedValue([buildEnabledOnlyRow('exa')]);
+
+    const result = await resolveUserMcpServerConfigs({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.preview.roomote.run',
+    });
+
+    expect(result.exa).toEqual({
+      url: 'https://api.preview.roomote.run/api/mcp/exa',
+      headers: { 'X-MCP-Client': 'Roomote' },
+      cacheRevision: expect.any(String),
+    });
+    expect(JSON.stringify(result)).not.toContain('exa-secret');
+  });
+
+  it('makes enabled keyless Exa available to coding tasks', async () => {
+    mockOrderBy.mockResolvedValue([buildEnabledOnlyRow('exa')]);
+
+    const result = await createCaller(
+      'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
+    ).getMcpServerConfigs();
+
+    expect(result.servers.exa).toEqual({
+      url: 'https://api.preview.roomote.run/api/mcp/exa',
+      headers: { 'X-MCP-Client': 'Roomote' },
+    });
+    expect(mockGetValidAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('does not expose Exa without an enabled row', async () => {
+    mockOrderBy.mockResolvedValue([]);
+
+    const fast = await resolveUserMcpServerConfigs({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.preview.roomote.run',
+    });
+    const codingTask = await createCaller(
+      'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
+    ).getMcpServerConfigs();
+
+    expect(fast).not.toHaveProperty('exa');
+    expect(codingTask.servers).not.toHaveProperty('exa');
+  });
+
+  it('routes the seeded development fixture to the local inert adapter', async () => {
+    mockFindCustomServers.mockResolvedValue([
+      {
+        id: '00000000-0000-4000-8000-000000000301',
+        name: 'Development fixtures',
+        url: 'http://127.0.0.1/development-fixtures',
+        stdio: null,
+        authType: 'none',
+        updatedAt: new Date('2026-09-16T00:00:00.000Z'),
+      },
+    ]);
+
+    const result = await resolveUserMcpServerConfigs({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.preview.roomote.run',
+    });
+
+    expect(result['Development fixtures']).toEqual({
+      url: 'https://api.preview.roomote.run/api/mcp/development-fixtures',
+      headers: {},
+      cacheRevision: '1789516800000',
+    });
+  });
+
+  it('does not expose a stale development fixture outside development', async () => {
+    mockEnv.APP_ENV = 'production';
+    mockFindCustomServers.mockResolvedValue([
+      {
+        id: '00000000-0000-4000-8000-000000000301',
+        name: 'Development fixtures',
+        url: 'http://127.0.0.1/development-fixtures',
+        stdio: null,
+        authType: 'none',
+        updatedAt: new Date(),
+      },
+    ]);
+
+    const result = await resolveUserMcpServerConfigs({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+    expect(result).not.toHaveProperty('Development fixtures');
   });
 
   it('carries deployment-disabled tools with the resolved server config', async () => {
@@ -348,6 +485,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
             'X-MCP-Client': 'Roomote',
           },
         },
+        ...httpBrokerServers(),
       },
     });
     expect(JSON.stringify(result)).not.toContain('notion-secret');
@@ -401,6 +539,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
               'X-MCP-Client': 'Roomote',
             },
           },
+          ...httpBrokerServers(),
         },
       });
       expect(JSON.stringify(result)).not.toContain(accessToken);
@@ -429,6 +568,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
             'X-MCP-Client': 'Roomote',
           },
         },
+        ...httpBrokerServers(),
       },
     });
     expect(mockSelect).toHaveBeenCalledTimes(1);
@@ -444,7 +584,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       '[getMcpServerConfigs] Final resolved server keys:',
-      ['posthog'],
+      ['posthog', '_roomote_http_integrations'],
     );
     expect(JSON.stringify(result)).not.toContain('posthog-raw-access-token');
   });
@@ -479,6 +619,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
             'X-MCP-Client': 'Roomote',
           },
         },
+        ...httpBrokerServers(),
       },
     });
   });
@@ -509,6 +650,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
             'X-MCP-Client': 'Roomote',
           },
         },
+        ...httpBrokerServers(),
       },
     });
   });
@@ -540,6 +682,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
             'X-MCP-Client': 'Roomote',
           },
         },
+        ...httpBrokerServers(),
       },
     });
   });
@@ -570,9 +713,42 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
             'X-MCP-Client': 'Roomote',
           },
         },
+        ...httpBrokerServers(),
       },
     });
     expect(JSON.stringify(result)).not.toContain('enc:secret');
+  });
+
+  it('returns Exa proxy config without exposing the API key', async () => {
+    mockOrderBy.mockResolvedValue([
+      buildJoinedConnectionRow({
+        id: 'conn-exa',
+        userId: null,
+        mcpId: 'exa',
+        authConfig: {
+          type: 'exa',
+          encryptedApiKey: 'enc:exa-secret',
+        },
+      }),
+    ]);
+
+    const result = await createCaller(
+      'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
+    ).getMcpServerConfigs();
+
+    expect(getValidAccessToken).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      servers: {
+        exa: {
+          url: 'https://api.preview.roomote.run/api/mcp/exa',
+          headers: {
+            'X-MCP-Client': 'Roomote',
+          },
+        },
+        ...httpBrokerServers(),
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('exa-secret');
   });
 
   it('never delivers a credential-only ElevenLabs connection to agents', async () => {
@@ -595,7 +771,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
 
     // Credential-only: no MCP server, and the secret never leaves the
     // control plane toward a task sandbox.
-    expect(result).toEqual({ servers: {} });
+    expect(result).toEqual({ servers: httpBrokerServers() });
     expect(JSON.stringify(result)).not.toContain('enc:secret');
     expect(JSON.stringify(result)).not.toContain('v1');
   });
@@ -627,6 +803,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
             'X-MCP-Client': 'Roomote',
           },
         },
+        ...httpBrokerServers(),
       },
     });
   });
@@ -658,6 +835,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
             'X-MCP-Client': 'Roomote',
           },
         },
+        ...httpBrokerServers(),
       },
     });
     expect(JSON.stringify(result)).not.toContain('neon-raw-access-token');
@@ -690,6 +868,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
             'X-MCP-Client': 'Roomote',
           },
         },
+        ...httpBrokerServers(),
       },
     });
     expect(JSON.stringify(result)).not.toContain('jira-raw-access-token');
@@ -722,6 +901,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
             'X-MCP-Client': 'Roomote',
           },
         },
+        ...httpBrokerServers(),
       },
     });
     expect(JSON.stringify(result)).not.toContain('supabase-raw-access-token');
@@ -738,6 +918,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
             'X-MCP-Client': 'Roomote',
           },
         },
+        ...httpBrokerServers(''),
       },
     });
   });
@@ -753,6 +934,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
 
     expect(result).toEqual({
       servers: {
+        ...httpBrokerServers(),
         notion: {
           url: 'https://api.preview.roomote.run/api/mcp/notion',
           headers: {
@@ -782,7 +964,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
       'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
     ).getMcpServerConfigs();
 
-    expect(result).toEqual({ servers: {} });
+    expect(result).toEqual({ servers: httpBrokerServers() });
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       '[getMcpServerConfigs] Missing upstream URL for OAuth-backed MCP notion, skipping',
     );
@@ -1022,6 +1204,7 @@ describe('custom MCP server delivery', () => {
     mockFindConnectionFirst.mockResolvedValue(undefined);
     mockEnv.R_CURATED_INTEGRATIONS_DISABLED = false;
     mockEnv.R_CUSTOM_MCP_DISABLED = false;
+    mockEnv.R_HTTP_INTEGRATIONS_ENABLED = false;
   });
 
   const remoteRow = {
@@ -1032,6 +1215,42 @@ describe('custom MCP server delivery', () => {
     stdio: null,
     enabled: true,
   };
+
+  it.each([false, true])(
+    'preserves persisted http-integrations custom delivery with operator manifest enabled=%s',
+    async (enabled) => {
+      mockEnv.R_CURATED_INTEGRATIONS_DISABLED = true;
+      mockEnv.R_HTTP_INTEGRATIONS_ENABLED = enabled;
+      mockFindCustomServers.mockResolvedValue([
+        { ...remoteRow, name: 'http-integrations' },
+      ]);
+      const expected = {
+        'http-integrations': {
+          url: 'https://api.example.com/api/mcp/custom/server-uuid-1',
+          headers: { 'X-MCP-Client': 'Roomote' },
+        },
+        ...httpBrokerServers('https://api.example.com'),
+      };
+
+      expect(
+        await createJobCaller(
+          'https://api.example.com/trpc',
+        ).getMcpServerConfigs(),
+      ).toEqual({ servers: expected });
+      expect(
+        await resolveUserMcpServerConfigs({
+          userId: 'user-1',
+          apiBaseUrl: 'https://api.example.com',
+        }),
+      ).toEqual({
+        ...expected,
+        'http-integrations': {
+          ...expected['http-integrations'],
+          cacheRevision: '0:',
+        },
+      });
+    },
+  );
 
   it('delivers custom proxy entries even when curated integrations are disabled', async () => {
     mockEnv.R_CURATED_INTEGRATIONS_DISABLED = true;
@@ -1109,7 +1328,9 @@ describe('custom MCP server delivery', () => {
       'https://app.example.com/api/trpc/x',
     ).getMcpServerConfigs();
 
-    expect(Object.keys(result.servers)).toHaveLength(0);
+    expect(result.servers).toEqual(
+      httpBrokerServers('https://app.example.com'),
+    );
   });
 });
 

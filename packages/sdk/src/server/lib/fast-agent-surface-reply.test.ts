@@ -113,6 +113,8 @@ import {
   fastAgentConversations,
   fastAgentProviderMessages,
   fastAgentMessages,
+  ensureSessionForFastConversation,
+  getSessionGoal,
   slackInstallations,
   userFactory,
 } from '@roomote/db/server';
@@ -122,6 +124,7 @@ import {
   continueFastAgentSurfaceReply,
   continueFastAgentSurfaceReplyWithLock,
   queueFastAgentSurfaceReply,
+  startFastSessionGoal,
 } from './fast-agent-surface-reply';
 import { FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS } from './fast-agent-telegram-activity';
 
@@ -333,7 +336,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       currentMessageId: '78',
     });
     delivery!.adapter.activity?.updateTitle?.('Fix generated Fast title', {
-      category: 'fix',
+      iconEmoji: '🦠',
     });
     await delivery!.adapter.activity?.dispose();
 
@@ -343,13 +346,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       name: 'Fix generated Fast title',
       iconCustomEmojiId: 'bug-icon',
     });
-    expect(mocks.telegramResolveForumTopicIcon).toHaveBeenCalledWith([
-      '🦠',
-      '🔎',
-      '💡',
-      '💬',
-      '📝',
-    ]);
+    expect(mocks.telegramResolveForumTopicIcon).toHaveBeenCalledWith(['🦠']);
   });
 
   it('does not rename a user-owned Telegram topic', async () => {
@@ -505,6 +502,11 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     mocks.admitHumanFollowUp.mockRejectedValueOnce(
       new Error('database unavailable'),
     );
+    const deliveryConversation = {
+      surface: 'web' as const,
+      workspaceId: 'notification',
+      conversationId: 'reply-route',
+    };
 
     await expect(
       queueFastAgentSurfaceReply({
@@ -513,10 +515,45 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         senderDisplayName: 'Matt',
         question: 'Follow up',
         currentMessageId: 'web-message-1',
+        deliveryConversation,
       }),
     ).rejects.toThrow('database unavailable');
     expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
-      expect.objectContaining({ forceQueue: true }),
+      expect.objectContaining({
+        forceQueue: true,
+        event: expect.objectContaining({ deliveryConversation }),
+      }),
+    );
+  });
+
+  it('persists the goal on the unified Session before admitting the Fast turn', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'web',
+    });
+    const session = await ensureSessionForFastConversation(db, conversation.id);
+
+    await expect(
+      startFastSessionGoal({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Matt',
+        objective: 'Ship the complete release',
+        currentMessageId: 'goal-message-1',
+      }),
+    ).resolves.toMatchObject({ success: true });
+
+    await expect(getSessionGoal(session.id)).resolves.toMatchObject({
+      objective: 'Ship the complete release',
+      status: 'active',
+    });
+    expect(mocks.admitHumanFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          question: 'Ship the complete release',
+        }),
+      }),
     );
   });
 

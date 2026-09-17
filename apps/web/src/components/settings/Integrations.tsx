@@ -2,7 +2,9 @@
 
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import { usePathname, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { toast } from 'sonner';
 
 import {
@@ -27,6 +29,7 @@ import {
   useDisconnectMcp,
   useGrafanaConnection,
   useGranolaConnection,
+  useExaConnection,
   useElevenLabsConnection,
   useVoiceConnection,
   useEffectiveMcpIntegrations,
@@ -37,6 +40,8 @@ import {
   useSaveRipplingConnection,
   useSaveGrafanaConnection,
   useSaveGranolaConnection,
+  useSaveExaConnection,
+  useRemoveExaApiKey,
   useSaveElevenLabsConnection,
   useSaveVoiceConnection,
   usePreviewVoice,
@@ -50,17 +55,20 @@ import {
 } from '@/hooks/mcp-connections';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import {
+  IntegrationListHeader,
+  IntegrationListRow,
   IntegrationSection,
-  splitIntegrationItems,
   type IntegrationItem,
 } from './integration-card';
 import { useCustomMcpServers } from './CustomMcpServers';
+import { useYourIntegrations } from './YourIntegrations';
 import {
   saveAsanaConnectionSchema,
   saveNotionConnectionSchema,
   saveRipplingConnectionSchema,
   saveGrafanaConnectionSchema,
   saveGranolaConnectionSchema,
+  saveExaConnectionSchema,
   saveElevenLabsConnectionSchema,
   saveVoiceConnectionSchema,
   saveSnowflakeConnectionSchema,
@@ -72,7 +80,10 @@ import {
   Alert,
   AlertDescription,
   AlertTitle,
+  BasicTooltip,
   Button,
+  Card,
+  CardContent,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -91,9 +102,12 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
+  Skeleton,
   Spinner,
   Textarea,
+  Trash2,
   TriangleAlert,
+  Wrench,
 } from '@/components/system';
 import { McpToolManagementDialog } from './McpToolManagementDialog';
 import { McpIcon } from './McpIcon';
@@ -110,6 +124,7 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect dashboards, alert rules, live alert state, annotations, and data sources.',
   granola:
     'Roomote will use one deployment-wide Granola connection to browse meeting notes, transcripts, decisions, and action items.',
+  exa: 'Roomote will enable Exa with free keyless web search and page fetching. You can add a deployment API key separately for authenticated access and Exa Agent.',
   elevenlabs:
     'Roomote will use one deployment-wide ElevenLabs connection to narrate feature-demo videos. The key stays on the control plane; agents get no ElevenLabs tools.',
   voice:
@@ -210,6 +225,10 @@ type GranolaFormState = {
   apiKey: string;
 };
 
+type ExaFormState = {
+  apiKey: string;
+};
+
 type ElevenLabsFormState = {
   apiKey: string;
   voiceId: string;
@@ -279,6 +298,12 @@ function buildEmptyRipplingForm(): RipplingFormState {
 }
 
 function buildEmptyGranolaForm(): GranolaFormState {
+  return {
+    apiKey: '',
+  };
+}
+
+function buildEmptyExaForm(): ExaFormState {
   return {
     apiKey: '',
   };
@@ -433,6 +458,18 @@ function getGranolaFieldErrors(
   };
 }
 
+function getExaFieldErrors(
+  result: ReturnType<typeof saveExaConnectionSchema.safeParse>,
+): Partial<Record<keyof ExaFormState, string[]>> {
+  if (result.success) {
+    return {};
+  }
+
+  return {
+    apiKey: result.error.flatten().fieldErrors.apiKey,
+  };
+}
+
 function getVoiceFieldErrors(
   result: ReturnType<typeof saveVoiceConnectionSchema.safeParse>,
 ): Partial<Record<keyof VoiceFormState, string[]>> {
@@ -569,6 +606,37 @@ function buildAdminConfiguredIntegrationItem({
       : undefined,
     isPending,
     status,
+    configureAction: canConfigure
+      ? {
+          label: 'Configure',
+          ariaLabel: `Configure ${integration.name}`,
+          onAction: openDialog,
+          isPending: isPending || (dialogOpen && connectionPending),
+          icon: <Pencil />,
+        }
+      : null,
+    manageToolsAction:
+      canManageTools &&
+      enabled &&
+      integration.serverMode !== 'native' &&
+      integration.serverMode !== 'credential_only'
+        ? {
+            label: 'Manage available tools',
+            ariaLabel: `Manage ${integration.name} tools`,
+            onAction: openToolDialog,
+            isPending: false,
+            icon: <Wrench />,
+          }
+        : undefined,
+    removeAction:
+      canConfigure && enabled
+        ? {
+            label: 'Remove',
+            ariaLabel: `Remove ${integration.name}`,
+            onAction: disconnectIntegration,
+            isPending,
+          }
+        : undefined,
     headerAction:
       canConfigure && connection != null
         ? {
@@ -589,7 +657,7 @@ function buildAdminConfiguredIntegrationItem({
             ariaLabel: `Manage ${integration.name} tools`,
             onAction: openToolDialog,
             isPending: false,
-            icon: <Settings2 className="size-4" />,
+            icon: <Wrench className="size-4" />,
           }
         : undefined,
     onAction: canConfigure
@@ -603,20 +671,6 @@ function buildAdminConfiguredIntegrationItem({
         }
       : undefined,
   };
-}
-
-function AddCustomMcpServerBar({ onAdd }: { onAdd: () => void }) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-border/70 px-4 py-3">
-      <p className="text-sm text-muted-foreground">
-        Not in the catalog? Connect your own MCP server, remote or local.
-      </p>
-      <Button type="button" variant="secondary" size="sm" onClick={onAdd}>
-        <Plus />
-        Add custom server
-      </Button>
-    </div>
-  );
 }
 
 function DeepLinkEnableDialog({
@@ -676,6 +730,7 @@ function AdminConfiguredIntegrationDialog({
   isLoading,
   description,
   loadingMessage,
+  title,
   submitLabel,
   onSubmit,
   children,
@@ -688,11 +743,13 @@ function AdminConfiguredIntegrationDialog({
   isLoading: boolean;
   description: ReactNode;
   loadingMessage?: string;
+  title?: string;
   submitLabel?: string;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   children: ReactNode;
 }) {
-  const dialogTitle = `${isEditing ? 'Edit' : 'Connect'} ${integrationName}`;
+  const dialogTitle =
+    title ?? `${isEditing ? 'Edit' : 'Connect'} ${integrationName}`;
   const resolvedLoadingMessage =
     loadingMessage ?? 'Loading connection settings...';
   const resolvedSubmitLabel =
@@ -700,7 +757,7 @@ function AdminConfiguredIntegrationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg">
+      <DialogContent size="xl">
         <DialogHeader>
           <DialogTitle>{dialogTitle}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -733,6 +790,38 @@ function AdminConfiguredIntegrationDialog({
   );
 }
 
+function getFieldErrorAttributes(fieldId: string, errors?: string[]) {
+  const hasError = Boolean(errors?.length);
+
+  return {
+    'aria-invalid': hasError || undefined,
+    'aria-describedby': hasError ? `${fieldId}-error` : undefined,
+    'data-invalid': hasError ? 'true' : undefined,
+  } as const;
+}
+
+function FieldError({
+  fieldId,
+  errors,
+}: {
+  fieldId: string;
+  errors?: string[];
+}) {
+  if (!errors?.length) {
+    return null;
+  }
+
+  return (
+    <p
+      id={`${fieldId}-error`}
+      className="text-sm text-destructive"
+      role="alert"
+    >
+      {errors[0]}
+    </p>
+  );
+}
+
 function SnowflakeConnectionFields({
   form,
   fieldErrors,
@@ -760,15 +849,17 @@ function SnowflakeConnectionFields({
               placeholder="xy12345.us-east-1"
               value={form.account}
               onChange={(event) => onFieldChange('account', event.target.value)}
-              data-invalid={fieldErrors.account ? 'true' : undefined}
+              {...getFieldErrorAttributes(
+                'snowflake-account',
+                fieldErrors.account,
+              )}
               className={fieldClassName}
               data-1p-ignore
             />
-            {fieldErrors.account ? (
-              <p className="text-sm text-destructive">
-                {fieldErrors.account[0]}
-              </p>
-            ) : null}
+            <FieldError
+              fieldId="snowflake-account"
+              errors={fieldErrors.account}
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="snowflake-username">Username</Label>
@@ -779,15 +870,17 @@ function SnowflakeConnectionFields({
               onChange={(event) =>
                 onFieldChange('username', event.target.value)
               }
-              data-invalid={fieldErrors.username ? 'true' : undefined}
+              {...getFieldErrorAttributes(
+                'snowflake-username',
+                fieldErrors.username,
+              )}
               className={fieldClassName}
               data-1p-ignore
             />
-            {fieldErrors.username ? (
-              <p className="text-sm text-destructive">
-                {fieldErrors.username[0]}
-              </p>
-            ) : null}
+            <FieldError
+              fieldId="snowflake-username"
+              errors={fieldErrors.username}
+            />
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label htmlFor="snowflake-private-key">Private Key (PEM)</Label>
@@ -799,7 +892,10 @@ function SnowflakeConnectionFields({
               onChange={(event) =>
                 onFieldChange('privateKey', event.target.value)
               }
-              data-invalid={fieldErrors.privateKey ? 'true' : undefined}
+              {...getFieldErrorAttributes(
+                'snowflake-private-key',
+                fieldErrors.privateKey,
+              )}
               className={fieldClassName}
               data-1p-ignore
             />
@@ -812,11 +908,10 @@ function SnowflakeConnectionFields({
                 Leave blank to keep the existing private key.
               </p>
             ) : null}
-            {fieldErrors.privateKey ? (
-              <p className="text-sm text-destructive">
-                {fieldErrors.privateKey[0]}
-              </p>
-            ) : null}
+            <FieldError
+              fieldId="snowflake-private-key"
+              errors={fieldErrors.privateKey}
+            />
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label htmlFor="snowflake-private-key-passphrase">
@@ -829,20 +924,20 @@ function SnowflakeConnectionFields({
               onChange={(event) =>
                 onFieldChange('privateKeyPassphrase', event.target.value)
               }
-              data-invalid={
-                fieldErrors.privateKeyPassphrase ? 'true' : undefined
-              }
+              {...getFieldErrorAttributes(
+                'snowflake-private-key-passphrase',
+                fieldErrors.privateKeyPassphrase,
+              )}
               className={fieldClassName}
               data-1p-ignore
             />
             <p className="text-sm text-muted-foreground">
               Only needed if your private key is encrypted.
             </p>
-            {fieldErrors.privateKeyPassphrase ? (
-              <p className="text-sm text-destructive">
-                {fieldErrors.privateKeyPassphrase[0]}
-              </p>
-            ) : null}
+            <FieldError
+              fieldId="snowflake-private-key-passphrase"
+              errors={fieldErrors.privateKeyPassphrase}
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="snowflake-role">Role</Label>
@@ -851,13 +946,11 @@ function SnowflakeConnectionFields({
               placeholder="ANALYST"
               value={form.role}
               onChange={(event) => onFieldChange('role', event.target.value)}
-              data-invalid={fieldErrors.role ? 'true' : undefined}
+              {...getFieldErrorAttributes('snowflake-role', fieldErrors.role)}
               className={fieldClassName}
               data-1p-ignore
             />
-            {fieldErrors.role ? (
-              <p className="text-sm text-destructive">{fieldErrors.role[0]}</p>
-            ) : null}
+            <FieldError fieldId="snowflake-role" errors={fieldErrors.role} />
           </div>
         </div>
       </div>
@@ -893,7 +986,10 @@ function AsanaConnectionFields({
           placeholder="0/1234567890abcdef..."
           value={form.accessToken}
           onChange={(event) => onFieldChange('accessToken', event.target.value)}
-          data-invalid={fieldErrors.accessToken ? 'true' : undefined}
+          {...getFieldErrorAttributes(
+            'asana-access-token',
+            fieldErrors.accessToken,
+          )}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -918,11 +1014,10 @@ function AsanaConnectionFields({
             Leave blank to keep the existing token.
           </p>
         ) : null}
-        {fieldErrors.accessToken ? (
-          <p className="text-sm text-destructive">
-            {fieldErrors.accessToken[0]}
-          </p>
-        ) : null}
+        <FieldError
+          fieldId="asana-access-token"
+          errors={fieldErrors.accessToken}
+        />
       </div>
       {formError ? (
         <p className="text-sm text-destructive">{formError}</p>
@@ -961,9 +1056,10 @@ function NotionConnectionFields({
           onChange={(event) =>
             onFieldChange('internalIntegrationSecret', event.target.value)
           }
-          data-invalid={
-            fieldErrors.internalIntegrationSecret ? 'true' : undefined
-          }
+          {...getFieldErrorAttributes(
+            'notion-internal-integration-secret',
+            fieldErrors.internalIntegrationSecret,
+          )}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -990,11 +1086,10 @@ function NotionConnectionFields({
             Leave blank to keep the existing secret.
           </p>
         ) : null}
-        {fieldErrors.internalIntegrationSecret ? (
-          <p className="text-sm text-destructive">
-            {fieldErrors.internalIntegrationSecret[0]}
-          </p>
-        ) : null}
+        <FieldError
+          fieldId="notion-internal-integration-secret"
+          errors={fieldErrors.internalIntegrationSecret}
+        />
       </div>
       {formError ? (
         <p className="text-sm text-destructive">{formError}</p>
@@ -1028,7 +1123,10 @@ function RipplingConnectionFields({
           type="password"
           value={form.apiToken}
           onChange={(event) => onFieldChange('apiToken', event.target.value)}
-          data-invalid={fieldErrors.apiToken ? 'true' : undefined}
+          {...getFieldErrorAttributes(
+            'rippling-api-token',
+            fieldErrors.apiToken,
+          )}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -1046,9 +1144,10 @@ function RipplingConnectionFields({
             Leave blank to keep and revalidate the existing token.
           </p>
         ) : null}
-        {fieldErrors.apiToken ? (
-          <p className="text-sm text-destructive">{fieldErrors.apiToken[0]}</p>
-        ) : null}
+        <FieldError
+          fieldId="rippling-api-token"
+          errors={fieldErrors.apiToken}
+        />
       </div>
       {formError ? (
         <p className="text-sm text-destructive">{formError}</p>
@@ -1083,7 +1182,10 @@ function XConnectionFields({
           placeholder="AAAAAAAAAAAAAAAAAAAAA..."
           value={form.bearerToken}
           onChange={(event) => onFieldChange('bearerToken', event.target.value)}
-          data-invalid={fieldErrors.bearerToken ? 'true' : undefined}
+          {...getFieldErrorAttributes(
+            'x-bearer-token',
+            fieldErrors.bearerToken,
+          )}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -1109,11 +1211,7 @@ function XConnectionFields({
             Leave blank to keep the existing token.
           </p>
         ) : null}
-        {fieldErrors.bearerToken ? (
-          <p className="text-sm text-destructive">
-            {fieldErrors.bearerToken[0]}
-          </p>
-        ) : null}
+        <FieldError fieldId="x-bearer-token" errors={fieldErrors.bearerToken} />
       </div>
       {formError ? (
         <p className="text-sm text-destructive">{formError}</p>
@@ -1122,18 +1220,26 @@ function XConnectionFields({
   );
 }
 
-function GranolaConnectionFields({
+function ApiKeyConnectionFields({
+  fieldId,
+  label,
+  placeholder,
   form,
   fieldErrors,
   formError,
   allowBlankApiKey,
+  help,
   onFieldChange,
 }: {
-  form: GranolaFormState;
-  fieldErrors: Partial<Record<keyof GranolaFormState, string[]>>;
+  fieldId: string;
+  label: string;
+  placeholder: string;
+  form: { apiKey: string };
+  fieldErrors: { apiKey?: string[] };
   formError: string | null;
   allowBlankApiKey: boolean;
-  onFieldChange: (field: keyof GranolaFormState, value: string) => void;
+  help: ReactNode;
+  onFieldChange: (field: 'apiKey', value: string) => void;
 }) {
   const fieldClassName =
     'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
@@ -1141,43 +1247,95 @@ function GranolaConnectionFields({
   return (
     <>
       <div className="space-y-2">
-        <Label htmlFor="granola-api-key">Granola API Key</Label>
+        <Label htmlFor={fieldId}>{label}</Label>
         <Input
-          id="granola-api-key"
+          id={fieldId}
           type="password"
-          placeholder="Enter your Granola API key"
+          placeholder={placeholder}
           value={form.apiKey}
           onChange={(event) => onFieldChange('apiKey', event.target.value)}
-          data-invalid={fieldErrors.apiKey ? 'true' : undefined}
+          {...getFieldErrorAttributes(fieldId, fieldErrors.apiKey)}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
           data-1p-ignore
         />
-        <p className="text-sm text-muted-foreground">
-          We strongly recommend a Granola workspace API key. Workspace keys can
-          read public notes and spaces where &quot;Allow Granola API
-          access&quot; is enabled. New spaces enable API access by default, so
-          admins should review space settings before connecting.
-        </p>
-        <p className="text-sm text-muted-foreground">
-          You can also use a personal API key with Public notes selected and
-          Personal notes left unchecked.
-        </p>
+        {help}
         {allowBlankApiKey ? (
           <p className="text-sm text-muted-foreground">
             Leave blank to keep the existing API key.
           </p>
         ) : null}
-        {fieldErrors.apiKey ? (
-          <p className="text-sm text-destructive">{fieldErrors.apiKey[0]}</p>
-        ) : null}
+        <FieldError fieldId={fieldId} errors={fieldErrors.apiKey} />
       </div>
       {formError ? (
         <p className="text-sm text-destructive">{formError}</p>
       ) : null}
     </>
+  );
+}
+
+function GranolaConnectionFields(
+  props: Omit<
+    Parameters<typeof ApiKeyConnectionFields>[0],
+    'fieldId' | 'label' | 'placeholder' | 'help'
+  >,
+) {
+  return (
+    <ApiKeyConnectionFields
+      {...props}
+      fieldId="granola-api-key"
+      label="Granola API Key"
+      placeholder="Enter your Granola API key"
+      help={
+        <>
+          <p className="text-sm text-muted-foreground">
+            We strongly recommend a Granola workspace API key. Workspace keys
+            can read public notes and spaces where &quot;Allow Granola API
+            access&quot; is enabled. New spaces enable API access by default, so
+            admins should review space settings before connecting.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            You can also use a personal API key with Public notes selected and
+            Personal notes left unchecked.
+          </p>
+        </>
+      }
+    />
+  );
+}
+
+function ExaConnectionFields(
+  props: Omit<
+    Parameters<typeof ApiKeyConnectionFields>[0],
+    'fieldId' | 'label' | 'placeholder' | 'help'
+  >,
+) {
+  return (
+    <ApiKeyConnectionFields
+      {...props}
+      fieldId="exa-api-key"
+      label="Exa API Key"
+      placeholder="Enter your Exa API key"
+      help={
+        <p className="text-sm text-muted-foreground">
+          Create a key in the{' '}
+          <a
+            href="https://dashboard.exa.ai/api-keys"
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary underline hover:no-underline"
+          >
+            Exa dashboard
+          </a>
+          . Roomote validates it against Exa before storing it. Exa Agent runs
+          are usage-based. Without a key, enabled deployments use Exa&apos;s
+          free keyless access, where Exa rate limits apply and Exa Agent is
+          unavailable.
+        </p>
+      }
+    />
   );
 }
 
@@ -1238,7 +1396,7 @@ function VoiceConnectionFields({
           placeholder="Enter an OpenAI API key with GPT-Live access"
           value={form.apiKey}
           onChange={(event) => onFieldChange('apiKey', event.target.value)}
-          data-invalid={fieldErrors.apiKey ? 'true' : undefined}
+          {...getFieldErrorAttributes('voice-api-key', fieldErrors.apiKey)}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -1250,9 +1408,7 @@ function VoiceConnectionFields({
             Leave blank to keep the existing API key.
           </p>
         ) : null}
-        {fieldErrors.apiKey ? (
-          <p className="text-sm text-destructive">{fieldErrors.apiKey[0]}</p>
-        ) : null}
+        <FieldError fieldId="voice-api-key" errors={fieldErrors.apiKey} />
       </div>
       <div className="space-y-2">
         <Label htmlFor="voice-selection">Voice</Label>
@@ -1263,7 +1419,14 @@ function VoiceConnectionFields({
               onFieldChange('voiceId', value as OpenAiRealtimeVoiceId)
             }
           >
-            <SelectTrigger id="voice-selection" className="w-full sm:flex-1">
+            <SelectTrigger
+              id="voice-selection"
+              className="w-full sm:flex-1"
+              {...getFieldErrorAttributes(
+                'voice-selection',
+                fieldErrors.voiceId,
+              )}
+            >
               <span>{selectedVoice?.label ?? 'Select a voice'}</span>
             </SelectTrigger>
             <SelectContent>
@@ -1298,9 +1461,7 @@ function VoiceConnectionFields({
           Hear an AI-generated sample. OpenAI currently recommends Marin and
           Cedar for best quality.
         </p>
-        {fieldErrors.voiceId ? (
-          <p className="text-sm text-destructive">{fieldErrors.voiceId[0]}</p>
-        ) : null}
+        <FieldError fieldId="voice-selection" errors={fieldErrors.voiceId} />
         {previewError ? (
           <p
             className="text-sm text-destructive"
@@ -1344,7 +1505,7 @@ function ElevenLabsConnectionFields({
           placeholder="Enter your ElevenLabs API key"
           value={form.apiKey}
           onChange={(event) => onFieldChange('apiKey', event.target.value)}
-          data-invalid={fieldErrors.apiKey ? 'true' : undefined}
+          {...getFieldErrorAttributes('elevenlabs-api-key', fieldErrors.apiKey)}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -1362,9 +1523,7 @@ function ElevenLabsConnectionFields({
             Leave blank to keep the existing API key.
           </p>
         ) : null}
-        {fieldErrors.apiKey ? (
-          <p className="text-sm text-destructive">{fieldErrors.apiKey[0]}</p>
-        ) : null}
+        <FieldError fieldId="elevenlabs-api-key" errors={fieldErrors.apiKey} />
       </div>
       <div className="space-y-2">
         <Label htmlFor="elevenlabs-voice-id">Voice ID</Label>
@@ -1373,7 +1532,10 @@ function ElevenLabsConnectionFields({
           placeholder="e.g. 21m00Tcm4TlvDq8ikWAM"
           value={form.voiceId}
           onChange={(event) => onFieldChange('voiceId', event.target.value)}
-          data-invalid={fieldErrors.voiceId ? 'true' : undefined}
+          {...getFieldErrorAttributes(
+            'elevenlabs-voice-id',
+            fieldErrors.voiceId,
+          )}
           className={fieldClassName}
           autoCapitalize="off"
           autoCorrect="off"
@@ -1383,9 +1545,10 @@ function ElevenLabsConnectionFields({
           The ElevenLabs voice used for narration. Find voice IDs in the
           ElevenLabs voice library.
         </p>
-        {fieldErrors.voiceId ? (
-          <p className="text-sm text-destructive">{fieldErrors.voiceId[0]}</p>
-        ) : null}
+        <FieldError
+          fieldId="elevenlabs-voice-id"
+          errors={fieldErrors.voiceId}
+        />
       </div>
       {formError ? (
         <p className="text-sm text-destructive">{formError}</p>
@@ -1420,7 +1583,10 @@ function GrafanaConnectionFields({
             placeholder="https://grafana.example.com"
             value={form.baseUrl}
             onChange={(event) => onFieldChange('baseUrl', event.target.value)}
-            data-invalid={fieldErrors.baseUrl ? 'true' : undefined}
+            {...getFieldErrorAttributes(
+              'grafana-base-url',
+              fieldErrors.baseUrl,
+            )}
             className={fieldClassName}
             autoCapitalize="off"
             autoCorrect="off"
@@ -1431,9 +1597,7 @@ function GrafanaConnectionFields({
             Use the base URL for the shared Grafana instance that this workspace
             should inspect.
           </p>
-          {fieldErrors.baseUrl ? (
-            <p className="text-sm text-destructive">{fieldErrors.baseUrl[0]}</p>
-          ) : null}
+          <FieldError fieldId="grafana-base-url" errors={fieldErrors.baseUrl} />
         </div>
 
         <div className="space-y-2">
@@ -1447,7 +1611,10 @@ function GrafanaConnectionFields({
             onChange={(event) =>
               onFieldChange('serviceAccountToken', event.target.value)
             }
-            data-invalid={fieldErrors.serviceAccountToken ? 'true' : undefined}
+            {...getFieldErrorAttributes(
+              'grafana-service-account-token',
+              fieldErrors.serviceAccountToken,
+            )}
             className={fieldClassName}
             autoCapitalize="off"
             autoCorrect="off"
@@ -1463,11 +1630,10 @@ function GrafanaConnectionFields({
               Leave blank to keep the existing token.
             </p>
           ) : null}
-          {fieldErrors.serviceAccountToken ? (
-            <p className="text-sm text-destructive">
-              {fieldErrors.serviceAccountToken[0]}
-            </p>
-          ) : null}
+          <FieldError
+            fieldId="grafana-service-account-token"
+            errors={fieldErrors.serviceAccountToken}
+          />
         </div>
       </div>
       {formError ? (
@@ -1505,7 +1671,10 @@ function VercelConnectionFields({
             onChange={(event) =>
               onFieldChange('accessToken', event.target.value)
             }
-            data-invalid={fieldErrors.accessToken ? 'true' : undefined}
+            {...getFieldErrorAttributes(
+              'vercel-access-token',
+              fieldErrors.accessToken,
+            )}
             className={fieldClassName}
             autoCapitalize="off"
             autoCorrect="off"
@@ -1521,11 +1690,10 @@ function VercelConnectionFields({
               Leave blank to keep the existing token.
             </p>
           ) : null}
-          {fieldErrors.accessToken ? (
-            <p className="text-sm text-destructive">
-              {fieldErrors.accessToken[0]}
-            </p>
-          ) : null}
+          <FieldError
+            fieldId="vercel-access-token"
+            errors={fieldErrors.accessToken}
+          />
         </div>
 
         <div className="space-y-2">
@@ -1539,7 +1707,10 @@ function VercelConnectionFields({
             onChange={(event) =>
               onFieldChange('defaultTeamIdOrSlug', event.target.value)
             }
-            data-invalid={fieldErrors.defaultTeamIdOrSlug ? 'true' : undefined}
+            {...getFieldErrorAttributes(
+              'vercel-default-team',
+              fieldErrors.defaultTeamIdOrSlug,
+            )}
             className={fieldClassName}
             autoCapitalize="off"
             autoCorrect="off"
@@ -1550,11 +1721,10 @@ function VercelConnectionFields({
             lookups. Leave blank to let tools work against the token&apos;s
             personal account unless a team is provided in the tool input.
           </p>
-          {fieldErrors.defaultTeamIdOrSlug ? (
-            <p className="text-sm text-destructive">
-              {fieldErrors.defaultTeamIdOrSlug[0]}
-            </p>
-          ) : null}
+          <FieldError
+            fieldId="vercel-default-team"
+            errors={fieldErrors.defaultTeamIdOrSlug}
+          />
         </div>
       </div>
       {formError ? (
@@ -1566,8 +1736,20 @@ function VercelConnectionFields({
 
 export function Integrations({
   integrationIds,
+  configurationRequest,
+  addRequest,
+  showCatalog = true,
 }: {
   integrationIds?: readonly string[];
+  configurationRequest?: {
+    integrationId: string;
+    sequence: number;
+  } | null;
+  addRequest?: {
+    type: 'catalog' | 'custom-mcp' | 'api-key';
+    sequence: number;
+  } | null;
+  showCatalog?: boolean;
 } = {}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -1581,6 +1763,9 @@ export function Integrations({
     useState<string | null>(null);
   const [clearedDeepLinkIntegrationId, setClearedDeepLinkIntegrationId] =
     useState<string | null>(null);
+  const [isCatalogOpen, setIsCatalogOpen] = useState(false);
+  const [configurationInfoItem, setConfigurationInfoItem] =
+    useState<IntegrationItem | null>(null);
   const highlightedIntegrationId =
     clearedDeepLinkIntegrationId === deepLinkedIntegrationId
       ? ''
@@ -1637,6 +1822,14 @@ export function Integrations({
     Partial<Record<keyof GranolaFormState, string[]>>
   >({});
   const [granolaFormError, setGranolaFormError] = useState<string | null>(null);
+  const [isExaDialogOpen, setIsExaDialogOpen] = useState(false);
+  const [exaForm, setExaForm] = useState<ExaFormState>(buildEmptyExaForm());
+  const [exaFieldErrors, setExaFieldErrors] = useState<
+    Partial<Record<keyof ExaFormState, string[]>>
+  >({});
+  const [exaFormError, setExaFormError] = useState<string | null>(null);
+  const [isRemoveExaApiKeyDialogOpen, setIsRemoveExaApiKeyDialogOpen] =
+    useState(false);
   const [isGrafanaDialogOpen, setIsGrafanaDialogOpen] = useState(false);
   const [grafanaForm, setGrafanaForm] = useState<GrafanaFormState>(
     buildEmptyGrafanaForm(),
@@ -1698,6 +1891,8 @@ export function Integrations({
   const saveRipplingConnection = useSaveRipplingConnection();
   const saveGrafanaConnection = useSaveGrafanaConnection();
   const saveGranolaConnection = useSaveGranolaConnection();
+  const saveExaConnection = useSaveExaConnection();
+  const removeExaApiKey = useRemoveExaApiKey();
   const saveElevenLabsConnection = useSaveElevenLabsConnection();
   const saveVoiceConnection = useSaveVoiceConnection();
   const saveSnowflakeConnection = useSaveSnowflakeConnection();
@@ -1754,6 +1949,15 @@ export function Integrations({
     granolaConnectionSummary?.authStatus === 'authenticated';
   const granolaConnection = useGranolaConnection(
     isAdmin && (isGranolaConnected || isGranolaDialogOpen),
+  );
+  const exaConnectionSummary = useMemo(
+    () =>
+      (effectiveIntegrations.data ?? []).find((entry) => entry.id === 'exa'),
+    [effectiveIntegrations.data],
+  );
+  const isExaConnected = exaConnectionSummary?.authStatus === 'authenticated';
+  const exaConnection = useExaConnection(
+    isAdmin && (isExaConnected || isExaDialogOpen),
   );
   const voiceConnectionSummary = useMemo(
     () =>
@@ -1876,6 +2080,20 @@ export function Integrations({
     setGranolaFormError(null);
     setGranolaForm(buildEmptyGranolaForm());
   }, [granolaConnection.isPending, isGranolaConnected, isGranolaDialogOpen]);
+
+  useEffect(() => {
+    if (!isExaDialogOpen) {
+      return;
+    }
+
+    if (exaConnection.isPending && isExaConnected) {
+      return;
+    }
+
+    setExaFieldErrors({});
+    setExaFormError(null);
+    setExaForm(buildEmptyExaForm());
+  }, [exaConnection.isPending, isExaConnected, isExaDialogOpen]);
 
   useEffect(() => {
     if (!isVoiceDialogOpen) {
@@ -2045,15 +2263,13 @@ export function Integrations({
         { mcpId: integration.id },
         {
           onSuccess: () => {
-            toast.success(
-              `${integration.name} disconnected for this deployment.`,
-            );
+            toast.success(`${integration.name} removed.`);
           },
           onError: (error) =>
             toast.error(
               error instanceof Error
                 ? error.message
-                : `Failed to disconnect ${integration.name}.`,
+                : `Failed to remove ${integration.name}.`,
             ),
         },
       );
@@ -2106,6 +2322,15 @@ export function Integrations({
               icon: <Settings2 />,
             }
           : undefined,
+        configureAction: isAdmin
+          ? {
+              label: 'Configure',
+              ariaLabel: 'Configure Linear',
+              onAction: () => setIsLinearOauthSetupOpen(true),
+              isPending: isLinearOauthSetupOpen && linearOauthSetup.isPending,
+              icon: <Pencil />,
+            }
+          : null,
         onAction: linearOauthUnavailable
           ? canSetUpLinearOauth
             ? () => setIsLinearOauthSetupOpen(true)
@@ -2113,13 +2338,12 @@ export function Integrations({
           : () => {
               if (linearInstallation.data) {
                 disconnectLinear.mutate(undefined, {
-                  onSuccess: () =>
-                    toast.success('Linear disabled for this deployment.'),
+                  onSuccess: () => toast.success('Linear removed.'),
                   onError: (error) =>
                     toast.error(
                       error instanceof Error
                         ? error.message
-                        : 'Failed to disable Linear. Please try again.',
+                        : 'Failed to remove Linear. Please try again.',
                     ),
                 });
                 return;
@@ -2222,27 +2446,173 @@ export function Integrations({
             });
           }
 
+          if (integration.id === 'exa') {
+            const enabled = orgEnablementMap.get(integration.id) ?? false;
+            const isPending =
+              (setDeploymentEnabled.isPending &&
+                setDeploymentEnabled.variables?.mcpId === integration.id) ||
+              saveExaConnection.isPending ||
+              removeExaApiKey.isPending;
+            const configureAction = isAdmin
+              ? {
+                  label: isExaConnected ? 'Edit API key' : 'Add API key',
+                  ariaLabel: `${isExaConnected ? 'Edit' : 'Add'} Exa API key`,
+                  onAction: () => setIsExaDialogOpen(true),
+                  isPending:
+                    isPending || (isExaDialogOpen && exaConnection.isPending),
+                  icon: <Pencil className="size-4" />,
+                }
+              : undefined;
+            const manageToolsAction =
+              isAdmin && enabled
+                ? {
+                    label: 'Manage tools',
+                    ariaLabel: 'Manage Exa tools',
+                    onAction: () => openMcpToolDialog(integration),
+                    isPending: false,
+                    icon: <Wrench className="size-4" />,
+                  }
+                : undefined;
+
+            return {
+              id: integration.id,
+              name: integration.name,
+              description: integration.description,
+              icon: <McpIcon icon={integration.icon} name={integration.name} />,
+              enabled,
+              connected: isExaConnected,
+              highlighted: highlightedIntegrationId === integration.id,
+              isMcpBased: true,
+              actionLabel: `${enabled ? 'Disable' : 'Enable'} Exa`,
+              isPending,
+              status: enabled
+                ? isExaConnected
+                  ? 'Enabled with a deployment API key. Exa Agent is available and usage-based.'
+                  : 'Enabled with free keyless access. Exa rate limits apply, and Exa Agent is unavailable.'
+                : isExaConnected
+                  ? 'Disabled. The deployment API key is still stored.'
+                  : 'Disabled. Enable Exa for free keyless search, or add a deployment API key.',
+              configureAction,
+              manageToolsAction,
+              removeAction:
+                isAdmin && isExaConnected
+                  ? {
+                      label: 'Remove API key',
+                      ariaLabel: 'Remove Exa API key',
+                      onAction: () =>
+                        removeExaApiKey.mutate(undefined, {
+                          onSuccess: () =>
+                            toast.success(
+                              enabled
+                                ? 'Exa API key removed. Keyless access remains enabled.'
+                                : 'Exa API key removed.',
+                            ),
+                          onError: (error) => toast.error(error.message),
+                        }),
+                      isPending: removeExaApiKey.isPending,
+                      confirmationDescription:
+                        'Remove the stored Exa API key. If Exa is enabled, it will continue with free keyless access.',
+                    }
+                  : undefined,
+              utilityAction:
+                isAdmin && isExaConnected
+                  ? {
+                      label: 'Remove API key',
+                      ariaLabel: 'Remove Exa API key',
+                      onAction: () => setIsRemoveExaApiKeyDialogOpen(true),
+                      isPending: removeExaApiKey.isPending,
+                      icon: <Trash2 className="size-4" />,
+                    }
+                  : undefined,
+              headerAction: configureAction,
+              secondaryAction: manageToolsAction,
+              onAction: isAdmin
+                ? () => {
+                    const nextEnabled = !enabled;
+                    setDeploymentEnabled.mutate(
+                      { mcpId: integration.id, enabled: nextEnabled },
+                      {
+                        onSuccess: () =>
+                          toast.success(
+                            nextEnabled
+                              ? 'Exa enabled for this deployment.'
+                              : 'Exa disabled for this deployment.',
+                          ),
+                        onError: (error) => toast.error(error.message),
+                      },
+                    );
+                  }
+                : undefined,
+            } satisfies IntegrationItem;
+          }
+
           if (integration.id === 'voice') {
+            if (voiceConfiguredByEnvironment) {
+              // The key comes from the environment (an operator's or a
+              // fleet-wide key), so there is nothing to configure or
+              // disconnect; the deployment's admins still decide whether
+              // Voice is on. The server reports that state (no enablement
+              // row means on), unlike the effective-integrations list, which
+              // treats a missing row as off.
+              const voiceEnabled = voiceConnection.data?.enabled ?? true;
+              const item = buildAdminConfiguredIntegrationItem({
+                integration,
+                connection: undefined,
+                orgEnabled: voiceEnabled,
+                highlightedIntegrationId,
+                savePending: false,
+                disconnectPending: false,
+                disconnectingMcpId: undefined,
+                dialogOpen: false,
+                connectionPending: voiceConnection.isPending,
+                canConfigure: false,
+                canManageTools: false,
+                openDialog: () => setIsVoiceDialogOpen(true),
+                openToolDialog: () => openMcpToolDialog(integration),
+                disconnectIntegration: () =>
+                  disconnectAdminConfiguredIntegration(integration),
+              });
+              if (!isAdmin) {
+                return item;
+              }
+              const nextEnabled = !voiceEnabled;
+              return {
+                ...item,
+                configureAction: null,
+                actionLabel: voiceEnabled ? 'Remove Voice' : 'Enable Voice',
+                isPending:
+                  setDeploymentEnabled.isPending &&
+                  setDeploymentEnabled.variables?.mcpId === integration.id,
+                onAction: () =>
+                  setDeploymentEnabled.mutate(
+                    { mcpId: integration.id, enabled: nextEnabled },
+                    {
+                      onSuccess: () =>
+                        toast.success(
+                          nextEnabled ? 'Voice enabled.' : 'Voice removed.',
+                        ),
+                      onError: (error) =>
+                        toast.error(
+                          error instanceof Error
+                            ? error.message
+                            : `Failed to ${nextEnabled ? 'enable' : 'remove'} Voice.`,
+                        ),
+                    },
+                  ),
+              };
+            }
+
             return buildAdminConfiguredIntegrationItem({
               integration,
               connection: userConnectionMap.get(integration.id),
-              orgEnabled:
-                voiceConfiguredByEnvironment ||
-                (orgEnablementMap.get(integration.id) ?? false),
+              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
               highlightedIntegrationId,
               savePending: saveVoiceConnection.isPending,
               disconnectPending: disconnectMcp.isPending,
               disconnectingMcpId: disconnectMcp.variables?.mcpId,
               dialogOpen: isVoiceDialogOpen,
               connectionPending: voiceConnection.isPending,
-              // An environment-provided key has nothing to edit or disconnect here.
-              canConfigure: isAdmin && !voiceConfiguredByEnvironment,
-              ...(voiceConfiguredByEnvironment
-                ? {
-                    status:
-                      'Configured by the R_VOICE_OPENAI_API_KEY environment variable.',
-                  }
-                : {}),
+              canConfigure: isAdmin,
               // Credential-only: no agent tools to manage.
               canManageTools: false,
               openDialog: () => setIsVoiceDialogOpen(true),
@@ -2409,7 +2779,7 @@ export function Integrations({
                         integrationName: displayName,
                       }),
                     isPending: false,
-                    icon: <Settings2 className="size-4" />,
+                    icon: <Wrench className="size-4" />,
                   }
                 : enabled && isDeploymentScoped && !isConnected
                   ? {
@@ -2470,14 +2840,16 @@ export function Integrations({
                     }
 
                     toast.success(
-                      `${displayName} ${nextEnabled ? 'enabled' : 'disabled'} for this deployment.`,
+                      nextEnabled
+                        ? `${displayName} enabled for this deployment.`
+                        : `${displayName} removed.`,
                     );
                   },
                   onError: (error) =>
                     toast.error(
                       error instanceof Error
                         ? error.message
-                        : `Failed to ${nextEnabled ? 'enable' : 'disable'} ${displayName}.`,
+                        : `Failed to ${nextEnabled ? 'enable' : 'remove'} ${displayName}.`,
                     ),
                 },
               );
@@ -2500,9 +2872,11 @@ export function Integrations({
     disconnectMcp,
     grafanaConnection.isPending,
     granolaConnection.isPending,
+    exaConnection.isPending,
     elevenLabsConnection.isPending,
     voiceConnection.isPending,
     voiceConfiguredByEnvironment,
+    voiceConnection.data?.enabled,
     linearInstallation.data,
     linearInstallation.isPending,
     linearOauthSetup.isPending,
@@ -2512,6 +2886,8 @@ export function Integrations({
     isAdmin,
     isGrafanaDialogOpen,
     isGranolaDialogOpen,
+    isExaDialogOpen,
+    isExaConnected,
     isElevenLabsDialogOpen,
     isVoiceDialogOpen,
     isLinearOauthSetupOpen,
@@ -2520,6 +2896,8 @@ export function Integrations({
     saveRipplingConnection.isPending,
     saveGrafanaConnection.isPending,
     saveGranolaConnection.isPending,
+    saveExaConnection.isPending,
+    removeExaApiKey,
     saveElevenLabsConnection.isPending,
     saveVoiceConnection.isPending,
     saveVercelConnection.isPending,
@@ -2546,17 +2924,172 @@ export function Integrations({
     highlightedIntegrationId,
   ]);
 
+  const handledConfigurationSequence = useRef<number | null>(null);
+  const integrationsUnavailable = effectiveIntegrations.data?.some(
+    (integration) => integration.status === 'unavailable',
+  );
+
+  useEffect(() => {
+    if (
+      configurationRequest == null ||
+      effectiveIntegrations.isPending ||
+      handledConfigurationSequence.current === configurationRequest.sequence
+    ) {
+      return;
+    }
+
+    const requestedItemId =
+      configurationRequest.integrationId === 'sentry'
+        ? 'sentry-mcp'
+        : configurationRequest.integrationId;
+    const requestedItem = items.find((item) => item.id === requestedItemId);
+    const requestedIntegration = effectiveIntegrations.data?.find(
+      (integration) => integration.id === configurationRequest.integrationId,
+    );
+
+    if (requestedItem?.isPending) {
+      return;
+    }
+
+    handledConfigurationSequence.current = configurationRequest.sequence;
+
+    if (integrationsUnavailable) {
+      toast.error('Integrations are disabled by the deployment operator.');
+      return;
+    }
+
+    if (requestedItem == null) {
+      toast.error('This integration cannot be configured here.');
+      return;
+    }
+
+    if (requestedIntegration?.status === 'connected') {
+      toast.success(`${requestedItem.name} is already connected.`);
+      return;
+    }
+
+    if (requestedIntegration?.status === 'needs_connection') {
+      const reconnectAction =
+        requestedItem.headerAction?.onAction ??
+        (requestedItem.secondaryAction?.ariaLabel.startsWith('Reconnect ')
+          ? requestedItem.secondaryAction.onAction
+          : undefined);
+
+      if (reconnectAction) {
+        reconnectAction();
+        return;
+      }
+    }
+
+    if (requestedItem.onAction == null) {
+      toast.error('This integration cannot be configured here.');
+      return;
+    }
+
+    requestedItem.onAction();
+  }, [
+    configurationRequest,
+    effectiveIntegrations.data,
+    effectiveIntegrations.isPending,
+    integrationsUnavailable,
+    items,
+  ]);
+
   const {
     isEnabled: customMcpEnabled,
     items: customMcpItems,
     openAddDialog: openCustomMcpDialog,
     dialogs: customMcpDialogs,
   } = useCustomMcpServers();
+  const {
+    items: apiKeyItems,
+    isLoading: apiKeyItemsLoading,
+    error: apiKeyItemsError,
+    openAddDialog: openApiKeyDialog,
+    dialogs: apiKeyDialogs,
+  } = useYourIntegrations();
+  const handledAddRequestSequence = useRef<number | null>(null);
 
-  const { installed, configured, available } = splitIntegrationItems([
-    ...items,
+  useEffect(() => {
+    if (
+      addRequest == null ||
+      handledAddRequestSequence.current === addRequest.sequence
+    ) {
+      return;
+    }
+
+    handledAddRequestSequence.current = addRequest.sequence;
+    if (addRequest.type === 'catalog') {
+      setIsCatalogOpen(true);
+    } else if (addRequest.type === 'custom-mcp') {
+      if (customMcpEnabled) {
+        openCustomMcpDialog();
+      } else {
+        toast.error(
+          'Custom MCP servers are disabled by the deployment operator.',
+        );
+      }
+    } else {
+      openApiKeyDialog();
+    }
+  }, [addRequest, customMcpEnabled, openApiKeyDialog, openCustomMcpDialog]);
+
+  const availableItems = items.filter((item) => !item.enabled);
+  const activeItems = [
+    ...items
+      .filter((item) => item.enabled)
+      .map((item) => ({
+        ...item,
+        configureAction:
+          item.configureAction === undefined
+            ? {
+                label: 'Configure',
+                ariaLabel: `Configure ${item.name}`,
+                onAction: () => setConfigurationInfoItem(item),
+                isPending: false,
+              }
+            : item.configureAction,
+        manageToolsAction:
+          item.manageToolsAction ??
+          (item.secondaryAction?.label.startsWith('Manage')
+            ? {
+                ...item.secondaryAction,
+                label: 'Manage available tools',
+              }
+            : undefined),
+      })),
     ...customMcpItems,
-  ]);
+    ...apiKeyItems,
+  ]
+    .filter((item) => item.enabled)
+    .map((item) => ({
+      ...item,
+      removeAction:
+        item.removeAction ??
+        (item.onAction
+          ? {
+              label: 'Remove',
+              ariaLabel: `Remove ${item.name}`,
+              onAction: item.onAction,
+              isPending: item.isPending,
+            }
+          : undefined),
+    }));
+  const configurationInfoDefinition = configurationInfoItem
+    ? MCP_INTEGRATIONS.find(
+        (integration) =>
+          integration.id ===
+          (configurationInfoItem.id === 'sentry-mcp'
+            ? 'sentry'
+            : configurationInfoItem.id),
+      )
+    : undefined;
+  const configurationIsDeploymentScoped = configurationInfoDefinition
+    ? isDeploymentScopedMcpIntegration(configurationInfoDefinition)
+    : false;
+  const displayedActiveItems = integrationsUnavailable
+    ? [...customMcpItems, ...apiKeyItems].filter((item) => item.enabled)
+    : activeItems;
   const highlightedItem =
     items.find((item) => item.id === highlightedIntegrationId) ?? null;
   const deepLinkDialogItem =
@@ -2671,6 +3204,14 @@ export function Integrations({
       return { ...current, [field]: undefined };
     });
     setGranolaFormError(null);
+  };
+
+  const handleExaFieldChange = (field: keyof ExaFormState, value: string) => {
+    setExaForm((current) => ({ ...current, [field]: value }));
+    setExaFieldErrors((current) =>
+      current[field] ? { ...current, [field]: undefined } : current,
+    );
+    setExaFormError(null);
   };
 
   const handleVoiceFieldChange = (
@@ -2834,6 +3375,16 @@ export function Integrations({
     }
 
     setGranolaForm(buildEmptyGranolaForm());
+  };
+
+  const handleExaDialogOpenChange = (open: boolean) => {
+    setIsExaDialogOpen(open);
+    setExaFieldErrors({});
+    setExaFormError(null);
+
+    if (open) {
+      setExaForm(buildEmptyExaForm());
+    }
   };
 
   const handleVoiceDialogOpenChange = (open: boolean) => {
@@ -3040,6 +3591,35 @@ export function Integrations({
     });
   };
 
+  const handleExaSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const parsed = saveExaConnectionSchema.safeParse(exaForm);
+    if (!parsed.success) {
+      setExaFieldErrors(getExaFieldErrors(parsed));
+      return;
+    }
+
+    if (!isExaConnected && parsed.data.apiKey.length === 0) {
+      setExaFieldErrors({ apiKey: ['API key is required'] });
+      return;
+    }
+
+    setExaFieldErrors({});
+    setExaFormError(null);
+    saveExaConnection.mutate(parsed.data, {
+      onSuccess: () => {
+        toast.success(
+          isExaConnected
+            ? 'Exa API key updated for this deployment.'
+            : 'Exa API key saved for this deployment.',
+        );
+        handleExaDialogOpenChange(false);
+      },
+      onError: (error) => setExaFormError(error.message),
+    });
+  };
+
   const handleVoiceSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -3226,13 +3806,9 @@ export function Integrations({
     });
   };
 
-  if (
-    effectiveIntegrations.data?.some(
-      (integration) => integration.status === 'unavailable',
-    )
-  ) {
+  if (integrationsUnavailable && integrationIds !== undefined) {
     return (
-      <div className="space-y-8">
+      <div>
         <Alert>
           <AlertTitle>Integrations disabled by deployment operator</AlertTitle>
           <AlertDescription>
@@ -3240,28 +3816,12 @@ export function Integrations({
             instance.
           </AlertDescription>
         </Alert>
-        {integrationIds === undefined && customMcpEnabled ? (
-          <>
-            {customMcpDialogs}
-            <AddCustomMcpServerBar onAdd={openCustomMcpDialog} />
-            <IntegrationSection
-              id="custom-mcp-servers"
-              title="Custom MCP servers"
-              items={customMcpItems}
-              emptyState={
-                <p className="text-sm text-muted-foreground">
-                  No custom MCP servers configured yet.
-                </p>
-              }
-            />
-          </>
-        ) : null}
       </div>
     );
   }
 
   return (
-    <div className="space-y-8">
+    <div className={integrationIds === undefined ? 'contents' : 'space-y-8'}>
       <McpToolManagementDialog
         mcpId={toolDialogState?.mcpId ?? null}
         integrationName={toolDialogState?.integrationName ?? null}
@@ -3372,6 +3932,79 @@ export function Integrations({
           onFieldChange={handleGranolaFieldChange}
         />
       </AdminConfiguredIntegrationDialog>
+      <AdminConfiguredIntegrationDialog
+        integrationName="Exa"
+        title={isExaConnected ? 'Edit Exa API key' : 'Add Exa API key'}
+        open={isExaDialogOpen}
+        onOpenChange={handleExaDialogOpenChange}
+        isEditing={isExaConnected}
+        isPending={saveExaConnection.isPending}
+        isLoading={isExaConnected && exaConnection.isPending}
+        submitLabel={isExaConnected ? 'Save changes' : 'Add API key'}
+        description={
+          <>
+            Optionally store an Exa API key for authenticated access and Exa
+            Agent. The key stays encrypted server-side and is sent only from
+            Roomote&apos;s proxy to Exa. Saving it does not change whether Exa
+            is enabled.
+          </>
+        }
+        onSubmit={handleExaSubmit}
+      >
+        <ExaConnectionFields
+          form={exaForm}
+          fieldErrors={exaFieldErrors}
+          formError={exaFormError}
+          allowBlankApiKey={isExaConnected}
+          onFieldChange={handleExaFieldChange}
+        />
+      </AdminConfiguredIntegrationDialog>
+      <Dialog
+        open={isRemoveExaApiKeyDialogOpen}
+        onOpenChange={setIsRemoveExaApiKeyDialogOpen}
+      >
+        <DialogContent size="md">
+          <DialogHeader>
+            <DialogTitle>Remove Exa API key?</DialogTitle>
+            <DialogDescription>
+              Remove the stored Exa API key. If Exa is enabled, it will continue
+              with free keyless access.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsRemoveExaApiKeyDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={removeExaApiKey.isPending}
+              onClick={() =>
+                removeExaApiKey.mutate(undefined, {
+                  onSuccess: () => {
+                    setIsRemoveExaApiKeyDialogOpen(false);
+                    toast.success(
+                      effectiveIntegrations.data?.find(
+                        (entry) => entry.id === 'exa',
+                      )?.enabled
+                        ? 'Exa API key removed. Keyless access remains enabled.'
+                        : 'Exa API key removed.',
+                    );
+                  },
+                  onError: (error) => toast.error(error.message),
+                })
+              }
+            >
+              {removeExaApiKey.isPending ? <Spinner size="sm" /> : <Trash2 />}
+              Remove key
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <AdminConfiguredIntegrationDialog
         integrationName="Voice"
         open={isVoiceDialogOpen}
@@ -3524,41 +4157,211 @@ export function Integrations({
           deepLinkDialogItem.onAction?.();
         }}
       />
-      {integrationIds !== undefined ? (
+      {customMcpDialogs}
+      {apiKeyDialogs}
+      <Dialog open={isCatalogOpen} onOpenChange={setIsCatalogOpen}>
+        <DialogContent
+          size="xl"
+          className="md:grid-rows-[auto_minmax(0,1fr)] md:overflow-y-hidden"
+        >
+          <DialogHeader>
+            <DialogTitle>Add from the catalog</DialogTitle>
+            <DialogDescription>
+              Choose a built-in integration to connect or configure.
+            </DialogDescription>
+          </DialogHeader>
+          {integrationsUnavailable ? (
+            <Alert>
+              <AlertTitle>
+                Integrations disabled by deployment operator
+              </AlertTitle>
+              <AlertDescription>
+                Built-in integrations cannot be added on this Roomote instance.
+              </AlertDescription>
+            </Alert>
+          ) : availableItems.length > 0 ? (
+            <div className="divide-y divide-background rounded-lg border bg-card md:min-h-0 md:overflow-y-auto">
+              {availableItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-3 px-4 py-3"
+                >
+                  <div className="flex size-5 shrink-0 items-center justify-center">
+                    {item.icon}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">
+                      {item.name}
+                    </p>
+                  </div>
+                  {[item.headerAction, item.utilityAction]
+                    .filter((action) => action != null)
+                    .map((action) => (
+                      <BasicTooltip
+                        key={action.ariaLabel}
+                        content={action.label}
+                      >
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          aria-label={action.ariaLabel}
+                          disabled={action.isPending}
+                          onClick={() => {
+                            setIsCatalogOpen(false);
+                            action.onAction();
+                          }}
+                        >
+                          {action.isPending ? (
+                            <Spinner size="sm" />
+                          ) : (
+                            action.icon
+                          )}
+                        </Button>
+                      </BasicTooltip>
+                    ))}
+                  {item.onAction ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        setIsCatalogOpen(false);
+                        item.onAction?.();
+                      }}
+                    >
+                      <Plus />
+                      Add
+                    </Button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              All available built-in integrations are active.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={configurationInfoItem != null}
+        onOpenChange={(open) => {
+          if (!open) setConfigurationInfoItem(null);
+        }}
+      >
+        <DialogContent size="xl">
+          <DialogHeader>
+            <DialogTitle>
+              Configure {configurationInfoItem?.name ?? 'integration'}
+            </DialogTitle>
+            <DialogDescription>
+              {configurationInfoItem?.description}
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {configurationIsDeploymentScoped
+              ? 'Reconnect the workspace account to update this deployment-wide connection.'
+              : 'Connection settings for this integration are managed by each team member from Personal settings.'}{' '}
+            Deployment-wide tool availability can be managed from the sliders
+            action in this list.
+          </p>
+          <DialogFooter>
+            {configurationIsDeploymentScoped && configurationInfoDefinition ? (
+              <Button
+                type="button"
+                onClick={() => {
+                  connectMcp.mutate(
+                    {
+                      mcpId: configurationInfoDefinition.id,
+                      redirectTo: pathname,
+                    },
+                    {
+                      onSuccess: (url) => {
+                        window.location.href = url;
+                      },
+                      onError: (error) => toast.error(error.message),
+                    },
+                  );
+                }}
+              >
+                Reconnect
+              </Button>
+            ) : (
+              <Button asChild>
+                <Link href="/settings/personal">Open Personal settings</Link>
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {!showCatalog ? null : integrationIds !== undefined ? (
         <IntegrationSection
           id="selected-integrations"
           title="Integrations"
           items={items}
         />
       ) : (
-        <>
-          {customMcpDialogs}
-          {customMcpEnabled ? (
-            <AddCustomMcpServerBar onAdd={openCustomMcpDialog} />
+        <div className="space-y-3 md:flex md:min-h-0 md:flex-1 md:flex-col md:gap-3 md:space-y-0">
+          {integrationsUnavailable ? (
+            <Alert>
+              <AlertTitle>
+                Integrations disabled by deployment operator
+              </AlertTitle>
+              <AlertDescription>
+                Built-in integrations cannot be connected or used on this
+                Roomote instance. Active custom and API-key integrations remain
+                listed below.
+              </AlertDescription>
+            </Alert>
           ) : null}
-          <IntegrationSection
-            id="installed-integrations"
-            title="Connected"
-            items={installed}
-            emptyState={
-              <p className="text-sm text-muted-foreground">
-                You haven&apos;t connected any integrations yet.
-              </p>
-            }
-          />
-          {configured.length > 0 && (
-            <IntegrationSection
-              id="configured-integrations"
-              title="Configured"
-              items={configured}
-            />
-          )}
-          <IntegrationSection
-            id="available-integrations"
-            title="Available"
-            items={available}
-          />
-        </>
+          {apiKeyItemsError ? (
+            <p role="alert" className="text-sm text-destructive">
+              {apiKeyItemsError}
+            </p>
+          ) : null}
+          <Card
+            variant="snug"
+            className="gap-0 p-0 md:min-h-0 md:flex-1 md:overflow-y-auto"
+          >
+            <CardContent className="h-full p-0!">
+              <div
+                role="table"
+                aria-label="Integrations"
+                className="flex h-full flex-col"
+              >
+                <IntegrationListHeader />
+                <div
+                  role="rowgroup"
+                  className="flex min-h-0 flex-1 flex-col divide-y divide-background"
+                >
+                  {apiKeyItemsLoading ? (
+                    <div className="space-y-2 px-4 py-3">
+                      <Skeleton className="h-4 w-48" />
+                      <Skeleton className="h-3 w-full max-w-lg" />
+                    </div>
+                  ) : null}
+                  {displayedActiveItems.map((item) => (
+                    <IntegrationListRow key={item.id} item={item} />
+                  ))}
+                  {!apiKeyItemsLoading && displayedActiveItems.length === 0 ? (
+                    <div className="flex min-h-64 flex-1 flex-col items-center justify-center gap-3 px-4 py-6">
+                      <Image
+                        src="/elements/integrations.png"
+                        width={778}
+                        height={685}
+                        alt=""
+                        className="max-h-32 w-auto object-contain"
+                      />
+                      <p className="text-sm text-muted-foreground">
+                        No active integrations yet.
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   );

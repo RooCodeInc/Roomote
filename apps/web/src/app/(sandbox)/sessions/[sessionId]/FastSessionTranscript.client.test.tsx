@@ -1,10 +1,12 @@
 import {
   act,
+  createEvent,
   fireEvent,
   render,
   screen,
   waitFor,
 } from '@testing-library/react';
+import { useState } from 'react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   SETUP_RECEIPT_INPUT_KIND,
@@ -20,14 +22,33 @@ import {
   clearPendingFastSessionLaunch,
   stagePendingFastSessionLaunch,
 } from '@/lib/pending-fast-session-launch';
+import {
+  SessionNavigationStateProvider,
+  useSessionNavigationState,
+} from '@/hooks/useSessionNavigationState';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => '/sessions/session-1',
 }));
 
+const integrationApprovalsState: { pending: unknown[] } = { pending: [] };
+vi.mock('@/hooks/useSessionIntegrationApprovals', () => ({
+  useSessionIntegrationApprovals: () => ({
+    data: { pending: integrationApprovalsState.pending, secrets: [] },
+    refetch: vi.fn(),
+  }),
+}));
+
+vi.mock('./CapabilityOfferCard', () => ({
+  CapabilityOfferCard: ({ offer }: { offer: { capability: string } }) => (
+    <div>Capability offer: {offer.capability}</div>
+  ),
+}));
+
 const {
   replyMutate,
+  startGoalMutate,
   reviewActionMutate,
   updateModelSelectionMutate,
   preparePromptAttachments,
@@ -38,9 +59,12 @@ const {
   voiceStatusQuery,
   recordVoiceTurnMutate,
   recordVoiceCallEventMutate,
+  waitForVoiceCallLease,
   liveVoiceState,
+  authenticatedUserState,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
+  startGoalMutate: vi.fn(),
   reviewActionMutate: vi.fn(),
   updateModelSelectionMutate: vi.fn(),
   preparePromptAttachments: vi.fn(),
@@ -53,6 +77,18 @@ const {
   voiceStatusQuery: vi.fn(),
   recordVoiceTurnMutate: vi.fn(),
   recordVoiceCallEventMutate: vi.fn(),
+  waitForVoiceCallLease: vi.fn(),
+  authenticatedUserState: {
+    user: null as null | {
+      userId: string;
+      name: string | null;
+      primaryEmail: string | null;
+      resource: {
+        primaryEmailAddress: { id: string; emailAddress: string } | null;
+        imageUrl: string;
+      };
+    },
+  },
   liveVoiceState: {
     active: false,
     status: 'idle' as
@@ -66,7 +102,10 @@ const {
     speak: vi.fn(),
     setMicMuted: vi.fn(),
     setOutputMuted: vi.fn(),
+    micMuted: false,
+    outputMuted: false,
     startedAt: null as number | null,
+    inputLevel: 0,
     deliveringUtterances: 0,
     onUtterance: undefined as
       | ((text: string, delegationId: string | null) => void)
@@ -76,6 +115,15 @@ const {
     onHeardTurnDelta: undefined as ((text: string) => void) | undefined,
     onSpokenTurnDelta: undefined as ((text: string) => void) | undefined,
   },
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useUser: () => ({
+    user: authenticatedUserState.user,
+    isSignedIn: authenticatedUserState.user !== null,
+    authStatus:
+      authenticatedUserState.user === null ? 'signed-out' : 'signed-in',
+  }),
 }));
 
 vi.mock('@/hooks/useLiveVoice', () => ({
@@ -103,14 +151,19 @@ vi.mock('@/hooks/useLiveVoice', () => ({
       start: liveVoiceState.start,
       stop: liveVoiceState.stop,
       speak: liveVoiceState.speak,
-      micMuted: false,
+      micMuted: liveVoiceState.micMuted,
       setMicMuted: liveVoiceState.setMicMuted,
-      outputMuted: false,
+      outputMuted: liveVoiceState.outputMuted,
       setOutputMuted: liveVoiceState.setOutputMuted,
       startedAt: liveVoiceState.startedAt,
+      inputLevel: liveVoiceState.inputLevel,
       deliveringUtterances: liveVoiceState.deliveringUtterances,
     };
   },
+}));
+
+vi.mock('@/hooks/useSessionVoiceCallLease', () => ({
+  useSessionVoiceCallLease: () => waitForVoiceCallLease,
 }));
 
 vi.mock('@/hooks/useNarrationMode', () => ({
@@ -121,6 +174,7 @@ vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
     fastSessions: {
       reply: { mutate: replyMutate },
+      startGoal: { mutate: startGoalMutate },
       reviewAction: { mutate: reviewActionMutate },
       updateModelSelection: { mutate: updateModelSelectionMutate },
     },
@@ -282,8 +336,11 @@ class FakeEventSource {
 }
 
 beforeEach(() => {
+  window.location.hash = '';
   FakeEventSource.instances = [];
   replyMutate.mockReset();
+  startGoalMutate.mockReset();
+  startGoalMutate.mockResolvedValue({ success: true, goal: {} });
   reviewActionMutate.mockReset();
   updateModelSelectionMutate.mockReset();
   preparePromptAttachments.mockImplementation(({ text }: { text: string }) =>
@@ -299,7 +356,12 @@ beforeEach(() => {
   recordVoiceTurnMutate.mockResolvedValue({ eventId: 'voice:1' });
   recordVoiceCallEventMutate.mockReset();
   recordVoiceCallEventMutate.mockResolvedValue({ eventId: 'voice-call:1' });
+  waitForVoiceCallLease.mockReset();
+  waitForVoiceCallLease.mockResolvedValue(undefined);
   liveVoiceState.startedAt = null;
+  liveVoiceState.inputLevel = 0;
+  liveVoiceState.micMuted = false;
+  liveVoiceState.outputMuted = false;
   liveVoiceState.deliveringUtterances = 0;
   liveVoiceState.onHeardTurn = undefined;
   liveVoiceState.onSpokenTurn = undefined;
@@ -309,6 +371,7 @@ beforeEach(() => {
   liveVoiceState.stop.mockReset();
   liveVoiceState.speak.mockReset();
   liveVoiceState.onUtterance = undefined;
+  authenticatedUserState.user = null;
   clearPendingFastSessionLaunch('session-1');
   vi.stubGlobal('EventSource', FakeEventSource);
 });
@@ -319,6 +382,181 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
+  it('shows a pending-key card for the owner and opens the key dialog from it', async () => {
+    integrationApprovalsState.pending = [
+      {
+        pendingRef: '6a1f8f1e-0000-4000-8000-000000000009',
+        label: 'Figma',
+        origin: 'https://api.figma.com',
+        headerName: 'x-figma-token',
+        headerPrefix: '',
+        allowedMethods: ['GET', 'HEAD'],
+        lifetimeHours: null,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    // The dialog fetches the same route; a fresh Response per call, since a
+    // body can only be read once.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              secrets: [],
+              pending: integrationApprovalsState.pending,
+            }),
+          ),
+        ),
+      ),
+    );
+    window.location.hash = '';
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    expect(screen.getByText('Add your Figma key')).toBeInTheDocument();
+    expect(screen.queryByLabelText('API key')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Enter key' }));
+    expect(window.location.hash).toBe('#integrations');
+    // jsdom does not dispatch hashchange for a programmatic fragment change.
+    fireEvent(window, new HashChangeEvent('hashchange'));
+    await screen.findByLabelText('API key');
+    integrationApprovalsState.pending = [];
+  });
+
+  it('hides the pending-key card from viewers who do not own the Session', () => {
+    integrationApprovalsState.pending = [
+      {
+        pendingRef: '6a1f8f1e-0000-4000-8000-000000000010',
+        label: 'Figma',
+        origin: 'https://api.figma.com',
+        headerName: 'x-figma-token',
+        headerPrefix: '',
+        allowedMethods: ['GET', 'HEAD'],
+        lifetimeHours: null,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    expect(screen.queryByText('Add your Figma key')).toBeNull();
+    integrationApprovalsState.pending = [];
+  });
+
+  it('reports server-owned secure-save continuation without submitting or replacing the browser composer draft', async () => {
+    const secretRef = '6a1f8f1e-0000-4000-8000-000000000007';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          secrets: [],
+          pending: [
+            {
+              pendingRef: secretRef,
+              label: 'Demo',
+              origin: 'https://api.example.com',
+              headerName: 'authorization',
+              headerPrefix: 'Bearer ',
+              allowedMethods: ['GET', 'HEAD'],
+              visibility: 'deployment',
+              expiresAt: new Date(Date.now() + 3600000).toISOString(),
+              revokedAt: null,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    window.location.hash = '#integrations';
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    const composer = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(composer, { target: { value: 'Keep this unsent draft' } });
+    await screen.findByLabelText('API key');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/canonical-session/secrets',
+      expect.objectContaining({
+        cache: 'no-store',
+        credentials: 'same-origin',
+      }),
+    );
+    expect(replyMutate).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('API key'), {
+      target: { value: 'disposable-test-credential' },
+    });
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /info|How it is used|Review/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Review access details|GET and HEAD/),
+    ).not.toBeInTheDocument();
+    expect(replyMutate).not.toHaveBeenCalled();
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          secret: {
+            secretRef,
+            label: 'Demo',
+            origin: 'https://api.example.com',
+            headerName: 'authorization',
+            headerPrefix: 'Bearer ',
+            allowedMethods: ['GET', 'HEAD'],
+            expiresAt: new Date(Date.now() + 3600000).toISOString(),
+            createdAt: new Date().toISOString(),
+            revokedAt: null,
+          },
+          resumed: true,
+        }),
+        { status: 201 },
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    expect(replyMutate).not.toHaveBeenCalled();
+    expect(preparePromptAttachments).not.toHaveBeenCalled();
+    expect(composer).toHaveValue('Keep this unsent draft');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/sessions/canonical-session/secrets',
+      expect.objectContaining({
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pendingRef: secretRef,
+          secret: 'disposable-test-credential',
+          allowedMethods: ['GET', 'HEAD'],
+          visibility: 'deployment',
+        }),
+      }),
+    );
+    expect(document.body.textContent).not.toContain(
+      'disposable-test-credential',
+    );
+  });
+
   const textMessage = ({
     id,
     role,
@@ -368,6 +606,68 @@ describe('FastSessionTranscript', () => {
     userEmail,
     userImageUrl,
     createdAt: new Date(ts),
+  });
+
+  it('restores each Session draft and scroll position without focusing after a direct switch', () => {
+    function SessionSwitchHarness() {
+      const [sessionId, setSessionId] = useState('session-a');
+      const navigationState = useSessionNavigationState();
+      const switchTo = (nextSessionId: string) => {
+        navigationState?.prepareSessionSwitch(nextSessionId);
+        setSessionId(nextSessionId);
+      };
+
+      return (
+        <>
+          <button type="button" onClick={() => switchTo('session-a')}>
+            Session A
+          </button>
+          <button type="button" onClick={() => switchTo('session-b')}>
+            Session B
+          </button>
+          <FastSessionTranscript
+            key={sessionId}
+            sessionId={sessionId}
+            initialMessages={[]}
+            canReply
+          />
+        </>
+      );
+    }
+
+    render(
+      <SessionNavigationStateProvider>
+        <SessionSwitchHarness />
+      </SessionNavigationStateProvider>,
+    );
+
+    const sessionAInput = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(sessionAInput, { target: { value: 'Draft for A' } });
+    const sessionAScroll = screen.getByRole('log').firstElementChild!;
+    sessionAScroll.scrollTop = 146;
+    fireEvent.scroll(sessionAScroll);
+
+    const sessionBButton = screen.getByRole('button', { name: 'Session B' });
+    sessionBButton.focus();
+    fireEvent.click(sessionBButton);
+
+    const sessionBInput = screen.getByPlaceholderText('Message agent');
+    expect(sessionBInput).toHaveValue('');
+    expect(sessionBInput).not.toHaveFocus();
+    fireEvent.change(sessionBInput, { target: { value: 'Draft for B' } });
+
+    const sessionAButton = screen.getByRole('button', { name: 'Session A' });
+    sessionAButton.focus();
+    fireEvent.click(sessionAButton);
+
+    expect(screen.getByPlaceholderText('Message agent')).toHaveValue(
+      'Draft for A',
+    );
+    expect(screen.getByPlaceholderText('Message agent')).not.toHaveFocus();
+    expect(screen.getByRole('log').firstElementChild).toHaveProperty(
+      'scrollTop',
+      146,
+    );
   });
 
   it('renders charts restored from persisted Session messages', () => {
@@ -1206,6 +1506,42 @@ describe('FastSessionTranscript', () => {
     expect(document.querySelector('.lucide-git-branch')).toBeInTheDocument();
   });
 
+  it('renders integration discovery with the requested status copy and plug icon', () => {
+    const receipt = textMessage({
+      id: 'integration-receipt',
+      role: 'user',
+      text: 'Asked about integrations.',
+      ts: 1,
+      inputKind: SETUP_RECEIPT_INPUT_KIND,
+      userId: 'user-1',
+    });
+    receipt.payload = {
+      setupReceipt: {
+        kind: 'integration_discovery',
+        presentation: {
+          label: 'Asked about integrations',
+          iconKey: 'plug',
+        },
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[receipt]}
+        owner={{
+          userId: 'user-1',
+          name: 'Test User',
+          email: 'test@example.com',
+          imageUrl: 'https://example.com/avatar.png',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Asked about integrations')).toBeInTheDocument();
+    expect(document.querySelector('.lucide-plug')).toBeInTheDocument();
+  });
+
   it('removes the running task indicator when the count returns to zero', () => {
     const { rerender } = render(
       <SessionRunningTaskCountContext.Provider value={1}>
@@ -1449,15 +1785,27 @@ describe('FastSessionTranscript', () => {
     expect(screen.queryByText('1 task running')).not.toBeInTheDocument();
   });
 
-  it('shows Thinking while the initial Fast turn is awaiting output', () => {
+  it('shows Working while the initial Fast turn is awaiting output', () => {
     render(
       <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
     );
 
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
   });
 
   it('shows a staged initial prompt immediately and reconciles its canonical event', () => {
+    authenticatedUserState.user = {
+      userId: 'current-user',
+      name: 'Current User',
+      primaryEmail: 'current@example.com',
+      resource: {
+        primaryEmailAddress: {
+          id: 'current-email',
+          emailAddress: 'current@example.com',
+        },
+        imageUrl: 'https://example.com/current-user.png',
+      },
+    };
     stagePendingFastSessionLaunch('session-1', {
       fastConversationId: 'fast-session-1',
       text: 'Initial question',
@@ -1468,7 +1816,16 @@ describe('FastSessionTranscript', () => {
     );
 
     expect(screen.getByText('Initial question')).toBeInTheDocument();
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
+    const optimisticAvatarLink = screen.getByRole('link', {
+      name: 'View sessions by Current User',
+    });
+    const optimisticAvatarImage = optimisticAvatarLink.querySelector('img');
+    expect(optimisticAvatarImage).toHaveAttribute(
+      'src',
+      'https://example.com/current-user.png',
+    );
+    expect(optimisticAvatarLink).not.toHaveTextContent('?');
 
     act(() => {
       FakeEventSource.instances[0]!.emit('messages', {
@@ -1479,6 +1836,10 @@ describe('FastSessionTranscript', () => {
               role: 'user',
               text: 'Initial question',
               ts: Date.now(),
+              userId: 'current-user',
+              userName: 'Current User',
+              userEmail: 'current@example.com',
+              userImageUrl: 'https://example.com/current-user.png',
             }),
             eventId: 'web-kickoff:fast-session-1:user',
             contentBlocks: [
@@ -1491,6 +1852,12 @@ describe('FastSessionTranscript', () => {
     });
 
     expect(screen.getAllByText('Initial question')).toHaveLength(1);
+    expect(
+      screen.getByRole('link', { name: 'View sessions by Current User' }),
+    ).toBe(optimisticAvatarLink);
+    expect(optimisticAvatarLink.querySelector('img')).toBe(
+      optimisticAvatarImage,
+    );
   });
 
   it('does not duplicate a staged prompt already present in initial messages', () => {
@@ -1518,56 +1885,148 @@ describe('FastSessionTranscript', () => {
     expect(screen.getAllByText('Already persisted')).toHaveLength(1);
   });
 
-  it('waits for the first visible assistant message before showing timeline extras', () => {
+  it('renders a trusted capability offer without waiting for another message', () => {
     render(
       <FastSessionTranscript
         sessionId="session-1"
-        initialMessages={[]}
-        timelineExtras={<div>Connect source control</div>}
+        canReply
+        initialMessages={[
+          {
+            id: 'source-control-offer',
+            eventId: 'turn-1:capability-offer:0',
+            turnId: 'turn-1',
+            turnSeq: 1,
+            ts: 1,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+            role: 'assistant',
+            contentBlocks: [{ type: 'text', text: 'Connect your code.' }],
+            metadata: { visibleInTranscript: true },
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              message: 'Connect your code.',
+              status: 'pending',
+            },
+            source: 'web',
+            nativeSessionId: 'opencode-1',
+            nativeMessageId: null,
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          },
+        ]}
       />,
     );
 
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
-    expect(screen.queryByText('Connect source control')).toBeNull();
-
-    act(() => {
-      FakeEventSource.instances[0]!.emit('messages', {
-        messages: [
-          textMessage({
-            id: 'hidden-assistant-activity',
-            role: 'assistant',
-            text: 'Internal setup activity',
-            ts: 1,
-            visible: false,
-          }),
-        ],
-      });
-    });
-
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
-    expect(screen.queryByText('Connect source control')).toBeNull();
-
-    act(() => {
-      FakeEventSource.instances[0]!.emit('messages', {
-        messages: [
-          textMessage({
-            id: 'assistant-introduction',
-            role: 'assistant',
-            text: 'First, let’s connect your source code.',
-            ts: 2,
-          }),
-        ],
-      });
-    });
-
     expect(
-      screen.getByText('First, let’s connect your source code.'),
+      screen.getByText('Capability offer: source_control'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Connect source control')).toBeInTheDocument();
-    expect(screen.queryByText('Thinking')).toBeNull();
+    expect(screen.getByText('Connect your code.')).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toBeInTheDocument();
   });
 
-  it('shows Thinking after a follow-up until streamed output arrives', async () => {
+  it('hides capability tool activity when the offer is represented by its message and card', () => {
+    const toolResult = (
+      id: string,
+      status: 'failed' | 'completed',
+      ts: number,
+    ) => ({
+      ...textMessage({
+        id,
+        role: 'assistant',
+        text: `${status} offer capability`,
+        ts,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool' as const,
+      turnId: 'turn-1',
+      payload: {
+        toolCallId: id,
+        title: 'offer_capability',
+        toolName: 'offer_capability',
+        kind: 'communication',
+        status,
+        rawInput: { arguments: { capability: 'source_control' } },
+      },
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          toolResult('failed-offer', 'failed', 1),
+          {
+            ...textMessage({
+              id: 'source-control-offer',
+              role: 'assistant',
+              text: 'Hi, I can help with your code.',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+            turnId: 'turn-1',
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              message: 'Hi, I can help with your code.',
+              status: 'pending',
+            },
+          },
+          toolResult('completed-offer', 'completed', 3),
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByText('Hi, I can help with your code.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Capability offer: source_control'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('failed offer capability')).toBeNull();
+    expect(screen.queryByText('completed offer capability')).toBeNull();
+  });
+
+  it('keeps a capability response in history and removes the resolved card', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...textMessage({
+              id: 'source-control-offer',
+              role: 'assistant',
+              text: 'Connect your code.',
+              ts: 1,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOffer,
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              message: 'Connect your code.',
+              status: 'pending',
+            },
+          },
+          {
+            ...textMessage({
+              id: 'source-control-response',
+              role: 'user',
+              text: 'Not now: source control.',
+              ts: 2,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.CapabilityOfferResponse,
+            payload: {
+              offerId: 'cap:source-1',
+              capability: 'source_control',
+              resolution: 'dismissed',
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByText('Capability offer: source_control')).toBeNull();
+    expect(screen.getByText('Not now: source control.')).toBeInTheDocument();
+  });
+
+  it('shows Working after a follow-up until streamed output arrives', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(2);
     replyMutate.mockResolvedValue({ success: true });
     render(
@@ -1591,12 +2050,12 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
     const input = screen.getByPlaceholderText('Message agent');
     fireEvent.change(input, { target: { value: 'Follow up' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
-    expect(await screen.findByText('Thinking')).toBeInTheDocument();
+    expect(await screen.findByText('Working')).toBeInTheDocument();
     act(() => {
       FakeEventSource.instances[0]!.emit('messages', {
         messages: [
@@ -1617,7 +2076,7 @@ describe('FastSessionTranscript', () => {
         ],
       });
     });
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
 
     act(() => {
       FakeEventSource.instances[0]!.emit('messages', {
@@ -1632,11 +2091,11 @@ describe('FastSessionTranscript', () => {
       });
     });
 
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
     expect(screen.getByText('Follow-up answer')).toBeInTheDocument();
   });
 
-  it('clears Thinking when a follow-up send fails', async () => {
+  it('clears Working when a follow-up send fails', async () => {
     replyMutate.mockRejectedValue(new Error('turn is busy'));
     render(
       <FastSessionTranscript
@@ -1664,10 +2123,10 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     expect(await screen.findByText('turn is busy')).toBeInTheDocument();
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
   });
 
-  it('keeps Thinking for an earlier pending response when a later send fails', async () => {
+  it('keeps Working for an earlier pending response when a later send fails', async () => {
     replyMutate.mockRejectedValue(new Error('turn is busy'));
     render(
       <FastSessionTranscript
@@ -1689,7 +2148,7 @@ describe('FastSessionTranscript', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
     expect(await screen.findByText('turn is busy')).toBeInTheDocument();
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
     expect(screen.getByText('Earlier pending follow-up')).toBeInTheDocument();
     expect(screen.getByRole('log')).not.toHaveTextContent('Rejected follow-up');
   });
@@ -1734,14 +2193,14 @@ describe('FastSessionTranscript', () => {
         ],
       });
     });
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
 
     await act(async () => {
       finishPreparing?.({ text: 'Later follow-up' });
     });
 
     expect(await screen.findByText('turn is busy')).toBeInTheDocument();
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
     expect(screen.getByText('Earlier response')).toBeInTheDocument();
   });
 
@@ -1794,9 +2253,25 @@ describe('FastSessionTranscript', () => {
         choice: 'yes',
       }),
     );
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId('pr-review-action-offer'),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not render a persisted resolved offer', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="22222222-2222-4222-8222-222222222222"
+        initialMessages={[reviewOfferMessage('resolved')]}
+      />,
+    );
+
     expect(
-      await screen.findByText('Resolving the current review issues.'),
-    ).toBeInTheDocument();
+      screen.queryByTestId('pr-review-action-offer'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Review feedback remains.')).toBeVisible();
   });
 
   it('hides dismissed offers and renders late-click states without controls', async () => {
@@ -2259,6 +2734,78 @@ describe('FastSessionTranscript', () => {
     });
   });
 
+  it('keeps the current-user avatar mounted while an optimistic reply reconciles', async () => {
+    authenticatedUserState.user = {
+      userId: 'current-user',
+      name: 'Current User',
+      primaryEmail: 'current@example.com',
+      resource: {
+        primaryEmailAddress: {
+          id: 'current-email',
+          emailAddress: 'current@example.com',
+        },
+        imageUrl: 'https://example.com/current-user.png',
+      },
+    };
+    replyMutate.mockResolvedValue({ success: true });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+        owner={{
+          userId: 'session-owner',
+          name: 'Session Owner',
+          email: 'owner@example.com',
+          imageUrl: 'https://example.com/session-owner.png',
+        }}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: 'Follow up question' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    const optimisticAvatarLink = await screen.findByRole('link', {
+      name: 'View sessions by Current User',
+    });
+    const optimisticAvatarImage = optimisticAvatarLink.querySelector('img');
+    expect(optimisticAvatarImage).toHaveAttribute(
+      'src',
+      'https://example.com/current-user.png',
+    );
+    expect(optimisticAvatarLink).not.toHaveTextContent('?');
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'canonical-user',
+            role: 'user',
+            text: 'Follow up question',
+            ts: Date.now(),
+            userId: 'current-user',
+            userName: 'Current User',
+            userEmail: 'current@example.com',
+            userImageUrl: 'https://example.com/current-user.png',
+          }),
+        ],
+      });
+    });
+
+    expect(screen.getAllByText('Follow up question')).toHaveLength(1);
+    expect(
+      screen.getByRole('link', { name: 'View sessions by Current User' }),
+    ).toBe(optimisticAvatarLink);
+    expect(optimisticAvatarLink.querySelector('img')).toBe(
+      optimisticAvatarImage,
+    );
+    expect(
+      screen.queryByRole('link', { name: 'View sessions by Session Owner' }),
+    ).not.toBeInTheDocument();
+  });
+
   it.each(['Tab', 'Escape', 'mouse', 'touch'])(
     'preserves focus-only hints and %s interaction for a long suggestion',
     (action) => {
@@ -2306,14 +2853,15 @@ describe('FastSessionTranscript', () => {
         const focusedHint = screen.getByRole('button', {
           name: 'Insert suggested message',
         });
-        expect(
-          fireEvent.pointerDown(focusedHint, {
-            pointerType: action,
-            cancelable: true,
-          }),
-        ).toBe(false);
+        const pointerDown = createEvent.pointerDown(focusedHint, {
+          cancelable: true,
+        });
+        Object.defineProperty(pointerDown, 'pointerType', { value: action });
+        expect(fireEvent(focusedHint, pointerDown)).toBe(false);
         expect(input).toHaveFocus();
-        fireEvent.click(focusedHint);
+        if (action === 'mouse') {
+          fireEvent.click(focusedHint);
+        }
       } else {
         fireEvent.keyDown(input, { key: action, code: action });
       }
@@ -2326,7 +2874,7 @@ describe('FastSessionTranscript', () => {
     },
   );
 
-  it('keeps a later suggestion hint hidden after a successful send remounts the composer', async () => {
+  it('shows a later suggestion hint on the focused composer after a successful send', async () => {
     composerSuggestionState.data = {
       suggestion: 'Accept the first suggestion',
       messageCount: 2,
@@ -2377,12 +2925,16 @@ describe('FastSessionTranscript', () => {
       });
     });
 
-    expect(
-      screen.getByPlaceholderText('Accept the next suggestion'),
-    ).not.toHaveFocus();
-    expect(
-      screen.queryByRole('button', { name: 'Insert suggested message' }),
-    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByPlaceholderText('Accept the next suggestion'),
+      ).toHaveFocus(),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Insert suggested message' }),
+      ).toBeInTheDocument(),
+    );
   });
 
   it('persists model selections immediately and uses them for the next reply', async () => {
@@ -2707,7 +3259,7 @@ describe('FastSessionTranscript', () => {
         canReply
       />,
     );
-    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Working')).toBeInTheDocument();
 
     act(() => {
       FakeEventSource.instances[0]!.emit(
@@ -2716,7 +3268,7 @@ describe('FastSessionTranscript', () => {
       );
     });
     expect(screen.getByText('Looking')).toBeInTheDocument();
-    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
 
     act(() => {
       FakeEventSource.instances[0]!.emit(
@@ -2840,9 +3392,111 @@ describe('FastSessionTranscript', () => {
       const toggle = await screen.findByRole('button', {
         name: /^end voice conversation$/i,
       });
+      expect(screen.getByText('Connecting voice...')).toBeInTheDocument();
+      expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
       fireEvent.click(toggle);
       expect(liveVoiceState.stop).toHaveBeenCalledTimes(1);
       expect(liveVoiceState.start).not.toHaveBeenCalled();
+    });
+
+    it('replaces typing with in-call controls and restores the saved draft when the call ends', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      const view = render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      const input = await screen.findByPlaceholderText('Message agent');
+      fireEvent.change(input, { target: { value: 'Keep this draft' } });
+
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      liveVoiceState.startedAt = Date.now() - 4_000;
+      liveVoiceState.inputLevel = 0.6;
+      view.rerender(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
+      expect(
+        screen.getByRole('meter', { name: 'Microphone level' }),
+      ).toHaveAttribute('aria-valuenow', '60');
+      const muteButton = screen.getByRole('button', {
+        name: 'Mute your voice',
+      });
+      expect(muteButton.querySelector('.lucide-audio-lines')).not.toBeNull();
+      expect(muteButton.querySelector('.lucide-x')).toBeNull();
+      fireEvent.click(muteButton);
+      expect(liveVoiceState.setMicMuted).toHaveBeenCalledWith(true);
+      expect(
+        screen.getByRole('button', { name: 'Silence Roomote' }),
+      ).toBeInTheDocument();
+
+      liveVoiceState.micMuted = true;
+      view.rerender(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      const unmuteButton = screen.getByRole('button', {
+        name: 'Unmute your voice',
+      });
+      expect(unmuteButton.querySelector('.lucide-audio-lines')).not.toBeNull();
+      expect(unmuteButton.querySelector('.lucide-x')).not.toBeNull();
+
+      liveVoiceState.active = false;
+      liveVoiceState.status = 'idle';
+      liveVoiceState.startedAt = null;
+      view.rerender(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+
+      expect(screen.getByPlaceholderText('Message agent')).toHaveValue(
+        'Keep this draft',
+      );
+    });
+
+    it('waits for the voice-call lease before sending the first spoken request', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      let releaseLease!: () => void;
+      waitForVoiceCallLease.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          releaseLease = resolve;
+        }),
+      );
+      replyMutate.mockResolvedValue({ success: true });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        liveVoiceState.onUtterance?.('Check the build', 'item_1');
+      });
+      expect(waitForVoiceCallLease).toHaveBeenCalledOnce();
+      expect(replyMutate).not.toHaveBeenCalled();
+
+      releaseLease();
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledOnce());
     });
 
     it('reads the answer to a spoken request to Live as it streams, and leaves typed replies on screen', async () => {
@@ -3520,5 +4174,94 @@ describe('FastSessionTranscript', () => {
       await waitFor(() => expect(voiceStatusQuery).toHaveBeenCalled());
       expect(liveVoiceState.start).not.toHaveBeenCalled();
     });
+  });
+
+  it('shows the Session-owned goal above the transcript', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        sessionGoal={{
+          objective: 'Ship the complete release',
+          generation: 'goal-generation:one',
+          status: 'active',
+          maxContinuations: 5,
+          continuationsUsed: 2,
+          blockedReason: null,
+          completedAt: null,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Ship the complete release')).toBeInTheDocument();
+    expect(
+      screen.getByText(/active - 2\/5 continuations/i),
+    ).toBeInTheDocument();
+  });
+
+  it('updates the Session-owned goal from the live Session stream', () => {
+    render(
+      <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
+    );
+
+    expect(screen.queryByText('Initial objective')).not.toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        goal: {
+          objective: 'Initial objective',
+          generation: 'goal-generation:one',
+          status: 'active',
+          maxContinuations: 5,
+          continuationsUsed: 0,
+          blockedReason: null,
+          completedAt: null,
+        },
+      });
+    });
+
+    expect(screen.getByText('Initial objective')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        goal: {
+          objective: 'Replacement objective',
+          generation: 'goal-generation:two',
+          status: 'active',
+          maxContinuations: 5,
+          continuationsUsed: 0,
+          blockedReason: null,
+          completedAt: null,
+        },
+      });
+    });
+
+    expect(screen.queryByText('Initial objective')).not.toBeInTheDocument();
+    expect(screen.getByText('Replacement objective')).toBeInTheDocument();
+    expect(
+      screen.getByText(/active - 0\/5 continuations/i),
+    ).toBeInTheDocument();
+  });
+
+  it('starts /goal from the Session composer without sending a normal reply', async () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Message agent');
+    fireEvent.change(input, { target: { value: '/goal ship the release' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+
+    await waitFor(() =>
+      expect(startGoalMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        objective: 'ship the release',
+      }),
+    );
+    expect(replyMutate).not.toHaveBeenCalled();
   });
 });

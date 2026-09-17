@@ -14,9 +14,10 @@ import {
   updateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook,
 } from '@roomote/sdk/server';
-import type { PullRequestStatus } from '@roomote/types';
+import type { OperationalLogFields, PullRequestStatus } from '@roomote/types';
 
-import { apiLogger, logApiError } from '../../logging';
+import { apiLogger, logApiError, logApiOperationalEvent } from '../../logging';
+import { captureApiException } from '../../monitoring/sentry';
 // Onboarding:
 import { handleInstallationCreated } from './handleInstallationCreated';
 
@@ -58,6 +59,7 @@ import { handleInstallationRepositoriesChange } from './handleInstallationReposi
 import { isFromKnownInstallation } from './isFromKnownInstallation';
 import { recordWebhook } from './recordWebhook';
 import { toHostFromUrl } from '../utils';
+import { toValidDate } from '../pull-request-fact-sync';
 import {
   enrichGitHubMergeAnnouncerEvent,
   normalizeGitHubPush,
@@ -222,6 +224,12 @@ async function resolveGitHubWebhookSecret(): Promise<string | null> {
 export const github = new Hono();
 
 github.post('/', async (c) => {
+  const requestStartedAt = Date.now();
+  let requestFields: OperationalLogFields = {
+    provider: 'github',
+    surface: 'github',
+    requestId: c.req.header('x-request-id'),
+  };
   try {
     const headers = c.req.header();
     const id = headers['x-github-delivery'];
@@ -229,16 +237,40 @@ github.post('/', async (c) => {
     const signature = headers['x-hub-signature-256'];
 
     if (!id || !name || !signature) {
-      apiLogger.debug(
-        `[GitHub] missing headers: ${JSON.stringify({ id, name, signature })}`,
-      );
+      apiLogger.debug('[GitHub] webhook is missing required headers');
+      logApiOperationalEvent('warn', 'source_control_webhook_terminal', {
+        ...requestFields,
+        deliveryId: id,
+        eventType: name,
+        outcome: 'rejected',
+        reason: 'missing_headers',
+        status: 400,
+        durationMs: Date.now() - requestStartedAt,
+      });
 
       return c.json({ error: 'missing_headers' }, { status: 400 });
     }
 
+    requestFields = {
+      ...requestFields,
+      deliveryId: id,
+      eventType: name,
+    };
+    logApiOperationalEvent('info', 'source_control_webhook_received', {
+      ...requestFields,
+      outcome: 'received',
+    });
+
     const secret = await resolveGitHubWebhookSecret();
 
     if (!secret) {
+      logApiOperationalEvent('warn', 'source_control_webhook_terminal', {
+        ...requestFields,
+        outcome: 'rejected',
+        reason: 'webhook_secret_not_configured',
+        status: 401,
+        durationMs: Date.now() - requestStartedAt,
+      });
       apiLogger.debug('[GitHub] webhook secret is not configured');
       return c.json({ error: 'invalid_signature' }, { status: 401 });
     }
@@ -553,6 +585,22 @@ github.post('/', async (c) => {
     webhooks.on(
       'pull_request_review.submitted',
       async ({ id, name, payload }) => {
+        const reviewId = payload.review.id;
+        logApiOperationalEvent('info', 'source_control_review_received', {
+          provider: 'github',
+          surface: 'github',
+          deliveryId: id,
+          eventType: `${name}.${payload.action}`,
+          repository: payload.repository.full_name,
+          prNumber: payload.pull_request.number,
+          reviewId,
+          externalEventId:
+            typeof reviewId === 'number'
+              ? `github-review:${reviewId}`
+              : undefined,
+          outcome: 'admitted',
+          reason: 'verified_known_installation',
+        });
         await queuePrReviewActivityNotification(payload, id);
 
         return recordWebhook(
@@ -662,7 +710,12 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           status,
-          { host: toHostFromUrl(payload.pull_request.html_url) },
+          {
+            host: toHostFromUrl(payload.pull_request.html_url),
+            ...(status === 'merged'
+              ? { mergedAt: toValidDate(payload.pull_request.merged_at) }
+              : {}),
+          },
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
@@ -723,6 +776,13 @@ github.post('/', async (c) => {
     // Verify the signature before the installation lookup so unsigned junk
     // cannot trigger database reads.
     if (!(await webhooks.verify(payload, signature))) {
+      logApiOperationalEvent('warn', 'source_control_webhook_terminal', {
+        ...requestFields,
+        outcome: 'rejected',
+        reason: 'invalid_signature',
+        status: 401,
+        durationMs: Date.now() - requestStartedAt,
+      });
       return c.json({ error: 'invalid_signature' }, { status: 401 });
     }
 
@@ -734,6 +794,13 @@ github.post('/', async (c) => {
         `[GitHub] ignoring webhook ${id} (${name}) from unknown installation`,
       );
 
+      logApiOperationalEvent('info', 'source_control_webhook_terminal', {
+        ...requestFields,
+        outcome: 'skipped',
+        reason: 'unknown_installation',
+        status: 200,
+        durationMs: Date.now() - requestStartedAt,
+      });
       return c.json({ message: 'unknown_installation' });
     }
 
@@ -746,8 +813,39 @@ github.post('/', async (c) => {
     ]);
 
     await webhooks.verifyAndReceive({ id, name, signature, payload });
+    logApiOperationalEvent('info', 'source_control_webhook_terminal', {
+      ...requestFields,
+      outcome: 'acknowledged',
+      reason: 'handler_dispatch_returned',
+      status: 200,
+      durationMs: Date.now() - requestStartedAt,
+    });
     return c.json({ message: 'webhook_processed' });
   } catch (error) {
+    logApiOperationalEvent('error', 'source_control_webhook_terminal', {
+      ...requestFields,
+      outcome: 'failed',
+      reason: error instanceof Error ? error.name : 'unknown_error',
+      status: 500,
+      durationMs: Date.now() - requestStartedAt,
+      retryable: true,
+    });
+    captureApiException(
+      new Error('GitHub webhook processing failed'),
+      undefined,
+      {
+        component: 'github_webhook',
+        errorType: error instanceof Error ? error.name : 'unknown_error',
+        deliveryId:
+          typeof requestFields.deliveryId === 'string'
+            ? requestFields.deliveryId
+            : undefined,
+        eventType:
+          typeof requestFields.eventType === 'string'
+            ? requestFields.eventType
+            : undefined,
+      },
+    );
     logApiError('[GitHub] caught error', error);
 
     if (error instanceof Error && error.message.includes('signature')) {

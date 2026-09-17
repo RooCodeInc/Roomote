@@ -14,7 +14,10 @@ import {
   type AcpRequestUserInputAnswers,
 } from '@roomote/types';
 import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
-import { createTelegramCommunicationProviderFromRuntimeCredentials as createTelegramCommunicationProvider } from '@roomote/sdk/server';
+import {
+  createTelegramCommunicationProviderFromRuntimeCredentials as createTelegramCommunicationProvider,
+  retireTelegramRequestUserInputPromptBestEffort,
+} from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
 import {
@@ -64,12 +67,18 @@ async function confirmAnswer(params: {
     params.pendingRequest.promptMessageId ?? params.messageId ?? null;
   if (messageId) {
     try {
+      await retireTelegramRequestUserInputPromptBestEffort({
+        channelId: params.chatId,
+        threadId: params.threadId,
+        messageId,
+      });
       const provider = await createTelegramCommunicationProvider();
       if (provider) {
         await provider.editMessageText({
           channelId: params.chatId,
           messageId,
           text: confirmationText,
+          textFormat: 'markdown',
           buttons: [],
         });
         return;
@@ -87,6 +96,30 @@ async function confirmAnswer(params: {
     chatId: params.chatId,
     threadId: params.threadId ?? undefined,
     text: confirmationText,
+    textFormat: 'markdown',
+  });
+}
+
+async function retirePendingPrompt(params: {
+  chatId: string;
+  threadId?: string | null;
+  conversationId: string;
+  pendingRequest: PendingCommunicationRequestUserInput;
+}): Promise<void> {
+  const cleared = await clearPendingCommunicationRequestUserInput(
+    'telegram',
+    params.conversationId,
+    {
+      requestId: params.pendingRequest.requestId,
+      runId: params.pendingRequest.runId,
+    },
+  ).catch(() => false);
+  if (!cleared || !params.pendingRequest.promptMessageId) return;
+
+  await retireTelegramRequestUserInputPromptBestEffort({
+    channelId: params.chatId,
+    threadId: params.threadId,
+    messageId: params.pendingRequest.promptMessageId,
   });
 }
 
@@ -96,7 +129,7 @@ export async function tryHandleTelegramRequestUserInputMessage(params: {
   text: string;
   chatId: string;
   threadId?: string | null;
-}): Promise<boolean> {
+}): Promise<false | 'submitted' | 'already_received'> {
   const conversationId = params.threadId?.trim() || params.chatId;
   const pendingRequest = await getPendingCommunicationRequestUserInput(
     'telegram',
@@ -106,13 +139,12 @@ export async function tryHandleTelegramRequestUserInputMessage(params: {
     return false;
   }
   if (pendingRequest.runId !== params.activeRunId) {
-    await clearPendingCommunicationRequestUserInput(
-      'telegram',
+    await retirePendingPrompt({
+      chatId: params.chatId,
+      threadId: params.threadId,
       conversationId,
-      {
-        requestId: pendingRequest.requestId,
-      },
-    ).catch(() => undefined);
+      pendingRequest,
+    });
     return false;
   }
   if (pendingRequest.status === 'submitted') {
@@ -121,7 +153,7 @@ export async function tryHandleTelegramRequestUserInputMessage(params: {
       threadId: params.threadId ?? undefined,
       text: 'I already received your answer. Please wait for the agent to continue.',
     });
-    return true;
+    return 'already_received';
   }
 
   const parsedReply = parseAcpRequestUserInputAnswerReply(
@@ -129,6 +161,12 @@ export async function tryHandleTelegramRequestUserInputMessage(params: {
     params.text,
   );
   if (!parsedReply) {
+    await retirePendingPrompt({
+      chatId: params.chatId,
+      threadId: params.threadId,
+      conversationId,
+      pendingRequest,
+    });
     return false;
   }
 
@@ -153,7 +191,7 @@ export async function tryHandleTelegramRequestUserInputMessage(params: {
       threadId: params.threadId ?? undefined,
       text: 'I already received your answer. Please wait for the agent to continue.',
     });
-    return true;
+    return 'already_received';
   }
 
   await confirmAnswer({
@@ -163,7 +201,7 @@ export async function tryHandleTelegramRequestUserInputMessage(params: {
     answerText,
     cancelled,
   });
-  return true;
+  return 'submitted';
 }
 
 export async function tryHandleTelegramRequestUserInputCallback(params: {

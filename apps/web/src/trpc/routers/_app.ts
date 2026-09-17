@@ -29,7 +29,7 @@ import {
   prActions,
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
-  taskGoalInputSchema,
+  sessionGoalInputSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
@@ -39,7 +39,9 @@ import {
   getFastSessionComposerSuggestionCommand,
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
+  resolveFastSessionCapabilityOfferCommand,
   replyToFastSessionCommand,
+  startFastSessionGoalCommand,
   startFastSessionCommand,
   submitFastSessionUserInputCommand,
   updateFastSessionModelSelectionCommand,
@@ -47,6 +49,7 @@ import {
 import {
   replyToFastSessionInputSchema,
   fastSessionPrReviewActionInputSchema,
+  fastSessionCapabilityOfferResponseInputSchema,
   startFastSessionInputSchema,
   updateFastSessionModelSelectionInputSchema,
 } from '../commands/fast-sessions/input';
@@ -64,6 +67,7 @@ import {
   getSessions,
   getSessionTimeline,
   archiveSessionCommand,
+  deletePrivateSessionCommand,
   listSessionPins,
   markSessionReadCommand,
   sessionIdInputSchema,
@@ -88,6 +92,7 @@ import {
   saveNotionConnectionSchema,
   saveRipplingConnectionSchema,
   saveGranolaConnectionSchema,
+  saveExaConnectionSchema,
   saveElevenLabsConnectionSchema,
   saveVoiceConnectionSchema,
   saveGrafanaConnectionSchema,
@@ -99,6 +104,7 @@ import {
 } from '@/types';
 
 import { protectedProcedure, publicProcedure, createRouter } from '../init';
+import { getHomeComposerSuggestionsCommand } from '../commands/home/composer-suggestions';
 
 import {
   getTasksCommand,
@@ -155,7 +161,6 @@ import {
 import {
   cancelTaskRunCommand,
   retryFailedTaskStartCommand,
-  startTaskGoalCommand,
 } from '../commands/task-runs';
 import {
   exchangeSlackOAuthCodeCommand,
@@ -202,6 +207,8 @@ import {
   getPersonalAccountCapabilitiesCommand,
   getPersonalPreferencesCommand,
   acceptCookieConsentCommand,
+  acceptVoiceConsentCommand,
+  getVoiceConsentCommand,
   setPersonalPasswordCommand,
   updatePersonalPreferencesCommand,
   getUserPersonalizationCommand,
@@ -266,6 +273,7 @@ import {
   getNotionConnectionCommand,
   getRipplingConnectionCommand,
   getGranolaConnectionCommand,
+  getExaConnectionCommand,
   getElevenLabsConnectionCommand,
   getVoiceConnectionCommand,
   getGrafanaConnectionCommand,
@@ -277,6 +285,8 @@ import {
   saveNotionConnectionCommand,
   saveRipplingConnectionCommand,
   saveGranolaConnectionCommand,
+  saveExaConnectionCommand,
+  removeExaApiKeyCommand,
   saveElevenLabsConnectionCommand,
   saveVoiceConnectionCommand,
   saveGrafanaConnectionCommand,
@@ -333,6 +343,7 @@ import {
   notifySetupSourceControlSynchronized,
   persistSetupRecommendationApplicationReceipt,
   reconcileSetupPlatformEvents,
+  skipSetupSourceControlCommand,
   submitSetupSessionUserInputCommand,
 } from '../commands/setup/setup-session';
 import { SETUP_STARTER_TASK_IDS } from '@/lib/setup-starter-tasks';
@@ -489,8 +500,10 @@ import {
 } from '../commands/analytics';
 import {
   getMiscSettingsCommand,
+  getPrivateSessionsExperimentCommand,
   setDeploymentTimeZoneCommand,
   setAnonymousAnalyticsCommand,
+  setPrivateSessionsExperimentCommand,
 } from '../commands/misc-settings';
 import {
   backfillBrainTaskMemoriesCommand,
@@ -980,6 +993,12 @@ const automationsRouter = createRouter({
 });
 
 export const appRouter = createRouter({
+  home: createRouter({
+    composerSuggestions: protectedProcedure.query(({ ctx: { auth } }) =>
+      getHomeComposerSuggestionsCommand(auth),
+    ),
+  }),
+
   statuspage: createRouter({
     incident: publicProcedure.query(() => getStatuspageIncident()),
   }),
@@ -1049,7 +1068,18 @@ export const appRouter = createRouter({
       .query(({ ctx: { auth }, input }) => getTaskByIdCommand(auth, input)),
 
     messageEnvelopes: protectedProcedure
-      .input(z.object({ taskId: z.string() }))
+      .input(
+        z.object({
+          taskId: z.string(),
+          cursor: z
+            .object({
+              createdAt: z.string(),
+              ts: z.number(),
+              id: z.string().uuid(),
+            })
+            .optional(),
+        }),
+      )
       .query(({ ctx: { auth }, input }) =>
         getTaskMessageEnvelopesCommand(auth, input),
       ),
@@ -1169,19 +1199,6 @@ export const appRouter = createRouter({
   }),
 
   taskRuns: createRouter({
-    startGoal: protectedProcedure
-      .input(
-        z.object({
-          taskId: z.string(),
-          goal: taskGoalInputSchema,
-          clientMessageId: z.string().optional(),
-          userImageUrl: z.string().optional(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        startTaskGoalCommand(auth, input),
-      ),
-
     cancel: protectedProcedure
       .input(
         z.object({
@@ -1602,6 +1619,12 @@ export const appRouter = createRouter({
     acceptCookieConsent: protectedProcedure.mutation(({ ctx: { auth } }) =>
       acceptCookieConsentCommand(auth),
     ),
+    getVoiceConsent: protectedProcedure.query(({ ctx: { auth } }) =>
+      getVoiceConsentCommand(auth),
+    ),
+    acceptVoiceConsent: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      acceptVoiceConsentCommand(auth),
+    ),
     accountCapabilities: protectedProcedure.query(({ ctx: { auth } }) =>
       getPersonalAccountCapabilitiesCommand(auth),
     ),
@@ -1620,16 +1643,20 @@ export const appRouter = createRouter({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
-            therapistMode: z.boolean().optional(),
             resultsPageEnabled: z.boolean().optional(),
+            slackPeerConversationsExperimentEnabled: z.boolean().optional(),
+            homeComposerSuggestionsEnabled: z.boolean().optional(),
+            serviceCredentialToolsEnabled: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
               input.narrationMode !== undefined ||
-              input.therapistMode !== undefined ||
-              input.resultsPageEnabled !== undefined,
+              input.resultsPageEnabled !== undefined ||
+              input.slackPeerConversationsExperimentEnabled !== undefined ||
+              input.homeComposerSuggestionsEnabled !== undefined ||
+              input.serviceCredentialToolsEnabled !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -1988,6 +2015,10 @@ export const appRouter = createRouter({
       getGranolaConnectionCommand(auth),
     ),
 
+    exaConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getExaConnectionCommand(auth),
+    ),
+
     elevenLabsConnection: protectedProcedure.query(({ ctx: { auth } }) =>
       getElevenLabsConnectionCommand(auth),
     ),
@@ -2079,6 +2110,16 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         saveGranolaConnectionCommand(auth, input),
       ),
+
+    saveExaConnection: protectedProcedure
+      .input(saveExaConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveExaConnectionCommand(auth, input),
+      ),
+
+    removeExaApiKey: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      removeExaApiKeyCommand(auth),
+    ),
 
     saveElevenLabsConnection: protectedProcedure
       .input(saveElevenLabsConnectionSchema)
@@ -2718,6 +2759,12 @@ export const appRouter = createRouter({
       getSetupSessionStatusCommand(auth),
     ),
 
+    skipSourceControl: protectedProcedure
+      .input(z.object({ sessionId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        skipSetupSourceControlCommand(auth, input.sessionId),
+      ),
+
     submitSessionUserInput: protectedProcedure
       .input(
         z.object({
@@ -3034,10 +3081,26 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         replyToFastSessionCommand(auth, input),
       ),
+    startGoal: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          objective: sessionGoalInputSchema.shape.objective,
+          clientMessageId: z.string().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        startFastSessionGoalCommand(auth, input),
+      ),
     reviewAction: protectedProcedure
       .input(fastSessionPrReviewActionInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         handleFastSessionPrReviewActionCommand(auth, input),
+      ),
+    resolveCapabilityOffer: protectedProcedure
+      .input(fastSessionCapabilityOfferResponseInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        resolveFastSessionCapabilityOfferCommand(auth, input),
       ),
     updateModelSelection: protectedProcedure
       .input(updateFastSessionModelSelectionInputSchema)
@@ -3190,6 +3253,11 @@ export const appRouter = createRouter({
       .input(sessionIdInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         archiveSessionCommand(auth, input.sessionId),
+      ),
+    deletePrivate: protectedProcedure
+      .input(sessionIdInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        deletePrivateSessionCommand(auth, input.sessionId),
       ),
     unarchive: protectedProcedure
       .input(sessionIdInputSchema)
@@ -3399,6 +3467,9 @@ export const appRouter = createRouter({
   }),
 
   miscSettings: createRouter({
+    privateSessionsExperiment: protectedProcedure.query(() =>
+      getPrivateSessionsExperimentCommand(),
+    ),
     get: protectedProcedure.query(({ ctx: { auth } }) =>
       getMiscSettingsCommand(auth),
     ),
@@ -3411,6 +3482,11 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setAnonymousAnalyticsCommand(auth, input),
+      ),
+    setPrivateSessionsExperiment: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setPrivateSessionsExperimentCommand(auth, input),
       ),
     setTimeZone: protectedProcedure
       .input(z.object({ timeZone: z.string().trim().min(1).max(100) }))

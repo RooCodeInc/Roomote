@@ -483,10 +483,6 @@ export async function resolveTaskRunSourceControlProviders(
   };
   const workspace = resolveTaskWorkspace(taskRun.payload);
 
-  if (workspace.type === 'no_repositories') {
-    return [];
-  }
-
   if (
     payload.repositoryProviders &&
     Object.keys(payload.repositoryProviders).length > 0
@@ -514,6 +510,13 @@ export async function resolveTaskRunSourceControlProviders(
     payload.sourceControlProvider !== ''
   ) {
     return [resolveSourceControlProviderFromPayload(payload)];
+  }
+
+  // A Blank slate is stamped at launch only when the deployment has active
+  // repositories to check out on demand; without a stamp it needs no
+  // source-control credentials, so never fall back to a provider default.
+  if (workspace.type === 'no_repositories') {
+    return [];
   }
 
   // No explicit stamp: resolve from the workspace's synced repositories via the
@@ -748,6 +751,7 @@ export async function createSourceControlTokenForTaskRun(
   {
     maxRetries = SOURCE_CONTROL_TOKEN_MAX_RETRIES,
     baseDelayMs = SOURCE_CONTROL_TOKEN_BASE_DELAY_MS,
+    readOnly = false,
   } = {},
 ): Promise<SourceControlRuntimeToken | null> {
   const providers = await resolveTaskRunSourceControlProviders(taskRun);
@@ -788,9 +792,27 @@ export async function createSourceControlTokenForTaskRun(
     tokensByProvider.set(provider, token);
   }
 
-  return mergeProviderTokens(
+  const merged = mergeProviderTokens(
     providers.map((provider) => tokensByProvider.get(provider)!),
   );
+  if (!readOnly) return merged;
+
+  const exposesRawCredential =
+    Boolean(merged.token) ||
+    Object.values(merged.envVars).some(Boolean) ||
+    (merged.gitCredentials?.some((credential) => Boolean(credential.token)) ??
+      false);
+  if (exposesRawCredential) {
+    throw new Error(
+      'This source-control provider cannot supply read-only credentials to a private task.',
+    );
+  }
+  return {
+    ...merged,
+    gitProxyCredentials: (merged.gitProxyCredentials ?? []).map(
+      (credential) => ({ ...credential, readOnly: true }),
+    ),
+  };
 }
 
 /**

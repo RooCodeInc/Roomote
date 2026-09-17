@@ -8,7 +8,12 @@ import { useRecentSessions } from '@/hooks/useRecentSessions';
 import { formatDistanceToNowCompact } from '@/lib/formatters';
 import { useTRPC } from '@/trpc/client';
 
-import { ArrowRight, Button, Skeleton } from '@/components/system';
+import {
+  ArrowRight,
+  Button,
+  RetryableLoadError,
+  Skeleton,
+} from '@/components/system';
 
 const MAX_VISIBLE_SESSIONS = 15;
 
@@ -48,6 +53,21 @@ export function RecentSessionsList({ enabled }: RecentSessionsListProps) {
           <Skeleton key={index} className="h-12 w-full" />
         ))}
       </div>
+    );
+  }
+
+  if (
+    sessionIds.length > 0 &&
+    sessionsQuery.isError &&
+    sessionsQuery.data === undefined
+  ) {
+    return (
+      <RetryableLoadError
+        className="p-4 md:p-4 [&_[data-slot=empty-icon]]:mb-0"
+        message="Failed to load recent sessions."
+        isRetrying={sessionsQuery.isFetching}
+        onRetry={() => void sessionsQuery.refetch()}
+      />
     );
   }
 

@@ -206,4 +206,83 @@ describe('spawnBlaxelWorker', () => {
     });
     expect(mockDestroyInstance).not.toHaveBeenCalled();
   });
+
+  it('carries the Credential egress bootstrap env and admits after the worker launches', async () => {
+    const admit = vi.fn().mockResolvedValue({
+      workloadId: 'w1',
+      generation: 1,
+      substitutes: [],
+    });
+    const planApiProxy = vi.fn().mockResolvedValue({
+      required: true,
+      bootstrapEnv: {
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+        ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+      },
+      admit,
+    });
+    const taskRun = {
+      id: 321,
+      taskId: 'task-321',
+      vendor: 'blaxel',
+      payloadKind: TaskPayloadKind.StandardTask,
+      sourceSnapshotId: null,
+      payload: { repo: 'test/repo' },
+    } as TaskRun;
+
+    await spawnBlaxelWorker(taskRun, 'auth-token', {
+      blaxelApiKey: 'key',
+      blaxelWorkspace: 'workspace',
+      blaxelImage: 'sandbox/roomote-worker:test',
+      blaxelTimeoutMs: 5 * 60 * 60 * 1_000,
+      credentialEgress: { planApiProxy } as never,
+    });
+
+    expect(planApiProxy).toHaveBeenCalledWith({ taskRun, provider: 'blaxel' });
+    expect(mockRunCommand.mock.calls.at(-1)![0].env).toMatchObject({
+      ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_REQUIRED: '1',
+      ROOMOTE_CREDENTIAL_EGRESS_BOOTSTRAP_NONCE: 'nonce-1',
+    });
+    // Admission runs only once the worker is launched and waiting.
+    expect(admit).toHaveBeenCalledOnce();
+    expect(admit.mock.invocationCallOrder[0]!).toBeGreaterThan(
+      mockRunCommand.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('restores standby when Credential egress admission fails after a resumed launch', async () => {
+    const admit = vi.fn().mockRejectedValue(new Error('admission failed'));
+
+    await expect(
+      spawnBlaxelWorker(
+        {
+          id: 322,
+          taskId: 'task-322',
+          vendor: 'blaxel',
+          payloadKind: TaskPayloadKind.SnapshotResume,
+          sourceSnapshotId: 'roomote-blaxel-standby',
+          payload: { repo: 'test/repo' },
+        } as TaskRun,
+        'auth-token',
+        {
+          blaxelApiKey: 'key',
+          blaxelWorkspace: 'workspace',
+          blaxelImage: 'sandbox/roomote-worker:test',
+          blaxelTimeoutMs: 5 * 60 * 60 * 1_000,
+          credentialEgress: {
+            planApiProxy: vi.fn().mockResolvedValue({
+              required: true,
+              bootstrapEnv: {},
+              admit,
+            }),
+          } as never,
+        },
+      ),
+    ).rejects.toThrow('admission failed');
+    expect(mockEnterStandby).toHaveBeenCalledWith({
+      instanceId: 'roomote-blaxel-standby',
+      commandId: 'worker-command-2',
+    });
+    expect(mockDestroyInstance).not.toHaveBeenCalled();
+  });
 });

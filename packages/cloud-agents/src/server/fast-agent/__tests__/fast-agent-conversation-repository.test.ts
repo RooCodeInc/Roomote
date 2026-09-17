@@ -2,11 +2,15 @@ import {
   and,
   db,
   eq,
+  createChatInitiationOrder,
   fastAgentConversations,
   fastAgentMessages,
   fastAgentParentEvents,
+  getSessionForFastConversation,
+  getUserChatInitiationProvider,
   inArray,
   sessions,
+  recordUserChatInitiationProvider,
   userFactory,
   users,
 } from '@roomote/db/server';
@@ -58,6 +62,162 @@ afterEach(async () => {
 });
 
 describe('Fast conversation repository', () => {
+  it('creates private web conversations with an immutable matching owner', async () => {
+    const owner = await createUser();
+    const conversation = {
+      surface: 'web' as const,
+      workspaceId: owner.id,
+      conversationId: crypto.randomUUID(),
+    };
+
+    const created = await getOrCreateFastAgentSession({
+      owner: { kind: 'user', userId: owner.id },
+      conversation,
+      privacy: 'private',
+    });
+    expect(created).toMatchObject({ privacy: 'private', created: true });
+    await fastAgentConversationRepository.appendVisibleMessages({
+      conversationId: created.id,
+      messages: [
+        { role: 'user', content: 'Private question' },
+        { role: 'assistant', content: 'Private answer' },
+      ],
+    });
+    await expect(
+      getSessionForFastConversation(db, created.id),
+    ).resolves.toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    await expect(
+      fastAgentConversationRepository.findById({ id: created.id }),
+    ).resolves.toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      compatibilityMessages: [
+        { role: 'user', content: 'Private question' },
+        { role: 'assistant', content: 'Private answer' },
+      ],
+    });
+    await expect(
+      getOrCreateFastAgentSession({
+        owner: { kind: 'user', userId: owner.id },
+        conversation,
+        privacy: 'private',
+      }),
+    ).resolves.toMatchObject({
+      id: created.id,
+      privacy: 'private',
+      created: false,
+    });
+    await expect(
+      getOrCreateFastAgentSession({
+        owner: { kind: 'user', userId: owner.id },
+        conversation,
+      }),
+    ).rejects.toThrow('privacy does not match');
+    await expect(
+      getOrCreateFastAgentSession({
+        owner: { kind: 'user', userId: owner.id },
+        conversation: {
+          ...slackConversation,
+          conversationId: crypto.randomUUID(),
+        },
+        privacy: 'private',
+      }),
+    ).rejects.toThrow('user-owned web conversation');
+  });
+
+  it.each(['slack', 'teams', 'telegram', 'discord'] as const)(
+    'records %s when a human chat turn creates a Session',
+    async (surface) => {
+      const user = await createUser();
+      const conversation = {
+        surface,
+        workspaceId: `${surface}-workspace`,
+        conversationId: crypto.randomUUID(),
+        replyTarget: { channelId: `${surface}-channel` },
+      };
+
+      await getOrCreateFastAgentSession({
+        userId: user.id,
+        conversation,
+        chatInitiationOrder: createChatInitiationOrder(),
+      });
+
+      await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+        surface,
+      );
+    },
+  );
+
+  it('does not overwrite the preference for an existing Session turn', async () => {
+    const user = await createUser();
+    const conversation = {
+      ...slackConversation,
+      conversationId: crypto.randomUUID(),
+    };
+    await getOrCreateFastAgentSession({
+      userId: user.id,
+      conversation,
+    });
+    await recordUserChatInitiationProvider(
+      user.id,
+      'discord',
+      createChatInitiationOrder(),
+    );
+
+    const reused = await getOrCreateFastAgentSession({
+      userId: user.id,
+      conversation,
+      chatInitiationOrder: createChatInitiationOrder(),
+    });
+
+    expect(reused.created).toBe(false);
+    await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+      'discord',
+    );
+  });
+
+  it('does not record an automated chat-surface Session', async () => {
+    const user = await createUser();
+    await recordUserChatInitiationProvider(
+      user.id,
+      'telegram',
+      createChatInitiationOrder(),
+    );
+
+    await getOrCreateFastAgentSession({
+      userId: user.id,
+      conversation: {
+        ...slackConversation,
+        conversationId: crypto.randomUUID(),
+      },
+    });
+
+    await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+      'telegram',
+    );
+  });
+
+  it('does not let a delayed older initiation overwrite a newer preference', async () => {
+    const user = await createUser();
+    const initiatedAt = '2026-09-15T15:30:00.000Z';
+
+    await recordUserChatInitiationProvider(user.id, 'discord', {
+      initiatedAt,
+      order: '200',
+    });
+    await recordUserChatInitiationProvider(user.id, 'slack', {
+      initiatedAt,
+      order: '100',
+    });
+
+    await expect(getUserChatInitiationProvider(user.id)).resolves.toBe(
+      'discord',
+    );
+  });
+
   it.each([true, false])(
     'seeds model settings only on insert (initial overrides: %s)',
     async (withOverrides) => {

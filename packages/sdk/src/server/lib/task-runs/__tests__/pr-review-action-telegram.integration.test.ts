@@ -172,4 +172,67 @@ describe('Telegram PR review action carrier lifecycle', () => {
       body: { reply_markup: { inline_keyboard: [] } },
     });
   });
+
+  it('replaces Telegram controls with an inline resolution and preserves the footer', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(telegramResponse({ message_id: 101 }))
+      .mockResolvedValueOnce(telegramResponse(true));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+    mocks.adapter = provider;
+
+    await postTextThreadReplyWithFooter({
+      provider,
+      input: {
+        channelId: '222',
+        threadId: '7',
+        text: 'Review feedback: add a regression test.',
+        buttons: [
+          [{ text: 'Auto-resolve on this PR', callbackData: 'prr:a:nonce' }],
+        ],
+      },
+      footerText: 'Reply anytime',
+    });
+    await retirePrReviewActionMessagesBestEffort(
+      [
+        {
+          provider: 'telegram',
+          channelId: '222',
+          threadId: '7',
+          messageId: '101',
+        },
+      ],
+      {
+        resolution:
+          'OK, Ada. Future review feedback on this PR will get resolved automatically.',
+      },
+    );
+
+    expect(
+      await getThreadReplyFooterRecord('telegram', '222', '7'),
+    ).toMatchObject({
+      messageId: '101',
+      textWithoutFooter:
+        'Review feedback: add a regression test.\n\n_OK, Ada. Future review feedback on this PR will get resolved automatically._',
+    });
+    expect(
+      (await getThreadReplyFooterRecord('telegram', '222', '7'))?.buttons,
+    ).toBeUndefined();
+
+    const editRequest = fetchMock.mock.calls[1];
+    expect(String(editRequest?.[0]).split('/').at(-1)).toBe('editMessageText');
+    expect(
+      JSON.parse(String((editRequest?.[1] as RequestInit).body)),
+    ).toMatchObject({
+      rich_message: {
+        markdown:
+          'Review feedback: add a regression test.\n\n_OK, Ada. Future review feedback on this PR will get resolved automatically._\n\n<footer>Reply anytime</footer>',
+      },
+      reply_markup: { inline_keyboard: [] },
+    });
+  });
 });
