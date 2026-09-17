@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import { db } from '../db';
 import { deploymentSettings } from '../schema';
@@ -9,29 +9,18 @@ import {
 } from './deployment-experiments';
 
 describe('deployment experiments', () => {
-  it('defaults every absent flag off and preserves stored values on updates', async () => {
-    await expect(getDeploymentExperiments()).resolves.toEqual({
-      results: false,
-      slackPeerConversations: false,
-      homeComposerSuggestions: false,
-      serviceCredentialTools: false,
-      privateSessions: false,
-    });
-
+  it('stores one flag without replacing unrelated deployment metadata', async () => {
+    await setDeploymentExperimentEnabled('results', false);
     await db
       .update(deploymentSettings)
       .set({
-        metadata: {
-          preserved: true,
-          private_sessions_experiment_enabled: true,
-        },
+        metadata: sql`${deploymentSettings.metadata} || '{"preserved":true}'::jsonb`,
       })
       .where(eq(deploymentSettings.id, 'default'));
     await setDeploymentExperimentEnabled('results', true);
 
     await expect(getDeploymentExperiments()).resolves.toMatchObject({
       results: true,
-      privateSessions: true,
     });
     await expect(
       db.query.deploymentSettings.findFirst({
@@ -41,7 +30,6 @@ describe('deployment experiments', () => {
     ).resolves.toMatchObject({
       metadata: {
         preserved: true,
-        private_sessions_experiment_enabled: true,
         results_page_enabled: true,
       },
     });

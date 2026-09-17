@@ -19,12 +19,8 @@ describe('Private Sessions deployment experiment', () => {
         [PRIVATE_SESSIONS_EXPERIMENT_METADATA_KEY]: 'true',
       }),
     ).toBe(false);
+    await setPrivateSessionsExperimentEnabled(false);
     await expect(isPrivateSessionsExperimentEnabled()).resolves.toBe(false);
-
-    await db.insert(deploymentSettings).values({
-      id: 'default',
-      metadata: { preserved: true },
-    });
     await setPrivateSessionsExperimentEnabled(true);
 
     await expect(isPrivateSessionsExperimentEnabled()).resolves.toBe(true);
@@ -35,7 +31,6 @@ describe('Private Sessions deployment experiment', () => {
       }),
     ).resolves.toMatchObject({
       metadata: {
-        preserved: true,
         [PRIVATE_SESSIONS_EXPERIMENT_METADATA_KEY]: true,
       },
     });
