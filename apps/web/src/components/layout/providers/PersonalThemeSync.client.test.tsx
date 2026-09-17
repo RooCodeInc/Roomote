@@ -1,4 +1,21 @@
-import { render, waitFor } from '@testing-library/react';
+import { render as renderComponent, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
+const queryKey = [['preferences', 'getPersonal']];
+let client: QueryClient;
+function render(children: ReactNode) {
+  return renderComponent(children, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    preferences: { getPersonal: { queryKey: () => queryKey } },
+  }),
+}));
+afterEach(() => client.clear());
 
 type PersonalColorTheme = 'light' | 'dark' | 'system';
 
@@ -38,6 +55,7 @@ import { PersonalThemeSync } from './PersonalThemeSync';
 
 describe('PersonalThemeSync', () => {
   beforeEach(() => {
+    client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     vi.clearAllMocks();
     window.localStorage.clear();
     personalPreferencesState.preferences = {
@@ -47,7 +65,12 @@ describe('PersonalThemeSync', () => {
     personalPreferencesState.isLoading = false;
     personalPreferencesState.hasLoadedPreferences = true;
     personalPreferencesState.refetch.mockReset();
-    personalPreferencesState.refetch.mockResolvedValue({ isSuccess: true });
+    personalPreferencesState.refetch.mockImplementation(() =>
+      client.fetchQuery({
+        queryKey,
+        queryFn: async () => personalPreferencesState.preferences,
+      }),
+    );
     themeState.theme = 'system';
     userState.isSignedIn = true;
   });
@@ -105,7 +128,12 @@ describe('PersonalThemeSync', () => {
 
     unmount();
     personalPreferencesState.refetch.mockReset();
-    personalPreferencesState.refetch.mockResolvedValue({ isSuccess: true });
+    personalPreferencesState.refetch.mockImplementation(() =>
+      client.fetchQuery({
+        queryKey,
+        queryFn: async () => personalPreferencesState.preferences,
+      }),
+    );
     personalPreferencesState.preferences = {
       colorTheme: 'light',
       narrationMode: false,
