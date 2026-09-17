@@ -2837,6 +2837,12 @@ export async function deliverFastAgentParentEventWithLock(
       !humanFollowUp.turnSource
         ? { allowSilentAmbientReply: true }
         : {}),
+      ...(typeof humanFollowUp?.directedAtRoomote === 'boolean'
+        ? { directedAtRoomote: humanFollowUp.directedAtRoomote }
+        : {}),
+      ...(humanFollowUp?.peerDirectedTurn === true
+        ? { peerDirectedTurn: true }
+        : {}),
       ...(humanFollowUp?.attachmentTexts
         ? { attachmentTexts: humanFollowUp.attachmentTexts }
         : {}),

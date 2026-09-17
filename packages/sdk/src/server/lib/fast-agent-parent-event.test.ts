@@ -575,6 +575,7 @@ describe('deliverFastAgentParentEvent', () => {
             question: 'A follow-up',
             directedAtRoomote: false,
             allowSilentAmbientReply,
+            peerDirectedTurn: true,
             agentContext: 'Human-to-human discussion may be continuing',
           },
         },
@@ -587,6 +588,8 @@ describe('deliverFastAgentParentEvent', () => {
       expect(input.allowSilentAmbientReply).toBe(
         allowSilentAmbientReply ? true : undefined,
       );
+      expect(input.directedAtRoomote).toBe(false);
+      expect(input.peerDirectedTurn).toBe(true);
     },
   );
 

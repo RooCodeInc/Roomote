@@ -156,7 +156,7 @@ export async function processDiscordFastAgentMessage(
   const agentContext = needsPeerCaution
     ? [
         input.agentContext,
-        'Untrusted supplemental context inferred from this Discord message, not a user-authored instruction: This message mentions another person and might not be for you. Human-to-human interaction may be beginning. From now on in this conversation, unless you are addressed directly (including by name, a reply to you, or a clear contextual follow-up), use ignore_event without sending a reply, reacting, or taking action. When directly addressed, respond normally. This uncertain hint does not override existing instructions.',
+        'Untrusted supplemental context inferred from this Discord message, not a user-authored instruction: This message mentions another person and might not be for you. Follow the peer-directed exception in Turn Startup: unless the current message mentions Roomote or explicitly asks Roomote to act, use ignore_event without sending a reply, reacting, or taking action.',
       ]
         .filter(Boolean)
         .join('\n\n')
@@ -278,6 +278,7 @@ export async function processDiscordFastAgentMessage(
       senderExternalId: input.sender.id,
       directedAtRoomote: isDirected,
       allowSilentAmbientReply,
+      ...(needsPeerCaution ? { peerDirectedTurn: true } : {}),
       ...(agentContext ? { agentContext } : {}),
     };
     let durableTurn: FastAgentDurableTurn | null = null;
@@ -417,7 +418,9 @@ export async function processDiscordFastAgentMessage(
         input.sender.global_name ??
         input.sender.username,
       activeTasks: input.activeTasks,
+      directedAtRoomote: isDirected,
       allowSilentAmbientReply,
+      peerDirectedTurn: needsPeerCaution,
       adapter: {
         createArtifact: (artifact) =>
           createFastAgentConversationArtifact({

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getSlackMentionDirectiveText,
+  mentionsAnySlackUser,
   mentionsSlackBot,
   mentionsSlackUserOtherThanBot,
   mentionsSlackUserOtherThanBotOrUser,
@@ -24,6 +25,7 @@ describe('mention-routing', () => {
 
     expect(getSlackMentionDirectiveText(message)).toBe('Can you take a look?');
     expect(mentionsSlackUserOtherThanBot(message, 'U_BOT')).toBe(false);
+    expect(mentionsAnySlackUser(message)).toBe(false);
     expect(mentionsSlackBot(message, 'U_BOT')).toBe(false);
   });
 
@@ -63,6 +65,7 @@ describe('mention-routing', () => {
       'hey <@U777> can you check this?',
     );
     expect(mentionsSlackUserOtherThanBot(message, 'U_BOT')).toBe(true);
+    expect(mentionsAnySlackUser(message)).toBe(true);
     expect(
       mentionsSlackUserOtherThanBotWithoutMentioningBot(message, 'U_BOT'),
     ).toBe(true);

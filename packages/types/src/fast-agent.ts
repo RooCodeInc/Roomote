@@ -283,6 +283,8 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
    * Absent and false both require a response, including for older durable rows.
    */
   allowSilentAmbientReply: z.boolean().optional(),
+  /** The surface classified this turn as conversation between human peers. */
+  peerDirectedTurn: z.boolean().optional(),
   /**
    * Surface context the model reads with the message (the pull request a
    * mention is on, for example). Persisted so a queued or resumed turn keeps

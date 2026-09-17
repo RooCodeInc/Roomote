@@ -221,6 +221,7 @@ export function buildFastAgentSystemPrompt({
   automationReport = false,
   retryTaskStartAvailable = false,
   allowSilentAmbientReply = false,
+  peerDirectedTurn = false,
   implicitAutomationOffersEnabled = true,
   releaseVersion,
   commitSha,
@@ -253,6 +254,7 @@ export function buildFastAgentSystemPrompt({
   automationReport?: boolean;
   retryTaskStartAvailable?: boolean;
   allowSilentAmbientReply?: boolean;
+  peerDirectedTurn?: boolean;
   implicitAutomationOffersEnabled?: boolean;
   releaseVersion?: string;
   commitSha?: string;
@@ -350,10 +352,32 @@ ${
     workspaceRoutingRules,
     availableEnvironments,
   );
+  const resolvedPeerDirectedTurn =
+    !platformEvent &&
+    !reactionInput &&
+    allowSilentAmbientReply &&
+    peerDirectedTurn;
+  const humanTurnDirectednessGuidance =
+    !platformEvent &&
+    !reactionInput &&
+    allowSilentAmbientReply &&
+    !resolvedPeerDirectedTurn
+      ? `- For an eligible unmentioned multi-human turn, first decide from the current message and recent thread whether it is specifically directed at Roomote.
+- Respond to explicit platform mentions or commands, direct replies or answers to Roomote, requests about Roomote's work, and contextually clear follow-ups. A first-time participant is not ambient when the context shows they are addressing Roomote.
+- Messages to another person or to the whole group default to ambient, even when actionable. A message that explicitly addresses another person remains ambient when it asks about Roomote's work. Call \`ignore_event\` without acknowledging, using integrations, or starting work.
+- Answer a whole-group message only when Roomote has a specific, materially useful contribution beyond what participants have already said. This bar is higher than for an ordinary response-required message; do not merely agree, restate, or join the discussion.
+- Use \`send_chat_reaction\` only when acknowledgement itself is useful; otherwise call \`ignore_event\`. When directedness is uncertain, prefer reaction or silence for plausible human-to-human discussion, but never suppress a legitimate request because it is unclear, difficult, or needs clarification.
+- \`retry_task_start\` is invalid for a human-authored turn.
+
+`
+      : '';
+  const peerDirectedStartupGuidance = resolvedPeerDirectedTurn
+    ? '- The communication surface classified this turn as a colleague-to-colleague conversation. Default to `ignore_event` without acknowledging, reacting, or taking action. Respond only if the current message mentions Roomote or explicitly asks Roomote to act.\n'
+    : '';
   return `You are ${PRODUCT_NAME} in fast mode on ${surfaceName}. You are the conversational orchestrator for this conversation, not a router and not a transparent relay to a sandbox task. You own the conversation, answer directly when possible, and deliberately delegate execution work when useful.
 
 ${releaseIdentifier}## Turn Startup (Highest Priority)
-- On every response-required human turn, the first model-selected action must communicate with the user before substantive model-invoked work.
+${peerDirectedStartupGuidance}${humanTurnDirectednessGuidance}- Except for a turn classified above as peer-directed or another eligible ambient message, on every response-required human turn the first model-selected action must communicate with the user before substantive model-invoked work.
 - When work will continue in a coding task, use \`send_chat_reply\` with purpose \`ack\` before calling \`launch_task\`. A reaction never satisfies this startup requirement, including an "eyes" reaction.
 - A direct closeout or clarification that fully handles the turn without bypassing required Brain recall or other investigation is already the first communication; do not prepend a separate acknowledgement.
 - The acknowledgement streams independently of coding-task startup, so send it first and do not wait for launch or workspace provisioning. Do not repeat it after \`launch_task\`. If launch fails, explain the failure through the normal closeout or clarification path.
@@ -665,14 +689,7 @@ ${
 - The reacted-to message is context, not the current message surface. Do not call \`send_chat_reaction\` or \`retry_task_start\`.
 `
       : allowSilentAmbientReply
-        ? `## Multi-Human Conversation Directedness (Highest Priority)
-- Before applying Turn Startup or Evidence-Driven Workflow, decide from the current message and recent thread whether this unmentioned multi-human turn is specifically directed at Roomote.
-- Respond to explicit platform mentions or commands, direct replies or answers to Roomote, requests about Roomote's work, and contextually clear follow-ups. A first-time participant is not ambient when the context shows they are addressing Roomote.
-- Messages to another person or to the whole group default to ambient, even when actionable. Call \`ignore_event\` without acknowledging, using integrations, or starting work.
-- Answer a whole-group message only when Roomote has a specific, materially useful contribution beyond what participants have already said. This bar is higher than for an ordinary response-required message; do not merely agree, restate, or join the discussion.
-- Use \`send_chat_reaction\` only when acknowledgement itself is useful; otherwise call \`ignore_event\`. When directedness is uncertain, prefer reaction or silence for plausible human-to-human discussion, but never suppress a legitimate request because it is unclear, difficult, or needs clarification.
-- \`retry_task_start\` is invalid for a human-authored turn.
-`
+        ? ''
         : '- `ignore_event` and `retry_task_start` are invalid for this human-authored turn.\n'
 }
 
