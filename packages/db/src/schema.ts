@@ -2018,13 +2018,24 @@ export const taskPlatformIssueReports = pgTable(
   'task_platform_issue_reports',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    taskId: text('task_id')
-      .notNull()
-      .references(() => tasks.id, { onDelete: 'cascade' }),
-    runId: integer('run_id')
-      .notNull()
-      .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
+    runId: integer('run_id').references(() => taskRuns.id, {
+      onDelete: 'cascade',
+    }),
     taskMessageId: uuid('task_message_id').references(() => taskMessages.id, {
+      onDelete: 'set null',
+    }),
+    sessionId: uuid('session_id').references(() => sessions.id, {
+      onDelete: 'cascade',
+    }),
+    fastConversationId: uuid('fast_conversation_id').references(
+      () => fastAgentConversations.id,
+      { onDelete: 'cascade' },
+    ),
+    fastEventId: text('fast_event_id'),
+    reportedByUserId: text('reported_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
     report: jsonb('report').notNull().$type<PlatformIssueReport>(),
@@ -2049,6 +2060,14 @@ export const taskPlatformIssueReports = pgTable(
     uniqueIndex('task_platform_issue_reports_task_message_id_unique').on(
       table.taskMessageId,
     ),
+    uniqueIndex('task_platform_issue_reports_fast_event_unique').on(
+      table.fastConversationId,
+      table.fastEventId,
+    ),
+    check(
+      'task_platform_issue_reports_source_check',
+      sql`(${table.taskId} IS NOT NULL AND ${table.runId} IS NOT NULL AND ${table.sessionId} IS NULL AND ${table.fastConversationId} IS NULL AND ${table.fastEventId} IS NULL) OR (${table.taskId} IS NULL AND ${table.runId} IS NULL AND ${table.sessionId} IS NOT NULL AND ${table.fastConversationId} IS NOT NULL AND ${table.fastEventId} IS NOT NULL)`,
+    ),
   ],
 );
 
@@ -2066,6 +2085,18 @@ export const taskPlatformIssueReportsRelations = relations(
     taskMessage: one(taskMessages, {
       fields: [taskPlatformIssueReports.taskMessageId],
       references: [taskMessages.id],
+    }),
+    session: one(sessions, {
+      fields: [taskPlatformIssueReports.sessionId],
+      references: [sessions.id],
+    }),
+    fastConversation: one(fastAgentConversations, {
+      fields: [taskPlatformIssueReports.fastConversationId],
+      references: [fastAgentConversations.id],
+    }),
+    reportedByUser: one(users, {
+      fields: [taskPlatformIssueReports.reportedByUserId],
+      references: [users.id],
     }),
   }),
 );

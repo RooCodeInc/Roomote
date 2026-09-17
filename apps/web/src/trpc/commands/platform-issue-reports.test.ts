@@ -9,6 +9,8 @@ vi.mock('@roomote/telemetry/server', () => ({
 import {
   db,
   eq,
+  ensureSessionForFastConversation,
+  fastAgentConversations,
   taskFactory,
   taskPlatformIssueReports,
   taskRuns,
@@ -68,6 +70,7 @@ describe('platform issue report commands', () => {
       id: REPORT_ID,
       title: 'Worker cannot start',
       summary: 'Detailed report',
+      sourceLabel: 'task',
       taskUrl: expect.stringContaining(`/task/${TASK_ID}`),
       submittedAt: null,
     });
@@ -101,6 +104,57 @@ describe('platform issue report commands', () => {
       pingSubmittedAt: expect.any(Date),
       pingSubmittedByUserId: adminId,
     });
+  });
+
+  it('uses the owning Session as the Fast report context', async () => {
+    const owner = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: `platform-issue-command-${Date.now()}`,
+        conversationId: `platform-issue-command-${Date.now()}`,
+      })
+      .returning({ id: fastAgentConversations.id });
+    const session = await ensureSessionForFastConversation(
+      db,
+      conversation!.id,
+    );
+    const reportId = 'd3c76560-b323-4626-a19a-f6d7df718c33';
+    await db.insert(taskPlatformIssueReports).values({
+      id: reportId,
+      sessionId: session.id,
+      fastConversationId: conversation!.id,
+      fastEventId: 'turn-1:tool:0',
+      reportedByUserId: owner.id,
+      report: { title: 'Fast runtime failed', summary: 'Detailed report' },
+    });
+
+    await expect(
+      getPlatformIssueReportCommand({ isAdmin: true }, reportId),
+    ).resolves.toMatchObject({
+      sourceLabel: 'Session',
+      taskUrl: expect.stringContaining(`/sessions/${session.id}`),
+    });
+    await expect(
+      submitPlatformIssueReportCommand(
+        { userId: adminId, isAdmin: true },
+        reportId,
+      ),
+    ).resolves.toMatchObject({ success: true });
+    expect(submitPlatformIssueToPingMock).toHaveBeenLastCalledWith({
+      reportId,
+      report: {
+        title: 'Fast runtime failed',
+        summary: 'Detailed report',
+        taskUrl: expect.stringContaining(`/sessions/${session.id}`),
+      },
+    });
+
+    await db
+      .delete(taskPlatformIssueReports)
+      .where(eq(taskPlatformIssueReports.id, reportId));
   });
 
   it('keeps the report retryable when Ping does not accept it', async () => {

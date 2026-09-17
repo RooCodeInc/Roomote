@@ -102,6 +102,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'create_artifact.js'),
       'utf8',
     );
+    const reportPlatformIssueSource = await readFile(
+      join(toolsDirectory, 'report_platform_issue.js'),
+      'utf8',
+    );
     const sendTaskMessageSource = await readFile(
       join(toolsDirectory, 'send_task_message.js'),
       'utf8',
@@ -163,6 +167,15 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(createArtifactSource).toContain('invoke("create_artifact"');
     expect(createArtifactSource).toContain('maximum 128 KiB');
+    expect(reportPlatformIssueSource).toContain(
+      'invoke("report_platform_issue"',
+    );
+    expect(reportPlatformIssueSource).toContain(
+      'admin-fixable Roomote platform',
+    );
+    expect(reportPlatformIssueSource).toContain(
+      'z.string().trim().min(1).max(4000)',
+    );
     expect(launchTaskSource).toContain('deployment-enabled model ID');
     expect(reviewPullRequestSource).toContain(
       'model: z.string().min(1).nullable().optional()',

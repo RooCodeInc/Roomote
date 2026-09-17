@@ -874,6 +874,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('Each structured output');
     expect(prompt).not.toContain('toolArguments');
     expect(prompt).toContain('no local filesystem, shell');
+    expect(prompt).toContain(
+      'Use `report_platform_issue` only for an admin-fixable Roomote platform',
+    );
     expect(prompt).not.toContain(
       'current-channel chat context tools are the only direct external capabilities',
     );

@@ -20,6 +20,17 @@ describe('buildFastAgentToolFilter', () => {
     expect(filter.bash).not.toBe(true);
     expect(filter.read).not.toBe(true);
     expect(filter.edit).not.toBe(true);
+    expect(filter[FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue]).toBe(true);
+    expect(
+      buildFastAgentToolFilter([], { surface: 'slack' })[
+        FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue
+      ],
+    ).toBe(true);
+    expect(
+      FAST_AGENT_SUBAGENT_TOOL_FILTER[
+        FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue
+      ],
+    ).toBe(false);
   });
 });
 
@@ -123,6 +134,7 @@ describe('getFastAgentNativeAcpKind', () => {
     [FAST_AGENT_NATIVE_TOOL_NAMES.saveMemory, ACP_TOOL_KINDS.memory],
     [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact, ACP_TOOL_KINDS.artifact],
     [FAST_AGENT_NATIVE_TOOL_NAMES.showWidget, ACP_TOOL_KINDS.widget],
+    [FAST_AGENT_NATIVE_TOOL_NAMES.reportPlatformIssue, ACP_TOOL_KINDS.tool],
   ])('maps %s to %s', (name, expected) => {
     expect(getFastAgentNativeAcpKind(name)).toBe(expected);
   });
