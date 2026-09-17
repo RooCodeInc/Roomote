@@ -9,14 +9,34 @@ import {
   workItems,
 } from '@roomote/db/server';
 
+const experimentEnabled = vi.hoisted(() => ({ value: false }));
+
+vi.mock('@roomote/db/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/db/server')>()),
+  isDeploymentExperimentEnabled: () => experimentEnabled.value,
+}));
+
 import type { UserAuthSuccess } from '@/types';
 import { actOnResultCommand, listResultsCommand } from './results';
 
 describe('Results commands', () => {
-  it('sorts unread items by priority then recency and removes acted-on items', async () => {
+  beforeEach(() => {
+    experimentEnabled.value = false;
+  });
+
+  it('ignores a legacy per-user opt-in when the deployment experiment is off', async () => {
     const user = await userFactory.create({
       metadata: { results_page_enabled: true },
     });
+
+    await expect(
+      listResultsCommand({ userId: user.id } as UserAuthSuccess),
+    ).rejects.toThrow('Results is not enabled.');
+  });
+
+  it('sorts unread items by priority then recency and removes acted-on items', async () => {
+    const user = await userFactory.create();
+    experimentEnabled.value = true;
     const auth = { userId: user.id } as UserAuthSuccess;
     const sourceTask = await taskFactory.create({
       repositoryName: 'RooCodeInc/Roomote',

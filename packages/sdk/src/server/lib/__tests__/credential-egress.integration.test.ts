@@ -10,6 +10,7 @@ import {
   terminateCredentialEgressWorkloadsForRun,
   taskRuns,
   sessionFactory,
+  setDeploymentExperimentEnabled,
   sessionTasks,
   sessions,
   tasks,
@@ -50,9 +51,8 @@ let taskId: string;
 let connectorIdentity: string;
 
 beforeEach(async () => {
-  const owner = await userFactory.create({
-    metadata: { integration_keys_enabled: true },
-  });
+  const owner = await userFactory.create();
+  await setDeploymentExperimentEnabled('serviceCredentialTools', true);
   const session = await sessionFactory.create({
     ownerKind: 'user',
     ownerUserId: owner.id,

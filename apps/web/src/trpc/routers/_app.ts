@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEPLOYMENT_EXPERIMENT_IDS } from '@roomote/feature-flags';
 import { instanceSkillsRouter } from './instance-skills';
 import {
   publicAuthTokenTimeoutMsSchema,
@@ -214,6 +215,10 @@ import {
   getUserPersonalizationCommand,
   updateUserPersonalizationCommand,
 } from '../commands/preferences';
+import {
+  getDeploymentExperimentsCommand,
+  setDeploymentExperimentCommand,
+} from '../commands/deployment-experiments';
 import {
   type EnvironmentConfigVersionDetail,
   getActiveEnvironmentDefinitionTaskCommand,
@@ -500,10 +505,8 @@ import {
 } from '../commands/analytics';
 import {
   getMiscSettingsCommand,
-  getPrivateSessionsExperimentCommand,
   setDeploymentTimeZoneCommand,
   setAnonymousAnalyticsCommand,
-  setPrivateSessionsExperimentCommand,
 } from '../commands/misc-settings';
 import {
   backfillBrainTaskMemoriesCommand,
@@ -1643,20 +1646,12 @@ export const appRouter = createRouter({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
-            resultsPageEnabled: z.boolean().optional(),
-            slackPeerConversationsExperimentEnabled: z.boolean().optional(),
-            homeComposerSuggestionsEnabled: z.boolean().optional(),
-            serviceCredentialToolsEnabled: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
-              input.narrationMode !== undefined ||
-              input.resultsPageEnabled !== undefined ||
-              input.slackPeerConversationsExperimentEnabled !== undefined ||
-              input.homeComposerSuggestionsEnabled !== undefined ||
-              input.serviceCredentialToolsEnabled !== undefined,
+              input.narrationMode !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -3466,10 +3461,23 @@ export const appRouter = createRouter({
     ),
   }),
 
-  miscSettings: createRouter({
-    privateSessionsExperiment: protectedProcedure.query(() =>
-      getPrivateSessionsExperimentCommand(),
+  deploymentExperiments: createRouter({
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getDeploymentExperimentsCommand(auth),
     ),
+    set: protectedProcedure
+      .input(
+        z.object({
+          id: z.enum(DEPLOYMENT_EXPERIMENT_IDS),
+          enabled: z.boolean(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setDeploymentExperimentCommand(auth, input),
+      ),
+  }),
+
+  miscSettings: createRouter({
     get: protectedProcedure.query(({ ctx: { auth } }) =>
       getMiscSettingsCommand(auth),
     ),
@@ -3482,11 +3490,6 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setAnonymousAnalyticsCommand(auth, input),
-      ),
-    setPrivateSessionsExperiment: protectedProcedure
-      .input(z.object({ enabled: z.boolean() }))
-      .mutation(({ ctx: { auth }, input }) =>
-        setPrivateSessionsExperimentCommand(auth, input),
       ),
     setTimeZone: protectedProcedure
       .input(z.object({ timeZone: z.string().trim().min(1).max(100) }))

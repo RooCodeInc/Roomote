@@ -30,6 +30,7 @@ import {
   users,
 } from '../schema';
 import { runInTransactionIfAvailable } from './transaction-utils';
+import { isDeploymentExperimentEnabled } from './deployment-experiments';
 import { createMemoryOutboxLifecycle } from './memory-outbox-lifecycle';
 import { isVisibleTask } from './tasks';
 
@@ -112,19 +113,19 @@ export async function findHomeComposerPrecomputeUserForRun(
   database: DatabaseOrTransaction,
   runId: number,
 ): Promise<string | null> {
+  if (
+    !(await isDeploymentExperimentEnabled('homeComposerSuggestions', database))
+  ) {
+    return null;
+  }
+
   const [row] = await database
     .select({ userId: tasks.initiatorUserId })
     .from(brainMemoryEvents)
     .innerJoin(taskRuns, eq(taskRuns.id, brainMemoryEvents.runId))
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .innerJoin(users, eq(users.id, tasks.initiatorUserId))
-    .where(
-      and(
-        ...eligibleUserTaskMemoryConditions(),
-        eq(taskRuns.id, runId),
-        sql`${users.metadata} @> '{"home_composer_suggestions_enabled": true}'::jsonb`,
-      ),
-    )
+    .where(and(...eligibleUserTaskMemoryConditions(), eq(taskRuns.id, runId)))
     .limit(1);
 
   return row?.userId ?? null;
@@ -132,20 +133,8 @@ export async function findHomeComposerPrecomputeUserForRun(
 
 export async function isHomeComposerSuggestionsEnabled(
   database: DatabaseOrTransaction,
-  userId: string,
 ): Promise<boolean> {
-  const [row] = await database
-    .select({ id: users.id })
-    .from(users)
-    .where(
-      and(
-        eq(users.id, userId),
-        sql`${users.metadata} @> '{"home_composer_suggestions_enabled": true}'::jsonb`,
-      ),
-    )
-    .limit(1);
-
-  return Boolean(row);
+  return isDeploymentExperimentEnabled('homeComposerSuggestions', database);
 }
 
 export async function upsertBrainCollectorItems(

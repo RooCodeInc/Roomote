@@ -71,8 +71,7 @@ vi.mock('@roomote/redis', async (importOriginal) => ({
 vi.mock('@roomote/db/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/db/server')>()),
   db: {},
-  isSlackPeerConversationsExperimentEnabledForUser:
-    peerConversationsExperimentEnabledMock,
+  isDeploymentExperimentEnabled: peerConversationsExperimentEnabledMock,
 }));
 
 const THREAD_TS = '100.000';
@@ -276,11 +275,11 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     });
     expect(markSlackThreadExplicitMentionRequiredMock).not.toHaveBeenCalled();
     expect(peerConversationsExperimentEnabledMock).toHaveBeenCalledWith(
-      'owner-user-id',
+      'slackPeerConversations',
     );
   });
 
-  it('keeps the peer-mention cutoff when the conversation owner has not enabled the experiment', async () => {
+  it('keeps the peer-mention cutoff when the deployment has not enabled the experiment', async () => {
     getFastAgentSessionOwnerMock.mockResolvedValue({
       kind: 'user',
       userId: 'owner-user-id',
@@ -296,10 +295,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
       ),
     ).resolves.toEqual({ shouldRoute: false });
     expect(peerConversationsExperimentEnabledMock).toHaveBeenCalledWith(
-      'owner-user-id',
-    );
-    expect(peerConversationsExperimentEnabledMock).not.toHaveBeenCalledWith(
-      'participant-user-id',
+      'slackPeerConversations',
     );
   });
 

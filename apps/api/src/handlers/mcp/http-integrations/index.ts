@@ -8,6 +8,7 @@ import {
   users,
   resolveServiceCredentialContext,
   listOwnedServiceCredentials,
+  isDeploymentExperimentEnabled,
   type ServiceCredentialContext,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
@@ -15,10 +16,7 @@ import {
   listServiceCredentialApprovals,
   prepareServiceCredential,
 } from '@roomote/sdk/server/service-credentials';
-import {
-  isServiceCredentialToolsExperimentEnabled,
-  serviceCredentialPrepareToolSchema,
-} from '@roomote/types';
+import { serviceCredentialPrepareToolSchema } from '@roomote/types';
 import type { Variables } from '../../../types';
 import { resolveDeploymentMcpAuth } from '../deployment-mcp-auth';
 import {
@@ -94,7 +92,7 @@ export function createHttpIntegrationsMcp() {
       const user = userId
         ? await db.query.users.findFirst({
             where: eq(users.id, userId),
-            columns: { id: true, deletedAt: true, metadata: true },
+            columns: { id: true, deletedAt: true },
           })
         : undefined;
       if (!user || user.deletedAt)
@@ -102,8 +100,13 @@ export function createHttpIntegrationsMcp() {
           403,
           'HTTP integrations requires an active member actor',
         );
-      const serviceCredentialToolsEnabled =
-        isServiceCredentialToolsExperimentEnabled(user.metadata);
+      const serviceCredentialToolsEnabled = await isDeploymentExperimentEnabled(
+        'serviceCredentialTools',
+      );
+      const integrationKeysStillEnabled = () =>
+        serviceCredentialToolsEnabled
+          ? isDeploymentExperimentEnabled('serviceCredentialTools')
+          : Promise.resolve(false);
       const scope =
         auth.tokenType === 'run' ? `run:${auth.runId}` : `user:${user.id}`;
       server = new McpServer(
@@ -128,8 +131,9 @@ export function createHttpIntegrationsMcp() {
           },
         },
         async () => {
+          const integrationKeysEnabled = await integrationKeysStillEnabled();
           const grants =
-            serviceCredentialToolsEnabled && resolveContext
+            integrationKeysEnabled && resolveContext
               ? await resolveContext()
                   .then(listOwnedServiceCredentials)
                   .catch(() => [])
@@ -178,7 +182,8 @@ export function createHttpIntegrationsMcp() {
         },
         async (args) => {
           try {
-            if (!resolveContext) throw new Error();
+            if (!(await integrationKeysStillEnabled()) || !resolveContext)
+              throw new Error();
             const context = await resolveContext();
             const pending = await prepareServiceCredential(context, args);
             return toMcpToolResult({
@@ -207,7 +212,8 @@ export function createHttpIntegrationsMcp() {
         },
         async () => {
           try {
-            if (!resolveContext) throw new Error();
+            if (!(await integrationKeysStillEnabled()) || !resolveContext)
+              throw new Error();
             return toMcpToolResult(
               await listServiceCredentialApprovals(await resolveContext()),
             );
@@ -244,6 +250,7 @@ export function createHttpIntegrationsMcp() {
         },
         async (args) => {
           try {
+            const integrationKeysEnabled = await integrationKeysStillEnabled();
             return toMcpToolResult(
               await integrationRequest(
                 config,
@@ -251,7 +258,7 @@ export function createHttpIntegrationsMcp() {
                 args,
                 user.id,
                 c.req.raw.signal,
-                serviceCredentialToolsEnabled ? resolveContext : undefined,
+                integrationKeysEnabled ? resolveContext : undefined,
               ),
             );
           } catch (error) {
