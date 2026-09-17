@@ -118,6 +118,14 @@ export const MEDIA_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Judgment-model provider credentials. Only control-plane routing judgments
+ * call the provider; a task never needs the key.
+ */
+const JUDGMENT_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
+  'R_TYPESAFE_API_KEY',
+]);
+
+/**
  * Declarative environment provisioning inputs, managed through the deployment
  * environment. Not secrets per se, but they are control-plane configuration
  * (the inline YAML may carry per-environment env values) and a task never
@@ -153,6 +161,7 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     ...PROVIDER_IDENTIFIER_ENV_VAR_NAMES,
     ...INSTANCE_SECRET_ENV_VAR_NAMES,
     ...MEDIA_PROVIDER_ENV_VAR_NAMES,
+    ...JUDGMENT_PROVIDER_ENV_VAR_NAMES,
     ...DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES,
     ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
     // Hosting-managed Roomote inference is served only through the inference

@@ -185,6 +185,12 @@ const serverSchema = {
   // control plane: the browser only ever receives short-lived ephemeral
   // realtime tokens and synthesized audio, never the key itself.
   R_VOICE_OPENAI_API_KEY: z.string().min(1).optional(),
+  // TypeSafe key for the optional judgment model (Jev). When set, bounded
+  // routing judgments (channel launch gate, requested work kind) try one fast
+  // typed call first and fall back to the helper model when it is unsure or
+  // fails. Unset means every judgment uses the helper model. The key stays on
+  // the control plane.
+  R_TYPESAFE_API_KEY: z.string().min(1).optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -646,6 +652,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_ELEVENLABS_API_KEY',
   'R_ELEVENLABS_VOICE_ID',
   'R_VOICE_OPENAI_API_KEY',
+  'R_TYPESAFE_API_KEY',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',

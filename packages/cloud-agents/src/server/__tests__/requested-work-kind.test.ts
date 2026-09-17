@@ -1,5 +1,11 @@
-const { mockGenerateTrackedNonTaskObject } = vi.hoisted(() => ({
-  mockGenerateTrackedNonTaskObject: vi.fn(),
+const { mockGenerateTrackedNonTaskObject, mockEvaluateTypeSafeJudgments } =
+  vi.hoisted(() => ({
+    mockGenerateTrackedNonTaskObject: vi.fn(),
+    mockEvaluateTypeSafeJudgments: vi.fn(),
+  }));
+
+vi.mock('../typesafe-judgment', () => ({
+  evaluateTypeSafeJudgments: mockEvaluateTypeSafeJudgments,
 }));
 
 vi.mock('../non-task-provider-usage', async (importOriginal) => {
@@ -20,6 +26,7 @@ import {
 describe('requested work kind classification', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(null);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   });
 
@@ -157,5 +164,69 @@ describe('requested work kind classification', () => {
       source: 'system_default',
       confidence: null,
     });
+  });
+
+  it('uses a confident judgment-model answer without the helper model', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+      kind: {
+        type: 'choice',
+        choice: 'implement',
+        probabilities: {
+          question: 0.05,
+          plan: 0.04,
+          implement: 0.9,
+          unknown: 0.01,
+        },
+        confidence: 0.86,
+      },
+    });
+
+    const decision = await resolveRequestedWorkKindDecision({
+      prompt: 'Check Better Stack and fix the failure',
+    });
+
+    expect(decision).toEqual({
+      kind: 'implement',
+      source: 'llm_classifier',
+      confidence: 0.86,
+    });
+    expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
+  });
+
+  it('defers to the helper model when the judgment model is unsure or fails', async () => {
+    mockEvaluateTypeSafeJudgments
+      .mockResolvedValueOnce({
+        kind: {
+          type: 'choice',
+          choice: 'plan',
+          probabilities: {
+            question: 0.3,
+            plan: 0.36,
+            implement: 0.3,
+            unknown: 0.04,
+          },
+          confidence: 0.12,
+        },
+      })
+      .mockRejectedValueOnce(
+        new Error('TypeSafe request failed with HTTP 429'),
+      );
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: { kind: 'question', confidence: 0.7 },
+    } as never);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const decision = await resolveRequestedWorkKindDecision({
+        prompt: 'Look into the auth flow',
+      });
+
+      expect(decision).toEqual({
+        kind: 'question',
+        source: 'llm_classifier',
+        confidence: 0.7,
+      });
+    }
+
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(2);
   });
 });

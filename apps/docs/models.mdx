@@ -277,6 +277,28 @@ You do not need a separate model for every role. Set a specialized role to
 strong default model, then split out a faster orchestration or helper model, or
 a stronger review model, after they can see real usage.
 
+### Optional judgment model
+
+Some helper-model work is a bounded decision rather than text: does this
+channel message meet the launch criteria, or is this request a question, a
+plan, or an implementation. Self-hosted operators can set `R_TYPESAFE_API_KEY`
+to let [TypeSafe](https://typesafe.ai)'s Jev model make those decisions. Jev
+returns typed answers with probabilities in a single fast call instead of
+generating text.
+
+When the key is set, Roomote asks the judgment model first for:
+
+- [Auto-respond to channels](/automations#channel-automations) launch
+  criteria, including the check for duplicates of an earlier launch
+- the question, plan, or implement classification of a new task request
+
+Roomote acts on the answer only when the judgment model is confident. When it
+is unsure, unavailable, or returns an error, the helper model decides exactly
+as it does without the key, so removing the key changes speed, not behavior.
+The key stays on the control plane and is never sent to task sandboxes. The
+message or request text being judged is sent to TypeSafe, so review their data
+terms before enabling it.
+
 ## Reasoning settings
 
 Some models expose reasoning controls. Roomote lets admins set reasoning levels

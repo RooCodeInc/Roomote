@@ -389,6 +389,7 @@ manifest changes.
 | `R_ELEVENLABS_API_KEY`         | Optional          | ElevenLabs API key for narrated feature-demo videos. The key stays on the control plane; sandboxes reach text-to-speech only through an authenticated Roomote endpoint. A key scoped to text-to-speech only is sufficient and recommended. |
 | `R_ELEVENLABS_VOICE_ID`        | Optional          | ElevenLabs voice ID used for feature-demo narration. Required alongside the API key for narration to be available.                                                       |
 | `R_VOICE_OPENAI_API_KEY`       | Optional          | OpenAI key dedicated to GPT-Live voice conversations. Requires project access to `gpt-live-1`; the general `OPENAI_API_KEY` is not used for Voice. The key stays on the control plane; browsers receive only a server-negotiated WebRTC session answer. |
+| `R_TYPESAFE_API_KEY`           | Optional          | TypeSafe key for the optional [judgment model](/models#optional-judgment-model). Bounded routing decisions try one fast typed call first and fall back to the helper model when it is unsure or fails. The key stays on the control plane. |
 
 During Microsoft Teams setup, Roomote uses the Microsoft Entra app values for
 the Teams bot by default. Use **Show advanced config** after the Directory
