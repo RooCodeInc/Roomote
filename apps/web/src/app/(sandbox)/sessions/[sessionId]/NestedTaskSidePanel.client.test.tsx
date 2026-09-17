@@ -252,6 +252,17 @@ describe('NestedTaskSidePanel', () => {
     expect(useSleepInvalidationMock).toHaveBeenCalledWith(baseSession.taskRun);
   });
 
+  it('does not repeat private Session status in the task side panel', () => {
+    useTaskSessionMock.mockReturnValue({
+      ...baseSession,
+      task: { ...baseSession.task, privacy: 'private' },
+    });
+
+    render(<NestedTaskSidePanel taskId="child-1" onClose={vi.fn()} />);
+
+    expect(screen.queryByLabelText('Private session')).not.toBeInTheDocument();
+  });
+
   it('hides the workspace badge for no-repository tasks', () => {
     useTaskSessionMock.mockReturnValue({
       ...baseSession,
