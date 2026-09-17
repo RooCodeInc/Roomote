@@ -682,6 +682,48 @@ describe('ModelSettingsSection', () => {
     );
   });
 
+  it('does not show a success toast for each routing-rule condition edit', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    const condition = screen.getByLabelText('Routing rule 1 condition');
+
+    for (const value of ['a', 'ab', 'abc']) {
+      fireEvent.change(condition, { target: { value } });
+      await waitFor(() => {
+        expect(updateMutateAsyncMock).toHaveBeenCalledTimes(value.length);
+      });
+    }
+
+    expect(toast.success).not.toHaveBeenCalledWith('Updated model settings.');
+    expect(updateMutateAsyncMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps success feedback when another setting joins a routing-rule save', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    fireEvent.change(screen.getByLabelText('Routing rule 1 condition'), {
+      target: { value: 'a' },
+    });
+    fireEvent.click(screen.getByRole('switch', { name: 'Toggle GLM 5.2' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(toast.success).toHaveBeenCalledWith('Updated model settings.');
+  });
+
   it('hides the reasoning selector for models that do not support reasoning', () => {
     const data = buildSettingsData();
     // The coding default model does not support reasoning; helper, vision,
