@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { UnsupportedCommunicationOperationError } from '../provider';
-import { TelegramCommunicationProvider } from '../telegram-provider';
+import {
+  isTelegramThreadUnavailableError,
+  TelegramCommunicationProvider,
+} from '../telegram-provider';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -13,6 +16,38 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe('TelegramCommunicationProvider', () => {
+  it('classifies only a permanently unavailable reply thread', () => {
+    expect(
+      isTelegramThreadUnavailableError(
+        new Error(
+          'Telegram sendRichMessage failed (400): Bad Request: message thread not found',
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      isTelegramThreadUnavailableError(
+        new Error(
+          'Telegram sendRichMessage failed (400): Bad Request: message is too long',
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      isTelegramThreadUnavailableError(
+        new Error('Telegram sendRichMessage failed (500): server error'),
+      ),
+    ).toBe(false);
+    expect(isTelegramThreadUnavailableError('message thread not found')).toBe(
+      false,
+    );
+    expect(
+      isTelegramThreadUnavailableError(
+        new Error(
+          `${'Telegram sendRichMessage failed (400):'.repeat(10_000)} other failure`,
+        ),
+      ),
+    ).toBe(false);
+  });
+
   it('registers the supported slash commands', async () => {
     const fetchMock = vi
       .fn()

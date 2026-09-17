@@ -53,6 +53,7 @@ import {
   resolveFastSessionReplyFooterContext,
   type FastSessionReplyFooterContext,
 } from '@roomote/communication';
+import { isTelegramThreadUnavailableError } from '@roomote/communication/telegram-provider';
 import {
   resolveFastAgentLaunchWorkspace,
   buildFastAgentChildTaskMetadata,
@@ -2074,7 +2075,17 @@ async function createTelegramFastAgentParentTurn(
             sessionId: params.parent.sessionId,
             ...params.footerContext,
           }),
+        }).catch((error: unknown) => {
+          if (!isTelegramThreadUnavailableError(error)) throw error;
+          console.warn(
+            `[Fast Agent] Telegram thread is unavailable for Session ${session.id}; keeping the reply in the Session transcript.`,
+          );
+          return null;
         });
+        if (!posted) {
+          params.onReplyPosted();
+          return undefined;
+        }
         activity.reassert();
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,

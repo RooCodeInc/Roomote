@@ -461,6 +461,45 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('keeps Telegram replies transcript-only when their thread is gone', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      replyTarget: { channelId: 'telegram-chat', threadId: '77' },
+    });
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Matt',
+      question: 'Follow up',
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mocks.telegramPostMessage.mockRejectedValueOnce(
+      new Error(
+        'Telegram sendRichMessage failed (400): Bad Request: message thread not found',
+      ),
+    );
+
+    try {
+      await expect(
+        delivery!.adapter.postReply({ purpose: 'closeout', message: 'Done' }),
+      ).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('keeping the reply in the Session transcript'),
+      );
+
+      mocks.telegramPostMessage.mockRejectedValueOnce(
+        new Error('Telegram sendRichMessage failed (500): server error'),
+      );
+      await expect(
+        delivery!.adapter.postReply({ purpose: 'closeout', message: 'Retry' }),
+      ).rejects.toThrow('server error');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('lets web follow-up turns create artifacts in the Session', async () => {
     const user = await userFactory.create();
     const conversation = await createConversation({

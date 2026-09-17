@@ -1,5 +1,10 @@
-const { bootstrapWebRuntimeEnvMock, sentryInitMock } = vi.hoisted(() => ({
+const {
+  bootstrapWebRuntimeEnvMock,
+  installWebFastAgentGracefulShutdownMock,
+  sentryInitMock,
+} = vi.hoisted(() => ({
   bootstrapWebRuntimeEnvMock: vi.fn(),
+  installWebFastAgentGracefulShutdownMock: vi.fn(),
   sentryInitMock: vi.fn(),
 }));
 
@@ -13,6 +18,11 @@ vi.mock('@/lib/sentry-config', () => ({
   resolveWebSentryRelease: () => 'test-release',
 }));
 
+vi.mock('@/lib/server/fast-agent-graceful-shutdown', () => ({
+  installWebFastAgentGracefulShutdown: () =>
+    installWebFastAgentGracefulShutdownMock(),
+}));
+
 vi.mock('@sentry/nextjs', () => ({
   init: (...args: unknown[]) => sentryInitMock(...args),
   captureRequestError: vi.fn(),
@@ -20,10 +30,13 @@ vi.mock('@sentry/nextjs', () => ({
 
 describe('web instrumentation', () => {
   const originalNextRuntime = process.env.NEXT_RUNTIME;
+  const originalCoordinatedShutdown =
+    process.env.ROOMOTE_WEB_SHUTDOWN_COORDINATED;
 
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    delete process.env.ROOMOTE_WEB_SHUTDOWN_COORDINATED;
   });
 
   afterAll(() => {
@@ -31,6 +44,12 @@ describe('web instrumentation', () => {
       delete process.env.NEXT_RUNTIME;
     } else {
       process.env.NEXT_RUNTIME = originalNextRuntime;
+    }
+    if (originalCoordinatedShutdown === undefined) {
+      delete process.env.ROOMOTE_WEB_SHUTDOWN_COORDINATED;
+    } else {
+      process.env.ROOMOTE_WEB_SHUTDOWN_COORDINATED =
+        originalCoordinatedShutdown;
     }
   });
 
@@ -60,6 +79,16 @@ describe('web instrumentation', () => {
         release: 'test-release',
       }),
     );
+  });
+
+  it('installs Fast handoff only in the coordinated Next child', async () => {
+    process.env.NEXT_RUNTIME = 'nodejs';
+    process.env.ROOMOTE_WEB_SHUTDOWN_COORDINATED = 'true';
+
+    const instrumentation = await import('../instrumentation');
+    await instrumentation.register();
+
+    expect(installWebFastAgentGracefulShutdownMock).toHaveBeenCalledWith();
   });
 
   it('initializes edge runtime Sentry with explicit release attribution', async () => {

@@ -35,6 +35,7 @@ import {
   resolveFastSessionReplyFooterContext,
   postTextThreadReplyWithFooter,
 } from '@roomote/communication';
+import { isTelegramThreadUnavailableError } from '@roomote/communication/telegram-provider';
 import {
   createFastAgentSlackLiveTaskLauncher,
   createFastAgentSlackSessionActivity,
@@ -632,7 +633,14 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           sessionId: session.id,
           ...footerContext,
         }),
+      }).catch((error: unknown) => {
+        if (!isTelegramThreadUnavailableError(error)) throw error;
+        console.warn(
+          `[Fast Agent] Telegram thread is unavailable for Session ${session.id}; keeping the reply in the Session transcript.`,
+        );
+        return null;
       });
+      if (!posted) return undefined;
       activity.reassert();
       await recordFastAgentConversationMessageBestEffort({
         sessionId: session.id,

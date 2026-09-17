@@ -3833,6 +3833,45 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('settles Telegram parent replies in the transcript when their thread is gone', async () => {
+    const telegramParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-chat-1',
+        conversationId: 'telegram-chat-1:topic-7',
+        replyTarget: { channelId: 'telegram-chat-1', threadId: 'topic-7' },
+      },
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mocks.telegramPostMessage.mockRejectedValueOnce(
+      new Error(
+        'Telegram sendRichMessage failed (400): Bad Request: message thread not found',
+      ),
+    );
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+      await adapter.postReply({
+        purpose: 'closeout',
+        message: 'The proof is ready.',
+      });
+      throw new Error('canonical persistence failed');
+    });
+
+    try {
+      await expect(
+        deliverFastAgentParentEvent({ parent: telegramParent, event }),
+      ).rejects.toMatchObject({
+        message: 'canonical persistence failed',
+        replyPosted: true,
+      });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('keeping the reply in the Session transcript'),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('retires a Telegram action message when attachment failure retries the post', async () => {
     const feedbackEvent = {
       type: 'pull_request_feedback' as const,
