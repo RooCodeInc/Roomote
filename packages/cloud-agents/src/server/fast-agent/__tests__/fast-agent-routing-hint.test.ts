@@ -29,6 +29,35 @@ const environments = [
   },
 ];
 
+const models = [
+  {
+    id: 'openai/gpt-5.6',
+    displayName: 'GPT-5.6',
+    family: 'GPT',
+    metadata: {
+      contextWindow: null,
+      inputTypes: null,
+      inputPricePerToken: null,
+      outputPricePerToken: null,
+      lastRefreshedAt: null,
+      supportsReasoning: true,
+    },
+  },
+  {
+    id: 'anthropic/claude-sonnet-5',
+    displayName: 'Claude Sonnet 5',
+    family: 'Claude',
+    metadata: {
+      contextWindow: null,
+      inputTypes: null,
+      inputPricePerToken: null,
+      outputPricePerToken: null,
+      lastRefreshedAt: null,
+      supportsReasoning: true,
+    },
+  },
+];
+
 function mockChoice(choice: string, confidence: number) {
   mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
     environment: {
@@ -55,8 +84,93 @@ describe('resolveFastAgentRoutingHint', () => {
     });
 
     expect(hint).toBe(
-      'Routing hint: api [id: env-api] looks like the best fit (judgment model confidence 0.82). Verify against the environments and routing guidance before delegating, and ask when the request is still ambiguous.',
+      'Routing hint: api [id: env-api] looks like the best environment (judgment model confidence 0.82). Verify against the listed environments, models, and routing guidance before delegating; an explicit user choice takes precedence, and ask when the request is still ambiguous.',
     );
+  });
+
+  it('returns enabled environment and model recommendations together', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+      environment: {
+        type: 'choice',
+        choice: 'env_2',
+        confidence: 0.84,
+        probabilities: { env_2: 0.84 },
+      },
+      model: {
+        type: 'choice',
+        choice: 'model_2',
+        confidence: 0.91,
+        probabilities: { model_2: 0.91 },
+      },
+    });
+
+    const hint = await resolveFastAgentRoutingHint({
+      request: 'Fix the payments API using Claude',
+      environments,
+      models,
+      defaultModelId: 'openai/gpt-5.6',
+      routingGuidance:
+        'Payments work uses API. Prefer Claude Sonnet for backend fixes.',
+    });
+
+    expect(hint).toContain(
+      'api [id: env-api] looks like the best environment (judgment model confidence 0.84)',
+    );
+    expect(hint).toContain(
+      'Claude Sonnet 5 [id: anthropic/claude-sonnet-5] looks like the best coding model (judgment model confidence 0.91)',
+    );
+    expect(hint).not.toContain('reasoning effort');
+    expect(
+      mockEvaluateTypeSafeJudgments.mock.calls[0]![0].questions.model.criteria
+        .model_1,
+    ).toContain('supports configurable reasoning effort');
+  });
+
+  it('returns a model-only recommendation when no environment choice is needed', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+      model: {
+        type: 'choice',
+        choice: 'model_1',
+        confidence: 0.88,
+        probabilities: { model_1: 0.88 },
+      },
+    });
+
+    const hint = await resolveFastAgentRoutingHint({
+      request: 'Use GPT-5.6 for this planning task',
+      environments: [],
+      models,
+      defaultModelId: 'anthropic/claude-sonnet-5',
+      routingGuidance: 'Prefer GPT-5.6 for planning tasks.',
+    });
+
+    expect(hint).toContain(
+      'GPT-5.6 [id: openai/gpt-5.6] looks like the best coding model',
+    );
+    expect(hint).not.toContain('best environment');
+    expect(
+      mockEvaluateTypeSafeJudgments.mock.calls[0]![0].questions,
+    ).not.toHaveProperty('environment');
+  });
+
+  it('drops an unavailable model recommendation', async () => {
+    mockEvaluateTypeSafeJudgments.mockResolvedValueOnce({
+      model: {
+        type: 'choice',
+        choice: 'model_99',
+        confidence: 0.99,
+        probabilities: { model_99: 0.99 },
+      },
+    });
+
+    await expect(
+      resolveFastAgentRoutingHint({
+        request: 'Use the unavailable model',
+        environments: [],
+        models,
+        routingGuidance: 'Prefer a model that is not enabled.',
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it('passes free-text routing guidance to the judgment model', async () => {
@@ -117,7 +231,9 @@ describe('resolveFastAgentRoutingHint', () => {
     await expect(
       resolveFastAgentRoutingHint({
         request: 'Fix the login page',
-        environments,
+        environments: [],
+        models,
+        routingGuidance: 'Prefer GPT-5.6 for frontend work.',
       }),
     ).resolves.toBeUndefined();
     expect(mockEvaluateTypeSafeJudgments).toHaveBeenCalledTimes(1);

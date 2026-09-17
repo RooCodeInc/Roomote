@@ -3274,9 +3274,9 @@ export async function answerFastAgentQuestion({
             agentBehaviorSettings.workspaceRoutingSettings,
           )
         : undefined;
-    // The judgment model's environment pick is only useful before the Session
-    // has chosen where its work runs, so it is requested for what looks like
-    // the first human request and used only once persistence confirms it.
+    // The judgment model's environment and model picks are only useful before
+    // the Session has delegated work, so request them for what looks like the
+    // first human request and use them only once persistence confirms it.
     const routingHintRequest =
       substantiveHumanInput &&
       !setupSession &&
@@ -3288,6 +3288,8 @@ export async function answerFastAgentQuestion({
             request: normalizeThreadText(question),
             threadContext,
             environments: availableEnvironments,
+            models: taskModelOptions.models,
+            defaultModelId: taskModelOptions.defaultModelId,
             routingGuidance: workspaceRoutingSettings?.guidance,
           })
         : undefined;

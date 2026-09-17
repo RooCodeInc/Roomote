@@ -1049,6 +1049,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         confidence: 0.82,
         probabilities: { env_2: 0.82 },
       },
+      model: {
+        type: 'choice',
+        choice: 'default_model',
+        confidence: 0.9,
+        probabilities: { default_model: 0.9 },
+      },
     });
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
@@ -1068,7 +1074,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const firstTurn = mocks.generateText.mock.calls[0]?.[0];
     const followUp = mocks.generateText.mock.calls[1]?.[0];
     expect(firstTurn?.prompt).toContain(
-      '<routing_hint>\nRouting hint: Infra [id: env-2] looks like the best fit (judgment model confidence 0.82).',
+      '<routing_hint>\nRouting hint: Infra [id: env-2] looks like the best environment (judgment model confidence 0.82).',
     );
     expect(followUp?.prompt).not.toContain('<routing_hint>');
     expect(followUp?.system).toBe(firstTurn?.system);
@@ -1077,6 +1083,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({
         state: expect.objectContaining({
           routingGuidance: 'Infrastructure work uses Infra.',
+        }),
+        questions: expect.objectContaining({
+          model: expect.objectContaining({
+            criteria: expect.objectContaining({
+              model_1: expect.stringContaining('openai/gpt-5.6'),
+              model_2: expect.stringContaining('anthropic/claude-sonnet-5'),
+            }),
+          }),
         }),
       }),
     );
