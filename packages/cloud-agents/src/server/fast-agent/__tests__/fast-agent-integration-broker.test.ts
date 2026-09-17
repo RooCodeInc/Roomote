@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   listMcpTools: vi.fn(),
   callMcpTool: vi.fn(),
   findGithubInstallation: vi.fn(),
+  findGithubRepository: vi.fn(),
   findGithubAccount: vi.fn(),
   isRouterMcpServerEnabled: vi.fn(),
   findGitlabRepository: vi.fn(),
@@ -74,6 +75,7 @@ vi.mock('@roomote/db/server', () => ({
           const provider = options.where.find(
             ([column]) => column === 'provider',
           )?.[1];
+          if (provider === 'github') return mocks.findGithubRepository(options);
           if (provider === 'gitlab') return mocks.findGitlabRepository(options);
           if (provider === 'bitbucket')
             return mocks.findBitbucketRepository(options);
@@ -153,6 +155,7 @@ describe('fast-agent integration broker', () => {
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
     mocks.createSessionBrokerToken.mockResolvedValue('session-broker-token');
     mocks.findGithubInstallation.mockResolvedValue(undefined);
+    mocks.findGithubRepository.mockResolvedValue(undefined);
     mocks.findGithubAccount.mockResolvedValue(undefined);
     mocks.isRouterMcpServerEnabled.mockReturnValue(false);
     mocks.env.R_CURATED_INTEGRATIONS_DISABLED = false;
@@ -515,11 +518,12 @@ describe('fast-agent integration broker', () => {
     expect(mocks.callMcpTool).toHaveBeenCalledTimes(2);
   });
 
-  it('requires an installation before discovering native GitHub tools for public reads', async () => {
+  it('requires an active repository before discovering native GitHub tools for public reads', async () => {
     mocks.isRouterMcpServerEnabled.mockReturnValue(true);
     expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
     expect(mocks.listMcpTools).not.toHaveBeenCalled();
     mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+    mocks.findGithubRepository.mockResolvedValue({ id: 'repository-1' });
     const tools = [
       'get_file_contents',
       'issue_read',
@@ -534,6 +538,7 @@ describe('fast-agent integration broker', () => {
     expect(integrations[0]?.tools).toEqual(tools);
     expect(mocks.isRouterMcpServerEnabled).toHaveBeenCalledWith('github');
     expect(mocks.findGithubInstallation).toHaveBeenCalledTimes(2);
+    expect(mocks.findGithubRepository).toHaveBeenCalledTimes(2);
     expect(mocks.findMember).not.toHaveBeenCalled();
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp-routing/github',
@@ -789,6 +794,7 @@ describe('fast-agent integration broker', () => {
   it('exposes GitHub reads and bounded writes through the existing router MCP', async () => {
     mocks.isRouterMcpServerEnabled.mockReturnValue(true);
     mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+    mocks.findGithubRepository.mockResolvedValue({ id: 'repository-1' });
     mocks.listMcpTools.mockResolvedValue([
       { name: 'actions_get', inputSchema: { type: 'object' } },
       { name: 'actions_list', inputSchema: { type: 'object' } },
@@ -837,8 +843,9 @@ describe('fast-agent integration broker', () => {
     });
   });
 
-  it('exposes account-owned gist creation for a linked member without a repository installation', async () => {
+  it('refreshes account-only discovery when an existing installation gains an active repository', async () => {
     mocks.isRouterMcpServerEnabled.mockReturnValue(true);
+    mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
     mocks.findGithubAccount.mockResolvedValue({ id: 'mapping-1' });
     mocks.listMcpTools.mockResolvedValue([
       { name: 'create_gist', inputSchema: { type: 'object' } },
@@ -859,7 +866,7 @@ describe('fast-agent integration broker', () => {
       columns: { id: true },
     });
 
-    mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+    mocks.findGithubRepository.mockResolvedValue({ id: 'repository-1' });
     mocks.listMcpTools.mockResolvedValue([
       { name: 'get_file_contents', inputSchema: { type: 'object' } },
       { name: 'create_gist', inputSchema: { type: 'object' } },
@@ -1004,6 +1011,7 @@ describe('fast-agent integration broker', () => {
       };
       mocks.isRouterMcpServerEnabled.mockReturnValue(true);
       mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+      mocks.findGithubRepository.mockResolvedValue({ id: 'repository-1' });
       if (reason === 'configuration') {
         mocks.resolveGitLabInstanceHost.mockImplementationOnce(() => {
           throw new Error('Invalid GitLab configuration');
@@ -1317,6 +1325,7 @@ describe('fast-agent integration broker', () => {
     async ({ name, args }) => {
       mocks.isRouterMcpServerEnabled.mockReturnValue(true);
       mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+      mocks.findGithubRepository.mockResolvedValue({ id: 'repository-1' });
       const nativeTool = {
         name,
         description: `Native ${name} description`,

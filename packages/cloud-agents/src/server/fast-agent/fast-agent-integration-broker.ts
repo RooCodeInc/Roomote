@@ -486,6 +486,7 @@ export async function listFastAgentIntegrations(
   const [
     configuredServers,
     githubInstallation,
+    githubRepository,
     githubAccount,
     gitlabConnection,
     bitbucketAvailable,
@@ -500,6 +501,15 @@ export async function listFastAgentIntegrations(
         })
       : Promise.resolve(undefined),
     isRouterMcpServerEnabled('github')
+      ? db.query.repositories.findFirst({
+          where: and(
+            eq(repositories.sourceControlProvider, 'github'),
+            eq(repositories.isActive, true),
+          ),
+          columns: { id: true },
+        })
+      : Promise.resolve(undefined),
+    isRouterMcpServerEnabled('github')
       ? db.query.githubUserMappings.findFirst({
           where: eq(githubUserMappings.userId, context.userId),
           columns: { id: true },
@@ -510,10 +520,13 @@ export async function listFastAgentIntegrations(
     isNativeProviderMergeAvailable(context.userId, 'gitea').catch(() => false),
     isNativeProviderMergeAvailable(context.userId, 'ado').catch(() => false),
   ]);
+  const githubRepositoryAvailable = Boolean(
+    githubInstallation && githubRepository,
+  );
 
   if (
     Object.keys(configuredServers).length === 0 &&
-    !githubInstallation &&
+    !githubRepositoryAvailable &&
     !githubAccount &&
     !gitlabConnection &&
     !bitbucketAvailable &&
@@ -538,7 +551,10 @@ export async function listFastAgentIntegrations(
     disabledTools: new Set(config.disabledTools ?? []),
   }));
 
-  if ((githubInstallation || githubAccount) && !configuredServers.github) {
+  if (
+    (githubRepositoryAvailable || githubAccount) &&
+    !configuredServers.github
+  ) {
     candidates.push({
       id: 'github',
       name: 'GitHub',
@@ -610,7 +626,7 @@ export async function listFastAgentIntegrations(
     candidates.map(async (integration) => {
       const githubCapabilityRevision =
         integration.id === 'github'
-          ? `${Boolean(githubInstallation)}:${Boolean(githubAccount)}`
+          ? `${githubRepositoryAvailable}:${Boolean(githubAccount)}`
           : '';
       return {
         ...integration,
