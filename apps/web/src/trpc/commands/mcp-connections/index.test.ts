@@ -2,6 +2,7 @@ import {
   db,
   deploymentMcpEnablements,
   eq,
+  inArray,
   mcpConnections,
   userFactory,
 } from '@roomote/db/server';
@@ -63,9 +64,15 @@ const memberAuth = {
   isAdmin: false,
 } as UserAuthSuccess;
 
+const testMcpIds = ['asana', 'exa', 'linear', 'monday', 'sentry', 'voice'];
+
 async function cleanup() {
-  await db.delete(mcpConnections);
-  await db.delete(deploymentMcpEnablements);
+  await db
+    .delete(mcpConnections)
+    .where(inArray(mcpConnections.mcpId, testMcpIds));
+  await db
+    .delete(deploymentMcpEnablements)
+    .where(inArray(deploymentMcpEnablements.mcpId, testMcpIds));
 }
 
 describe('MCP connection lifecycle telemetry', () => {
