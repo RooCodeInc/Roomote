@@ -37,16 +37,23 @@ export async function setDeploymentJudgmentModelSelection(
   options: { executor?: DatabaseOrTransaction } = {},
 ): Promise<JudgmentModelSelection> {
   const executor = options.executor ?? db;
+  const now = new Date();
+  const patch = { [JUDGMENT_MODEL_METADATA_KEY]: selection };
 
+  // Upsert: the default deployment row is not guaranteed to exist yet, and a
+  // plain update would silently drop the admin's choice.
   await executor
-    .update(deploymentSettings)
-    .set({
-      metadata: sql`${deploymentSettings.metadata} || ${JSON.stringify({
-        [JUDGMENT_MODEL_METADATA_KEY]: selection,
-      })}::jsonb`,
-      updatedAt: new Date(),
-    })
-    .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID));
+    .insert(deploymentSettings)
+    .values({ id: DEFAULT_DEPLOYMENT_ID, metadata: patch, updatedAt: now })
+    .onConflictDoUpdate({
+      target: deploymentSettings.id,
+      set: {
+        metadata: sql`${deploymentSettings.metadata} || ${JSON.stringify(
+          patch,
+        )}::jsonb`,
+        updatedAt: now,
+      },
+    });
 
   return selection;
 }
