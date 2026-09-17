@@ -3979,6 +3979,54 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(activity.dispose).toHaveBeenCalledOnce();
   });
 
+  it('preserves ongoing task activity for an ignored ambient human turn', async () => {
+    mocks.getActiveTasks.mockResolvedValueOnce([{ taskId: 'task-1' }]);
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.ignoreEvent, {
+          reason: 'The participants are talking to each other.',
+        });
+        return '';
+      },
+    );
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      allowSilentAmbientReply: true,
+      adapter: callbacks({ activity }),
+    });
+
+    expect(activity.start).not.toHaveBeenCalled();
+    expect(activity.settle).toHaveBeenCalledOnce();
+    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: true });
+    expect(activity.dispose).not.toHaveBeenCalled();
+  });
+
+  it('preserves ongoing task activity after a directed human turn', async () => {
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      activeTasks: [{ taskId: 'task-1' }],
+      adapter: callbacks({ activity }),
+    });
+
+    expect(activity.start).toHaveBeenCalledOnce();
+    expect(activity.settle).toHaveBeenCalledOnce();
+    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: true });
+    expect(activity.dispose).not.toHaveBeenCalled();
+  });
+
   it('starts and settles deferred activity when Roomote joins an ambient turn', async () => {
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
@@ -4065,6 +4113,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     };
     const result = answerFastAgentQuestion({
       ...baseParams,
+      activeTasks: [{ taskId: 'task-1' }],
       allowSilentAmbientReply: true,
       adapter: callbacks({ activity }),
       signal: controller.signal,

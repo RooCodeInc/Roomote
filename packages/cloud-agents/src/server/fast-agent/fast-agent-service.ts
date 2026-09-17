@@ -2287,6 +2287,7 @@ export async function answerFastAgentQuestion({
   });
   let surfaceDisposed = false;
   let surfaceActivityStarted = false;
+  let surfaceHasOngoingWork = activeTasks.length > 0;
   const startSurfaceActivity = () => {
     if (surfaceDisposed || surfaceActivityStarted || !adapter.activity) return;
     surfaceActivityStarted = true;
@@ -3106,8 +3107,9 @@ export async function answerFastAgentQuestion({
     surfaceSettlement ??= (async () => {
       await surfaceReplyStream.close();
       if (surfaceDisposed) return;
-      if (surfaceActivityStarted) {
-        await adapter.activity?.settle({ keepProcessing: durableTurnDeferred });
+      const keepProcessing = durableTurnDeferred || surfaceHasOngoingWork;
+      if (surfaceActivityStarted || keepProcessing) {
+        await adapter.activity?.settle({ keepProcessing });
       } else {
         await adapter.activity?.dispose();
       }
@@ -3545,6 +3547,7 @@ export async function answerFastAgentQuestion({
     const currentTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
     );
+    surfaceHasOngoingWork = currentTasks.size > 0;
     taskMessageGuard.restore(previousAttempt?.events ?? [], [
       ...currentTasks.keys(),
     ]);
@@ -4705,6 +4708,7 @@ export async function answerFastAgentQuestion({
             }
             if (result.success) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
+              surfaceHasOngoingWork = true;
               if (
                 substantiveHumanInput &&
                 currentSessionPrivacy !== 'private'
@@ -4806,6 +4810,7 @@ export async function answerFastAgentQuestion({
             }
             if (result.taskId) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
+              surfaceHasOngoingWork = true;
             }
             const kickoffMessage = [
               args.kickoffMessage,
@@ -4896,6 +4901,7 @@ export async function answerFastAgentQuestion({
             );
             if (result.success) {
               currentTasks.delete(target.taskId);
+              surfaceHasOngoingWork = currentTasks.size > 0;
             }
             return result;
           }
