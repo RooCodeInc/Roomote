@@ -191,37 +191,43 @@ const [isOpen, setIsOpen] = useState(false);
 
 ## Settings Page Pattern
 
-### Section component
+### Boolean setting cards
 
-All settings cards use the `Section` component from `@/components/settings`:
+All settings cards use the `Section` component from `@/components/settings`.
+`Section` provides the icon/title header and divider above the body. For a
+boolean setting with explanatory copy, place the switch on the left before the
+description in a `flex gap-3` row:
 
 ```tsx
 import { Section } from '@/components/settings';
-import { RefreshCw } from '@/components/system';
+import { Bell, Button, RefreshCw, Switch } from '@/components/system';
 
 <Section icon={RefreshCw} title="Task Sync">
-  <div className="space-y-6">
-    <FormField
-      control={control}
-      name="enableTaskSync"
-      render={({ field }) => (
-        <FormControl>
-          <Switch checked={field.value} onCheckedChange={field.onChange} />
-        </FormControl>
-      )}
+  <div className="flex gap-3">
+    <Switch
+      aria-label="Toggle task sync"
+      checked={enabled}
+      disabled={isUpdating}
+      onCheckedChange={setEnabled}
     />
-    <p>Save all extension tasks to Roomote.</p>
+    <p className="text-sm text-muted-foreground">
+      Save all extension tasks to Roomote.
+    </p>
   </div>
 </Section>
 ```
 
-### Section with action slot (for toggle switches)
+### Section action slot
+
+Reserve the `action` slot for contextual header actions such as buttons. Keep
+boolean switches with their explanatory text in the section body as shown
+above.
 
 ```tsx
 <Section
   icon={Bell}
   title="Push Notifications"
-  action={<Switch checked={enabled} onCheckedChange={setEnabled} />}
+  action={<Button variant="outline">Manage</Button>}
 >
   <p>Receive notifications when tasks complete or need attention.</p>
 </Section>
