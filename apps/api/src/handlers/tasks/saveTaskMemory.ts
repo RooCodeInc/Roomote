@@ -1,7 +1,12 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 
-import { db, isBrainEnabled, saveBrainAgentSummary } from '@roomote/db/server';
+import {
+  db,
+  isBrainEnabled,
+  isTaskRunSharedBrainEligible,
+  saveBrainAgentSummary,
+} from '@roomote/db/server';
 import { TASK_MEMORY_LIMITS } from '@roomote/types';
 
 import type { Variables } from '../../types';
@@ -130,6 +135,12 @@ export async function saveTaskMemory(
   }
 
   try {
+    if (!(await isTaskRunSharedBrainEligible(db, runId))) {
+      return c.json(
+        { saved: false, reason: 'Private tasks cannot write shared memory.' },
+        200,
+      );
+    }
     await saveBrainAgentSummary(db, runId, renderAgentSummary(parsed.data));
 
     return c.json({ saved: true });

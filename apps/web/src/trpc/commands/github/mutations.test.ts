@@ -221,6 +221,7 @@ describe('GitHub App manifest commands', () => {
       setup_on_update: true,
       public: true,
     });
+    expect(manifest.default_permissions).not.toHaveProperty('gists');
   });
 
   it('prefers R_PUBLIC_URL for manifest callbacks, webhooks, and name when R_APP_URL is loopback', async () => {

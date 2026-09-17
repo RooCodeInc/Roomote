@@ -1110,9 +1110,9 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
     // deployment may have the channel flag on before its sender is
     // configured (or an address may be suppressed after a bounce), and a
     // verification gate would lock those accounts out with no way back in.
-    // Roomote only ever initiates email to an address it has verified, but
-    // that guarantee lives at the sending side (`emailVerified` or an
-    // explicitly linked address), not at sign-in.
+    // Inbound email can act as the account only after verification, but that
+    // authorization requirement lives in the AgentMail inbound path, not at
+    // sign-in. Outbound account and lifecycle email may arrive before then.
     emailAndPassword: {
       enabled: true,
       resetPasswordTokenExpiresIn: PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS,

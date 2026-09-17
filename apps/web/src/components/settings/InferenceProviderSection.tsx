@@ -7,6 +7,8 @@ import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   ROOMOTE_INFERENCE_PROVIDER_ID,
+  TYPESAFE_API_KEY_ENV_VAR_NAME,
+  TYPESAFE_PROVIDER,
   XAI_SUBSCRIPTION_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
   getModelProviderLabel,
@@ -55,9 +57,15 @@ import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotC
 import { XaiConnectDialog } from '@/components/settings/XaiConnectDialog';
 import { ProviderCreditBalanceLine } from '@/components/settings/ProviderCreditBalanceLine';
 import { SubscriptionUsageLine } from '@/components/settings/SubscriptionUsageLine';
+import { useDeleteTypeSafeKey } from '@/hooks/task-models/useDeleteTypeSafeKey';
+import { useJudgmentModelSettings } from '@/hooks/task-models/useJudgmentModelSettings';
+import { useSaveTypeSafeKey } from '@/hooks/task-models/useSaveTypeSafeKey';
 
 const PROVIDER_GRID_ROW_CLASS =
   'grid gap-2 md:grid-cols-[minmax(160px,220px)_minmax(0,1fr)]';
+
+const TYPESAFE_PROVIDER_DESCRIPTION =
+  'Judgment model for fast routing and triage decisions. Not used for chat or tasks.';
 
 type InferenceProviderSectionProps = {
   providerSetup: SetupModelStatus | null;
@@ -78,9 +86,16 @@ type InferenceProviderSectionProps = {
   onRecommendedModelsAdded?: () => void;
 };
 
+// TypeSafe shares the credentials dialog but is not a setup model provider:
+// its key saves through the judgment model procedures, never `saveProvider`.
 type ProviderCredentialsDialogState =
   | { mode: 'add'; providerId?: SetupModelProviderId }
-  | { mode: 'edit'; providerId: SetupModelProviderId };
+  | {
+      mode: 'edit';
+      providerId: SetupModelProviderId | typeof TYPESAFE_PROVIDER.id;
+    };
+
+type ProviderDialogOption = { id: string; label: string };
 
 function getInitialAdditionalEnvValues(
   provider: SetupModelProviderStatus | null,
@@ -270,7 +285,9 @@ function ProviderCredentialsDialog({
   mode,
   providers,
   isSaving,
+  includeTypeSafe = false,
   onSave,
+  onSaveTypeSafe,
   onOpenChange,
   onConnectOAuth,
 }: {
@@ -278,19 +295,50 @@ function ProviderCredentialsDialog({
   mode: 'add' | 'edit';
   providers: SetupModelProviderStatus[];
   isSaving: boolean;
+  /** Offer TypeSafe (the judgment model key) alongside `providers`. */
+  includeTypeSafe?: boolean;
   onSave: (
     providerId: SetupModelProviderId,
     apiKey: string,
     additionalEnvValues?: Record<string, string>,
     connectionName?: string,
   ) => Promise<void>;
+  /** Rejects with a message to show under the key field. */
+  onSaveTypeSafe?: (apiKey: string) => Promise<void>;
   onOpenChange: (open: boolean) => void;
   onConnectOAuth: (providerId: SetupModelProviderId) => void;
 }) {
-  const [selectedProviderId, setSelectedProviderId] =
-    useState<SetupModelProviderId | null>(providers[0]?.id ?? null);
+  const options = useMemo<ProviderDialogOption[]>(() => {
+    const providerOptions = providers.map(({ id, label }) => ({ id, label }));
+
+    if (!includeTypeSafe) {
+      return providerOptions;
+    }
+
+    const typeSafeOption = {
+      id: TYPESAFE_PROVIDER.id,
+      label: TYPESAFE_PROVIDER.label,
+    };
+    const insertAt = providerOptions.findIndex(
+      (option) => option.label.localeCompare(typeSafeOption.label) > 0,
+    );
+
+    return insertAt === -1
+      ? [...providerOptions, typeSafeOption]
+      : [
+          ...providerOptions.slice(0, insertAt),
+          typeSafeOption,
+          ...providerOptions.slice(insertAt),
+        ];
+  }, [includeTypeSafe, providers]);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
+    options[0]?.id ?? null,
+  );
+  const [typeSafeKeyError, setTypeSafeKeyError] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState(() =>
-    getInitialPrimaryCredential(providers[0] ?? null),
+    getInitialPrimaryCredential(
+      providers.find((provider) => provider.id === options[0]?.id) ?? null,
+    ),
   );
   const connectionNameRef = useRef<HTMLInputElement>(null);
   const primaryCredentialRef = useRef<HTMLInputElement>(null);
@@ -307,7 +355,7 @@ function ProviderCredentialsDialog({
 
     if (
       selectedProviderId &&
-      providers.some((provider) => provider.id === selectedProviderId)
+      options.some((option) => option.id === selectedProviderId)
     ) {
       return;
     }
@@ -317,12 +365,15 @@ function ProviderCredentialsDialog({
     // form values when that happens; otherwise the refresh clears the endpoint
     // while model discovery is in flight and repeatedly reinitializes the
     // dialog. Only initialize values when the selection is no longer valid.
-    const provider = providers[0] ?? null;
-    setSelectedProviderId(provider?.id ?? null);
+    const firstOptionId = options[0]?.id ?? null;
+    const provider =
+      providers.find((candidate) => candidate.id === firstOptionId) ?? null;
+    setSelectedProviderId(firstOptionId);
     setApiKey(getInitialPrimaryCredential(provider));
     setConnectionName('');
     setAdditionalEnvValues(getInitialAdditionalEnvValues(provider));
-  }, [open, providers, selectedProviderId]);
+    setTypeSafeKeyError(null);
+  }, [open, options, providers, selectedProviderId]);
 
   useEffect(() => {
     if (!open || mode !== 'add') {
@@ -337,10 +388,13 @@ function ProviderCredentialsDialog({
     return () => window.clearTimeout(timeoutId);
   }, [mode, open]);
 
-  const selectedProvider =
-    providers.find((provider) => provider.id === selectedProviderId) ??
-    providers[0] ??
-    null;
+  const isTypeSafeSelected =
+    includeTypeSafe && selectedProviderId === TYPESAFE_PROVIDER.id;
+  const selectedProvider = isTypeSafeSelected
+    ? null
+    : (providers.find((provider) => provider.id === selectedProviderId) ??
+      providers[0] ??
+      null);
 
   const primaryCredentialLabel = selectedProvider?.envVarLabel ?? 'API key';
   const additionalEnvFields = selectedProvider?.additionalEnvFields ?? [];
@@ -366,6 +420,25 @@ function ProviderCredentialsDialog({
     requiresConnectionName && connectionName.trim().length === 0;
 
   const handleSaveClick = async () => {
+    if (isTypeSafeSelected) {
+      if (!onSaveTypeSafe) {
+        return;
+      }
+
+      try {
+        await onSaveTypeSafe(apiKey.trim());
+        setApiKey('');
+        setTypeSafeKeyError(null);
+      } catch (error) {
+        setTypeSafeKeyError(
+          error instanceof Error && error.message
+            ? error.message
+            : 'Could not save the TypeSafe API key.',
+        );
+      }
+      return;
+    }
+
     if (!selectedProvider) {
       return;
     }
@@ -404,10 +477,11 @@ function ProviderCredentialsDialog({
     : isXaiSubscriptionProvider
       ? 'Connect Grok subscription'
       : 'Connect ChatGPT';
+  const selectedLabel = isTypeSafeSelected
+    ? TYPESAFE_PROVIDER.label
+    : selectedProvider?.label;
   const title =
-    mode === 'add'
-      ? 'Add Provider'
-      : `Edit ${selectedProvider?.label ?? 'Provider'}`;
+    mode === 'add' ? 'Add Provider' : `Edit ${selectedLabel ?? 'Provider'}`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -422,31 +496,34 @@ function ProviderCredentialsDialog({
         </DialogHeader>
 
         <div className="space-y-3">
-          {selectedProvider ? (
+          {options.length > 0 ? (
             <>
               <div className={PROVIDER_GRID_ROW_CLASS}>
                 <span className="text-sm font-medium">Provider</span>
                 <Select
                   open={providerSelectOpen}
                   onOpenChange={setProviderSelectOpen}
-                  value={selectedProvider.id}
+                  value={
+                    isTypeSafeSelected
+                      ? TYPESAFE_PROVIDER.id
+                      : (selectedProvider?.id ?? undefined)
+                  }
                   handoffTargetOnSelect={
                     requiresConnectionName
                       ? connectionNameRef
                       : primaryCredentialRef
                   }
                   onValueChange={(value) => {
-                    const providerId = value as SetupModelProviderId;
                     const provider =
-                      providers.find(
-                        (candidate) => candidate.id === providerId,
-                      ) ?? null;
-                    setSelectedProviderId(providerId);
+                      providers.find((candidate) => candidate.id === value) ??
+                      null;
+                    setSelectedProviderId(value);
                     setApiKey(getInitialPrimaryCredential(provider));
                     setConnectionName('');
                     setAdditionalEnvValues(
                       getInitialAdditionalEnvValues(provider),
                     );
+                    setTypeSafeKeyError(null);
                   }}
                   disabled={isSaving || mode === 'edit'}
                 >
@@ -457,16 +534,63 @@ function ProviderCredentialsDialog({
                     <SelectValue placeholder="Choose a provider" />
                   </SelectTrigger>
                   <SelectContent>
-                    {providers.map((provider) => (
-                      <SelectItem key={provider.id} value={provider.id}>
-                        {provider.label}
+                    {options.map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
-              {isOAuthProvider ? (
+              {isTypeSafeSelected ? (
+                <>
+                  <div className={PROVIDER_GRID_ROW_CLASS}>
+                    <span className="text-sm font-medium">Used for</span>
+                    <p className="min-w-0 text-sm text-muted-foreground">
+                      {TYPESAFE_PROVIDER_DESCRIPTION}
+                    </p>
+                  </div>
+                  <div className={PROVIDER_GRID_ROW_CLASS}>
+                    <span className="text-sm font-medium">API key</span>
+                    <div className="space-y-1.5">
+                      <Input
+                        ref={primaryCredentialRef}
+                        secret
+                        className="font-mono"
+                        value={apiKey}
+                        onChange={(event) => {
+                          setApiKey(event.target.value);
+                          setTypeSafeKeyError(null);
+                        }}
+                        placeholder={`API key for ${TYPESAFE_PROVIDER.label}`}
+                        disabled={isSaving}
+                        aria-label={`${mode === 'edit' ? 'New ' : ''}API key for ${TYPESAFE_PROVIDER.label}`}
+                        aria-invalid={typeSafeKeyError ? true : undefined}
+                        data-1p-ignore
+                      />
+                      {typeSafeKeyError ? (
+                        <p role="alert" className="text-xs text-destructive">
+                          {typeSafeKeyError}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Stored encrypted and used only by the Roomote server.{' '}
+                          <a
+                            className="font-medium underline underline-offset-2 hover:text-foreground"
+                            href={TYPESAFE_PROVIDER.credentialHelp.url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {TYPESAFE_PROVIDER.credentialHelp.label}
+                          </a>
+                          .
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : !selectedProvider ? null : isOAuthProvider ? (
                 <div className={PROVIDER_GRID_ROW_CLASS}>
                   <span className="text-sm font-medium">Account</span>
                   <p className="min-w-0 text-sm text-muted-foreground">
@@ -599,10 +723,12 @@ function ProviderCredentialsDialog({
               onClick={() => void handleSaveClick()}
               disabled={
                 isSaving ||
-                !selectedProvider ||
-                hasMissingPrimaryCredential ||
-                hasMissingRequiredFields ||
-                hasMissingConnectionName
+                (isTypeSafeSelected
+                  ? apiKey.trim().length === 0
+                  : !selectedProvider ||
+                    hasMissingPrimaryCredential ||
+                    hasMissingRequiredFields ||
+                    hasMissingConnectionName)
               }
             >
               {isSaving ? (
@@ -876,6 +1002,113 @@ function DeleteProviderDialog({
   );
 }
 
+function TypeSafeProviderRow({
+  source,
+  isBusy,
+  onEdit,
+  onDelete,
+}: {
+  source: 'environment' | 'settings' | null;
+  isBusy: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const label = TYPESAFE_PROVIDER.label;
+
+  return (
+    <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
+      <span className="min-w-0 truncate text-sm font-medium">{label}</span>
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <p className="min-w-0 text-sm text-muted-foreground">
+          {TYPESAFE_PROVIDER_DESCRIPTION}
+        </p>
+
+        {source === 'environment' ? (
+          <BasicTooltip
+            content={`Set by ${TYPESAFE_API_KEY_ENV_VAR_NAME}, not changeable in the UI.`}
+          >
+            <Lock
+              aria-label={`${label} API key is managed by ${TYPESAFE_API_KEY_ENV_VAR_NAME}`}
+              className="mr-1.5 size-4 shrink-0 text-muted-foreground"
+            />
+          </BasicTooltip>
+        ) : (
+          <div className="flex shrink-0 items-center gap-1">
+            <BasicTooltip content={`Edit ${label}`}>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={onEdit}
+                disabled={isBusy}
+                aria-label={`Edit ${label} API key`}
+              >
+                <Pencil />
+              </Button>
+            </BasicTooltip>
+            <BasicTooltip content={`Delete ${label}`}>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={onDelete}
+                disabled={isBusy}
+                aria-label={`Delete ${label} provider`}
+              >
+                <Trash2 />
+              </Button>
+            </BasicTooltip>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DeleteTypeSafeKeyDialog({
+  open,
+  isDeleting,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean;
+  isDeleting: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => Promise<void>;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="md">
+        <DialogHeader>
+          <DialogTitle>Delete {TYPESAFE_PROVIDER.label}?</DialogTitle>
+          <DialogDescription>
+            This removes the saved TypeSafe API key. Routing and triage
+            decisions that use Jev via TypeSafe fall back to the helper model
+            until a key is connected again.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isDeleting}
+          >
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={() => void onConfirm()}
+            disabled={isDeleting}
+          >
+            {isDeleting ? <Spinner /> : <Trash2 />}
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function InferenceProviderSection({
   providerSetup,
   trialInferenceActive = false,
@@ -896,6 +1129,15 @@ export function InferenceProviderSection({
   const [isGitHubCopilotDialogOpen, setIsGitHubCopilotDialogOpen] =
     useState(false);
   const [isXaiDialogOpen, setIsXaiDialogOpen] = useState(false);
+  const [isDeleteTypeSafeDialogOpen, setIsDeleteTypeSafeDialogOpen] =
+    useState(false);
+
+  // TypeSafe is listed with the inference providers but is not one: it never
+  // counts toward the keep-one-provider guard or the model pickers.
+  const judgmentSettingsQuery = useJudgmentModelSettings();
+  const typeSafeStatus = judgmentSettingsQuery.data?.typeSafe ?? null;
+  const saveTypeSafeKey = useSaveTypeSafeKey();
+  const deleteTypeSafeKey = useDeleteTypeSafeKey();
 
   const chatgptStatusQuery = useQuery(
     trpc.chatgptSubscription.status.queryOptions(),
@@ -1123,6 +1365,33 @@ export function InferenceProviderSection({
     });
   };
 
+  const handleSaveTypeSafeKey = async (apiKey: string) => {
+    const result = await saveTypeSafeKey.mutateAsync({ apiKey });
+
+    if (result.keyCheck === 'unverified') {
+      toast.warning(
+        'Saved the TypeSafe API key, but TypeSafe could not be reached to verify it.',
+      );
+    } else {
+      toast.success('Saved the TypeSafe API key.');
+    }
+    setProviderDialog(null);
+  };
+
+  const handleDeleteTypeSafeKey = async () => {
+    try {
+      await deleteTypeSafeKey.mutateAsync();
+      toast.success('Deleted the TypeSafe API key.');
+      setIsDeleteTypeSafeDialogOpen(false);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Could not delete the TypeSafe API key.',
+      );
+    }
+  };
+
   const handleDisconnectChatGpt = async () => {
     await disconnectChatGpt.mutateAsync();
   };
@@ -1281,7 +1550,14 @@ export function InferenceProviderSection({
     chatgptHasRecord ||
     githubCopilotHasRecord ||
     xaiHasRecord;
-  const canAddProvider = sortedAddableProviders.length > 0;
+  const typeSafeConnected = typeSafeStatus?.connected === true;
+  const canAddTypeSafe = typeSafeStatus !== null && !typeSafeConnected;
+  const canAddProvider = sortedAddableProviders.length > 0 || canAddTypeSafe;
+  const providerDialogIncludesTypeSafe = providerDialog
+    ? providerDialog.mode === 'add'
+      ? !providerDialog.providerId && canAddTypeSafe
+      : providerDialog.providerId === TYPESAFE_PROVIDER.id
+    : false;
   // Count key rows and subscription rows independently so dual-path xAI
   // (API key + SuperGrok) can delete the key while the subscription remains.
   // Mirrors the server-side delete guard: a row is deletable only while at
@@ -1340,8 +1616,10 @@ export function InferenceProviderSection({
           open={true}
           mode={providerDialog.mode}
           providers={providerDialogProviders}
-          isSaving={savingProviderId !== null}
+          isSaving={savingProviderId !== null || saveTypeSafeKey.isPending}
+          includeTypeSafe={providerDialogIncludesTypeSafe}
           onSave={handleSave}
+          onSaveTypeSafe={handleSaveTypeSafeKey}
           onOpenChange={(open) => {
             if (!open) {
               setProviderDialog(null);
@@ -1369,6 +1647,12 @@ export function InferenceProviderSection({
           }
         }}
         onConfirm={handleDeleteProvider}
+      />
+      <DeleteTypeSafeKeyDialog
+        open={isDeleteTypeSafeDialogOpen}
+        isDeleting={deleteTypeSafeKey.isPending}
+        onOpenChange={setIsDeleteTypeSafeDialogOpen}
+        onConfirm={handleDeleteTypeSafeKey}
       />
 
       <div className="divide-y divide-background">
@@ -1433,6 +1717,20 @@ export function InferenceProviderSection({
               />
             ))}
           </>
+        ) : null}
+
+        {typeSafeConnected ? (
+          <TypeSafeProviderRow
+            source={typeSafeStatus?.source ?? null}
+            isBusy={saveTypeSafeKey.isPending || deleteTypeSafeKey.isPending}
+            onEdit={() =>
+              setProviderDialog({
+                mode: 'edit',
+                providerId: TYPESAFE_PROVIDER.id,
+              })
+            }
+            onDelete={() => setIsDeleteTypeSafeDialogOpen(true)}
+          />
         ) : null}
 
         {canAddProvider ? (

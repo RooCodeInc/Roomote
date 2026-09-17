@@ -4,6 +4,7 @@ import {
   db,
   eq,
   isVisibleTask,
+  privateTaskAccess,
   taskRuns,
   tasks,
 } from '@roomote/db/server';
@@ -117,6 +118,7 @@ export async function verifyArtifactRouteTaskReadAccess(
     },
     where: and(
       eq(tasks.id, taskId),
+      privateTaskAccess({ userId: auth.userId }),
       taskRun.taskId === taskId ? undefined : isVisibleTask(),
       customAutomationHistoryAccess(
         { userId: auth.userId ?? undefined, authContext: auth },

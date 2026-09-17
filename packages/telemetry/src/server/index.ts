@@ -26,6 +26,7 @@ import {
   type PingEvent,
   type PingEventsRequest,
   type PingInstanceReportRequest,
+  type PingPlatformIssueSubmission,
   type PingVersionCheckRequest,
   type PingVersionCheckResponse,
   type TelemetryEventProperties,
@@ -189,6 +190,42 @@ async function postToPing(path: string, body: unknown): Promise<Response> {
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
+}
+
+export async function submitPlatformIssueToPing(
+  input: Omit<
+    PingPlatformIssueSubmission,
+    'instanceId' | 'appVersion' | 'submittedAt'
+  >,
+): Promise<boolean> {
+  try {
+    if (!isTelemetryEnvAllowed()) {
+      return false;
+    }
+
+    const request: PingPlatformIssueSubmission = {
+      ...input,
+      instanceId: await getInstanceAnalyticsId(),
+      appVersion: getAppVersion(),
+      submittedAt: new Date().toISOString(),
+    };
+    const response = await postToPing('/v1/platform-issues', request);
+
+    if (!response.ok) {
+      console.warn(
+        `${LOG_PREFIX} platform issue submission failed: ping responded ${response.status}`,
+      );
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.warn(
+      `${LOG_PREFIX} platform issue submission failed:`,
+      error instanceof Error ? error.message : error,
+    );
+    return false;
+  }
 }
 
 /**

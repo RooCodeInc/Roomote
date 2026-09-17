@@ -88,10 +88,12 @@ import type {
   FastAgentSurface,
   ReasoningEffort,
   SessionStatus,
+  SessionPrivacy,
   SessionWakeupReportPolicy,
   SessionWakeupSchedule,
   SessionWakeupStatus,
   AutomationResultPriority,
+  AutomationResultVisibility,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -645,6 +647,9 @@ export const workItems = pgTable(
     resultUserId: text('result_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
+    // Null marks legacy/unknown provenance and intentionally fails closed.
+    resultVisibility:
+      text('result_visibility').$type<AutomationResultVisibility>(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -718,6 +723,14 @@ export const tasks = pgTable(
       .notNull()
       .default('visible')
       .$type<TaskVisibility>(),
+    privacy: text('privacy')
+      .notNull()
+      .default('shared')
+      .$type<SessionPrivacy>(),
+    privateOwnerUserId: text('private_owner_user_id').references(
+      () => users.id,
+      { onDelete: 'cascade' },
+    ),
     // Terminal task state. Only written by the finishRun terminal path;
     // live runtime phase stays on runs.
     state: text('state').notNull().default('active').$type<TaskState>(),
@@ -848,6 +861,14 @@ export const tasks = pgTable(
       sql`${table.visibility} in ('visible', 'hidden')`,
     ),
     check(
+      'tasks_privacy_check',
+      sql`${table.privacy} in ('shared', 'private')`,
+    ),
+    check(
+      'tasks_private_owner_check',
+      sql`(${table.privacy} = 'shared' AND ${table.privateOwnerUserId} IS NULL) OR (${table.privacy} = 'private' AND ${table.privateOwnerUserId} IS NOT NULL)`,
+    ),
+    check(
       'tasks_state_check',
       sql`${table.state} in ('active', 'completed', 'failed', 'canceled')`,
     ),
@@ -966,6 +987,7 @@ export const taskArtifacts = pgTable(
     version: integer('version').notNull().default(0),
     size: bigint('size', { mode: 'number' }).notNull(),
     uploaded: boolean('uploaded').notNull().default(false),
+    uploadUrlExpiresAt: timestamp('upload_url_expires_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -1646,6 +1668,11 @@ export const taskRuns = pgTable(
       .where(
         sql`${table.payload}->>'launchIdempotencyKey' IS NOT NULL AND ${table.canceledAt} IS NULL`,
       ),
+    index('task_runs_canceled_launch_idempotency_key_idx')
+      .on(sql`(${table.payload}->>'launchIdempotencyKey')`)
+      .where(
+        sql`${table.payload}->>'launchIdempotencyKey' IS NOT NULL AND ${table.canceledAt} IS NOT NULL`,
+      ),
     index('task_runs_first_assistant_output_at_idx').on(
       table.firstAssistantOutputAt,
     ),
@@ -1991,17 +2018,33 @@ export const taskPlatformIssueReports = pgTable(
   'task_platform_issue_reports',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    taskId: text('task_id')
-      .notNull()
-      .references(() => tasks.id, { onDelete: 'cascade' }),
-    runId: integer('run_id')
-      .notNull()
-      .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
+    runId: integer('run_id').references(() => taskRuns.id, {
+      onDelete: 'cascade',
+    }),
     taskMessageId: uuid('task_message_id').references(() => taskMessages.id, {
+      onDelete: 'set null',
+    }),
+    sessionId: uuid('session_id').references(() => sessions.id, {
+      onDelete: 'cascade',
+    }),
+    fastConversationId: uuid('fast_conversation_id').references(
+      () => fastAgentConversations.id,
+      { onDelete: 'cascade' },
+    ),
+    fastEventId: text('fast_event_id'),
+    reportedByUserId: text('reported_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
     report: jsonb('report').notNull().$type<PlatformIssueReport>(),
     slackPostedAt: timestamp('slack_posted_at'),
+    pingSubmittedAt: timestamp('ping_submitted_at'),
+    pingSubmittedByUserId: text('ping_submitted_by_user_id').references(
+      () => users.id,
+      { onDelete: 'set null' },
+    ),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
@@ -2016,6 +2059,14 @@ export const taskPlatformIssueReports = pgTable(
     ),
     uniqueIndex('task_platform_issue_reports_task_message_id_unique').on(
       table.taskMessageId,
+    ),
+    uniqueIndex('task_platform_issue_reports_fast_event_unique').on(
+      table.fastConversationId,
+      table.fastEventId,
+    ),
+    check(
+      'task_platform_issue_reports_source_check',
+      sql`(${table.taskId} IS NOT NULL AND ${table.runId} IS NOT NULL AND ${table.sessionId} IS NULL AND ${table.fastConversationId} IS NULL AND ${table.fastEventId} IS NULL) OR (${table.taskId} IS NULL AND ${table.runId} IS NULL AND ${table.sessionId} IS NOT NULL AND ${table.fastConversationId} IS NOT NULL AND ${table.fastEventId} IS NOT NULL)`,
     ),
   ],
 );
@@ -2034,6 +2085,18 @@ export const taskPlatformIssueReportsRelations = relations(
     taskMessage: one(taskMessages, {
       fields: [taskPlatformIssueReports.taskMessageId],
       references: [taskMessages.id],
+    }),
+    session: one(sessions, {
+      fields: [taskPlatformIssueReports.sessionId],
+      references: [sessions.id],
+    }),
+    fastConversation: one(fastAgentConversations, {
+      fields: [taskPlatformIssueReports.fastConversationId],
+      references: [fastAgentConversations.id],
+    }),
+    reportedByUser: one(users, {
+      fields: [taskPlatformIssueReports.reportedByUserId],
+      references: [users.id],
     }),
   }),
 );
@@ -3434,6 +3497,14 @@ export const fastAgentConversations = pgTable(
       onDelete: 'cascade',
     }),
     ownerAutomation: text('owner_automation').$type<BackgroundAutomationKey>(),
+    privacy: text('privacy')
+      .notNull()
+      .default('shared')
+      .$type<SessionPrivacy>(),
+    privateOwnerUserId: text('private_owner_user_id').references(
+      () => users.id,
+      { onDelete: 'cascade' },
+    ),
     surface: text('surface').notNull().$type<FastAgentSurface>(),
     workspaceId: text('workspace_id').notNull(),
     conversationId: text('conversation_id').notNull(),
@@ -3477,6 +3548,14 @@ export const fastAgentConversations = pgTable(
         or
         (${table.userId} is null and ${table.ownerAutomation} is not null)
       )`,
+    ),
+    check(
+      'fast_agent_conversations_privacy_check',
+      sql`${table.privacy} in ('shared', 'private')`,
+    ),
+    check(
+      'fast_agent_conversations_private_owner_check',
+      sql`(${table.privacy} = 'shared' AND ${table.privateOwnerUserId} IS NULL) OR (${table.privacy} = 'private' AND ${table.privateOwnerUserId} IS NOT NULL AND ${table.privateOwnerUserId} = ${table.userId})`,
     ),
     index('fast_agent_conversations_legacy_ids_idx').using(
       'gin',
@@ -4161,7 +4240,7 @@ export const automationsRelations = relations(automations, ({ many }) => ({
 
 export type SessionOwnerKind = 'user' | 'automation' | 'system';
 export type SessionSourceSurface = TaskSurface | FastAgentSurface;
-export type { SessionStatus };
+export type { SessionPrivacy, SessionStatus };
 export type SessionTaskOrigin =
   | 'direct_launch'
   | 'fast_delegation'
@@ -4195,6 +4274,14 @@ export const sessions = pgTable(
     ownerAutomation: text('owner_automation')
       .$type<BackgroundAutomationKey>()
       .references(() => automations.key, { onDelete: 'set null' }),
+    privacy: text('privacy')
+      .notNull()
+      .default('shared')
+      .$type<SessionPrivacy>(),
+    privateOwnerUserId: text('private_owner_user_id').references(
+      () => users.id,
+      { onDelete: 'cascade' },
+    ),
     sourceSurface: text('source_surface')
       .notNull()
       .$type<SessionSourceSurface>(),
@@ -4237,6 +4324,14 @@ export const sessions = pgTable(
     check(
       'sessions_owner_kind_check',
       sql`${table.ownerKind} in ('user', 'automation', 'system')`,
+    ),
+    check(
+      'sessions_privacy_check',
+      sql`${table.privacy} in ('shared', 'private')`,
+    ),
+    check(
+      'sessions_private_owner_check',
+      sql`(${table.privacy} = 'shared' AND ${table.privateOwnerUserId} IS NULL) OR (${table.privacy} = 'private' AND ${table.privateOwnerUserId} IS NOT NULL AND ${table.privateOwnerUserId} = ${table.ownerUserId})`,
     ),
     check(
       'sessions_source_surface_check',
@@ -4792,6 +4887,9 @@ export const automationResults = pgTable(
     userId: text('user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
+    // Null marks legacy/unknown provenance and intentionally fails closed.
+    resultVisibility:
+      text('result_visibility').$type<AutomationResultVisibility>(),
     automationName: text('automation_name').notNull(),
     content: text('content').notNull(),
     priority: text('priority')

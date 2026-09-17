@@ -221,6 +221,7 @@ vi.mock('@roomote/sdk/server', () => ({
   })),
   buildAutomationRootSummaryText: vi.fn(({ summaryText }) => summaryText),
   enqueueSlackSuggestedTasksOnboardingFollowup: vi.fn(),
+  resolveTaskAutomationResultVisibility: vi.fn(async () => 'shared'),
   shouldPostHistoricalThreadFeedbackDebugSnippet: vi.fn(async () => false),
 }));
 

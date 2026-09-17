@@ -21,6 +21,7 @@ import { getSessionByIdCommand } from '@/trpc/commands/sessions';
 import { WorkspaceHeader } from '@/components/layout';
 import { SessionViewers } from '@/components/sessions/SessionViewers';
 import { ServiceCredentials } from '@/components/sessions/ServiceCredentials';
+import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 
 import { hasVoiceAutostartFlag } from '@/lib/voice-autostart';
 import { FastSessionTranscript } from './FastSessionTranscript';
@@ -125,6 +126,7 @@ export default async function SessionDetailPage({
       ownerName: unifiedSession.ownerName,
       ownerEmail: unifiedSession.ownerEmail,
       ownerImageUrl: unifiedSession.ownerImageUrl,
+      privacy: unifiedSession.privacy,
       surface: unifiedSession.sourceSurface,
       model: session?.model ?? defaultModelId,
       reasoningEffort: session?.reasoningEffort ?? defaultReasoningEffort,
@@ -167,6 +169,7 @@ export default async function SessionDetailPage({
                   defaultModelId={defaultModelId}
                   defaultReasoningEffort={defaultReasoningEffort}
                   autoStartVoice={autoStartVoice}
+                  privateSession={unifiedSession.privacy === 'private'}
                   sessionGoal={unifiedSession.goal}
                   {...(unifiedSession.ownerUserId
                     ? {
@@ -204,11 +207,16 @@ export default async function SessionDetailPage({
                   </>
                 }
               >
-                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <h1 className={SESSION_HEADER_TITLE_CLASS_NAME}>
                     {unifiedSession.title}
                   </h1>
-                  <SessionHeaderPullRequests />
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 text-xs text-muted-foreground">
+                    {unifiedSession.privacy === 'private' ? (
+                      <PrivateSessionIcon className="text-accent-foreground" />
+                    ) : null}
+                    <SessionHeaderPullRequests />
+                  </div>
                 </div>
               </WorkspaceHeader>
               <SessionTaskTimeline
@@ -237,6 +245,7 @@ export default async function SessionDetailPage({
     ownerName: session.ownerName,
     ownerEmail: session.ownerEmail,
     ownerImageUrl: session.ownerImageUrl,
+    privacy: session.privacy,
     surface: session.surface,
     model: session.model ?? defaultModelId,
     reasoningEffort: session.reasoningEffort ?? defaultReasoningEffort,
@@ -275,6 +284,7 @@ export default async function SessionDetailPage({
           defaultModelId={defaultModelId}
           defaultReasoningEffort={defaultReasoningEffort}
           autoStartVoice={autoStartVoice}
+          privateSession={session.privacy === 'private'}
           {...(session.userId
             ? {
                 owner: {

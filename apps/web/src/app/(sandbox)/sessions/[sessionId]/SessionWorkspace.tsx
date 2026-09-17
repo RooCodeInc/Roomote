@@ -138,6 +138,7 @@ type SessionTaskSummary = {
     id: number;
     status: RunStatus;
     taskPhase: string | null;
+    canRetryFailedStart?: boolean;
     error: string | null;
     result: unknown;
   } | null;
@@ -178,6 +179,7 @@ export type SessionInfo = {
   ownerName: string | null;
   ownerEmail: string | null;
   ownerImageUrl: string | null;
+  privacy: 'shared' | 'private';
   surface: string;
   /** Effective model for the session's turns (stored override or default). */
   model: string | null;
@@ -200,7 +202,7 @@ export type SessionInfo = {
       inferenceCostMicroUsd?: number;
       latestRun: Pick<
         NonNullable<SessionTaskSummary['latestRun']>,
-        'status' | 'taskPhase'
+        'status' | 'taskPhase' | 'canRetryFailedStart'
       > | null;
     }
   >;
@@ -819,6 +821,10 @@ export function SessionWorkspace({
   const fastTasks = currentFastTasks ?? session.taskCards ?? [];
   const taskCards = isFastTaskSource ? fastTasks : sessionTasks;
   const artifactTasks = isFastTaskSource ? fastTasks : sessionTasks;
+  const sessionArtifacts = currentSession?.artifacts ?? session.artifacts ?? [];
+  const hasSessionArtifacts =
+    getLatestSessionArtifacts(artifactTasks, session.id, sessionArtifacts)
+      .length > 0;
   const sessionPullRequests = getSessionPullRequests(sessionTasks);
   const sessionPreviewCount = getSessionPreviews(taskCards).length;
   const runningTasks = useMemo(
@@ -852,11 +858,14 @@ export function SessionWorkspace({
   );
   const automaticTaskPanelIds = useMemo(() => {
     const runningTaskIdSet = new Set(runningTaskIds);
+    const selectableTaskIds = taskCards
+      .filter((task) => task.latestRun?.canRetryFailedStart !== true)
+      .map((task) => task.taskId);
     return [
       ...runningTaskIds,
-      ...taskIds.filter((taskId) => !runningTaskIdSet.has(taskId)),
+      ...selectableTaskIds.filter((taskId) => !runningTaskIdSet.has(taskId)),
     ];
-  }, [runningTaskIds, taskIds]);
+  }, [runningTaskIds, taskCards]);
   const {
     utilityPanel,
     taskArtifacts,
@@ -943,7 +952,7 @@ export function SessionWorkspace({
       <SessionArtifactsPanel
         tasks={artifactTasks}
         sessionId={session.id}
-        sessionArtifacts={session.artifacts ?? []}
+        sessionArtifacts={sessionArtifacts}
         initialSelection={requestedArtifact}
         onDeselect={clearRequestedArtifact}
         onClose={closeSessionArtifact}
@@ -1069,6 +1078,7 @@ export function SessionWorkspace({
                   tooltip="Artifacts"
                   active={utilityPanel?.kind === 'artifacts'}
                   aria-expanded={utilityPanel?.kind === 'artifacts'}
+                  disabled={!hasSessionArtifacts}
                   icon={LayoutGrid}
                   onClick={() => togglePanel('artifacts')}
                 />

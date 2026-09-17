@@ -13,6 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useStickToBottomContext } from 'use-stick-to-bottom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   SETUP_RECEIPT_INPUT_KIND,
@@ -34,7 +35,7 @@ import {
 } from '@roomote/types';
 
 import type { FastSessionMessage } from '@/lib/server/fast-sessions';
-import { useTRPCClient } from '@/trpc/client';
+import { useTRPC, useTRPCClient } from '@/trpc/client';
 import {
   Conversation,
   ConversationContent,
@@ -49,6 +50,7 @@ import {
   type SlackMentionScope,
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
+import { PrivateSessionIcon } from '@/components/sessions/PrivateSessionIcon';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
 import { useSessionVoiceCallLease } from '@/hooks/useSessionVoiceCallLease';
 import { useSessionNavigationState } from '@/hooks/useSessionNavigationState';
@@ -138,6 +140,25 @@ function isIntegrationKeyRequest(message: TranscriptMessage) {
     payload?.toolName === 'prepare_integration_key' &&
     payload?.status === 'completed'
   );
+}
+
+/**
+ * The approval a key request created, read from the tool's JSON output. The
+ * native tool persists `{ pending, sessionUrl }` as is; a `{ success, result }`
+ * wrapper is accepted too. Null when the output is missing or another shape.
+ */
+function integrationKeyRequestPendingRef(message: TranscriptMessage) {
+  const output = (message.payload as { output?: unknown } | null)?.output;
+  if (typeof output !== 'string') return null;
+  try {
+    type Body = { pending?: { pendingRef?: unknown } } | null;
+    const parsed = JSON.parse(output) as (Body & { result?: Body }) | null;
+    const ref =
+      parsed?.pending?.pendingRef ?? parsed?.result?.pending?.pendingRef;
+    return typeof ref === 'string' && ref ? ref : null;
+  } catch {
+    return null;
+  }
 }
 
 function shouldSuppressTrustedInputToolMessage(
@@ -421,6 +442,7 @@ export function FastSessionTranscript({
   defaultReasoningEffort = null,
   owner,
   headerExtras,
+  privateSession = false,
   headerActions,
   secretSessionId,
   sessionGoal,
@@ -438,6 +460,7 @@ export function FastSessionTranscript({
   defaultReasoningEffort?: ReasoningEffort | null;
   owner?: TranscriptOwner;
   headerExtras?: ReactNode;
+  privateSession?: boolean;
   headerActions?: ReactNode;
   secretSessionId?: string;
   sessionGoal?: SessionGoal | null;
@@ -448,7 +471,25 @@ export function FastSessionTranscript({
    */
   autoStartVoice?: boolean;
 }) {
+  const trpc = useTRPC();
   const trpcClient = useTRPCClient();
+  const queryClient = useQueryClient();
+  const taskReportRefreshRef = useRef({
+    queryClient,
+    fastTasksQueryKey: trpc.fastSessions.tasks.queryKey({ sessionId }),
+    taskSessionQueryKey: (taskId: string) =>
+      trpc.sandboxSession.byTaskId.queryKey({ taskId }),
+    taskArtifactsQueryKey: (taskId: string) =>
+      trpc.artifacts.forTask.queryKey({ taskId }),
+  });
+  taskReportRefreshRef.current = {
+    queryClient,
+    fastTasksQueryKey: trpc.fastSessions.tasks.queryKey({ sessionId }),
+    taskSessionQueryKey: (taskId: string) =>
+      trpc.sandboxSession.byTaskId.queryKey({ taskId }),
+    taskArtifactsQueryKey: (taskId: string) =>
+      trpc.artifacts.forTask.queryKey({ taskId }),
+  };
   const { user: authenticatedUser } = useUser();
   const currentUser = useMemo<TranscriptOwner | undefined>(
     () =>
@@ -486,6 +527,9 @@ export function FastSessionTranscript({
   );
   const serverMessagesRef = useRef(serverMessages);
   const hasReceivedInitialSessionStateRef = useRef(false);
+  const pendingTaskReportTimingsRef = useRef(
+    new Map<string, { admittedAtMs: number; serverReceivedAtMs: number }>(),
+  );
   const [initialOptimisticMessage] = useState(() =>
     getInitialOptimisticMessage(sessionId, initialMessages, currentUser),
   );
@@ -596,6 +640,40 @@ export function FastSessionTranscript({
         }
         serverMessagesRef.current = next;
         setServerMessages(next);
+        for (const message of canonicalMessages) {
+          const timing = pendingTaskReportTimingsRef.current.get(
+            message.eventId,
+          );
+          if (!timing) continue;
+          pendingTaskReportTimingsRef.current.delete(message.eventId);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              const displayAt = performance.timeOrigin + performance.now();
+              if (displayAt < timing.admittedAtMs) return;
+              try {
+                performance.measure(
+                  'roomote.task-report-admission-to-display',
+                  {
+                    start: Math.max(
+                      0,
+                      timing.admittedAtMs - performance.timeOrigin,
+                    ),
+                    end: performance.now(),
+                    detail: {
+                      admissionToServerMs: Math.max(
+                        0,
+                        timing.serverReceivedAtMs - timing.admittedAtMs,
+                      ),
+                      admissionToDisplayMs: displayAt - timing.admittedAtMs,
+                    },
+                  },
+                );
+              } catch {
+                // Older browsers may not support options-based measurements.
+              }
+            });
+          });
+        }
         // A persisted reply row supersedes the live text streamed for it.
         const persistedStreamIds = new Set(
           messages
@@ -700,15 +778,55 @@ export function FastSessionTranscript({
         // Ignore malformed frames; the persisted row still arrives.
       }
     };
+    const onTaskReport = (event: MessageEvent) => {
+      try {
+        const refresh = JSON.parse(event.data) as {
+          type: 'task_report_admitted';
+          eventId: string;
+          taskId: string;
+          admittedAtMs: number;
+          serverReceivedAtMs: number;
+        };
+        if (
+          refresh.type !== 'task_report_admitted' ||
+          !refresh.eventId ||
+          !refresh.taskId ||
+          !Number.isFinite(refresh.admittedAtMs) ||
+          !Number.isFinite(refresh.serverReceivedAtMs)
+        ) {
+          return;
+        }
+        pendingTaskReportTimingsRef.current.set(refresh.eventId, {
+          admittedAtMs: refresh.admittedAtMs,
+          serverReceivedAtMs: refresh.serverReceivedAtMs,
+        });
+        const refreshQueries = taskReportRefreshRef.current;
+        void Promise.all([
+          refreshQueries.queryClient.invalidateQueries({
+            queryKey: refreshQueries.fastTasksQueryKey,
+          }),
+          refreshQueries.queryClient.invalidateQueries({
+            queryKey: refreshQueries.taskSessionQueryKey(refresh.taskId),
+          }),
+          refreshQueries.queryClient.invalidateQueries({
+            queryKey: refreshQueries.taskArtifactsQueryKey(refresh.taskId),
+          }),
+        ]);
+      } catch {
+        // Ignore malformed hints; transcript and task polling remain active.
+      }
+    };
     source.addEventListener('open', onOpen);
     source.addEventListener('messages', onMessages);
     source.addEventListener('session', onSession);
     source.addEventListener('chunk', onChunk);
+    source.addEventListener('task-report', onTaskReport);
     return () => {
       source.removeEventListener('open', onOpen);
       source.removeEventListener('messages', onMessages);
       source.removeEventListener('session', onSession);
       source.removeEventListener('chunk', onChunk);
+      source.removeEventListener('task-report', onTaskReport);
       source.close();
     };
   }, [
@@ -1610,37 +1728,60 @@ export function FastSessionTranscript({
   const stopLiveVoiceRef = useRef(liveVoice.stop);
   stopLiveVoiceRef.current = liveVoice.stop;
 
-  // Key requests that arrive while the owner is watching open the key dialog
-  // on their own; requests already in the history only show the pending card.
-  const latestIntegrationKeyRequestId = useMemo(() => {
+  // The key request the conversation is still waiting on: the newest one with
+  // no human message after it. Once the owner replies without saving a key
+  // (or after saving one, since that posts a reply), the ask is over and the
+  // card goes away, even though the approval stays open in the dialog. A
+  // request that arrives while the owner is watching also opens the dialog.
+  const openIntegrationKeyRequest = useMemo(() => {
     let latest: TranscriptMessage | null = null;
+    let latestHumanMessage: TranscriptMessage | null = null;
     for (const message of messages) {
       if (
         isIntegrationKeyRequest(message) &&
         (latest === null || compareTranscriptOrder(message, latest) > 0)
       ) {
         latest = message;
+      } else if (
+        message.role === 'user' &&
+        message.metadata?.inputKind !== SETUP_RECEIPT_INPUT_KIND &&
+        (latestHumanMessage === null ||
+          compareTranscriptOrder(message, latestHumanMessage) > 0)
+      ) {
+        latestHumanMessage = message;
       }
     }
-    return latest?.eventId ?? null;
+    if (
+      latest === null ||
+      (latestHumanMessage !== null &&
+        compareTranscriptOrder(latestHumanMessage, latest) > 0)
+    ) {
+      return null;
+    }
+    return {
+      eventId: latest.eventId,
+      pendingRef: integrationKeyRequestPendingRef(latest),
+    };
   }, [messages]);
+  const openIntegrationKeyRequestId =
+    openIntegrationKeyRequest?.eventId ?? null;
   const seenIntegrationKeyRequestId = useRef<string | null | undefined>(
     undefined,
   );
   useEffect(() => {
     if (!secretSessionId) return;
     if (seenIntegrationKeyRequestId.current === undefined) {
-      seenIntegrationKeyRequestId.current = latestIntegrationKeyRequestId;
+      seenIntegrationKeyRequestId.current = openIntegrationKeyRequestId;
       return;
     }
     if (
-      latestIntegrationKeyRequestId &&
-      latestIntegrationKeyRequestId !== seenIntegrationKeyRequestId.current
+      openIntegrationKeyRequestId &&
+      openIntegrationKeyRequestId !== seenIntegrationKeyRequestId.current
     ) {
-      seenIntegrationKeyRequestId.current = latestIntegrationKeyRequestId;
+      seenIntegrationKeyRequestId.current = openIntegrationKeyRequestId;
       openIntegrationKeyDialog();
     }
-  }, [latestIntegrationKeyRequestId, secretSessionId]);
+  }, [openIntegrationKeyRequestId, secretSessionId]);
 
   useEffect(() => {
     if (pendingInputRequest && (liveVoiceActive || liveVoiceConnecting)) {
@@ -1675,8 +1816,11 @@ export function FastSessionTranscript({
             >
               {title ?? fallbackTitle}
             </h1>
-            {(effectiveSessionModel || headerExtras) && (
-              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+            {(privateSession || effectiveSessionModel || headerExtras) && (
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 text-xs text-muted-foreground">
+                {privateSession ? (
+                  <PrivateSessionIcon className="text-accent-foreground" />
+                ) : null}
                 {effectiveSessionModel ? (
                   <ModelBadge
                     model={effectiveSessionModel}
@@ -1785,7 +1929,7 @@ export function FastSessionTranscript({
             {secretSessionId ? (
               <PendingIntegrationKeys
                 sessionId={secretSessionId}
-                latestRequestId={latestIntegrationKeyRequestId}
+                openRequest={openIntegrationKeyRequest}
               />
             ) : null}
           </ConversationContent>

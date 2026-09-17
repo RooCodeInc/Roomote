@@ -375,6 +375,15 @@ interface McpProxyConfig {
   allowAuthTokens?: boolean;
   validateTaskRunToken?: (auth: RunTokenContext) => Promise<Response | null>;
   allowedToolNames?: readonly string[];
+  /**
+   * The upstream answers every request on its own, with no MCP session.
+   * Session ids are neither forwarded nor returned, so nothing upstream is
+   * ever tied to the credential of an earlier request. For a proxy that
+   * chooses credentials per request (for example, a GitHub installation
+   * based on the target repository), a session would bind the first
+   * credential and reject a later request routed through another one.
+   */
+  statelessUpstream?: boolean;
   stripToolSchemaPatterns?: boolean;
   timeoutMs?: number;
   /**
@@ -386,6 +395,50 @@ interface McpProxyConfig {
   guardUpstreamEgress?: { allowedPrivateCidrs?: string };
   /** Reject request bodies larger than this many bytes (413). */
   maxRequestBodyBytes?: number;
+  /**
+   * Rewrite a successful `tools/call` result before the client sees it;
+   * resolve `undefined` to pass it through. Applied only where the proxy
+   * already holds the whole JSON-RPC response (JSON bodies and single-response
+   * SSE replies). A throw is treated as `undefined`.
+   */
+  transformToolCallResult?: ToolCallResultTransform;
+}
+
+type ToolCallResultTransform = (call: {
+  toolName: string;
+  arguments: unknown;
+  result: unknown;
+}) => Promise<unknown>;
+
+async function applyToolCallResultTransform(
+  transform: ToolCallResultTransform | undefined,
+  request: unknown,
+  response: unknown,
+): Promise<unknown> {
+  const toolName = getToolCallName(request);
+
+  if (
+    !transform ||
+    !toolName ||
+    !response ||
+    typeof response !== 'object' ||
+    !('result' in response)
+  ) {
+    return undefined;
+  }
+
+  try {
+    const result = await transform({
+      toolName,
+      arguments: (request as { params?: { arguments?: unknown } }).params
+        ?.arguments,
+      result: response.result,
+    });
+
+    return result === undefined ? undefined : { ...response, result };
+  } catch {
+    return undefined;
+  }
 }
 
 export class McpProxyError extends Error {
@@ -763,10 +816,18 @@ export function createMcpProxy(config: McpProxyConfig) {
     allowAuthTokens = false,
     validateTaskRunToken = verifyTaskRunTokenTargetExists,
     allowedToolNames,
+    statelessUpstream = false,
     stripToolSchemaPatterns: shouldStripToolSchemaPatterns = false,
     guardUpstreamEgress,
     maxRequestBodyBytes,
+    transformToolCallResult,
   } = config;
+
+  const buildResponseHeaders = (upstreamHeaders: Headers): Headers => {
+    const headers = buildProxyResponseHeaders(upstreamHeaders);
+    if (statelessUpstream) headers.delete('mcp-session-id');
+    return headers;
+  };
 
   // Guarded dispatchers pin connections to DNS answers vetted against the
   // private-range blocklist; constructed once per proxy, shared by requests.
@@ -1026,6 +1087,7 @@ export function createMcpProxy(config: McpProxyConfig) {
         c.req.raw.headers,
         method,
       );
+      if (statelessUpstream) proxyHeaders.delete('mcp-session-id');
 
       if (credentials.extraHeaders) {
         for (const [key, value] of Object.entries(credentials.extraHeaders)) {
@@ -1204,7 +1266,7 @@ export function createMcpProxy(config: McpProxyConfig) {
               stripToolSchemaPatterns: shouldStripToolSchemaPatterns,
             },
           );
-          const headers = buildProxyResponseHeaders(upstreamResponse.headers);
+          const headers = buildResponseHeaders(upstreamResponse.headers);
           headers.set('content-type', 'application/json');
 
           upstreamResponse.body?.cancel().catch(() => {});
@@ -1219,10 +1281,28 @@ export function createMcpProxy(config: McpProxyConfig) {
       }
 
       if (method === 'POST' && isJsonResponse(contentType)) {
-        return new Response(await upstreamResponse.text(), {
-          status: upstreamResponse.status,
-          headers: buildProxyResponseHeaders(upstreamResponse.headers),
-        });
+        const text = await upstreamResponse.text();
+        let transformed: unknown;
+
+        if (transformToolCallResult && upstreamResponse.ok) {
+          try {
+            transformed = await applyToolCallResultTransform(
+              transformToolCallResult,
+              parsedBody,
+              JSON.parse(text),
+            );
+          } catch {
+            // Not a JSON-RPC body we can rewrite; forward it untouched.
+          }
+        }
+
+        return new Response(
+          transformed === undefined ? text : JSON.stringify(transformed),
+          {
+            status: upstreamResponse.status,
+            headers: buildResponseHeaders(upstreamResponse.headers),
+          },
+        );
       }
 
       // Some Streamable HTTP MCP servers (e.g. X) answer a POST request with an
@@ -1259,10 +1339,15 @@ export function createMcpProxy(config: McpProxyConfig) {
             // the upstream connection instead of leaving it open.
             upstreamResponse.body?.cancel().catch(() => {});
 
-            const headers = buildProxyResponseHeaders(upstreamResponse.headers);
+            const transformed = await applyToolCallResultTransform(
+              transformToolCallResult,
+              parsedBody,
+              response,
+            );
+            const headers = buildResponseHeaders(upstreamResponse.headers);
             headers.set('content-type', 'application/json');
 
-            return new Response(JSON.stringify(response), {
+            return new Response(JSON.stringify(transformed ?? response), {
               status: upstreamResponse.status,
               headers,
             });
@@ -1280,7 +1365,7 @@ export function createMcpProxy(config: McpProxyConfig) {
       if (credentials.maxResponseBodyBytes !== undefined) {
         return new Response(await upstreamResponse.text(), {
           status: upstreamResponse.status,
-          headers: buildProxyResponseHeaders(upstreamResponse.headers),
+          headers: buildResponseHeaders(upstreamResponse.headers),
         });
       }
 
@@ -1307,7 +1392,7 @@ export function createMcpProxy(config: McpProxyConfig) {
         }),
         {
           status: upstreamResponse.status,
-          headers: buildProxyResponseHeaders(upstreamResponse.headers),
+          headers: buildResponseHeaders(upstreamResponse.headers),
         },
       );
     } catch (error) {

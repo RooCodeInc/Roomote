@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   revoke: vi.fn(),
   findSession: vi.fn(),
-  findUser: vi.fn(),
+  isDeploymentExperimentEnabled: vi.fn(),
   reply: vi.fn(),
   eq: vi.fn((column, value) => ({ column, value })),
   env: {
@@ -21,12 +21,11 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       sessions: { findFirst: mocks.findSession },
-      users: { findFirst: mocks.findUser },
     },
   },
   sessions: { id: 'sessions.id' },
-  users: { id: 'users.id' },
   eq: mocks.eq,
+  isDeploymentExperimentEnabled: mocks.isDeploymentExperimentEnabled,
 }));
 vi.mock('@/trpc/commands/fast-sessions', () => ({
   replyToFastSessionCommand: mocks.reply,
@@ -81,7 +80,7 @@ beforeEach(() => {
   mocks.env.R_PUBLIC_URL = 'https://roomote.example';
   mocks.authorize.mockResolvedValue(auth);
   mocks.findSession.mockResolvedValue(liveSession);
-  mocks.findUser.mockResolvedValue({ metadata: {} });
+  mocks.isDeploymentExperimentEnabled.mockResolvedValue(false);
   mocks.reply.mockResolvedValue({ success: true });
   mocks.create.mockResolvedValue(metadata);
   mocks.list.mockResolvedValue({
@@ -172,7 +171,6 @@ describe('integration key route boundary', () => {
       createArgs,
     );
     expect(mocks.eq).toHaveBeenCalledWith('sessions.id', sessionId);
-    expect(mocks.eq).toHaveBeenCalledWith('users.id', auth.userId);
     expect(mocks.findSession).toHaveBeenCalledExactlyOnceWith({
       where: { column: 'sessions.id', value: sessionId },
       columns: {
@@ -199,9 +197,7 @@ describe('integration key route boundary', () => {
   });
 
   it('resumes with the available workflow when the experiment is enabled', async () => {
-    mocks.findUser.mockResolvedValue({
-      metadata: { integration_keys_enabled: true },
-    });
+    mocks.isDeploymentExperimentEnabled.mockResolvedValue(true);
 
     await POST(request('POST', createArgs), props);
 
@@ -210,6 +206,8 @@ describe('integration key route boundary', () => {
       text: expect.stringContaining('call list_integration_keys'),
     });
     const text = mocks.reply.mock.calls[0]![1].text;
+    expect(text).toContain('_roomote_http_integrations integration_request');
+    expect(text).toContain('a session: prefix');
     expect(text).toMatch(
       /^<integration_saved>\n[^<]+\n<\/integration_saved>\nI added the integration, go ahead\.$/u,
     );

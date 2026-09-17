@@ -755,6 +755,34 @@ describe('ArtifactViewerContent', () => {
     expect(screen.getByLabelText('Loading artifact')).toBeVisible();
   });
 
+  it('labels the enabled download link without changing native download behavior', () => {
+    render(
+      <ArtifactViewerContent
+        taskId="task-1"
+        artifact={{
+          id: 'artifact-1',
+          taskId: 'task-1',
+          path: 'reports/data.csv',
+          version: 1,
+          artifactType: 'general',
+          contentType: 'text/csv',
+          size: 128,
+          createdAt: new Date('2026-05-22T00:00:00.000Z'),
+          downloadUrl: 'https://example.test/data.csv',
+          content: 'name,value\nalpha,1',
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'Download' })).toHaveAttribute(
+      'href',
+      'https://example.test/data.csv',
+    );
+    expect(screen.getByRole('link', { name: 'Download' })).toHaveAttribute(
+      'download',
+    );
+  });
+
   it('offers the Build action when a markdown plan has no fetched content', () => {
     render(
       <ArtifactViewerContent

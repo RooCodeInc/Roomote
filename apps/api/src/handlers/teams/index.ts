@@ -264,6 +264,7 @@ async function startTeamsFastSuggestion(params: {
       const session = await getOrCreateFastAgentSession({
         userId: params.mappedUserId,
         conversation: canonicalConversation,
+        userInitiated: { surface: 'teams', trigger: 'message' },
       });
       return continueFastAgentSurfaceReply({
         sessionId: session.id,
@@ -2655,6 +2656,7 @@ teams.post('/', async (c) => {
       session = await getOrCreateFastAgentSession({
         userId: mappedUserId,
         conversation,
+        userInitiated: { surface: 'teams', trigger: 'message' },
       });
     } catch (error) {
       apiLogger.error(

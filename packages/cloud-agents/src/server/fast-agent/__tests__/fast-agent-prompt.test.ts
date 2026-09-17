@@ -70,7 +70,23 @@ describe.each([
 });
 
 describe('buildFastAgentSystemPrompt', () => {
-  it('includes matching workspace and model guidance as supplemental routing rules', () => {
+  it('adds ask-first guidance only for private Sessions', () => {
+    const privatePrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      privacy: 'private',
+    });
+
+    expect(privatePrompt).toContain('## Private Session');
+    expect(privatePrompt).toContain("get the owner's explicit approval");
+    expect(privatePrompt).toContain(
+      'Delegated tasks inherit this private Session.',
+    );
+    expect(
+      buildFastAgentSystemPrompt({ availableEnvironments: [] }),
+    ).not.toContain('## Private Session');
+  });
+
+  it('includes matching workspace guidance as supplemental routing rules', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [
         { id: 'env-app', name: 'App', repositoryNames: ['acme/app'] },
@@ -80,7 +96,7 @@ describe('buildFastAgentSystemPrompt', () => {
       ],
       workspaceRoutingRules: [
         {
-          description: 'For frontend work, use App and prefer GPT-5.6.',
+          description: 'For frontend work, use App.',
           target: 'env-app',
         },
       ],
@@ -88,20 +104,49 @@ describe('buildFastAgentSystemPrompt', () => {
 
     expect(prompt).toContain('## Routing Rules');
     expect(prompt).toContain(
-      'For frontend work, use App and prefer GPT-5.6. -> App [id: env-app]',
+      'For frontend work, use App. -> App [id: env-app]',
     );
     expect(prompt).toContain(
-      "An explicit user request for an environment or model takes precedence over these rules only when it satisfies the work's requirements",
+      "An explicit user request for an environment takes precedence over these rules only when it satisfies the work's requirements",
     );
     expect(prompt).toContain(
       'A Blank slate request never overrides a routing rule indicating that the work requires a repository or configured environment',
     );
     expect(prompt).toContain('supplemental routing rules');
-    expect(prompt).toContain(
-      'natural-language guidance for selecting an exact model from Available Delegated Task Models',
-    );
     expect(prompt.indexOf('## Routing Rules')).toBeLessThan(
       prompt.indexOf('## Available Delegated Task Models'),
+    );
+  });
+
+  it('includes coding-model routing rules with model and effort', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      availableTaskModels: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT 5.6', family: 'GPT' },
+      ],
+      defaultTaskModelId: 'openai/gpt-5.6',
+      codingModelRoutingRules: [
+        {
+          modelId: 'openai/gpt-5.6',
+          reasoningEffort: 'high',
+          condition: 'Complex reasoning and engineering tasks',
+        },
+      ],
+    });
+
+    expect(prompt).toContain('## Coding Model Routing');
+    expect(prompt).toContain(
+      'Complex reasoning and engineering tasks -> GPT 5.6 [id: openai/gpt-5.6] with high reasoning',
+    );
+    expect(prompt).toContain(
+      'Explicit user model or effort choices take precedence',
+    );
+    expect(prompt).toContain(
+      'Evaluate every routing rule and use the strongest matching rule only when its condition clearly and strongly matches',
+    );
+    expect(prompt).toContain('Do not use a weak best-available match');
+    expect(prompt).toContain(
+      'If no rule is a strong match, omit both fields to use the deployment defaults',
     );
   });
 
@@ -572,7 +617,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).not.toContain('`send_chat_reaction` with purpose `ack`');
     expect(prompt).toContain(
-      'A direct closeout or clarification that fully handles the turn is already the first communication',
+      'A direct closeout or clarification that fully handles the turn without bypassing required Brain recall or other investigation is already the first communication',
     );
     expect(prompt).toContain(
       'The acknowledgement streams independently of coding-task startup',
@@ -681,7 +726,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'GPT-5.6 [id: openai/gpt-5.6] (deployment default)',
     );
     expect(prompt).toContain('Claude Sonnet 5 [id: anthropic/claude-sonnet-5]');
-    expect(prompt).toContain('Omit it to use the deployment default');
+    expect(prompt).toContain('Omit both to use the deployment defaults');
     expect(prompt).toContain('manage_tasks');
     expect(prompt).toContain('get_chat_message_context');
     expect(prompt).toContain('get_chat_channel_messages');
@@ -729,11 +774,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Tool arguments, results, and reasoning are retained natively',
     );
     expect(prompt).toContain('native JSON schema');
-    for (const name of [
-      'prepare_integration_key',
-      'list_integration_keys',
-      'request_with_integration_key',
-    ]) {
+    for (const name of ['prepare_integration_key', 'list_integration_keys']) {
       expect(prompt).not.toContain(name);
     }
     expect(prompt).toContain(
@@ -750,12 +791,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(enabledPrompt).toContain('`prepare_integration_key`');
     expect(enabledPrompt).toContain('`list_integration_keys`');
     expect(enabledPrompt).toContain(
-      'launch a coding task attached to this Session to use the integration',
+      'use the `_roomote_http_integrations` server for one or a few direct calls',
     );
-    expect(enabledPrompt).not.toContain('`request_with_integration_key`');
-    expect(enabledPrompt).not.toContain(
-      'for one or a few direct calls, call `request_with_integration_key` yourself',
-    );
+    expect(enabledPrompt).toContain('`integration_request` tool');
+    expect(enabledPrompt).toContain('a `session:` prefix');
     expect(enabledPrompt).toContain(
       'Never invent a reference or substitute another credential.',
     );
@@ -763,10 +802,48 @@ describe('buildFastAgentSystemPrompt', () => {
       'In web Sessions these tools need no opening `send_chat_reply`.',
     );
     expect(enabledPrompt).toContain(
-      'do not launch a coding task to build a connector when an integration key would do',
+      'pick one route in this order and act on it in the same turn',
     );
     expect(enabledPrompt).toContain(
-      'Do not probe whether the service is publicly reachable and do not delegate that check to a coding task',
+      'A connector for a different service does not count',
+    );
+    expect(enabledPrompt).not.toContain('If none is connected');
+    expect(enabledPrompt).toContain(
+      "research it before choosing: up to three `roomote_fetch_url` reads of the provider's own documentation",
+    );
+    expect(enabledPrompt).toContain(
+      'only means nothing is installed for this one',
+    );
+    expect(enabledPrompt).toContain('the page where the human creates a key');
+    expect(enabledPrompt).toContain(
+      'what connecting to it requires (whether clients must be approved or allowlisted by the provider',
+    );
+    expect(enabledPrompt).toContain(
+      'Suggest the MCP route only when connecting is something this human can complete now',
+    );
+    expect(enabledPrompt).toContain(
+      'A result that needs manual client registration or static headers means the MCP is not connectable by this human now',
+    );
+    expect(enabledPrompt).toContain(
+      "when the result carries the provider's `reason`, give it to the human in plain words",
+    );
+    expect(enabledPrompt).toContain(
+      "never characterize a provider's status (beta, unsupported, a future capability) from memory",
+    );
+    expect(enabledPrompt).toContain(
+      'say in one sentence where they create that key',
+    );
+    expect(enabledPrompt).toContain(
+      'stdio project or a repository is not a hosted MCP',
+    );
+    expect(enabledPrompt).toContain(
+      'An authorization link is a pending MCP state',
+    );
+    expect(enabledPrompt).toContain(
+      'a denied authorization is never bypassed with a key',
+    );
+    expect(enabledPrompt).toContain(
+      'Do not ask for exports, screenshots, or pasted content, do not probe whether the service is reachable',
     );
     expect(enabledPrompt).toContain(
       'If available documentation cannot verify the API origin and credential header, say those details could not be verified and do not guess',
@@ -779,6 +856,15 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(enabledPrompt).toContain(
       'never delegate that lookup to a coding task',
+    );
+    expect(enabledPrompt).toContain(
+      'For custom integration connection, setup, and result replies, lead with the plain-language outcome',
+    );
+    expect(enabledPrompt).toContain(
+      'Omit endpoint paths, request methods, status codes, authentication jargon, and implementation or process details',
+    );
+    expect(enabledPrompt).toContain(
+      'Do not claim broader access than the completed check established; state meaningful permission limits in plain language',
     );
     const platformEventPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -848,6 +934,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('Each structured output');
     expect(prompt).not.toContain('toolArguments');
     expect(prompt).toContain('no local filesystem, shell');
+    expect(prompt).toContain(
+      'Use `report_platform_issue` only for an admin-fixable Roomote platform',
+    );
     expect(prompt).not.toContain(
       'current-channel chat context tools are the only direct external capabilities',
     );
@@ -1156,6 +1245,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('remain visible in the session');
     expect(prompt).toContain('Treat Brain recall as a sequential preflight');
     expect(prompt).toContain(
+      'An unfamiliar person, project, company, name, or term is a reason to retrieve relevant memory, not to immediately ask the user what it means',
+    );
+    expect(prompt).toContain(
       'durable preference, decision, correction, or fact',
     );
     expect(prompt).toContain('save_memory');
@@ -1181,7 +1273,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Use deployment MCP servers as relevant sources of truth',
     );
     expect(prompt).toContain(
-      'Ask for clarification only when ambiguity blocks meaningful investigation',
+      'Ask for clarification only after required recall and available-source inspection',
     );
     expect(prompt).toContain(
       'regardless of whether the message is phrased as a question, request, or declarative feedback',
@@ -1286,9 +1378,9 @@ describe('buildFastAgentSystemPrompt', () => {
         'an eligible deployment GitHub App installation with an active connected repository is required',
         'without connecting the public target or linking a personal GitHub account',
         'including source, code search, issues, and pull requests',
-        'exactly one positive `repo:owner/name` qualifier',
+        'Searches can span the connected repositories in one call',
         'Respect upstream pagination and search-index limits and disclose incomplete results',
-        'Private reads and all writes still require an eligible connection to the target repository',
+        'Private repository reads and repository writes still require an eligible connection to the target repository',
         'never retry an authorization denial anonymously or through a task',
       ])
         expect(prompt).toContain(guidance);
@@ -1390,7 +1482,10 @@ describe('buildFastAgentSystemPrompt', () => {
           : { turnSource: 'platform_event' as const, platformEventKind: turn }),
       });
       expect(prompt).toContain(
-        'these bounded actions do not require a coding task',
+        'use the discovered native GitHub tools directly',
+      );
+      expect(prompt).toContain(
+        'Work that needs a checkout, a build, or tests to get right still belongs in a coding task',
       );
       expect(prompt).toContain(
         'Writes unsupported by the discovered provider API tools still require a coding task, not an authorization bypass',
@@ -1399,9 +1494,8 @@ describe('buildFastAgentSystemPrompt', () => {
         "A permission denial is not a reason to bypass the integration's authorization",
       );
       for (const guidance of [
-        '`update_pull_request`, `merge_pull_request`, `add_issue_comment`, and `add_reply_to_pull_request_comment`',
         'Follow their discovered descriptions, schemas, and arguments',
-        'Read the target first, send only the requested fields',
+        'For repository writes, read the target first, send only the requested fields',
         'report success only after the tool confirms it',
         'current human message explicitly requests merging that exact pull or merge request',
         'approval, passing checks, automation events, or discussion about merging is not authorization',
@@ -1414,6 +1508,7 @@ describe('buildFastAgentSystemPrompt', () => {
       ]) {
         expect(prompt).toContain(guidance);
       }
+      expect(prompt).not.toContain('create_gist');
     },
   );
 
@@ -1632,15 +1727,23 @@ describe('buildFastAgentSystemPrompt', () => {
     const directedPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
     });
+    const peerDirectedPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      allowSilentAmbientReply: true,
+      peerDirectedTurn: true,
+    });
 
     expect(ambientPrompt).toContain(
-      'decide from the current message and recent thread whether this unmentioned multi-human turn is specifically directed at Roomote',
+      'decide from the current message and recent thread whether it is specifically directed at Roomote',
     );
     expect(ambientPrompt).toContain(
       "Respond to explicit platform mentions or commands, direct replies or answers to Roomote, requests about Roomote's work, and contextually clear follow-ups",
     );
     expect(ambientPrompt).toContain(
       'Messages to another person or to the whole group default to ambient, even when actionable',
+    );
+    expect(ambientPrompt).toContain(
+      "A message that explicitly addresses another person remains ambient when it asks about Roomote's work",
     );
     expect(ambientPrompt).toContain(
       'Answer a whole-group message only when Roomote has a specific, materially useful contribution beyond what participants have already said',
@@ -1656,6 +1759,34 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(ambientPrompt).toContain(
       'An eligible ambient message or optional human reaction may use `ignore_event` under its narrow rule below',
+    );
+    expect(peerDirectedPrompt).toContain(
+      'The communication surface classified this turn as a colleague-to-colleague conversation',
+    );
+    expect(peerDirectedPrompt).toContain(
+      'Default to `ignore_event` without acknowledging, reacting, or taking action',
+    );
+    expect(peerDirectedPrompt).toContain(
+      'Respond only if the current message mentions Roomote or explicitly asks Roomote to act',
+    );
+    expect(peerDirectedPrompt).toContain(
+      'Except for a turn classified above as peer-directed or another eligible ambient message',
+    );
+    expect(peerDirectedPrompt).not.toContain('contextually clear follow-ups');
+    expect(
+      peerDirectedPrompt.indexOf('## Turn Startup (Highest Priority)'),
+    ).toBeLessThan(
+      peerDirectedPrompt.indexOf(
+        'The communication surface classified this turn',
+      ),
+    );
+    expect(
+      peerDirectedPrompt.indexOf(
+        'The communication surface classified this turn',
+      ),
+    ).toBeLessThan(peerDirectedPrompt.indexOf('## All Environments'));
+    expect(directedPrompt).not.toContain(
+      'classified this turn as a colleague-to-colleague conversation',
     );
     expect(directedPrompt).toContain(
       '`ignore_event` and `retry_task_start` are invalid for this human-authored turn',
@@ -1931,5 +2062,64 @@ describe('buildFastAgentSystemPrompt', () => {
       'This goal belongs to the Fast Session, not to any delegated task',
     );
     expect(prompt).toContain('Use `manage_goal`');
+  });
+
+  it('keeps remote MCP setup links exact and resumes automatically', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      addRemoteMcpEnabled: true,
+    });
+
+    expect(prompt).toContain(
+      'Share `authorizeUrl` and `settingsUrl` exactly unchanged',
+    );
+    expect(prompt).toContain('`Authorize <name>` and `Integration settings`');
+    expect(prompt).toContain(
+      'The conversation resumes automatically after authorization',
+    );
+    expect(prompt).toContain('never ask the human to send a follow-up');
+    expect(prompt).toContain(
+      'do not mention integration IDs, catalog checks, probing, or internal recovery',
+    );
+    expect(prompt).toContain(
+      'Remote MCP: call `add_remote_mcp` with only its name and URL',
+    );
+  });
+
+  it('does not bypass an applicable or indeterminate remote MCP with an integration key', () => {
+    const adminPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      addRemoteMcpEnabled: true,
+      serviceCredentialToolsEnabled: true,
+    });
+    const nonAdminPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      addRemoteMcpEnabled: false,
+      serviceCredentialToolsEnabled: true,
+    });
+
+    expect(adminPrompt).toContain(
+      'Treat a verification tool error, network failure, or otherwise indeterminate result as unresolved',
+    );
+    expect(adminPrompt).toContain('do not switch to the key route');
+    expect(adminPrompt).toContain(
+      'Roomote registers this deployment with the provider before returning an authorization link',
+    );
+    expect(adminPrompt).toContain("relay the provider's `reason` when present");
+    expect(adminPrompt).not.toContain(
+      'a failed verification only means there is no MCP and the key route applies',
+    );
+    expect(nonAdminPrompt).not.toContain('Remote MCP: call `add_remote_mcp`');
+    expect(nonAdminPrompt).toContain(
+      'Remote MCP setup is not available from this Session',
+    );
+    expect(nonAdminPrompt).toContain(
+      'use the key route and mention the MCP in one sentence',
+    );
+    for (const prompt of [adminPrompt, nonAdminPrompt]) {
+      expect(prompt).not.toContain('Only deployment administrators');
+      expect(prompt).not.toContain('deployment administrator can connect');
+      expect(prompt).not.toContain('deployment administrator must authorize');
+    }
   });
 });

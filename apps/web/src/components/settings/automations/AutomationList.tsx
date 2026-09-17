@@ -73,35 +73,11 @@ export function AutomationListToolbar({
   );
 }
 
-export function AutomationListHeader() {
-  return (
-    <div
-      role="row"
-      className="hidden grid-cols-[2rem_1rem_minmax(0,4fr)_minmax(0,6fr)_7rem] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
-    >
-      <span role="columnheader" className="sr-only">
-        Enabled
-      </span>
-      <span role="columnheader" className="sr-only">
-        Icon
-      </span>
-      <span role="columnheader" className="col-start-3">
-        Name
-      </span>
-      <span role="columnheader" className="col-start-4">
-        Description
-      </span>
-      <span role="columnheader" className="sr-only">
-        Actions
-      </span>
-    </div>
-  );
-}
-
 export function AutomationListRow({
   icon: Icon,
   name,
   summary,
+  metadata,
   description,
   enabledControl,
   actions,
@@ -109,6 +85,7 @@ export function AutomationListRow({
   icon: ComponentType<{ className?: string }>;
   name: string;
   summary: ReactNode;
+  metadata?: ReactNode;
   description: ReactNode;
   enabledControl: ReactNode;
   actions?: ReactNode;
@@ -116,7 +93,7 @@ export function AutomationListRow({
   return (
     <div
       role="row"
-      className="grid grid-cols-[2rem_1rem_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[2rem_1rem_minmax(0,4fr)_minmax(0,6fr)_7rem] md:items-center md:gap-4 md:px-4 md:py-3"
+      className="grid grid-cols-[2rem_1rem_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[2rem_1rem_minmax(12rem,5fr)_minmax(0,4fr)_7rem] md:items-center md:gap-4 md:px-4 md:py-3"
     >
       <div
         role="cell"
@@ -137,8 +114,13 @@ export function AutomationListRow({
       </div>
       <div
         role="cell"
-        className="col-span-2 col-start-3 row-start-2 min-w-0 whitespace-normal text-sm text-muted-foreground/80 md:col-span-1 md:col-start-4 md:row-start-1"
+        className="col-span-2 col-start-3 row-start-2 min-w-0 space-y-1 whitespace-normal text-sm text-muted-foreground/80 md:col-span-1 md:col-start-4 md:row-start-1"
       >
+        {metadata ? (
+          <div className="flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
+            {metadata}
+          </div>
+        ) : null}
         {description}
       </div>
       <div

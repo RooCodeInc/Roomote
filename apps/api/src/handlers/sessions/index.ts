@@ -21,6 +21,7 @@ import {
   sessions,
   sessionTasks,
   sql,
+  taskRuns,
   type SQL,
   tasks,
 } from '@roomote/db/server';
@@ -86,7 +87,7 @@ async function findAccessibleSession(sessionId: string, auth: McpAuth) {
       and(
         eq(fastAgentConversations.id, sessionId),
         customAutomationHistoryAccess(auth, 'fast'),
-        customAutomationHistoryAccess(auth, 'session'),
+        or(isNull(sessions.id), customAutomationHistoryAccess(auth, 'session')),
       ),
     )
     .limit(1);
@@ -248,8 +249,28 @@ function serializeSession(
 }
 
 async function startSession(c: SessionContext): Promise<Response> {
-  const userId = await resolveMcpTaskOrSessionUserId(c.get('mcpAuth'));
+  const mcpAuth = c.get('mcpAuth');
+  let userId = await resolveMcpTaskOrSessionUserId(mcpAuth);
   if (!userId) return c.json({ error: 'User context required' }, 403);
+  let privacy: 'shared' | 'private' = 'shared';
+  if (mcpAuth.authContext.tokenType === 'run') {
+    const [source] = await db
+      .select({
+        privacy: tasks.privacy,
+        privateOwnerUserId: tasks.privateOwnerUserId,
+      })
+      .from(taskRuns)
+      .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+      .where(eq(taskRuns.id, mcpAuth.authContext.runId))
+      .limit(1);
+    if (source?.privacy === 'private') {
+      if (!source.privateOwnerUserId) {
+        return c.json({ error: 'Private task owner is unavailable' }, 409);
+      }
+      privacy = 'private';
+      userId = source.privateOwnerUserId;
+    }
+  }
 
   let body: { message?: string };
   try {
@@ -269,6 +290,8 @@ async function startSession(c: SessionContext): Promise<Response> {
     const fastSession = await getOrCreateFastAgentSession({
       userId,
       conversation,
+      privacy,
+      userInitiated: { surface: 'api', trigger: 'manual' },
     });
     const session = await getSessionForFastConversation(db, fastSession.id);
     const queued = await queueFastAgentSurfaceReply({

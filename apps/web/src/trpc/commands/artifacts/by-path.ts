@@ -5,6 +5,7 @@ import {
   getArtifactBySessionPath,
   generateDownloadUrl,
   generateOwnedDownloadUrl,
+  getOwnedArtifactObject,
   signArtifactId,
   currentEpochSeconds,
 } from '@/lib/server';
@@ -89,13 +90,13 @@ export async function getArtifactByPathCommand(
   },
 ): Promise<ArtifactWithContent | null> {
   const { taskId, sessionId, path, version, preview = false } = input;
-  if (
-    sessionId &&
-    !(await findReadableSession(
-      { userId: auth.userId, isAdmin: auth.isAdmin },
-      sessionId,
-    ))
-  ) {
+  const readableSession = sessionId
+    ? await findReadableSession(
+        { userId: auth.userId, isAdmin: auth.isAdmin },
+        sessionId,
+      )
+    : null;
+  if (sessionId && !readableSession) {
     return null;
   }
 
@@ -119,19 +120,31 @@ export async function getArtifactByPathCommand(
     return null;
   }
 
-  const downloadUrl = artifact.taskId
-    ? await generateDownloadUrl(
-        artifact.taskId,
-        artifact.id,
-        artifact.path,
-        artifact.version,
-      )
-    : await generateOwnedDownloadUrl(
-        { sessionId: artifact.sessionId! },
-        artifact.id,
-        artifact.path,
-        artifact.version,
-      );
+  const isPrivate = artifact.taskId
+    ? 'privacy' in artifact && artifact.privacy === 'private'
+    : readableSession?.privacy === 'private';
+  const rawTs = currentEpochSeconds();
+  const rawSig = signArtifactId(artifact.id, rawTs);
+  const signedRawUrl = `/api/artifacts/${artifact.id}/raw?sig=${rawSig}&ts=${rawTs}`;
+
+  const owner = artifact.taskId
+    ? ({ taskId: artifact.taskId } as const)
+    : ({ sessionId: artifact.sessionId! } as const);
+  const downloadUrl = isPrivate
+    ? `${signedRawUrl}&download=1`
+    : artifact.taskId
+      ? await generateDownloadUrl(
+          artifact.taskId,
+          artifact.id,
+          artifact.path,
+          artifact.version,
+        )
+      : await generateOwnedDownloadUrl(
+          owner,
+          artifact.id,
+          artifact.path,
+          artifact.version,
+        );
 
   let content: string | undefined;
 
@@ -168,10 +181,27 @@ export async function getArtifactByPathCommand(
       const maxBytes = preview
         ? MAX_THUMBNAIL_PREVIEW_BYTES
         : MAX_TEXT_PREVIEW_BYTES;
-      const response = await fetch(
-        downloadUrl,
-        preview ? { headers: { Range: `bytes=0-${maxBytes - 1}` } } : undefined,
-      );
+      const response = isPrivate
+        ? await getOwnedArtifactObject(
+            owner,
+            artifact.id,
+            artifact.path,
+            artifact.version,
+          ).then((object) => {
+            if (!object.Body) throw new Error('Artifact content is empty');
+            return new Response(object.Body.transformToWebStream(), {
+              headers:
+                object.ContentLength === undefined
+                  ? undefined
+                  : { 'Content-Length': String(object.ContentLength) },
+            });
+          })
+        : await fetch(
+            downloadUrl,
+            preview
+              ? { headers: { Range: `bytes=0-${maxBytes - 1}` } }
+              : undefined,
+          );
 
       if (response.ok) {
         content = await readTextWithByteLimit(response, maxBytes, preview);
@@ -188,9 +218,7 @@ export async function getArtifactByPathCommand(
   const isImage = artifact.contentType.startsWith('image/');
   let rawUrl: string | undefined;
   if (isImage) {
-    const ts = currentEpochSeconds();
-    const sig = signArtifactId(artifact.id, ts);
-    rawUrl = `/api/artifacts/${artifact.id}/raw?sig=${sig}&ts=${ts}`;
+    rawUrl = signedRawUrl;
   }
 
   return {

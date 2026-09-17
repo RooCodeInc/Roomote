@@ -135,6 +135,52 @@ describe('Session artifact helper authorization', () => {
       getArtifactBySessionPath({ sessionId, path, auth }),
     ).resolves.toMatchObject({ path, version: 2, uploaded: true });
   });
+
+  it('keeps private Session artifact metadata owner-only, including for admins', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const privateSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+    });
+    await db.insert(taskArtifacts).values({
+      sessionId: privateSession.id,
+      path,
+      version: 1,
+      uploaded: true,
+      contentType: 'application/pdf',
+      size: 100,
+    });
+
+    await expect(
+      getArtifactBySessionPath({
+        sessionId: privateSession.id,
+        path,
+        auth: { userId: owner.id, isAdmin: false },
+      }),
+    ).resolves.toMatchObject({ version: 1 });
+    for (const auth of [
+      { userId: other.id, isAdmin: false },
+      { userId: other.id, isAdmin: true },
+    ]) {
+      await expect(
+        getArtifactBySessionPath({
+          sessionId: privateSession.id,
+          path,
+          auth,
+        }),
+      ).resolves.toBeNull();
+      await expect(
+        getArtifactVersionsBySessionPath({
+          sessionId: privateSession.id,
+          path,
+          auth,
+        }),
+      ).resolves.toEqual([]);
+    }
+  });
 });
 
 describe('validateArtifactPath', () => {

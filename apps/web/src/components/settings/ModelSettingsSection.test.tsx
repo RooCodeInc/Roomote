@@ -93,6 +93,29 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
+// The judgment model row renders inside Model mapping with its own query and
+// mutation; JudgmentModelRow.test.tsx covers its behavior.
+vi.mock('@/hooks/task-models/useJudgmentModelSettings', () => ({
+  useJudgmentModelSettings: () => ({
+    data: {
+      typeSafe: { connected: false, source: null },
+      vercelGatewayConnected: false,
+      storedSelection: null,
+      envSelection: null,
+      effectiveSelection: 'off',
+      effectiveSelectionUsable: true,
+    },
+    isPending: false,
+  }),
+}));
+
+vi.mock('@/hooks/task-models/useSetJudgmentModelSelection', () => ({
+  useSetJudgmentModelSelection: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+}));
+
 vi.mock('@/components/settings', () => ({
   Section: ({
     children,
@@ -147,6 +170,11 @@ function buildSettingsData(
     codingReasoningEffort?: ReasoningEffort | null;
     orchestrationReasoningEffort?: ReasoningEffort | null;
     helperReasoningEffort?: ReasoningEffort | null;
+    codingModelRoutingRules?: Array<{
+      modelId: string;
+      reasoningEffort: ReasoningEffort | null;
+      condition: string;
+    }>;
   } = {},
 ) {
   return {
@@ -270,6 +298,7 @@ function buildSettingsData(
         },
       },
     ],
+    codingModelRoutingRules: overrides.codingModelRoutingRules ?? [],
   };
 }
 
@@ -429,8 +458,9 @@ describe('ModelSettingsSection', () => {
         '[data-slot="select-trigger"]',
       ),
     );
-    // 7 model selects + 7 reasoning selects + the add-model provider select.
-    expect(triggers).toHaveLength(15);
+    // 7 model selects + 7 reasoning selects + the judgment model select + the
+    // add-model provider select.
+    expect(triggers).toHaveLength(16);
     expect(triggers[0]).toBeDisabled();
     expect(triggers[2]).toBeDisabled();
     expect(triggers[4]).toBeDisabled();
@@ -446,9 +476,10 @@ describe('ModelSettingsSection', () => {
     expect(triggers[9]).not.toBeDisabled();
     expect(triggers[11]).not.toBeDisabled();
     expect(triggers[13]).not.toBeDisabled();
-    // The add-model provider select stays enabled regardless of env-managed
-    // runtime models.
+    // The judgment model and add-model provider selects stay enabled
+    // regardless of env-managed runtime models.
     expect(triggers[14]).not.toBeDisabled();
+    expect(triggers[15]).not.toBeDisabled();
 
     expect(screen.queryByText('Make default')).toBeNull();
     expect(screen.queryByText('Env-managed')).toBeNull();
@@ -475,7 +506,7 @@ describe('ModelSettingsSection', () => {
       ),
     );
 
-    expect(triggers).toHaveLength(15);
+    expect(triggers).toHaveLength(16);
     expect(triggers[0]).not.toBeDisabled();
     expect(triggers[1]).toBeDisabled();
     expect(triggers[12]).not.toBeDisabled();
@@ -553,7 +584,7 @@ describe('ModelSettingsSection', () => {
     const { container } = renderModelSettingsSection();
 
     const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    expect(triggers).toHaveLength(15);
+    expect(triggers).toHaveLength(16);
     for (const trigger of Array.from(triggers)) {
       expect(trigger).not.toBeDisabled();
     }
@@ -595,6 +626,104 @@ describe('ModelSettingsSection', () => {
     expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(4);
   });
 
+  it('adds, saves, edits, and removes coding-model routing rules', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    const condition = screen.getByLabelText('Routing rule 1 condition');
+    fireEvent.change(condition, {
+      target: { value: 'Routine tasks where speed matters' },
+    });
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        codingModelRoutingRules: [
+          {
+            modelId: 'openrouter/openai/gpt-5.4',
+            reasoningEffort: 'medium',
+            condition: 'Routine tasks where speed matters',
+          },
+        ],
+      }),
+    );
+
+    updateMutateAsyncMock.mockClear();
+    fireEvent.change(condition, {
+      target: { value: 'Routine implementation tasks' },
+    });
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        codingModelRoutingRules: [
+          expect.objectContaining({
+            condition: 'Routine implementation tasks',
+          }),
+        ],
+      }),
+    );
+
+    updateMutateAsyncMock.mockClear();
+    fireEvent.click(screen.getByLabelText('Remove routing rule 1'));
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ codingModelRoutingRules: [] }),
+    );
+  });
+
+  it('does not show a success toast for each routing-rule condition edit', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    const condition = screen.getByLabelText('Routing rule 1 condition');
+
+    for (const value of ['a', 'ab', 'abc']) {
+      fireEvent.change(condition, { target: { value } });
+      await waitFor(() => {
+        expect(updateMutateAsyncMock).toHaveBeenCalledTimes(value.length);
+      });
+    }
+
+    expect(toast.success).not.toHaveBeenCalledWith('Updated model settings.');
+    expect(updateMutateAsyncMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps success feedback when another setting joins a routing-rule save', async () => {
+    settingsData.current = buildSettingsData();
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Add a model routing rule',
+      }),
+    );
+    fireEvent.change(screen.getByLabelText('Routing rule 1 condition'), {
+      target: { value: 'a' },
+    });
+    fireEvent.click(screen.getByRole('switch', { name: 'Toggle GLM 5.2' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(toast.success).toHaveBeenCalledWith('Updated model settings.');
+  });
+
   it('hides the reasoning selector for models that do not support reasoning', () => {
     const data = buildSettingsData();
     // The coding default model does not support reasoning; helper, vision,
@@ -605,8 +734,9 @@ describe('ModelSettingsSection', () => {
     const { container } = renderModelSettingsSection();
 
     const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    // 7 model selects + the add-model provider select; no reasoning selectors.
-    expect(triggers).toHaveLength(8);
+    // 7 model selects + the judgment model select + the add-model provider
+    // select; no reasoning selectors.
+    expect(triggers).toHaveLength(9);
   });
 
   it('clears orchestration reasoning when switching to a non-reasoning model', async () => {

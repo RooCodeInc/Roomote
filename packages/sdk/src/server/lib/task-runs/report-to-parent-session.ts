@@ -44,6 +44,7 @@ export async function reportToParentSession(input: {
   const messageId = createHash('sha256')
     .update(`${parent.sessionId}:${run.id}:${input.deliverySignature}`)
     .digest('hex');
+  const admittedAtMs = Date.now();
 
   await enqueueFastAgentParentEvent({
     parent,
@@ -52,6 +53,7 @@ export async function reportToParentSession(input: {
       taskId: run.taskId,
       runId: run.id,
       messageId,
+      admittedAtMs,
       purpose: input.purpose,
       message: input.message,
       ...(input.imageArtifactIds?.length

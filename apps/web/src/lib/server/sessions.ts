@@ -21,6 +21,7 @@ import {
   llmUsageEvents,
   lt,
   or,
+  privateSessionAccess,
   repositories,
   sessionParticipants,
   sessionPins,
@@ -40,6 +41,7 @@ import {
   type BackgroundAutomationKey,
 } from '@roomote/types';
 import { syncFastAgentSlackTitleBestEffort } from '@roomote/sdk/server';
+import { getRetryableFailedStartRunIds } from '@roomote/cloud-agents/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { parseCreatorFilterValue } from '@/lib/task-creator-filter';
@@ -86,7 +88,7 @@ function sessionScope(auth: SessionAuth) {
 // The /sessions listing mirrors the /tasks listing instead: admins see every
 // Session, other users see the Sessions they own, participate in, or spoke in.
 function sessionListScope(auth: SessionAuth) {
-  if (auth.isAdmin) return undefined;
+  if (auth.isAdmin) return sessionScope(auth);
   return and(
     sessionScope(auth),
     or(
@@ -530,6 +532,8 @@ const baseSelection = {
   ownerKind: sessions.ownerKind,
   ownerUserId: sessions.ownerUserId,
   ownerAutomation: sessions.ownerAutomation,
+  privacy: sessions.privacy,
+  privateOwnerUserId: sessions.privateOwnerUserId,
   ownerName: users.name,
   ownerEmail: users.email,
   ownerImageUrl: users.imageUrl,
@@ -846,7 +850,7 @@ export async function findAccessibleSession(
   return session ?? null;
 }
 
-/** Direct-link reads for authenticated deployment members, not action authorization. */
+/** Direct-link reads remain collaborative for shared Sessions. */
 export async function findReadableSession(
   auth: SessionAuth,
   sessionId: string,
@@ -857,9 +861,12 @@ export async function findReadableSession(
     .from(sessions)
     .leftJoin(users, eq(users.id, sessions.ownerUserId))
     .where(
-      or(
-        eq(sessions.id, sessionId),
-        eq(sessions.fastConversationId, sessionId),
+      and(
+        or(
+          eq(sessions.id, sessionId),
+          eq(sessions.fastConversationId, sessionId),
+        ),
+        privateSessionAccess(auth),
       ),
     )
     .limit(1);
@@ -918,6 +925,8 @@ async function getSessionTasks(sessionId: string) {
           id: taskRuns.id,
           status: taskRuns.status,
           taskPhase: taskRuns.taskPhase,
+          payloadKind: taskRuns.payloadKind,
+          payload: taskRuns.payload,
           error: taskRuns.error,
           result: taskRuns.result,
           machineDomain: taskRuns.machineDomain,
@@ -976,6 +985,8 @@ async function getSessionTasks(sessionId: string) {
     ]);
 
   const latestRunByTask = new Map(latestRuns.map((run) => [run.taskId, run]));
+  const retryableFailedStartRunIds =
+    await getRetryableFailedStartRunIds(latestRuns);
   const usageByTask = new Map(
     usageRows.map((row) => [row.taskId, Number(row.costMicroUsd)]),
   );
@@ -987,6 +998,7 @@ async function getSessionTasks(sessionId: string) {
           id: latestRunRow.id,
           status: latestRunRow.status,
           taskPhase: latestRunRow.taskPhase,
+          canRetryFailedStart: retryableFailedStartRunIds.has(latestRunRow.id),
           error: latestRunRow.error,
           result: latestRunRow.result,
         }
@@ -1219,7 +1231,7 @@ export async function getSessionForTask(auth: SessionAuth, taskId: string) {
     .select({ sessionId: sessions.id, title: sessions.title })
     .from(sessionTasks)
     .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
-    .where(eq(sessionTasks.taskId, taskId))
+    .where(and(eq(sessionTasks.taskId, taskId), privateSessionAccess(auth)))
     .limit(1);
   return row ?? null;
 }
@@ -1243,6 +1255,7 @@ export async function updateSessionMetadata(
       .where(
         and(
           eq(sessions.id, sessionId),
+          privateSessionAccess(auth),
           auth.isAdmin ? undefined : eq(sessions.ownerUserId, auth.userId),
         ),
       )

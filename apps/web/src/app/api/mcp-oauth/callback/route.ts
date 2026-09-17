@@ -32,6 +32,8 @@ import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { logger } from '@/lib/server/logger';
 import { captureIntegrationLifecycleEvent } from '@/lib/server/integration-telemetry';
+import { buildRemoteMcpConnectedContinuation } from '@/lib/server/integration-saved-continuation';
+import { resumeFastSessionFromReplay } from '@/lib/server/mcp-oauth-replay-continuation';
 import {
   hydrateLinearMcpConnectionAfterOauth,
   LinearReplayIdentityMismatchError,
@@ -438,6 +440,17 @@ export async function GET(request: NextRequest) {
         integration.id,
         userId,
       );
+    }
+
+    if (customTarget && oauthState.replayToken) {
+      await resumeFastSessionFromReplay({
+        replayToken: oauthState.replayToken,
+        authResult,
+        connectionId: resolvedConnectionId,
+        mcpId: connection.mcpId,
+        text: buildRemoteMcpConnectedContinuation(customTarget.name),
+        event: 'custom_mcp_oauth_continuation_failed',
+      });
     }
 
     return redirectToResult({ status: 'connected' });

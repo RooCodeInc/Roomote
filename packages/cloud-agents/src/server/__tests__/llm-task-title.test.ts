@@ -1,5 +1,11 @@
-const { mockGenerateTrackedNonTaskObject } = vi.hoisted(() => ({
-  mockGenerateTrackedNonTaskObject: vi.fn(),
+const { mockGenerateTrackedNonTaskObject, mockEvaluateTypeSafeJudgments } =
+  vi.hoisted(() => ({
+    mockGenerateTrackedNonTaskObject: vi.fn(),
+    mockEvaluateTypeSafeJudgments: vi.fn(),
+  }));
+
+vi.mock('../typesafe-judgment', () => ({
+  evaluateTypeSafeJudgments: mockEvaluateTypeSafeJudgments,
 }));
 
 vi.mock('../non-task-provider-usage', async (importOriginal) => {
@@ -24,6 +30,7 @@ import {
 describe('llm-task-title', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEvaluateTypeSafeJudgments.mockResolvedValue(null);
   });
 
   it('enforces a maximum of 12 words', () => {
@@ -75,6 +82,109 @@ describe('llm-task-title', () => {
       }),
     ).resolves.toEqual({ title: 'Fix deploy failures', iconEmoji: '🦠' });
   });
+
+  it('uses a confident judgment-model icon from the supported inventory', async () => {
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: { title: 'Document deployment setup', iconEmoji: '💻' },
+    });
+    mockEvaluateTypeSafeJudgments.mockResolvedValue({
+      icon: {
+        type: 'choice',
+        choice: 'icon37',
+        probabilities: { icon37: 0.96 },
+        confidence: 0.96,
+      },
+    });
+
+    await expect(
+      generateLlmTaskTitleWithIcon({
+        messages: [
+          { role: 'user', text: 'Update the deployment documentation.' },
+        ],
+      }),
+    ).resolves.toEqual({
+      title: 'Document deployment setup',
+      iconEmoji: '📚',
+    });
+    expect(mockEvaluateTypeSafeJudgments).toHaveBeenCalledWith({
+      state: {
+        generatedTitle: 'Document deployment setup',
+        conversationTranscript:
+          'Conversation transcript (speaker-labeled):\n[User] Update the deployment documentation.\n',
+      },
+      questions: {
+        icon: expect.objectContaining({
+          type: 'choice',
+          criteria: expect.objectContaining({
+            icon37: '📚 (documentation or books) is the best fit.',
+          }),
+        }),
+      },
+    });
+    const question =
+      mockEvaluateTypeSafeJudgments.mock.calls[0]![0].questions.icon;
+    expect(Object.keys(question.criteria)).toHaveLength(112);
+  });
+
+  it.each([
+    ['unconfigured', null],
+    [
+      'uncertain',
+      {
+        icon: {
+          type: 'choice',
+          choice: 'icon37',
+          probabilities: { icon37: 0.45 },
+          confidence: 0.45,
+        },
+      },
+    ],
+  ])(
+    'keeps the title-model icon when judgment is %s',
+    async (_scenario, judgment) => {
+      mockGenerateTrackedNonTaskObject.mockResolvedValue({
+        object: { title: 'Fix deploy failures', iconEmoji: '🦠' },
+      });
+      mockEvaluateTypeSafeJudgments.mockResolvedValue(judgment);
+
+      await expect(
+        generateLlmTaskTitleWithIcon({
+          messages: [{ role: 'user', text: 'Fix the failing deployment.' }],
+        }),
+      ).resolves.toEqual({ title: 'Fix deploy failures', iconEmoji: '🦠' });
+    },
+  );
+
+  it.each([
+    ['unavailable', new Error('Judgment model request failed with HTTP 503')],
+    [
+      'invalid',
+      new Error('Judgment model response is missing a valid answer for "icon"'),
+    ],
+  ])(
+    'keeps the title-model icon when judgment is %s',
+    async (_scenario, error) => {
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+      mockGenerateTrackedNonTaskObject.mockResolvedValue({
+        object: { title: 'Fix deploy failures', iconEmoji: '🦠' },
+      });
+      mockEvaluateTypeSafeJudgments.mockRejectedValue(error);
+
+      await expect(
+        generateLlmTaskTitleWithIcon({
+          messages: [{ role: 'user', text: 'Fix the failing deployment.' }],
+        }),
+      ).resolves.toEqual({ title: 'Fix deploy failures', iconEmoji: '🦠' });
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Judgment model failed, using title-model selection',
+        ),
+      );
+      warn.mockRestore();
+    },
+  );
 
   it.each([undefined, 'unexpected'])(
     'omits model icon %s instead of substituting a generic icon',

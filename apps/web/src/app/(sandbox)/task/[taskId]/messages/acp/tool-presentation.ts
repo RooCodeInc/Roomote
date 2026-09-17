@@ -340,11 +340,50 @@ function resolveReceiptLanguage(
       object: label ? `a key for ${label}` : 'an integration key',
     };
   }
+  if (toolName === 'add_remote_mcp') {
+    const requestedName = stringArgument(args, 'name') ?? 'a remote MCP';
+    const resultName = stringArgument(result, 'name') ?? requestedName;
+    const remoteMcp =
+      resultName === 'a remote MCP' ? resultName : `remote MCP ${resultName}`;
+    if (phase === 'running') return { verb: 'Adding', object: remoteMcp };
+    if (phase === 'failed') {
+      return { verb: 'Failed to Add', object: remoteMcp };
+    }
+
+    const status = stringArgument(result, 'status');
+    if (status === 'connected') {
+      const toolCount = Array.isArray(result?.tools)
+        ? ` (${result.tools.length} tools)`
+        : '';
+      return {
+        verb: result?.reused === true ? 'Found' : 'Added',
+        object: `${remoteMcp}${toolCount}`,
+      };
+    }
+    if (status === 'oauth' || status === 'authorization_required') {
+      return { verb: 'Prepared', object: `${remoteMcp} for authorization` };
+    }
+    if (status === 'disabled') {
+      return { verb: 'Found', object: `${remoteMcp} (disabled)` };
+    }
+    if (
+      status === 'needs_static_headers' ||
+      status === 'client_registration_required'
+    ) {
+      return {
+        verb: 'Checked',
+        object: `${remoteMcp}, needs setup in Settings`,
+      };
+    }
+    return { verb: 'Checked', object: remoteMcp };
+  }
   if (toolName === 'list_integration_keys')
     return {
       verb: byPhase('Checking', 'Checked', 'Failed to Check'),
       object: 'your integrations',
     };
+  // Historical Fast transcripts can still contain calls from before the
+  // shared HTTP broker became the only execution path.
   if (toolName === 'request_with_integration_key') {
     const method =
       typeof args?.method === 'string' ? args.method.toUpperCase() : '';

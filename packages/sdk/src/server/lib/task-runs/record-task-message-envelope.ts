@@ -10,11 +10,7 @@ import {
   taskPlatformIssueReports,
   tasks,
   taskRuns,
-  getBackgroundAgentSettings,
-  findActiveSlackInstallationForChannel,
-  upsertBackgroundAutomationSlackThread,
   slackInstallations,
-  users,
   normalizeTaskActivityTimestamp,
   eq,
   and,
@@ -30,18 +26,6 @@ import {
   setLatestSlackBotReply,
   trackSlackBotReply,
 } from '@roomote/slack';
-import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../discord-communication';
-import { listConnectedCommunicationProviders } from '../../automations/destination';
-import {
-  hasUserDirectMessageIdentity,
-  sendUserDirectMessage,
-} from '../user-direct-message';
-import {
-  appendManagerSlackFooter,
-  buildAutomationSettingsMessage,
-  degradeSlackMrkdwnToMarkdown,
-  PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
-} from '../manager-slack';
 import {
   type AcpPersistedEnvelope,
   type ShowWidgetFallbackDelivery,
@@ -57,7 +41,6 @@ import {
   isVisibleInTranscript,
   normalizeTranscriptUserText,
   platformIssueReportSchema,
-  type CommunicationProvider,
   withTranscriptVisibility,
 } from '@roomote/types';
 
@@ -70,6 +53,7 @@ import { withSandboxServerRpcClient } from '../auth/sandbox-server-rpc';
 import { extractShowWidgetFallbackDelivery } from './show-widget-fallback-delivery';
 import { maybeNotifySourceThreadOfTerminalProviderError } from './notify-source-thread-provider-error';
 import { syncTaskCommunicationThreadTitleBestEffort } from '../task-thread-title-sync';
+import { notifyPlatformIssueReport } from '../platform-issue-reporting';
 
 interface RecordTaskMessageEnvelopeInput {
   runId: number;
@@ -221,250 +205,6 @@ function getPlatformIssueReportFromToolPayload(
   return parsedReport.data;
 }
 
-function buildPlatformIssueTaskUrl(
-  taskId: string,
-  utmSource: CommunicationProvider,
-): string {
-  const url = new URL(`/task/${taskId}`, process.env.R_APP_URL);
-
-  url.searchParams.set('utm_source', utmSource);
-  url.searchParams.set('utm_medium', 'integration');
-  url.searchParams.set('utm_campaign', 'platform_issue_alert');
-
-  return url.toString();
-}
-
-function buildPlatformIssueAlertText(params: {
-  taskId: string;
-  report: { title: string; summary: string };
-  utmSource: CommunicationProvider;
-}): string {
-  const taskUrl = buildPlatformIssueTaskUrl(params.taskId, params.utmSource);
-
-  return appendManagerSlackFooter(
-    `Platform issue reported: *${params.report.title}*\n` +
-      `> ${params.report.summary}\n<${taskUrl}|View task>`,
-  );
-}
-
-function buildPlatformIssueSlackAlertMessage(params: {
-  taskId: string;
-  report: { title: string; summary: string };
-}) {
-  const taskUrl = buildPlatformIssueTaskUrl(params.taskId, 'slack');
-
-  return buildAutomationSettingsMessage(
-    `Platform issue reported: *${params.report.title}*\n` +
-      `> ${params.report.summary}`,
-    PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
-    { taskUrl, slackIcon: 'triangle-alert' },
-  );
-}
-
-// Marks the report row as delivered. slackPostedAt doubles as the
-// posted-anywhere marker so Discord deliveries also suppress re-posting.
-async function markPlatformIssueReportPosted(reportRowId: string) {
-  await db
-    .update(taskPlatformIssueReports)
-    .set({ slackPostedAt: new Date() })
-    .where(
-      and(
-        eq(taskPlatformIssueReports.id, reportRowId),
-        isNull(taskPlatformIssueReports.slackPostedAt),
-      ),
-    );
-}
-
-async function notifyDeploymentAdminsOfPlatformIssue(params: {
-  taskId: string;
-  report: { title: string; summary: string };
-}): Promise<{ complete: boolean; delivered: boolean }> {
-  const [admins, providers] = await Promise.all([
-    db.query.users.findMany({
-      where: and(eq(users.role, 'admin'), isNull(users.deletedAt)),
-      columns: { id: true },
-      orderBy: asc(users.createdAt),
-    }),
-    listConnectedCommunicationProviders(),
-  ]);
-  let delivered = false;
-  let eligibleAdmins = 0;
-  let deliveredAdmins = 0;
-
-  for (const admin of admins) {
-    const linkedProviders: CommunicationProvider[] = [];
-    for (const provider of providers) {
-      if (await hasUserDirectMessageIdentity(provider, admin.id)) {
-        linkedProviders.push(provider);
-      }
-    }
-    if (linkedProviders.length === 0) {
-      continue;
-    }
-
-    eligibleAdmins += 1;
-    for (const provider of linkedProviders) {
-      const alertText = buildPlatformIssueAlertText({
-        taskId: params.taskId,
-        report: params.report,
-        utmSource: provider,
-      });
-      const slackMessage =
-        provider === 'slack'
-          ? buildPlatformIssueSlackAlertMessage({
-              taskId: params.taskId,
-              report: params.report,
-            })
-          : null;
-      const sent = await sendUserDirectMessage({
-        provider,
-        userId: admin.id,
-        text: slackMessage?.text ?? degradeSlackMrkdwnToMarkdown(alertText),
-        slackBlocks: slackMessage?.blocks,
-        logContext: 'recordTaskMessageEnvelope',
-      });
-
-      if (sent) {
-        delivered = true;
-        deliveredAdmins += 1;
-        break;
-      }
-    }
-  }
-
-  return {
-    complete: eligibleAdmins > 0 && deliveredAdmins === eligibleAdmins,
-    delivered,
-  };
-}
-
-async function maybeNotifyPlatformIssue(params: {
-  reportRowId: string;
-  taskId: string;
-  report: { title: string; summary: string };
-  slackPostedAt: Date | null;
-}): Promise<void> {
-  if (params.slackPostedAt) {
-    return;
-  }
-
-  const settings = await getBackgroundAgentSettings();
-
-  if (!settings.platformIssueAlertsEnabled) {
-    return;
-  }
-
-  // The automation's own destination wins, then the shared manager channel.
-  // Preserve the existing Slack preference when both manager providers exist.
-  const discordChannelId =
-    settings.platformIssueDiscordChannelId ??
-    (!settings.platformIssueSlackChannelId && !settings.managerSlackChannelId
-      ? settings.managerDiscordChannelId
-      : null);
-
-  if (discordChannelId) {
-    const discord =
-      await createDiscordCommunicationProviderFromRuntimeCredentials();
-
-    if (!discord) {
-      console.warn(
-        `[recordTaskMessageEnvelope] No Discord credentials, skipping platform issue Discord alert for task ${params.taskId}`,
-      );
-      return;
-    }
-
-    await discord.postMessage({
-      channelId: discordChannelId,
-      text: degradeSlackMrkdwnToMarkdown(
-        buildPlatformIssueAlertText({
-          taskId: params.taskId,
-          report: params.report,
-          utmSource: 'discord',
-        }),
-      ),
-      textFormat: 'markdown',
-    });
-
-    await markPlatformIssueReportPosted(params.reportRowId);
-    return;
-  }
-
-  // Two-level fallback: the platform_issue_alerts automation target wins,
-  // otherwise the deployment-wide manager channel.
-  const channelId =
-    settings.platformIssueSlackChannelId ?? settings.managerSlackChannelId;
-
-  if (!channelId) {
-    const delivery = await notifyDeploymentAdminsOfPlatformIssue({
-      taskId: params.taskId,
-      report: params.report,
-    });
-    if (delivery.complete) {
-      await markPlatformIssueReportPosted(params.reportRowId);
-    } else {
-      console.warn(
-        delivery.delivered
-          ? `[recordTaskMessageEnvelope] Some linked admins did not receive the platform issue alert for task ${params.taskId}; leaving it pending for retry`
-          : `[recordTaskMessageEnvelope] No configured channel or linked admin DM destination for platform issue alert on task ${params.taskId}`,
-      );
-    }
-    return;
-  }
-
-  const slackInstallation =
-    await findActiveSlackInstallationForChannel(channelId);
-  if (!slackInstallation?.botAccessToken) {
-    console.warn(
-      `[recordTaskMessageEnvelope] No unambiguous active Slack installation for channel ${channelId}, skipping platform issue Slack alert for task ${params.taskId}`,
-    );
-    return;
-  }
-
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
-  const message = buildPlatformIssueSlackAlertMessage({
-    taskId: params.taskId,
-    report: params.report,
-  });
-
-  const messageTs = await slack.postMessage({
-    channel: channelId,
-    ...message,
-    unfurl_links: false,
-    unfurl_media: false,
-  });
-
-  if (!messageTs) {
-    console.warn(
-      `[recordTaskMessageEnvelope] Failed to post platform issue Slack alert for task ${params.taskId}`,
-    );
-    return;
-  }
-
-  try {
-    await upsertBackgroundAutomationSlackThread(db, {
-      surface: 'slack',
-      automationKey: 'platform_issue_alerts',
-      slackTeamId: slackInstallation.teamId,
-      slackChannelId: channelId,
-      threadTs: messageTs,
-      summaryText: message.text,
-      postedAt: new Date(),
-      metadata: {
-        sourceTaskId: params.taskId,
-        slackTeamId: slackInstallation.teamId,
-      },
-    });
-  } catch (error) {
-    console.warn(
-      `[recordTaskMessageEnvelope] Failed to track platform issue Slack alert thread for task ${params.taskId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-
-  await markPlatformIssueReportPosted(params.reportRowId);
-}
-
 async function maybePersistPlatformIssueReport(params: {
   input: RecordTaskMessageEnvelopeInput;
   taskMessageId: string;
@@ -512,13 +252,13 @@ async function maybePersistPlatformIssueReport(params: {
       },
     }));
 
-  if (!reportRow) {
+  if (!reportRow?.taskId) {
     return;
   }
 
-  await maybeNotifyPlatformIssue({
+  await notifyPlatformIssueReport({
     reportRowId: reportRow.id,
-    taskId: reportRow.taskId,
+    source: { taskId: reportRow.taskId },
     report: reportRow.report,
     slackPostedAt: reportRow.slackPostedAt,
   });

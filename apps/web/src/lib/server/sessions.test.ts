@@ -399,6 +399,35 @@ describe('unified Session queries', () => {
     }
   });
 
+  it('keeps private Session reads owner-only, including for admins', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      title: 'Owner-only Session',
+    });
+
+    await expect(
+      findReadableSession({ userId: owner.id, isAdmin: false }, session.id),
+    ).resolves.toMatchObject({ id: session.id, privacy: 'private' });
+
+    for (const auth of [
+      { userId: other.id, isAdmin: false },
+      { userId: other.id, isAdmin: true },
+    ]) {
+      await expect(findReadableSession(auth, session.id)).resolves.toBeNull();
+      await expect(findAccessibleSession(auth, session.id)).resolves.toBeNull();
+      await expect(getSessionById(auth, session.id)).resolves.toBeNull();
+      await expect(getSessionTimeline(auth, session.id)).resolves.toBeNull();
+      expect((await getSessions(auth, { ids: [session.id] })).sessions).toEqual(
+        [],
+      );
+    }
+  });
+
   beforeEach(() => {
     syncFastSlackTitle.mockReset();
     syncFastSlackTitle.mockResolvedValue(undefined);
@@ -1735,6 +1764,76 @@ describe('unified Session queries', () => {
         }),
       ]),
     );
+  });
+
+  it('classifies failed starts separately from failures after task output', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      title: 'Failed task session',
+    });
+    const failedStartTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      title: 'Failed start',
+    });
+    const failedAfterOutputTask = await taskFactory.create({
+      initiatorUserId: owner.id,
+      title: 'Failed after output',
+    });
+    await db.insert(sessionTasks).values([
+      {
+        sessionId: session.id,
+        taskId: failedStartTask.id,
+        origin: 'fast_delegation',
+      },
+      {
+        sessionId: session.id,
+        taskId: failedAfterOutputTask.id,
+        origin: 'fast_delegation',
+      },
+    ]);
+    const failedStartRun = await runFactory.create({
+      taskId: failedStartTask.id,
+      status: RunStatus.Failed,
+      payload: { repo: 'acme/widgets', description: 'Failed to start' },
+    });
+    const failedAfterOutputRun = await runFactory.create({
+      taskId: failedAfterOutputTask.id,
+      status: RunStatus.Failed,
+      payload: { repo: 'acme/widgets', description: 'Ran and failed' },
+    });
+    await db.insert(taskMessages).values({
+      runId: failedAfterOutputRun.id,
+      taskId: failedAfterOutputTask.id,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [{ type: 'text', text: 'Meaningful task output' }],
+      metadata: {},
+      payload: { text: 'Meaningful task output' },
+    });
+
+    const detail = await getSessionById(
+      { userId: owner.id, isAdmin: false },
+      session.id,
+    );
+
+    expect(
+      detail?.tasks.find((task) => task.taskId === failedStartTask.id)
+        ?.latestRun,
+    ).toMatchObject({
+      id: failedStartRun.id,
+      canRetryFailedStart: true,
+    });
+    expect(
+      detail?.tasks.find((task) => task.taskId === failedAfterOutputTask.id)
+        ?.latestRun,
+    ).toMatchObject({
+      id: failedAfterOutputRun.id,
+      canRetryFailedStart: false,
+    });
   });
 
   it('returns uploaded Session-owned artifacts without creating a task', async () => {

@@ -215,6 +215,7 @@ function logPrReviewNotificationTriage(input: {
       githubTokenMintRequests: input.telemetry.githubTokenMintRequests,
       triageInvoked: input.telemetry.triageInvoked,
       triageCacheHit: input.telemetry.triageCacheHit,
+      triageJudgmentSkipped: input.telemetry.triageJudgmentSkipped,
       triageInputChars: input.telemetry.triageInputChars,
       triageInputTokenEstimate: input.telemetry.triageInputTokenEstimate,
       outcome: input.outcome,

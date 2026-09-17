@@ -551,4 +551,28 @@ describe('createFastAgentWebTaskLauncher', () => {
       expect.any(Object),
     );
   });
+
+  it('inherits private mode from the Fast parent', async () => {
+    mocks.findById.mockResolvedValue({
+      privacy: 'private',
+      privateOwnerUserId: 'user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'workspace-1',
+        conversationId: 'conversation-1',
+      },
+    });
+
+    await createFastAgentWebTaskLauncher({ userId: 'user-1' })({
+      prompt: 'Handle private context',
+      environmentId: null,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff: vi.fn(),
+    });
+
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({ privacy: 'private' }),
+      expect.any(Object),
+    );
+  });
 });

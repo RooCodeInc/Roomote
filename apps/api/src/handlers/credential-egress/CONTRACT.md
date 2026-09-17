@@ -219,8 +219,8 @@ approval requires the approving client to echo the exact prepared method set
 (`serviceCredentialCreateSchema.allowedMethods`), so a client that never shows the
 policy cannot approve a write-capable grant and a successful key entry never
 widens an approval. Grants created before this column existed remain
-GET/HEAD-only. The Fast `request_with_integration_key` path stays GET/HEAD-only
-regardless of `allowed_methods`.
+GET/HEAD-only. Both direct broker requests and attached-run proxy requests
+enforce `allowed_methods`.
 
 ## Lifecycle obligations (controller)
 

@@ -62,6 +62,7 @@ const {
   waitForVoiceCallLease,
   liveVoiceState,
   authenticatedUserState,
+  invalidateQueries,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
   startGoalMutate: vi.fn(),
@@ -89,6 +90,7 @@ const {
       };
     },
   },
+  invalidateQueries: vi.fn(),
   liveVoiceState: {
     active: false,
     status: 'idle' as
@@ -173,6 +175,9 @@ vi.mock('@/hooks/useNarrationMode', () => ({
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
     fastSessions: {
+      tasks: {
+        queryKey: (input: unknown) => ['fastSessions.tasks', input],
+      },
       reply: { mutate: replyMutate },
       startGoal: { mutate: startGoalMutate },
       reviewAction: { mutate: reviewActionMutate },
@@ -193,12 +198,25 @@ vi.mock('@/trpc/client', () => ({
       },
     },
     fastSessions: {
+      tasks: {
+        queryKey: (input: unknown) => ['fastSessions.tasks', input],
+      },
       composerSuggestion: {
         queryOptions: (input: unknown, options?: Record<string, unknown>) => ({
           ...options,
           queryKey: ['fastSessions.composerSuggestion', input],
           queryFn: async () => ({ suggestion: null, messageCount: 0 }),
         }),
+      },
+    },
+    sandboxSession: {
+      byTaskId: {
+        queryKey: (input: unknown) => ['sandboxSession.byTaskId', input],
+      },
+    },
+    artifacts: {
+      forTask: {
+        queryKey: (input: unknown) => ['artifacts.forTask', input],
       },
     },
   }),
@@ -209,6 +227,7 @@ vi.mock('@/trpc/client', () => ({
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
   useQuery: () => ({ data: composerSuggestionState.data }),
+  useQueryClient: () => ({ invalidateQueries }),
 }));
 
 // Wakeup polling has dedicated provider-backed tests. Keep this suite's query
@@ -350,6 +369,8 @@ beforeEach(() => {
   composerSuggestionState.data = undefined;
   openTaskPanel.mockReset();
   openTasksPanel.mockReset();
+  invalidateQueries.mockReset();
+  invalidateQueries.mockResolvedValue(undefined);
   voiceStatusQuery.mockReset();
   voiceStatusQuery.mockResolvedValue({ enabled: false });
   recordVoiceTurnMutate.mockReset();
@@ -382,6 +403,57 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
+  /**
+   * A completed `prepare_integration_key` call at `ts` that created
+   * `pendingRef`, persisted as the tool returns it or under a result wrapper.
+   */
+  const keyRequestMessage = (
+    ts: number,
+    pendingRef: string,
+    shape: 'plain' | 'wrapped' = 'plain',
+  ) => ({
+    id: `key-request-${ts}`,
+    eventId: `key-request-${ts}:event`,
+    turnId: `key-request-${ts}:turn`,
+    turnSeq: 1,
+    ts,
+    eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+    role: 'tool' as const,
+    contentBlocks: [
+      {
+        type: 'text' as const,
+        text: JSON.stringify({ pending: { pendingRef } }),
+      },
+    ],
+    metadata: { visibleInTranscript: true },
+    payload: {
+      toolCallId: `key-request-${ts}:tool`,
+      title: 'prepare_integration_key',
+      kind: 'tool',
+      status: 'completed',
+      isExecute: false,
+      isRead: false,
+      isMcp: false,
+      mcpServerName: null,
+      mcpToolName: null,
+      toolName: 'prepare_integration_key',
+      command: null,
+      output: JSON.stringify(
+        shape === 'plain'
+          ? {
+              pending: { pendingRef },
+              sessionUrl:
+                'https://app.example/sessions/canonical-session#integrations',
+            }
+          : { success: true, result: { pending: { pendingRef } } },
+      ),
+    },
+    source: 'web',
+    nativeSessionId: 'opencode-1',
+    nativeMessageId: null,
+    createdAt: new Date(ts),
+  });
+
   it('shows a pending-key card for the owner and opens the key dialog from it', async () => {
     integrationApprovalsState.pending = [
       {
@@ -416,7 +488,16 @@ describe('FastSessionTranscript', () => {
       <FastSessionTranscript
         sessionId="fast-conversation"
         secretSessionId="canonical-session"
-        initialMessages={[]}
+        initialMessages={[
+          textMessage({ id: 'ask', role: 'user', text: 'Read Figma', ts: 1 }),
+          keyRequestMessage(2, '6a1f8f1e-0000-4000-8000-000000000009'),
+          textMessage({
+            id: 'link',
+            role: 'assistant',
+            text: 'Add your key in the secure form.',
+            ts: 3,
+          }),
+        ]}
         canReply
       />,
     );
@@ -427,6 +508,96 @@ describe('FastSessionTranscript', () => {
     // jsdom does not dispatch hashchange for a programmatic fragment change.
     fireEvent(window, new HashChangeEvent('hashchange'));
     await screen.findByLabelText('API key');
+    integrationApprovalsState.pending = [];
+  });
+
+  it('hides the pending-key card once the owner replies after the request', () => {
+    integrationApprovalsState.pending = [
+      {
+        pendingRef: '6a1f8f1e-0000-4000-8000-000000000011',
+        label: 'Intercom',
+        origin: 'https://api.intercom.io',
+        headerName: 'Authorization',
+        headerPrefix: 'Bearer ',
+        allowedMethods: ['GET', 'HEAD'],
+        lifetimeHours: null,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[
+          keyRequestMessage(1, '6a1f8f1e-0000-4000-8000-000000000011'),
+          textMessage({
+            id: 'moved-on',
+            role: 'user',
+            text: 'Intercom can only use oauth',
+            ts: 2,
+          }),
+          textMessage({
+            id: 'answer',
+            role: 'assistant',
+            text: 'The token form does not fit your setup.',
+            ts: 3,
+          }),
+        ]}
+        canReply
+      />,
+    );
+    expect(screen.queryByText('Add your Intercom key')).toBeNull();
+    integrationApprovalsState.pending = [];
+  });
+
+  it('shows only the open request approval, not one the owner declined earlier', () => {
+    const approval = (pendingRef: string, label: string, origin: string) => ({
+      pendingRef,
+      label,
+      origin,
+      headerName: 'Authorization',
+      headerPrefix: 'Bearer ',
+      allowedMethods: ['GET', 'HEAD'],
+      lifetimeHours: null,
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+    integrationApprovalsState.pending = [
+      approval(
+        '6a1f8f1e-0000-4000-8000-000000000012',
+        'Figma',
+        'https://api.figma.com',
+      ),
+      approval(
+        '6a1f8f1e-0000-4000-8000-000000000013',
+        'Intercom',
+        'https://api.intercom.io',
+      ),
+    ];
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[
+          keyRequestMessage(1, '6a1f8f1e-0000-4000-8000-000000000012'),
+          textMessage({
+            id: 'declined',
+            role: 'user',
+            text: 'Skip Figma, read Intercom instead',
+            ts: 2,
+          }),
+          keyRequestMessage(
+            3,
+            '6a1f8f1e-0000-4000-8000-000000000013',
+            'wrapped',
+          ),
+        ]}
+        canReply
+      />,
+    );
+    expect(screen.getByText('Add your Intercom key')).toBeInTheDocument();
+    expect(screen.queryByText('Add your Figma key')).toBeNull();
     integrationApprovalsState.pending = [];
   });
 
@@ -3219,6 +3390,31 @@ describe('FastSessionTranscript', () => {
     );
   });
 
+  it('shows private session metadata before the model in the header', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="private-session"
+        initialMessages={[]}
+        initialTitle="Private planning"
+        sessionModel="model-1"
+        privateSession
+      />,
+    );
+
+    const privateIndicator = screen.getByLabelText('Private session');
+    expect(privateIndicator).toHaveClass('text-accent-foreground');
+    expect(
+      privateIndicator.querySelector('.lucide-hat-glasses'),
+    ).toBeInTheDocument();
+    const metadata = privateIndicator.parentElement;
+    expect(metadata).not.toBeNull();
+    expect(metadata?.textContent).toContain('model-1');
+    expect(
+      privateIndicator.compareDocumentPosition(screen.getByText('model-1')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('hides the reply composer for non-web sessions', () => {
     render(
       <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
@@ -3305,6 +3501,33 @@ describe('FastSessionTranscript', () => {
     });
     expect(screen.getByText('Looking into it now.')).toBeInTheDocument();
     expect(screen.getByText('Done.')).toBeInTheDocument();
+  });
+
+  it('refreshes task-backed panes when a task report admission is pushed', async () => {
+    render(
+      <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
+    );
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('task-report', {
+        type: 'task_report_admitted',
+        eventId: 'fast-parent-child-message:report-1:user',
+        taskId: 'task-1',
+        admittedAtMs: Date.now() - 20,
+        serverReceivedAtMs: Date.now() - 10,
+      });
+    });
+
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledTimes(3));
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['fastSessions.tasks', { sessionId: 'session-1' }],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['sandboxSession.byTaskId', { taskId: 'task-1' }],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['artifacts.forTask', { taskId: 'task-1' }],
+    });
   });
 
   it('withdraws streamed text that no reply delivered once the turn settles', () => {

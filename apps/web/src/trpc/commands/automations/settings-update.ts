@@ -352,11 +352,15 @@ export async function updateBackgroundAgentSettingsCommand(
 > {
   assertAdmin(auth);
   const fieldErrors: BackgroundAgentFieldErrors = {};
-  const [existingSettings, existingProviderUsageLimitAutomation] =
-    await Promise.all([
-      getBackgroundAgentSettingsForDeployment(),
-      getAutomationByKey('provider_usage_limit'),
-    ]);
+  // Capture row presence before the settings read can seed missing rows.
+  const [
+    existingProviderUsageLimitAutomation,
+    existingChannelAutoStartAutomation,
+  ] = await Promise.all([
+    getAutomationByKey('provider_usage_limit'),
+    getAutomationByKey('slack_channel_auto_start'),
+  ]);
+  const existingSettings = await getBackgroundAgentSettingsForDeployment();
   const platformIssueAlertsEnabled =
     input.savingAutomation === 'platformIssueAlerts'
       ? (input.platformIssueAlertsEnabled ??
@@ -949,6 +953,13 @@ export async function updateBackgroundAgentSettingsCommand(
   const channelAutoStartChannelIds = finalResolvedChannelAutoStartRows.map(
     ({ channelId }) => channelId,
   );
+  const channelAutoStartEnabled =
+    input.channelAutoStartEnabled ??
+    (existingChannelAutoStartAutomation
+      ? existingSettings.channelAutoStartEnabled
+      : finalResolvedChannelAutoStartRows.length +
+          finalResolvedChannelAutoStartDiscordRows.length >
+        0);
   const managerChannelHasApp =
     input.savingAutomation === 'managerChannel' &&
     managerChannelChanged &&
@@ -1413,10 +1424,7 @@ export async function updateBackgroundAgentSettingsCommand(
 
     await upsertAutomation(tx, {
       key: 'slack_channel_auto_start',
-      enabled:
-        finalResolvedChannelAutoStartRows.length +
-          finalResolvedChannelAutoStartDiscordRows.length >
-        0,
+      enabled: channelAutoStartEnabled,
       instructions:
         normalizeOptionalText(
           finalResolvedChannelAutoStartRows[0]?.instructions,
@@ -1620,12 +1628,15 @@ export async function updateBackgroundAgentSettingsCommand(
   await Promise.all([
     syncSlackAutoStartChannelCache({
       shouldUpdate: true,
-      enabled: finalResolvedChannelAutoStartRows.length > 0,
+      enabled:
+        channelAutoStartEnabled && finalResolvedChannelAutoStartRows.length > 0,
       channelIds: channelAutoStartChannelIds,
     }),
     syncDiscordAutoStartChannelCache({
       shouldUpdate: true,
-      enabled: finalResolvedChannelAutoStartDiscordRows.length > 0,
+      enabled:
+        channelAutoStartEnabled &&
+        finalResolvedChannelAutoStartDiscordRows.length > 0,
       channelIds: finalResolvedChannelAutoStartDiscordRows.map(
         ({ channelId }) => channelId,
       ),

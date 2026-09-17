@@ -52,11 +52,11 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Settings2,
   Skeleton,
   Switch,
   Textarea,
   Trash2,
+  Wrench,
   Zap,
 } from '@/components/system';
 
@@ -70,7 +70,6 @@ import {
   type AutomationDestinationProvider,
 } from './AutomationDestinationPicker';
 import {
-  AutomationListHeader,
   AutomationListRow,
   AutomationListToolbar,
   type AutomationListFilter,
@@ -96,6 +95,8 @@ type CustomAutomationFormState = {
   targetMode: 'channel' | 'direct_message';
   targetChannelId: string;
 };
+
+type CustomAutomationFieldErrors = Partial<Record<'name' | 'prompt', string>>;
 
 const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
@@ -501,6 +502,11 @@ export function CustomAutomationsSection({
   );
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<CustomAutomationFormState>(EMPTY_FORM);
+  const [fieldErrors, setFieldErrors] = useState<CustomAutomationFieldErrors>(
+    {},
+  );
+  const nameRef = useRef<HTMLInputElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
   const [resolvedCron, setResolvedCron] = useState<string | null>(null);
   const [scheduleSummary, setScheduleSummary] = useState<string | null>(null);
   const [localFilter, setLocalFilter] = useState<AutomationListFilter>('all');
@@ -577,7 +583,7 @@ export function CustomAutomationsSection({
       (emailIdentities ?? []).map((identity) => ({
         id: identity.id,
         name: identity.emailAddress,
-        label: `${identity.emailAddress} · Verified`,
+        label: `${identity.emailAddress} · Account email`,
       })),
     [emailIdentities],
   );
@@ -617,6 +623,7 @@ export function CustomAutomationsSection({
         toast.success('Custom automation created');
         setIsCreating(false);
         setForm(EMPTY_FORM);
+        setFieldErrors({});
         setResolvedCron(null);
         setScheduleSummary(null);
         await invalidate();
@@ -633,6 +640,7 @@ export function CustomAutomationsSection({
         toast.success('Custom automation saved');
         setEditingId(null);
         setForm(EMPTY_FORM);
+        setFieldErrors({});
         setResolvedCron(null);
         setScheduleSummary(null);
         window.history.replaceState(
@@ -782,6 +790,7 @@ export function CustomAutomationsSection({
     setIsCreating(false);
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setFieldErrors({});
     setResolvedCron(null);
     setScheduleSummary(null);
     if (window.location.hash.startsWith('#custom-automation-')) {
@@ -793,15 +802,20 @@ export function CustomAutomationsSection({
     }
   };
 
-  const editAutomation = (row: CustomAutomationListItem) => {
+  const editAutomation = (
+    row: CustomAutomationListItem,
+    enabled = row.enabled,
+  ) => {
     setEditingId(row.id);
     setIsCreating(false);
-    setForm(
-      formFromRow(
+    setFieldErrors({});
+    setForm({
+      ...formFromRow(
         row,
         capabilitiesLoaded ? connectedDestinationProviders : null,
       ),
-    );
+      enabled,
+    });
     setResolvedCron(row.cronExpression ?? null);
     setScheduleSummary(null);
     window.history.replaceState(
@@ -861,6 +875,20 @@ export function CustomAutomationsSection({
   }, [capabilitiesLoaded, connectedDestinationProviders]);
 
   const saveForm = () => {
+    const requiredFieldErrors: CustomAutomationFieldErrors = {};
+    if (!form.name.trim()) {
+      requiredFieldErrors.name = 'Enter a name.';
+    }
+    if (!form.prompt.trim()) {
+      requiredFieldErrors.prompt = 'Enter a prompt.';
+    }
+    if (requiredFieldErrors.name || requiredFieldErrors.prompt) {
+      setFieldErrors(requiredFieldErrors);
+      (requiredFieldErrors.name ? nameRef : promptRef).current?.focus();
+      return;
+    }
+    setFieldErrors({});
+
     if (!form.environmentId) {
       toast.error('Choose an environment.');
       return;
@@ -927,33 +955,72 @@ export function CustomAutomationsSection({
         <div className="space-y-2">
           <Label htmlFor="custom-automation-name">Name</Label>
           <Input
+            ref={nameRef}
             id="custom-automation-name"
             value={form.name}
             maxLength={100}
             disabled={busy}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, name: event.target.value }))
+            aria-invalid={fieldErrors.name ? true : undefined}
+            aria-describedby={
+              fieldErrors.name ? 'custom-automation-name-error' : undefined
             }
+            onChange={(event) => {
+              const name = event.target.value;
+              setForm((current) => ({ ...current, name }));
+              if (name.trim() && fieldErrors.name) {
+                setFieldErrors((current) => ({ ...current, name: undefined }));
+              }
+            }}
             placeholder="Weekly flaky-test scan"
           />
+          {fieldErrors.name ? (
+            <p
+              id="custom-automation-name-error"
+              role="alert"
+              className="text-sm text-destructive"
+            >
+              {fieldErrors.name}
+            </p>
+          ) : null}
         </div>
 
         <div className="space-y-2">
           <Label htmlFor="custom-automation-prompt">Prompt</Label>
           <Textarea
+            ref={promptRef}
             id="custom-automation-prompt"
             value={form.prompt}
             maxLength={8000}
             disabled={busy}
             rows={5}
-            onChange={(event) =>
+            aria-invalid={fieldErrors.prompt ? true : undefined}
+            aria-describedby={
+              fieldErrors.prompt ? 'custom-automation-prompt-error' : undefined
+            }
+            onChange={(event) => {
+              const prompt = event.target.value;
               setForm((current) => ({
                 ...current,
-                prompt: event.target.value,
-              }))
-            }
+                prompt,
+              }));
+              if (prompt.trim() && fieldErrors.prompt) {
+                setFieldErrors((current) => ({
+                  ...current,
+                  prompt: undefined,
+                }));
+              }
+            }}
             placeholder="What should Roomote do on each run?"
           />
+          {fieldErrors.prompt ? (
+            <p
+              id="custom-automation-prompt-error"
+              role="alert"
+              className="text-sm text-destructive"
+            >
+              {fieldErrors.prompt}
+            </p>
+          ) : null}
         </div>
 
         <div className="space-y-2">
@@ -1170,13 +1237,14 @@ export function CustomAutomationsSection({
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Switch
+              id="custom-automation-enabled"
               checked={form.enabled}
               disabled={busy}
               onCheckedChange={(checked) =>
                 setForm((current) => ({ ...current, enabled: checked }))
               }
             />
-            <Label>Enabled</Label>
+            <Label htmlFor="custom-automation-enabled">Enabled</Label>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -1212,6 +1280,7 @@ export function CustomAutomationsSection({
           );
           setIsCreating(true);
           setEditingId(null);
+          setFieldErrors({});
           setForm({
             ...EMPTY_FORM,
             targetProvider: target.provider,
@@ -1257,7 +1326,6 @@ export function CustomAutomationsSection({
       >
         <CardContent className="p-0!">
           <div role="table" aria-label="Automations">
-            <AutomationListHeader />
             <div role="rowgroup" className="divide-y divide-background">
               {initialListLoadFailed && filter !== 'built-in' ? (
                 <RetryableLoadError
@@ -1328,40 +1396,8 @@ export function CustomAutomationsSection({
                       icon={Zap}
                       name={row.name}
                       description={<p className="line-clamp-2">{row.prompt}</p>}
-                      enabledControl={
-                        <Switch
-                          aria-label={`Toggle ${row.name}`}
-                          checked={row.enabled}
-                          disabled={busy}
-                          className="border-border data-[state=unchecked]:bg-muted"
-                          onCheckedChange={(enabled) =>
-                            toggleMutation.mutate({
-                              id: row.id,
-                              ...writeInputFromRow(row),
-                              enabled,
-                            })
-                          }
-                        />
-                      }
-                      summary={
+                      metadata={
                         <>
-                          <span>
-                            {cadenceLabel(row, schedulingTimeZone)}
-                            {environmentName
-                              ? `, in ${environmentName}`
-                              : ''} →
-                          </span>
-                          {target.provider !== 'none' ? (
-                            <BrandIcon
-                              icon={target.provider}
-                              name=""
-                              className="size-4 shrink-0"
-                            />
-                          ) : null}
-                          <span>
-                            {destinationName}
-                            {destinationLabel ? ` ${destinationLabel}` : ''}
-                          </span>
                           <span>
                             Created by {row.createdByName ?? 'Unknown'}
                             {row.lastRunAt ? (
@@ -1390,6 +1426,48 @@ export function CustomAutomationsSection({
                           ) : null}
                         </>
                       }
+                      enabledControl={
+                        <Switch
+                          aria-label={`Toggle ${row.name}`}
+                          aria-busy={toggleMutation.isPending || undefined}
+                          checked={row.enabled}
+                          disabled={busy}
+                          className="border-border data-[state=unchecked]:bg-muted"
+                          onCheckedChange={(enabled) => {
+                            if (enabled && row.scheduleMode !== 'off') {
+                              editAutomation(row, true);
+                              return;
+                            }
+
+                            toggleMutation.mutate({
+                              id: row.id,
+                              ...writeInputFromRow(row),
+                              enabled,
+                            });
+                          }}
+                        />
+                      }
+                      summary={
+                        <>
+                          <span>
+                            {cadenceLabel(row, schedulingTimeZone)}
+                            {environmentName
+                              ? `, in ${environmentName}`
+                              : ''} →
+                          </span>
+                          {target.provider !== 'none' ? (
+                            <BrandIcon
+                              icon={target.provider}
+                              name=""
+                              className="size-4 shrink-0"
+                            />
+                          ) : null}
+                          <span>
+                            {destinationName}
+                            {destinationLabel ? ` ${destinationLabel}` : ''}
+                          </span>
+                        </>
+                      }
                       actions={
                         <>
                           <CustomAutomationRunButton
@@ -1405,13 +1483,13 @@ export function CustomAutomationsSection({
                               aria-label={`Configure ${row.name}`}
                               onClick={() => editAutomation(row)}
                             >
-                              <Settings2 />
+                              <Wrench />
                             </Button>
                           </BasicTooltip>
                           <BasicTooltip content="Delete">
                             <Button
                               type="button"
-                              size="sm"
+                              size="icon"
                               variant="ghost"
                               disabled={busy}
                               onClick={() => {

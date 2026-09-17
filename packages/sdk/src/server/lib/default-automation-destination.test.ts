@@ -252,7 +252,7 @@ describe('resolveDefaultAutomationTarget', () => {
     expect(mocks.emailIdentities).not.toHaveBeenCalled();
   });
 
-  it('uses verified Email only after chat candidates are exhausted', async () => {
+  it('uses account Email only after chat candidates are exhausted', async () => {
     mocks.emailIdentities.mockResolvedValue([{ id: 'verified:user:hash' }]);
 
     await expect(

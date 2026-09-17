@@ -16,6 +16,7 @@ describe('SessionCard', () => {
           ownerEmail: 'test@example.com',
           ownerImageUrl: null,
           ownerUserId: 'user-1',
+          privacy: 'shared',
           sourceSurface: 'web',
           activityAt: Date.now() / 1000,
           cachedStatus: 'active',
@@ -46,9 +47,10 @@ describe('SessionCard', () => {
     expect(
       screen.getByRole('link', { name: /Update homepage background/ }),
     ).toHaveAttribute('href', '/sessions/session-1');
-    expect(screen.getByText('Test User')).toBeInTheDocument();
+    expect(screen.getByText('You')).toBeInTheDocument();
     expect(screen.getByText('started a session')).toBeInTheDocument();
-    expect(screen.getByText('Web')).toBeInTheDocument();
+    expect(screen.getByLabelText('Web')).toBeInTheDocument();
+    expect(screen.queryByText('Web')).not.toBeInTheDocument();
     expect(screen.getByText('0.01')).toBeInTheDocument();
     fireEvent.focus(screen.getByText('0.01'));
     expect(
@@ -80,6 +82,7 @@ describe('SessionCard', () => {
           ownerEmail: 'test@example.com',
           ownerImageUrl: null,
           ownerUserId: 'user-1',
+          privacy: 'shared',
           sourceSurface: 'web',
           activityAt: Date.now() / 1000,
           cachedStatus: 'ready',
@@ -111,6 +114,7 @@ describe('SessionCard', () => {
       ownerEmail: 'test@example.com',
       ownerImageUrl: null,
       ownerUserId: 'user-1',
+      privacy: 'shared' as const,
       sourceSurface: 'web',
       activityAt: Date.now() / 1000,
       cachedStatus: 'ready' as const,
@@ -141,6 +145,7 @@ describe('SessionCard', () => {
       ownerEmail: 'test@example.com',
       ownerImageUrl: null,
       ownerUserId: 'user-1',
+      privacy: 'shared' as const,
       sourceSurface: 'web',
       activityAt: Date.now() / 1000,
       cachedStatus: 'active' as const,
@@ -197,6 +202,7 @@ describe('SessionCard', () => {
           ownerEmail: null,
           ownerImageUrl: null,
           ownerUserId: null,
+          privacy: 'shared',
           sourceSurface: 'automation',
           activityAt: Date.now() / 1000,
           cachedStatus: 'ready',
@@ -231,6 +237,7 @@ describe('SessionCard', () => {
           ownerEmail: 'test@example.com',
           ownerImageUrl: null,
           ownerUserId: 'user-1',
+          privacy: 'shared',
           sourceSurface: 'slack',
           activityAt: Date.now() / 1000,
           cachedStatus: 'ready',
@@ -244,8 +251,95 @@ describe('SessionCard', () => {
       />,
     );
 
-    expect(screen.getByText('Test User')).toBeInTheDocument();
+    expect(screen.getByText('You')).toBeInTheDocument();
     expect(screen.queryByText('started a session')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Slack')).toBeInTheDocument();
     expect(screen.queryByText('Slack')).not.toBeInTheDocument();
   });
+
+  it('uses canonical identity for the viewer without changing other users', () => {
+    const session = {
+      id: 'session-identity',
+      title: 'Identity labels',
+      ownerKind: 'user' as const,
+      ownerAutomation: null,
+      ownerName: 'Same Display Name',
+      ownerEmail: 'owner@example.com',
+      ownerImageUrl: null,
+      ownerUserId: 'owner-user',
+      privacy: 'shared' as const,
+      sourceSurface: 'web',
+      activityAt: Date.now() / 1000,
+      cachedStatus: 'ready' as const,
+      executionCount: 0,
+      inferenceCostMicroUsd: 0,
+      directInferenceCostMicroUsd: 0,
+      unread: false,
+      pullRequests: [],
+      tasks: [],
+    };
+
+    const { rerender } = render(
+      <SessionCard session={session} viewerUserId="other-user" />,
+    );
+    expect(screen.getByText('Same Display Name')).toBeInTheDocument();
+    expect(screen.queryByText('You')).not.toBeInTheDocument();
+
+    rerender(<SessionCard session={session} viewerUserId="owner-user" />);
+    expect(screen.getByText('You')).toBeInTheDocument();
+    expect(screen.getByLabelText('Same Display Name')).toHaveTextContent('SD');
+    expect(screen.queryByText('Y')).not.toBeInTheDocument();
+
+    rerender(
+      <SessionCard view="board" session={session} viewerUserId="owner-user" />,
+    );
+    expect(screen.getByText('You')).toBeInTheDocument();
+    expect(screen.getByLabelText('Same Display Name')).toHaveTextContent('SD');
+    expect(screen.queryByText('Y')).not.toBeInTheDocument();
+  });
+
+  it.each(['list', 'board'] as const)(
+    'shows private and source metadata in %s view',
+    (view) => {
+      render(
+        <SessionCard
+          view={view}
+          viewerUserId="user-1"
+          session={{
+            id: `private-${view}`,
+            title: 'Private planning',
+            ownerKind: 'user',
+            ownerAutomation: null,
+            ownerName: 'Test User',
+            ownerEmail: 'test@example.com',
+            ownerImageUrl: null,
+            ownerUserId: 'user-1',
+            privacy: 'private',
+            sourceSurface: 'web',
+            activityAt: Date.now() / 1000,
+            cachedStatus: 'ready',
+            executionCount: 0,
+            inferenceCostMicroUsd: 0,
+            directInferenceCostMicroUsd: 0,
+            unread: false,
+            pullRequests: [],
+            tasks: [],
+          }}
+        />,
+      );
+
+      expect(screen.getByLabelText('Private session')).toBeInTheDocument();
+      expect(screen.getByLabelText('Web')).toBeInTheDocument();
+      expect(screen.queryByText('Web')).not.toBeInTheDocument();
+      if (view === 'list') {
+        expect(
+          screen.getByText('started a private session'),
+        ).toBeInTheDocument();
+      } else {
+        expect(
+          screen.queryByText('started a private session'),
+        ).not.toBeInTheDocument();
+      }
+    },
+  );
 });

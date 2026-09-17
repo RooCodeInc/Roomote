@@ -91,6 +91,7 @@ export const startFastSessionInputSchema = z
   .object({
     ...fastSessionMessageInputShape,
     conversationId: z.string().uuid().optional(),
+    privacy: z.enum(['shared', 'private']).optional(),
     pinnedLaunch: pinnedFastSessionLaunchSchema.optional(),
     /** Open the Session for a voice call; any text is the pre-typed message. */
     voiceCall: z.boolean().optional(),

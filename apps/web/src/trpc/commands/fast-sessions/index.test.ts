@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   startPinnedLaunch: vi.fn(),
   getOrCreateSession: vi.fn(),
   getUnifiedSession: vi.fn(),
+  privateSessionsEnabled: vi.fn(),
   startSessionGoal: vi.fn(),
   getFastSessionTasks: vi.fn(),
   currentEpochSeconds: vi.fn(),
@@ -53,6 +54,7 @@ vi.mock('@roomote/sdk/server', () => ({
   resolveUserMcpServerConfigs: vi.fn(),
   wakeFastAgentParentEventAt: vi.fn(),
   wakeFastAgentParentEventNow: vi.fn(),
+  wakeFastAgentParentEventsOnTurnRelease: vi.fn(),
   startFastSessionGoal: mocks.startSessionGoal,
 }));
 
@@ -67,6 +69,7 @@ vi.mock('@roomote/db/server', () => ({
   sessions: {},
   getSessionForFastConversation: mocks.getUnifiedSession,
   ensureSessionForFastConversation: mocks.getUnifiedSession,
+  isPrivateSessionsExperimentEnabled: mocks.privateSessionsEnabled,
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -726,6 +729,7 @@ describe('startFastSessionCommand', () => {
     mocks.createWebTaskLauncher.mockReturnValue(mocks.launchTask);
     mocks.launchTask.mockResolvedValue({ success: true, taskId: 'task-1' });
     mocks.getUnifiedSession.mockResolvedValue({ id: 'unified-session-1' });
+    mocks.privateSessionsEnabled.mockResolvedValue(true);
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'fast-session-1',
       created: true,
@@ -774,6 +778,7 @@ describe('startFastSessionCommand', () => {
     expect(mocks.getOrCreateSession).toHaveBeenCalledTimes(2);
     expect(mocks.getOrCreateSession).toHaveBeenCalledWith({
       userId: 'user-1',
+      userInitiated: { surface: 'web', trigger: 'message' },
       conversation: {
         surface: 'web',
         workspaceId: 'user-1',
@@ -781,6 +786,37 @@ describe('startFastSessionCommand', () => {
       },
     });
     expect(mocks.after).toHaveBeenCalledOnce();
+  });
+
+  it('declares private mode when creating a new web Session', async () => {
+    await startFastSessionCommand(auth, {
+      text: 'Review private context',
+      conversationId: '22222222-2222-4222-8222-222222222221',
+      privacy: 'private',
+    });
+
+    expect(mocks.getOrCreateSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      privacy: 'private',
+      userInitiated: { surface: 'web', trigger: 'message' },
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: '22222222-2222-4222-8222-222222222221',
+      },
+    });
+  });
+
+  it('rejects private Session creation when the experiment is disabled', async () => {
+    mocks.privateSessionsEnabled.mockResolvedValue(false);
+
+    await expect(
+      startFastSessionCommand(auth, {
+        text: 'Review private context',
+        privacy: 'private',
+      }),
+    ).rejects.toThrow('not enabled for this deployment');
+    expect(mocks.getOrCreateSession).not.toHaveBeenCalled();
   });
 
   it('runs a typed kickoff in voice mode when the Session is opened for a call', async () => {
@@ -806,6 +842,30 @@ describe('startFastSessionCommand', () => {
         voiceMode: true,
       }),
     );
+  });
+
+  it('creates a private voice Session for its owner', async () => {
+    await expect(
+      startFastSessionCommand(auth, {
+        text: '',
+        conversationId: '22222222-2222-4222-8222-222222222223',
+        privacy: 'private',
+        voiceCall: true,
+      }),
+    ).resolves.toEqual({
+      sessionId: 'unified-session-1',
+      fastConversationId: 'fast-session-1',
+    });
+    expect(mocks.getOrCreateSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      privacy: 'private',
+      userInitiated: { surface: 'web', trigger: 'message' },
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: '22222222-2222-4222-8222-222222222223',
+      },
+    });
   });
 
   it('seeds the launch tab presence before scheduling the first turn', async () => {

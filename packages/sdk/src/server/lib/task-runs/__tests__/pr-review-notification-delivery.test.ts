@@ -13,6 +13,7 @@ const {
   mockIsRoomoteGitHubLogin,
   mockResolveConfiguredGitHubAppSlug,
   mockGetGitHubRateLimitRetryAfterMs,
+  mockEvaluateTypeSafeJudgments,
 } = vi.hoisted(() => ({
   mockGenerateObject: vi.fn(),
   mockReadSourceControlPullRequest: vi.fn(),
@@ -28,6 +29,11 @@ const {
   mockIsRoomoteGitHubLogin: vi.fn((login: string) => login === 'roomote[bot]'),
   mockResolveConfiguredGitHubAppSlug: vi.fn(),
   mockGetGitHubRateLimitRetryAfterMs: vi.fn(),
+  mockEvaluateTypeSafeJudgments: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server/typesafe-judgment', () => ({
+  evaluateTypeSafeJudgments: mockEvaluateTypeSafeJudgments,
 }));
 
 vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
@@ -164,6 +170,7 @@ const events: PrReviewActivityEvent[] = [
 
 beforeEach(() => {
   clearPrReviewTriageDecisionCache();
+  mockEvaluateTypeSafeJudgments.mockResolvedValue(null);
 });
 
 const eventsWithoutSelfReview: PrReviewActivityEvent[] = events.slice(0, 2);
@@ -1307,6 +1314,168 @@ describe('triagePrReviewActivity', () => {
       triagePrReviewActivity({ ...request, events }),
     ).rejects.toThrow('empty summary');
   });
+});
+
+describe('triagePrReviewActivity with the judgment model', () => {
+  const botApprovalEvents: PrReviewActivityEvent[] = [
+    {
+      kind: 'review',
+      authorLogin: 'review-bot[bot]',
+      automatedAuthorId: 'review-bot',
+      reviewState: 'approved',
+      body: 'LGTM',
+    },
+  ];
+  const notifyingObject = {
+    worthNotifying: true,
+    actionableFeedback: false,
+    summary: 'review-bot approved the pull request.',
+    followUpQuestion: '',
+    followUpPrompt: '',
+  };
+
+  function mockJudgment(worthNotifying: number, actionableFeedback: number) {
+    mockEvaluateTypeSafeJudgments.mockResolvedValue({
+      worthNotifying: { type: 'noul', noul: worthNotifying },
+      actionableFeedback: { type: 'noul', noul: actionableFeedback },
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGenerateObject.mockResolvedValue({ object: notifyingObject });
+  });
+
+  it('suppresses confidently unimportant activity without the helper model', async () => {
+    mockJudgment(0.05, 0.04);
+    const telemetry = createPrReviewNotificationTelemetry(1);
+
+    await expect(
+      triagePrReviewActivity({
+        ...request,
+        events: botApprovalEvents,
+        telemetry,
+      }),
+    ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+    expect(telemetry).toMatchObject({
+      triageInvoked: false,
+      triageJudgmentSkipped: true,
+    });
+    expect(mockEvaluateTypeSafeJudgments).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          events: [
+            {
+              kind: 'review',
+              author: 'review-bot[bot]',
+              automatedAuthor: true,
+              reviewState: 'approved',
+              body: 'LGTM',
+            },
+          ],
+        }),
+      }),
+    );
+
+    // Identical activity reuses the cached suppression.
+    await triagePrReviewActivity({ ...request, events: botApprovalEvents });
+    expect(mockEvaluateTypeSafeJudgments).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a cached suppression cover different activity', async () => {
+    mockJudgment(0.05, 0.04);
+    await triagePrReviewActivity({ ...request, events: botApprovalEvents });
+
+    mockJudgment(0.9, 0.9);
+    await expect(
+      triagePrReviewActivity({
+        ...request,
+        events: [
+          {
+            kind: 'issue_comment',
+            authorLogin: 'bob',
+            body: 'This breaks auth, please fix.',
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({ post: true });
+
+    expect(mockEvaluateTypeSafeJudgments).toHaveBeenCalledTimes(2);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['worth notifying', 0.9, 0.2],
+    ['unsure', 0.3, 0.1],
+    ['not worth notifying but possibly actionable', 0.1, 0.4],
+  ])(
+    'uses the helper model when the judgment model is %s',
+    async (_label, worthNotifying, actionableFeedback) => {
+      mockJudgment(worthNotifying, actionableFeedback);
+
+      await expect(
+        triagePrReviewActivity({ ...request, events: botApprovalEvents }),
+      ).resolves.toEqual({
+        post: true,
+        summary: 'review-bot approved the pull request.',
+        followUpQuestion: null,
+        followUpPrompt: null,
+      });
+      expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('uses the helper model when the judgment model fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockEvaluateTypeSafeJudgments.mockRejectedValue(new Error('timeout'));
+
+    await expect(
+      triagePrReviewActivity({ ...request, events: botApprovalEvents }),
+    ).resolves.toMatchObject({ post: true });
+
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('[PrReviewNotification] Judgment model failed'),
+    );
+    warn.mockRestore();
+  });
+
+  it.each([
+    [
+      'a deterministic action signal',
+      [
+        {
+          kind: 'ci_failure',
+          authorLogin: 'github-actions',
+          checkName: 'CI / Tests',
+        },
+      ],
+    ],
+    ['a self-review result', events],
+    [
+      'a Roomote-authored event',
+      [
+        {
+          kind: 'review_comment',
+          authorLogin: 'roomote[bot]',
+          body: 'Consider handling the null case.',
+          roomoteAuthored: true,
+        },
+      ],
+    ],
+  ] satisfies Array<[string, PrReviewActivityEvent[]]>)(
+    'does not consult the judgment model for %s',
+    async (_label, activityEvents) => {
+      mockJudgment(0.01, 0.01);
+
+      await triagePrReviewActivity({ ...request, events: activityEvents });
+
+      expect(mockEvaluateTypeSafeJudgments).not.toHaveBeenCalled();
+      expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    },
+  );
 });
 
 describe('gatherPrReviewTriageContext', () => {

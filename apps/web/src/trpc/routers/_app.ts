@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEPLOYMENT_EXPERIMENT_IDS } from '@roomote/feature-flags';
 import { instanceSkillsRouter } from './instance-skills';
 import {
   publicAuthTokenTimeoutMsSchema,
@@ -23,6 +24,7 @@ import {
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
   SETUP_AUTH_PROVIDER_IDS,
   isSetupModelProviderId,
+  JUDGMENT_MODEL_SELECTIONS,
   isOpenAiCompatibleProviderId,
   customMcpServerInputSchema,
   isOpenAiRealtimeVoiceId,
@@ -30,6 +32,7 @@ import {
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
   sessionGoalInputSchema,
+  codingModelRoutingRuleSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
@@ -67,6 +70,7 @@ import {
   getSessions,
   getSessionTimeline,
   archiveSessionCommand,
+  deletePrivateSessionCommand,
   listSessionPins,
   markSessionReadCommand,
   sessionIdInputSchema,
@@ -213,6 +217,10 @@ import {
   getUserPersonalizationCommand,
   updateUserPersonalizationCommand,
 } from '../commands/preferences';
+import {
+  getDeploymentExperimentsCommand,
+  setDeploymentExperimentCommand,
+} from '../commands/deployment-experiments';
 import {
   type EnvironmentConfigVersionDetail,
   getActiveEnvironmentDefinitionTaskCommand,
@@ -459,6 +467,12 @@ import {
 } from '../commands/task-models';
 import { LOCAL_TASK_MODEL_PROVIDER_IDS } from '../commands/task-models/local-provider-discovery';
 import {
+  deleteJudgmentTypeSafeKeyCommand,
+  getJudgmentModelSettingsCommand,
+  saveJudgmentTypeSafeKeyCommand,
+  setJudgmentModelSelectionCommand,
+} from '../commands/task-models/judgment-model';
+import {
   disconnectChatGptSubscriptionCommand,
   getChatGptSubscriptionStatusCommand,
   isChatGptSubscriptionConnectedCommand,
@@ -515,6 +529,10 @@ import {
   getReleaseStatusCommand,
   getReleaseHistoryCommand,
 } from '../commands/product-releases';
+import {
+  getPlatformIssueReportCommand,
+  submitPlatformIssueReportCommand,
+} from '../commands/platform-issue-reports';
 import { getStatuspageIncident } from '@roomote/slack';
 
 const stateRecordSchema = z.record(z.string());
@@ -1153,6 +1171,19 @@ export const appRouter = createRouter({
       ),
   }),
 
+  platformIssueReports: createRouter({
+    byId: protectedProcedure
+      .input(z.object({ reportId: z.string().uuid() }))
+      .query(({ ctx: { auth }, input }) =>
+        getPlatformIssueReportCommand(auth, input.reportId),
+      ),
+    submit: protectedProcedure
+      .input(z.object({ reportId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        submitPlatformIssueReportCommand(auth, input.reportId),
+      ),
+  }),
+
   artifacts: createRouter({
     byPath: protectedProcedure
       .input(
@@ -1640,20 +1671,12 @@ export const appRouter = createRouter({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
-            resultsPageEnabled: z.boolean().optional(),
-            slackPeerConversationsExperimentEnabled: z.boolean().optional(),
-            homeComposerSuggestionsEnabled: z.boolean().optional(),
-            serviceCredentialToolsEnabled: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
-              input.narrationMode !== undefined ||
-              input.resultsPageEnabled !== undefined ||
-              input.slackPeerConversationsExperimentEnabled !== undefined ||
-              input.homeComposerSuggestionsEnabled !== undefined ||
-              input.serviceCredentialToolsEnabled !== undefined,
+              input.narrationMode !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -2474,6 +2497,30 @@ export const appRouter = createRouter({
         }),
       ),
 
+    // The judgment model (TypeSafe's Jev) is configured apart from chat
+    // providers and task model roles; see commands/task-models/judgment-model.
+    judgment: createRouter({
+      get: protectedProcedure.query(({ ctx: { auth } }) =>
+        getJudgmentModelSettingsCommand(auth),
+      ),
+
+      saveTypeSafeKey: protectedProcedure
+        .input(z.object({ apiKey: z.string().trim().min(1) }))
+        .mutation(({ ctx: { auth }, input }) =>
+          saveJudgmentTypeSafeKeyCommand(auth, input),
+        ),
+
+      deleteTypeSafeKey: protectedProcedure.mutation(({ ctx: { auth } }) =>
+        deleteJudgmentTypeSafeKeyCommand(auth),
+      ),
+
+      setSelection: protectedProcedure
+        .input(z.object({ selection: z.enum(JUDGMENT_MODEL_SELECTIONS) }))
+        .mutation(({ ctx: { auth }, input }) =>
+          setJudgmentModelSelectionCommand(auth, input),
+        ),
+    }),
+
     discoverProviderModels: protectedProcedure
       .input(
         z.object({
@@ -2598,6 +2645,7 @@ export const appRouter = createRouter({
           planningModelReasoningEffort: z
             .enum(REASONING_EFFORT_VALUES)
             .nullable(),
+          codingModelRoutingRules: z.array(codingModelRoutingRuleSchema),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -3251,6 +3299,11 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         archiveSessionCommand(auth, input.sessionId),
       ),
+    deletePrivate: protectedProcedure
+      .input(sessionIdInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        deletePrivateSessionCommand(auth, input.sessionId),
+      ),
     unarchive: protectedProcedure
       .input(sessionIdInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
@@ -3456,6 +3509,22 @@ export const appRouter = createRouter({
     retryFailedTaskMemories: protectedProcedure.mutation(({ ctx: { auth } }) =>
       retryFailedBrainTaskMemoriesCommand(auth),
     ),
+  }),
+
+  deploymentExperiments: createRouter({
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getDeploymentExperimentsCommand(auth),
+    ),
+    set: protectedProcedure
+      .input(
+        z.object({
+          id: z.enum(DEPLOYMENT_EXPERIMENT_IDS),
+          enabled: z.boolean(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setDeploymentExperimentCommand(auth, input),
+      ),
   }),
 
   miscSettings: createRouter({

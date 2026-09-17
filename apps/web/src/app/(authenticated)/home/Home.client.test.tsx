@@ -6,7 +6,6 @@ import {
   waitFor,
 } from '@testing-library/react';
 
-import { ALL_REPOSITORIES } from '@roomote/types';
 import type { PromptInputMessage } from '@/components/ai-elements';
 import {
   clearPendingFastSessionLaunch,
@@ -23,6 +22,7 @@ let currentEnvironmentsPending = false;
 let currentBrainConfigured = false;
 let currentHomeComposerSuggestionsEnabled = false;
 let currentHomeComposerSuggestionsFlagLoading = false;
+let currentPrivateSessionsExperimentEnabled = false;
 let currentHomeSuggestions: string[] = [];
 let currentHomeSuggestionsHasData = true;
 let currentHomeSuggestionsPending = false;
@@ -154,6 +154,12 @@ vi.mock('@/hooks/useVoiceEnabled', () => ({
   useVoiceEnabled: () => voiceState.enabled,
 }));
 
+vi.mock('@/hooks/usePrivateSessionsExperiment', () => ({
+  usePrivateSessionsExperiment: () => ({
+    enabled: currentPrivateSessionsExperimentEnabled,
+  }),
+}));
+
 vi.mock('@/hooks/useLiveVoice', () => ({
   useLiveVoice: ({ onUtterance }: { onUtterance: (text: string) => void }) => {
     voiceState.onUtterance = onUtterance;
@@ -201,7 +207,6 @@ vi.mock('./BottomSheetTabs', () => ({
 }));
 
 import { NewTaskForm } from '@/components/tasks/NewTaskForm';
-import { TaskLaunchConfigProvider } from '@/components/tasks/TaskLaunchConfig';
 import { Home } from './Home';
 
 vi.mock('@/components/tasks', async () => {
@@ -222,6 +227,7 @@ vi.mock('@/components/tasks', async () => {
       submitDisabledReason,
       submitWithMetaKey,
       tools,
+      submitLeadingAction,
       voice,
     }: {
       onSubmit: (message: PromptInputMessage) => Promise<void> | void;
@@ -234,6 +240,7 @@ vi.mock('@/components/tasks', async () => {
       submitDisabledReason?: string;
       submitWithMetaKey?: boolean;
       tools?: import('react').ReactNode;
+      submitLeadingAction?: import('react').ReactNode;
       voice?: { active: boolean; onToggle: () => void };
     }) => {
       capturedSubmitWithMetaKey = submitWithMetaKey;
@@ -280,6 +287,7 @@ vi.mock('@/components/tasks', async () => {
             onFocus={() => onPromptFocusChange?.(true)}
             onBlur={() => onPromptFocusChange?.(false)}
           />
+          {submitLeadingAction}
           <button type="submit" disabled={Boolean(submitDisabledReason)}>
             Submit prompt
           </button>
@@ -342,6 +350,7 @@ describe('Home', () => {
     currentBrainConfigured = false;
     currentHomeComposerSuggestionsEnabled = false;
     currentHomeComposerSuggestionsFlagLoading = false;
+    currentPrivateSessionsExperimentEnabled = false;
     currentHomeSuggestions = [];
     currentHomeSuggestionsHasData = true;
     currentHomeSuggestionsPending = false;
@@ -412,7 +421,12 @@ describe('Home', () => {
       .getByRole('button', { name: 'Add attachments' })
       .parentElement?.querySelectorAll('button');
     expect(toolbarButtons?.[0]).toHaveAccessibleName('Add attachments');
-    expect(toolbarButtons?.[1]).toHaveAccessibleName('Model for this session');
+    expect(
+      screen.queryByRole('switch', { name: 'Start a private Session' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Model for this session' }),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
@@ -438,6 +452,39 @@ describe('Home', () => {
         text: 'Test prompt',
       }),
     );
+  });
+
+  it('retains the private Session selection and sends it with creation', async () => {
+    currentPrivateSessionsExperimentEnabled = true;
+    const { rerender } = render(<NewTaskForm initialPrompt="First prompt" />);
+
+    const toggle = screen.getByRole('button', {
+      name: 'Private session',
+    });
+    expect(toggle.querySelector('.lucide-hat-glasses')).toBeInTheDocument();
+    expect(
+      toggle.compareDocumentPosition(
+        screen.getByRole('button', { name: 'Submit prompt' }),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(toggle);
+
+    rerender(<NewTaskForm initialPrompt="Reset prompt" />);
+    expect(
+      screen.getByRole('button', { name: 'Private session' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith(
+        expect.objectContaining({ privacy: 'private' }),
+      );
+    });
   });
 
   it('starts a new Fast session with the selected non-default model', async () => {
@@ -978,60 +1025,20 @@ describe('Home', () => {
     expect(screen.getByText('Onboarding')).toBeInTheDocument();
   });
 
-  it('pins environmentId URL launches with deployment defaults', async () => {
-    currentSearchParams = 'environmentId=env-created';
-
-    render(
-      <TaskLaunchConfigProvider
-        value={{
-          defaultComputeProvider: 'modal',
-          availableComputeProviders: ['modal', 'docker'],
-        }}
-      >
-        <Home initialPlaceholderIndex={0} />
-      </TaskLaunchConfigProvider>,
-    );
-
-    expect(screen.getByTestId('selected-model-id')).toHaveTextContent(
-      'openrouter/openai/gpt-5.4',
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockStartFastSession).toHaveBeenCalledWith({
-        text: 'Test prompt',
-        images: undefined,
-        attachmentTexts: undefined,
-        model: 'openrouter/openai/gpt-5.4',
-        pinnedLaunch: {
-          launchId: expect.any(String),
-          repo: ALL_REPOSITORIES,
-          environmentId: 'env-created',
-          harness: 'opencode-server',
-          computeProvider: 'modal',
-        },
-      });
-    });
-    expect(mockPush).toHaveBeenCalledWith('/task/task-4');
-  });
-
-  it('passes selected reasoning to an environmentId URL launch', async () => {
+  it('treats a legacy environment URL as an ordinary Session launch', async () => {
     currentSearchParams = 'environmentId=env-created';
     render(<Home initialPlaceholderIndex={0} />);
-
     fireEvent.click(screen.getByRole('button', { name: 'Use high reasoning' }));
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
-    await waitFor(() => {
-      expect(mockStartFastSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          reasoningEffort: 'high',
-          pinnedLaunch: expect.objectContaining({
-            environmentId: 'env-created',
-          }),
-        }),
-      );
-    });
+    await waitFor(() => expect(mockStartFastSession).toHaveBeenCalled());
+    expect(mockStartFastSession.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ text: 'Test prompt', reasoningEffort: 'high' }),
+    );
+    expect(mockStartFastSession.mock.calls[0]?.[0]).not.toHaveProperty(
+      'pinnedLaunch',
+    );
+    expect(mockPush).not.toHaveBeenCalledWith('/task/task-4');
   });
 
   it('prefills editable prompt and model details from the URL', async () => {
@@ -1093,5 +1100,31 @@ describe('Home', () => {
     // No call is opened on the home page itself; the Session page owns it.
     expect(voiceState.start).not.toHaveBeenCalled();
     expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1?voice=1');
+  });
+
+  it('opens an owner-only private Session for a private voice call', async () => {
+    currentPrivateSessionsExperimentEnabled = true;
+    voiceState.enabled = true;
+    mockStartFastSession.mockResolvedValue({ sessionId: 'private-session-1' });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Private session' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Voice conversation' }),
+    );
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: '',
+          privacy: 'private',
+          voiceCall: true,
+          conversationId: expect.any(String),
+        }),
+      );
+    });
+    expect(mockPush).toHaveBeenCalledWith(
+      '/sessions/private-session-1?voice=1',
+    );
   });
 });

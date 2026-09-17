@@ -275,10 +275,16 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
   /**
    * Whether the surface classified the message as addressed to Roomote (a
    * mention, a DM, a reply to it) rather than ambient conversation between
-   * people. When this message is steered into a running turn, only `false`
-   * lets that turn end without a visible reply; absent means directed.
+   * people. This is context about directedness, not permission to stay silent.
    */
   directedAtRoomote: z.boolean().optional(),
+  /**
+   * Explicit surface decision that this turn may end without a visible reply.
+   * Absent and false both require a response, including for older durable rows.
+   */
+  allowSilentAmbientReply: z.boolean().optional(),
+  /** The surface classified this turn as conversation between human peers. */
+  peerDirectedTurn: z.boolean().optional(),
   /**
    * Surface context the model reads with the message (the pull request a
    * mention is on, for example). Persisted so a queued or resumed turn keeps

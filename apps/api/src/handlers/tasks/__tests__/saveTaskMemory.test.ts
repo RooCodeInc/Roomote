@@ -6,12 +6,14 @@ import type { McpAuth } from '../../mcp/middleware';
 
 const mocks = vi.hoisted(() => ({
   isBrainEnabled: vi.fn(),
+  isTaskRunSharedBrainEligible: vi.fn(),
   saveBrainAgentSummary: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   db: {},
   isBrainEnabled: mocks.isBrainEnabled,
+  isTaskRunSharedBrainEligible: mocks.isTaskRunSharedBrainEligible,
   saveBrainAgentSummary: mocks.saveBrainAgentSummary,
 }));
 
@@ -41,7 +43,21 @@ function postMemory(body: unknown) {
 describe('saveTaskMemory', () => {
   beforeEach(() => {
     mocks.isBrainEnabled.mockReset().mockResolvedValue(true);
+    mocks.isTaskRunSharedBrainEligible.mockReset().mockResolvedValue(true);
     mocks.saveBrainAgentSummary.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('keeps private task memories out of the shared Brain', async () => {
+    mocks.isTaskRunSharedBrainEligible.mockResolvedValue(false);
+
+    const response = await postMemory({ outcome: 'Private work completed.' });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      saved: false,
+      reason: 'Private tasks cannot write shared memory.',
+    });
+    expect(mocks.saveBrainAgentSummary).not.toHaveBeenCalled();
   });
 
   it('saves a memory within the caps', async () => {

@@ -1089,6 +1089,7 @@ export const runTask = async ({
             reportConsumer: getTaskReportConsumerFromPayload(taskRun.payload),
             commitSha: resolveWorkerReleaseMetadata().workerCommit,
             appEnv: process.env.ROOMOTE_RELEASE_APP_ENV,
+            privacy: task?.privacy,
           },
         ),
         harnessInstructions,

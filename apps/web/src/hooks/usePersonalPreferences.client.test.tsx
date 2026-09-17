@@ -156,10 +156,6 @@ describe('usePersonalPreferences', () => {
       colorTheme: 'system',
       mindReaderMode: false,
       narrationMode: false,
-      resultsPageEnabled: false,
-      homeComposerSuggestionsEnabled: false,
-      serviceCredentialToolsEnabled: false,
-      slackPeerConversationsExperimentEnabled: false,
     });
   });
 

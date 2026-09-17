@@ -765,7 +765,7 @@ async function launchCustomAutomationRow(
         automation.target.targetKind,
       )
         ? automation.target.provider === 'email'
-          ? 'The automation owner no longer has an active verified Email destination.'
+          ? 'The automation owner no longer has an active Email destination.'
           : `The automation owner does not have a linked ${PROVIDER_LABELS[automation.target.provider as Exclude<BackgroundAutomationProvider, 'sentry'>]} account that can receive direct messages.`
         : automation.target.provider === 'teams'
           ? 'Teams report destination is missing a resolvable service URL.'

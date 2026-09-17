@@ -7,6 +7,7 @@ import {
   sessionTasks,
   taskFactory,
   tasks,
+  userFactory,
 } from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
@@ -17,6 +18,10 @@ import { formatAnalyticsDateTime } from './time-buckets';
 describe('getSessionAnalyticsRows', () => {
   const sessionIds: string[] = [];
   const taskIds: string[] = [];
+  const analyticsAuth = {
+    userId: 'analytics-test-user',
+    isAdmin: true,
+  } as UserAuthSuccess;
 
   // createdAt is database-generated, so backdate it after insert.
   async function createSessionAt(createdAt: Date) {
@@ -57,7 +62,7 @@ describe('getSessionAnalyticsRows', () => {
     );
     sessionIds.push(recentSession.id, boundarySession.id, oldSession.id);
 
-    const rows = await getSessionAnalyticsRows({} as UserAuthSuccess, 7, now);
+    const rows = await getSessionAnalyticsRows(analyticsAuth, 7, now);
     const rowIds = new Set(rows.map((row) => row.id));
 
     expect(rowIds.has(recentSession.id)).toBe(true);
@@ -76,7 +81,7 @@ describe('getSessionAnalyticsRows', () => {
     sessionIds.push(slackSession.id, systemSession.id);
 
     const rows = await getSessionAnalyticsRows(
-      {} as UserAuthSuccess,
+      analyticsAuth,
       'all',
       new Date('2026-07-16T16:00:00.000Z'),
     );
@@ -120,7 +125,7 @@ describe('getSessionAnalyticsRows', () => {
     ]);
 
     const rows = await getSessionAnalyticsRows(
-      {} as UserAuthSuccess,
+      analyticsAuth,
       'all',
       new Date('2026-07-16T16:00:00.000Z'),
     );
@@ -142,5 +147,81 @@ describe('getSessionAnalyticsRows', () => {
     expect(rows.filter((row) => row.id === sessionWithTasks.id)).toHaveLength(
       1,
     );
+  });
+
+  it('includes private Sessions for every viewer while redacting non-owner details', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const privateSession = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      title: 'Owner analytics only',
+    });
+    sessionIds.push(privateSession.id);
+
+    const ownerRows = await getSessionAnalyticsRows(
+      { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+      'all',
+      new Date(),
+    );
+    const adminRows = await getSessionAnalyticsRows(
+      { userId: other.id, isAdmin: true } as UserAuthSuccess,
+      'all',
+      new Date(),
+    );
+    const nonOwnerRows = await getSessionAnalyticsRows(
+      { userId: other.id, isAdmin: false } as UserAuthSuccess,
+      'all',
+      new Date(),
+    );
+    const ownerRow = ownerRows.find(({ id }) => id === privateSession.id);
+    const adminRow = adminRows.find(
+      (row) =>
+        row.details.values.sessionTitle === 'Private session' &&
+        row.dimensions.user?.key === ownerRow?.dimensions.user?.key,
+    );
+    const nonOwnerRow = nonOwnerRows.find(
+      (row) =>
+        row.details.values.sessionTitle === 'Private session' &&
+        row.dimensions.user?.key === ownerRow?.dimensions.user?.key,
+    );
+
+    expect(ownerRows.reduce((sum, row) => sum + row.value, 0)).toBe(
+      adminRows.reduce((sum, row) => sum + row.value, 0),
+    );
+    expect(nonOwnerRows.reduce((sum, row) => sum + row.value, 0)).toBe(
+      adminRows.reduce((sum, row) => sum + row.value, 0),
+    );
+    expect(ownerRow).toMatchObject({
+      id: privateSession.id,
+      details: {
+        values: {
+          sessionTitle: 'Owner analytics only',
+          session: 'Open',
+        },
+        links: { session: `/sessions/${privateSession.id}` },
+      },
+    });
+    expect(adminRow).toMatchObject({
+      id: expect.stringMatching(/^private-session:/),
+      dimensions: {
+        user: ownerRow?.dimensions.user,
+        source: { key: 'Private', label: 'Private' },
+        status: { key: 'Private', label: 'Private' },
+      },
+      details: { values: { sessionTitle: 'Private session' } },
+    });
+    expect(adminRow?.details.links).toBeUndefined();
+    expect(nonOwnerRow).toMatchObject({
+      id: expect.stringMatching(/^private-session:/),
+      dimensions: { user: ownerRow?.dimensions.user },
+      details: { values: { sessionTitle: 'Private session' } },
+    });
+    expect(nonOwnerRow?.details.links).toBeUndefined();
+    expect(JSON.stringify(adminRow)).not.toContain(privateSession.id);
+    expect(JSON.stringify(adminRow)).not.toContain('Owner analytics only');
+    expect(adminRow?.details.values.user).toBe(ownerRow?.details.values.user);
   });
 });

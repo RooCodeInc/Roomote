@@ -22,6 +22,7 @@ import {
   inArray,
   isNull,
   or,
+  privateFastSessionAccess,
   sessions,
   sql,
   taskArtifacts,
@@ -30,6 +31,7 @@ import {
   users,
 } from '@roomote/db/server';
 import type { FastAgentMessage } from '@roomote/db';
+import { getRetryableFailedStartRunIds } from '@roomote/cloud-agents/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { getTaskMessageReference } from '@/lib/task-message-reference';
@@ -61,6 +63,7 @@ type FastSessionTaskSummary = {
   latestRun: {
     status: (typeof taskRuns.$inferSelect)['status'];
     taskPhase: (typeof taskRuns.$inferSelect)['taskPhase'];
+    canRetryFailedStart: boolean;
   };
 };
 
@@ -315,6 +318,7 @@ const fastSessionSelection = {
   ownerName: users.name,
   ownerEmail: users.email,
   ownerImageUrl: users.imageUrl,
+  privacy: fastAgentConversations.privacy,
   title: fastAgentConversations.title,
   model: fastAgentConversations.model,
   reasoningEffort: fastAgentConversations.reasoningEffort,
@@ -347,13 +351,13 @@ export async function findAccessibleFastSession(
   return findFastSession(sessionId, fastSessionScope(auth));
 }
 
-/** Direct-link reads for authenticated deployment members, not action authorization. */
+/** Shared direct links stay collaborative; private reads require the owner. */
 export async function findReadableFastSession(
   auth: FastSessionAuth,
   sessionId: string,
 ) {
   if (!auth.userId) return null;
-  return findFastSession(sessionId);
+  return findFastSession(sessionId, privateFastSessionAccess(auth));
 }
 
 async function findFastSession(
@@ -433,6 +437,8 @@ export async function getFastSessionTasks(
         latestRunId: taskRuns.id,
         status: taskRuns.status,
         taskPhase: taskRuns.taskPhase,
+        payloadKind: taskRuns.payloadKind,
+        payload: taskRuns.payload,
         machineDomain: taskRuns.machineDomain,
         machineDomains: taskRuns.machineDomains,
         initialPaths: taskRuns.initialPaths,
@@ -462,6 +468,8 @@ export async function getFastSessionTasks(
       latestRunId: latestRunPerTask.latestRunId,
       status: latestRunPerTask.status,
       taskPhase: latestRunPerTask.taskPhase,
+      payloadKind: latestRunPerTask.payloadKind,
+      payload: latestRunPerTask.payload,
       machineDomain: latestRunPerTask.machineDomain,
       machineDomains: latestRunPerTask.machineDomains,
       initialPaths: latestRunPerTask.initialPaths,
@@ -484,6 +492,8 @@ export async function getFastSessionTasks(
       latestRunPerTask.latestRunId,
       latestRunPerTask.status,
       latestRunPerTask.taskPhase,
+      latestRunPerTask.payloadKind,
+      latestRunPerTask.payload,
       latestRunPerTask.machineDomain,
       latestRunPerTask.machineDomains,
       latestRunPerTask.initialPaths,
@@ -496,6 +506,14 @@ export async function getFastSessionTasks(
     )
     .orderBy(desc(latestRunPerTask.latestRunId));
 
+  const retryableFailedStartRunIds = await getRetryableFailedStartRunIds(
+    rows.map((row) => ({
+      id: row.latestRunId,
+      status: row.status,
+      payloadKind: row.payloadKind,
+      payload: row.payload,
+    })),
+  );
   const taskIds = rows.map((row) => row.taskId);
   const previewConfig = taskIds.length
     ? await getSessionPreviewProxyConfig()
@@ -539,6 +557,7 @@ export async function getFastSessionTasks(
     latestRun: {
       status: row.status,
       taskPhase: row.taskPhase,
+      canRetryFailedStart: retryableFailedStartRunIds.has(row.latestRunId),
     },
   }));
 }
@@ -810,7 +829,12 @@ export async function getFastSessionById(
     .select(fastSessionSelection)
     .from(fastAgentConversations)
     .leftJoin(users, eq(fastAgentConversations.userId, users.id))
-    .where(eq(fastAgentConversations.id, sessionId))
+    .where(
+      and(
+        eq(fastAgentConversations.id, sessionId),
+        privateFastSessionAccess(auth),
+      ),
+    )
     .limit(1);
 
   if (!session) {

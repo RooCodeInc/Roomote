@@ -1490,11 +1490,12 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(integrationInstructions).toContain('roomote_call_integration_tool');
     expect(integrationInstructions).toContain('- github [id: github]');
     expect(integrationInstructions).toContain(
-      'An eligible deployment GitHub App installation with an active connected repository is required, just as in Fast',
+      'An eligible deployment GitHub App installation with an active connected repository is required',
     );
     expect(integrationInstructions).toContain(
       'This task MCP path is read-only',
     );
+    expect(integrationInstructions).not.toContain('gist');
   });
 
   it('mounts every server when no Roomote member server can proxy on-demand calls', () => {

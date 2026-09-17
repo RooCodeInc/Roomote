@@ -13,9 +13,19 @@ agent works with an opaque reference or a substitute token, and Roomote's API
 adds the real key on the way out. Integration keys are for HTTPS services, not
 a replacement for [connected integrations](/integrations).
 
+When you ask Roomote to connect a service without saying how, it uses a
+connected integration for that service if there is one, then the service's
+official remote MCP server when one exists, and an integration key otherwise or
+when you ask for the service's API. When it does not already know the service,
+it reads the provider's documentation first to find the MCP server and what
+connecting to it requires. If the provider must approve or allowlist clients,
+or access is limited to a beta or a plan, Roomote uses an integration key and
+mentions the MCP as an option. Otherwise it looks up the API origin, the key
+header, and where you create a key.
+
 <Note>
-  Integration keys are gated per user. Turn on **integration keys** under
-  **Settings → Experimental** to enable them for the Sessions you own.
+  Integration keys are gated deployment-wide. An admin can turn on
+  **Integration keys** under **Settings → Experimental** for all members.
 </Note>
 
 ## How an approval works
@@ -39,6 +49,9 @@ a replacement for [connected integrations](/integrations).
 4. The Session resumes on its own. Personal integrations are available to your
    Sessions and coding tasks. Deployment-wide integrations are available to
    active members while the integration owner remains active.
+
+If the service's remote MCP server is still waiting for authorization, Roomote
+shares that link again rather than opening a key approval.
 
 You can also add a personal integration directly under **Personal Settings →
 Personal integrations**, naming the origin, header, methods, and key yourself.

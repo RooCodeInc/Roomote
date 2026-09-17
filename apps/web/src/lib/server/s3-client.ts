@@ -10,12 +10,13 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   getArtifactStorageKey,
+  ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
   type ArtifactStorageOwner,
 } from '@roomote/types';
 
 import { Env } from '@/lib/server/env';
 
-const PRESIGNED_URL_EXPIRY = 3600; // 1 hour
+const PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS = 3600;
 
 // Lazy initialization to avoid importing Env at module level
 // This prevents errors when the module is imported by client-side code
@@ -82,7 +83,7 @@ export async function generateUploadUrl(
   });
 
   return getSignedUrl(getS3PresignClient(), command, {
-    expiresIn: PRESIGNED_URL_EXPIRY,
+    expiresIn: ARTIFACT_UPLOAD_URL_MAX_AGE_SECONDS,
   });
 }
 
@@ -111,7 +112,7 @@ export async function generateOwnedDownloadUrl(
   });
 
   return getSignedUrl(getS3PresignClient(), command, {
-    expiresIn: PRESIGNED_URL_EXPIRY,
+    expiresIn: PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
   });
 }
 
@@ -150,17 +151,18 @@ export async function deleteArtifact(
   await getS3Client().send(command);
 }
 
+type OwnedArtifactDelete = ArtifactStorageOwner & {
+  artifactId: string;
+  path: string;
+  version: number;
+};
+
 /**
  * Delete multiple artifacts from S3 in a batch.
  * S3 allows up to 1000 objects per batch delete request.
  */
 export async function deleteArtifactsBatch(
-  artifacts: Array<{
-    taskId: string;
-    artifactId: string;
-    path: string;
-    version: number;
-  }>,
+  artifacts: OwnedArtifactDelete[],
 ): Promise<{ deleted: number; errors: number }> {
   if (artifacts.length === 0) {
     return { deleted: 0, errors: 0 };
@@ -178,8 +180,10 @@ export async function deleteArtifactsBatch(
       Bucket: Env.S3_BUCKET_ARTIFACTS,
       Delete: {
         Objects: batch.map((artifact) => ({
-          Key: getArtifactKey(
-            artifact.taskId,
+          Key: getOwnedArtifactKey(
+            artifact.taskId !== undefined
+              ? { taskId: artifact.taskId }
+              : { sessionId: artifact.sessionId },
             artifact.artifactId,
             artifact.path,
             artifact.version,

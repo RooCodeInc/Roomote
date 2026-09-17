@@ -112,7 +112,7 @@ vi.mock('../github-pr-review-check', () => ({
     mockMarkGithubPrReviewCheckInProgress(...args),
 }));
 
-import { dequeueTaskRun } from '../dequeue-task-run';
+import { buildDequeuedTaskContext, dequeueTaskRun } from '../dequeue-task-run';
 
 type RunWithTask = TaskRun & { task: Record<string, unknown> };
 
@@ -588,41 +588,61 @@ describe('dequeueTaskRun', () => {
     );
   });
 
-  it('records createSourceControlToken as failed when token creation returns null', async () => {
-    const taskRun = makeStandardTaskRun();
-
-    mockTxExecute.mockResolvedValue([{ id: taskRun.id }]);
-    mockTxFindFirstTaskRuns.mockResolvedValue(taskRun);
-    mockCreateSourceControlTokenForTaskRun.mockResolvedValueOnce(null);
-
-    const result = await dequeueTaskRun({ orgId: 'org-1' } as never, {
-      runId: taskRun.id,
-    });
-
-    expect(result).toBeUndefined();
-    expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        runId: taskRun.id,
-        taskId: taskRun.taskId,
-        eventType: 'phase',
-        message: 'createSourceControlToken',
-        details: expect.objectContaining({
-          phase: 'createSourceControlToken',
-          outcome: 'failed',
-          durationMs: expect.any(Number),
-          error: expect.stringContaining('returned no token'),
-          payloadKind: TaskPayloadKind.StandardTask,
-          provider: 'github',
+  it.each(['github', 'gitlab'] as const)(
+    'cancels and releases a private %s run when credential setup throws',
+    async (provider) => {
+      const taskRun = makeStandardTaskRun({
+        payload: {
+          repo: 'owner/repo',
+          description: 'Investigate auth flakes',
+          sourceControlProvider: provider,
+        },
+        task: makeTaskRow({
+          privacy: 'private',
+          privateOwnerUserId: 'user-1',
         }),
-      }),
-    );
-    expect(mockCancelAndReleaseTaskRun).toHaveBeenCalledWith(
-      taskRun,
-      'Failed to create source control token.',
-      expect.any(String),
-    );
-  });
+      });
+
+      mockTxExecute.mockResolvedValue([{ id: taskRun.id }]);
+      mockTxFindFirstTaskRuns.mockResolvedValue(taskRun);
+      mockResolveTaskRunSourceControlProviders.mockResolvedValue([provider]);
+      mockCreateSourceControlTokenForTaskRun.mockRejectedValueOnce(
+        new Error('Source-control credentials are unavailable.'),
+      );
+
+      const result = await dequeueTaskRun({ orgId: 'org-1' } as never, {
+        runId: taskRun.id,
+      });
+
+      expect(result).toBeUndefined();
+      expect(mockCreateSourceControlTokenForTaskRun).toHaveBeenCalledWith(
+        taskRun,
+        '[dequeueTaskRun]',
+      );
+      expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          runId: taskRun.id,
+          taskId: taskRun.taskId,
+          eventType: 'phase',
+          message: 'createSourceControlToken',
+          details: expect.objectContaining({
+            phase: 'createSourceControlToken',
+            outcome: 'failed',
+            durationMs: expect.any(Number),
+            error: expect.stringContaining('credentials are unavailable'),
+            payloadKind: TaskPayloadKind.StandardTask,
+            provider,
+          }),
+        }),
+      );
+      expect(mockCancelAndReleaseTaskRun).toHaveBeenCalledWith(
+        taskRun,
+        'Failed to create source control token.',
+        expect.any(String),
+      );
+    },
+  );
 
   it('skips slackThreadTs persistence when the job is not Slack-originated', async () => {
     const taskRun = makeStandardTaskRun();
@@ -814,5 +834,21 @@ describe('dequeueTaskRun', () => {
       expect.stringContaining('Failed to persist launch metadata'),
       '[dequeueTaskRun]',
     );
+  });
+});
+
+describe('buildDequeuedTaskContext', () => {
+  it('carries private task ownership to the worker runtime', () => {
+    expect(
+      buildDequeuedTaskContext(
+        makeTaskRow({
+          privacy: 'private',
+          privateOwnerUserId: 'user-1',
+        }) as never,
+      ),
+    ).toMatchObject({
+      privacy: 'private',
+      privateOwnerUserId: 'user-1',
+    });
   });
 });

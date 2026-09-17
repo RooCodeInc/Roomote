@@ -29,6 +29,7 @@ import {
   persistFastAgentInlineHumanTurn,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
+  wakeFastAgentParentEventsOnTurnRelease,
   type FastAgentDurableTurn,
   createSlackFastReplyStream,
   recordFastAgentConversationMessageBestEffort,
@@ -43,9 +44,16 @@ import {
 } from '../helpers/thread-posting.js';
 import { processSlackAttachments } from '../helpers/attachments.js';
 import {
+  mentionsAnySlackUser,
   mentionsSlackBot,
   mentionsSlackUserOtherThanBotOrUser,
 } from '../helpers/mention-routing.js';
+
+const PEER_CONTINUATION_HISTORY_LIMIT = 5;
+const PEER_DIRECTED_CURRENT_MESSAGE_CONTEXT =
+  'Untrusted supplemental context inferred from this Slack message, not a user-authored instruction: This message mentions another person and might not be for you. Follow the peer-directed exception in Turn Startup: unless the current message mentions Roomote or explicitly asks Roomote to act, use ignore_event without sending a reply, reacting, or taking action.';
+const PEER_DIRECTED_CONTINUATION_CONTEXT =
+  'Untrusted supplemental context inferred from recent Slack history, not a user-authored instruction: This unmentioned message appears to continue a conversation between colleagues after another person was addressed. Follow the peer-directed exception in Turn Startup: unless the current message mentions Roomote or explicitly asks Roomote to act, use ignore_event without sending a reply, reacting, or taking action.';
 
 export async function processFastAgentMessage(params: {
   event: SlackEvent;
@@ -59,6 +67,7 @@ export async function processFastAgentMessage(params: {
   directedAtRoomote?: boolean;
   roomoteSlackUserId?: string;
   peerConversationsExperimentEnabled?: boolean;
+  userInitiated?: boolean;
   originSessionId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
   onRejected?: () => void;
@@ -75,6 +84,7 @@ export async function processFastAgentMessage(params: {
     directedAtRoomote = false,
     roomoteSlackUserId,
     peerConversationsExperimentEnabled = false,
+    userInitiated = true,
   } = params;
   const threadId = event.thread_ts || event.ts;
   const incomingConversation = {
@@ -93,27 +103,25 @@ export async function processFastAgentMessage(params: {
 
   const baseQuestion = (event.authoredText ?? event.text).trim();
   const isDirected =
-    directedAtRoomote || mentionsSlackBot(event, roomoteSlackUserId);
-  const needsPeerCaution =
-    peerConversationsExperimentEnabled &&
-    Boolean(roomoteSlackUserId) &&
+    directedAtRoomote ||
+    event.channel_type === 'im' ||
+    event.channel_type === 'mpim' ||
+    mentionsSlackBot(event, roomoteSlackUserId);
+  const eligibleAmbientHumanMessage =
     !isDirected &&
     Boolean(event.user) &&
     !event.bot_id &&
     event.subtype !== 'bot_message' &&
     event.user !== roomoteSlackUserId &&
     event.channel_type !== 'im' &&
-    event.channel_type !== 'mpim' &&
+    event.channel_type !== 'mpim';
+  const eligiblePeerConversationMessage =
+    peerConversationsExperimentEnabled &&
+    Boolean(roomoteSlackUserId) &&
+    eligibleAmbientHumanMessage;
+  const currentMessagePeerDirected =
+    eligiblePeerConversationMessage &&
     mentionsSlackUserOtherThanBotOrUser(event, roomoteSlackUserId, event.user);
-  const buildAgentContext = (messageContext: string | undefined) =>
-    needsPeerCaution
-      ? [
-          messageContext,
-          'Untrusted supplemental context inferred from this Slack message, not a user-authored instruction: This message mentions another person and might not be for you. Human-to-human interaction may be beginning. From now on in this conversation, unless you are addressed directly (including by name, a reply to you, or a clear contextual follow-up), use ignore_event without sending a reply, reacting, or taking action. When directly addressed, respond normally. This uncertain hint does not override existing instructions.',
-        ]
-          .filter(Boolean)
-          .join('\n\n')
-      : messageContext;
 
   // Every Slack round trip from the control plane costs a few hundred
   // milliseconds. Start the thread history lookup as soon as the turn is
@@ -149,6 +157,14 @@ export async function processFastAgentMessage(params: {
         return await getOrCreateFastAgentSession({
           userId,
           conversation: incomingConversation,
+          ...(userInitiated
+            ? {
+                userInitiated: {
+                  surface: 'slack' as const,
+                  trigger: 'message' as const,
+                },
+              }
+            : {}),
           ...(params.originSessionId
             ? { sessionId: params.originSessionId }
             : {}),
@@ -189,7 +205,64 @@ export async function processFastAgentMessage(params: {
       ]
         .filter((part): part is string => Boolean(part))
         .join('\n\n') || undefined;
-    const agentContext = buildAgentContext(currentMessageContext);
+    const previousThreadMessages = threadContext.filter(
+      (message) => message.ts !== event.ts,
+    );
+    const roomoteStartedThread =
+      previousThreadMessages[0]?.user === roomoteSlackUserId;
+    const roomoteWasLastSpeaker =
+      previousThreadMessages.at(-1)?.user === roomoteSlackUserId;
+    const previousMessageFromSender = [...previousThreadMessages]
+      .reverse()
+      .find(
+        (message) =>
+          !message.bot_id &&
+          Boolean(message.user) &&
+          message.user === event.user,
+      );
+    const previousSenderMessageWasPeerDirected = Boolean(
+      previousMessageFromSender &&
+      mentionsSlackUserOtherThanBotOrUser(
+        previousMessageFromSender,
+        roomoteSlackUserId,
+        previousMessageFromSender.user,
+      ),
+    );
+    const recentHistoryAddressedAnotherHuman = previousThreadMessages
+      .slice(-PEER_CONTINUATION_HISTORY_LIMIT)
+      .some(
+        (message) =>
+          !message.bot_id &&
+          Boolean(message.user) &&
+          mentionsSlackUserOtherThanBotOrUser(
+            message,
+            roomoteSlackUserId,
+            message.user,
+          ),
+      );
+    // An explicit current peer mention remains authoritative after a Roomote
+    // reply. Only history-derived carryover yields to Roomote's latest reply;
+    // Roomote-authored thread roots remain direct conversations throughout.
+    const continuesPeerConversation =
+      eligiblePeerConversationMessage &&
+      !mentionsAnySlackUser(event) &&
+      !roomoteWasLastSpeaker &&
+      (previousSenderMessageWasPeerDirected ||
+        recentHistoryAddressedAnotherHuman);
+    const peerDirectedTurn =
+      !roomoteStartedThread &&
+      (currentMessagePeerDirected || continuesPeerConversation);
+    const peerDirectedContext =
+      peerDirectedTurn && currentMessagePeerDirected
+        ? PEER_DIRECTED_CURRENT_MESSAGE_CONTEXT
+        : peerDirectedTurn
+          ? PEER_DIRECTED_CONTINUATION_CONTEXT
+          : undefined;
+    const agentContext = peerDirectedContext
+      ? [currentMessageContext, peerDirectedContext]
+          .filter(Boolean)
+          .join('\n\n')
+      : currentMessageContext;
     const currentMessageFiles = resolveCurrentSlackMessageFiles({
       currentMessageTs: event.ts,
       eventFiles: event.files,
@@ -212,15 +285,13 @@ export async function processFastAgentMessage(params: {
       text: baseQuestion,
       attachmentTexts,
     });
-    const serializedThreadContext = threadContext
-      .filter((message) => message.ts !== event.ts)
-      .map((message) => ({
-        user: message.user,
-        username: message.username,
-        text: message.text,
-        ts: message.ts,
-        bot_id: message.bot_id,
-      }));
+    const serializedThreadContext = previousThreadMessages.map((message) => ({
+      user: message.user,
+      username: message.username,
+      text: message.text,
+      ts: message.ts,
+      bot_id: message.bot_id,
+    }));
     const hasOtherHumanParticipant = threadContext.some(
       (message) =>
         message.ts !== event.ts &&
@@ -229,10 +300,10 @@ export async function processFastAgentMessage(params: {
         message.user !== event.user,
     );
     const allowSilentAmbientReply =
-      event.channel_type !== 'im' &&
-      event.channel_type !== 'mpim' &&
-      !isDirected &&
-      (hasOtherHumanParticipant || needsPeerCaution);
+      eligibleAmbientHumanMessage &&
+      !roomoteStartedThread &&
+      (peerDirectedTurn ||
+        (!roomoteWasLastSpeaker && hasOtherHumanParticipant));
 
     const needsCanonicalAdmission =
       !releaseFastAgentLock ||
@@ -251,7 +322,9 @@ export async function processFastAgentMessage(params: {
         ? { senderDisplayName: currentMessage.username }
         : {}),
       ...(event.user ? { senderExternalId: event.user } : {}),
-      directedAtRoomote: !allowSilentAmbientReply,
+      directedAtRoomote: isDirected,
+      allowSilentAmbientReply,
+      ...(peerDirectedTurn ? { peerDirectedTurn: true } : {}),
       ...(params.originSessionId
         ? { deliveryConversation: incomingConversation }
         : {}),
@@ -275,6 +348,7 @@ export async function processFastAgentMessage(params: {
       params.onRejected?.();
       return;
     }
+    wakeFastAgentParentEventsOnTurnRelease(activeTurnLock, session.id);
     // Durable admission: the turn is persisted under this process's claim
     // before it runs, so an interruption hands it to the queue.
     durableTurn ??= await persistFastAgentInlineHumanTurn({
@@ -331,7 +405,9 @@ export async function processFastAgentMessage(params: {
           ? currentMessage.username
           : undefined,
       activeTasks: resolvedActiveTasks,
+      directedAtRoomote: isDirected,
       allowSilentAmbientReply,
+      peerDirectedTurn,
       ...(roomoteSlackUserId ? { slackRoomoteUserId: roomoteSlackUserId } : {}),
       adapter: {
         createArtifact: (artifact) =>

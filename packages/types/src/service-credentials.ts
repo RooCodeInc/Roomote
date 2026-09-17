@@ -11,6 +11,7 @@ import {
 export const SERVICE_CREDENTIAL_TOOLS_EXPERIMENT_KEY =
   'integration_keys_enabled' as const;
 
+/** @deprecated Retained for N-1 rollback compatibility with dormant user metadata. */
 export function isServiceCredentialToolsExperimentEnabled(
   metadata: unknown,
 ): boolean {
@@ -122,9 +123,8 @@ export const integrationCreateSchema = z
   .strict();
 
 /**
- * Mediated integration-key requests (`request_with_integration_key` /
- * `integration_request` with a `session:` ID) use the same approved-method
- * policy as the credential egress gateway.
+ * Mediated integration-key requests use the same approved-method policy as
+ * the credential egress gateway.
  */
 export const SERVICE_CREDENTIAL_REQUEST_BODY_MAX_BYTES = 65_536;
 

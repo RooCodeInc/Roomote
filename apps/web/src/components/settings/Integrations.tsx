@@ -24,22 +24,14 @@ import {
   useLinearOauthSetup,
 } from '@/hooks/linear';
 import {
-  useAsanaConnection,
   useConnectMcp,
   useDisconnectMcp,
   useGrafanaConnection,
-  useGranolaConnection,
   useExaConnection,
   useElevenLabsConnection,
   useVoiceConnection,
   useEffectiveMcpIntegrations,
-  useNotionConnection,
-  useRipplingConnection,
-  useSaveAsanaConnection,
-  useSaveNotionConnection,
-  useSaveRipplingConnection,
   useSaveGrafanaConnection,
-  useSaveGranolaConnection,
   useSaveExaConnection,
   useRemoveExaApiKey,
   useSaveElevenLabsConnection,
@@ -47,11 +39,9 @@ import {
   usePreviewVoice,
   useSaveSnowflakeConnection,
   useSaveVercelConnection,
-  useSaveXConnection,
   useSetDeploymentMcpEnabled,
   useSnowflakeConnection,
   useVercelConnection,
-  useXConnection,
 } from '@/hooks/mcp-connections';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import {
@@ -63,23 +53,23 @@ import {
 import { useCustomMcpServers } from './CustomMcpServers';
 import { useYourIntegrations } from './YourIntegrations';
 import {
-  saveAsanaConnectionSchema,
-  saveNotionConnectionSchema,
-  saveRipplingConnectionSchema,
+  buildAdminConfiguredIntegrationItem,
+  useCredentialIntegrations,
+} from './CredentialIntegrations';
+import {
   saveGrafanaConnectionSchema,
-  saveGranolaConnectionSchema,
   saveExaConnectionSchema,
   saveElevenLabsConnectionSchema,
   saveVoiceConnectionSchema,
   saveSnowflakeConnectionSchema,
   saveVercelConnectionSchema,
-  saveXConnectionSchema,
 } from '@/types';
 
 import {
   Alert,
   AlertDescription,
   AlertTitle,
+  BasicTooltip,
   Button,
   Card,
   CardContent,
@@ -174,25 +164,6 @@ function getLinearOauthSetupStatus(
   return status === 'partial' ? 'Configuration incomplete.' : null;
 }
 
-type AdminConfiguredIntegrationItemOptions = {
-  integration: McpIntegrationDefinition;
-  connection?: { authStatus?: string | null };
-  orgEnabled: boolean;
-  /** Note under the description, e.g. that the environment provides the credential. */
-  status?: string;
-  highlightedIntegrationId: string;
-  savePending: boolean;
-  disconnectPending: boolean;
-  disconnectingMcpId?: string;
-  dialogOpen: boolean;
-  connectionPending: boolean;
-  canConfigure: boolean;
-  canManageTools: boolean;
-  openDialog: () => void;
-  openToolDialog: () => void;
-  disconnectIntegration: () => void;
-};
-
 type SnowflakeFormState = {
   account: string;
   username: string;
@@ -206,22 +177,6 @@ type SnowflakeConnectionData = {
   account: string;
   username: string;
   role: string;
-};
-
-type AsanaFormState = {
-  accessToken: string;
-};
-
-type NotionFormState = {
-  internalIntegrationSecret: string;
-};
-
-type RipplingFormState = {
-  apiToken: string;
-};
-
-type GranolaFormState = {
-  apiKey: string;
 };
 
 type ExaFormState = {
@@ -258,10 +213,6 @@ type VercelFormState = {
   defaultTeamIdOrSlug: string;
 };
 
-type XFormState = {
-  bearerToken: string;
-};
-
 type VercelConnectionData = {
   authStatus?: 'pending' | 'authenticated' | 'error' | null;
   defaultTeamIdOrSlug?: string;
@@ -279,26 +230,6 @@ function buildEmptySnowflakeForm(): SnowflakeFormState {
     privateKey: '',
     privateKeyPassphrase: '',
     role: '',
-  };
-}
-
-function buildEmptyAsanaForm(): AsanaFormState {
-  return {
-    accessToken: '',
-  };
-}
-
-function buildEmptyNotionForm(): NotionFormState {
-  return { internalIntegrationSecret: '' };
-}
-
-function buildEmptyRipplingForm(): RipplingFormState {
-  return { apiToken: '' };
-}
-
-function buildEmptyGranolaForm(): GranolaFormState {
-  return {
-    apiKey: '',
   };
 }
 
@@ -355,26 +286,6 @@ function buildEmptyVercelForm(): VercelFormState {
   };
 }
 
-function buildEmptyXForm(): XFormState {
-  return {
-    bearerToken: '',
-  };
-}
-
-function getXFieldErrors(
-  result: ReturnType<typeof saveXConnectionSchema.safeParse>,
-): Partial<Record<keyof XFormState, string[]>> {
-  if (result.success) {
-    return {};
-  }
-
-  const fieldErrors = result.error.flatten().fieldErrors;
-
-  return {
-    bearerToken: fieldErrors.bearerToken,
-  };
-}
-
 function buildSnowflakeForm(
   connection: SnowflakeConnectionData | null | undefined,
 ): SnowflakeFormState {
@@ -406,54 +317,6 @@ function getSnowflakeFieldErrors(
     privateKey: fieldErrors.privateKey,
     privateKeyPassphrase: fieldErrors.privateKeyPassphrase,
     role: fieldErrors.role,
-  };
-}
-
-function getAsanaFieldErrors(
-  result: ReturnType<typeof saveAsanaConnectionSchema.safeParse>,
-): Partial<Record<keyof AsanaFormState, string[]>> {
-  if (result.success) {
-    return {};
-  }
-
-  const fieldErrors = result.error.flatten().fieldErrors;
-
-  return {
-    accessToken: fieldErrors.accessToken,
-  };
-}
-
-function getNotionFieldErrors(
-  result: ReturnType<typeof saveNotionConnectionSchema.safeParse>,
-): Partial<Record<keyof NotionFormState, string[]>> {
-  if (result.success) {
-    return {};
-  }
-
-  return {
-    internalIntegrationSecret:
-      result.error.flatten().fieldErrors.internalIntegrationSecret,
-  };
-}
-
-function getRipplingFieldErrors(
-  result: ReturnType<typeof saveRipplingConnectionSchema.safeParse>,
-): Partial<Record<keyof RipplingFormState, string[]>> {
-  if (result.success) return {};
-  return { apiToken: result.error.flatten().fieldErrors.apiToken };
-}
-
-function getGranolaFieldErrors(
-  result: ReturnType<typeof saveGranolaConnectionSchema.safeParse>,
-): Partial<Record<keyof GranolaFormState, string[]>> {
-  if (result.success) {
-    return {};
-  }
-
-  const fieldErrors = result.error.flatten().fieldErrors;
-
-  return {
-    apiKey: fieldErrors.apiKey,
   };
 }
 
@@ -567,109 +430,6 @@ export function sortIntegrationItems<T extends { id: string; name: string }>(
 
     return left.name.localeCompare(right.name);
   });
-}
-
-function buildAdminConfiguredIntegrationItem({
-  integration,
-  connection,
-  orgEnabled,
-  highlightedIntegrationId,
-  savePending,
-  disconnectPending,
-  disconnectingMcpId,
-  dialogOpen,
-  connectionPending,
-  canConfigure,
-  canManageTools,
-  openDialog,
-  openToolDialog,
-  disconnectIntegration,
-  status,
-}: AdminConfiguredIntegrationItemOptions): IntegrationItem {
-  const enabled = orgEnabled || connection?.authStatus === 'authenticated';
-  const isPending =
-    savePending || (disconnectPending && disconnectingMcpId === integration.id);
-
-  return {
-    id: integration.id,
-    name: integration.name,
-    description: integration.description,
-    icon: <McpIcon icon={integration.icon} name={integration.name} />,
-    enabled,
-    highlighted: highlightedIntegrationId === integration.id,
-    isMcpBased: true,
-    actionLabel: canConfigure
-      ? enabled
-        ? `Disconnect ${integration.name}`
-        : `Configure ${integration.name}`
-      : undefined,
-    isPending,
-    status,
-    configureAction: canConfigure
-      ? {
-          label: 'Configure',
-          ariaLabel: `Configure ${integration.name}`,
-          onAction: openDialog,
-          isPending: isPending || (dialogOpen && connectionPending),
-          icon: <Pencil />,
-        }
-      : null,
-    manageToolsAction:
-      canManageTools &&
-      enabled &&
-      integration.serverMode !== 'native' &&
-      integration.serverMode !== 'credential_only'
-        ? {
-            label: 'Manage available tools',
-            ariaLabel: `Manage ${integration.name} tools`,
-            onAction: openToolDialog,
-            isPending: false,
-            icon: <Wrench />,
-          }
-        : undefined,
-    removeAction:
-      canConfigure && enabled
-        ? {
-            label: 'Remove',
-            ariaLabel: `Remove ${integration.name}`,
-            onAction: disconnectIntegration,
-            isPending,
-          }
-        : undefined,
-    headerAction:
-      canConfigure && connection != null
-        ? {
-            label: 'Edit connection',
-            ariaLabel: `Edit ${integration.name} connection`,
-            onAction: openDialog,
-            isPending: isPending || (dialogOpen && connectionPending),
-            icon: <Pencil className="size-4" />,
-          }
-        : undefined,
-    secondaryAction:
-      canManageTools &&
-      enabled &&
-      integration.serverMode !== 'native' &&
-      integration.serverMode !== 'credential_only'
-        ? {
-            label: 'Manage tools',
-            ariaLabel: `Manage ${integration.name} tools`,
-            onAction: openToolDialog,
-            isPending: false,
-            icon: <Wrench className="size-4" />,
-          }
-        : undefined,
-    onAction: canConfigure
-      ? () => {
-          if (enabled) {
-            disconnectIntegration();
-            return;
-          }
-
-          openDialog();
-        }
-      : undefined,
-  };
 }
 
 function DeepLinkEnableDialog({
@@ -960,265 +720,6 @@ function SnowflakeConnectionFields({
   );
 }
 
-function AsanaConnectionFields({
-  form,
-  fieldErrors,
-  formError,
-  allowBlankToken,
-  onFieldChange,
-}: {
-  form: AsanaFormState;
-  fieldErrors: Partial<Record<keyof AsanaFormState, string[]>>;
-  formError: string | null;
-  allowBlankToken: boolean;
-  onFieldChange: (field: keyof AsanaFormState, value: string) => void;
-}) {
-  const fieldClassName =
-    'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
-
-  return (
-    <>
-      <div className="space-y-2">
-        <Label htmlFor="asana-access-token">Asana Access Token</Label>
-        <Input
-          id="asana-access-token"
-          placeholder="0/1234567890abcdef..."
-          value={form.accessToken}
-          onChange={(event) => onFieldChange('accessToken', event.target.value)}
-          {...getFieldErrorAttributes(
-            'asana-access-token',
-            fieldErrors.accessToken,
-          )}
-          className={fieldClassName}
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-          data-1p-ignore
-        />
-        <p className="text-sm text-muted-foreground">
-          Works with both Personal Access Tokens and Service Account tokens.
-          Generate a PAT in Asana at{' '}
-          <a
-            href="https://app.asana.com/0/my-apps"
-            target="_blank"
-            rel="noreferrer"
-            className="text-primary underline hover:no-underline"
-          >
-            app.asana.com/0/my-apps
-          </a>
-          .
-        </p>
-        {allowBlankToken ? (
-          <p className="text-sm text-muted-foreground">
-            Leave blank to keep the existing token.
-          </p>
-        ) : null}
-        <FieldError
-          fieldId="asana-access-token"
-          errors={fieldErrors.accessToken}
-        />
-      </div>
-      {formError ? (
-        <p className="text-sm text-destructive">{formError}</p>
-      ) : null}
-    </>
-  );
-}
-
-function NotionConnectionFields({
-  form,
-  fieldErrors,
-  formError,
-  allowBlankSecret,
-  onFieldChange,
-}: {
-  form: NotionFormState;
-  fieldErrors: Partial<Record<keyof NotionFormState, string[]>>;
-  formError: string | null;
-  allowBlankSecret: boolean;
-  onFieldChange: (field: keyof NotionFormState, value: string) => void;
-}) {
-  const fieldClassName =
-    'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
-
-  return (
-    <>
-      <div className="space-y-2">
-        <Label htmlFor="notion-internal-integration-secret">
-          Internal integration secret
-        </Label>
-        <Input
-          id="notion-internal-integration-secret"
-          type="password"
-          placeholder="ntn_..."
-          value={form.internalIntegrationSecret}
-          onChange={(event) =>
-            onFieldChange('internalIntegrationSecret', event.target.value)
-          }
-          {...getFieldErrorAttributes(
-            'notion-internal-integration-secret',
-            fieldErrors.internalIntegrationSecret,
-          )}
-          className={fieldClassName}
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-          data-1p-ignore
-        />
-        <p className="text-sm text-muted-foreground">
-          Create an internal integration in{' '}
-          <a
-            href="https://www.notion.so/profile/integrations/internal"
-            target="_blank"
-            rel="noreferrer"
-            className="text-primary underline hover:no-underline"
-          >
-            Notion integrations
-          </a>
-          . In Notion, choose its read, update, insert, and comment
-          capabilities, then share only the approved pages or data sources with
-          it. Roomote cannot access anything that has not been shared with this
-          connection.
-        </p>
-        {allowBlankSecret ? (
-          <p className="text-sm text-muted-foreground">
-            Leave blank to keep the existing secret.
-          </p>
-        ) : null}
-        <FieldError
-          fieldId="notion-internal-integration-secret"
-          errors={fieldErrors.internalIntegrationSecret}
-        />
-      </div>
-      {formError ? (
-        <p className="text-sm text-destructive">{formError}</p>
-      ) : null}
-    </>
-  );
-}
-
-function RipplingConnectionFields({
-  form,
-  fieldErrors,
-  formError,
-  allowBlankToken,
-  onFieldChange,
-}: {
-  form: RipplingFormState;
-  fieldErrors: Partial<Record<keyof RipplingFormState, string[]>>;
-  formError: string | null;
-  allowBlankToken: boolean;
-  onFieldChange: (field: keyof RipplingFormState, value: string) => void;
-}) {
-  const fieldClassName =
-    'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
-
-  return (
-    <>
-      <div className="space-y-2">
-        <Label htmlFor="rippling-api-token">API token</Label>
-        <Input
-          id="rippling-api-token"
-          type="password"
-          value={form.apiToken}
-          onChange={(event) => onFieldChange('apiToken', event.target.value)}
-          {...getFieldErrorAttributes(
-            'rippling-api-token',
-            fieldErrors.apiToken,
-          )}
-          className={fieldClassName}
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-          data-1p-ignore
-        />
-        <p className="text-sm text-muted-foreground">
-          Create a company-wide token in Rippling&apos;s API Tokens app with
-          workers.read and the user, department, team, employment type, and work
-          location read scopes needed for the roster. Roomote validates the
-          token before storing it.
-        </p>
-        {allowBlankToken ? (
-          <p className="text-sm text-muted-foreground">
-            Leave blank to keep and revalidate the existing token.
-          </p>
-        ) : null}
-        <FieldError
-          fieldId="rippling-api-token"
-          errors={fieldErrors.apiToken}
-        />
-      </div>
-      {formError ? (
-        <p className="text-sm text-destructive">{formError}</p>
-      ) : null}
-    </>
-  );
-}
-
-function XConnectionFields({
-  form,
-  fieldErrors,
-  formError,
-  allowBlankToken,
-  onFieldChange,
-}: {
-  form: XFormState;
-  fieldErrors: Partial<Record<keyof XFormState, string[]>>;
-  formError: string | null;
-  allowBlankToken: boolean;
-  onFieldChange: (field: keyof XFormState, value: string) => void;
-}) {
-  const fieldClassName =
-    'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
-
-  return (
-    <>
-      <div className="space-y-2">
-        <Label htmlFor="x-bearer-token">X App-only Bearer Token</Label>
-        <Input
-          id="x-bearer-token"
-          type="password"
-          placeholder="AAAAAAAAAAAAAAAAAAAAA..."
-          value={form.bearerToken}
-          onChange={(event) => onFieldChange('bearerToken', event.target.value)}
-          {...getFieldErrorAttributes(
-            'x-bearer-token',
-            fieldErrors.bearerToken,
-          )}
-          className={fieldClassName}
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-          data-1p-ignore
-        />
-        <p className="text-sm text-muted-foreground">
-          Generate it at{' '}
-          <a
-            href="https://console.x.com/"
-            target="_blank"
-            rel="noreferrer"
-            className="text-primary underline hover:no-underline"
-          >
-            console.x.com
-          </a>{' '}
-          under Apps, in your app&apos;s Keys and tokens tab. App-only bearer
-          tokens give read-only access to public X data; posting and other
-          account actions stay unavailable. Access depends on your X API plan.
-        </p>
-        {allowBlankToken ? (
-          <p className="text-sm text-muted-foreground">
-            Leave blank to keep the existing token.
-          </p>
-        ) : null}
-        <FieldError fieldId="x-bearer-token" errors={fieldErrors.bearerToken} />
-      </div>
-      {formError ? (
-        <p className="text-sm text-destructive">{formError}</p>
-      ) : null}
-    </>
-  );
-}
-
 function ApiKeyConnectionFields({
   fieldId,
   label,
@@ -1272,36 +773,6 @@ function ApiKeyConnectionFields({
         <p className="text-sm text-destructive">{formError}</p>
       ) : null}
     </>
-  );
-}
-
-function GranolaConnectionFields(
-  props: Omit<
-    Parameters<typeof ApiKeyConnectionFields>[0],
-    'fieldId' | 'label' | 'placeholder' | 'help'
-  >,
-) {
-  return (
-    <ApiKeyConnectionFields
-      {...props}
-      fieldId="granola-api-key"
-      label="Granola API Key"
-      placeholder="Enter your Granola API key"
-      help={
-        <>
-          <p className="text-sm text-muted-foreground">
-            We strongly recommend a Granola workspace API key. Workspace keys
-            can read public notes and spaces where &quot;Allow Granola API
-            access&quot; is enabled. New spaces enable API access by default, so
-            admins should review space settings before connecting.
-          </p>
-          <p className="text-sm text-muted-foreground">
-            You can also use a personal API key with Public notes selected and
-            Personal notes left unchecked.
-          </p>
-        </>
-      }
-    />
   );
 }
 
@@ -1769,36 +1240,6 @@ export function Integrations({
     clearedDeepLinkIntegrationId === deepLinkedIntegrationId
       ? ''
       : deepLinkedIntegrationId;
-  const [isAsanaDialogOpen, setIsAsanaDialogOpen] = useState(false);
-  const [asanaForm, setAsanaForm] = useState<AsanaFormState>(
-    buildEmptyAsanaForm(),
-  );
-  const [asanaFieldErrors, setAsanaFieldErrors] = useState<
-    Partial<Record<keyof AsanaFormState, string[]>>
-  >({});
-  const [asanaFormError, setAsanaFormError] = useState<string | null>(null);
-  const [isNotionDialogOpen, setIsNotionDialogOpen] = useState(false);
-  const [notionForm, setNotionForm] = useState<NotionFormState>(
-    buildEmptyNotionForm(),
-  );
-  const [notionFieldErrors, setNotionFieldErrors] = useState<
-    Partial<Record<keyof NotionFormState, string[]>>
-  >({});
-  const [notionFormError, setNotionFormError] = useState<string | null>(null);
-  const [isRipplingDialogOpen, setIsRipplingDialogOpen] = useState(false);
-  const [ripplingForm, setRipplingForm] = useState<RipplingFormState>(
-    buildEmptyRipplingForm(),
-  );
-  const [ripplingFieldErrors, setRipplingFieldErrors] = useState<
-    Partial<Record<keyof RipplingFormState, string[]>>
-  >({});
-  const [ripplingFormError, setRipplingFormError] = useState<string | null>(
-    null,
-  );
-  const [isGranolaDialogOpen, setIsGranolaDialogOpen] = useState(false);
-  const [granolaForm, setGranolaForm] = useState<GranolaFormState>(
-    buildEmptyGranolaForm(),
-  );
   const [isVoiceDialogOpen, setIsVoiceDialogOpen] = useState(false);
   const [voiceForm, setVoiceForm] = useState<VoiceFormState>(
     buildEmptyVoiceForm(),
@@ -1817,10 +1258,6 @@ export function Integrations({
   const [elevenLabsFormError, setElevenLabsFormError] = useState<string | null>(
     null,
   );
-  const [granolaFieldErrors, setGranolaFieldErrors] = useState<
-    Partial<Record<keyof GranolaFormState, string[]>>
-  >({});
-  const [granolaFormError, setGranolaFormError] = useState<string | null>(null);
   const [isExaDialogOpen, setIsExaDialogOpen] = useState(false);
   const [exaForm, setExaForm] = useState<ExaFormState>(buildEmptyExaForm());
   const [exaFieldErrors, setExaFieldErrors] = useState<
@@ -1855,12 +1292,6 @@ export function Integrations({
     Partial<Record<keyof VercelFormState, string[]>>
   >({});
   const [vercelFormError, setVercelFormError] = useState<string | null>(null);
-  const [isXDialogOpen, setIsXDialogOpen] = useState(false);
-  const [xForm, setXForm] = useState<XFormState>(buildEmptyXForm());
-  const [xFieldErrors, setXFieldErrors] = useState<
-    Partial<Record<keyof XFormState, string[]>>
-  >({});
-  const [xFormError, setXFormError] = useState<string | null>(null);
   const [toolDialogState, setToolDialogState] = useState<{
     mcpId: string;
     integrationName: string;
@@ -1885,70 +1316,13 @@ export function Integrations({
   const setDeploymentEnabled = useSetDeploymentMcpEnabled();
   const connectMcp = useConnectMcp();
   const disconnectMcp = useDisconnectMcp();
-  const saveAsanaConnection = useSaveAsanaConnection();
-  const saveNotionConnection = useSaveNotionConnection();
-  const saveRipplingConnection = useSaveRipplingConnection();
   const saveGrafanaConnection = useSaveGrafanaConnection();
-  const saveGranolaConnection = useSaveGranolaConnection();
   const saveExaConnection = useSaveExaConnection();
   const removeExaApiKey = useRemoveExaApiKey();
   const saveElevenLabsConnection = useSaveElevenLabsConnection();
   const saveVoiceConnection = useSaveVoiceConnection();
   const saveSnowflakeConnection = useSaveSnowflakeConnection();
   const saveVercelConnection = useSaveVercelConnection();
-  const saveXConnection = useSaveXConnection();
-  const asanaConnectionSummary = useMemo(() => {
-    const connection = (effectiveIntegrations.data ?? []).find(
-      (entry) => entry.id === 'asana',
-    );
-
-    return connection;
-  }, [effectiveIntegrations.data]);
-  const isAsanaConnected =
-    asanaConnectionSummary?.authStatus === 'authenticated';
-  const asanaConnection = useAsanaConnection(
-    isAdmin && (isAsanaConnected || isAsanaDialogOpen),
-  );
-  const notionConnectionSummary = useMemo(
-    () =>
-      (effectiveIntegrations.data ?? []).find((entry) => entry.id === 'notion'),
-    [effectiveIntegrations.data],
-  );
-  const notionConnection = useNotionConnection(
-    isAdmin &&
-      (notionConnectionSummary?.authStatus === 'authenticated' ||
-        isNotionDialogOpen),
-  );
-  const isNotionConnected =
-    notionConnectionSummary?.authStatus === 'authenticated' &&
-    notionConnection.data?.authStatus === 'authenticated';
-  const ripplingConnectionSummary = useMemo(
-    () =>
-      (effectiveIntegrations.data ?? []).find(
-        (entry) => entry.id === 'rippling',
-      ),
-    [effectiveIntegrations.data],
-  );
-  const ripplingConnection = useRipplingConnection(
-    isAdmin &&
-      (ripplingConnectionSummary?.authStatus === 'authenticated' ||
-        isRipplingDialogOpen),
-  );
-  const isRipplingConnected =
-    ripplingConnectionSummary?.authStatus === 'authenticated' &&
-    ripplingConnection.data?.authStatus === 'authenticated';
-  const granolaConnectionSummary = useMemo(() => {
-    const connection = (effectiveIntegrations.data ?? []).find(
-      (entry) => entry.id === 'granola',
-    );
-
-    return connection;
-  }, [effectiveIntegrations.data]);
-  const isGranolaConnected =
-    granolaConnectionSummary?.authStatus === 'authenticated';
-  const granolaConnection = useGranolaConnection(
-    isAdmin && (isGranolaConnected || isGranolaDialogOpen),
-  );
   const exaConnectionSummary = useMemo(
     () =>
       (effectiveIntegrations.data ?? []).find((entry) => entry.id === 'exa'),
@@ -2018,67 +1392,6 @@ export function Integrations({
   const vercelConnection = useVercelConnection(
     isAdmin && (isVercelConnected || isVercelDialogOpen),
   );
-  const xConnectionSummary = useMemo(() => {
-    const connection = (effectiveIntegrations.data ?? []).find(
-      (entry) => entry.id === 'x',
-    );
-
-    return connection;
-  }, [effectiveIntegrations.data]);
-  const isXConnected = xConnectionSummary?.authStatus === 'authenticated';
-  const xConnection = useXConnection(
-    isAdmin && (isXConnected || isXDialogOpen),
-  );
-
-  useEffect(() => {
-    if (!isAsanaDialogOpen) {
-      return;
-    }
-
-    if (asanaConnection.isPending && isAsanaConnected) {
-      return;
-    }
-
-    setAsanaFieldErrors({});
-    setAsanaFormError(null);
-    setAsanaForm(buildEmptyAsanaForm());
-  }, [asanaConnection.isPending, isAsanaConnected, isAsanaDialogOpen]);
-
-  useEffect(() => {
-    if (!isNotionDialogOpen) {
-      return;
-    }
-
-    if (notionConnection.isPending && isNotionConnected) {
-      return;
-    }
-
-    setNotionFieldErrors({});
-    setNotionFormError(null);
-    setNotionForm(buildEmptyNotionForm());
-  }, [isNotionConnected, isNotionDialogOpen, notionConnection.isPending]);
-
-  useEffect(() => {
-    if (!isRipplingDialogOpen) return;
-    if (ripplingConnection.isPending && isRipplingConnected) return;
-    setRipplingFieldErrors({});
-    setRipplingFormError(null);
-    setRipplingForm(buildEmptyRipplingForm());
-  }, [isRipplingConnected, isRipplingDialogOpen, ripplingConnection.isPending]);
-
-  useEffect(() => {
-    if (!isGranolaDialogOpen) {
-      return;
-    }
-
-    if (granolaConnection.isPending && isGranolaConnected) {
-      return;
-    }
-
-    setGranolaFieldErrors({});
-    setGranolaFormError(null);
-    setGranolaForm(buildEmptyGranolaForm());
-  }, [granolaConnection.isPending, isGranolaConnected, isGranolaDialogOpen]);
 
   useEffect(() => {
     if (!isExaDialogOpen) {
@@ -2208,19 +1521,18 @@ export function Integrations({
     vercelConnection.isPending,
   ]);
 
-  useEffect(() => {
-    if (!isXDialogOpen) {
-      return;
-    }
-
-    if (xConnection.isPending && isXConnected) {
-      return;
-    }
-
-    setXFieldErrors({});
-    setXFormError(null);
-    setXForm(buildEmptyXForm());
-  }, [isXConnected, isXDialogOpen, xConnection.isPending]);
+  const openMcpToolDialog = (integration: McpIntegrationDefinition) =>
+    setToolDialogState({
+      mcpId: integration.id,
+      integrationName: integration.name,
+    });
+  const credentialIntegrations = useCredentialIntegrations({
+    effectiveIntegrations: effectiveIntegrations.data ?? [],
+    highlightedIntegrationId,
+    isAdmin,
+    openToolDialog: openMcpToolDialog,
+  });
+  const credentialItemsById = credentialIntegrations.itemsById;
 
   const items = useMemo<IntegrationItem[]>(() => {
     const visibleMcpIntegrations = MCP_INTEGRATIONS;
@@ -2250,11 +1562,6 @@ export function Integrations({
           ),
       });
     };
-    const openMcpToolDialog = (integration: McpIntegrationDefinition) =>
-      setToolDialogState({
-        mcpId: integration.id,
-        integrationName: integration.name,
-      });
     const disconnectAdminConfiguredIntegration = (
       integration: McpIntegrationDefinition,
     ) => {
@@ -2365,84 +1672,9 @@ export function Integrations({
           );
         })
         .map((integration) => {
-          if (integration.id === 'asana') {
-            return buildAdminConfiguredIntegrationItem({
-              integration,
-              connection: userConnectionMap.get(integration.id),
-              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
-              highlightedIntegrationId,
-              savePending: saveAsanaConnection.isPending,
-              disconnectPending: disconnectMcp.isPending,
-              disconnectingMcpId: disconnectMcp.variables?.mcpId,
-              dialogOpen: isAsanaDialogOpen,
-              connectionPending: asanaConnection.isPending,
-              canConfigure: isAdmin,
-              canManageTools: isAdmin,
-              openDialog: () => setIsAsanaDialogOpen(true),
-              openToolDialog: () => openMcpToolDialog(integration),
-              disconnectIntegration: () =>
-                disconnectAdminConfiguredIntegration(integration),
-            });
-          }
-
-          if (integration.id === 'notion') {
-            return buildAdminConfiguredIntegrationItem({
-              integration,
-              connection: notionConnectionSummary,
-              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
-              highlightedIntegrationId,
-              savePending: saveNotionConnection.isPending,
-              disconnectPending: disconnectMcp.isPending,
-              disconnectingMcpId: disconnectMcp.variables?.mcpId,
-              dialogOpen: isNotionDialogOpen,
-              connectionPending: notionConnection.isPending,
-              canConfigure: isAdmin,
-              canManageTools: false,
-              openDialog: () => setIsNotionDialogOpen(true),
-              openToolDialog: () => openMcpToolDialog(integration),
-              disconnectIntegration: () =>
-                disconnectAdminConfiguredIntegration(integration),
-            });
-          }
-
-          if (integration.id === 'rippling') {
-            return buildAdminConfiguredIntegrationItem({
-              integration,
-              connection: ripplingConnectionSummary,
-              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
-              highlightedIntegrationId,
-              savePending: saveRipplingConnection.isPending,
-              disconnectPending: disconnectMcp.isPending,
-              disconnectingMcpId: disconnectMcp.variables?.mcpId,
-              dialogOpen: isRipplingDialogOpen,
-              connectionPending: ripplingConnection.isPending,
-              canConfigure: isAdmin,
-              canManageTools: false,
-              openDialog: () => setIsRipplingDialogOpen(true),
-              openToolDialog: () => openMcpToolDialog(integration),
-              disconnectIntegration: () =>
-                disconnectAdminConfiguredIntegration(integration),
-            });
-          }
-
-          if (integration.id === 'granola') {
-            return buildAdminConfiguredIntegrationItem({
-              integration,
-              connection: userConnectionMap.get(integration.id),
-              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
-              highlightedIntegrationId,
-              savePending: saveGranolaConnection.isPending,
-              disconnectPending: disconnectMcp.isPending,
-              disconnectingMcpId: disconnectMcp.variables?.mcpId,
-              dialogOpen: isGranolaDialogOpen,
-              connectionPending: granolaConnection.isPending,
-              canConfigure: isAdmin,
-              canManageTools: isAdmin,
-              openDialog: () => setIsGranolaDialogOpen(true),
-              openToolDialog: () => openMcpToolDialog(integration),
-              disconnectIntegration: () =>
-                disconnectAdminConfiguredIntegration(integration),
-            });
+          const credentialItem = credentialItemsById.get(integration.id);
+          if (credentialItem) {
+            return credentialItem;
           }
 
           if (integration.id === 'exa') {
@@ -2702,26 +1934,6 @@ export function Integrations({
             });
           }
 
-          if (integration.id === 'x') {
-            return buildAdminConfiguredIntegrationItem({
-              integration,
-              connection: userConnectionMap.get(integration.id),
-              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
-              highlightedIntegrationId,
-              savePending: saveXConnection.isPending,
-              disconnectPending: disconnectMcp.isPending,
-              disconnectingMcpId: disconnectMcp.variables?.mcpId,
-              dialogOpen: isXDialogOpen,
-              connectionPending: xConnection.isPending,
-              canConfigure: isAdmin,
-              canManageTools: isAdmin,
-              openDialog: () => setIsXDialogOpen(true),
-              openToolDialog: () => openMcpToolDialog(integration),
-              disconnectIntegration: () =>
-                disconnectAdminConfiguredIntegration(integration),
-            });
-          }
-
           const enabled = orgEnablementMap.get(integration.id) ?? false;
           const isDeploymentScoped =
             isDeploymentScopedMcpIntegration(integration);
@@ -2870,7 +2082,6 @@ export function Integrations({
     disconnectLinear,
     disconnectMcp,
     grafanaConnection.isPending,
-    granolaConnection.isPending,
     exaConnection.isPending,
     elevenLabsConnection.isPending,
     voiceConnection.isPending,
@@ -2884,17 +2095,12 @@ export function Integrations({
     effectiveIntegrations.isPending,
     isAdmin,
     isGrafanaDialogOpen,
-    isGranolaDialogOpen,
     isExaDialogOpen,
     isExaConnected,
     isElevenLabsDialogOpen,
     isVoiceDialogOpen,
     isLinearOauthSetupOpen,
-    saveAsanaConnection.isPending,
-    saveNotionConnection.isPending,
-    saveRipplingConnection.isPending,
     saveGrafanaConnection.isPending,
-    saveGranolaConnection.isPending,
     saveExaConnection.isPending,
     removeExaApiKey,
     saveElevenLabsConnection.isPending,
@@ -2905,21 +2111,11 @@ export function Integrations({
     integrationIds,
     setDeploymentEnabled,
     saveSnowflakeConnection.isPending,
-    asanaConnection.isPending,
-    isAsanaDialogOpen,
-    isNotionDialogOpen,
-    notionConnectionSummary,
-    notionConnection.isPending,
-    isRipplingDialogOpen,
-    ripplingConnection.isPending,
-    ripplingConnectionSummary,
     snowflakeConnection.isPending,
     isSnowflakeDialogOpen,
     vercelConnection.isPending,
     isVercelDialogOpen,
-    saveXConnection.isPending,
-    xConnection.isPending,
-    isXDialogOpen,
+    credentialItemsById,
     highlightedIntegrationId,
   ]);
 
@@ -3149,62 +2345,6 @@ export function Integrations({
     setSnowflakeFormError(null);
   };
 
-  const handleAsanaFieldChange = (
-    field: keyof AsanaFormState,
-    value: string,
-  ) => {
-    setAsanaForm((current) => ({ ...current, [field]: value }));
-    setAsanaFieldErrors((current) => {
-      if (!current[field]) {
-        return current;
-      }
-
-      return { ...current, [field]: undefined };
-    });
-    setAsanaFormError(null);
-  };
-
-  const handleNotionFieldChange = (
-    field: keyof NotionFormState,
-    value: string,
-  ) => {
-    setNotionForm((current) => ({ ...current, [field]: value }));
-    setNotionFieldErrors((current) => {
-      if (!current[field]) {
-        return current;
-      }
-
-      return { ...current, [field]: undefined };
-    });
-    setNotionFormError(null);
-  };
-
-  const handleRipplingFieldChange = (
-    field: keyof RipplingFormState,
-    value: string,
-  ) => {
-    setRipplingForm((current) => ({ ...current, [field]: value }));
-    setRipplingFieldErrors((current) =>
-      current[field] ? { ...current, [field]: undefined } : current,
-    );
-    setRipplingFormError(null);
-  };
-
-  const handleGranolaFieldChange = (
-    field: keyof GranolaFormState,
-    value: string,
-  ) => {
-    setGranolaForm((current) => ({ ...current, [field]: value }));
-    setGranolaFieldErrors((current) => {
-      if (!current[field]) {
-        return current;
-      }
-
-      return { ...current, [field]: undefined };
-    });
-    setGranolaFormError(null);
-  };
-
   const handleExaFieldChange = (field: keyof ExaFormState, value: string) => {
     setExaForm((current) => ({ ...current, [field]: value }));
     setExaFieldErrors((current) =>
@@ -3270,110 +2410,6 @@ export function Integrations({
       return { ...current, [field]: undefined };
     });
     setVercelFormError(null);
-  };
-
-  const handleXFieldChange = (field: keyof XFormState, value: string) => {
-    setXForm((current) => ({ ...current, [field]: value }));
-    setXFieldErrors((current) => {
-      if (!current[field]) {
-        return current;
-      }
-
-      return { ...current, [field]: undefined };
-    });
-    setXFormError(null);
-  };
-
-  const handleXDialogOpenChange = (open: boolean) => {
-    setIsXDialogOpen(open);
-
-    setXFieldErrors({});
-    setXFormError(null);
-
-    if (!open) {
-      return;
-    }
-
-    setXForm(buildEmptyXForm());
-  };
-
-  const handleXSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    const parsed = saveXConnectionSchema.safeParse({
-      bearerToken: xForm.bearerToken,
-    });
-    if (!parsed.success) {
-      setXFieldErrors(getXFieldErrors(parsed));
-      return;
-    }
-
-    if (!isXConnected && parsed.data.bearerToken.length === 0) {
-      setXFieldErrors({
-        bearerToken: ['Bearer token is required'],
-      });
-      return;
-    }
-
-    setXFieldErrors({});
-    setXFormError(null);
-
-    saveXConnection.mutate(parsed.data, {
-      onSuccess: () => {
-        toast.success(
-          isXConnected
-            ? 'X connection updated for this deployment.'
-            : 'X connected for this deployment.',
-        );
-        handleXDialogOpenChange(false);
-      },
-      onError: (error) => {
-        setXFormError(error.message);
-      },
-    });
-  };
-
-  const handleAsanaDialogOpenChange = (open: boolean) => {
-    setIsAsanaDialogOpen(open);
-
-    setAsanaFieldErrors({});
-    setAsanaFormError(null);
-
-    if (!open) {
-      return;
-    }
-
-    setAsanaForm(buildEmptyAsanaForm());
-  };
-
-  const handleNotionDialogOpenChange = (open: boolean) => {
-    setIsNotionDialogOpen(open);
-    setNotionFieldErrors({});
-    setNotionFormError(null);
-
-    if (open) {
-      setNotionForm(buildEmptyNotionForm());
-    }
-  };
-
-  const handleRipplingDialogOpenChange = (open: boolean) => {
-    setIsRipplingDialogOpen(open);
-    setRipplingFieldErrors({});
-    setRipplingFormError(null);
-    if (open) setRipplingForm(buildEmptyRipplingForm());
-  };
-
-  const handleGranolaDialogOpenChange = (open: boolean) => {
-    setIsGranolaDialogOpen(open);
-
-    setGranolaFieldErrors({});
-    setGranolaFormError(null);
-
-    if (!open) {
-      return;
-    }
-
-    setGranolaForm(buildEmptyGranolaForm());
   };
 
   const handleExaDialogOpenChange = (open: boolean) => {
@@ -3455,139 +2491,6 @@ export function Integrations({
     if (!isVercelConnected) {
       setVercelForm(buildEmptyVercelForm());
     }
-  };
-
-  const handleAsanaSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    const parsed = saveAsanaConnectionSchema.safeParse({
-      accessToken: asanaForm.accessToken,
-    });
-    if (!parsed.success) {
-      setAsanaFieldErrors(getAsanaFieldErrors(parsed));
-      return;
-    }
-
-    if (!isAsanaConnected && parsed.data.accessToken.length === 0) {
-      setAsanaFieldErrors({
-        accessToken: ['Access token is required'],
-      });
-      return;
-    }
-
-    setAsanaFieldErrors({});
-    setAsanaFormError(null);
-
-    saveAsanaConnection.mutate(parsed.data, {
-      onSuccess: () => {
-        toast.success(
-          isAsanaConnected
-            ? 'Asana connection updated for this deployment.'
-            : 'Asana connected for this deployment.',
-        );
-        handleAsanaDialogOpenChange(false);
-      },
-      onError: (error) => {
-        setAsanaFormError(error.message);
-      },
-    });
-  };
-
-  const handleNotionSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    const parsed = saveNotionConnectionSchema.safeParse(notionForm);
-    if (!parsed.success) {
-      setNotionFieldErrors(getNotionFieldErrors(parsed));
-      return;
-    }
-
-    if (
-      !isNotionConnected &&
-      parsed.data.internalIntegrationSecret.length === 0
-    ) {
-      setNotionFieldErrors({
-        internalIntegrationSecret: ['Internal integration secret is required'],
-      });
-      return;
-    }
-
-    setNotionFieldErrors({});
-    setNotionFormError(null);
-    saveNotionConnection.mutate(parsed.data, {
-      onSuccess: () => {
-        toast.success(
-          isNotionConnected
-            ? 'Notion connection updated for this deployment.'
-            : 'Notion connected for this deployment.',
-        );
-        handleNotionDialogOpenChange(false);
-      },
-      onError: (error) => setNotionFormError(error.message),
-    });
-  };
-
-  const handleRipplingSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const parsed = saveRipplingConnectionSchema.safeParse(ripplingForm);
-    if (!parsed.success) {
-      setRipplingFieldErrors(getRipplingFieldErrors(parsed));
-      return;
-    }
-    if (!isRipplingConnected && parsed.data.apiToken.length === 0) {
-      setRipplingFieldErrors({ apiToken: ['API token is required'] });
-      return;
-    }
-
-    setRipplingFieldErrors({});
-    setRipplingFormError(null);
-    saveRipplingConnection.mutate(parsed.data, {
-      onSuccess: () => {
-        toast.success(
-          isRipplingConnected
-            ? 'Rippling connection updated for this deployment.'
-            : 'Rippling connected for this deployment.',
-        );
-        handleRipplingDialogOpenChange(false);
-      },
-      onError: (error) => setRipplingFormError(error.message),
-    });
-  };
-
-  const handleGranolaSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    const parsed = saveGranolaConnectionSchema.safeParse({
-      apiKey: granolaForm.apiKey,
-    });
-    if (!parsed.success) {
-      setGranolaFieldErrors(getGranolaFieldErrors(parsed));
-      return;
-    }
-
-    if (!isGranolaConnected && parsed.data.apiKey.length === 0) {
-      setGranolaFieldErrors({
-        apiKey: ['API key is required'],
-      });
-      return;
-    }
-
-    setGranolaFieldErrors({});
-    setGranolaFormError(null);
-
-    saveGranolaConnection.mutate(parsed.data, {
-      onSuccess: () => {
-        toast.success(
-          isGranolaConnected
-            ? 'Granola connection updated for this deployment.'
-            : 'Granola connected for this deployment.',
-        );
-        handleGranolaDialogOpenChange(false);
-      },
-      onError: (error) => {
-        setGranolaFormError(error.message);
-      },
-    });
   };
 
   const handleExaSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -3836,101 +2739,7 @@ export function Integrations({
         onOpenChange={setIsLinearOauthSetupOpen}
         setup={linearOauthSetup.data}
       />
-      <AdminConfiguredIntegrationDialog
-        integrationName="Asana"
-        open={isAsanaDialogOpen}
-        onOpenChange={handleAsanaDialogOpenChange}
-        isEditing={isAsanaConnected}
-        isPending={saveAsanaConnection.isPending}
-        isLoading={isAsanaConnected && asanaConnection.isPending}
-        description={
-          <>
-            Store the workspace Asana access token for Roomote tasks. Secrets
-            stay encrypted server-side.
-          </>
-        }
-        onSubmit={handleAsanaSubmit}
-      >
-        <AsanaConnectionFields
-          form={asanaForm}
-          fieldErrors={asanaFieldErrors}
-          formError={asanaFormError}
-          allowBlankToken={isAsanaConnected}
-          onFieldChange={handleAsanaFieldChange}
-        />
-      </AdminConfiguredIntegrationDialog>
-      <AdminConfiguredIntegrationDialog
-        integrationName="Notion"
-        open={isNotionDialogOpen}
-        onOpenChange={handleNotionDialogOpenChange}
-        isEditing={isNotionConnected}
-        isPending={saveNotionConnection.isPending}
-        isLoading={isNotionConnected && notionConnection.isPending}
-        description={
-          <>
-            Store a Notion internal integration secret for this deployment.
-            Notion controls the connection&apos;s capabilities and limits it to
-            pages and data sources explicitly shared with that integration; the
-            secret stays encrypted server-side.
-          </>
-        }
-        onSubmit={handleNotionSubmit}
-      >
-        <NotionConnectionFields
-          form={notionForm}
-          fieldErrors={notionFieldErrors}
-          formError={notionFormError}
-          allowBlankSecret={isNotionConnected}
-          onFieldChange={handleNotionFieldChange}
-        />
-      </AdminConfiguredIntegrationDialog>
-      <AdminConfiguredIntegrationDialog
-        integrationName="Rippling"
-        open={isRipplingDialogOpen}
-        onOpenChange={handleRipplingDialogOpenChange}
-        isEditing={isRipplingConnected}
-        isPending={saveRipplingConnection.isPending}
-        isLoading={isRipplingConnected && ripplingConnection.isPending}
-        description={
-          <>
-            Connect Rippling&apos;s read-only HRIS API so Memory can maintain
-            the employee roster and authoritative reporting structure. The token
-            stays encrypted on the control plane and is never sent to agents.
-          </>
-        }
-        onSubmit={handleRipplingSubmit}
-      >
-        <RipplingConnectionFields
-          form={ripplingForm}
-          fieldErrors={ripplingFieldErrors}
-          formError={ripplingFormError}
-          allowBlankToken={isRipplingConnected}
-          onFieldChange={handleRipplingFieldChange}
-        />
-      </AdminConfiguredIntegrationDialog>
-      <AdminConfiguredIntegrationDialog
-        integrationName="Granola"
-        open={isGranolaDialogOpen}
-        onOpenChange={handleGranolaDialogOpenChange}
-        isEditing={isGranolaConnected}
-        isPending={saveGranolaConnection.isPending}
-        isLoading={isGranolaConnected && granolaConnection.isPending}
-        description={
-          <>
-            Store a Granola API key for this deployment. The secret stays
-            encrypted server-side.
-          </>
-        }
-        onSubmit={handleGranolaSubmit}
-      >
-        <GranolaConnectionFields
-          form={granolaForm}
-          fieldErrors={granolaFieldErrors}
-          formError={granolaFormError}
-          allowBlankApiKey={isGranolaConnected}
-          onFieldChange={handleGranolaFieldChange}
-        />
-      </AdminConfiguredIntegrationDialog>
+      {credentialIntegrations.dialogs}
       <AdminConfiguredIntegrationDialog
         integrationName="Exa"
         title={isExaConnected ? 'Edit Exa API key' : 'Add Exa API key'}
@@ -4117,29 +2926,6 @@ export function Integrations({
           onFieldChange={handleVercelFieldChange}
         />
       </AdminConfiguredIntegrationDialog>
-      <AdminConfiguredIntegrationDialog
-        integrationName="X"
-        open={isXDialogOpen}
-        onOpenChange={handleXDialogOpenChange}
-        isEditing={isXConnected}
-        isPending={saveXConnection.isPending}
-        isLoading={isXConnected && xConnection.isPending}
-        description={
-          <>
-            Store the workspace X app-only bearer token for read-only Roomote
-            tasks. Secrets stay encrypted server-side.
-          </>
-        }
-        onSubmit={handleXSubmit}
-      >
-        <XConnectionFields
-          form={xForm}
-          fieldErrors={xFieldErrors}
-          formError={xFormError}
-          allowBlankToken={isXConnected}
-          onFieldChange={handleXFieldChange}
-        />
-      </AdminConfiguredIntegrationDialog>
       <DeepLinkEnableDialog
         item={deepLinkDialogItem}
         open={
@@ -4193,6 +2979,32 @@ export function Integrations({
                       {item.name}
                     </p>
                   </div>
+                  {[item.headerAction, item.utilityAction]
+                    .filter((action) => action != null)
+                    .map((action) => (
+                      <BasicTooltip
+                        key={action.ariaLabel}
+                        content={action.label}
+                      >
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          aria-label={action.ariaLabel}
+                          disabled={action.isPending}
+                          onClick={() => {
+                            setIsCatalogOpen(false);
+                            action.onAction();
+                          }}
+                        >
+                          {action.isPending ? (
+                            <Spinner size="sm" />
+                          ) : (
+                            action.icon
+                          )}
+                        </Button>
+                      </BasicTooltip>
+                    ))}
                   {item.onAction ? (
                     <Button
                       type="button"

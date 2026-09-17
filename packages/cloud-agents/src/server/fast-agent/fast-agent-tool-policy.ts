@@ -13,16 +13,6 @@ export {
   type FastAgentNativeToolName,
 };
 
-const FAST_AGENT_DISABLED_NATIVE_TOOLS = new Set<FastAgentNativeToolName>([
-  FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential,
-]);
-
-export function isFastAgentNativeToolEnabled(
-  name: FastAgentNativeToolName,
-): boolean {
-  return !FAST_AGENT_DISABLED_NATIVE_TOOLS.has(name);
-}
-
 export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
   '*': false,
   task: true,
@@ -31,7 +21,7 @@ export const FAST_AGENT_NATIVE_TOOL_FILTER: Record<string, boolean> = {
   ),
   [FAST_AGENT_NATIVE_TOOL_NAMES.prepareServiceCredential]: false,
   [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]: false,
-  [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential]: false,
+  [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]: false,
 };
 
 export const FAST_AGENT_SUBAGENT_TOOL_FILTER: Record<string, boolean> = {
@@ -68,6 +58,7 @@ export function buildFastAgentToolFilter(
     surface?: FastAgentSurface;
     serviceCredentialToolsEnabled?: boolean;
     serviceCredentialPrepareEnabled?: boolean;
+    addRemoteMcpEnabled?: boolean;
   } = {},
 ): Record<string, boolean> {
   return {
@@ -77,7 +68,8 @@ export function buildFastAgentToolFilter(
       options.serviceCredentialToolsEnabled === true,
     [FAST_AGENT_NATIVE_TOOL_NAMES.listServiceCredentials]:
       options.serviceCredentialToolsEnabled === true,
-    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithServiceCredential]: false,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.addRemoteMcp]:
+      options.addRemoteMcpEnabled === true,
     ...(options.surface && options.surface !== 'web'
       ? {
           [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: false,

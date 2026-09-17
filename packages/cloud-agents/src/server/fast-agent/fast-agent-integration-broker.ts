@@ -27,12 +27,14 @@ import {
 import { resolveGitLabInstanceHost } from '@roomote/gitlab';
 import {
   createMemoryMcpInstructions,
+  BRAIN_MCP_ID,
   MCP_INTEGRATION_PROXY_PATH_PREFIX,
   MCP_ROUTING_PROXY_PATH_PREFIX,
   ROOMOTE_MCP_ID,
   PUBLIC_URL_FETCH_DEFAULT_TIMEOUT_SECONDS,
   PUBLIC_URL_FETCH_MAX_TIMEOUT_SECONDS,
   getMcpIntegration,
+  getMcpIntegrationDataPolicy,
   getMemoryMcpDisplayName,
   isMemoryMcpServer,
 } from '@roomote/types';
@@ -50,6 +52,7 @@ export type FastAgentIntegration = {
   id: string;
   name: string;
   description: string;
+  dataPolicy?: 'shared' | 'private';
   instructions?: string;
   tools: McpToolDefinition[];
   endpoint?: {
@@ -73,6 +76,9 @@ type BrokerContext = {
 type IntegrationCallContext = BrokerContext & {
   humanTurn?: boolean;
   sessionId: string;
+  privacy?: 'shared' | 'private';
+  privateOwnerUserId?: string | null;
+  privateSessionsExperimentEnabled?: boolean;
 };
 
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
@@ -289,7 +295,10 @@ function integrationProxyUrl(baseUrl: string, integrationId: string): string {
 
 function describeMcpServer(
   id: string,
-): Pick<FastAgentIntegration, 'name' | 'description' | 'instructions'> {
+): Pick<
+  FastAgentIntegration,
+  'name' | 'description' | 'instructions' | 'dataPolicy'
+> {
   if (id === HTTP_INTEGRATIONS_MCP_ID) {
     return {
       name: 'HTTP integrations',
@@ -321,6 +330,7 @@ function describeMcpServer(
       integration?.description ??
       'Use tools from this deployment-configured MCP server.',
     instructions: integration?.instructions,
+    dataPolicy: getMcpIntegrationDataPolicy(integration),
   };
 }
 
@@ -524,7 +534,7 @@ export async function listFastAgentIntegrations(
       id: 'github',
       name: 'GitHub',
       description:
-        'Read public github.com repositories and connected private repositories using the deployment GitHub App. Public repositories do not need to be connected. In active connected repositories, use native update_pull_request, merge_pull_request, add_issue_comment, and add_reply_to_pull_request_comment capabilities, including reviewer requests, draft status, merges, and comment reactions. Follow the discovered native tool descriptions and schemas for supported arguments.',
+        'Read public github.com repositories and connected private repositories using the deployment GitHub App. Public repositories do not need to be connected. In active connected repositories, use the native GitHub tools directly for pull request and issue edits, comments, reviews, labels, branches, merges, and small file changes. Follow the discovered native tool descriptions and schemas for supported arguments.',
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'github'),
         headers: { Authorization: `Bearer ${authToken}` },
@@ -622,6 +632,7 @@ export async function listFastAgentIntegrations(
         id: result.value.id,
         name: result.value.name,
         description: result.value.description,
+        dataPolicy: result.value.dataPolicy,
         instructions: isMemory
           ? createMemoryMcpInstructions(result.value.id, {
               primary: primaryMemory,
@@ -652,6 +663,29 @@ export async function callFastAgentIntegration(
   }
   if (!integration.tools.some((tool) => tool.name === request.toolName)) {
     throw new Error('That integration tool is not available to fast mode.');
+  }
+  const privateBrainRead =
+    context.privacy === 'private' && request.integrationId === BRAIN_MCP_ID;
+  const privateIntegrationCall = integration.dataPolicy === 'private';
+  if (
+    privateIntegrationCall &&
+    (context.privateSessionsExperimentEnabled !== true ||
+      context.privacy !== 'private' ||
+      context.privateOwnerUserId !== context.userId)
+  ) {
+    throw new Error(
+      'Private integrations require a private Session owned by the current user.',
+    );
+  }
+  if (
+    context.privacy === 'private' &&
+    isMemoryMcpServer(request.integrationId) &&
+    request.integrationId !== BRAIN_MCP_ID
+  ) {
+    throw new Error('Private Sessions cannot write to shared memory.');
+  }
+  if (privateBrainRead && request.toolName === 'synthesize') {
+    throw new Error('Brain synthesis is unavailable in private Sessions.');
   }
   if (
     request.integrationId === ROOMOTE_MCP_ID &&

@@ -10,6 +10,7 @@ export function IntegrationName({ href, icon, name }) {
     agentmail: '/logo/integrations/agentmail.svg',
     monday: '/logo/integrations/monday.svg',
     rippling: '/logo/integrations/rippling.svg',
+    typesafe: '/logo/integrations/typesafe.svg',
   };
   const iconSrc =
     manualIcons[icon] ??

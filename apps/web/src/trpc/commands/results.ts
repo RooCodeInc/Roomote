@@ -7,7 +7,7 @@ import {
   eq,
   isNotNull,
   isNull,
-  or,
+  isDeploymentExperimentEnabled,
   sql,
   tasks,
   workItems,
@@ -19,7 +19,6 @@ import {
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
-import { getPersonalPreferencesCommand } from './preferences';
 
 export type ResultInboxItem = {
   id: string;
@@ -56,24 +55,23 @@ function githubRepositoryUrl(
   }
 }
 
-async function assertResultsEnabled(auth: UserAuthSuccess) {
-  if (!(await getPersonalPreferencesCommand(auth)).resultsPageEnabled) {
+async function assertResultsEnabled() {
+  if (!(await isDeploymentExperimentEnabled('results'))) {
     throw new Error('Results is not enabled.');
   }
 }
 
-const visibleReport = (userId: string) =>
-  or(isNull(automationResults.userId), eq(automationResults.userId, userId))!;
-const visibleSuggestion = (userId: string) =>
+const visibleReport = () => eq(automationResults.resultVisibility, 'shared');
+const visibleSuggestion = () =>
   and(
     isNotNull(workItems.resultAutomationName),
-    or(isNull(workItems.resultUserId), eq(workItems.resultUserId, userId))!,
+    eq(workItems.resultVisibility, 'shared'),
   )!;
 
 export async function listResultsCommand(
-  auth: UserAuthSuccess,
+  _auth: UserAuthSuccess,
 ): Promise<ResultInboxItem[]> {
-  await assertResultsEnabled(auth);
+  await assertResultsEnabled();
   const [reports, suggestions] = await Promise.all([
     db
       .select({
@@ -96,7 +94,7 @@ export async function listResultsCommand(
       )
       .where(
         and(
-          visibleReport(auth.userId),
+          visibleReport(),
           isNull(automationResults.acceptedAt),
           isNull(automationResults.ignoredAt),
         ),
@@ -126,7 +124,7 @@ export async function listResultsCommand(
       )
       .where(
         and(
-          visibleSuggestion(auth.userId),
+          visibleSuggestion(),
           isNull(workItems.resultAcceptedAt),
           isNull(workItems.resultIgnoredAt),
         ),
@@ -180,15 +178,15 @@ export async function listResultsCommand(
     .slice(0, 100);
 }
 
-export async function getUnreadResultCountCommand(auth: UserAuthSuccess) {
-  if (!(await getPersonalPreferencesCommand(auth)).resultsPageEnabled) return 0;
+export async function getUnreadResultCountCommand(_auth: UserAuthSuccess) {
+  if (!(await isDeploymentExperimentEnabled('results'))) return 0;
   const [reportRows, suggestionRows] = await Promise.all([
     db
       .select({ count: count() })
       .from(automationResults)
       .where(
         and(
-          visibleReport(auth.userId),
+          visibleReport(),
           isNull(automationResults.acceptedAt),
           isNull(automationResults.ignoredAt),
         ),
@@ -198,7 +196,7 @@ export async function getUnreadResultCountCommand(auth: UserAuthSuccess) {
       .from(workItems)
       .where(
         and(
-          visibleSuggestion(auth.userId),
+          visibleSuggestion(),
           isNull(workItems.resultAcceptedAt),
           isNull(workItems.resultIgnoredAt),
         ),
@@ -210,14 +208,14 @@ export async function getUnreadResultCountCommand(auth: UserAuthSuccess) {
 }
 
 export async function actOnResultCommand(
-  auth: UserAuthSuccess,
+  _auth: UserAuthSuccess,
   input: {
     id: string;
     kind: 'report' | 'suggestion';
     action: 'accept' | 'ignore';
   },
 ) {
-  await assertResultsEnabled(auth);
+  await assertResultsEnabled();
   const now = new Date();
   const values =
     input.action === 'accept'
@@ -238,9 +236,7 @@ export async function actOnResultCommand(
     await db
       .update(automationResults)
       .set(values)
-      .where(
-        and(eq(automationResults.id, input.id), visibleReport(auth.userId)),
-      );
+      .where(and(eq(automationResults.id, input.id), visibleReport()));
   } else {
     await db
       .update(workItems)
@@ -249,14 +245,14 @@ export async function actOnResultCommand(
         resultIgnoredAt: values.ignoredAt,
         updatedAt: now,
       })
-      .where(and(eq(workItems.id, input.id), visibleSuggestion(auth.userId)));
+      .where(and(eq(workItems.id, input.id), visibleSuggestion()));
   }
 
   return { success: true as const };
 }
 
-export async function clearResultsCommand(auth: UserAuthSuccess) {
-  await assertResultsEnabled(auth);
+export async function clearResultsCommand(_auth: UserAuthSuccess) {
+  await assertResultsEnabled();
   const now = new Date();
   await Promise.all([
     db
@@ -264,7 +260,7 @@ export async function clearResultsCommand(auth: UserAuthSuccess) {
       .set({ ignoredAt: now, updatedAt: now })
       .where(
         and(
-          visibleReport(auth.userId),
+          visibleReport(),
           isNull(automationResults.acceptedAt),
           isNull(automationResults.ignoredAt),
         ),
@@ -274,7 +270,7 @@ export async function clearResultsCommand(auth: UserAuthSuccess) {
       .set({ resultIgnoredAt: now, updatedAt: now })
       .where(
         and(
-          visibleSuggestion(auth.userId),
+          visibleSuggestion(),
           isNull(workItems.resultAcceptedAt),
           isNull(workItems.resultIgnoredAt),
         ),

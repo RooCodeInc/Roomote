@@ -47,6 +47,7 @@ vi.mock('@roomote/sdk/server', () => ({
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
   wakeFastAgentParentEventAt: mocks.wakeParentEventAt,
   wakeFastAgentParentEventNow: mocks.wakeParentEventNow,
+  wakeFastAgentParentEventsOnTurnRelease: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', () => ({

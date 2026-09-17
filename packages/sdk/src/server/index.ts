@@ -121,6 +121,7 @@ export {
 } from './lib/task-runs/pull-request-mergeability-check';
 export * from './lib/manager-slack';
 export * from './lib/automation-result-metadata';
+export * from './lib/automation-result-visibility';
 export * from './automations';
 export * from './lib/manager-stats';
 export {
@@ -143,13 +144,22 @@ export {
   signArtifactIdWithKey,
   verifyArtifactSignatureWithKeys,
 } from './lib/artifacts/raw-url';
-export { createTaskArtifactRecord } from './lib/artifacts/create-record';
+export {
+  authorizeTaskArtifactUpload,
+  createTaskArtifactRecord,
+} from './lib/artifacts/create-record';
 export {
   createFastAgentConversationArtifact,
   createFastAgentSessionArtifact,
   createSessionArtifact,
 } from './lib/artifacts/create-session-artifact';
 export { buildFastAgentArtifactCreator } from './lib/artifacts/fast-agent-artifact-creator';
+export {
+  buildPlatformIssueSourceUrl,
+  createFastSessionPlatformIssueReport,
+  notifyPlatformIssueReport,
+  type PlatformIssueSource,
+} from './lib/platform-issue-reporting';
 export {
   notifyFastAgentParentOnArtifact,
   type FastArtifactNotificationResult,
@@ -259,6 +269,7 @@ export {
   recoverPendingFastAgentParentEvents,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
+  wakeFastAgentParentEventsOnTurnRelease,
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';
 export {
@@ -554,6 +565,7 @@ export { resolveUserMcpServerConfigs } from './routers/mcp-connections';
 export {
   discoverOAuthEndpoints,
   discoverOAuthProtectedResourceMetadata,
+  ClientRegistrationRejectedError,
   registerOAuthClient,
   getPreferredTokenEndpointAuthMethod,
   generateCodeVerifier,
@@ -570,6 +582,13 @@ export {
   isDefinitiveOAuthRejection,
   type CustomMcpAuthTarget,
 } from './lib/mcp/custom-auth-target';
+
+export {
+  addRemoteCustomMcpForFast,
+  describeRegistrationRefusal,
+  prepareDeploymentCustomMcpOAuthConnection,
+  type AddRemoteCustomMcpResult,
+} from './lib/mcp/add-remote-custom-mcp';
 
 export {
   LINEAR_ORG_CONNECTION_ROLE,

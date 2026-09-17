@@ -11,6 +11,10 @@ import {
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
 } from './non-task-provider-usage';
+import {
+  evaluateTypeSafeJudgments,
+  type TypeSafeChoiceQuestion,
+} from './typesafe-judgment';
 
 type ExplicitBootstrapSkill = 'explain-repo-code' | 'plan-repo-implementation';
 
@@ -57,6 +61,28 @@ Confidence should be a number from 0 to 1 when you can estimate it.
 `.trim();
 
 const REQUESTED_WORK_KIND_TIMEOUT_MS = 5_000;
+
+/**
+ * Below this Choice confidence the judgment model's answer is discarded and
+ * the helper model classifies instead. Starting value, not tuned.
+ */
+const JUDGMENT_MIN_CONFIDENCE = 0.5;
+
+const REQUESTED_WORK_KIND_QUESTION: TypeSafeChoiceQuestion<RequestedWorkKind> =
+  {
+    type: 'choice',
+    instructions:
+      "What kind of work does the user's initial ask in `prompt` request from a coding agent? Classify the initial ask only, not later lifecycle behavior. When the ask mixes investigation with changes, any request to modify, run, validate, or deliver repository or workspace work makes it implement.",
+    criteria: {
+      question:
+        'Explanation, understanding, investigation, diagnosis, review, or a connected-system action that needs no repository or workspace changes. Examples: "Check Better Stack and tell me what failed", "Run a Sentry query and report the results".',
+      plan: 'Planning, scoping, design, sequencing, or a proposal that should stay non-mutating, including work that needs meaningful product, scope, or architecture decisions before implementation.',
+      implement:
+        'Build, fix, change, create, edit, write, run, or otherwise execute repository or workspace work, including narrow, conventional, low-decision changes. Examples: "Check Better Stack and fix the failure", "Inspect Sentry, then patch the crash".',
+      unknown:
+        'Too contradictory or underspecified to pick any of the other kinds.',
+    },
+  };
 
 const EXPLICIT_BOOTSTRAP_KIND: Record<
   ExplicitBootstrapSkill,
@@ -127,6 +153,38 @@ function getSystemDefaultRequestedWorkKindDecision(): RequestedWorkKindDecision 
   };
 }
 
+/**
+ * Fast path through the optional judgment model. Returns `undefined` when it
+ * is not configured, fails, or is not confident, so the helper model decides.
+ */
+async function classifyWithJudgmentModel(
+  prompt: string,
+): Promise<RequestedWorkKindDecision | undefined> {
+  try {
+    const answers = await evaluateTypeSafeJudgments({
+      state: { prompt },
+      questions: { kind: REQUESTED_WORK_KIND_QUESTION },
+    });
+
+    if (!answers || answers.kind.confidence < JUDGMENT_MIN_CONFIDENCE) {
+      return undefined;
+    }
+
+    return {
+      kind: answers.kind.choice,
+      source: 'llm_classifier',
+      confidence: answers.kind.confidence,
+    };
+  } catch (error) {
+    console.warn(
+      `[RequestedWorkKind] Judgment model failed, using the helper model: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return undefined;
+  }
+}
+
 export async function classifyRequestedWorkKindFromPrompt(
   prompt: string,
   tracking?: {
@@ -138,6 +196,12 @@ export async function classifyRequestedWorkKindFromPrompt(
 
   if (!trimmedPrompt) {
     return getSystemDefaultRequestedWorkKindDecision();
+  }
+
+  const judgmentDecision = await classifyWithJudgmentModel(trimmedPrompt);
+
+  if (judgmentDecision) {
+    return judgmentDecision;
   }
 
   const { object } = await generateTrackedNonTaskObject({

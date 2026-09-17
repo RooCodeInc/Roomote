@@ -260,7 +260,11 @@ Leave them unset and Memory uses OpenAI's `gpt-5.6-luna` and
 
 Memory search does not use a cross-encoder reranker: retrieval is hybrid
 (vector + keyword fusion), which keeps search latency flat and provider
-requirements minimal.
+requirements minimal. When the optional [judgment model](/models#judgment-model)
+is on, Roomote reorders `query` results it returns to agents: passages the
+judgment model confidently finds relevant move up and ones it confidently finds
+irrelevant move down. Nothing is removed, and the passage text is sent to the
+judgment model provider.
 
 The synthesis model is applied by Roomote when it forwards the call and passed
 to the provider as written, so use that provider's naming

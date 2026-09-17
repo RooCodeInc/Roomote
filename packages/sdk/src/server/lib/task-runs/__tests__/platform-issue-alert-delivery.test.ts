@@ -43,6 +43,8 @@ import {
   deploymentSettings,
   eq,
   findBackgroundAutomationSlackThread,
+  fastAgentConversations,
+  ensureSessionForFastConversation,
   slackInstallations,
   slackInstallationChannels,
   slackInstallationFactory,
@@ -51,6 +53,7 @@ import {
   taskPlatformIssueReports,
   taskRuns,
   tasks,
+  sessions,
   upsertAutomation,
   upsertBackgroundAutomationSlackThread,
   updateBackgroundAutomationSlackThreadMetadata,
@@ -64,6 +67,7 @@ import {
 } from '@roomote/types';
 
 import { recordTaskMessageEnvelope } from '../record-task-message-envelope';
+import { createFastSessionPlatformIssueReport } from '../../platform-issue-reporting';
 
 const REPORT = {
   title: 'Broken webhook secret',
@@ -181,6 +185,98 @@ describe('platform issue alert delivery', () => {
     await db.delete(deploymentSettings);
     await db.delete(slackUserMappings);
     await db.delete(slackInstallations);
+  });
+
+  it('persists a Fast report with canonical session and actor identity', async () => {
+    const user = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: `platform-issue-${Date.now()}`,
+        conversationId: `platform-issue-${Date.now()}`,
+      })
+      .returning({ id: fastAgentConversations.id });
+    const session = await ensureSessionForFastConversation(
+      db,
+      conversation!.id,
+    );
+
+    await expect(
+      createFastSessionPlatformIssueReport({
+        fastConversationId: conversation!.id,
+        fastEventId: 'turn-1:tool:0',
+        report: REPORT,
+        userId: user.id,
+      }),
+    ).resolves.toEqual({
+      success: true,
+      reportCreated: true,
+      report: REPORT,
+    });
+
+    await expect(
+      db.query.taskPlatformIssueReports.findFirst({
+        where: eq(
+          taskPlatformIssueReports.fastConversationId,
+          conversation!.id,
+        ),
+        columns: {
+          taskId: true,
+          runId: true,
+          sessionId: true,
+          fastConversationId: true,
+          fastEventId: true,
+          reportedByUserId: true,
+          report: true,
+        },
+      }),
+    ).resolves.toMatchObject({
+      taskId: null,
+      runId: null,
+      sessionId: session.id,
+      fastConversationId: conversation!.id,
+      fastEventId: 'turn-1:tool:0',
+      reportedByUserId: user.id,
+      report: REPORT,
+    });
+  });
+
+  it('rejects a Fast report from a non-owner of a private session', async () => {
+    const owner = await userFactory.create();
+    const otherUser = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'web',
+        workspaceId: `private-platform-issue-${Date.now()}`,
+        conversationId: `private-platform-issue-${Date.now()}`,
+      })
+      .returning({ id: fastAgentConversations.id });
+    const session = await ensureSessionForFastConversation(
+      db,
+      conversation!.id,
+    );
+    await db
+      .update(sessions)
+      .set({
+        privacy: 'private',
+        privateOwnerUserId: owner.id,
+      })
+      .where(eq(sessions.id, session.id));
+
+    await expect(
+      createFastSessionPlatformIssueReport({
+        fastConversationId: conversation!.id,
+        fastEventId: 'turn-2:tool:0',
+        report: REPORT,
+        userId: otherUser.id,
+      }),
+    ).rejects.toThrow(
+      'This user cannot report issues from this private session.',
+    );
   });
 
   it('posts the alert to the automation Discord channel when its own destination is Discord', async () => {
@@ -436,6 +532,10 @@ describe('platform issue alert delivery', () => {
             type: 'actions',
             elements: expect.arrayContaining([
               expect.objectContaining({
+                action_id: 'platform_issue_review_and_send',
+                url: expect.stringContaining('/platform-issues/'),
+              }),
+              expect.objectContaining({
                 action_id: 'late_bound_automation_view_task',
                 url: expect.stringContaining('utm_source=slack'),
               }),
@@ -642,9 +742,12 @@ describe('platform issue alert delivery', () => {
     expect(mockSlackOpenConversation).toHaveBeenCalledWith('UADMIN');
     expect(mockSlackPostMessage).toHaveBeenCalledTimes(1);
     const [post] = mockSlackPostMessage.mock.calls[0] ?? [];
+    const expectedText =
+      `Platform issue reported: *${REPORT.title}*\n> ${REPORT.summary}\n` +
+      `Roomote has not received this report. Review what will be shared, then send it to Roomote if you'd like help.`;
     expect(post).toMatchObject({
       channel: 'DADMIN',
-      text: `Platform issue reported: *${REPORT.title}*\n> ${REPORT.summary}`,
+      text: expectedText,
       blocks: [
         expect.objectContaining({
           type: 'container',
@@ -658,7 +761,7 @@ describe('platform issue alert delivery', () => {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: `Platform issue reported: *${REPORT.title}*\n> ${REPORT.summary}`,
+                text: expectedText,
               },
             },
           ]),
@@ -672,6 +775,9 @@ describe('platform issue alert delivery', () => {
     );
     expect(JSON.stringify(post.blocks)).toContain(
       'late_bound_automation_configure',
+    );
+    expect(JSON.stringify(post.blocks)).toContain(
+      'platform_issue_review_and_send',
     );
     expect((await findReportRow(taskId))?.slackPostedAt).not.toBeNull();
   });

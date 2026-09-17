@@ -559,18 +559,23 @@ describe('deliverFastAgentParentEvent', () => {
   });
 
   it.each([false, true])(
-    'preserves queued Slack caution eligibility (directed=%s)',
-    async (directedAtRoomote) => {
+    'preserves explicit queued provider quiet eligibility (allowed=%s)',
+    async (allowSilentAmbientReply) => {
       await deliverFastAgentParentEventWithLock(
         {
-          parent,
+          parent: {
+            ...parent,
+            conversation: { ...parent.conversation, surface: 'discord' },
+          },
           event: {
             type: 'human_follow_up',
             eventId: '100.004',
             currentMessageId: '100.004',
             userId: 'user-2',
             question: 'A follow-up',
-            directedAtRoomote,
+            directedAtRoomote: false,
+            allowSilentAmbientReply,
+            peerDirectedTurn: true,
             agentContext: 'Human-to-human discussion may be continuing',
           },
         },
@@ -581,8 +586,10 @@ describe('deliverFastAgentParentEvent', () => {
         'Human-to-human discussion may be continuing',
       );
       expect(input.allowSilentAmbientReply).toBe(
-        directedAtRoomote ? undefined : true,
+        allowSilentAmbientReply ? true : undefined,
       );
+      expect(input.directedAtRoomote).toBe(false);
+      expect(input.peerDirectedTurn).toBe(true);
     },
   );
 
@@ -1075,6 +1082,7 @@ describe('deliverFastAgentParentEvent', () => {
       taskId: 'task-1',
       runId: 42,
       messageId: '22222222-2222-4222-8222-222222222222',
+      admittedAtMs: 1_789_660_000_000,
       purpose: 'progress' as const,
       message: 'The child is running targeted tests.',
     };
@@ -1086,6 +1094,7 @@ describe('deliverFastAgentParentEvent', () => {
         question: expect.stringContaining(
           '"message":"The child is running targeted tests."',
         ),
+        platformEventTimestampMs: childEvent.admittedAtMs,
         turnSource: 'platform_event',
       }),
     );

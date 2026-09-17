@@ -54,6 +54,7 @@ export * from './logging';
 export * from './llm-usage';
 export * from './bedrock-opencode-provider';
 export * from './inference-gateway';
+export * from './judgment-model';
 export * from './sandbox-preview-inference';
 export * from './inference-provider-retry';
 export * from './model-provider-config';

@@ -24,7 +24,7 @@ import {
   userFactory,
 } from '../../server';
 
-async function makeConversation() {
+async function makeConversation(privacy: 'shared' | 'private' = 'shared') {
   const user = await userFactory.create();
   const [conversation] = await db
     .insert(fastAgentConversations)
@@ -33,6 +33,8 @@ async function makeConversation() {
       surface: 'web',
       workspaceId: user.id,
       conversationId: `conversation-${crypto.randomUUID()}`,
+      privacy,
+      privateOwnerUserId: privacy === 'private' ? user.id : null,
     })
     .returning();
   return { user, conversation: conversation! };
@@ -64,6 +66,22 @@ afterEach(async () => {
 });
 
 describe('session wakeup helpers', () => {
+  it('admits wakeups for private Sessions', async () => {
+    const { user, conversation } = await makeConversation('private');
+    await admitSessionWakeup({
+      conversationId: conversation.id,
+      createdByUserId: user.id,
+      name: 'Private follow-up',
+      prompt: 'Private canary prompt',
+      schedule: { mode: 'once', at: firstRunAt.toISOString() },
+      reportPolicy: 'always',
+      maxRuns: 1,
+      until: null,
+      nextRunAt: firstRunAt,
+    });
+    expect(await listSessionWakeups(conversation.id)).toHaveLength(1);
+  });
+
   it.each([2, 0.5, 31 / 60])(
     'deduplicates relative retries (%s minutes) with changed resolved times, not distinct delays or prompts',
     async (inMinutes) => {

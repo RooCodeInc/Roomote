@@ -195,7 +195,7 @@ function buildTarget(
     }
     const identityId = input.targetChannelId?.trim();
     if (!identityId) {
-      throw new Error('Choose a verified Email identity.');
+      throw new Error('Choose an account Email identity.');
     }
     // Email keeps the direct-message shape (externalRef = owner) and pins the
     // selected identity in metadata.
@@ -265,7 +265,7 @@ async function assertDestinationConnected(
       ))
     ) {
       throw new Error(
-        'Verify your Email address and ask an admin to configure AgentMail before saving this destination.',
+        'Choose your current account Email address and ask an admin to configure AgentMail before saving this destination.',
       );
     }
     return;

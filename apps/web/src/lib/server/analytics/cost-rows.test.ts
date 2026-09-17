@@ -25,11 +25,15 @@ import {
 import { buildChartData } from './chart';
 import { buildCostChartAnalytics } from './cost-summary';
 import { applyDimensionFilters, buildFilterOptions } from './dimensions';
-import { getAnalyticsDetails } from './index';
+import { getAnalyticsDetails, getAnalyticsExportData } from './index';
 import { getBucketStart } from './time-buckets';
 import type { AnalyticsRow } from './types';
 
 describe('getCostAnalyticsRows', () => {
+  const analyticsAuth = {
+    userId: 'cost-analytics-user',
+    isAdmin: true,
+  } as UserAuthSuccess;
   const usageEventIds: string[] = [];
   const taskIds: string[] = [];
   const environmentIds: string[] = [];
@@ -89,11 +93,210 @@ describe('getCostAnalyticsRows', () => {
 
     usageEventIds.push(recentEvent.id, oldEvent.id);
 
-    const rows = await getCostAnalyticsRows({} as UserAuthSuccess, 7, now);
+    const rows = await getCostAnalyticsRows(analyticsAuth, 7, now);
     const rowIds = new Set(rows.map((row) => row.id));
 
     expect(rowIds.has(recentEvent.id)).toBe(true);
     expect(rowIds.has(oldEvent.id)).toBe(false);
+  });
+
+  it('includes private task and Fast usage with equal redacted non-owner totals', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    userIds.push(owner.id, other.id);
+    const task = await taskFactory.create({
+      initiatorUserId: owner.id,
+      privacy: 'private',
+      privateOwnerUserId: owner.id,
+      title: 'Private cost task title',
+      repositoryName: 'secret/private-cost-repository',
+    });
+    taskIds.push(task.id);
+    const nativeSessionId = `private-native-${crypto.randomUUID()}`;
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        privacy: 'private',
+        privateOwnerUserId: owner.id,
+        surface: 'web',
+        workspaceId: owner.id,
+        conversationId: crypto.randomUUID(),
+        openCodeSessionId: nativeSessionId,
+      })
+      .returning();
+    fastSessionIds.push(conversation!.id);
+    const events = await db
+      .insert(llmUsageEvents)
+      .values([
+        {
+          eventKey: `private-task-cost-${crypto.randomUUID()}`,
+          taskId: task.id,
+          userId: owner.id,
+          source: 'private_task_source',
+          providerId: 'private-provider',
+          modelId: 'private-model',
+          costSource: 'missing',
+          costMicroUsd: 1_000_000,
+          totalTokens: 100,
+        },
+        {
+          eventKey: `private-task-cost-${crypto.randomUUID()}`,
+          taskId: task.id,
+          userId: owner.id,
+          source: 'private_task_source',
+          providerId: 'private-provider',
+          modelId: 'private-model',
+          costSource: 'missing',
+          costMicroUsd: 2_000_000,
+          totalTokens: 200,
+        },
+        {
+          eventKey: `private-fast-cost-${crypto.randomUUID()}`,
+          harnessSessionId: nativeSessionId,
+          userId: owner.id,
+          source: 'fast_agent',
+          providerId: 'private-provider',
+          modelId: 'private-model',
+          costSource: 'missing',
+          costMicroUsd: 3_000_000,
+          totalTokens: 300,
+        },
+      ])
+      .returning({ id: llmUsageEvents.id });
+    usageEventIds.push(...events.map(({ id }) => id));
+
+    const ownerRows = await getCostAnalyticsRows(
+      { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+      'all',
+      new Date(),
+    );
+    const adminRows = await getCostAnalyticsRows(
+      { userId: other.id, isAdmin: true } as UserAuthSuccess,
+      'all',
+      new Date(),
+    );
+    const nonOwnerRows = await getCostAnalyticsRows(
+      { userId: other.id, isAdmin: false } as UserAuthSuccess,
+      'all',
+      new Date(),
+    );
+    const eventIds = events.map(({ id }) => id);
+    const ownerEventRows = ownerRows.filter(({ id }) => eventIds.includes(id));
+    const isPrivateFixtureRow = (row: AnalyticsRow) =>
+      row.id.startsWith('private-cost:') &&
+      row.dimensions.provider?.key === 'private-provider' &&
+      row.dimensions.user?.key === ownerEventRows[0]?.dimensions.user?.key;
+    const adminPrivateRows = adminRows.filter(isPrivateFixtureRow);
+    const nonOwnerPrivateRows = nonOwnerRows.filter(isPrivateFixtureRow);
+    const adminPrivateTaskRows = adminPrivateRows.filter(
+      (row) => row.details.values.taskTitle === 'Private task',
+    );
+    const adminPrivateSessionRow = adminPrivateRows.find(
+      (row) => row.details.values.taskTitle === 'Private session',
+    );
+
+    expect(ownerEventRows).toHaveLength(3);
+    expect(ownerEventRows.reduce((sum, row) => sum + row.value, 0)).toBe(6);
+    expect(
+      ownerEventRows.reduce((sum, row) => sum + (row.tokens ?? 0), 0),
+    ).toBe(600);
+    expect(adminRows.reduce((sum, row) => sum + row.value, 0)).toBe(
+      ownerRows.reduce((sum, row) => sum + row.value, 0),
+    );
+    expect(adminRows.reduce((sum, row) => sum + (row.tokens ?? 0), 0)).toBe(
+      ownerRows.reduce((sum, row) => sum + (row.tokens ?? 0), 0),
+    );
+    expect(nonOwnerRows.reduce((sum, row) => sum + row.value, 0)).toBe(
+      adminRows.reduce((sum, row) => sum + row.value, 0),
+    );
+    expect(adminPrivateRows).toHaveLength(3);
+    expect(nonOwnerPrivateRows).toHaveLength(3);
+    expect(nonOwnerPrivateRows.reduce((sum, row) => sum + row.value, 0)).toBe(
+      6,
+    );
+    expect(
+      nonOwnerPrivateRows.reduce((sum, row) => sum + (row.tokens ?? 0), 0),
+    ).toBe(600);
+    expect(adminPrivateTaskRows).toHaveLength(2);
+    expect(adminPrivateSessionRow).toBeDefined();
+    expect(adminPrivateTaskRows[0]?.meta?.canonicalTaskId).toBe(
+      adminPrivateTaskRows[1]?.meta?.canonicalTaskId,
+    );
+    expect(adminPrivateTaskRows[0]?.meta?.canonicalTaskId).toMatch(
+      /^private-task:/,
+    );
+    expect(adminPrivateSessionRow?.meta?.canonicalTaskId).toBeNull();
+    expect(adminPrivateRows[0]?.dimensions.provider?.label).toBe(
+      'private-provider',
+    );
+    expect(adminPrivateRows[0]?.dimensions.model?.label).toBe('private-model');
+    expect(adminPrivateRows[0]?.dimensions.user).toEqual(
+      ownerEventRows[0]?.dimensions.user,
+    );
+    expect(adminPrivateRows[0]?.details.values.user).toBe(
+      ownerEventRows[0]?.details.values.user,
+    );
+    expect(adminPrivateRows.every((row) => !row.details.links)).toBe(true);
+
+    const adminPayload = JSON.stringify(adminPrivateRows);
+    expect(adminPayload).not.toContain(task.id);
+    expect(adminPayload).not.toContain(nativeSessionId);
+    expect(adminPayload).not.toContain('Private cost task title');
+    expect(adminPayload).not.toContain('secret/private-cost-repository');
+    expect(adminPayload).not.toContain('private_task_source');
+
+    const detailsInput = {
+      object: 'costs' as const,
+      viewBy: 'provider' as const,
+      metric: 'cost' as const,
+      filters: { provider: ['private-provider'] },
+      timePeriod: 'all' as const,
+      granularity: 'day' as const,
+      bucketKey: getBucketStart(
+        adminPrivateRows[0]!.timestamp,
+        'day',
+      ).toISOString(),
+      seriesKey: 'private-provider',
+    };
+    const ownerDetails = await getAnalyticsDetails(
+      { userId: owner.id, isAdmin: false } as UserAuthSuccess,
+      detailsInput,
+      new Date(),
+    );
+    const adminDetails = await getAnalyticsDetails(
+      { userId: other.id, isAdmin: true } as UserAuthSuccess,
+      detailsInput,
+      new Date(),
+    );
+    const adminExport = await getAnalyticsExportData(
+      { userId: other.id, isAdmin: true } as UserAuthSuccess,
+      {
+        object: 'costs',
+        viewBy: 'provider',
+        metric: 'cost',
+        filters: { provider: ['private-provider'] },
+        timePeriod: 'all',
+        granularity: 'day',
+      },
+      new Date(),
+    );
+
+    expect(ownerDetails).toMatchObject({ total: 6 });
+    expect(adminDetails).toMatchObject({ total: 6 });
+    expect(adminDetails.rows).toHaveLength(2);
+    expect(adminExport).toMatchObject({ total: 6 });
+    expect(adminExport.rows).toHaveLength(3);
+    expect(JSON.stringify(ownerDetails)).toContain(task.id);
+    expect(JSON.stringify(ownerDetails)).toContain('Private cost task title');
+    for (const response of [adminDetails, adminExport]) {
+      const payload = JSON.stringify(response);
+      expect(payload).not.toContain(task.id);
+      expect(payload).not.toContain(nativeSessionId);
+      expect(payload).not.toContain('Private cost task title');
+      expect(payload).not.toContain('secret/private-cost-repository');
+      expect(payload).not.toContain('private_task_source');
+    }
   });
 
   it('includes stored token totals for zero-cost usage without recomputing components', async () => {
@@ -117,7 +320,7 @@ describe('getCostAnalyticsRows', () => {
     usageEventIds.push(insertedEvent!.id);
 
     const rows = await getCostAnalyticsRows(
-      {} as UserAuthSuccess,
+      analyticsAuth,
       'all',
       new Date('2026-07-16T16:00:00.000Z'),
     );
@@ -161,7 +364,7 @@ describe('getCostAnalyticsRows', () => {
     ]);
 
     const details = await getAnalyticsDetails(
-      {} as UserAuthSuccess,
+      analyticsAuth,
       {
         object: 'costs',
         viewBy: 'provider',
@@ -235,7 +438,7 @@ describe('getCostAnalyticsRows', () => {
     usageEventIds.push(...usageEvents.map((event) => event.id));
 
     const rows = await getCostAnalyticsRows(
-      {} as UserAuthSuccess,
+      analyticsAuth,
       'all',
       new Date('2026-07-16T16:00:00.000Z'),
     );
@@ -285,7 +488,7 @@ describe('getCostAnalyticsRows', () => {
       .where(eq(tasks.id, task.id));
 
     const rows = await getCostAnalyticsRows(
-      {} as UserAuthSuccess,
+      analyticsAuth,
       'all',
       new Date('2026-07-17T12:00:00.000Z'),
     );
@@ -357,7 +560,7 @@ describe('getCostAnalyticsRows', () => {
     usageEventIds.push(...insertedEvents.map((event) => event.id));
 
     const rows = await getCostAnalyticsRows(
-      {} as UserAuthSuccess,
+      analyticsAuth,
       'all',
       new Date('2026-07-16T16:00:00.000Z'),
     );
@@ -488,11 +691,7 @@ describe('getCostAnalyticsRows', () => {
       .returning({ id: llmUsageEvents.id });
     usageEventIds.push(...insertedEvents.map((event) => event.id));
 
-    const rows = await getCostAnalyticsRows(
-      {} as UserAuthSuccess,
-      'all',
-      new Date(),
-    );
+    const rows = await getCostAnalyticsRows(analyticsAuth, 'all', new Date());
     const insertedRows = rows.filter((row) =>
       insertedEvents.some((event) => event.id === row.id),
     );

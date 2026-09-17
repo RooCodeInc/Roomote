@@ -149,6 +149,14 @@ all-repositories environment.
 Fast automation reports can be delivered to configured Discord channels or the
 automation owner's DM. Replies continue the report's Fast session in Discord.
 
+**Peer conversations** under **Settings > Experimental** is off by default. The
+deployment admin can enable it so linked participants' messages in established
+Fast Discord threads continue reaching Fast after a peer is mentioned. Roomote
+may ignore ambient discussion, while explicit bot mentions, commands, DMs, and
+replies to Roomote continue to receive a response normally. This applies only
+inside the established thread; it does not make Roomote monitor the surrounding
+channel.
+
 Every Fast reply ends with a compact footer: **Reply anytime**, a plain
 running-task count when at least one task is running, links to pull requests the
 Session is working on, and **Open in Roomote**, which opens the Session transcript.

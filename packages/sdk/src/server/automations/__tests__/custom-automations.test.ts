@@ -830,7 +830,7 @@ describe('customAutomationsJob', () => {
     );
   });
 
-  it('fails closed when the selected Email identity is no longer verified', async () => {
+  it('fails closed when the selected Email identity is no longer eligible', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
         ...automation,
@@ -847,7 +847,7 @@ describe('customAutomationsJob', () => {
     const result = await customAutomationsJob();
 
     expect(result.errors).toEqual([
-      'Flaky tests: The automation owner no longer has an active verified Email destination.',
+      'Flaky tests: The automation owner no longer has an active Email destination.',
     ]);
     expect(fastMocks.prepareAgentMailConversation).not.toHaveBeenCalled();
     expect(fastMocks.getSession).not.toHaveBeenCalled();
