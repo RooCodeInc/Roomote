@@ -607,21 +607,27 @@ export async function listFastAgentIntegrations(
   }
 
   const results = await Promise.allSettled(
-    candidates.map(async (integration) => ({
-      ...integration,
-      tools: (
-        await listCachedIntegrationTools({
-          cacheKey: `${context.userId}:${integration.endpoint!.url}:${configuredServers[integration.id]?.cacheRevision ?? ''}`,
-          url: integration.endpoint!.url,
-          headers: integration.endpoint!.headers,
-        })
-      )
-        .filter((tool) => !integration.disabledTools.has(tool.name))
-        .flatMap((tool) => {
-          const shaped = shapeFastIntegrationTool(integration.id, tool);
-          return shaped ? [shaped] : [];
-        }),
-    })),
+    candidates.map(async (integration) => {
+      const githubCapabilityRevision =
+        integration.id === 'github'
+          ? `${Boolean(githubInstallation)}:${Boolean(githubAccount)}`
+          : '';
+      return {
+        ...integration,
+        tools: (
+          await listCachedIntegrationTools({
+            cacheKey: `${context.userId}:${integration.endpoint!.url}:${configuredServers[integration.id]?.cacheRevision ?? githubCapabilityRevision}`,
+            url: integration.endpoint!.url,
+            headers: integration.endpoint!.headers,
+          })
+        )
+          .filter((tool) => !integration.disabledTools.has(tool.name))
+          .flatMap((tool) => {
+            const shaped = shapeFastIntegrationTool(integration.id, tool);
+            return shaped ? [shaped] : [];
+          }),
+      };
+    }),
   );
 
   let hasPrimaryMemory = false;

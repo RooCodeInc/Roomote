@@ -858,6 +858,22 @@ describe('fast-agent integration broker', () => {
       where: ['github-user-id', 'user-1'],
       columns: { id: true },
     });
+
+    mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'get_file_contents', inputSchema: { type: 'object' } },
+      { name: 'create_gist', inputSchema: { type: 'object' } },
+    ]);
+
+    const afterRepositoryConnection = await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+
+    expect(
+      afterRepositoryConnection[0]?.tools.map((tool) => tool.name),
+    ).toEqual(['get_file_contents', 'create_gist']);
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
   });
 
   it.each([
