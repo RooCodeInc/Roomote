@@ -188,13 +188,25 @@ function isValidAnswer(question: TypeSafeQuestion, answer: unknown): boolean {
     );
   }
 
+  const probabilities = record.probabilities;
+  if (
+    typeof probabilities !== 'object' ||
+    probabilities === null ||
+    Array.isArray(probabilities)
+  ) {
+    return false;
+  }
+
+  const probabilityRecord = probabilities as Record<string, unknown>;
+  const choices = Object.keys(question.criteria);
+
   return (
     record.type === 'choice' &&
     typeof record.choice === 'string' &&
     Object.hasOwn(question.criteria, record.choice) &&
     isProbability(record.confidence) &&
-    typeof record.probabilities === 'object' &&
-    record.probabilities !== null
+    Object.keys(probabilityRecord).length === choices.length &&
+    choices.every((choice) => isProbability(probabilityRecord[choice]))
   );
 }
 

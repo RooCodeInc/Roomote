@@ -377,6 +377,22 @@ describe('resolveUnmentionedThreadReplyRouting', () => {
     warn.mockRestore();
   });
 
+  it('keeps the refusal when the judgment response is malformed', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockEvaluateTypeSafeJudgments.mockRejectedValue(
+      new Error('Judgment model response is missing a valid answer'),
+    );
+
+    await expect(resolve()).resolves.toEqual({
+      shouldRoute: false,
+      interjectionDetected: true,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('missing a valid answer'),
+    );
+    warn.mockRestore();
+  });
+
   it('does not consult the judgment model for a reply with no text', async () => {
     await expect(resolve({ eventText: '   ' })).resolves.toEqual({
       shouldRoute: false,

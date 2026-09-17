@@ -47,6 +47,12 @@ function mockFetchResponse(body: unknown, init?: { status?: number }) {
   return fetchMock;
 }
 
+function mockFetchRawResponse(body: string) {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(body));
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
 const directAnswers = {
   urgent: { type: 'noul', noul: 0.92 },
   team: {
@@ -230,6 +236,39 @@ describe('evaluateTypeSafeJudgments', () => {
     await expect(
       evaluateTypeSafeJudgments({ state: 'hi', questions }),
     ).rejects.toThrow('missing a valid answer');
+  });
+
+  describe.each([
+    { label: 'TypeSafe direct', backend: 'typesafe' },
+    { label: 'Vercel AI Gateway', backend: 'vercel' },
+  ] as const)('$label choice answers', ({ backend }) => {
+    it.each([
+      ['a non-number', '{"billing":0.1,"technical":"0.9"}'],
+      ['an out-of-range number', '{"billing":0.1,"technical":1.1}'],
+      ['a non-finite number', '{"billing":0.1,"technical":1e309}'],
+      ['a missing choice', '{"technical":0.9}'],
+      ['an unexpected choice', '{"billing":0.1,"technical":0.9,"sales":0}'],
+    ])('rejects probabilities with %s', async (_label, probabilities) => {
+      if (backend === 'vercel') {
+        mockEnv.R_JUDGMENT_MODEL = 'vercel';
+        mockKeys({ AI_GATEWAY_API_KEY: 'gw-key' });
+      }
+
+      const providerMetadata =
+        backend === 'vercel'
+          ? ',"providerMetadata":{"typesafe":{"confidence":{"team":0.9}}}'
+          : '';
+      mockFetchRawResponse(
+        `{"answers":{"team":{"type":"choice","choice":"technical","probabilities":${probabilities},"confidence":0.9}}${providerMetadata}}`,
+      );
+
+      await expect(
+        evaluateTypeSafeJudgments({
+          state: 'hi',
+          questions: { team: questions.team },
+        }),
+      ).rejects.toThrow('missing a valid answer');
+    });
   });
 
   it('accepts score answers within the level range', async () => {
