@@ -12,6 +12,9 @@ import {
   llmUsageEvents,
   pullRequestFacts,
   repositoryFactory,
+  sessionFactory,
+  sessions,
+  sessionTasks,
   taskFactory,
   taskPullRequests,
   taskRuns,
@@ -592,6 +595,175 @@ describe('collectInstanceReportStats task usage isolation', () => {
       output: 20,
       total: 30,
       costMicroUsd: 40,
+    });
+  });
+});
+
+describe('collectInstanceReportStats session usage', () => {
+  it('returns empty session aggregates when the window has no data', async () => {
+    const report = await collectInstanceReportStats(
+      new Date('2400-01-01T00:00:00.000Z'),
+    );
+
+    expect(report.sessions24h).toEqual({
+      created: 0,
+      bySourceSurface: {},
+      bySourceTrigger: {},
+      byOwnerKind: {},
+      tokens: {
+        input: 0,
+        output: 0,
+        total: 0,
+        costMicroUsd: 0,
+      },
+    });
+  });
+
+  it('counts sessions and attributed usage with task-equivalent window semantics', async () => {
+    const now = new Date('2500-01-02T00:00:00.000Z');
+    const since = new Date('2500-01-01T00:00:00.000Z');
+    const beforeSince = new Date(since.getTime() - 1);
+    const afterNow = new Date(now.getTime() + 1);
+    const suffix = Date.now().toString();
+
+    const boundarySession = await sessionFactory.create({
+      ownerKind: 'user',
+      sourceSurface: 'web',
+      sourceTrigger: 'manual',
+    });
+    const recentSession = await sessionFactory.create({
+      ownerKind: 'automation',
+      sourceSurface: 'slack',
+      sourceTrigger: 'schedule',
+    });
+    const oldSession = await sessionFactory.create({
+      ownerKind: 'system',
+      sourceSurface: 'system',
+      sourceTrigger: 'manual',
+    });
+    await Promise.all([
+      db
+        .update(sessions)
+        .set({ createdAt: since })
+        .where(eq(sessions.id, boundarySession.id)),
+      db
+        .update(sessions)
+        .set({ createdAt: afterNow })
+        .where(eq(sessions.id, recentSession.id)),
+      db
+        .update(sessions)
+        .set({ createdAt: beforeSince })
+        .where(eq(sessions.id, oldSession.id)),
+    ]);
+
+    const directTask = await taskFactory.create({
+      workflow: 'standard',
+      createdAt: now,
+    });
+    const delegatedTask = await taskFactory.create({
+      workflow: 'standard',
+      createdAt: now,
+    });
+    const snapshotTask = await taskFactory.create({
+      workflow: 'env_snapshot',
+      createdAt: now,
+    });
+    await db.insert(sessionTasks).values([
+      {
+        sessionId: boundarySession.id,
+        taskId: directTask.id,
+        origin: 'direct_launch',
+      },
+      {
+        sessionId: boundarySession.id,
+        taskId: delegatedTask.id,
+        origin: 'fast_delegation',
+      },
+      {
+        sessionId: boundarySession.id,
+        taskId: snapshotTask.id,
+        origin: 'follow_up',
+      },
+    ]);
+
+    await db.insert(llmUsageEvents).values([
+      {
+        eventKey: `session-direct-${suffix}`,
+        taskId: directTask.id,
+        sessionId: boundarySession.id,
+        inputTokens: 10,
+        outputTokens: 20,
+        totalTokens: 30,
+        costMicroUsd: 40,
+        costSource: 'opencode_message',
+        createdAt: since,
+      },
+      {
+        eventKey: `session-delegated-${suffix}`,
+        taskId: delegatedTask.id,
+        sessionId: boundarySession.id,
+        inputTokens: 1,
+        outputTokens: 2,
+        totalTokens: 3,
+        costMicroUsd: 4,
+        costSource: 'opencode_message',
+        createdAt: now,
+      },
+      {
+        eventKey: `session-snapshot-${suffix}`,
+        taskId: snapshotTask.id,
+        sessionId: boundarySession.id,
+        inputTokens: 100,
+        outputTokens: 200,
+        totalTokens: 300,
+        costMicroUsd: 400,
+        costSource: 'opencode_message',
+        createdAt: now,
+      },
+      {
+        eventKey: `session-fast-${suffix}`,
+        sessionId: recentSession.id,
+        inputTokens: 5,
+        outputTokens: 6,
+        totalTokens: 11,
+        costMicroUsd: 12,
+        costSource: 'opencode_message',
+        createdAt: afterNow,
+      },
+      {
+        eventKey: `session-unattributed-${suffix}`,
+        inputTokens: 1_000,
+        outputTokens: 2_000,
+        totalTokens: 3_000,
+        costMicroUsd: 4_000,
+        costSource: 'opencode_message',
+        createdAt: now,
+      },
+      {
+        eventKey: `session-before-window-${suffix}`,
+        sessionId: recentSession.id,
+        inputTokens: 10_000,
+        outputTokens: 20_000,
+        totalTokens: 30_000,
+        costMicroUsd: 40_000,
+        costSource: 'opencode_message',
+        createdAt: beforeSince,
+      },
+    ]);
+
+    const report = await collectInstanceReportStats(now);
+
+    expect(report.sessions24h).toEqual({
+      created: 2,
+      bySourceSurface: { slack: 1, web: 1 },
+      bySourceTrigger: { manual: 1, schedule: 1 },
+      byOwnerKind: { automation: 1, user: 1 },
+      tokens: {
+        input: 16,
+        output: 28,
+        total: 44,
+        costMicroUsd: 56,
+      },
     });
   });
 });
