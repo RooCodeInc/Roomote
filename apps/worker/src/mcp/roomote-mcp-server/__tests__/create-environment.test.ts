@@ -21,6 +21,10 @@ const projectDefinition = {
 };
 const projectProposalHash =
   buildEnvironmentProposal(projectDefinition).proposalHash;
+const projectUpdateProposalHash = buildEnvironmentProposal(
+  projectDefinition,
+  'env-existing',
+).proposalHash;
 
 describe('handlePreviewEnvironment', () => {
   it('returns a concrete approval-bound proposal without mutating', async () => {
@@ -201,7 +205,7 @@ repositories:
   - repository: owner/repo
 `,
         format: 'yaml',
-        approvedProposalHash: projectProposalHash,
+        approvedProposalHash: projectUpdateProposalHash,
       },
       config,
     );
@@ -213,7 +217,7 @@ repositories:
     expect(parsed.environmentId).toBe('env-existing');
     expect(tasksApiClient.updateEnvironment).toHaveBeenCalledWith(config, {
       environmentId: 'env-existing',
-      approvedProposalHash: projectProposalHash,
+      approvedProposalHash: projectUpdateProposalHash,
       config: expect.objectContaining({ name: 'My Project' }),
     });
   });
@@ -244,6 +248,23 @@ repositories:
         environmentId: 'env-existing',
         definition: { ...projectDefinition, services: ['postgres16'] },
         approvedProposalHash: projectProposalHash,
+      },
+      config,
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+      success: false,
+      error: expect.stringContaining('Explicit approval is required'),
+    });
+    expect(tasksApiClient.updateEnvironment).not.toHaveBeenCalled();
+  });
+
+  it('rejects replaying approval against another environment', async () => {
+    const result = await handleUpdateEnvironment(
+      {
+        environmentId: 'env-other',
+        definition: projectDefinition,
+        approvedProposalHash: projectUpdateProposalHash,
       },
       config,
     );

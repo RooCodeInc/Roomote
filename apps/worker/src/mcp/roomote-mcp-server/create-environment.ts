@@ -129,7 +129,10 @@ function parseFinalDefinition(params: {
   return applyOverrides(parsedConfig.data, params);
 }
 
-export function buildEnvironmentProposal(config: EnvironmentConfig): {
+export function buildEnvironmentProposal(
+  config: EnvironmentConfig,
+  environmentId?: string,
+): {
   proposalHash: string;
   summary: {
     name: string;
@@ -152,7 +155,13 @@ export function buildEnvironmentProposal(config: EnvironmentConfig): {
     (config.analysis_recipe ? 5_400 : 0);
   return {
     proposalHash: createHash('sha256')
-      .update(stableSerialize(config))
+      .update(
+        stableSerialize({
+          action: environmentId ? 'update' : 'create',
+          environmentId: environmentId ?? null,
+          config,
+        }),
+      )
       .digest('hex'),
     summary: {
       name: config.name,
@@ -174,7 +183,10 @@ export async function handlePreviewEnvironment(params: {
 }): Promise<ToolResult> {
   try {
     const finalConfig = parseFinalDefinition(params);
-    const proposal = buildEnvironmentProposal(finalConfig);
+    const proposal = buildEnvironmentProposal(
+      finalConfig,
+      params.environmentId,
+    );
     return successResult({
       ...proposal,
       approvalQuestionId: `environment-approval:${proposal.proposalHash}`,
@@ -247,7 +259,7 @@ export async function handleUpdateEnvironment(
 
     const finalConfig = parseFinalDefinition(params);
     if (
-      buildEnvironmentProposal(finalConfig).proposalHash !==
+      buildEnvironmentProposal(finalConfig, environmentId).proposalHash !==
       params.approvedProposalHash
     ) {
       return errorResult(
