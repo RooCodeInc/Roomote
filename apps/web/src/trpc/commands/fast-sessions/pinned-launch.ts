@@ -7,7 +7,6 @@ import {
   refreshFastAgentSessionTitle,
 } from '@roomote/cloud-agents/server';
 import { formatErrorForLog } from '@roomote/types';
-import { db, environments, eq } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
   NO_REPOSITORIES,
@@ -26,6 +25,7 @@ import {
 } from '@/lib/server/source-control-provider';
 
 import type { PinnedFastSessionLaunchInput } from './input';
+import { getEnvironmentNamesByIdsCommand } from '../environments';
 
 type StartPinnedFastSessionLaunchInput = {
   text: string;
@@ -53,20 +53,24 @@ function getPinnedRepositoryFullNames(
 }
 
 async function describeLaunchTarget(
+  auth: UserAuthSuccess,
   pinnedLaunch: PinnedFastSessionLaunchInput,
+  environmentId: string | undefined,
 ): Promise<string> {
   if (pinnedLaunch.repo === NO_REPOSITORIES) {
     return 'Blank slate';
   }
 
-  if (pinnedLaunch.environmentId) {
-    const environment = await db.query.environments.findFirst({
-      where: eq(environments.id, pinnedLaunch.environmentId),
-      columns: { name: true },
+  if (environmentId) {
+    const [environment] = await getEnvironmentNamesByIdsCommand(auth, {
+      ids: [environmentId],
     });
-    if (environment?.name) {
-      return environment.name;
+    if (!environment) {
+      throw new Error(
+        'The selected environment is no longer available. Choose another environment and try again.',
+      );
     }
+    return environment.name;
   }
   return pinnedLaunch.repo === ALL_REPOSITORIES
     ? 'all repositories'
@@ -103,6 +107,7 @@ export async function startPinnedFastSessionLaunch(
     pinnedLaunch.repo === NO_REPOSITORIES
       ? undefined
       : pinnedLaunch.environmentId;
+  const target = await describeLaunchTarget(auth, pinnedLaunch, environmentId);
   const sourceControlProvider =
     resolveSelectedRepositorySourceControlProvider(
       selectedRepositories,
@@ -141,7 +146,6 @@ export async function startPinnedFastSessionLaunch(
     },
   };
 
-  const target = await describeLaunchTarget(pinnedLaunch);
   const kickoffMessage = blank
     ? `Opened a workspace in ${target}.`
     : `Started a task in ${target}.`;

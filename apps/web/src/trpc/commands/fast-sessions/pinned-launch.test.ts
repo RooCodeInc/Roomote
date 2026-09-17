@@ -2,7 +2,7 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   launchPinned: vi.fn(),
   refreshTitle: vi.fn(),
-  environmentsFindFirst: vi.fn(),
+  getEnvironmentNamesByIds: vi.fn(),
   getRepositories: vi.fn(),
   resolveEnvironmentProvider: vi.fn(),
   resolveSelectedProvider: vi.fn(),
@@ -18,16 +18,12 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   refreshFastAgentSessionTitle: mocks.refreshTitle,
 }));
 
-vi.mock('@roomote/db/server', () => ({
-  db: {
-    query: { environments: { findFirst: mocks.environmentsFindFirst } },
-  },
-  environments: { id: 'environments.id' },
-  eq: vi.fn(),
-}));
-
 vi.mock('@/lib/server', () => ({
   getRepositories: mocks.getRepositories,
+}));
+
+vi.mock('../environments', () => ({
+  getEnvironmentNamesByIdsCommand: mocks.getEnvironmentNamesByIds,
 }));
 
 vi.mock('@/lib/server/source-control-provider', () => ({
@@ -62,7 +58,9 @@ describe('startPinnedFastSessionLaunch', () => {
       taskId: 'task-1',
       runId: 7,
     });
-    mocks.environmentsFindFirst.mockResolvedValue({ name: 'Backend' });
+    mocks.getEnvironmentNamesByIds.mockResolvedValue([
+      { id: environmentId, name: 'Backend' },
+    ]);
     mocks.getRepositories.mockResolvedValue([]);
     mocks.resolveEnvironmentProvider.mockResolvedValue('gitlab');
     mocks.resolveSelectedProvider.mockReturnValue(undefined);
@@ -92,6 +90,9 @@ describe('startPinnedFastSessionLaunch', () => {
       sessionId: 'session-1',
       fastConversationId: 'fast-1',
       taskId: 'task-1',
+    });
+    expect(mocks.getEnvironmentNamesByIds).toHaveBeenCalledWith(auth, {
+      ids: [environmentId],
     });
     expect(mocks.getRepositories).not.toHaveBeenCalled();
     expect(mocks.after).toHaveBeenCalledOnce();
@@ -132,6 +133,27 @@ describe('startPinnedFastSessionLaunch', () => {
     expect(launchInput.task.payload.description).toContain('stack trace');
   });
 
+  it('rejects a missing environment before creating a Session or task', async () => {
+    mocks.getEnvironmentNamesByIds.mockResolvedValue([]);
+
+    await expect(
+      startPinnedFastSessionLaunch(auth, {
+        text: 'Keep this prompt available',
+        pinnedLaunch: {
+          launchId,
+          repo: ALL_REPOSITORIES,
+          environmentId,
+        },
+      }),
+    ).rejects.toThrow(
+      'The selected environment is no longer available. Choose another environment and try again.',
+    );
+
+    expect(mocks.resolveEnvironmentProvider).not.toHaveBeenCalled();
+    expect(mocks.launchPinned).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+
   it('opens a blank workspace for a bare repository launch', async () => {
     mocks.getRepositories.mockResolvedValue([
       { fullName: 'acme/api', sourceControlProvider: 'github' },
@@ -153,7 +175,7 @@ describe('startPinnedFastSessionLaunch', () => {
       [{ fullName: 'acme/api', sourceControlProvider: 'github' }],
       ['acme/api'],
     );
-    expect(mocks.environmentsFindFirst).not.toHaveBeenCalled();
+    expect(mocks.getEnvironmentNamesByIds).not.toHaveBeenCalled();
     expect(mocks.launchPinned).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: '',
@@ -187,6 +209,7 @@ describe('startPinnedFastSessionLaunch', () => {
     });
 
     expect(mocks.getRepositories).not.toHaveBeenCalled();
+    expect(mocks.getEnvironmentNamesByIds).not.toHaveBeenCalled();
     expect(mocks.resolveSelectedProvider).toHaveBeenCalledWith([], []);
     expect(mocks.resolveEnvironmentProvider).not.toHaveBeenCalled();
     expect(mocks.launchPinned).toHaveBeenCalledWith(
