@@ -1,6 +1,5 @@
 const mocks = vi.hoisted(() => ({
   decrypt: vi.fn((value: string) => value),
-  execute: vi.fn(),
   findFirst: vi.fn(),
   resolveDeploymentEnvVar: vi.fn(),
   update: vi.fn(),
@@ -13,24 +12,24 @@ vi.mock('@roomote/db/encryption', () => ({
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ conditions })),
   db: {
-    transaction: async (callback: (tx: unknown) => unknown) =>
-      callback({
-        execute: mocks.execute,
-        query: {
-          githubUserMappings: { findFirst: mocks.findFirst },
-        },
-        update: mocks.update,
-      }),
+    query: {
+      githubUserMappings: { findFirst: mocks.findFirst },
+    },
+    update: mocks.update,
   },
   desc: vi.fn((value: unknown) => ({ desc: value })),
   eq: vi.fn((left: unknown, right: unknown) => ({ left, right })),
   githubUserMappings: {
     id: 'githubUserMappings.id',
+    tokenRefreshClaim: 'githubUserMappings.tokenRefreshClaim',
+    tokenRefreshClaimedAt: 'githubUserMappings.tokenRefreshClaimedAt',
     updatedAt: 'githubUserMappings.updatedAt',
     userId: 'githubUserMappings.userId',
   },
+  isNull: vi.fn((value: unknown) => ({ isNull: value })),
+  lt: vi.fn((left: unknown, right: unknown) => ({ left, right })),
+  or: vi.fn((...conditions: unknown[]) => ({ or: conditions })),
   resolveDeploymentEnvVar: mocks.resolveDeploymentEnvVar,
-  sql: vi.fn(),
 }));
 
 import {
@@ -40,14 +39,15 @@ import {
 
 describe('resolveGitHubUserAccessToken', () => {
   const now = Date.parse('2026-09-16T12:00:00Z');
-  const where = vi.fn().mockResolvedValue(undefined);
+  const returning = vi.fn().mockResolvedValue([{ id: 'mapping-1' }]);
+  const where = vi.fn(() => ({ returning }));
   const set = vi.fn(() => ({ where }));
 
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.decrypt.mockImplementation((value: string) => value);
-    mocks.execute.mockResolvedValue(undefined);
     mocks.update.mockReturnValue({ set });
+    returning.mockResolvedValue([{ id: 'mapping-1' }]);
     mocks.resolveDeploymentEnvVar.mockImplementation(async (name: string) =>
       name === 'R_GITHUB_CLIENT_ID' ? 'client-id' : 'client-secret',
     );
@@ -120,14 +120,18 @@ describe('resolveGitHubUserAccessToken', () => {
       accessToken: 'refreshed-token',
       refreshToken: 'rotated-refresh-token',
       tokenExpiresAt: new Date(now + 28_800_000),
+      tokenRefreshClaim: null,
+      tokenRefreshClaimedAt: null,
       updatedAt: new Date(now),
     });
-    expect(where).toHaveBeenCalledWith({
-      conditions: [
-        { left: 'githubUserMappings.id', right: 'mapping-1' },
-        { left: 'githubUserMappings.userId', right: 'actor-1' },
-      ],
-    });
+    expect(where).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conditions: expect.arrayContaining([
+          { left: 'githubUserMappings.id', right: 'mapping-1' },
+          { left: 'githubUserMappings.userId', right: 'actor-1' },
+        ]),
+      }),
+    );
   });
 
   it('requires reconnection when an expired token cannot be refreshed', async () => {
@@ -167,7 +171,9 @@ describe('resolveGitHubUserAccessToken', () => {
         message: expect.stringContaining('Try again'),
       }),
     );
-    expect(mocks.update).not.toHaveBeenCalled();
+    expect(set).not.toHaveBeenCalledWith(
+      expect.objectContaining({ accessToken: expect.anything() }),
+    );
   });
 
   it.each([
@@ -196,7 +202,123 @@ describe('resolveGitHubUserAccessToken', () => {
           message: expect.stringContaining(guidance),
         }),
       );
-      expect(mocks.update).not.toHaveBeenCalled();
+      expect(set).not.toHaveBeenCalledWith(
+        expect.objectContaining({ accessToken: expect.anything() }),
+      );
     },
   );
+
+  it('single-flights concurrent refreshes without holding a database operation during OAuth', async () => {
+    let activeDatabaseOperations = 0;
+    let maxActiveDatabaseOperations = 0;
+    const trackDatabaseOperation = async <T>(result: T): Promise<T> => {
+      activeDatabaseOperations += 1;
+      maxActiveDatabaseOperations = Math.max(
+        maxActiveDatabaseOperations,
+        activeDatabaseOperations,
+      );
+      await Promise.resolve();
+      activeDatabaseOperations -= 1;
+      return result;
+    };
+
+    mocks.findFirst.mockImplementation(() =>
+      trackDatabaseOperation({
+        id: 'mapping-1',
+        accessToken: 'expired-token',
+        refreshToken: 'refresh-token',
+        tokenExpiresAt: new Date(now - 1),
+      }),
+    );
+    returning.mockImplementation(() =>
+      trackDatabaseOperation([{ id: 'mapping-1' }]),
+    );
+
+    let releaseOAuth!: (response: Response) => void;
+    const oauthResponse = new Promise<Response>((resolve) => {
+      releaseOAuth = resolve;
+    });
+    const fetchImpl = vi.fn<typeof fetch>(() => oauthResponse);
+
+    const resolutions = Array.from({ length: 10 }, () =>
+      resolveGitHubUserAccessToken('actor-1', { fetchImpl, now }),
+    );
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+
+    expect(activeDatabaseOperations).toBe(0);
+    expect(maxActiveDatabaseOperations).toBe(1);
+    releaseOAuth(
+      Response.json({
+        access_token: 'refreshed-token',
+        refresh_token: 'rotated-refresh-token',
+        expires_in: 28_800,
+      }),
+    );
+
+    await expect(Promise.all(resolutions)).resolves.toEqual(
+      Array(10).fill('refreshed-token'),
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(mocks.findFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-reads a token refreshed by another process after losing the claim', async () => {
+    mocks.findFirst
+      .mockResolvedValueOnce({
+        id: 'mapping-1',
+        accessToken: 'expired-token',
+        refreshToken: 'refresh-token',
+        tokenExpiresAt: new Date(now - 1),
+      })
+      .mockResolvedValueOnce({
+        id: 'mapping-1',
+        accessToken: 'refreshed-by-peer',
+        refreshToken: 'rotated-by-peer',
+        tokenExpiresAt: new Date(now + 28_800_000),
+      });
+    returning.mockResolvedValueOnce([]);
+    const fetchImpl = vi.fn<typeof fetch>();
+
+    await expect(
+      resolveGitHubUserAccessToken('actor-1', { fetchImpl, now }),
+    ).resolves.toBe('refreshed-by-peer');
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(mocks.findFirst).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not return a refresh result after the linked account changes', async () => {
+    mocks.findFirst
+      .mockResolvedValueOnce({
+        id: 'mapping-1',
+        accessToken: 'expired-token',
+        refreshToken: 'refresh-token',
+        tokenExpiresAt: new Date(now - 1),
+        updatedAt: new Date(now - 60_000),
+      })
+      .mockResolvedValueOnce({
+        id: 'mapping-1',
+        accessToken: 'relinked-token',
+        refreshToken: 'relinked-refresh-token',
+        tokenExpiresAt: new Date(now + 28_800_000),
+        updatedAt: new Date(now),
+      });
+    returning
+      .mockResolvedValueOnce([{ id: 'mapping-1' }])
+      .mockResolvedValueOnce([]);
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        access_token: 'stale-refresh-result',
+        refresh_token: 'stale-rotated-refresh-token',
+        expires_in: 28_800,
+      }),
+    );
+
+    await expect(
+      resolveGitHubUserAccessToken('actor-1', { fetchImpl, now }),
+    ).resolves.toBe('relinked-token');
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(mocks.findFirst).toHaveBeenCalledTimes(2);
+  });
 });
