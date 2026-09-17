@@ -137,6 +137,7 @@ export async function getSlackChannelAccessWarnings({
   suggesterSlackChannelId,
   announcerSlackChannelId,
   platformIssueSlackChannelId,
+  releaseAnnouncementsSlackChannelId,
   sentryTriageSlackChannelId,
   dependabotTriageSlackChannelId,
   codeqlTriageSlackChannelId,
@@ -151,6 +152,7 @@ export async function getSlackChannelAccessWarnings({
   suggesterSlackChannelId: string | null;
   announcerSlackChannelId: string | null;
   platformIssueSlackChannelId: string | null;
+  releaseAnnouncementsSlackChannelId: string | null;
   sentryTriageSlackChannelId: string | null;
   dependabotTriageSlackChannelId: string | null;
   codeqlTriageSlackChannelId: string | null;
@@ -167,6 +169,7 @@ export async function getSlackChannelAccessWarnings({
       suggesterSlackChannel: null,
       announcerSlackChannel: null,
       platformIssueSlackChannel: null,
+      releaseAnnouncementsSlackChannel: null,
       sentryTriageSlackChannel: null,
       dependabotTriageSlackChannel: null,
       codeqlTriageSlackChannel: null,
@@ -183,6 +186,7 @@ export async function getSlackChannelAccessWarnings({
     suggesterSlackChannelId,
     announcerSlackChannelId,
     platformIssueSlackChannelId,
+    releaseAnnouncementsSlackChannelId,
     sentryTriageSlackChannelId,
     dependabotTriageSlackChannelId,
     codeqlTriageSlackChannelId,
@@ -232,6 +236,11 @@ export async function getSlackChannelAccessWarnings({
       membershipByChannelId.get(platformIssueSlackChannelId) !== true
         ? platformIssueSlackChannelId
         : null,
+    releaseAnnouncementsSlackChannel:
+      releaseAnnouncementsSlackChannelId &&
+      membershipByChannelId.get(releaseAnnouncementsSlackChannelId) !== true
+        ? releaseAnnouncementsSlackChannelId
+        : null,
     sentryTriageSlackChannel:
       sentryTriageSlackChannelId &&
       membershipByChannelId.get(sentryTriageSlackChannelId) !== true
@@ -274,6 +283,7 @@ export async function getSlackChannelDisplayNames({
   suggesterSlackChannelId,
   announcerSlackChannelId,
   platformIssueSlackChannelId,
+  releaseAnnouncementsSlackChannelId,
   sentryTriageSlackChannelId,
   dependabotTriageSlackChannelId,
   codeqlTriageSlackChannelId,
@@ -289,6 +299,7 @@ export async function getSlackChannelDisplayNames({
   suggesterSlackChannelId: string | null;
   announcerSlackChannelId: string | null;
   platformIssueSlackChannelId: string | null;
+  releaseAnnouncementsSlackChannelId: string | null;
   sentryTriageSlackChannelId: string | null;
   dependabotTriageSlackChannelId: string | null;
   codeqlTriageSlackChannelId: string | null;
@@ -305,6 +316,7 @@ export async function getSlackChannelDisplayNames({
       suggesterSlackChannel: null,
       announcerSlackChannel: null,
       platformIssueSlackChannel: null,
+      releaseAnnouncementsSlackChannel: null,
       sentryTriageSlackChannel: null,
       dependabotTriageSlackChannel: null,
       codeqlTriageSlackChannel: null,
@@ -323,6 +335,7 @@ export async function getSlackChannelDisplayNames({
     suggesterSlackChannel,
     announcerSlackChannel,
     platformIssueSlackChannel,
+    releaseAnnouncementsSlackChannel,
     sentryTriageSlackChannel,
     dependabotTriageSlackChannel,
     codeqlTriageSlackChannel,
@@ -353,6 +366,9 @@ export async function getSlackChannelDisplayNames({
       : Promise.resolve(null),
     platformIssueSlackChannelId
       ? notifier.getChannelName(platformIssueSlackChannelId)
+      : Promise.resolve(null),
+    releaseAnnouncementsSlackChannelId
+      ? notifier.getChannelName(releaseAnnouncementsSlackChannelId)
       : Promise.resolve(null),
     sentryTriageSlackChannelId
       ? notifier.getChannelName(sentryTriageSlackChannelId)
@@ -396,6 +412,9 @@ export async function getSlackChannelDisplayNames({
       : null,
     platformIssueSlackChannel: platformIssueSlackChannel
       ? `#${platformIssueSlackChannel}`
+      : null,
+    releaseAnnouncementsSlackChannel: releaseAnnouncementsSlackChannel
+      ? `#${releaseAnnouncementsSlackChannel}`
       : null,
     sentryTriageSlackChannel: sentryTriageSlackChannel
       ? `#${sentryTriageSlackChannel}`

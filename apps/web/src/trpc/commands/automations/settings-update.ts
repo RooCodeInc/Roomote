@@ -366,6 +366,11 @@ export async function updateBackgroundAgentSettingsCommand(
       ? (input.platformIssueAlertsEnabled ??
         existingSettings.platformIssueAlertsEnabled)
       : existingSettings.platformIssueAlertsEnabled;
+  const releaseAnnouncementsEnabled =
+    input.savingAutomation === 'releaseAnnouncements'
+      ? (input.releaseAnnouncementsEnabled ??
+        existingSettings.releaseAnnouncementsEnabled)
+      : existingSettings.releaseAnnouncementsEnabled;
   const additionalRulesConfig =
     ADDITIONAL_RULES_BY_AUTOMATION[
       input.savingAutomation as keyof typeof ADDITIONAL_RULES_BY_AUTOMATION
@@ -1623,6 +1628,14 @@ export async function updateBackgroundAgentSettingsCommand(
       ...destinationUpsertFields('platformIssueAlerts'),
       updatedAt: now,
     });
+
+    await upsertAutomation(tx, {
+      key: 'release_announcements',
+      enabled: releaseAnnouncementsEnabled,
+      settings: { optedOut: !releaseAnnouncementsEnabled },
+      ...destinationUpsertFields('releaseAnnouncements'),
+      updatedAt: now,
+    });
   });
 
   await Promise.all([
@@ -1690,6 +1703,8 @@ export async function updateBackgroundAgentSettingsCommand(
     suggesterSlackChannelId: updatedSettings.suggesterSlackChannelId,
     announcerSlackChannelId: updatedSettings.announcerSlackChannelId,
     platformIssueSlackChannelId: updatedSettings.platformIssueSlackChannelId,
+    releaseAnnouncementsSlackChannelId:
+      updatedSettings.releaseAnnouncementsSlackChannelId,
     sentryTriageSlackChannelId: updatedSettings.sentryTriageSlackChannelId,
     dependabotTriageSlackChannelId:
       updatedSettings.dependabotTriageSlackChannelId,
@@ -1711,6 +1726,8 @@ export async function updateBackgroundAgentSettingsCommand(
     suggesterSlackChannelId: updatedSettings.suggesterSlackChannelId,
     announcerSlackChannelId: updatedSettings.announcerSlackChannelId,
     platformIssueSlackChannelId: updatedSettings.platformIssueSlackChannelId,
+    releaseAnnouncementsSlackChannelId:
+      updatedSettings.releaseAnnouncementsSlackChannelId,
     sentryTriageSlackChannelId: updatedSettings.sentryTriageSlackChannelId,
     dependabotTriageSlackChannelId:
       updatedSettings.dependabotTriageSlackChannelId,

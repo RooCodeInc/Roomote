@@ -172,6 +172,9 @@ function buildInput(
     platformIssueAlertsEnabled: true,
     platformIssueSlackChannel: null,
     platformIssueDiscordChannel: null,
+    releaseAnnouncementsEnabled: true,
+    releaseAnnouncementsSlackChannel: null,
+    releaseAnnouncementsDiscordChannel: null,
     ...overrides,
   };
 }
@@ -811,6 +814,46 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       expect(result.settings.managerStatsFrequency).toBe('off');
     }
   }, 15_000);
+
+  it('configures and disables installed release announcements as a built-in automation', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D-RELEASES',
+      channelName: 'releases',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'releaseAnnouncements',
+        releaseAnnouncementsEnabled: false,
+        releaseAnnouncementsDiscordChannel: 'D-RELEASES',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.releaseAnnouncementsEnabled).toBe(false);
+      expect(result.settings.releaseAnnouncementsDiscordChannelId).toBe(
+        'D-RELEASES',
+      );
+    }
+    await expect(
+      db.query.automations.findFirst({
+        where: eq(automations.key, 'release_announcements'),
+      }),
+    ).resolves.toMatchObject({
+      enabled: false,
+      settings: { optedOut: true },
+      targets: [
+        {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'D-RELEASES',
+        },
+      ],
+    });
+  });
 
   it('switches a Discord manager channel to Slack and clears Discord', async () => {
     await upsertAutomation(db, {

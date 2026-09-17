@@ -270,6 +270,11 @@ export const deploymentSettings = pgTable('deployment_settings', {
   // Read by the in-app "update available" notice for self-host admins.
   latestKnownVersion: text('latest_known_version'),
   latestVersionCheckedAt: timestamp('latest_version_checked_at'),
+  // Last release positively recorded by the deployment workflow after its
+  // readiness checks passed. This is intentionally separate from the latest
+  // release advertised by Ping above.
+  installedReleaseVersion: text('installed_release_version'),
+  installedReleaseRecordedAt: timestamp('installed_release_recorded_at'),
   setupCompletedAt: timestamp('setup_completed_at'),
   setupNewState: jsonb('setup_new_state').$type<SetupNewState>(),
   slackOnboardingStage: text('slack_onboarding_stage').$type<
@@ -319,6 +324,50 @@ export const deploymentSettings = pgTable('deployment_settings', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+
+/** Durable, per-destination attempts for installed-release announcements. */
+export const releaseAnnouncementDeliveries = pgTable(
+  'release_announcement_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    previousVersion: text('previous_version').notNull(),
+    installedVersion: text('installed_version').notNull(),
+    provider: text('provider').$type<'slack' | 'discord'>().notNull(),
+    destinationKey: text('destination_key').notNull(),
+    channelId: text('channel_id').notNull(),
+    status: text('status')
+      .$type<'pending' | 'delivered'>()
+      .notNull()
+      .default('pending'),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at').notNull().defaultNow(),
+    providerMessageId: text('provider_message_id'),
+    lastError: text('last_error'),
+    deliveredAt: timestamp('delivered_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex(
+      'release_announcement_deliveries_version_destination_unique',
+    ).on(table.installedVersion, table.destinationKey),
+    index('release_announcement_deliveries_due_idx').on(
+      table.status,
+      table.nextAttemptAt,
+      table.leaseExpiresAt,
+    ),
+    check(
+      'release_announcement_deliveries_status_check',
+      sql`${table.status} in ('pending', 'delivered')`,
+    ),
+    check(
+      'release_announcement_deliveries_provider_check',
+      sql`${table.provider} in ('slack', 'discord')`,
+    ),
+  ],
+);
 
 /**
  * Immutable active-user observations awaiting delivery to Roomote Cloud.

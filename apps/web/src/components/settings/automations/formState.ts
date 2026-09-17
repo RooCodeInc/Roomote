@@ -120,6 +120,7 @@ export type FormState = {
   announcerFrequency: AnnouncerFrequency;
   announcerInstructions: string;
   platformIssueAlertsEnabled: boolean;
+  releaseAnnouncementsEnabled?: boolean;
   mergeAnnouncerTargetProvider: 'none' | AutomationCapableCommunicationProvider;
   mergeAnnouncerTargetMode: 'channel' | 'direct_message';
   mergeAnnouncerTargetChannelId: string;
@@ -140,7 +141,8 @@ export type AutomationId =
   | 'conflictResolver'
   | 'suggester'
   | 'announcer'
-  | 'platformIssueAlerts';
+  | 'platformIssueAlerts'
+  | 'releaseAnnouncements';
 
 const REVIEWER_FIELDS: Array<keyof FormState> = [
   'reviewerEnabled',
@@ -229,6 +231,11 @@ const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> = [
   ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.platformIssueAlerts,
 ];
 
+const RELEASE_ANNOUNCEMENT_FIELDS: Array<keyof FormState> = [
+  'releaseAnnouncementsEnabled',
+  ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.releaseAnnouncements,
+];
+
 const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => [
     automation.id,
@@ -276,6 +283,7 @@ const AUTOMATION_FIELDS: Record<AutomationId, Array<keyof FormState>> = {
   suggester: SUGGESTER_FIELDS,
   announcer: ANNOUNCER_FIELDS,
   platformIssueAlerts: PLATFORM_ISSUE_ALERT_FIELDS,
+  releaseAnnouncements: RELEASE_ANNOUNCEMENT_FIELDS,
 };
 
 export function isAutomationDirty(
@@ -442,6 +450,8 @@ export function buildAutomationSettingsSaveInput(
     announcerFrequency: stateToSave.announcerFrequency,
     announcerInstructions: stateToSave.announcerInstructions.trim() || null,
     platformIssueAlertsEnabled: stateToSave.platformIssueAlertsEnabled,
+    releaseAnnouncementsEnabled:
+      stateToSave.releaseAnnouncementsEnabled ?? true,
     ...buildDestinationChannelSaveInput(stateToSave),
   };
 }

@@ -72,6 +72,8 @@ export * from './manage-custom-automations-tool';
 export * from './create-custom-skill-tool';
 export * from './mcp-service-detection';
 export * from './platform-issue-reports';
+export * from './product-release-notes';
+export * from './product-version';
 export * from './preview-proxy';
 export * from './primitives';
 export * from './provider-retry-notice';

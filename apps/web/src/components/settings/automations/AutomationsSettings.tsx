@@ -123,6 +123,7 @@ import {
   SelectValue,
   Smile,
   MessagesSquare,
+  PackageCheck,
   Skeleton,
   Slack,
   Slider,
@@ -161,6 +162,7 @@ type FieldErrors = Partial<
     | 'suggesterSlackChannel'
     | 'announcerSlackChannel'
     | 'platformIssueSlackChannel'
+    | 'releaseAnnouncementsSlackChannel'
     | 'sentryTriageSlackChannel'
     | 'dependabotTriageSlackChannel'
     | 'codeqlTriageSlackChannel'
@@ -178,6 +180,7 @@ type FieldErrors = Partial<
     | 'suggesterDiscordChannel'
     | 'announcerDiscordChannel'
     | 'platformIssueDiscordChannel'
+    | 'releaseAnnouncementsDiscordChannel'
     | 'suggesterUseTelegram'
     | 'suggesterUseTeams'
     | 'sentryTriageProjectSlugs'
@@ -197,6 +200,7 @@ type SlackChannelAccessWarnings = {
   suggesterSlackChannel: string | null;
   announcerSlackChannel: string | null;
   platformIssueSlackChannel: string | null;
+  releaseAnnouncementsSlackChannel: string | null;
   sentryTriageSlackChannel: string | null;
   dependabotTriageSlackChannel: string | null;
   codeqlTriageSlackChannel: string | null;
@@ -301,6 +305,7 @@ const EMPTY_SLACK_CHANNEL_ACCESS_WARNINGS: SlackChannelAccessWarnings = {
   suggesterSlackChannel: null,
   announcerSlackChannel: null,
   platformIssueSlackChannel: null,
+  releaseAnnouncementsSlackChannel: null,
   sentryTriageSlackChannel: null,
   dependabotTriageSlackChannel: null,
   codeqlTriageSlackChannel: null,
@@ -594,6 +599,15 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     category: 'operations',
     searchTerms: ['Slack', 'Discord'],
   },
+  releaseAnnouncements: {
+    id: 'releaseAnnouncements',
+    label: 'Announce Roomote Updates',
+    description:
+      'Post release highlights after this deployment successfully updates.',
+    icon: PackageCheck,
+    category: 'operations',
+    searchTerms: ['release', 'update', 'Slack', 'Discord'],
+  },
 };
 
 const AutomationListContext = createContext<{
@@ -652,6 +666,7 @@ const HASH_ALIAS_TO_AUTOMATION_ID: Record<string, AutomationId> = {
   announcer: 'announcer',
   'alert-on-config-errors': 'platformIssueAlerts',
   'platform-issue-alerts': 'platformIssueAlerts',
+  'release-announcements': 'releaseAnnouncements',
 };
 
 const AUTOMATION_RUN_KEYS_BY_ID: Partial<
@@ -820,6 +835,10 @@ function mapSettingsToFormState(
     platformIssueSlackChannelId: string | null;
     platformIssueSlackChannelName?: string | null;
     platformIssueDiscordChannelId: string | null;
+    releaseAnnouncementsEnabled?: boolean;
+    releaseAnnouncementsSlackChannelId?: string | null;
+    releaseAnnouncementsSlackChannelName?: string | null;
+    releaseAnnouncementsDiscordChannelId?: string | null;
     securityAuditorSlackChannelId: string | null;
     securityAuditorSlackChannelName?: string | null;
     securityAuditorDiscordChannelId: string | null;
@@ -958,6 +977,13 @@ function mapSettingsToFormState(
       settings.platformIssueSlackChannelId ??
       '',
     platformIssueDiscordChannel: settings.platformIssueDiscordChannelId ?? '',
+    releaseAnnouncementsEnabled: settings.releaseAnnouncementsEnabled ?? true,
+    releaseAnnouncementsSlackChannel:
+      settings.releaseAnnouncementsSlackChannelName ??
+      settings.releaseAnnouncementsSlackChannelId ??
+      '',
+    releaseAnnouncementsDiscordChannel:
+      settings.releaseAnnouncementsDiscordChannelId ?? '',
     securityAuditorSlackChannel:
       settings.securityAuditorSlackChannelName ??
       settings.securityAuditorSlackChannelId ??
@@ -1017,6 +1043,12 @@ export function isPlatformIssueAlertsEnabled(
   formState: Pick<FormState, 'platformIssueAlertsEnabled'> | null | undefined,
 ): boolean {
   return formState?.platformIssueAlertsEnabled ?? true;
+}
+
+function isReleaseAnnouncementsEnabled(
+  formState: Pick<FormState, 'releaseAnnouncementsEnabled'> | null | undefined,
+): boolean {
+  return formState?.releaseAnnouncementsEnabled ?? true;
 }
 
 export function canSelectSentryTriageFrequency({
@@ -1712,6 +1744,9 @@ export function AutomationsSettings({
         settingsQuery.data.slackChannelDisplayNames.announcerSlackChannel,
       platformIssueSlackChannelName:
         settingsQuery.data.slackChannelDisplayNames.platformIssueSlackChannel,
+      releaseAnnouncementsSlackChannelName:
+        settingsQuery.data.slackChannelDisplayNames
+          .releaseAnnouncementsSlackChannel,
       securityAuditorSlackChannelName:
         settingsQuery.data.slackChannelDisplayNames.securityAuditorSlackChannel,
       codeQualityAuditorSlackChannelName:
@@ -1836,7 +1871,10 @@ export function AutomationsSettings({
         }
 
         setFieldErrors({});
-        setSlackChannelAccessWarnings(result.slackChannelAccessWarnings);
+        setSlackChannelAccessWarnings({
+          ...EMPTY_SLACK_CHANNEL_ACCESS_WARNINGS,
+          ...result.slackChannelAccessWarnings,
+        });
         setManagerSlackChannelId(result.settings.managerSlackChannelId);
         setManagerDiscordChannelId(result.settings.managerDiscordChannelId);
         const mapped = mapSettingsToFormState({
@@ -1861,6 +1899,8 @@ export function AutomationsSettings({
             result.slackChannelDisplayNames.announcerSlackChannel,
           platformIssueSlackChannelName:
             result.slackChannelDisplayNames.platformIssueSlackChannel,
+          releaseAnnouncementsSlackChannelName:
+            result.slackChannelDisplayNames.releaseAnnouncementsSlackChannel,
           securityAuditorSlackChannelName:
             result.slackChannelDisplayNames.securityAuditorSlackChannel,
           codeQualityAuditorSlackChannelName:
@@ -1990,6 +2030,7 @@ export function AutomationsSettings({
         suggester: false,
         announcer: false,
         platformIssueAlerts: false,
+        releaseAnnouncements: false,
       };
     }
 
@@ -2035,6 +2076,11 @@ export function AutomationsSettings({
         formState,
         savedState,
         'platformIssueAlerts',
+      ),
+      releaseAnnouncements: isAutomationDirty(
+        formState,
+        savedState,
+        'releaseAnnouncements',
       ),
     };
   }, [formState, savedState]);
@@ -2352,6 +2398,9 @@ export function AutomationsSettings({
           break;
         case 'platformIssueAlerts':
           nextState.platformIssueAlertsEnabled = enabled;
+          break;
+        case 'releaseAnnouncements':
+          nextState.releaseAnnouncementsEnabled = enabled;
           break;
         case 'securityAuditor':
         case 'codeQualityAuditor': {
@@ -2721,6 +2770,7 @@ export function AutomationsSettings({
     suggester: suggesterIsEnabled,
     announcer: announcerIsEnabled,
     platformIssueAlerts: isPlatformIssueAlertsEnabled(formState),
+    releaseAnnouncements: isReleaseAnnouncementsEnabled(formState),
   } satisfies Record<AutomationId, boolean>;
 
   const resolvedDestinationLabel = (
@@ -2804,6 +2854,7 @@ export function AutomationsSettings({
       resolvedDestinationLabel('announcer'),
     ),
     platformIssueAlerts: `Configuration errors → ${resolvedDestinationLabel('platform_issue_alerts')}`,
+    releaseAnnouncements: `Installed updates → ${resolvedDestinationLabel('release_announcements')}`,
   } satisfies Record<AutomationId, string>;
 
   const normalizedAutomationSearch = automationSearch.trim().toLowerCase();
@@ -3036,6 +3087,67 @@ export function AutomationsSettings({
                     </div>
                   </div>
                 ) : null}
+              </div>
+            </AutomationCard>
+
+            <AutomationCard
+              automation={AUTOMATION_DEFINITIONS.releaseAnnouncements}
+              isAvailableMatch={visibleBuiltInAutomations.has(
+                'releaseAnnouncements',
+              )}
+              isOpen={openAutomationIds.has('releaseAnnouncements')}
+              onOpenChange={(open) =>
+                setAutomationOpen('releaseAnnouncements', open)
+              }
+              iconEnabled={iconEnabled.releaseAnnouncements}
+              footer={
+                <AutomationFooter
+                  isDirty={isDirty.releaseAnnouncements}
+                  isPending={
+                    updateMutation.isPending &&
+                    savingAutomation === 'releaseAnnouncements'
+                  }
+                  onSave={() => saveAgent('releaseAnnouncements')}
+                  onReset={() => resetAgent('releaseAnnouncements')}
+                />
+              }
+            >
+              <div className="space-y-5">
+                <div className="flex items-center gap-3">
+                  <Switch
+                    id="release-announcements-enabled"
+                    checked={formState?.releaseAnnouncementsEnabled ?? true}
+                    onCheckedChange={(enabled) =>
+                      setFormState((prev) =>
+                        prev
+                          ? { ...prev, releaseAnnouncementsEnabled: enabled }
+                          : prev,
+                      )
+                    }
+                    aria-label="Announce Roomote Updates enabled"
+                  />
+                  <Label
+                    htmlFor="release-announcements-enabled"
+                    className="text-sm"
+                  >
+                    Announce successfully installed Roomote updates
+                  </Label>
+                </div>
+                {renderSlackDestinationField({
+                  field: 'releaseAnnouncementsSlackChannel',
+                  inputId: 'release-announcements-slack-channel',
+                  label: 'Post announcements to this Slack channel',
+                  helperText:
+                    'Choose a destination or leave empty to use the Manager Channel.',
+                  savedChannelId:
+                    settingsQuery.data?.settings
+                      .releaseAnnouncementsSlackChannelId ?? null,
+                  savedDiscordChannelId:
+                    settingsQuery.data?.settings
+                      .releaseAnnouncementsDiscordChannelId ?? null,
+                  warningChannelId:
+                    slackChannelAccessWarnings.releaseAnnouncementsSlackChannel,
+                })}
               </div>
             </AutomationCard>
 

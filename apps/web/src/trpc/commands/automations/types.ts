@@ -45,6 +45,7 @@ export type BackgroundAgentFieldErrorKey =
   | 'suggesterSlackChannel'
   | 'announcerSlackChannel'
   | 'platformIssueSlackChannel'
+  | 'releaseAnnouncementsSlackChannel'
   | 'sentryTriageSlackChannel'
   | 'dependabotTriageSlackChannel'
   | 'codeqlTriageSlackChannel'
@@ -62,6 +63,7 @@ export type BackgroundAgentFieldErrorKey =
   | 'suggesterDiscordChannel'
   | 'announcerDiscordChannel'
   | 'platformIssueDiscordChannel'
+  | 'releaseAnnouncementsDiscordChannel'
   | 'suggesterUseTelegram'
   | 'suggesterUseTeams'
   | 'sentryTriageProjectSlugs'
@@ -83,6 +85,7 @@ export type SlackChannelFieldErrorKey = Extract<
   | 'suggesterSlackChannel'
   | 'announcerSlackChannel'
   | 'platformIssueSlackChannel'
+  | 'releaseAnnouncementsSlackChannel'
   | 'sentryTriageSlackChannel'
   | 'dependabotTriageSlackChannel'
   | 'codeqlTriageSlackChannel'
@@ -105,6 +108,7 @@ export type DiscordChannelFieldErrorKey = Extract<
   | 'suggesterDiscordChannel'
   | 'announcerDiscordChannel'
   | 'platformIssueDiscordChannel'
+  | 'releaseAnnouncementsDiscordChannel'
 >;
 
 /** A Discord channel the automations destination picker can target. */
@@ -124,6 +128,7 @@ export interface SlackChannelAccessWarnings {
   suggesterSlackChannel: string | null;
   announcerSlackChannel: string | null;
   platformIssueSlackChannel: string | null;
+  releaseAnnouncementsSlackChannel: string | null;
   sentryTriageSlackChannel: string | null;
   dependabotTriageSlackChannel: string | null;
   codeqlTriageSlackChannel: string | null;
@@ -140,6 +145,7 @@ export interface SlackChannelDisplayNames {
   suggesterSlackChannel: string | null;
   announcerSlackChannel: string | null;
   platformIssueSlackChannel: string | null;
+  releaseAnnouncementsSlackChannel: string | null;
   sentryTriageSlackChannel: string | null;
   dependabotTriageSlackChannel: string | null;
   codeqlTriageSlackChannel: string | null;
@@ -167,6 +173,7 @@ export const MANAGER_REPORTING_AUTOMATION_KEYS = [
   'suggester',
   'announcer',
   'platform_issue_alerts',
+  'release_announcements',
 ] as const satisfies readonly BackgroundAutomationKey[];
 
 export type ManagerReportingAutomationKey =
@@ -250,7 +257,8 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
     | 'codeqlTriage'
     | ScheduleOnlyBackgroundAutomationId
     | 'announcer'
-    | 'platformIssueAlerts';
+    | 'platformIssueAlerts'
+    | 'releaseAnnouncements';
   reviewerEnabled: boolean;
   reviewerEnvironmentScope: NonNullable<PrReviewSettings['environmentScope']>;
   reviewerEnvironmentIds: string[];
@@ -322,6 +330,9 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   platformIssueAlertsEnabled?: boolean;
   platformIssueSlackChannel: string | null;
   platformIssueDiscordChannel?: string | null;
+  releaseAnnouncementsEnabled?: boolean;
+  releaseAnnouncementsSlackChannel?: string | null;
+  releaseAnnouncementsDiscordChannel?: string | null;
   securityAuditorSlackChannel?: string | null;
   securityAuditorDiscordChannel?: string | null;
   codeQualityAuditorSlackChannel?: string | null;

@@ -123,6 +123,7 @@ export {
   instanceSkills,
   userRelations,
   deploymentSettings,
+  releaseAnnouncementDeliveries,
   licenseUsageObservations,
   invites,
   authUsers,

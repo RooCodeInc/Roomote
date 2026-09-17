@@ -222,10 +222,10 @@ async function resolveAutomationDestinations(params: {
   const entries = await Promise.all(
     MANAGER_REPORTING_AUTOMATION_KEYS.map(async (key) => {
       const runtime = runtimes[key];
-      // Platform issue alerts use deployment-admin DMs as their final tail;
-      // unlike scheduled automations, they never post to a primary channel.
+      // These event-driven notifications stop at their explicit or shared
+      // manager channel instead of falling through to a primary conversation.
       const destination =
-        key === 'platform_issue_alerts'
+        key === 'platform_issue_alerts' || key === 'release_announcements'
           ? runtime.destination
           : await resolveAutomationRuntimeDestination({
               runtime,
@@ -292,6 +292,7 @@ export async function getBackgroundAgentSettingsCommand(
     suggesterSlackChannel: string | null;
     announcerSlackChannel: string | null;
     platformIssueSlackChannel: string | null;
+    releaseAnnouncementsSlackChannel: string | null;
     sentryTriageSlackChannel: string | null;
     dependabotTriageSlackChannel: string | null;
     codeqlTriageSlackChannel: string | null;
@@ -372,6 +373,8 @@ export async function getBackgroundAgentSettingsCommand(
       suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
       announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
       platformIssueSlackChannelId: visibleSettings.platformIssueSlackChannelId,
+      releaseAnnouncementsSlackChannelId:
+        visibleSettings.releaseAnnouncementsSlackChannelId,
       sentryTriageSlackChannelId: visibleSettings.sentryTriageSlackChannelId,
       dependabotTriageSlackChannelId:
         visibleSettings.dependabotTriageSlackChannelId,
@@ -396,6 +399,8 @@ export async function getBackgroundAgentSettingsCommand(
       suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
       announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
       platformIssueSlackChannelId: visibleSettings.platformIssueSlackChannelId,
+      releaseAnnouncementsSlackChannelId:
+        visibleSettings.releaseAnnouncementsSlackChannelId,
       sentryTriageSlackChannelId: visibleSettings.sentryTriageSlackChannelId,
       dependabotTriageSlackChannelId:
         visibleSettings.dependabotTriageSlackChannelId,

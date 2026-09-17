@@ -560,6 +560,7 @@ const UPDATE_SETTINGS_SAVING_AUTOMATION_VALUES = [
   ...SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   'announcer',
   'platformIssueAlerts',
+  'releaseAnnouncements',
 ] as const;
 
 const SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE = Object.fromEntries(
@@ -814,6 +815,21 @@ const automationsRouter = createRouter({
         platformIssueAlertsEnabled: z.boolean().optional(),
         platformIssueSlackChannel: z.string().trim().min(1).max(160).nullable(),
         platformIssueDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
+        releaseAnnouncementsEnabled: z.boolean().optional(),
+        releaseAnnouncementsSlackChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
+        releaseAnnouncementsDiscordChannel: z
           .string()
           .trim()
           .min(1)
