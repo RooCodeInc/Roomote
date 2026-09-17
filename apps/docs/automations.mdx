@@ -387,6 +387,10 @@ startup error, it notifies human users but stays silent for bot and webhook
 messages. Specific issues such as unavailable access or a read-only deployment
 can still receive a status reply.
 
+Launch criteria are evaluated by the helper model. Deployments with the
+optional [judgment model](/models#judgment-model) turned on get a faster
+decision on clear-cut messages; unclear ones still go to the helper model.
+
 Start with a low-risk channel first. Auto-response can feel noisy if the
 channel mixes casual discussion with requests that should become Roomote
 tasks.

@@ -185,6 +185,14 @@ const serverSchema = {
   // control plane: the browser only ever receives short-lived ephemeral
   // realtime tokens and synthesized audio, never the key itself.
   R_VOICE_OPENAI_API_KEY: z.string().min(1).optional(),
+  // TypeSafe key for the optional judgment model (Jev). Bounded routing and
+  // triage judgments try one fast typed call first and keep their existing
+  // behavior when it is unsure or fails. The key stays on the control plane.
+  R_TYPESAFE_API_KEY: z.string().min(1).optional(),
+  // Selects the judgment model backend (`off`, `typesafe`, or `vercel` for
+  // Jev through Vercel AI Gateway). Overrides the Settings > Models choice.
+  // Unset defers to Settings, where a TypeSafe key alone selects `typesafe`.
+  R_JUDGMENT_MODEL: z.enum(['off', 'typesafe', 'vercel']).optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -646,6 +654,8 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_ELEVENLABS_API_KEY',
   'R_ELEVENLABS_VOICE_ID',
   'R_VOICE_OPENAI_API_KEY',
+  'R_TYPESAFE_API_KEY',
+  'R_JUDGMENT_MODEL',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',

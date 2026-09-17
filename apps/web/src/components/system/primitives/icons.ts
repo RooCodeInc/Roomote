@@ -168,6 +168,7 @@ export {
   Rows4,
   ScanFace,
   ScanSearch,
+  Scale,
   Search,
   SearchCheck,
   SearchIcon,

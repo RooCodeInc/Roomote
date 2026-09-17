@@ -98,7 +98,10 @@ task; their message starts a separate conversation of their own.
 
 Roomote silently ignores auto-submitted or auto-generated messages and mail
 marked as bulk, list, or junk traffic. This prevents vacation responders,
-mailing lists, and similar automated senders from creating reply loops.
+mailing lists, and similar automated senders from creating reply loops. With
+the optional [judgment model](/models#judgment-model) on, Roomote also ignores
+mail without those headers that the judgment model is confident is an
+automatic reply, such as an out-of-office message or a bounce notice.
 
 Email is deliberately low-frequency: expect roughly two emails per task, an
 acknowledgment and the result, plus questions when the agent genuinely needs

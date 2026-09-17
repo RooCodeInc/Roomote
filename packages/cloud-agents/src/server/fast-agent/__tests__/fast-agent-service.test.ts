@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getEnvironments: vi.fn(),
   listCustomSkills: vi.fn(),
   getCustomSkill: vi.fn(),
+  scoreTypeSafeRelevance: vi.fn(),
   getTaskModelOptions: vi.fn(),
   getDeploymentSettings: vi.fn(),
   appendMemory: vi.fn(),
@@ -73,6 +74,7 @@ const mocks = vi.hoisted(() => ({
   updateParentEventWhere: vi.fn(),
   nativeSteer: vi.fn(),
   executeDb: vi.fn(),
+  evaluateJudgments: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
         agent?: string;
@@ -268,6 +270,11 @@ vi.mock('../../non-task-provider-usage', () => ({
   isNonTaskOpenCodeSessionValidationError: (error: unknown) =>
     error instanceof Error &&
     error.name === 'NonTaskOpenCodeSessionValidationError',
+}));
+
+vi.mock('../../typesafe-judgment', () => ({
+  evaluateTypeSafeJudgments: mocks.evaluateJudgments,
+  scoreTypeSafeRelevance: mocks.scoreTypeSafeRelevance,
 }));
 
 vi.mock('../fast-agent-opencode-session', () => ({
@@ -559,6 +566,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     mocks.setOpenCodeSession.mockResolvedValue(undefined);
     mocks.upsertMessage.mockResolvedValue({ initialHumanTurn: true });
+    mocks.evaluateJudgments.mockResolvedValue(null);
     mocks.reconcileRetryNotices.mockResolvedValue(0);
     mocks.markRetryNoticeInterruption.mockResolvedValue(undefined);
     mocks.renewRespondingLease.mockResolvedValue(true);
@@ -583,6 +591,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.listCustomSkills.mockResolvedValue([]);
     mocks.getCustomSkill.mockResolvedValue(null);
+    mocks.scoreTypeSafeRelevance.mockResolvedValue(null);
     mocks.getEnvironments.mockResolvedValue([
       {
         id: 'env-1',
@@ -703,6 +712,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
       'Reply in pirate style.',
+    );
+  });
+
+  it('adds the judgment-model skill hint to the turn prompt, not the system prompt', async () => {
+    const skill = {
+      id: '00000000-0000-4000-8000-000000000002',
+      name: 'deploy-staging',
+      description: 'Deploy main to staging and run smoke checks.',
+      content: '# Deploy staging',
+    };
+    mocks.listCustomSkills.mockResolvedValue([skill]);
+    mocks.scoreTypeSafeRelevance.mockResolvedValueOnce(
+      new Map([[`instance:${skill.id}`, 0.92]]),
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.scoreTypeSafeRelevance).toHaveBeenCalledOnce();
+    const params = mocks.generateText.mock.calls[0]?.[0];
+    expect(params.prompt).toContain(
+      `<skill_relevance>\nRelevant to the current request: deploy-staging [id: instance:${skill.id}].`,
+    );
+    expect(params.system).not.toContain('skill_relevance');
+  });
+
+  it('skips the judgment-model skill hint when no skills are configured', async () => {
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.scoreTypeSafeRelevance).not.toHaveBeenCalled();
+    expect(mocks.generateText.mock.calls[0]?.[0].prompt).not.toContain(
+      'skill_relevance',
     );
   });
 
@@ -994,6 +1034,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(systemPrompt).toContain(
       'Use App for frontend work and prefer GPT-5.6. -> App [id: env-1]',
     );
+  });
+
+  it('adds a judgment-model routing hint to the first request of a new Session only', async () => {
+    mocks.getEnvironments.mockResolvedValue([
+      { id: 'env-1', name: 'App', repositoryNames: ['acme/app'] },
+      { id: 'env-2', name: 'Infra', repositoryNames: ['acme/infra'] },
+    ]);
+    mocks.evaluateJudgments.mockResolvedValue({
+      environment: {
+        type: 'choice',
+        choice: 'env_2',
+        confidence: 0.82,
+        probabilities: { env_2: 0.82 },
+      },
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    mocks.getSession.mockResolvedValue({
+      id: 'conversation-1',
+      compatibilityMessages: [],
+      openCodeSessionId: 'opencode-session-1',
+    });
+    mocks.upsertMessage.mockResolvedValue({ initialHumanTurn: false });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'And the staging cluster too?',
+      currentMessageId: '100.3',
+      adapter: callbacks(),
+    });
+
+    const firstTurn = mocks.generateText.mock.calls[0]?.[0];
+    const followUp = mocks.generateText.mock.calls[1]?.[0];
+    expect(firstTurn?.prompt).toContain(
+      '<routing_hint>\nRouting hint: Infra [id: env-2] looks like the best fit (judgment model confidence 0.82).',
+    );
+    expect(followUp?.prompt).not.toContain('<routing_hint>');
+    expect(followUp?.system).toBe(firstTurn?.system);
+    expect(mocks.evaluateJudgments).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the system prompt stable when voice mode changes', async () => {

@@ -31,6 +31,7 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
       'R_ELEVENLABS_API_KEY',
       'R_ELEVENLABS_VOICE_ID',
       'R_VOICE_OPENAI_API_KEY',
+      'R_TYPESAFE_API_KEY',
     ]) {
       expect(CONTROL_PLANE_ENV_VAR_NAMES.has(name)).toBe(true);
     }

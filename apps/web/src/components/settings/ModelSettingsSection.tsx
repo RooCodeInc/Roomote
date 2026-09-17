@@ -53,6 +53,7 @@ import {
 import type { LucideIcon } from '@/components/system';
 import { Section } from '@/components/settings';
 import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
+import { JudgmentModelRow } from './JudgmentModelRow';
 import { formatMetadataSummary } from './model-metadata';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
@@ -1754,6 +1755,7 @@ export function ModelSettingsSection({
               />
             );
           })}
+          <JudgmentModelRow />
         </div>
       </Section>
 

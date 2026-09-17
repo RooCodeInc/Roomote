@@ -51,6 +51,7 @@ import {
   type FastAgentConversation,
 } from '@roomote/types';
 
+import { judgeAgentMailAutoReply } from './auto-reply-judgment';
 import {
   isAgentMailAddressSuppressed,
   suppressAgentMailAddress,
@@ -538,6 +539,18 @@ export async function processAgentMailWebhookEvent(
     if (!isAgentMailSenderAuthenticated(message)) {
       console.warn(
         `${LOG_PREFIX} Dropping inbound email without a DMARC pass: inbox=${inboxId} message=${message.message_id} dmarc=${message.authentication_results?.dmarc ?? 'absent'}`,
+      );
+      await markEventProcessed(row.id);
+      return;
+    }
+
+    // Some auto-responders omit the auto-generated headers checked above.
+    // Everything from here on either starts or continues a Session or sends
+    // a refusal, so a confident content-based verdict drops it the same way.
+    const autoReplyProbability = await judgeAgentMailAutoReply(message);
+    if (autoReplyProbability !== undefined) {
+      console.info(
+        `${LOG_PREFIX} Dropping inbound email judged an automatic reply: inbox=${inboxId} message=${message.message_id} p=${autoReplyProbability.toFixed(2)}`,
       );
       await markEventProcessed(row.id);
       return;

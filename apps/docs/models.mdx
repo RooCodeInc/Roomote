@@ -80,6 +80,7 @@ These connections use metered API billing or a provider-managed gateway:
 | [OpenRouter](/providers/inference/openrouter) | OpenRouter API key | OpenRouter balance and key limit |
 | [Requesty](/providers/inference/requesty) | Requesty API key | Requesty organization |
 | [Together AI](/providers/inference/together-ai) | Together AI API key | Together AI account |
+| [TypeSafe](/providers/inference/typesafe) | TypeSafe API key, used only for the [judgment model](#judgment-model) | TypeSafe account |
 | <IntegrationName href="/providers/inference/vercel-ai-gateway" icon="vercel" name="Vercel AI Gateway" /> | AI Gateway API key | Vercel team |
 | [xAI](/providers/inference/xai) | xAI API key | xAI API team |
 | [Z.AI](/providers/inference/zai) | Regional Z.AI platform key | Z.AI or BigModel API balance |
@@ -276,6 +277,54 @@ You do not need a separate model for every role. Set a specialized role to
 **Same as coding model** to inherit the default. Many teams start with one
 strong default model, then split out a faster orchestration or helper model, or
 a stronger review model, after they can see real usage.
+
+### Judgment model
+
+The judgment model is optional. Many routing and triage steps are bounded
+decisions rather than text: whether a channel message should start work, which
+skill or tool fits a request, or whether a thread reply is meant for Roomote.
+A judgment model answers these as typed questions with probabilities in one
+fast call. Roomote currently supports TypeSafe's Jev, through either route:
+
+| Judgment model | Requires |
+| --- | --- |
+| **Jev via TypeSafe** | a [TypeSafe](/providers/inference/typesafe) API key |
+| **Jev via Vercel AI Gateway** | a [Vercel AI Gateway](/providers/inference/vercel-ai-gateway) key |
+
+Choose it under **Judgment model** in **Settings > Models**, or set
+`R_JUDGMENT_MODEL` to `typesafe`, `vercel`, or `off`. A TypeSafe key alone
+turns on **Jev via TypeSafe**. Vercel AI Gateway is used only when you select
+it, because many deployments already have that key for task inference.
+
+When a judgment model is on, Roomote asks it first for:
+
+- [Auto-respond to channels](/automations#channel-automations) launch criteria,
+  including whether a message repeats an incident that already launched
+- whether a new task request asks a question, wants a plan, or wants an
+  implementation
+- whether an unmentioned reply in a Slack, Discord, or Teams thread is meant
+  for Roomote after someone else spoke; it routes the reply only when
+  confident, and otherwise Roomote still needs a mention
+- the environment that best fits the first request in a new Fast Session, as
+  an advisory hint the Session still verifies
+- a one-line hint naming a clearly relevant [skill](/skills), including skills
+  beyond the prompt's skill list
+- ranking integration tools when a Fast `find_integration_tools` keyword search
+  matches nothing or more than the result limit
+- ordering [Memory](/memory) search results, moving confidently relevant
+  passages up and confidently irrelevant ones down without removing any
+- skipping triage for PR review activity that is clearly bot noise, such as an
+  automated approval, when there are no failing checks, conflicts, requested
+  changes, or open threads
+- dropping inbound [email](/providers/communications/agentmail) that is
+  clearly an automatic reply, such as an out-of-office or bounce notice
+- choosing the forum tag when Roomote opens a thread in a Discord forum channel
+
+Roomote acts on the judgment model only when it is confident. When it is
+unsure, unavailable, or returns an error, Roomote keeps the behavior it has
+without a judgment model, usually a helper model call. The text a decision
+needs is sent to the judgment model provider; keys stay on the control plane
+and are never sent to task sandboxes.
 
 ## Reasoning settings
 

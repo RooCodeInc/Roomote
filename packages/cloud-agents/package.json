@@ -22,6 +22,11 @@
       "import": "./src/server/non-task-provider-usage.ts",
       "require": "./src/server/non-task-provider-usage.ts"
     },
+    "./server/typesafe-judgment": {
+      "types": "./src/server/typesafe-judgment.ts",
+      "import": "./src/server/typesafe-judgment.ts",
+      "require": "./src/server/typesafe-judgment.ts"
+    },
     "./show-widget": {
       "types": "./src/server/show-widget.ts",
       "import": "./src/server/show-widget.ts",
