@@ -22,7 +22,7 @@ import { usePrivateSessionsExperiment } from '@/hooks/usePrivateSessionsExperime
 import { type PromptInputMessage } from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
 import { useTaskLaunchConfig } from '@/components/tasks/TaskLaunchConfig';
-import { Lock, Switch } from '@/components/system';
+import { BasicTooltip, Button, HatGlasses } from '@/components/system';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
 
@@ -278,29 +278,37 @@ export function NewTaskForm({
             : undefined
         }
         tools={
-          <div className="flex items-center gap-2">
-            {!environmentIdParam && privateSessionsEnabled ? (
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Lock className="size-3.5" />
-                <span>Private</span>
-                <Switch
-                  checked={privateSession}
-                  onCheckedChange={setPrivateSession}
-                  aria-label="Start a private Session"
-                />
-              </label>
-            ) : null}
-            <SessionModelSwitcher
-              model={selectedModelOverrideId ?? ''}
-              onModelChange={(model) =>
-                setSelectedModelOverrideId(model || undefined)
-              }
-              reasoningEffort={selectedReasoningEffort ?? null}
-              onReasoningEffortChange={setSelectedReasoningEffort}
-              defaultModelId={defaultModelId}
-              defaultReasoningEffort={defaultReasoningEffort}
-            />
-          </div>
+          <SessionModelSwitcher
+            model={selectedModelOverrideId ?? ''}
+            onModelChange={(model) =>
+              setSelectedModelOverrideId(model || undefined)
+            }
+            reasoningEffort={selectedReasoningEffort ?? null}
+            onReasoningEffortChange={setSelectedReasoningEffort}
+            defaultModelId={defaultModelId}
+            defaultReasoningEffort={defaultReasoningEffort}
+          />
+        }
+        submitLeadingAction={
+          !environmentIdParam && privateSessionsEnabled ? (
+            <BasicTooltip content="Private session">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={`size-8 rounded-full ${
+                  privateSession
+                    ? 'bg-accent-foreground/10 text-accent-foreground hover:bg-accent-foreground/20 hover:text-accent-foreground'
+                    : 'text-muted-foreground'
+                }`}
+                aria-label="Private session"
+                aria-pressed={privateSession}
+                onClick={() => setPrivateSession((selected) => !selected)}
+              >
+                <HatGlasses />
+              </Button>
+            </BasicTooltip>
+          ) : null
         }
       />
     </div>

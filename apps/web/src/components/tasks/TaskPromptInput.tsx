@@ -122,6 +122,8 @@ type TaskPromptInputProps = {
   suggestion?: ReactNode;
   /** Optional controls rendered after the attachment action. */
   tools?: ReactNode;
+  /** Optional control rendered immediately before the submit button. */
+  submitLeadingAction?: ReactNode;
   /** Optional reason that disables the submit button and explains why. */
   submitDisabledReason?: string;
   /** When true, submit on Cmd/Ctrl+Enter instead of plain Enter. */
@@ -156,6 +158,7 @@ export function TaskPromptInput({
   animateContainer = true,
   suggestion,
   tools,
+  submitLeadingAction,
   submitDisabledReason,
   submitWithMetaKey = true,
   submitIcon,
@@ -280,6 +283,7 @@ export function TaskPromptInput({
               onClick={voiceDictation.toggle}
               disabled={isBusy || Boolean(voice?.active)}
             />
+            {submitLeadingAction}
             <div
               className={`transition-opacity ${promptText.trim().length > 0 ? 'opacity-100' : 'opacity-50'}`}
             >

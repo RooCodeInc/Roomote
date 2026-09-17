@@ -95,6 +95,7 @@ export {
   Hammer,
   HandHelping,
   HandMetal,
+  HatGlasses,
   HardDriveUpload,
   HelpCircle,
   Home,

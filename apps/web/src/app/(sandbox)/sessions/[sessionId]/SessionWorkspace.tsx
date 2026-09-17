@@ -179,6 +179,7 @@ export type SessionInfo = {
   ownerName: string | null;
   ownerEmail: string | null;
   ownerImageUrl: string | null;
+  privacy: 'shared' | 'private';
   surface: string;
   /** Effective model for the session's turns (stored override or default). */
   model: string | null;
